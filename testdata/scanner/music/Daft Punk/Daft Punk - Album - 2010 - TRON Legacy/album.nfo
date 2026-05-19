@@ -1,0 +1,154 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<album>
+  <review />
+  <outline />
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-11 23:11:56</dateadded>
+  <title>Tron: Legacy</title>
+  <year>2010</year>
+  <premiered>2010-01-01</premiered>
+  <releasedate>2010-01-01</releasedate>
+  <runtime>59</runtime>
+  <genre>Dance; Disco; Electro House; Electroclash; Electronic; House; French House; French Electro</genre>
+  <studio />
+  <musicbrainzalbumid>dddddddd-dddd-dddd-dddd-ddd321108967</musicbrainzalbumid>
+  <musicbrainzalbumartistid>056e4f3e-d505-4dad-8ec1-d04f521cbb56</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>bbbbbbbb-bbbb-bbbb-bbbb-bbb321108967</musicbrainzreleasegroupid>
+  <art>
+    <poster>/config/data/metadata/library/04/049f0a0e8d578319709de6a5b19620a6/folder.jpg</poster>
+  </art>
+  <artist>Daft Punk</artist>
+  <albumartist>Daft Punk</albumartist>
+  <track>
+    <disc>1</disc>
+    <position>1</position>
+    <title>Overture (From "TRON: Legacy"/Score)</title>
+    <duration>02:28</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>2</position>
+    <title>The Grid (From "TRON: Legacy"/Score)</title>
+    <duration>01:36</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>3</position>
+    <title>The Son of Flynn (From "TRON: Legacy"/Score)</title>
+    <duration>01:35</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>4</position>
+    <title>Recognizer (From "TRON: Legacy"/Score)</title>
+    <duration>02:37</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>5</position>
+    <title>Armory (From "TRON: Legacy"/Score)</title>
+    <duration>02:02</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>6</position>
+    <title>Arena (From "TRON: Legacy"/Score)</title>
+    <duration>01:33</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>7</position>
+    <title>Rinzler (From "TRON: Legacy"/Score)</title>
+    <duration>02:17</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>8</position>
+    <title>The Game Has Changed (From "TRON: Legacy"/Score)</title>
+    <duration>03:25</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>9</position>
+    <title>Outlands (From "TRON: Legacy"/Score)</title>
+    <duration>02:36</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>10</position>
+    <title>Adagio For TRON (From "TRON: Legacy"/Score)</title>
+    <duration>04:11</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>11</position>
+    <title>Nocturne (From "TRON: Legacy"/Score)</title>
+    <duration>01:41</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>12</position>
+    <title>End of Line (From "TRON: Legacy"/Score)</title>
+    <duration>02:36</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>13</position>
+    <title>Derezzed (From "TRON: Legacy"/Score)</title>
+    <duration>01:44</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>14</position>
+    <title>Fall (From "TRON: Legacy"/Score)</title>
+    <duration>01:22</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>15</position>
+    <title>Solar Sailer (From "TRON: Legacy"/Score)</title>
+    <duration>02:42</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>16</position>
+    <title>Rectifier (From "TRON: Legacy"/Score)</title>
+    <duration>02:14</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>17</position>
+    <title>Disc Wars (From "TRON: Legacy"/Score)</title>
+    <duration>04:11</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>18</position>
+    <title>C.L.U. (From "TRON: Legacy"/Score)</title>
+    <duration>04:39</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>19</position>
+    <title>Arrival (From "TRON: Legacy"/Score)</title>
+    <duration>02:00</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>20</position>
+    <title>Flynn Lives (From "TRON: Legacy"/Score)</title>
+    <duration>03:22</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>21</position>
+    <title>TRON Legacy (End Titles) (From "TRON: Legacy"/Score)</title>
+    <duration>03:17</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>22</position>
+    <title>Finale (From "TRON: Legacy"/Score)</title>
+    <duration>04:22</duration>
+  </track>
+</album>

@@ -1,0 +1,93 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>Sawatari sends the "Ghost Devil" after Hayakawa, and he's nearly killed before the "Ghost Devil" stops and hands him a cigarette with a message from Himeno. The words inside give Hayakawa the strength to kill the “Ghost Devil” and capture Sawatari.
+
+Meanwhile, Denji heads into his rematch with Samurai Sword. With a pull of the starter on his chest, he transforms into Chainsaw Man.
+
+And now, the last battle between Chainsaw Man and Samurai Sword has finally begun...</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2022-12-27 15:00:00</dateadded>
+  <title>KATANA VS. CHAINSAW</title>
+  <rating>7.9</rating>
+  <year>2022</year>
+  <imdbid>tt24438514</imdbid>
+  <tvdbid>9358687</tvdbid>
+  <runtime>24</runtime>
+  <genre>Action</genre>
+  <genre>Adventure</genre>
+  <genre>Animation</genre>
+  <studio />
+  <anidbid>261481</anidbid>
+  <sonarrid>17252</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Chainsaw Man (2022)/Season 01/Chainsaw Man (2022) - S01E12 - 012 [Bluray-1080p][FLAC 2.0][JA+PT][10bit][x265][PT]-Franceira-thumb.jpg</poster>
+  </art>
+  <showtitle>Chainsaw Man</showtitle>
+  <episode>12</episode>
+  <season>1</season>
+  <aired>2022-12-28</aired>
+  <fileinfo>
+    <streamdetails>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>1591654</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <language>jpn</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+        <duration>23</duration>
+        <durationinseconds>1435</durationinseconds>
+      </video>
+      <audio>
+        <codec>aac</codec>
+        <micodec>aac</micodec>
+        <bitrate>128002</bitrate>
+        <language>por</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>44100</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <audio>
+        <codec>flac</codec>
+        <micodec>flac</micodec>
+        <bitrate>726254</bitrate>
+        <language>jpn</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>ass</codec>
+        <micodec>ass</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>por</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <uniqueid type="tvdb" default="true">9358687</uniqueid>
+  <uniqueid type="sonarr">17252</uniqueid>
+</episodedetails>

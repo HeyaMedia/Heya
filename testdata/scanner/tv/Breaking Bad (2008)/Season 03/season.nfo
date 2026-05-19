@@ -1,0 +1,97 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<season>
+  <plot>Walt continues to battle dueling identities: a desperate husband and father trying to provide for his family, and a newly appointed key player in the Albuquerque drug trade. As the danger around him escalates, Walt is now entrenched in the complex worlds of an angst-ridden family on the verge of dissolution, and the ruthless and unrelenting drug cartel.</plot>
+  <outline>Walt continues to battle dueling identities: a desperate husband and father trying to provide for his family, and a newly appointed key player in the Albuquerque drug trade. As the danger around him escalates, Walt is now entrenched in the complex worlds of an angst-ridden family on the verge of dissolution, and the ruthless and unrelenting drug cartel.</outline>
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-10 20:42:28</dateadded>
+  <title>Season 3</title>
+  <year>2010</year>
+  <tvdbid>171641</tvdbid>
+  <premiered>2010-03-21</premiered>
+  <releasedate>2010-03-21</releasedate>
+  <studio />
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/season03-poster.jpg</poster>
+  </art>
+  <actor>
+    <name>Bryan Cranston</name>
+    <role>Walter White</role>
+    <type>Actor</type>
+    <sortorder>0</sortorder>
+    <thumb>/config/data/metadata/People/B/Bryan Cranston/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>George Mastras</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/G/George Mastras/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Melissa Bernstein</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/M/Melissa Bernstein/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Peter Gould</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/P/Peter Gould/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Stewart Lyons</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/S/Stewart Lyons/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Thomas Schnauz</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/T/Thomas Schnauz/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Aaron Paul</name>
+    <role>Jesse Pinkman</role>
+    <type>Actor</type>
+    <sortorder>1</sortorder>
+    <thumb>/config/data/metadata/People/A/Aaron Paul/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Anna Gunn</name>
+    <role>Skyler White</role>
+    <type>Actor</type>
+    <sortorder>2</sortorder>
+    <thumb>/config/data/metadata/People/A/Anna Gunn/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>RJ Mitte</name>
+    <role>Walter White Jr.</role>
+    <type>Actor</type>
+    <sortorder>3</sortorder>
+    <thumb>/config/data/metadata/People/R/RJ Mitte/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Dean Norris</name>
+    <role>Hank Schrader</role>
+    <type>Actor</type>
+    <sortorder>4</sortorder>
+    <thumb>/config/data/metadata/People/D/Dean Norris/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Betsy Brandt</name>
+    <role>Marie Schrader</role>
+    <type>Actor</type>
+    <sortorder>5</sortorder>
+    <thumb>/config/data/metadata/People/B/Betsy Brandt/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Giancarlo Esposito</name>
+    <role>Gus Fring</role>
+    <type>Actor</type>
+    <sortorder>6</sortorder>
+    <thumb>/config/data/metadata/People/G/Giancarlo Esposito/folder.jpg</thumb>
+  </actor>
+  <seasonnumber>3</seasonnumber>
+  <tvmazeid>755</tvmazeid>
+</season>

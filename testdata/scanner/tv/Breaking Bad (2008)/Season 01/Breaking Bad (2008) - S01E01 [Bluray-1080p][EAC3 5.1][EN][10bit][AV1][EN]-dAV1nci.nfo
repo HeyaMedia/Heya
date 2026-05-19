@@ -1,0 +1,91 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>When an unassuming high school chemistry teacher discovers he has a rare form of lung cancer, he decides to team up with a former student and create a top of the line crystal meth in a used RV, to provide for his family once he is gone.</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2008-01-21 02:00:00</dateadded>
+  <title>Pilot</title>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=yAAphfWE3Vs</trailer>
+  <rating>8.475</rating>
+  <year>2008</year>
+  <imdbid>tt0959621</imdbid>
+  <tvdbid>349232</tvdbid>
+  <runtime>58</runtime>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <studio />
+  <tvrageid>637041</tvrageid>
+  <anidbid>182741</anidbid>
+  <sonarrid>7717</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/Season 01/Breaking Bad (2008) - S01E01 [Bluray-1080p][EAC3 5.1][EN][10bit][AV1][EN]-dAV1nci-thumb.jpg</poster>
+  </art>
+  <showtitle>Breaking Bad</showtitle>
+  <episode>1</episode>
+  <season>1</season>
+  <aired>2008-01-20</aired>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>3569549</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+        <duration>58</duration>
+        <durationinseconds>3486</durationinseconds>
+      </video>
+      <audio>
+        <codec>eac3</codec>
+        <micodec>eac3</micodec>
+        <bitrate>256000</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>6</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <audio>
+        <codec>opus</codec>
+        <micodec>opus</micodec>
+        <bitrate>54317</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>48000</samplingrate>
+        <default>False</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <uniqueid type="tvdb" default="true">349232</uniqueid>
+  <uniqueid type="sonarr">7717</uniqueid>
+</episodedetails>

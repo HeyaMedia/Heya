@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<album>
+  <review />
+  <outline />
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-11 23:11:56</dateadded>
+  <title>Da Funk</title>
+  <year>1997</year>
+  <premiered>1997-02-28</premiered>
+  <releasedate>1997-02-28</releasedate>
+  <runtime>16</runtime>
+  <genre>Dance; Disco; Electro House; Electroclash; Electronic; House; French House; French Electro</genre>
+  <studio />
+  <musicbrainzalbumid>dddddddd-dddd-dddd-dddd-dddddd325475</musicbrainzalbumid>
+  <musicbrainzalbumartistid>056e4f3e-d505-4dad-8ec1-d04f521cbb56</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>bbbbbbbb-bbbb-bbbb-bbbb-bbbbbb325475</musicbrainzreleasegroupid>
+  <art>
+    <poster>/config/data/metadata/library/5c/5c908515fbbc041a82f488089769d344/folder.jpg</poster>
+  </art>
+  <artist>Daft Punk</artist>
+  <albumartist>Daft Punk</albumartist>
+  <track>
+    <disc>1</disc>
+    <position>1</position>
+    <title>Da Funk (Radio Edit)</title>
+    <duration>03:49</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>2</position>
+    <title>Musique</title>
+    <duration>06:53</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>3</position>
+    <title>Da Funk</title>
+    <duration>05:34</duration>
+  </track>
+</album>

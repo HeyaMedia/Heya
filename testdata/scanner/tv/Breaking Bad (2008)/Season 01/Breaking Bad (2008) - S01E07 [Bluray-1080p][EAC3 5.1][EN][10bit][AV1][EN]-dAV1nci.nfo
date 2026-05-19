@@ -1,0 +1,68 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>Walter accepts his new identity as a drug dealer after a PTA meeting. Elsewhere, Jesse decides to put his aunt's house on the market and Skyler is the recipient of a baby shower.</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2008-03-10 01:00:00</dateadded>
+  <title>A No Rough Stuff Type Deal</title>
+  <rating>8.372</rating>
+  <year>2008</year>
+  <imdbid>tt1054729</imdbid>
+  <tvdbid>352534</tvdbid>
+  <runtime>48</runtime>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <studio />
+  <tvrageid>640422</tvrageid>
+  <sonarrid>7723</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/Season 01/Breaking Bad (2008) - S01E07 [Bluray-1080p][EAC3 5.1][EN][10bit][AV1][EN]-dAV1nci-thumb.jpg</poster>
+  </art>
+  <showtitle>Breaking Bad</showtitle>
+  <episode>7</episode>
+  <season>1</season>
+  <aired>2008-03-09</aired>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>2789309</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+        <duration>47</duration>
+        <durationinseconds>2862</durationinseconds>
+      </video>
+      <audio>
+        <codec>eac3</codec>
+        <micodec>eac3</micodec>
+        <bitrate>256000</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>6</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <uniqueid type="tvdb" default="true">352534</uniqueid>
+  <uniqueid type="sonarr">7723</uniqueid>
+</episodedetails>

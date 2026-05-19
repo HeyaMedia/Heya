@@ -1,0 +1,81 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>Aki Hayakawa, Denji, and Power start living together.
+
+Denji finally fulfills his dream of touching Power’s boobs, but is shocked when things do not turn out the way he expected.  As Denji realizes that chasing his dream was more fun than achieving it, Makima approaches him and says, "If you can kill the Gun Devil, I’ll grant you one wish.”</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2022-11-08 15:00:00</dateadded>
+  <title>GUN DEVIL</title>
+  <rating>7.6</rating>
+  <year>2022</year>
+  <imdbid>tt23475664</imdbid>
+  <tvdbid>9358679</tvdbid>
+  <runtime>24</runtime>
+  <genre>Action</genre>
+  <genre>Adventure</genre>
+  <genre>Animation</genre>
+  <studio />
+  <anidbid>260825</anidbid>
+  <sonarrid>17245</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Chainsaw Man (2022)/Season 01/Chainsaw Man (2022) - S01E05 - 005 [Bluray-1080p][FLAC 2.0][JA+PT][10bit][x265][PT]-Franceira-thumb.jpg</poster>
+  </art>
+  <showtitle>Chainsaw Man</showtitle>
+  <episode>5</episode>
+  <season>1</season>
+  <aired>2022-11-09</aired>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>1983005</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <language>jpn</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+        <duration>23</duration>
+        <durationinseconds>1435</durationinseconds>
+      </video>
+      <audio>
+        <codec>aac</codec>
+        <micodec>aac</micodec>
+        <bitrate>128002</bitrate>
+        <language>por</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>44100</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <audio>
+        <codec>flac</codec>
+        <micodec>flac</micodec>
+        <bitrate>664882</bitrate>
+        <language>jpn</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>ass</codec>
+        <micodec>ass</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>por</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <uniqueid type="tvdb" default="true">9358679</uniqueid>
+  <uniqueid type="sonarr">17245</uniqueid>
+</episodedetails>

@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Alien</title>
+  <originaltitle>Alien</originaltitle>
+  <sorttitle>alien</sorttitle>
+  <ratings>
+    <rating name="imdb" max="10" default="true">
+      <value>8.5</value>
+      <votes>1063337</votes>
+    </rating>
+    <rating name="themoviedb" max="10">
+      <value>8.17</value>
+      <votes>16273</votes>
+    </rating>
+    <rating name="tomatometerallcritics" max="100">
+      <value>93</value>
+    </rating>
+  </ratings>
+  <rating>8.17</rating>
+  <criticrating>93</criticrating>
+  <userrating />
+  <top250 />
+  <outline />
+  <plot>During its return to the earth, commercial spaceship Nostromo intercepts a distress signal from a distant planet. When a three-member team of the crew discovers a chamber containing thousands of eggs on the planet, a creature inside one of the eggs attacks an explorer. The entire crew is unaware of the impending nightmare set to descend upon them when the alien parasite planted inside its unfortunate host is birthed.</plot>
+  <tagline />
+  <runtime>117</runtime>
+  <thumb aspect="poster" preview="https://image.tmdb.org/t/p/original/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg">https://image.tmdb.org/t/p/original/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg</thumb>
+  <fanart>
+    <thumb preview="https://image.tmdb.org/t/p/original/cEobq5QrnOJjO6giDs8q4RxmMKh.jpg">https://image.tmdb.org/t/p/original/cEobq5QrnOJjO6giDs8q4RxmMKh.jpg</thumb>
+  </fanart>
+  <mpaa>R</mpaa>
+  <playcount />
+  <lastplayed />
+  <id>348</id>
+  <uniqueid type="tmdb" default="true">348</uniqueid>
+  <uniqueid type="imdb">tt0078748</uniqueid>
+  <genre>Horror</genre>
+  <genre>Science Fiction</genre>
+  <country />
+  <set tmdbcolid="8091">
+    <name>Alien Collection</name>
+    <overview />
+  </set>
+  <status>Released</status>
+  <credits>Dan O'Bannon</credits>
+  <director>Ridley Scott</director>
+  <premiered>1979-05-28</premiered>
+  <year>1979</year>
+  <studio>Brandywine Productions</studio>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=bM01Al2SWx4</trailer>
+  <watched>false</watched>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <aspect>2.4</aspect>
+        <bitrate>1749972</bitrate>
+        <codec>AV1</codec>
+        <framerate>23.976023976023976023976023976</framerate>
+        <height>1600</height>
+        <scantype>Progressive</scantype>
+        <width>3840</width>
+        <duration>115.83833333333334</duration>
+        <durationinseconds>6950</durationinseconds>
+        <hdrtype>hdr10</hdrtype>
+      </video>
+      <audio>
+        <bitrate>960000</bitrate>
+        <channels>6</channels>
+        <codec>EAC3</codec>
+        <language>engeng</language>
+      </audio>
+      <subtitle>
+        <language>eng</language>
+      </subtitle>
+      <subtitle>
+        <language>eng</language>
+      </subtitle>
+      <subtitle>
+        <language>chi</language>
+      </subtitle>
+      <subtitle>
+        <language>chi</language>
+      </subtitle>
+      <subtitle>
+        <language>cze</language>
+      </subtitle>
+      <subtitle>
+        <language>dan</language>
+      </subtitle>
+      <subtitle>
+        <language>dut</language>
+      </subtitle>
+      <subtitle>
+        <language>fin</language>
+      </subtitle>
+      <subtitle>
+        <language>fre</language>
+      </subtitle>
+      <subtitle>
+        <language>ger</language>
+      </subtitle>
+      <subtitle>
+        <language>ita</language>
+      </subtitle>
+      <subtitle>
+        <language>jpn</language>
+      </subtitle>
+      <subtitle>
+        <language>kor</language>
+      </subtitle>
+      <subtitle>
+        <language>nob</language>
+      </subtitle>
+      <subtitle>
+        <language>pol</language>
+      </subtitle>
+      <subtitle>
+        <language>spa</language>
+      </subtitle>
+      <subtitle>
+        <language>spa</language>
+      </subtitle>
+      <subtitle>
+        <language>swe</language>
+      </subtitle>
+      <subtitle>
+        <language>tha</language>
+      </subtitle>
+      <subtitle>
+        <language>fre</language>
+      </subtitle>
+      <subtitle>
+        <language>ger</language>
+      </subtitle>
+      <subtitle>
+        <language>ita</language>
+      </subtitle>
+      <subtitle>
+        <language>jpn</language>
+      </subtitle>
+      <subtitle>
+        <language>spa</language>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <actor>
+    <name>Tom Skerritt</name>
+    <role>Dallas</role>
+    <order>0</order>
+    <thumb>https://image.tmdb.org/t/p/original/oWFCyBLm1lsbsbT5Nmx3SPMaqFZ.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Sigourney Weaver</name>
+    <role>Ripley</role>
+    <order>1</order>
+    <thumb>https://image.tmdb.org/t/p/original/wTSnfktNBLd6kwQxgvkqYw6vEon.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Veronica Cartwright</name>
+    <role>Lambert</role>
+    <order>2</order>
+    <thumb>https://image.tmdb.org/t/p/original/1CiknHO8ssMM4bWPsIMMzCTVHeB.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Harry Dean Stanton</name>
+    <role>Brett</role>
+    <order>3</order>
+    <thumb>https://image.tmdb.org/t/p/original/9zOTpVMwMHNjPFBNoPy9vOBT1NC.jpg</thumb>
+  </actor>
+  <actor>
+    <name>John Hurt</name>
+    <role>Kane</role>
+    <order>4</order>
+    <thumb>https://image.tmdb.org/t/p/original/bjNSzt1d7uK3q5PbtFXUJrRt4qg.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Ian Holm</name>
+    <role>Ash</role>
+    <order>5</order>
+    <thumb>https://image.tmdb.org/t/p/original/cOJDgvgj4nMec6Inzj1H5nugTO5.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yaphet Kotto</name>
+    <role>Parker</role>
+    <order>6</order>
+    <thumb>https://image.tmdb.org/t/p/original/f0jquWLj22hvYf6PTIggdolhiDx.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Bolaji Badejo</name>
+    <role>Alien</role>
+    <order>7</order>
+    <thumb>https://image.tmdb.org/t/p/original/7ddxWlDIOVKBK6TjP66vb9Qp3MW.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Helen Horton</name>
+    <role>Mother (voice)</role>
+    <order>8</order>
+    <thumb>https://image.tmdb.org/t/p/original/ghK0UV1cMPThtRmx5vn9dbDwRYb.jpg</thumb>
+  </actor>
+</movie>

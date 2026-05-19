@@ -1,0 +1,91 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<season>
+  <plot>Walt is faced with the prospect of moving on in a world without his enemy. As the pressure of a criminal life starts to build, Skyler struggles to keep Walt’s terrible secrets. Facing resistance from sometime adversary and former Fring lieutenant Mike, Walt tries to keep his world from falling apart even as his DEA Agent brother in law, Hank, finds numerous leads that could blaze a path straight to Walt.</plot>
+  <outline>Walt is faced with the prospect of moving on in a world without his enemy. As the pressure of a criminal life starts to build, Skyler struggles to keep Walt’s terrible secrets. Facing resistance from sometime adversary and former Fring lieutenant Mike, Walt tries to keep his world from falling apart even as his DEA Agent brother in law, Hank, finds numerous leads that could blaze a path straight to Walt.</outline>
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-10 20:42:28</dateadded>
+  <title>Season 5</title>
+  <year>2012</year>
+  <tvdbid>490110</tvdbid>
+  <premiered>2012-07-15</premiered>
+  <releasedate>2012-07-15</releasedate>
+  <studio />
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/season05-poster.jpg</poster>
+  </art>
+  <actor>
+    <name>Bryan Cranston</name>
+    <role>Walter White</role>
+    <type>Actor</type>
+    <sortorder>0</sortorder>
+    <thumb>/config/data/metadata/People/B/Bryan Cranston/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Bryan Cranston</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/B/Bryan Cranston/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Diane Mercer</name>
+    <role>Producer</role>
+    <type>Producer</type>
+  </actor>
+  <actor>
+    <name>Stewart Lyons</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/S/Stewart Lyons/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Aaron Paul</name>
+    <role>Jesse Pinkman</role>
+    <type>Actor</type>
+    <sortorder>1</sortorder>
+    <thumb>/config/data/metadata/People/A/Aaron Paul/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Anna Gunn</name>
+    <role>Skyler White</role>
+    <type>Actor</type>
+    <sortorder>2</sortorder>
+    <thumb>/config/data/metadata/People/A/Anna Gunn/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>RJ Mitte</name>
+    <role>Walter White Jr.</role>
+    <type>Actor</type>
+    <sortorder>3</sortorder>
+    <thumb>/config/data/metadata/People/R/RJ Mitte/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Dean Norris</name>
+    <role>Hank Schrader</role>
+    <type>Actor</type>
+    <sortorder>4</sortorder>
+    <thumb>/config/data/metadata/People/D/Dean Norris/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Betsy Brandt</name>
+    <role>Marie Schrader</role>
+    <type>Actor</type>
+    <sortorder>5</sortorder>
+    <thumb>/config/data/metadata/People/B/Betsy Brandt/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Bob Odenkirk</name>
+    <role>Saul Goodman</role>
+    <type>Actor</type>
+    <sortorder>7</sortorder>
+    <thumb>/config/data/metadata/People/B/Bob Odenkirk/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Jonathan Banks</name>
+    <role>Mike Ehrmantraut</role>
+    <type>Actor</type>
+    <sortorder>9</sortorder>
+    <thumb>/config/data/metadata/People/J/Jonathan Banks/folder.jpg</thumb>
+  </actor>
+  <seasonnumber>5</seasonnumber>
+  <tvmazeid>757</tvmazeid>
+</season>

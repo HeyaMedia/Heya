@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<album>
+  <review />
+  <outline />
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-11 23:11:33</dateadded>
+  <title>Bloom (Jamie XX Rework) / Separator (Anstam RMX) / Lotus Flower (SBTRKT RMX)</title>
+  <year>2011</year>
+  <premiered>2011-01-01</premiered>
+  <releasedate>2011-01-01</releasedate>
+  <runtime>13</runtime>
+  <genre>Ambient</genre>
+  <genre>Electronic</genre>
+  <genre>House</genre>
+  <studio />
+  <musicbrainzalbumid>2bbccf9c-ac60-45c2-ac5f-ee11e2bbdc2c</musicbrainzalbumid>
+  <musicbrainzalbumartistid>a74b1b7f-71a5-4011-9441-d0b5e4122711</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>42b012bb-44f0-4a55-b8c8-d8141f74c497</musicbrainzreleasegroupid>
+  <art>
+    <poster>/storage/Music/Radiohead/Radiohead - Single - 2011 - Bloom Jamie XX Rework Separator Anstam RMX Lotus Flower SBTRKT RMX/folder.jpg</poster>
+  </art>
+  <artist>Radiohead</artist>
+  <albumartist>Radiohead</albumartist>
+  <track>
+    <disc>1</disc>
+    <position>1</position>
+    <title>Bloom (Jamie XX Rework)</title>
+    <duration>02:26</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>2</position>
+    <title>Separator (Anstam RMX)</title>
+    <duration>04:48</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>3</position>
+    <title>Lotus Flower (SBTRKT RMX)</title>
+    <duration>05:21</duration>
+  </track>
+  <artistdesc />
+  <label>XL Recordings</label>
+</album>

@@ -1,0 +1,98 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>Walt and Jesse find themselves in close quarters with an unhinged Tuco. Marie and Hank comfort Skyler, who is distraught over Walt’s disappearance. Hank pays a visit to Mrs. Pinkman on some not-so-official business.</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2009-03-16 01:00:00</dateadded>
+  <title>Grilled</title>
+  <rating>8.846</rating>
+  <year>2009</year>
+  <imdbid>tt1232249</imdbid>
+  <tvdbid>438913</tvdbid>
+  <runtime>48</runtime>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <studio />
+  <sonarrid>7725</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/Season 02/Breaking Bad (2008) - S02E02 [Bluray-1080p][DTS 5.1][EN][8bit][x264][EN+FR]-decibeL-thumb.jpg</poster>
+  </art>
+  <showtitle>Breaking Bad</showtitle>
+  <episode>2</episode>
+  <season>2</season>
+  <aired>2009-03-15</aired>
+  <fileinfo>
+    <streamdetails>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>dan</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>5108333</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+        <duration>47</duration>
+        <durationinseconds>2877</durationinseconds>
+      </video>
+      <audio>
+        <codec>dts</codec>
+        <micodec>dts</micodec>
+        <bitrate>1536000</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>6</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>fra</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <tvmazeid>12200</tvmazeid>
+  <uniqueid type="tvdb" default="true">438913</uniqueid>
+  <uniqueid type="sonarr">7725</uniqueid>
+</episodedetails>

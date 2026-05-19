@@ -1,0 +1,53 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<album>
+  <review />
+  <outline />
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-11 23:11:56</dateadded>
+  <title>Around The World</title>
+  <year>1997</year>
+  <premiered>1997-04-11</premiered>
+  <releasedate>1997-04-11</releasedate>
+  <runtime>24</runtime>
+  <genre>Dance</genre>
+  <genre>Disco</genre>
+  <genre>Electro House</genre>
+  <genre>Electroclash</genre>
+  <genre>Electronic</genre>
+  <genre>French Electro</genre>
+  <genre>French House</genre>
+  <genre>House</genre>
+  <studio />
+  <musicbrainzalbumid>dddddddd-dddd-dddd-dddd-dddddd302364</musicbrainzalbumid>
+  <musicbrainzalbumartistid>056e4f3e-d505-4dad-8ec1-d04f521cbb56</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>bbbbbbbb-bbbb-bbbb-bbbb-bbbbbb302364</musicbrainzreleasegroupid>
+  <art>
+    <poster>/storage/Music/Daft Punk (French electronic duo)/Daft Punk - EP - 1997 - Around The World/folder.jpg</poster>
+  </art>
+  <artist>Daft Punk</artist>
+  <albumartist>Daft Punk</albumartist>
+  <track>
+    <disc>1</disc>
+    <position>1</position>
+    <title>Around the World (Radio Edit)</title>
+    <duration>04:01</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>2</position>
+    <title>Around the World</title>
+    <duration>07:09</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>3</position>
+    <title>Teachers (Extended Mix)</title>
+    <duration>05:53</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>4</position>
+    <title>Around the World (Motorbass Vice Mix)</title>
+    <duration>06:37</duration>
+  </track>
+</album>

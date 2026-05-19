@@ -1,0 +1,98 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>All bad things must come to an end.</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2013-09-30 01:00:00</dateadded>
+  <title>Felina</title>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=pJj5MbGjtU0</trailer>
+  <rating>9.288</rating>
+  <year>2013</year>
+  <imdbid>tt2301455</imdbid>
+  <tvdbid>4553042</tvdbid>
+  <runtime>55</runtime>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <studio />
+  <sonarrid>7778</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/Season 05/Breaking Bad (2008) - S05E16 [Bluray-1080p][DTS-HD MA 5.1][EN][10bit][x265][EN+DE+TR]-thumb.jpg</poster>
+  </art>
+  <showtitle>Breaking Bad</showtitle>
+  <episode>16</episode>
+  <season>5</season>
+  <aired>2013-09-29</aired>
+  <fileinfo>
+    <streamdetails>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>dan</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>3858305</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+        <duration>55</duration>
+        <durationinseconds>3314</durationinseconds>
+      </video>
+      <audio>
+        <codec>dts</codec>
+        <micodec>dts</micodec>
+        <bitrate>3256228</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>6</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>deu</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>tur</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <tvmazeid>12253</tvmazeid>
+  <uniqueid type="tvdb" default="true">4553042</uniqueid>
+  <uniqueid type="sonarr">7778</uniqueid>
+</episodedetails>

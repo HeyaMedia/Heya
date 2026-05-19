@@ -1,0 +1,99 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>As the end of her pregnancy finds Skyler conflicted about her feelings, a dealer's death forces Walt to look for somewhere to unload a load of meth.</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2009-05-18 01:00:00</dateadded>
+  <title>Mandala</title>
+  <rating>8.497</rating>
+  <year>2009</year>
+  <imdbid>tt1232246</imdbid>
+  <tvdbid>438922</tvdbid>
+  <runtime>47</runtime>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <studio />
+  <tvrageid>785008</tvrageid>
+  <sonarrid>7734</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/Season 02/Breaking Bad (2008) - S02E11 [Bluray-1080p][DTS 5.1][EN][8bit][x264][EN+FR]-decibeL-thumb.jpg</poster>
+  </art>
+  <showtitle>Breaking Bad</showtitle>
+  <episode>11</episode>
+  <season>2</season>
+  <aired>2009-05-17</aired>
+  <fileinfo>
+    <streamdetails>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>dan</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>5017853</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+        <duration>47</duration>
+        <durationinseconds>2841</durationinseconds>
+      </video>
+      <audio>
+        <codec>dts</codec>
+        <micodec>dts</micodec>
+        <bitrate>1536000</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>6</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>PGSSUB</codec>
+        <micodec>PGSSUB</micodec>
+        <width>1920</width>
+        <height>1080</height>
+        <language>fra</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <tvmazeid>12209</tvmazeid>
+  <uniqueid type="tvdb" default="true">438922</uniqueid>
+  <uniqueid type="sonarr">7734</uniqueid>
+</episodedetails>

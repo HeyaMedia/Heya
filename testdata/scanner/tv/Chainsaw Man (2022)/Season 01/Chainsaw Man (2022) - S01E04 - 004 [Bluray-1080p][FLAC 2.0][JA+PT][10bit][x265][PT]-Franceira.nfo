@@ -1,0 +1,84 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>After a fierce battle, Denji defeats the “Bat Devil” and rescues Power even after she had trapped him.
+
+He says it is all for the sake of “touching Power’s boobs”.
+
+Power mocks his ridiculous motivation saying “that’s a pretty dumb reason”, but still agrees to let him fondle her boobs.
+
+As Denji gets thrilled with the idea, he faces a sudden attack from out of nowhere...</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2022-11-01 15:00:00</dateadded>
+  <title>RESCUE</title>
+  <rating>7.4</rating>
+  <year>2022</year>
+  <imdbid>tt23055240</imdbid>
+  <tvdbid>9358678</tvdbid>
+  <runtime>24</runtime>
+  <genre>Animation</genre>
+  <genre>Comedy</genre>
+  <studio />
+  <anidbid>260084</anidbid>
+  <sonarrid>17244</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Chainsaw Man (2022)/Season 01/Chainsaw Man (2022) - S01E04 - 004 [Bluray-1080p][FLAC 2.0][JA+PT][10bit][x265][PT]-Franceira-thumb.jpg</poster>
+  </art>
+  <showtitle>Chainsaw Man</showtitle>
+  <episode>4</episode>
+  <season>1</season>
+  <aired>2022-11-02</aired>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>1676304</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <language>jpn</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+        <duration>23</duration>
+        <durationinseconds>1435</durationinseconds>
+      </video>
+      <audio>
+        <codec>aac</codec>
+        <micodec>aac</micodec>
+        <bitrate>128002</bitrate>
+        <language>por</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>44100</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <audio>
+        <codec>flac</codec>
+        <micodec>flac</micodec>
+        <bitrate>723110</bitrate>
+        <language>jpn</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>ass</codec>
+        <micodec>ass</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>por</language>
+        <scantype>progressive</scantype>
+        <default>True</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <uniqueid type="tvdb" default="true">9358678</uniqueid>
+  <uniqueid type="sonarr">17244</uniqueid>
+</episodedetails>

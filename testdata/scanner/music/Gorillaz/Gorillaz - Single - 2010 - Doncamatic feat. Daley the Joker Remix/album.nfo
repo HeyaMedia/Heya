@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<album>
+  <review />
+  <outline />
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-11 22:40:56</dateadded>
+  <title>Doncamatic (feat. Daley) (the Joker Remix)</title>
+  <year>2010</year>
+  <premiered>2010-11-19</premiered>
+  <releasedate>2010-11-19</releasedate>
+  <runtime>8</runtime>
+  <studio />
+  <musicbrainzalbumid>dddddddd-dddd-dddd-dddd-dddddd697872</musicbrainzalbumid>
+  <musicbrainzalbumartistid>e21857d5-3256-4547-afb3-4b6ded592596</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>bbbbbbbb-bbbb-bbbb-bbbb-bbbbbb697872</musicbrainzreleasegroupid>
+  <art>
+    <poster>/config/data/metadata/library/bb/bbe05c4ffe215d54e8ecd41d76a41c25/folder.jpg</poster>
+  </art>
+  <artist>Gorillaz</artist>
+  <albumartist>Gorillaz</albumartist>
+  <track>
+    <disc>1</disc>
+    <position>1</position>
+    <title>Doncamatic (feat. Daley)</title>
+    <duration>03:22</duration>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>2</position>
+    <title>Doncamatic (feat. Daley) (The Joker Remix)</title>
+    <duration>04:46</duration>
+  </track>
+</album>

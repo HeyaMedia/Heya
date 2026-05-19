@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<album>
+  <review />
+  <outline />
+  <lockdata>false</lockdata>
+  <dateadded>2026-01-15 05:00:44</dateadded>
+  <title>Damascus</title>
+  <year>2025</year>
+  <premiered>2025-01-01</premiered>
+  <releasedate>2025-01-01</releasedate>
+  <runtime>4</runtime>
+  <genre>Electropop;Neo-Psychedelia;Experimental Hip Hop;Dabke;Electro-Disco;Electro Hop</genre>
+  <studio />
+  <musicbrainzalbumid>6d76bacf-5aba-41d7-b7f1-2781a2cc9e61</musicbrainzalbumid>
+  <musicbrainzalbumartistid>e21857d5-3256-4547-afb3-4b6ded592596</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>c68ab111-3c7d-4aab-b9cb-d6901647053f</musicbrainzreleasegroupid>
+  <art>
+    <poster>/storage/Music/Gorillaz (virtual band)/Gorillaz - Single - 2025 - Damascus/folder.jpg</poster>
+  </art>
+  <artist>Gorillaz</artist>
+  <albumartist>Gorillaz</albumartist>
+  <track>
+    <disc>1</disc>
+    <position>1</position>
+    <title>Damascus</title>
+    <duration>04:04</duration>
+  </track>
+  <artistdesc />
+  <label>Kong</label>
+</album>

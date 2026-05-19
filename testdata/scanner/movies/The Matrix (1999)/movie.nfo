@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>The Matrix</title>
+  <originaltitle>The Matrix</originaltitle>
+  <sorttitle>matrix</sorttitle>
+  <ratings>
+    <rating name="imdb" max="10" default="true">
+      <value>8.7</value>
+      <votes>2247156</votes>
+    </rating>
+    <rating name="themoviedb" max="10">
+      <value>8.2</value>
+      <votes>27846</votes>
+    </rating>
+    <rating name="tomatometerallcritics" max="100">
+      <value>83</value>
+    </rating>
+  </ratings>
+  <rating>8.2</rating>
+  <criticrating>83</criticrating>
+  <userrating />
+  <top250 />
+  <outline />
+  <plot>Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth.</plot>
+  <tagline />
+  <runtime>136</runtime>
+  <thumb aspect="poster" preview="https://image.tmdb.org/t/p/original/aOIuZAjPaRIE6CMzbazvcHuHXDc.jpg">https://image.tmdb.org/t/p/original/aOIuZAjPaRIE6CMzbazvcHuHXDc.jpg</thumb>
+  <fanart>
+    <thumb preview="https://image.tmdb.org/t/p/original/tlm8UkiQsitc8rSuIAscQDCnP8d.jpg">https://image.tmdb.org/t/p/original/tlm8UkiQsitc8rSuIAscQDCnP8d.jpg</thumb>
+  </fanart>
+  <mpaa>R</mpaa>
+  <playcount />
+  <lastplayed />
+  <id>603</id>
+  <uniqueid type="tmdb" default="true">603</uniqueid>
+  <uniqueid type="imdb">tt0133093</uniqueid>
+  <genre>Action</genre>
+  <genre>Science Fiction</genre>
+  <country />
+  <set tmdbcolid="2344">
+    <name>The Matrix Collection</name>
+    <overview />
+  </set>
+  <status>Released</status>
+  <director>Lana Wachowski</director>
+  <director>Lilly Wachowski</director>
+  <premiered>1999-03-31</premiered>
+  <year>1999</year>
+  <studio>Village Roadshow Pictures</studio>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=d0XTFAMmhrE</trailer>
+  <watched>false</watched>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <aspect>2.4</aspect>
+        <bitrate>2046311</bitrate>
+        <codec>AV1</codec>
+        <framerate>23.976023976023976023976023976</framerate>
+        <height>1600</height>
+        <scantype>Progressive</scantype>
+        <width>3840</width>
+        <duration>136.31188333333333</duration>
+        <durationinseconds>8179</durationinseconds>
+        <hdrtype>hdr10</hdrtype>
+      </video>
+      <audio>
+        <bitrate>768000</bitrate>
+        <channels>8</channels>
+        <codec>EAC3</codec>
+        <language>eng</language>
+      </audio>
+    </streamdetails>
+  </fileinfo>
+  <actor>
+    <name>Keanu Reeves</name>
+    <role>Neo</role>
+    <order>0</order>
+    <thumb>https://image.tmdb.org/t/p/original/kEoUZKEG7dzbCESDjd0CKAN1r0n.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Laurence Fishburne</name>
+    <role>Morpheus</role>
+    <order>1</order>
+    <thumb>https://image.tmdb.org/t/p/original/2GbXERENPpl5MmlqOLlPVaVtifD.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Carrie-Anne Moss</name>
+    <role>Trinity</role>
+    <order>2</order>
+    <thumb>https://image.tmdb.org/t/p/original/xD4jTA3KmVp5Rq3aHcymL9DUGjD.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Hugo Weaving</name>
+    <role>Agent Smith</role>
+    <order>3</order>
+    <thumb>https://image.tmdb.org/t/p/original/lSC8Et0PYi5zeQb3IpPkFje7hgR.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Gloria Foster</name>
+    <role>Oracle</role>
+    <order>4</order>
+    <thumb>https://image.tmdb.org/t/p/original/AriGXtC9fjBOia9Zr8CZjn4o3rx.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Joe Pantoliano</name>
+    <role>Cypher</role>
+    <order>5</order>
+    <thumb>https://image.tmdb.org/t/p/original/3OHUI3nX4SYGGItDk3xqeIvWtIf.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Marcus Chong</name>
+    <role>Tank</role>
+    <order>6</order>
+    <thumb>https://image.tmdb.org/t/p/original/q9HQttibTj2MoXVtLjq2kKqmPrE.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Julian Arahanga</name>
+    <role>Apoc</role>
+    <order>7</order>
+    <thumb>https://image.tmdb.org/t/p/original/g2YkF3PWSJU1vTKuURBH0DOMblm.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Matt Doran</name>
+    <role>Mouse</role>
+    <order>8</order>
+    <thumb>https://image.tmdb.org/t/p/original/4HtMShAbsZ2AyFtq5z3bOVrvw2s.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Belinda McClory</name>
+    <role>Switch</role>
+    <order>9</order>
+    <thumb>https://image.tmdb.org/t/p/original/wfTCwkIDJjH5k5DtuvcjP52PrLc.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Anthony Ray Parker</name>
+    <role>Dozer</role>
+    <order>10</order>
+    <thumb>https://image.tmdb.org/t/p/original/k03O1ClFvGRSedUnK0sAjTkrogX.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Paul Goddard</name>
+    <role>Agent Brown</role>
+    <order>11</order>
+    <thumb>https://image.tmdb.org/t/p/original/z6XP6Xhkh5ZE88gBOz2FnVQaKuf.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Robert Taylor</name>
+    <role>Agent Jones</role>
+    <order>12</order>
+    <thumb>https://image.tmdb.org/t/p/original/wjeEGFarZNyvrqLL4W52eXnAnXe.jpg</thumb>
+  </actor>
+  <actor>
+    <name>David Aston</name>
+    <role>Rhineheart</role>
+    <order>13</order>
+    <thumb>https://image.tmdb.org/t/p/original/98TG57IaWdMGBG41NHsUIWtecPX.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Marc Aden Gray</name>
+    <role>Choi</role>
+    <order>14</order>
+    <thumb>https://image.tmdb.org/t/p/original/veXu6ByX3OKooI9WBX6dg9U75B5.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Ada Nicodemou</name>
+    <role>Dujour</role>
+    <order>15</order>
+    <thumb>https://image.tmdb.org/t/p/original/n3KziDmCiKdaPfk0A88LN8kyf6Y.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Deni Gordon</name>
+    <role>Priestess</role>
+    <order>16</order>
+  </actor>
+  <actor>
+    <name>Rowan Witt</name>
+    <role>Spoon Boy</role>
+    <order>17</order>
+    <thumb>https://image.tmdb.org/t/p/original/2DBXtPC8HUL9pvxNhkdPbHA93kj.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Eleanor Witt</name>
+    <role>Potential</role>
+    <order>18</order>
+  </actor>
+  <actor>
+    <name>Tamara Brown</name>
+    <role>Potential</role>
+    <order>19</order>
+    <thumb>https://image.tmdb.org/t/p/original/2H6dMpJy2Zw9tC3jt9ztPE9hwVB.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Janaya Pender</name>
+    <role>Potential</role>
+    <order>20</order>
+  </actor>
+  <actor>
+    <name>Adryn White</name>
+    <role>Potential</role>
+    <order>21</order>
+  </actor>
+  <actor>
+    <name>Natalie Tjen</name>
+    <role>Potential</role>
+    <order>22</order>
+  </actor>
+  <actor>
+    <name>Bill Young</name>
+    <role>Lieutenant</role>
+    <order>23</order>
+    <thumb>https://image.tmdb.org/t/p/original/5FQC1XSeuIGE8r4vj0sFhY4zPCq.jpg</thumb>
+  </actor>
+  <actor>
+    <name>David O'Connor</name>
+    <role>FedEx Man</role>
+    <order>24</order>
+  </actor>
+  <actor>
+    <name>Jeremy Ball</name>
+    <role>Businessman</role>
+    <order>25</order>
+    <thumb>https://image.tmdb.org/t/p/original/rBtgBZ66Uzf3nEJrNWMttBLIWah.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Fiona Johnson</name>
+    <role>Woman in Red</role>
+    <order>26</order>
+    <thumb>https://image.tmdb.org/t/p/original/oa1EOs4o8Pe0MI3PGbLDPPPwtcw.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Harry Lawrence</name>
+    <role>Old Man</role>
+    <order>27</order>
+  </actor>
+  <actor>
+    <name>Steve Dodd</name>
+    <role>Blind Man</role>
+    <order>28</order>
+    <thumb>https://image.tmdb.org/t/p/original/3H4Lqrs2j2OYsDagB8Vd29H5DaX.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Luke Quinton</name>
+    <role>Security Guard</role>
+    <order>29</order>
+  </actor>
+</movie>

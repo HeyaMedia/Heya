@@ -1,0 +1,88 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <plot>The side effects of chemo begin to plague Walt. Meanwhile, the DEA rounds up suspected dealers.</plot>
+  <lockdata>false</lockdata>
+  <dateadded>2008-03-03 02:00:00</dateadded>
+  <title>Crazy Handful of Nothin'</title>
+  <rating>8.888</rating>
+  <year>2008</year>
+  <imdbid>tt1054728</imdbid>
+  <tvdbid>355100</tvdbid>
+  <runtime>48</runtime>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <studio />
+  <tvrageid>637647</tvrageid>
+  <sonarrid>7722</sonarrid>
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/Season 01/Breaking Bad (2008) - S01E06 [Bluray-1080p][EAC3 5.1][EN][10bit][AV1][EN]-dAV1nci-thumb.jpg</poster>
+  </art>
+  <showtitle>Breaking Bad</showtitle>
+  <episode>6</episode>
+  <season>1</season>
+  <aired>2008-03-02</aired>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <codec>av1</codec>
+        <micodec>av1</micodec>
+        <bitrate>3603215</bitrate>
+        <width>1920</width>
+        <height>1080</height>
+        <aspect>16:9</aspect>
+        <aspectratio>16:9</aspectratio>
+        <framerate>23.976025</framerate>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+        <duration>48</duration>
+        <durationinseconds>2884</durationinseconds>
+      </video>
+      <audio>
+        <codec>eac3</codec>
+        <micodec>eac3</micodec>
+        <bitrate>256000</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>6</channels>
+        <samplingrate>48000</samplingrate>
+        <default>True</default>
+        <forced>False</forced>
+      </audio>
+      <audio>
+        <codec>opus</codec>
+        <micodec>opus</micodec>
+        <bitrate>54954</bitrate>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <channels>2</channels>
+        <samplingrate>48000</samplingrate>
+        <default>False</default>
+        <forced>False</forced>
+      </audio>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+      <subtitle>
+        <codec>subrip</codec>
+        <micodec>subrip</micodec>
+        <width>0</width>
+        <height>0</height>
+        <language>eng</language>
+        <scantype>progressive</scantype>
+        <default>False</default>
+        <forced>False</forced>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <uniqueid type="tvdb" default="true">355100</uniqueid>
+  <uniqueid type="sonarr">7722</uniqueid>
+</episodedetails>

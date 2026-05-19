@@ -1,0 +1,104 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<season>
+  <plot>Walt and Jesse must cope with the fallout of their previous actions, both personally and professionally. Tension mounts as Walt faces a true standoff with his employer, Gus, with neither side willing or able to back down. Walt must also adjust to a new relationship with Skyler, whom while still reconciling her relationship with Walt, is committed to properly laundering Walt’s money and ensuring her sister Marie and an ailing Hank are financially stable.</plot>
+  <outline>Walt and Jesse must cope with the fallout of their previous actions, both personally and professionally. Tension mounts as Walt faces a true standoff with his employer, Gus, with neither side willing or able to back down. Walt must also adjust to a new relationship with Skyler, whom while still reconciling her relationship with Walt, is committed to properly laundering Walt’s money and ensuring her sister Marie and an ailing Hank are financially stable.</outline>
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-10 20:42:28</dateadded>
+  <title>Season 4</title>
+  <year>2011</year>
+  <tvdbid>297361</tvdbid>
+  <premiered>2011-07-17</premiered>
+  <releasedate>2011-07-17</releasedate>
+  <studio />
+  <art>
+    <poster>/storage/TV/Foreign/Breaking Bad (2008)/season04-poster.jpg</poster>
+  </art>
+  <actor>
+    <name>Bryan Cranston</name>
+    <role>Walter White</role>
+    <type>Actor</type>
+    <sortorder>0</sortorder>
+    <thumb>/config/data/metadata/People/B/Bryan Cranston/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Bryan Cranston</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/B/Bryan Cranston/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Diane Mercer</name>
+    <role>Producer</role>
+    <type>Producer</type>
+  </actor>
+  <actor>
+    <name>Moira Walley-Beckett</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/M/Moira Walley-Beckett/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Stewart Lyons</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/S/Stewart Lyons/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Aaron Paul</name>
+    <role>Jesse Pinkman</role>
+    <type>Actor</type>
+    <sortorder>1</sortorder>
+    <thumb>/config/data/metadata/People/A/Aaron Paul/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Anna Gunn</name>
+    <role>Skyler White</role>
+    <type>Actor</type>
+    <sortorder>2</sortorder>
+    <thumb>/config/data/metadata/People/A/Anna Gunn/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>RJ Mitte</name>
+    <role>Walter White Jr.</role>
+    <type>Actor</type>
+    <sortorder>3</sortorder>
+    <thumb>/config/data/metadata/People/R/RJ Mitte/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Dean Norris</name>
+    <role>Hank Schrader</role>
+    <type>Actor</type>
+    <sortorder>4</sortorder>
+    <thumb>/config/data/metadata/People/D/Dean Norris/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Betsy Brandt</name>
+    <role>Marie Schrader</role>
+    <type>Actor</type>
+    <sortorder>5</sortorder>
+    <thumb>/config/data/metadata/People/B/Betsy Brandt/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Giancarlo Esposito</name>
+    <role>Gus Fring</role>
+    <type>Actor</type>
+    <sortorder>6</sortorder>
+    <thumb>/config/data/metadata/People/G/Giancarlo Esposito/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Bob Odenkirk</name>
+    <role>Saul Goodman</role>
+    <type>Actor</type>
+    <sortorder>7</sortorder>
+    <thumb>/config/data/metadata/People/B/Bob Odenkirk/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Jonathan Banks</name>
+    <role>Mike Ehrmantraut</role>
+    <type>Actor</type>
+    <sortorder>9</sortorder>
+    <thumb>/config/data/metadata/People/J/Jonathan Banks/folder.jpg</thumb>
+  </actor>
+  <seasonnumber>4</seasonnumber>
+  <tvmazeid>756</tvmazeid>
+</season>
