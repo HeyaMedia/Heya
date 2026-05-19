@@ -8,7 +8,7 @@
 *.out
 vendor/
 bin/
-kura
+/kura
 
 # Environment
 .env
