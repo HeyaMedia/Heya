@@ -136,3 +136,15 @@ type Provider interface {
 	Search(ctx context.Context, kind MediaKind, query SearchQuery) ([]SearchResult, error)
 	GetDetail(ctx context.Context, providerID string) (*MediaDetail, error)
 }
+
+type NFOIDs struct {
+	TMDBID string
+	IMDBID string
+	TVDBID string
+	MBID   string
+}
+
+type DirectLookupProvider interface {
+	Provider
+	LookupByNFO(ctx context.Context, kind MediaKind, ids NFOIDs) (*MediaDetail, string, error)
+}

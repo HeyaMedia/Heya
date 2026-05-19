@@ -74,12 +74,17 @@ func (m *Matcher) MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, me
 }
 
 func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) error {
-	var parsed parser.ParsedStorageEntry
-	if err := json.Unmarshal(file.ParseResult, &parsed); err != nil {
-		return fmt.Errorf("parsing stored result: %w", err)
-	}
+	parsed, nfoIDs := parseFileResult(file.ParseResult)
 
 	kind := mediaTypeToKind(mediaType)
+
+	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.MBID != "") {
+		if matched := m.tryNFOLookup(ctx, file, kind, libraryID, nfoIDs); matched {
+			return nil
+		}
+		log.Debug().Int64("file_id", file.ID).Msg("NFO lookup failed, falling back to title search")
+	}
+
 	query := buildSearchQuery(parsed, kind)
 
 	if query.Title == "" && query.ISBN == "" {
@@ -214,6 +219,80 @@ func (m *Matcher) ResolveMatch(ctx context.Context, libraryFileID int64, candida
 	})
 
 	return nil
+}
+
+type parsedFileResult struct {
+	Parsed parser.ParsedStorageEntry `json:"parsed"`
+	NFO    *nfoData                  `json:"nfo,omitempty"`
+}
+
+type nfoData struct {
+	TMDBID string `json:"TMDBID"`
+	IMDBID string `json:"IMDBID"`
+	TVDBID string `json:"TVDBID"`
+	MBID   string `json:"MBID"`
+	Title  string `json:"Title"`
+	Year   string `json:"Year"`
+}
+
+func parseFileResult(data []byte) (parser.ParsedStorageEntry, *metadata.NFOIDs) {
+	var wrapper parsedFileResult
+	if err := json.Unmarshal(data, &wrapper); err == nil && wrapper.Parsed.InputPath != "" {
+		var ids *metadata.NFOIDs
+		if wrapper.NFO != nil && (wrapper.NFO.TMDBID != "" || wrapper.NFO.IMDBID != "" || wrapper.NFO.MBID != "") {
+			ids = &metadata.NFOIDs{
+				TMDBID: wrapper.NFO.TMDBID,
+				IMDBID: wrapper.NFO.IMDBID,
+				TVDBID: wrapper.NFO.TVDBID,
+				MBID:   wrapper.NFO.MBID,
+			}
+		}
+		return wrapper.Parsed, ids
+	}
+
+	var parsed parser.ParsedStorageEntry
+	json.Unmarshal(data, &parsed)
+	return parsed, nil
+}
+
+func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind metadata.MediaKind, libraryID int64, ids *metadata.NFOIDs) bool {
+	for _, p := range m.providers {
+		if !p.Supports(kind) {
+			continue
+		}
+
+		dlp, ok := p.(metadata.DirectLookupProvider)
+		if !ok {
+			continue
+		}
+
+		detail, providerID, err := dlp.LookupByNFO(ctx, kind, *ids)
+		if err != nil {
+			log.Debug().Err(err).Str("provider", p.Name()).Msg("NFO lookup failed")
+			continue
+		}
+
+		log.Info().
+			Str("provider", p.Name()).
+			Str("provider_id", providerID).
+			Str("title", detail.Title).
+			Int64("file_id", file.ID).
+			Msg("matched via NFO direct lookup")
+
+		mediaItemID, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to create media item from NFO lookup")
+			continue
+		}
+
+		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+			ID:          file.ID,
+			Status:      sqlc.FileStatusMatched,
+			MediaItemID: pgInt8(mediaItemID),
+		})
+		return true
+	}
+	return false
 }
 
 func (m *Matcher) storeCandidates(ctx context.Context, fileID int64, results []metadata.SearchResult) {

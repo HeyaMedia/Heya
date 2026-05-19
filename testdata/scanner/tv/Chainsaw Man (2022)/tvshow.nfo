@@ -1,0 +1,136 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<tvshow>
+  <plot>Denji has a simple dream—to live a happy and peaceful life, spending time with a girl he likes. This is a far cry from reality, however, as Denji is forced by the yakuza into killing devils in order to pay off his crushing debts. Using his pet devil Pochita as a weapon, he is ready to do anything for a bit of cash.</plot>
+  <outline>Denji has a simple dream—to live a happy and peaceful life, spending time with a girl he likes. This is a far cry from reality, however, as Denji is forced by the yakuza into killing devils in order to pay off his crushing debts. Using his pet devil Pochita as a weapon, he is ready to do anything for a bit of cash.</outline>
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-10 20:40:48</dateadded>
+  <title>Chainsaw Man</title>
+  <originaltitle>チェンソーマン</originaltitle>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=0qJxp7LwGd0</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=20Si967iTDk</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=5Trz4N2bNy8</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=BZxgQgjLVX8</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=j9sSzNmB5po</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=l96zmDlWCBk</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=OatDU-PgJQE</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=Sv_utkSJhkY</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=UXmROo9gTRs</trailer>
+  <rating>8.501</rating>
+  <year>2022</year>
+  <mpaa>TV-14</mpaa>
+  <collectionnumber>114410</collectionnumber>
+  <imdb_id>tt13616990</imdb_id>
+  <tmdbid>114410</tmdbid>
+  <premiered>2022-10-12</premiered>
+  <releasedate>2022-10-12</releasedate>
+  <enddate>2022-12-28</enddate>
+  <runtime>24</runtime>
+  <genre>Action &amp; Adventure</genre>
+  <genre>Animation</genre>
+  <genre>Comedy</genre>
+  <genre>Sci-Fi &amp; Fantasy</genre>
+  <studio />
+  <studio>TSC</studio>
+  <studio>TV Aichi</studio>
+  <studio>TV Osaka</studio>
+  <studio>TV Tokyo</studio>
+  <studio>TVh</studio>
+  <studio>TVQ</studio>
+  <tag>absurd</tag>
+  <tag>aggressive</tag>
+  <tag>anime</tag>
+  <tag>awestruck</tag>
+  <tag>based on manga</tag>
+  <tag>bewildered</tag>
+  <tag>chainsaw</tag>
+  <tag>combat</tag>
+  <tag>complex</tag>
+  <tag>complicated</tag>
+  <tag>cruelty</tag>
+  <tag>dark fantasy</tag>
+  <tag>demon</tag>
+  <tag>depressed</tag>
+  <tag>devil</tag>
+  <tag>distressing</tag>
+  <tag>dramatic</tag>
+  <tag>empathetic</tag>
+  <tag>excited</tag>
+  <tag>fantasy</tag>
+  <tag>furious</tag>
+  <tag>gore</tag>
+  <tag>horny female</tag>
+  <tag>introspective</tag>
+  <tag>melancholy</tag>
+  <tag>mysterious</tag>
+  <tag>ominous</tag>
+  <tag>optimistic</tag>
+  <tag>philosophical</tag>
+  <tag>secret organization</tag>
+  <tag>serious</tag>
+  <tag>shounen</tag>
+  <tag>sincere</tag>
+  <tag>somber</tag>
+  <tag>supernatural</tag>
+  <tag>sympathetic</tag>
+  <tag>tense</tag>
+  <tag>terror</tag>
+  <tag>urban fantasy</tag>
+  <anidbid>15914</anidbid>
+  <tvdbid>397934</tvdbid>
+  <tvmazeid>63451</tvmazeid>
+  <art>
+    <poster>/storage/TV/Foreign/Chainsaw Man (2022)/poster.jpg</poster>
+    <fanart>/storage/TV/Foreign/Chainsaw Man (2022)/backdrop.jpg</fanart>
+    <fanart>/storage/TV/Foreign/Chainsaw Man (2022)/backdrop1.jpg</fanart>
+    <fanart>/storage/TV/Foreign/Chainsaw Man (2022)/backdrop2.jpg</fanart>
+    <fanart>/storage/TV/Foreign/Chainsaw Man (2022)/backdrop3.jpg</fanart>
+    <fanart>/storage/TV/Foreign/Chainsaw Man (2022)/backdrop4.jpg</fanart>
+    <fanart>/storage/TV/Foreign/Chainsaw Man (2022)/fanart.jpg</fanart>
+  </art>
+  <actor>
+    <name>Kikunosuke Toya</name>
+    <role>淀治（配音）</role>
+    <type>Actor</type>
+    <sortorder>0</sortorder>
+    <thumb>/config/data/metadata/People/K/Kikunosuke Toya/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Makoto Kimura</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/M/Makoto Kimura/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Tomori Kusunoki</name>
+    <role>真纪真（配音）</role>
+    <type>Actor</type>
+    <sortorder>1</sortorder>
+    <thumb>/config/data/metadata/People/T/Tomori Kusunoki/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Shogo Sakata</name>
+    <role>早川秋（配音）</role>
+    <type>Actor</type>
+    <sortorder>2</sortorder>
+    <thumb>/config/data/metadata/People/S/Shogo Sakata/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Fairouz Ai</name>
+    <role>帕瓦（配音）</role>
+    <type>Actor</type>
+    <sortorder>3</sortorder>
+    <thumb>/config/data/metadata/People/F/Fairouz Ai/folder.jpg</thumb>
+  </actor>
+  <id>397934</id>
+  <episodeguide>
+    <url cache="397934.xml">http://www.thetvdb.com/api/1D62F2F90030C444/series/397934/all/en.zip</url>
+  </episodeguide>
+  <season>-1</season>
+  <episode>-1</episode>
+  <status>Ended</status>
+  <tvdbslugid>chainsaw-man</tvdbslugid>
+  <uniqueid type="tvdb" default="true">397934</uniqueid>
+  <uniqueid type="imdb">tt13616990</uniqueid>
+  <uniqueid type="tmdb">114410</uniqueid>
+  <uniqueid type="tvmaze">63451</uniqueid>
+</tvshow>

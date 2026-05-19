@@ -76,12 +76,14 @@ func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibrary
 			if d.IsDir() {
 				name := d.Name()
 				nameLower := strings.ToLower(name)
-				if strings.HasPrefix(name, ".") || skipDirs[name] || strings.HasSuffix(nameLower, ".trickplay") {
-					return fs.SkipDir
-				}
-				if extrasDirs[nameLower] {
-					log.Debug().Str("dir", relPath).Msg("skipping extras directory")
-					return fs.SkipDir
+				if relPath != "." {
+					if strings.HasPrefix(name, ".") || skipDirs[name] || strings.HasSuffix(nameLower, ".trickplay") {
+						return fs.SkipDir
+					}
+					if extrasDirs[nameLower] {
+						log.Debug().Str("dir", relPath).Msg("skipping extras directory")
+						return fs.SkipDir
+					}
 				}
 				log.Debug().Str("dir", relPath).Msg("entering directory")
 

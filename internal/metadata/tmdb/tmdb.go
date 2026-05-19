@@ -67,6 +67,76 @@ func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.
 	}
 }
 
+func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids metadata.NFOIDs) (*metadata.MediaDetail, string, error) {
+	tmdbID := ids.TMDBID
+
+	if tmdbID == "" && ids.IMDBID != "" {
+		foundKind, foundID, err := p.FindByIMDB(ctx, ids.IMDBID)
+		if err != nil {
+			return nil, "", err
+		}
+		tmdbID = foundID
+		if kind == metadata.KindMovie && foundKind == "tv" {
+			kind = metadata.KindTV
+		} else if kind == metadata.KindTV && foundKind == "movie" {
+			kind = metadata.KindMovie
+		}
+	}
+
+	if tmdbID == "" {
+		return nil, "", fmt.Errorf("no TMDB or IMDB ID available")
+	}
+
+	var providerID string
+	var detail *metadata.MediaDetail
+	var err error
+
+	switch kind {
+	case metadata.KindMovie:
+		providerID = "movie:" + tmdbID
+		detail, err = p.getMovieDetail(ctx, tmdbID)
+	case metadata.KindTV:
+		providerID = "tv:" + tmdbID
+		detail, err = p.getTVDetail(ctx, tmdbID)
+	default:
+		return nil, "", fmt.Errorf("TMDB does not support kind %s", kind)
+	}
+
+	if err != nil {
+		return nil, "", err
+	}
+	return detail, providerID, nil
+}
+
+func (p *Provider) GetMovieDetailByID(ctx context.Context, tmdbID string) (*metadata.MediaDetail, error) {
+	return p.getMovieDetail(ctx, tmdbID)
+}
+
+func (p *Provider) GetTVDetailByID(ctx context.Context, tmdbID string) (*metadata.MediaDetail, error) {
+	return p.getTVDetail(ctx, tmdbID)
+}
+
+type findResponse struct {
+	MovieResults []movieResult `json:"movie_results"`
+	TVResults    []tvResult    `json:"tv_results"`
+}
+
+func (p *Provider) FindByIMDB(ctx context.Context, imdbID string) (kind string, tmdbID string, err error) {
+	var resp findResponse
+	params := url.Values{"external_source": {"imdb_id"}}
+	if err := p.get(ctx, "/find/"+imdbID, params, &resp); err != nil {
+		return "", "", err
+	}
+
+	if len(resp.MovieResults) > 0 {
+		return "movie", strconv.Itoa(resp.MovieResults[0].ID), nil
+	}
+	if len(resp.TVResults) > 0 {
+		return "tv", strconv.Itoa(resp.TVResults[0].ID), nil
+	}
+	return "", "", fmt.Errorf("no TMDB result for IMDB %s", imdbID)
+}
+
 func (p *Provider) searchMovies(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
 	params := url.Values{
 		"query": {query.Title},

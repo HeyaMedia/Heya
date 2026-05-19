@@ -29,6 +29,18 @@ func (p *Provider) Supports(kind metadata.MediaKind) bool {
 	return kind == metadata.KindMusic
 }
 
+func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids metadata.NFOIDs) (*metadata.MediaDetail, string, error) {
+	if ids.MBID == "" {
+		return nil, "", fmt.Errorf("no MusicBrainz ID available")
+	}
+	providerID := "musicbrainz:" + ids.MBID
+	detail, err := p.GetDetail(ctx, providerID)
+	if err != nil {
+		return nil, "", err
+	}
+	return detail, providerID, nil
+}
+
 func (p *Provider) Search(ctx context.Context, kind metadata.MediaKind, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
 	var q string
 	if query.Artist != "" && query.Album != "" {

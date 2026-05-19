@@ -96,13 +96,15 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 		if d.IsDir() {
 			name := d.Name()
 			nameLower := strings.ToLower(name)
-			if strings.HasPrefix(name, ".") || skipDirNames[name] || strings.HasSuffix(nameLower, ".trickplay") {
-				log.Debug().Str("dir", relPath).Msg("skipping directory")
-				return fs.SkipDir
-			}
-			if extrasDirNames[nameLower] {
-				log.Debug().Str("dir", relPath).Msg("skipping extras directory (handled by asset detection)")
-				return fs.SkipDir
+			if relPath != "." {
+				if strings.HasPrefix(name, ".") || skipDirNames[name] || strings.HasSuffix(nameLower, ".trickplay") {
+					log.Debug().Str("dir", relPath).Msg("skipping directory")
+					return fs.SkipDir
+				}
+				if extrasDirNames[nameLower] {
+					log.Debug().Str("dir", relPath).Msg("skipping extras directory (handled by asset detection)")
+					return fs.SkipDir
+				}
 			}
 			log.Debug().Str("dir", relPath).Msg("entering directory")
 
