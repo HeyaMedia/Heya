@@ -34,4 +34,6 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.Handle("GET /api/media", authed(http.HandlerFunc(handleListMedia(app))))
 	mux.Handle("GET /api/media/{id}", authed(http.HandlerFunc(handleGetMedia(app))))
 	mux.Handle("GET /api/search", authed(http.HandlerFunc(handleSearchMedia(app))))
+
+	mux.Handle("GET /api/watchers", authed(http.HandlerFunc(handleWatcherStatus(app))))
 }

@@ -276,10 +276,27 @@ var libraryStatsCmd = &cobra.Command{
 
 var libraryWatchCmd = &cobra.Command{
 	Use:   "watch",
-	Short: "Show watcher status for a library",
+	Short: "Show watcher status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("library watch: not yet implemented (Phase 9)")
-		return nil
+		ctx := context.Background()
+		app, err := service.New(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		status := app.Watcher.Status()
+		if len(status) == 0 {
+			fmt.Println("No active watchers. Start the server with `kura serve` to enable file watching.")
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintf(w, "LIBRARY\tPATH\n")
+		for id, path := range status {
+			fmt.Fprintf(w, "%d\t%s\n", id, path)
+		}
+		return w.Flush()
 	},
 }
 

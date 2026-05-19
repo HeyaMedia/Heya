@@ -33,6 +33,10 @@ var serveCmd = &cobra.Command{
 		}
 		log.Info().Msg("river workers started")
 
+		if err := app.StartWatchers(ctx); err != nil {
+			log.Warn().Err(err).Msg("failed to start watchers")
+		}
+
 		srv := server.New(cfg, app)
 
 		go func() {
