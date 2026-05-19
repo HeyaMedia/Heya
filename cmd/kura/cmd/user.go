@@ -3,10 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"text/tabwriter"
-	"os"
+	"strconv"
 
 	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/kura/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +48,7 @@ var userCreateCmd = &cobra.Command{
 		if user.IsAdmin {
 			role = "admin"
 		}
-		fmt.Printf("Created %s: %s (id=%d)\n", role, user.Username, user.ID)
+		ui.Success("Created %s: %s (id=%d)", role, user.Username, user.ID)
 		return nil
 	},
 }
@@ -69,17 +69,25 @@ var userListCmd = &cobra.Command{
 			return err
 		}
 
+		if ui.JSONMode {
+			return ui.OutputJSON(users)
+		}
+
 		if len(users) == 0 {
-			fmt.Println("No users found.")
+			ui.Warn("No users found.")
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "ID\tUSERNAME\tEMAIL\tADMIN\n")
+		t := ui.NewTable("ID", "USERNAME", "EMAIL", "ROLE")
 		for _, u := range users {
-			fmt.Fprintf(w, "%d\t%s\t%s\t%v\n", u.ID, u.Username, u.Email, u.IsAdmin)
+			role := "user"
+			if u.IsAdmin {
+				role = ui.Bold("admin")
+			}
+			t.AddRow(strconv.FormatInt(u.ID, 10), u.Username, u.Email, role)
 		}
-		return w.Flush()
+		fmt.Println(t.Render())
+		return nil
 	},
 }
 
@@ -103,7 +111,7 @@ var userDeleteCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Deleted user: %s\n", username)
+		ui.Success("Deleted user: %s", username)
 		return nil
 	},
 }

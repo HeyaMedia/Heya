@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/karbowiak/kura/internal/config"
+	"github.com/karbowiak/kura/internal/ui"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -17,6 +19,10 @@ var rootCmd = &cobra.Command{
 	Short: "Kura — a self-hosted media server",
 	Long:  "Kura is a self-hosted media server for movies, TV series, music, books, and more.",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		jsonFlag, _ := cmd.Flags().GetBool("json")
+		noColorFlag, _ := cmd.Flags().GetBool("no-color")
+		ui.Init(jsonFlag, noColorFlag)
+
 		cfg = config.Load()
 
 		level, err := zerolog.ParseLevel(cfg.LogLevel)
@@ -29,6 +35,9 @@ var rootCmd = &cobra.Command{
 			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 		}
 	},
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Print(ui.HelpBanner())
+	},
 }
 
 func Execute() {
@@ -38,6 +47,9 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.PersistentFlags().Bool("json", false, "Output in JSON format")
+	rootCmd.PersistentFlags().Bool("no-color", false, "Disable colored output")
+
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(userCmd)
 	rootCmd.AddCommand(libraryCmd)

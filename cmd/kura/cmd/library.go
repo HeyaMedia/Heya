@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/kura/internal/database/sqlc"
 	"github.com/karbowiak/kura/internal/scanner"
 	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/kura/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -58,8 +58,9 @@ var libraryAddCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Created library: %s (id=%d, type=%s, paths=%s)\n",
-			lib.Name, lib.ID, lib.MediaType, strings.Join(lib.Paths, ", "))
+		ui.Success("Created library: %s (id=%d)", lib.Name, lib.ID)
+		ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
+		ui.Info("Paths", strings.Join(lib.Paths, ", "))
 		return nil
 	},
 }
@@ -80,18 +81,26 @@ var libraryListCmd = &cobra.Command{
 			return err
 		}
 
+		if ui.JSONMode {
+			return ui.OutputJSON(libs)
+		}
+
 		if len(libs) == 0 {
-			fmt.Println("No libraries found.")
+			ui.Warn("No libraries found. Run 'kura library add' to create one.")
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "ID\tNAME\tTYPE\tPATHS\n")
+		t := ui.NewTable("ID", "NAME", "TYPE", "PATHS")
 		for _, lib := range libs {
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n",
-				lib.ID, lib.Name, lib.MediaType, strings.Join(lib.Paths, ", "))
+			t.AddRow(
+				strconv.FormatInt(lib.ID, 10),
+				lib.Name,
+				ui.MediaBadge(string(lib.MediaType)),
+				strings.Join(lib.Paths, ", "),
+			)
 		}
-		return w.Flush()
+		fmt.Println(t.Render())
+		return nil
 	},
 }
 
@@ -134,41 +143,55 @@ var libraryScanCmd = &cobra.Command{
 		if async {
 			for _, lib := range libs {
 				if err := app.EnqueueScanLibrary(ctx, lib.ID, force); err != nil {
-					fmt.Fprintf(os.Stderr, "error enqueuing %s: %v\n", lib.Name, err)
+					ui.Error("enqueue failed for %s: %v", lib.Name, err)
 					continue
 				}
-				fmt.Printf("Enqueued scan for %s (id=%d)\n", lib.Name, lib.ID)
+				ui.Success("Enqueued scan for %s (id=%d)", lib.Name, lib.ID)
 			}
-			fmt.Println("Jobs enqueued. Start the server with `kura serve` to process them.")
+			ui.Println(ui.Dim("Jobs enqueued. Start the server with 'kura serve' to process them."))
 			return nil
 		}
 
 		opts := scanner.ScanOptions{ForceRescan: force}
 
 		for _, lib := range libs {
-			fmt.Printf("Scanning %s (id=%d, type=%s)...\n", lib.Name, lib.ID, lib.MediaType)
+			ui.Header(fmt.Sprintf("Scanning %s", lib.Name))
+			ui.Info("Library", fmt.Sprintf("%s (id=%d)", lib.Name, lib.ID))
+			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
 
 			scanResult, err := app.ScanLibrary(ctx, lib.ID, opts)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  error: %v\n", err)
+				ui.Error("scan failed: %v", err)
 				continue
 			}
-			fmt.Printf("  Discovered: %d, New: %d, Updated: %d, Unchanged: %d, Deleted: %d, Errors: %d\n",
-				scanResult.Discovered, scanResult.New, scanResult.Updated,
-				scanResult.Unchanged, scanResult.Deleted, scanResult.Errors)
+			ui.Success("Scan complete")
+			ui.Info("Discovered", strconv.Itoa(scanResult.Discovered))
+			ui.Info("New", strconv.Itoa(scanResult.New))
+			ui.Info("Unchanged", strconv.Itoa(scanResult.Unchanged))
+			ui.Info("Deleted", strconv.Itoa(scanResult.Deleted))
+			if scanResult.Errors > 0 {
+				ui.Info("Errors", ui.Bold(strconv.Itoa(scanResult.Errors)))
+			}
 
 			if scanOnly {
 				continue
 			}
 
-			fmt.Printf("Matching %s...\n", lib.Name)
+			fmt.Println()
+			ui.Header("Matching " + lib.Name)
 			matchResult, err := app.MatchLibrary(ctx, lib.ID)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  match error: %v\n", err)
+				ui.Error("match failed: %v", err)
 				continue
 			}
-			fmt.Printf("  Matched: %d, Unmatched: %d, Errors: %d\n",
-				matchResult.Matched, matchResult.Unmatched, matchResult.Errors)
+			ui.Success("Match complete")
+			ui.Info("Matched", strconv.Itoa(matchResult.Matched))
+			if matchResult.Unmatched > 0 {
+				ui.Info("Unmatched", ui.Bold(strconv.Itoa(matchResult.Unmatched)))
+			}
+			if matchResult.Errors > 0 {
+				ui.Info("Errors", ui.Bold(strconv.Itoa(matchResult.Errors)))
+			}
 
 			if interactive && matchResult.Unmatched > 0 {
 				runInteractiveResolve(ctx, app, lib.ID)
@@ -199,7 +222,7 @@ var libraryRemoveCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Deleted library: id=%d\n", id)
+		ui.Success("Deleted library: id=%d", id)
 		return nil
 	},
 }
@@ -225,17 +248,25 @@ var libraryFilesCmd = &cobra.Command{
 			return err
 		}
 
+		if ui.JSONMode {
+			return ui.OutputJSON(files)
+		}
+
 		if len(files) == 0 {
-			fmt.Println("No files found. Run `kura library scan` first.")
+			ui.Warn("No files found. Run 'kura library scan' first.")
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "ID\tSTATUS\tPATH\n")
+		t := ui.NewTable("ID", "STATUS", "PATH")
 		for _, f := range files {
-			fmt.Fprintf(w, "%d\t%s\t%s\n", f.ID, f.Status, filepath.Base(f.Path))
+			t.AddRow(
+				strconv.FormatInt(f.ID, 10),
+				ui.StatusBadge(string(f.Status)),
+				filepath.Base(f.Path),
+			)
 		}
-		return w.Flush()
+		fmt.Println(t.Render())
+		return nil
 	},
 }
 
@@ -260,17 +291,24 @@ var libraryStatsCmd = &cobra.Command{
 			return err
 		}
 
+		if ui.JSONMode {
+			return ui.OutputJSON(stats)
+		}
+
 		if len(stats) == 0 {
-			fmt.Println("No files in library. Run `kura library scan` first.")
+			ui.Warn("No files in library. Run 'kura library scan' first.")
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "STATUS\tCOUNT\n")
+		t := ui.NewTable("STATUS", "COUNT")
 		for _, s := range stats {
-			fmt.Fprintf(w, "%s\t%d\n", s.Status, s.Count)
+			t.AddRow(
+				ui.StatusBadge(string(s.Status)),
+				strconv.FormatInt(s.Count, 10),
+			)
 		}
-		return w.Flush()
+		fmt.Println(t.Render())
+		return nil
 	},
 }
 
@@ -287,16 +325,16 @@ var libraryWatchCmd = &cobra.Command{
 
 		status := app.Watcher.Status()
 		if len(status) == 0 {
-			fmt.Println("No active watchers. Start the server with `kura serve` to enable file watching.")
+			ui.Warn("No active watchers. Start the server with 'kura serve' to enable file watching.")
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "LIBRARY\tPATH\n")
+		t := ui.NewTable("LIBRARY", "PATH")
 		for id, path := range status {
-			fmt.Fprintf(w, "%d\t%s\n", id, path)
+			t.AddRow(strconv.FormatInt(id, 10), path)
 		}
-		return w.Flush()
+		fmt.Println(t.Render())
+		return nil
 	},
 }
 
