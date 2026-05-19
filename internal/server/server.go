@@ -17,7 +17,7 @@ func New(cfg *config.Config, app *service.App) *http.Server {
 
 	mux.Handle("GET /api/openapi.json", docsMux)
 	mux.Handle("GET /api/openapi.yaml", docsMux)
-	mux.Handle("GET /api/docs", docsMux)
+	mux.HandleFunc("GET /api/docs", scalarHandler("/api/openapi.json"))
 
 	handler := withMiddleware(mux)
 
