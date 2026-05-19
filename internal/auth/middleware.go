@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/karbowiak/kura/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
 type contextKey string

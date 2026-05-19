@@ -6,12 +6,12 @@ import (
 	"fmt"
 
 	"charm.land/huh/v2"
-	"github.com/karbowiak/kura/internal/config"
-	"github.com/karbowiak/kura/internal/database"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/service"
-	"github.com/karbowiak/kura/internal/ui"
-	"github.com/karbowiak/kura/migrations"
+	"github.com/karbowiak/heya/internal/config"
+	"github.com/karbowiak/heya/internal/database"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/ui"
+	"github.com/karbowiak/heya/migrations"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
@@ -23,7 +23,7 @@ var setupCmd = &cobra.Command{
 	Long:  "Interactive wizard to configure Kura: database, admin user, first library, and API keys.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !ui.IsInteractive() {
-			ui.Error("Setup requires an interactive terminal. Run 'kura setup' directly.")
+			ui.Error("Setup requires an interactive terminal. Run 'heya setup' directly.")
 			return nil
 		}
 
@@ -230,11 +230,11 @@ var setupCmd = &cobra.Command{
 		// Step 6: Save config
 		fmt.Println()
 		var saveConfig bool
-		savePath := "./kura.yaml"
+		savePath := "./heya.yaml"
 		huh.NewForm(
 			huh.NewGroup(
 				huh.NewConfirm().
-					Title("Save configuration to kura.yaml?").
+					Title("Save configuration to heya.yaml?").
 					Value(&saveConfig),
 			),
 		).Run()
@@ -249,9 +249,9 @@ var setupCmd = &cobra.Command{
 
 		fmt.Println()
 		ui.Header("Setup Complete")
-		ui.Println("  Start the server:  " + ui.Primary("kura serve"))
-		ui.Println("  Scan a library:    " + ui.Primary("kura library scan --all"))
-		ui.Println("  View dashboard:    " + ui.Primary("kura dashboard"))
+		ui.Println("  Start the server:  " + ui.Primary("heya serve"))
+		ui.Println("  Scan a library:    " + ui.Primary("heya library scan --all"))
+		ui.Println("  View dashboard:    " + ui.Primary("heya dashboard"))
 		fmt.Println()
 
 		return nil

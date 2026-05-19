@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/matcher"
-	"github.com/karbowiak/kura/internal/scanner"
-	"github.com/karbowiak/kura/internal/vfs"
-	"github.com/karbowiak/kura/internal/worker"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/matcher"
+	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/karbowiak/heya/internal/vfs"
+	"github.com/karbowiak/heya/internal/worker"
 )
 
 var validMediaTypes = map[string]sqlc.MediaType{

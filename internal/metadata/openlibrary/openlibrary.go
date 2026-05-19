@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/karbowiak/kura/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata"
 )
 
 const baseURL = "https://openlibrary.org"
@@ -17,7 +17,7 @@ type Provider struct {
 }
 
 func NewProvider() *Provider {
-	client := metadata.NewRateLimitedClient(5.0, 5, "Kura/1.0 (https://github.com/karbowiak/kura)")
+	client := metadata.NewRateLimitedClient(5.0, 5, "Heya/1.0 (https://github.com/karbowiak/heya)")
 	return &Provider{client: client}
 }
 

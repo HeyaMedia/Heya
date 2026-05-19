@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/karbowiak/kura/internal/scanner"
-	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/karbowiak/heya/internal/service"
 )
 
 func handleScanLibrary(app *service.App) http.HandlerFunc {

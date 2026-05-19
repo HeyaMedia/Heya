@@ -18,9 +18,9 @@ type FileConfig struct {
 }
 
 var searchPaths = []string{
-	"./kura.yaml",
-	filepath.Join(homeDir(), ".config", "kura", "kura.yaml"),
-	"/etc/kura/kura.yaml",
+	"./heya.yaml",
+	filepath.Join(homeDir(), ".config", "kura", "heya.yaml"),
+	"/etc/heya/heya.yaml",
 }
 
 func FindConfigFile() string {

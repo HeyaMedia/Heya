@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/heya/internal/service"
 )
 
 func handleWatcherStatus(app *service.App) http.HandlerFunc {

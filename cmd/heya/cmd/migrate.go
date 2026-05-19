@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/karbowiak/kura/migrations"
+	"github.com/karbowiak/heya/migrations"
 	"github.com/pressly/goose/v3"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"

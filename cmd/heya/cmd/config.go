@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/karbowiak/kura/internal/config"
-	"github.com/karbowiak/kura/internal/ui"
+	"github.com/karbowiak/heya/internal/config"
+	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +58,7 @@ var configPathCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := config.FindConfigFile()
 		if path == "" {
-			ui.Warn("No config file found. Run 'kura setup' or 'kura config init' to create one.")
+			ui.Warn("No config file found. Run 'heya setup' or 'heya config init' to create one.")
 		} else {
 			ui.Success("Config file: %s", path)
 		}
@@ -70,7 +70,7 @@ var configInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create a default config file",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := "./kura.yaml"
+		path := "./heya.yaml"
 		if existing := config.FindConfigFile(); existing != "" {
 			ui.Warn("Config file already exists: %s", existing)
 			return nil
@@ -95,7 +95,7 @@ var configSetCmd = &cobra.Command{
 
 		path := config.FindConfigFile()
 		if path == "" {
-			path = "./kura.yaml"
+			path = "./heya.yaml"
 		}
 
 		var fc *config.FileConfig

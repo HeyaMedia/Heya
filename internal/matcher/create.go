@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/metadata"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/rs/zerolog/log"
 )
 

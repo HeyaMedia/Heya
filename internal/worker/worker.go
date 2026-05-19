@@ -6,9 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/karbowiak/kura/internal/images"
-	"github.com/karbowiak/kura/internal/matcher"
-	"github.com/karbowiak/kura/internal/metadata"
+	"github.com/karbowiak/heya/internal/images"
+	"github.com/karbowiak/heya/internal/matcher"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"

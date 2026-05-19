@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/images"
-	"github.com/karbowiak/kura/internal/metadata"
-	"github.com/karbowiak/kura/internal/parser"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/images"
+	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/parser"
 	"github.com/rs/zerolog/log"
 )
 

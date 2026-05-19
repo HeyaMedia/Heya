@@ -3,8 +3,8 @@ package server
 import (
 	"net/http"
 
-	"github.com/karbowiak/kura/internal/config"
-	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/heya/internal/config"
+	"github.com/karbowiak/heya/internal/service"
 )
 
 func New(cfg *config.Config, app *service.App) *http.Server {

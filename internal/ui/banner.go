@@ -10,13 +10,13 @@ var Version = "dev"
 
 const logo = `
  ╔═╗╔═╗╔═╗╔═╗
- ║ ╠╝ ║║ ║║ ╠╗╔═╗
- ║ ║  ║║ ║║ ╠╝║ ║
- ╚═╝  ╚╝═╝╚═╝ ╚═╝`
+ ║ ╠╝ ╠╝ ║║ ╠╗
+ ║ ║  ║  ║║ ╠╝╔═╗
+ ╚═╝  ╚══╝╚═╝ ╚═╝`
 
 func Banner() string {
 	if !ColorEnabled {
-		return fmt.Sprintf("Kura v%s — self-hosted media server\n", Version)
+		return fmt.Sprintf("Heya v%s — self-hosted media server\n", Version)
 	}
 
 	logoStyled := lipgloss.NewStyle().
@@ -50,6 +50,6 @@ func HelpBanner() string {
 		fmt.Sprintf("  %s  %s\n", Primary("migrate"), "Run database migrations") +
 		fmt.Sprintf("  %s  %s\n", Primary("job"), "View background job status") +
 		"\n" +
-		Dim("Run 'kura <command> --help' for details on any command.") +
+		Dim("Run 'heya <command> --help' for details on any command.") +
 		"\n"
 }

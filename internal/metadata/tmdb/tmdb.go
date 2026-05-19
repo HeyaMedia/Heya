@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/karbowiak/kura/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata"
 )
 
 func decodeJSON(r io.Reader, v any) error {
@@ -28,7 +28,7 @@ type Provider struct {
 }
 
 func NewProvider(token string) *Provider {
-	client := metadata.NewRateLimitedClient(4.0, 4, "Kura/1.0")
+	client := metadata.NewRateLimitedClient(4.0, 4, "Heya/1.0")
 	return &Provider{client: client, token: token}
 }
 

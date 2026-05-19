@@ -121,7 +121,7 @@ func (m Model) View() tea.View {
 
 	var sb strings.Builder
 
-	sb.WriteString(titleStyle.Render(" Kura Dashboard"))
+	sb.WriteString(titleStyle.Render(" Heya Dashboard"))
 	sb.WriteString(dimStyle.Render("  q quit  r refresh  1-4 tabs"))
 	sb.WriteString("\n")
 

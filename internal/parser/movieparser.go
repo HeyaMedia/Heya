@@ -3,7 +3,7 @@ package parser
 import (
 	"fmt"
 
-	"github.com/karbowiak/kura/internal/parser/video"
+	"github.com/karbowiak/heya/internal/parser/video"
 )
 
 func canParseMovie(prepared PreparedSegment, mediaHint SceneMediaKind) bool {

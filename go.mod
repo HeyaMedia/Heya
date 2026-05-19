@@ -1,4 +1,4 @@
-module github.com/karbowiak/kura
+module github.com/karbowiak/heya
 
 go 1.26.2
 

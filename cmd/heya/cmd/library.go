@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/scanner"
-	"github.com/karbowiak/kura/internal/service"
-	"github.com/karbowiak/kura/internal/ui"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -86,7 +86,7 @@ var libraryListCmd = &cobra.Command{
 		}
 
 		if len(libs) == 0 {
-			ui.Warn("No libraries found. Run 'kura library add' to create one.")
+			ui.Warn("No libraries found. Run 'heya library add' to create one.")
 			return nil
 		}
 
@@ -148,7 +148,7 @@ var libraryScanCmd = &cobra.Command{
 				}
 				ui.Success("Enqueued scan for %s (id=%d)", lib.Name, lib.ID)
 			}
-			ui.Println(ui.Dim("Jobs enqueued. Start the server with 'kura serve' to process them."))
+			ui.Println(ui.Dim("Jobs enqueued. Start the server with 'heya serve' to process them."))
 			return nil
 		}
 
@@ -253,7 +253,7 @@ var libraryFilesCmd = &cobra.Command{
 		}
 
 		if len(files) == 0 {
-			ui.Warn("No files found. Run 'kura library scan' first.")
+			ui.Warn("No files found. Run 'heya library scan' first.")
 			return nil
 		}
 
@@ -296,7 +296,7 @@ var libraryStatsCmd = &cobra.Command{
 		}
 
 		if len(stats) == 0 {
-			ui.Warn("No files in library. Run 'kura library scan' first.")
+			ui.Warn("No files in library. Run 'heya library scan' first.")
 			return nil
 		}
 
@@ -325,7 +325,7 @@ var libraryWatchCmd = &cobra.Command{
 
 		status := app.Watcher.Status()
 		if len(status) == 0 {
-			ui.Warn("No active watchers. Start the server with 'kura serve' to enable file watching.")
+			ui.Warn("No active watchers. Start the server with 'heya serve' to enable file watching.")
 			return nil
 		}
 
@@ -415,7 +415,7 @@ func init() {
 	libraryScanCmd.Flags().Bool("scan-only", false, "Only scan, don't match")
 	libraryScanCmd.Flags().BoolP("interactive", "i", false, "Interactively resolve unmatched files")
 	libraryScanCmd.Flags().Bool("force", false, "Force re-scan all files")
-	libraryScanCmd.Flags().Bool("async", false, "Enqueue scan as background job (requires kura serve)")
+	libraryScanCmd.Flags().Bool("async", false, "Enqueue scan as background job (requires heya serve)")
 
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
 

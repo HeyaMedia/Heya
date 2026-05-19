@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/karbowiak/kura/internal/database"
-	"github.com/karbowiak/kura/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/database"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
 func getTestDatabaseURL(t *testing.T) string {

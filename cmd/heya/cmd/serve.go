@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/karbowiak/kura/internal/server"
-	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/heya/internal/server"
+	"github.com/karbowiak/heya/internal/service"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )

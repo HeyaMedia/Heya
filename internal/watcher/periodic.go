@@ -6,9 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/vfs"
-	"github.com/karbowiak/kura/internal/worker"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/vfs"
+	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )

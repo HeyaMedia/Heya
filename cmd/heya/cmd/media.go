@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/service"
-	"github.com/karbowiak/kura/internal/ui"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
 

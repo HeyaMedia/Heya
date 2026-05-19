@@ -10,10 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/nfo"
-	"github.com/karbowiak/kura/internal/parser"
-	"github.com/karbowiak/kura/internal/vfs"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/nfo"
+	"github.com/karbowiak/heya/internal/parser"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 

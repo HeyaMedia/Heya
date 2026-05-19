@@ -3,9 +3,9 @@ package server
 import (
 	"net/http"
 
-	"github.com/karbowiak/kura/internal/auth"
-	"github.com/karbowiak/kura/internal/database/sqlc"
-	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/heya/internal/auth"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/service"
 )
 
 type registerRequest struct {

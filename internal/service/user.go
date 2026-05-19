@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/karbowiak/kura/internal/auth"
-	"github.com/karbowiak/kura/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/auth"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
 func (a *App) CreateUser(ctx context.Context, username, email, password string, isAdmin bool) (sqlc.User, error) {

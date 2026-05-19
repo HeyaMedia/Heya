@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/karbowiak/kura/internal/parser"
+	"github.com/karbowiak/heya/internal/parser"
 	"github.com/spf13/cobra"
 )
 

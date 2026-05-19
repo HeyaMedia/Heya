@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/karbowiak/kura/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata"
 )
 
 const (
@@ -19,7 +19,7 @@ type Provider struct {
 }
 
 func NewProvider() *Provider {
-	client := metadata.NewRateLimitedClient(1.0, 1, "Kura/1.0 (https://github.com/karbowiak/kura)")
+	client := metadata.NewRateLimitedClient(1.0, 1, "Heya/1.0 (https://github.com/karbowiak/heya)")
 	return &Provider{client: client}
 }
 

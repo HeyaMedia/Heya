@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/karbowiak/kura/internal/auth"
-	"github.com/karbowiak/kura/internal/service"
+	"github.com/karbowiak/heya/internal/auth"
+	"github.com/karbowiak/heya/internal/service"
 )
 
 func registerRoutes(mux *http.ServeMux, app *service.App) {

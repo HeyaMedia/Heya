@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/karbowiak/kura/internal/config"
-	"github.com/karbowiak/kura/internal/ui"
+	"github.com/karbowiak/heya/internal/config"
+	"github.com/karbowiak/heya/internal/ui"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -15,9 +15,9 @@ import (
 var cfg *config.Config
 
 var rootCmd = &cobra.Command{
-	Use:   "kura",
-	Short: "Kura — a self-hosted media server",
-	Long:  "Kura is a self-hosted media server for movies, TV series, music, books, and more.",
+	Use:   "heya",
+	Short: "Heya — a self-hosted media server",
+	Long:  "Heya is a self-hosted media server for movies, TV series, music, books, and more.",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 		noColorFlag, _ := cmd.Flags().GetBool("no-color")

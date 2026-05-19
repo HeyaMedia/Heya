@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"github.com/karbowiak/kura/internal/dashboard"
-	"github.com/karbowiak/kura/internal/ui"
+	"github.com/karbowiak/heya/internal/dashboard"
+	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
 

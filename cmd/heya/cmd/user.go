@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/karbowiak/kura/internal/service"
-	"github.com/karbowiak/kura/internal/ui"
+	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var userCmd = &cobra.Command{
 	Use:   "user",
 	Short: "Manage users",
-	Long:  "Create, list, and delete Kura users.",
+	Long:  "Create, list, and delete Heya users.",
 }
 
 var userCreateCmd = &cobra.Command{

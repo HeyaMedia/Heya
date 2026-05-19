@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/karbowiak/kura/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )

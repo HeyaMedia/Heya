@@ -1,10 +1,10 @@
 .PHONY: build run test lint clean db-up db-down migrate
 
 build:
-	go build -o bin/kura ./cmd/kura
+	go build -o bin/heya ./cmd/heya
 
 run: build
-	./bin/kura
+	./bin/heya
 
 test:
 	go test ./...
