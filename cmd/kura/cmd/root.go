@@ -44,4 +44,5 @@ func init() {
 	rootCmd.AddCommand(parseCmd)
 	rootCmd.AddCommand(jobCmd)
 	rootCmd.AddCommand(mediaCmd)
+	rootCmd.AddCommand(migrateCmd)
 }

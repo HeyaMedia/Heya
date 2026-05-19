@@ -1,0 +1,230 @@
+[
+  {
+    "label": "parses scene-style TV release directories",
+    "kind": "storage-path",
+    "input": "Downloads/tv/Babylon.5.S01E01.Midnight.on.the.Firing.Line.1080p.BluRay.x264-GRP",
+    "expected": {
+      "media": "video",
+      "entryType": "directory",
+      "status": "ready",
+      "releaseSegment": "Babylon.5.S01E01.Midnight.on.the.Firing.Line.1080p.BluRay.x264-GRP",
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "title": "Babylon 5",
+        "group": "GRP",
+        "resolution": "1080P",
+        "seasons": [
+          1
+        ],
+        "episodes": [
+          1
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses loose TV releases at the top of the Downloads fixture",
+    "kind": "storage-path",
+    "input": "Downloads/The.Bear.S03E01.2160p.WEB-DL.DDP5.1.H.265-NTb",
+    "expected": {
+      "media": "video",
+      "entryType": "directory",
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "title": "The Bear",
+        "group": "NTb",
+        "seasons": [
+          3
+        ],
+        "episodes": [
+          1
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses anime-style tv releases from sonarr fixtures",
+    "kind": "release-name",
+    "input": "[HorribleSubs] Show-Title - 13 [1080p].mkv",
+    "mediaHint": "video",
+    "expected": {
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "media": "video",
+        "title": "Show-Title",
+        "group": "HorribleSubs",
+        "resolution": "1080P",
+        "episodes": [
+          13
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses Sonarr-style TV with special characters in title ($#-! My Dad Says)",
+    "kind": "storage-path",
+    "input": "TV/Foreign/$#-! My Dad Says (2010)/Season 01/$#-! My Dad Says (2010) - S01E01 [AMZN WEBDL-1080p][AAC 2.0][EN][8bit][h264][EN]-HONE.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "group": "HONE",
+        "resolution": "1080P",
+        "source": "WEBDL",
+        "seasons": [1],
+        "episodes": [1]
+      }
+    }
+  },
+  {
+    "label": "parses Sonarr-style TV specials with season zero (Foster's Home S00E01)",
+    "kind": "storage-path",
+    "input": "TV/Foreign/Foster's Home for Imaginary Friends (2004)/Season 00/Foster's Home for Imaginary Friends (2004) - S00E01 - House of Bloo's.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "seasons": [0],
+        "episodes": [1]
+      }
+    }
+  },
+  {
+    "label": "parses Alf S01E19 from file segment when folder has ambiguous E01E19",
+    "kind": "storage-path",
+    "input": "Downloads/tv/Alf E01E19 Ein Käfig für den Narren mkv 1080p by Uwealex01 [01+28]  Alf.S01E19.Ein Käfig für den Narren mkv 1080p.zip.001/Alf.S01E19.Ein Käfig für den Narren mkv 1080p.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Alf",
+        "resolution": "1080P",
+        "seasons": [1],
+        "episodes": [19]
+      }
+    }
+  },
+  {
+    "label": "parses LoliHouse anime batch without bracket artifacts in title",
+    "kind": "storage-path",
+    "input": "Downloads/tv/[LoliHouse] Mobile Suit Gundam SEED [01-50][BDRip 768x576 HEVC-10bit AC3][Dual Audio][Fin]/[LoliHouse] Mobile Suit Gundam SEED - 01.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Mobile Suit Gundam SEED",
+        "group": "LoliHouse",
+        "episodes": [1]
+      }
+    }
+  },
+  {
+    "label": "parses Dragon Ball Z with embedded year in title",
+    "kind": "storage-path",
+    "input": "Downloads/tv/Dragon.Ball.Z.1986.S08E02.King.of.the.Demons.1080p.BDRip.x265.10bit.TrueHD.+.AC3.2.0.DrainedDayTAoE",
+    "expected": {
+      "media": "video",
+      "entryType": "directory",
+      "release": {
+        "exists": true,
+        "resolution": "1080P",
+        "source": "BLURAY",
+        "seasons": [8],
+        "episodes": [2]
+      }
+    }
+  },
+  {
+    "label": "parses EMBER anime batch with _UNPACK_ status (folder segment wins on score over file)",
+    "kind": "storage-path",
+    "input": "Downloads/tv/_UNPACK_[EMBER] Suppose a Kid from the Last Dungeon Boonies moved to a starter town! (2021) (Season 1) [1080p] [Dual Audio HEVC WEBRip]/[EMBER] Suppose a Kid from the Last Dungeon Boonies moved to a starter town! - S01E08.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "status": "unpack",
+      "release": {
+        "exists": true,
+        "group": "EMBER",
+        "resolution": "1080P",
+        "seasons": [1],
+        "flagsContain": ["unpack"]
+      }
+    }
+  },
+  {
+    "label": "parses incomplete TV download with .!qB qBittorrent extension",
+    "kind": "storage-path",
+    "input": "Downloads/incomplete/Marvel.Zombies.S01E01.1080p.DSNP.WEB-DL.H264-STC/Marvel.Zombies.S01E01.1080p.DSNP.WEB-DL.H264-STC.mkv.!qB",
+    "expected": {
+      "media": "video",
+      "status": "partial",
+      "release": {
+        "exists": true,
+        "title": "Marvel Zombies",
+        "group": "STC",
+        "resolution": "1080P",
+        "source": "WEBDL",
+        "seasons": [1],
+        "episodes": [1]
+      }
+    }
+  },
+  {
+    "label": "parses TV release with episode-only notation (no season)",
+    "kind": "storage-path",
+    "input": "Downloads/tv/Patlabor.The.Mobile.Police.E05.iNTERNAL.1080p.BluRay.x264-URANiME.1",
+    "expected": {
+      "media": "video",
+      "release": {
+        "exists": true,
+        "title": "Patlabor The Mobile Police",
+        "group": "URANiME",
+        "resolution": "1080P",
+        "source": "BLURAY",
+        "episodes": [5],
+        "flagsContain": ["retry", "internal"]
+      }
+    }
+  },
+  {
+    "label": "parses NZB file as season pack (extension not recognized, treated as directory)",
+    "kind": "storage-path",
+    "input": "Downloads/The.Wire.S05.1080p.Complete.nzb",
+    "expected": {
+      "media": "video",
+      "entryType": "directory",
+      "release": {
+        "exists": true,
+        "title": "The Wire",
+        "resolution": "1080P",
+        "seasons": [5],
+        "flagsContain": ["complete"]
+      }
+    }
+  },
+  {
+    "label": "parses 3rd Rock from the Sun with numbered title",
+    "kind": "storage-path",
+    "input": "Downloads/tv/3rd.Rock.from.the.Sun.S04E23.Dicks.Giant.Headache.1.1080p.AMZN.WEB-DL.DD.5.1.H.264-SiGMA",
+    "expected": {
+      "media": "video",
+      "release": {
+        "exists": true,
+        "title": "3rd Rock from the Sun",
+        "group": "SiGMA",
+        "resolution": "1080P",
+        "source": "WEBDL",
+        "seasons": [4],
+        "episodes": [23]
+      }
+    }
+  }
+]

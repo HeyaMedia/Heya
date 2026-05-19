@@ -1,0 +1,166 @@
+[
+  {
+    "label": "parses movie files and strips the container extension",
+    "kind": "storage-path",
+    "input": "Downloads/movies/Dune.Part.Two.2024.2160p.UHD.BluRay.x265-B0MBARDiERS/Dune.Part.Two.2024.2160p.UHD.BluRay.x265-B0MBARDiERS.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "title": "Dune Part Two",
+        "year": "2024",
+        "group": "B0MBARDiERS",
+        "resolution": "2160P",
+        "flagsContain": [
+          "uhd"
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses incomplete partial files without losing the release name",
+    "kind": "storage-path",
+    "input": "Downloads/incomplete/Avatar.The.Way.of.Water.2022.2160p.WEB-DL.HDR10+.DV.H.265-FLUX/Avatar.The.Way.of.Water.2022.2160p.WEB-DL.HDR10+.DV.H.265-FLUX.mkv.part",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "status": "partial",
+      "extension": ".mkv.part",
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "title": "Avatar The Way of Water",
+        "group": "FLUX",
+        "source": "WEBDL"
+      }
+    }
+  },
+  {
+    "label": "parses loose movie releases at the top of the Downloads fixture",
+    "kind": "storage-path",
+    "input": "Downloads/Anora.2024.1080p.BluRay.x264-PiGNUS",
+    "expected": {
+      "media": "video",
+      "entryType": "directory",
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "title": "Anora",
+        "year": "2024",
+        "group": "PiGNUS"
+      }
+    }
+  },
+  {
+    "label": "parses anime-style movie releases from radarr fixtures",
+    "kind": "release-name",
+    "input": "[MTBB] Kimi no Na wa. (2016) v2 [97681524].mkv",
+    "mediaHint": "video",
+    "expected": {
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "media": "video",
+        "title": "Kimi no Na wa",
+        "year": "2016",
+        "group": "MTBB",
+        "releaseHash": "97681524",
+        "flagsContain": [
+          "v2"
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses unicode fraction in movie title (Naked Gun 33⅓)",
+    "kind": "storage-path",
+    "input": "Downloads/movies/Naked.Gun.33⅓.The.Final.Insult.1994.1080p.BluRay.x265-GRP/Naked.Gun.33⅓.The.Final.Insult.1994.1080p.BluRay.x265-GRP.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Naked Gun 33⅓ The Final Insult",
+        "year": "1994",
+        "group": "GRP",
+        "resolution": "1080P",
+        "source": "BLURAY"
+      }
+    }
+  },
+  {
+    "label": "parses MULTi anime movie release",
+    "kind": "storage-path",
+    "input": "Downloads/movies/Chainsaw.Man.The.Movie.Reze.Arc.2025.MULTi.2160p.WEBRip.x265-GRP/Chainsaw.Man.The.Movie.Reze.Arc.2025.MULTi.2160p.WEBRip.x265-GRP.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Chainsaw Man The Movie Reze Arc",
+        "year": "2025",
+        "group": "GRP",
+        "resolution": "2160P",
+        "flagsContain": [
+          "multi"
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses movie with .5 in title from scene naming (Bad Grandpa .5)",
+    "kind": "storage-path",
+    "input": "Downloads/movies/Jackass.Presents.Bad.Grandpa..5.2014.1080p.BluRay.x264-GRP/Jackass.Presents.Bad.Grandpa..5.2014.1080p.BluRay.x264-GRP.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "year": "2014",
+        "group": "GRP",
+        "resolution": "1080P",
+        "source": "BLURAY"
+      }
+    }
+  },
+  {
+    "label": "parses Radarr-organized extended edition movie with IMDB tag",
+    "kind": "storage-path",
+    "input": "Movies/Foreign/The Lord of the Rings The Fellowship of the Ring (2001)/The Lord of the Rings The Fellowship of the Ring (2001) {imdb-tt0120737} [Extended][Bluray-2160p][DTS-HD MA 6.1][EN][10bit][x265][EN]-CtrlHD.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "title": "The Lord of the Rings The Fellowship of the Ring",
+        "year": "2001",
+        "group": "CtrlHD",
+        "codec": "x265",
+        "flagsContain": [
+          "extended"
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses 2025 Naked Gun reboot with Atmos audio tag",
+    "kind": "storage-path",
+    "input": "Downloads/movies/The.Naked.Gun.2025.2160p.WEB-DL.DDP5.1.Atmos.H.265-FLUX/The.Naked.Gun.2025.2160p.WEB-DL.DDP5.1.Atmos.H.265-FLUX.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "The Naked Gun",
+        "year": "2025",
+        "group": "FLUX",
+        "resolution": "2160P",
+        "source": "WEBDL"
+      }
+    }
+  }
+]

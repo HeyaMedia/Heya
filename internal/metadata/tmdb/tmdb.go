@@ -1,0 +1,360 @@
+package tmdb
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/karbowiak/kura/internal/metadata"
+)
+
+func decodeJSON(r io.Reader, v any) error {
+	return json.NewDecoder(r).Decode(v)
+}
+
+const (
+	baseURL  = "https://api.themoviedb.org/3"
+	imageURL = "https://image.tmdb.org/t/p/original"
+)
+
+type Provider struct {
+	client *metadata.RateLimitedClient
+	token  string
+}
+
+func NewProvider(token string) *Provider {
+	client := metadata.NewRateLimitedClient(4.0, 4, "Kura/1.0")
+	return &Provider{client: client, token: token}
+}
+
+func (p *Provider) Name() string { return "tmdb" }
+
+func (p *Provider) Supports(kind metadata.MediaKind) bool {
+	return kind == metadata.KindMovie || kind == metadata.KindTV
+}
+
+func (p *Provider) Search(ctx context.Context, kind metadata.MediaKind, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	switch kind {
+	case metadata.KindMovie:
+		return p.searchMovies(ctx, query)
+	case metadata.KindTV:
+		return p.searchTV(ctx, query)
+	default:
+		return nil, fmt.Errorf("unsupported kind: %s", kind)
+	}
+}
+
+func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.MediaDetail, error) {
+	parts := strings.SplitN(providerID, ":", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid provider ID: %s", providerID)
+	}
+	kind := parts[0]
+	id := parts[1]
+
+	switch kind {
+	case "movie":
+		return p.getMovieDetail(ctx, id)
+	case "tv":
+		return p.getTVDetail(ctx, id)
+	default:
+		return nil, fmt.Errorf("unknown kind in provider ID: %s", kind)
+	}
+}
+
+func (p *Provider) searchMovies(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	params := url.Values{
+		"query": {query.Title},
+	}
+	if query.Year != "" {
+		params.Set("year", query.Year)
+	}
+
+	var resp searchMovieResponse
+	if err := p.get(ctx, "/search/movie", params, &resp); err != nil {
+		return nil, err
+	}
+
+	var results []metadata.SearchResult
+	for i, r := range resp.Results {
+		if i >= 10 {
+			break
+		}
+		year := ""
+		if len(r.ReleaseDate) >= 4 {
+			year = r.ReleaseDate[:4]
+		}
+		results = append(results, metadata.SearchResult{
+			ProviderID:   fmt.Sprintf("movie:%d", r.ID),
+			ProviderName: "tmdb",
+			Title:        r.Title,
+			Year:         year,
+			Description:  truncate(r.Overview, 300),
+			PosterURL:    imageURL + r.PosterPath,
+			RawData:      r,
+		})
+	}
+	return results, nil
+}
+
+func (p *Provider) searchTV(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	params := url.Values{
+		"query": {query.Title},
+	}
+	if query.Year != "" {
+		params.Set("first_air_date_year", query.Year)
+	}
+
+	var resp searchTVResponse
+	if err := p.get(ctx, "/search/tv", params, &resp); err != nil {
+		return nil, err
+	}
+
+	var results []metadata.SearchResult
+	for i, r := range resp.Results {
+		if i >= 10 {
+			break
+		}
+		year := ""
+		if len(r.FirstAirDate) >= 4 {
+			year = r.FirstAirDate[:4]
+		}
+		results = append(results, metadata.SearchResult{
+			ProviderID:   fmt.Sprintf("tv:%d", r.ID),
+			ProviderName: "tmdb",
+			Title:        r.Name,
+			Year:         year,
+			Description:  truncate(r.Overview, 300),
+			PosterURL:    imageURL + r.PosterPath,
+			RawData:      r,
+		})
+	}
+	return results, nil
+}
+
+func (p *Provider) getMovieDetail(ctx context.Context, id string) (*metadata.MediaDetail, error) {
+	var d movieDetail
+	params := url.Values{
+		"append_to_response": {"credits,external_ids"},
+	}
+	if err := p.get(ctx, "/movie/"+id, params, &d); err != nil {
+		return nil, err
+	}
+
+	year := ""
+	if len(d.ReleaseDate) >= 4 {
+		year = d.ReleaseDate[:4]
+	}
+
+	genres := make([]string, len(d.Genres))
+	for i, g := range d.Genres {
+		genres[i] = g.Name
+	}
+
+	companies := make([]string, len(d.ProductionCompanies))
+	for i, c := range d.ProductionCompanies {
+		companies[i] = c.Name
+	}
+
+	cast := convertCast(d.Credits.Cast, 20)
+	crew := convertCrew(d.Credits.Crew)
+
+	return &metadata.MediaDetail{
+		Title:               d.Title,
+		SortTitle:           strings.ToLower(d.Title),
+		Year:                year,
+		Description:         d.Overview,
+		PosterURL:           imageURLFor(d.PosterPath),
+		BackdropURL:         imageURLFor(d.BackdropPath),
+		ExternalIDs:         map[string]string{"tmdb": id, "imdb": d.ExternalIDs.IMDBID},
+		Genres:              genres,
+		Rating:              d.VoteAverage,
+		RuntimeMinutes:      d.Runtime,
+		Tagline:             d.Tagline,
+		ReleaseDate:         d.ReleaseDate,
+		OriginalTitle:       d.OriginalTitle,
+		OriginalLanguage:    d.OriginalLanguage,
+		Budget:              d.Budget,
+		Revenue:             d.Revenue,
+		Popularity:          d.Popularity,
+		VoteCount:           d.VoteCount,
+		ProductionCompanies: companies,
+		Cast:                cast,
+		Crew:                crew,
+	}, nil
+}
+
+func (p *Provider) getTVDetail(ctx context.Context, id string) (*metadata.MediaDetail, error) {
+	var d tvDetail
+	params := url.Values{
+		"append_to_response": {"credits,external_ids"},
+	}
+	if err := p.get(ctx, "/tv/"+id, params, &d); err != nil {
+		return nil, err
+	}
+
+	year := ""
+	if len(d.FirstAirDate) >= 4 {
+		year = d.FirstAirDate[:4]
+	}
+
+	genres := make([]string, len(d.Genres))
+	for i, g := range d.Genres {
+		genres[i] = g.Name
+	}
+
+	networks := make([]string, len(d.Networks))
+	for i, n := range d.Networks {
+		networks[i] = n.Name
+	}
+
+	createdBy := make([]string, len(d.CreatedBy))
+	for i, c := range d.CreatedBy {
+		createdBy[i] = c.Name
+	}
+
+	cast := convertCast(d.Credits.Cast, 20)
+
+	var seasons []metadata.SeasonDetail
+	for _, s := range d.Seasons {
+		if s.SeasonNumber == 0 {
+			continue
+		}
+
+		sd, err := p.getSeasonDetail(ctx, id, s.SeasonNumber)
+		if err != nil {
+			continue
+		}
+
+		var episodes []metadata.EpisodeDetail
+		for _, ep := range sd.Episodes {
+			episodes = append(episodes, metadata.EpisodeDetail{
+				Number:         ep.EpisodeNumber,
+				Title:          ep.Name,
+				Overview:       ep.Overview,
+				StillURL:       imageURLFor(ep.StillPath),
+				RuntimeMinutes: ep.Runtime,
+				AirDate:        ep.AirDate,
+			})
+		}
+
+		seasons = append(seasons, metadata.SeasonDetail{
+			Number:    sd.SeasonNumber,
+			Title:     sd.Name,
+			Overview:  sd.Overview,
+			PosterURL: imageURLFor(sd.PosterPath),
+			AirDate:   sd.AirDate,
+			Episodes:  episodes,
+		})
+	}
+
+	return &metadata.MediaDetail{
+		Title:            d.Name,
+		SortTitle:        strings.ToLower(d.Name),
+		Year:             year,
+		Description:      d.Overview,
+		PosterURL:        imageURLFor(d.PosterPath),
+		BackdropURL:      imageURLFor(d.BackdropPath),
+		ExternalIDs:      map[string]string{"tmdb": id, "imdb": d.ExternalIDs.IMDBID, "tvdb": strconv.Itoa(d.ExternalIDs.TVDBID)},
+		Genres:           genres,
+		Rating:           d.VoteAverage,
+		Status:           d.Status,
+		FirstAirDate:     d.FirstAirDate,
+		LastAirDate:      d.LastAirDate,
+		OriginalName:     d.OriginalName,
+		OriginalLanguage: d.OriginalLanguage,
+		Networks:         networks,
+		CreatedBy:        createdBy,
+		NumberOfSeasons:  d.NumberOfSeasons,
+		NumberOfEpisodes: d.NumberOfEpisodes,
+		Popularity:       d.Popularity,
+		VoteCount:        d.VoteCount,
+		Cast:             cast,
+		Seasons:          seasons,
+	}, nil
+}
+
+func (p *Provider) getSeasonDetail(ctx context.Context, tvID string, seasonNum int) (*seasonDetail, error) {
+	var sd seasonDetail
+	path := fmt.Sprintf("/tv/%s/season/%d", tvID, seasonNum)
+	if err := p.get(ctx, path, nil, &sd); err != nil {
+		return nil, err
+	}
+	return &sd, nil
+}
+
+func (p *Provider) get(ctx context.Context, path string, params url.Values, result any) error {
+	u := baseURL + path
+	if params != nil {
+		u += "?" + params.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+p.token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := p.client.Do(ctx, req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("TMDB %s: HTTP %d", path, resp.StatusCode)
+	}
+
+	return decodeJSON(resp.Body, result)
+}
+
+func convertCast(entries []castEntry, limit int) []metadata.CastMember {
+	var result []metadata.CastMember
+	for i, c := range entries {
+		if i >= limit {
+			break
+		}
+		result = append(result, metadata.CastMember{
+			Name:        c.Name,
+			Character:   c.Character,
+			Order:       c.Order,
+			ProfilePath: imageURLFor(c.ProfilePath),
+		})
+	}
+	return result
+}
+
+func convertCrew(entries []crewEntry) []metadata.CrewMember {
+	var result []metadata.CrewMember
+	important := map[string]bool{"Director": true, "Writer": true, "Screenplay": true, "Producer": true, "Executive Producer": true}
+	for _, c := range entries {
+		if important[c.Job] {
+			result = append(result, metadata.CrewMember{
+				Name:       c.Name,
+				Job:        c.Job,
+				Department: c.Department,
+			})
+		}
+	}
+	return result
+}
+
+func imageURLFor(path string) string {
+	if path == "" {
+		return ""
+	}
+	return imageURL + path
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}

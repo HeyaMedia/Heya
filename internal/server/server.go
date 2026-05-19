@@ -3,13 +3,13 @@ package server
 import (
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/kura/internal/config"
+	"github.com/karbowiak/kura/internal/service"
 )
 
-func New(cfg *config.Config, db *pgxpool.Pool) *http.Server {
+func New(cfg *config.Config, app *service.App) *http.Server {
 	mux := http.NewServeMux()
-	registerRoutes(mux, db)
+	registerRoutes(mux, app)
 
 	handler := withMiddleware(mux)
 

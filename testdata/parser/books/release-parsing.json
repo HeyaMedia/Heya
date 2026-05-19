@@ -1,0 +1,186 @@
+[
+  {
+    "label": "clean epub with author-title-year",
+    "kind": "storage-path",
+    "input": "Books/Brandon Sanderson - Wind and Truth (2024).epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "Brandon Sanderson - Wind and Truth",
+        "year": "2024"
+      }
+    }
+  },
+  {
+    "label": "scene-style book release",
+    "kind": "storage-path",
+    "input": "Downloads/books/Brandon.Sanderson.-.Wind.and.Truth.2024.EPUB-GROUP.epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "Brandon Sanderson - Wind and Truth",
+        "year": "2024",
+        "group": "GROUP"
+      }
+    }
+  },
+  {
+    "label": "isbn in filename",
+    "kind": "storage-path",
+    "input": "Books/9780765326355_Mistborn_The_Final_Empire.epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "flagsContain": ["isbn-detected"]
+      }
+    }
+  },
+  {
+    "label": "bracket group prefix",
+    "kind": "storage-path",
+    "input": "Downloads/books/[BookZ] Terry.Pratchett-Going.Postal.v2.epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic"
+      }
+    }
+  },
+  {
+    "label": "pdf with author and title",
+    "kind": "storage-path",
+    "input": "Books/Frank Herbert - Dune (1965).pdf",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".pdf",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "Frank Herbert - Dune",
+        "year": "1965"
+      }
+    }
+  },
+  {
+    "label": "multi-author scene",
+    "kind": "storage-path",
+    "input": "Downloads/books/Neil.Gaiman.and.Terry.Pratchett-Good.Omens.1990.EPUB-LIT.epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "Neil Gaiman and Terry Pratchett - Good Omens",
+        "year": "1990",
+        "group": "LIT"
+      }
+    }
+  },
+  {
+    "label": "audiobook-style with brackets",
+    "kind": "storage-path",
+    "input": "Books/Project Hail Mary - Andy Weir (2021) [EPUB].epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "Project Hail Mary - Andy Weir",
+        "year": "2021"
+      }
+    }
+  },
+  {
+    "label": "bare filename with dashes",
+    "kind": "storage-path",
+    "input": "Books/the-name-of-the-wind.pdf",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".pdf",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "the-name-of-the-wind"
+      }
+    }
+  },
+  {
+    "label": "scene with explicit format tag",
+    "kind": "storage-path",
+    "input": "Downloads/books/Stephen.King.-.The.Shining.1977.PDF-SQUAD.pdf",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".pdf",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "Stephen King - The Shining",
+        "year": "1977",
+        "group": "SQUAD"
+      }
+    }
+  },
+  {
+    "label": "isbn-13 with title",
+    "kind": "storage-path",
+    "input": "Books/9780547928227-The-Hobbit.epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "flagsContain": ["isbn-detected"]
+      }
+    }
+  },
+  {
+    "label": "dashed path simple title",
+    "kind": "storage-path",
+    "input": "Books/Tolkien - The Silmarillion.epub",
+    "expected": {
+      "media": "book",
+      "entryType": "file",
+      "extension": ".epub",
+      "status": "ready",
+      "release": {
+        "exists": true,
+        "strategy": "book-heuristic",
+        "title": "Tolkien - The Silmarillion"
+      }
+    }
+  }
+]

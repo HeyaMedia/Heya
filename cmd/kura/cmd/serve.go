@@ -28,7 +28,7 @@ var serveCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		srv := server.New(cfg, app.DB)
+		srv := server.New(cfg, app)
 
 		go func() {
 			log.Info().Str("addr", cfg.Addr()).Msg("starting server")

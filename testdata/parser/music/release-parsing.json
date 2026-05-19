@@ -1,0 +1,223 @@
+[
+  {
+    "label": "parses audio scene releases with catalog, year, group, and xpost markers",
+    "kind": "storage-path",
+    "input": "Downloads/audio/Fedde Le Grand - Who Got The Funk-(DLR290EX)-SINGLE-WEB-2025-FMC-xpost",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "audio-heuristic",
+        "title": "Fedde Le Grand - Who Got The Funk",
+        "year": "2025",
+        "group": "FMC",
+        "source": "WEB",
+        "catalog": "DLR290EX",
+        "flagsContain": [
+          "single",
+          "xpost"
+        ]
+      }
+    }
+  },
+  {
+    "label": "walks up the path when a metadata file is weaker than the parent release folder",
+    "kind": "storage-path",
+    "input": "Downloads/audio/_FAILED_Dua.Lipa-Don't.Start.Now.[Regard.Remix]-16BIT-44-KHZ-WEB-FLAC-2020-WALKMAN-xpost.1/00-dua.lipa-dont.start.now-regard.remix-web-2020.nfo",
+    "expected": {
+      "media": "audio",
+      "entryType": "file",
+      "status": "failed",
+      "extension": ".nfo",
+      "releaseSegment": "_FAILED_Dua.Lipa-Don't.Start.Now.[Regard.Remix]-16BIT-44-KHZ-WEB-FLAC-2020-WALKMAN-xpost.1",
+      "release": {
+        "exists": true,
+        "strategy": "audio-heuristic",
+        "title": "Dua Lipa - Don't Start Now",
+        "group": "WALKMAN",
+        "codec": "FLAC",
+        "flagsContain": [
+          "failed",
+          "xpost"
+        ]
+      }
+    }
+  },
+  {
+    "label": "returns no release when the folder is not scene-like enough",
+    "kind": "storage-path",
+    "input": "Downloads/soulseek/LOVER TOFU FRUIT",
+    "expected": {
+      "media": "audio",
+      "releaseSegment": null,
+      "release": {
+        "exists": false
+      }
+    }
+  },
+  {
+    "label": "parses direct audio release names without a storage path wrapper",
+    "kind": "release-name",
+    "input": "Aftershock_and_Wolv_-_Alegria-WEB-FLAC-2026",
+    "mediaHint": "audio",
+    "expected": {
+      "release": {
+        "exists": true,
+        "media": "audio",
+        "title": "Aftershock and Wolv - Alegria",
+        "year": "2026",
+        "source": "WEB",
+        "codec": "FLAC"
+      }
+    }
+  },
+  {
+    "label": "parses lidarr-style repack music scene releases",
+    "kind": "release-name",
+    "input": "Artist.Title-Album.Title.2017.REPACK.FLAC-aAF",
+    "mediaHint": "audio",
+    "expected": {
+      "release": {
+        "exists": true,
+        "media": "audio",
+        "title": "Artist Title - Album Title",
+        "year": "2017",
+        "group": "aAF",
+        "codec": "FLAC",
+        "flagsContain": [
+          "repack"
+        ]
+      }
+    }
+  },
+  {
+    "label": "parses lidarr-style webflac releases",
+    "kind": "release-name",
+    "input": "Kid_Cudi-Entergalactic-WEBFLAC-2022-NACHOS",
+    "mediaHint": "audio",
+    "expected": {
+      "release": {
+        "exists": true,
+        "media": "audio",
+        "title": "Kid Cudi - Entergalactic",
+        "year": "2022",
+        "group": "NACHOS",
+        "source": "WEB",
+        "codec": "FLAC"
+      }
+    }
+  },
+  {
+    "label": "parses Charli XCX scene-style audio release with dot-dash-dot separator",
+    "kind": "storage-path",
+    "input": "Downloads/Charli.XCX.-.BRAT.(2024).WEB.FLAC-ENRiCH",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "audio-heuristic",
+        "title": "Charli XCX - BRAT",
+        "year": "2024",
+        "group": "ENRiCH",
+        "source": "WEB",
+        "codec": "FLAC"
+      }
+    }
+  },
+  {
+    "label": "parses Above & Beyond soulseek-style release with ampersand and retry counter",
+    "kind": "storage-path",
+    "input": "Downloads/audio/Above & Beyond feat. Richard Bedford - Sun & Moon (2011) FLAC.2",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "year": "2011",
+        "codec": "FLAC",
+        "flagsContain": ["retry"]
+      }
+    }
+  },
+  {
+    "label": "parses Hardwell multi-disc release with catalog in nested brackets",
+    "kind": "storage-path",
+    "input": "Downloads/audio/Hardwell - I Am Hardwell (Original Soundtrack) (Revealed Recordings [REVRCD002]) - 2013, FLAC",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "year": "2013",
+        "codec": "FLAC",
+        "catalog": "Original Soundtrack"
+      }
+    }
+  },
+  {
+    "label": "parses LNY TNZ underscore-style scene audio release",
+    "kind": "storage-path",
+    "input": "Downloads/audio/LNY_TNZ_And_ALYSSA_JOLEE_._TECHNO_ACID.WEB.2026.SRG",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "year": "2026",
+        "group": "SRG",
+        "source": "WEB"
+      }
+    }
+  },
+  {
+    "label": "returns no release for bare soulseek single-track files",
+    "kind": "storage-path",
+    "input": "Downloads/soulseek/Tiffany Day/Tiffany Day - TELL ME WHAT I DID.flac",
+    "expected": {
+      "media": "audio",
+      "entryType": "file",
+      "extension": ".flac",
+      "release": {
+        "exists": false
+      }
+    }
+  },
+  {
+    "label": "parses soulseek album folder with year and FLAC in brackets as catalog",
+    "kind": "storage-path",
+    "input": "Downloads/soulseek/THE GRATITUDE PROJECT (2023) [FLAC] [24B-44.1kHz]",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "year": "2023",
+        "catalog": "FLAC"
+      }
+    }
+  },
+  {
+    "label": "parses 4 Strings scene release with catalog in parentheses",
+    "kind": "storage-path",
+    "input": "Downloads/audio/4_Strings_And_Seri-Ready_To_Fall-(LQ224)-WEB-2013-MW3_iNT",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "title": "4 Strings And Seri - Ready To Fall",
+        "year": "2013",
+        "source": "WEB",
+        "catalog": "LQ224"
+      }
+    }
+  },
+  {
+    "label": "parses Mauro Picotto non-scene release with label and year in brackets",
+    "kind": "storage-path",
+    "input": "Downloads/audio/Mauro Picotto & Riccardo Ferri - Taotek Ep (Alchemy) [2004]",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "year": "2004",
+        "catalog": "Alchemy"
+      }
+    }
+  }
+]

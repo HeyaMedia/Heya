@@ -57,7 +57,7 @@ Makefile
 
 ---
 
-## Phase 2: CLI Framework + Service Layer
+## Phase 2: CLI Framework + Service Layer ✅
 
 **Goal**: Cobra-based CLI with subcommand structure and a shared service layer that both CLI and API use. Every feature from this point forward gets a CLI command AND an API endpoint.
 
@@ -91,7 +91,7 @@ internal/service/           — shared service layer (business logic lives here)
 
 ---
 
-## Phase 3: Media Filename Parser — Core Engine
+## Phase 3: Media Filename Parser — Core Engine ✅
 
 **Goal**: Pure Go parser passing all ported test cases (~2700+ cases from yarr).
 
@@ -139,7 +139,7 @@ This is the largest single phase. We must re-implement `@ctrl/video-filename-par
 
 ---
 
-## Phase 4: Database Schema + Migrations
+## Phase 4: Database Schema + Migrations ✅
 
 **Goal**: Complete schema for users, libraries, media items, watch history. sqlc-generated Go code.
 
@@ -170,7 +170,7 @@ This is the largest single phase. We must re-implement `@ctrl/video-filename-par
 
 ---
 
-## Phase 5: Auth + User/Library Management
+## Phase 5: Auth + User/Library Management ✅
 
 **Goal**: User registration, login, session auth, library CRUD — via both CLI and API.
 
@@ -378,10 +378,10 @@ This is the largest single phase. We must re-implement `@ctrl/video-filename-par
 | # | Phase | Depends On | Size | Key Deliverable |
 |---|-------|-----------|------|-----------------|
 | 1 | Project Bootstrap ✅ | — | S | Health endpoint, PG connection |
-| 2 | CLI Framework | 1 | S | Cobra CLI, service layer pattern |
-| 3 | Filename Parser | 2 | L | Full parser, ~2700 test cases, `kura parse` |
-| 4 | Database Schema | 1 | M | Migrations, sqlc code |
-| 5 | Auth + User/Library | 4 | M | `kura user/library` + API endpoints |
+| 2 | CLI Framework ✅ | 1 | S | Cobra CLI, service layer pattern |
+| 3 | Filename Parser ✅ | 2 | L | Full parser, ~2700 test cases, `kura parse` |
+| 4 | Database Schema ✅ | 1 | M | Migrations, sqlc code |
+| 5 | Auth + User/Library ✅ | 4 | M | `kura user/library` + API endpoints |
 | 6 | Library Scanning | 3,4,5 | M | `kura library scan` + API |
 | 7 | Background Jobs | 6 | M | River queue, async scans, `kura job` |
 | 8 | Metadata Fetching | 7,4 | L | TMDB/MusicBrainz, `kura media` |
