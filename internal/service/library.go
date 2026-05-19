@@ -10,6 +10,7 @@ import (
 	"github.com/karbowiak/kura/internal/database/sqlc"
 	"github.com/karbowiak/kura/internal/matcher"
 	"github.com/karbowiak/kura/internal/scanner"
+	"github.com/karbowiak/kura/internal/vfs"
 	"github.com/karbowiak/kura/internal/worker"
 )
 
@@ -33,6 +34,9 @@ func ParseMediaType(s string) (sqlc.MediaType, error) {
 
 func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.MediaType, paths []string, userID int64) (sqlc.Library, error) {
 	for _, p := range paths {
+		if vfs.IsSMBPath(p) {
+			continue
+		}
 		info, err := os.Stat(p)
 		if err != nil {
 			return sqlc.Library{}, fmt.Errorf("path %q: %w", p, err)
@@ -69,6 +73,9 @@ func (a *App) GetLibrary(ctx context.Context, id int64) (sqlc.Library, error) {
 
 func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []string) (sqlc.Library, error) {
 	for _, p := range paths {
+		if vfs.IsSMBPath(p) {
+			continue
+		}
 		info, err := os.Stat(p)
 		if err != nil {
 			return sqlc.Library{}, fmt.Errorf("path %q: %w", p, err)
