@@ -7,6 +7,8 @@
 *.test
 *.out
 vendor/
+bin/
+kura
 
 # Environment
 .env

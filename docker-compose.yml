@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: kura-postgres
+    environment:
+      POSTGRES_USER: kura
+      POSTGRES_PASSWORD: kura
+      POSTGRES_DB: kura
+    ports:
+      - "5440:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
