@@ -35,35 +35,32 @@ const scalarHTML = `<!DOCTYPE html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin: 0; padding: 0; }
+    body { margin: 0; padding: 0; height: 100vh; }
   </style>
 </head>
 <body>
-  <script id="api-reference" data-url="%s" data-configuration='%s'></script>
-  <script src="https://cdn.scalar.com/api-reference/latest/standalone.min.js"></script>
+  <div id="app"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/browser/standalone.js"></script>
+  <script>
+    Scalar.createApiReference('#app', {
+      url: '%s',
+      theme: 'kepler',
+      darkMode: true,
+      hideModels: false,
+      hideDownloadButton: false,
+      authentication: {
+        preferredSecurityScheme: 'bearer',
+        http: {
+          bearer: { token: '' }
+        }
+      }
+    })
+  </script>
 </body>
 </html>`
 
 func scalarHandler(specURL string) http.HandlerFunc {
-	config := `{
-		"theme": "kepler",
-		"darkMode": true,
-		"hideModels": false,
-		"hideDownloadButton": false,
-		"metaData": {
-			"title": "Heya API Reference"
-		},
-		"authentication": {
-			"preferredSecurityScheme": "bearer",
-			"http": {
-				"bearer": {
-					"token": ""
-				}
-			}
-		}
-	}`
-
-	page := fmt.Sprintf(scalarHTML, specURL, config)
+	page := fmt.Sprintf(scalarHTML, specURL)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
