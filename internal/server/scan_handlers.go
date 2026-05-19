@@ -16,6 +16,20 @@ func handleScanLibrary(app *service.App) http.HandlerFunc {
 			return
 		}
 
+		async := r.URL.Query().Get("async") == "true"
+
+		if async {
+			if err := app.EnqueueScanLibrary(r.Context(), id, false); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusAccepted, map[string]string{
+				"status":  "queued",
+				"message": "library scan enqueued",
+			})
+			return
+		}
+
 		scanResult, err := app.ScanLibrary(r.Context(), id, scanner.ScanOptions{})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

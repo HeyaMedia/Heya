@@ -11,10 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDeletedLibraryFiles = `-- name: CountDeletedLibraryFiles :one
+SELECT count(*) FROM library_files
+WHERE library_id = $1 AND deleted_at IS NOT NULL
+`
+
+func (q *Queries) CountDeletedLibraryFiles(ctx context.Context, libraryID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeletedLibraryFiles, libraryID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countLibraryFilesByStatus = `-- name: CountLibraryFilesByStatus :many
 SELECT status, count(*) as count
 FROM library_files
-WHERE library_id = $1
+WHERE library_id = $1 AND deleted_at IS NULL
 GROUP BY status
 `
 
@@ -67,7 +79,7 @@ func (q *Queries) DeleteLibraryFilesByPath(ctx context.Context, arg DeleteLibrar
 }
 
 const getLibraryFileByID = `-- name: GetLibraryFileByID :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at FROM library_files WHERE id = $1
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files WHERE id = $1
 `
 
 func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile, error) {
@@ -85,12 +97,14 @@ func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.MediaInfo,
 	)
 	return i, err
 }
 
 const getLibraryFileByPath = `-- name: GetLibraryFileByPath :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at FROM library_files WHERE library_id = $1 AND path = $2
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files WHERE library_id = $1 AND path = $2
 `
 
 type GetLibraryFileByPathParams struct {
@@ -113,6 +127,8 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.MediaInfo,
 	)
 	return i, err
 }
@@ -149,7 +165,7 @@ func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItem
 }
 
 const listAllLibraryFilePaths = `-- name: ListAllLibraryFilePaths :many
-SELECT path FROM library_files WHERE library_id = $1
+SELECT path FROM library_files WHERE library_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) ListAllLibraryFilePaths(ctx context.Context, libraryID int64) ([]string, error) {
@@ -172,9 +188,56 @@ func (q *Queries) ListAllLibraryFilePaths(ctx context.Context, libraryID int64) 
 	return items, nil
 }
 
+const listDeletedLibraryFiles = `-- name: ListDeletedLibraryFiles :many
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files
+WHERE library_id = $1 AND deleted_at IS NOT NULL
+ORDER BY deleted_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListDeletedLibraryFilesParams struct {
+	LibraryID int64 `json:"library_id"`
+	Limit     int32 `json:"limit"`
+	Offset    int32 `json:"offset"`
+}
+
+func (q *Queries) ListDeletedLibraryFiles(ctx context.Context, arg ListDeletedLibraryFilesParams) ([]LibraryFile, error) {
+	rows, err := q.db.Query(ctx, listDeletedLibraryFiles, arg.LibraryID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryFile{}
+	for rows.Next() {
+		var i LibraryFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.MediaItemID,
+			&i.ParseResult,
+			&i.Status,
+			&i.ErrorMessage,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.MediaInfo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLibraryFiles = `-- name: ListLibraryFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at FROM library_files
-WHERE library_id = $1
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files
+WHERE library_id = $1 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
 `
@@ -206,6 +269,8 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 			&i.ErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.MediaInfo,
 		); err != nil {
 			return nil, err
 		}
@@ -218,8 +283,8 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 }
 
 const listLibraryFilesByStatus = `-- name: ListLibraryFilesByStatus :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at FROM library_files
-WHERE library_id = $1 AND status = $4
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files
+WHERE library_id = $1 AND status = $4 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
 `
@@ -257,6 +322,8 @@ func (q *Queries) ListLibraryFilesByStatus(ctx context.Context, arg ListLibraryF
 			&i.ErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.MediaInfo,
 		); err != nil {
 			return nil, err
 		}
@@ -266,6 +333,75 @@ func (q *Queries) ListLibraryFilesByStatus(ctx context.Context, arg ListLibraryF
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeDeletedLibraryFiles = `-- name: PurgeDeletedLibraryFiles :exec
+DELETE FROM library_files
+WHERE library_id = $1 AND deleted_at IS NOT NULL AND deleted_at < $2
+`
+
+type PurgeDeletedLibraryFilesParams struct {
+	LibraryID int64              `json:"library_id"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) PurgeDeletedLibraryFiles(ctx context.Context, arg PurgeDeletedLibraryFilesParams) error {
+	_, err := q.db.Exec(ctx, purgeDeletedLibraryFiles, arg.LibraryID, arg.DeletedAt)
+	return err
+}
+
+const restoreLibraryFile = `-- name: RestoreLibraryFile :exec
+UPDATE library_files
+SET deleted_at = NULL, updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) RestoreLibraryFile(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, restoreLibraryFile, id)
+	return err
+}
+
+const softDeleteLibraryFile = `-- name: SoftDeleteLibraryFile :exec
+UPDATE library_files
+SET deleted_at = now(), updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) SoftDeleteLibraryFile(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, softDeleteLibraryFile, id)
+	return err
+}
+
+const softDeleteLibraryFilesByPath = `-- name: SoftDeleteLibraryFilesByPath :exec
+UPDATE library_files
+SET deleted_at = now(), updated_at = now()
+WHERE library_id = $1 AND path = ANY($2::text[]) AND deleted_at IS NULL
+`
+
+type SoftDeleteLibraryFilesByPathParams struct {
+	LibraryID int64    `json:"library_id"`
+	Column2   []string `json:"column_2"`
+}
+
+func (q *Queries) SoftDeleteLibraryFilesByPath(ctx context.Context, arg SoftDeleteLibraryFilesByPathParams) error {
+	_, err := q.db.Exec(ctx, softDeleteLibraryFilesByPath, arg.LibraryID, arg.Column2)
+	return err
+}
+
+const updateLibraryFileMediaInfo = `-- name: UpdateLibraryFileMediaInfo :exec
+UPDATE library_files
+SET media_info = $2, updated_at = now()
+WHERE id = $1
+`
+
+type UpdateLibraryFileMediaInfoParams struct {
+	ID        int64  `json:"id"`
+	MediaInfo []byte `json:"media_info"`
+}
+
+func (q *Queries) UpdateLibraryFileMediaInfo(ctx context.Context, arg UpdateLibraryFileMediaInfoParams) error {
+	_, err := q.db.Exec(ctx, updateLibraryFileMediaInfo, arg.ID, arg.MediaInfo)
+	return err
 }
 
 const updateLibraryFileStatus = `-- name: UpdateLibraryFileStatus :exec
@@ -297,8 +433,8 @@ VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (library_id, path) DO UPDATE
 SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
-    updated_at = now()
-RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at
+    deleted_at = NULL, updated_at = now()
+RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info
 `
 
 type UpsertLibraryFileParams struct {
@@ -332,6 +468,8 @@ func (q *Queries) UpsertLibraryFile(ctx context.Context, arg UpsertLibraryFilePa
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.MediaInfo,
 	)
 	return i, err
 }

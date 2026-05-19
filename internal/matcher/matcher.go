@@ -69,6 +69,10 @@ func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType s
 	return result, nil
 }
 
+func (m *Matcher) MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) error {
+	return m.matchFile(ctx, file, mediaType, libraryID)
+}
+
 func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) error {
 	var parsed parser.ParsedStorageEntry
 	if err := json.Unmarshal(file.ParseResult, &parsed); err != nil {

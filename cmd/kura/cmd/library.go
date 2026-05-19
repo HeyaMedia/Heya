@@ -104,6 +104,7 @@ var libraryScanCmd = &cobra.Command{
 		scanOnly, _ := cmd.Flags().GetBool("scan-only")
 		interactive, _ := cmd.Flags().GetBool("interactive")
 		force, _ := cmd.Flags().GetBool("force")
+		async, _ := cmd.Flags().GetBool("async")
 
 		if id == 0 && !all {
 			return fmt.Errorf("--id or --all is required")
@@ -128,6 +129,18 @@ var libraryScanCmd = &cobra.Command{
 				return err
 			}
 			libs = []sqlc.Library{lib}
+		}
+
+		if async {
+			for _, lib := range libs {
+				if err := app.EnqueueScanLibrary(ctx, lib.ID, force); err != nil {
+					fmt.Fprintf(os.Stderr, "error enqueuing %s: %v\n", lib.Name, err)
+					continue
+				}
+				fmt.Printf("Enqueued scan for %s (id=%d)\n", lib.Name, lib.ID)
+			}
+			fmt.Println("Jobs enqueued. Start the server with `kura serve` to process them.")
+			return nil
 		}
 
 		opts := scanner.ScanOptions{ForceRescan: force}
@@ -347,6 +360,7 @@ func init() {
 	libraryScanCmd.Flags().Bool("scan-only", false, "Only scan, don't match")
 	libraryScanCmd.Flags().BoolP("interactive", "i", false, "Interactively resolve unmatched files")
 	libraryScanCmd.Flags().Bool("force", false, "Force re-scan all files")
+	libraryScanCmd.Flags().Bool("async", false, "Enqueue scan as background job (requires kura serve)")
 
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
 

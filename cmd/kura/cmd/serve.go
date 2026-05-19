@@ -28,6 +28,11 @@ var serveCmd = &cobra.Command{
 		}
 		defer app.Close()
 
+		if err := app.StartWorkers(ctx); err != nil {
+			return err
+		}
+		log.Info().Msg("river workers started")
+
 		srv := server.New(cfg, app)
 
 		go func() {
@@ -43,6 +48,7 @@ var serveCmd = &cobra.Command{
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
+		app.StopWorkers(shutdownCtx)
 		return srv.Shutdown(shutdownCtx)
 	},
 }

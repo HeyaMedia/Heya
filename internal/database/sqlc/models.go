@@ -11,6 +11,109 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AssetType string
+
+const (
+	AssetTypePoster       AssetType = "poster"
+	AssetTypeBackdrop     AssetType = "backdrop"
+	AssetTypeBanner       AssetType = "banner"
+	AssetTypeClearart     AssetType = "clearart"
+	AssetTypeClearlogo    AssetType = "clearlogo"
+	AssetTypeFanart       AssetType = "fanart"
+	AssetTypeLandscape    AssetType = "landscape"
+	AssetTypeLogo         AssetType = "logo"
+	AssetTypeFolder       AssetType = "folder"
+	AssetTypeThumb        AssetType = "thumb"
+	AssetTypeSeasonPoster AssetType = "season_poster"
+	AssetTypeSubtitle     AssetType = "subtitle"
+	AssetTypeLyrics       AssetType = "lyrics"
+	AssetTypeNfo          AssetType = "nfo"
+)
+
+func (e *AssetType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AssetType(s)
+	case string:
+		*e = AssetType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AssetType: %T", src)
+	}
+	return nil
+}
+
+type NullAssetType struct {
+	AssetType AssetType `json:"asset_type"`
+	Valid     bool      `json:"valid"` // Valid is true if AssetType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAssetType) Scan(value interface{}) error {
+	if value == nil {
+		ns.AssetType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AssetType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAssetType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AssetType), nil
+}
+
+type ExtraType string
+
+const (
+	ExtraTypeTrailer         ExtraType = "trailer"
+	ExtraTypeTeaser          ExtraType = "teaser"
+	ExtraTypeBehindTheScenes ExtraType = "behind_the_scenes"
+	ExtraTypeDeletedScene    ExtraType = "deleted_scene"
+	ExtraTypeFeaturette      ExtraType = "featurette"
+	ExtraTypeInterview       ExtraType = "interview"
+	ExtraTypeScene           ExtraType = "scene"
+	ExtraTypeShort           ExtraType = "short"
+	ExtraTypeOther           ExtraType = "other"
+)
+
+func (e *ExtraType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ExtraType(s)
+	case string:
+		*e = ExtraType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ExtraType: %T", src)
+	}
+	return nil
+}
+
+type NullExtraType struct {
+	ExtraType ExtraType `json:"extra_type"`
+	Valid     bool      `json:"valid"` // Valid is true if ExtraType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullExtraType) Scan(value interface{}) error {
+	if value == nil {
+		ns.ExtraType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ExtraType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullExtraType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ExtraType), nil
+}
+
 type FileStatus string
 
 const (
@@ -179,6 +282,8 @@ type LibraryFile struct {
 	ErrorMessage string             `json:"error_message"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	MediaInfo    []byte             `json:"media_info"`
 }
 
 type MatchCandidate struct {
@@ -194,6 +299,33 @@ type MatchCandidate struct {
 	RawData       []byte             `json:"raw_data"`
 	Chosen        bool               `json:"chosen"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type MediaAsset struct {
+	ID          int64              `json:"id"`
+	MediaItemID int64              `json:"media_item_id"`
+	AssetType   AssetType          `json:"asset_type"`
+	Source      string             `json:"source"`
+	LocalPath   string             `json:"local_path"`
+	RemoteUrl   string             `json:"remote_url"`
+	Language    string             `json:"language"`
+	Label       string             `json:"label"`
+	SortOrder   int32              `json:"sort_order"`
+	Width       int32              `json:"width"`
+	Height      int32              `json:"height"`
+	FileSize    int64              `json:"file_size"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type MediaExtra struct {
+	ID          int64              `json:"id"`
+	MediaItemID int64              `json:"media_item_id"`
+	ExtraType   ExtraType          `json:"extra_type"`
+	Title       string             `json:"title"`
+	FilePath    string             `json:"file_path"`
+	DurationMs  int32              `json:"duration_ms"`
+	FileSize    int64              `json:"file_size"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type MediaItem struct {

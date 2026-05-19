@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/kura/internal/database/sqlc"
 	"github.com/karbowiak/kura/internal/matcher"
 	"github.com/karbowiak/kura/internal/scanner"
+	"github.com/karbowiak/kura/internal/worker"
 )
 
 var validMediaTypes = map[string]sqlc.MediaType{
@@ -127,4 +129,29 @@ func (a *App) LibraryFileStats(ctx context.Context, libraryID int64) ([]sqlc.Cou
 func (a *App) ListMatchCandidates(ctx context.Context, fileID int64) ([]sqlc.MatchCandidate, error) {
 	q := sqlc.New(a.DB)
 	return q.ListMatchCandidatesByFile(ctx, fileID)
+}
+
+func (a *App) EnqueueScanLibrary(ctx context.Context, id int64, force bool) error {
+	_, err := a.River.Insert(ctx, worker.ScanLibraryArgs{
+		LibraryID: id,
+		Force:     force,
+	}, nil)
+	return err
+}
+
+func (a *App) ListDeletedFiles(ctx context.Context, libraryID int64, limit, offset int32) ([]sqlc.LibraryFile, error) {
+	q := sqlc.New(a.DB)
+	return q.ListDeletedLibraryFiles(ctx, sqlc.ListDeletedLibraryFilesParams{
+		LibraryID: libraryID,
+		Limit:     limit,
+		Offset:    offset,
+	})
+}
+
+func (a *App) PurgeDeletedFiles(ctx context.Context, libraryID int64) error {
+	q := sqlc.New(a.DB)
+	return q.PurgeDeletedLibraryFiles(ctx, sqlc.PurgeDeletedLibraryFilesParams{
+		LibraryID: libraryID,
+		DeletedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	})
 }

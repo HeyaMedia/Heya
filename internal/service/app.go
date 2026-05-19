@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/kura/internal/config"
 	"github.com/karbowiak/kura/internal/database"
@@ -13,6 +14,8 @@ import (
 	"github.com/karbowiak/kura/internal/metadata/openlibrary"
 	"github.com/karbowiak/kura/internal/metadata/tmdb"
 	"github.com/karbowiak/kura/internal/scanner"
+	"github.com/karbowiak/kura/internal/worker"
+	"github.com/riverqueue/river"
 )
 
 type App struct {
@@ -21,6 +24,8 @@ type App struct {
 	Scanner    *scanner.Scanner
 	Matcher    *matcher.Matcher
 	Downloader *images.Downloader
+	River      *river.Client[pgx.Tx]
+	Providers  []metadata.Provider
 }
 
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
@@ -41,13 +46,37 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	m := matcher.New(db, dl, matcher.DefaultOptions(), providers...)
 
+	riverClient, err := worker.Setup(ctx, worker.Config{
+		DB:         db,
+		Matcher:    m,
+		Downloader: dl,
+		Providers:  providers,
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return &App{
 		Config:     cfg,
 		DB:         db,
 		Scanner:    sc,
 		Matcher:    m,
 		Downloader: dl,
+		River:      riverClient,
+		Providers:  providers,
 	}, nil
+}
+
+func (a *App) StartWorkers(ctx context.Context) error {
+	return a.River.Start(ctx)
+}
+
+func (a *App) StopWorkers(ctx context.Context) error {
+	if a.River != nil {
+		return a.River.Stop(ctx)
+	}
+	return nil
 }
 
 func (a *App) Close() {

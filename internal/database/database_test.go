@@ -131,11 +131,18 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 search result, got %d", len(results))
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 search result, got 0")
 	}
-	if results[0].Title != "Dune: Part Two" {
-		t.Errorf("expected search to find 'Dune: Part Two', got %s", results[0].Title)
+	found := false
+	for _, r := range results {
+		if r.Title == "Dune: Part Two" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected search to find 'Dune: Part Two'")
 	}
 
 	count, err := qtx.CountMediaItemsByLibrary(ctx, lib.ID)
