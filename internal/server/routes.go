@@ -11,6 +11,7 @@ import (
 
 func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.HandleFunc("GET /api/health", healthHandler(app.DB))
+	mux.HandleFunc("GET /api/media/{id}/image/{type}", handleMediaImage(app))
 
 	mux.HandleFunc("POST /api/auth/register", handleRegister(app))
 	mux.HandleFunc("POST /api/auth/login", handleLogin(app))
@@ -35,9 +36,25 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 
 	mux.Handle("GET /api/media", authed(http.HandlerFunc(handleListMedia(app))))
 	mux.Handle("GET /api/media/{id}", authed(http.HandlerFunc(handleGetMedia(app))))
+	mux.Handle("POST /api/media/{id}/refresh", authed(http.HandlerFunc(handleRefreshMedia(app))))
 	mux.Handle("GET /api/search", authed(http.HandlerFunc(handleSearchMedia(app))))
 
 	mux.Handle("GET /api/watchers", authed(http.HandlerFunc(handleWatcherStatus(app))))
+
+	// Streaming
+	mux.Handle("GET /api/stream/{file_id}", authed(http.HandlerFunc(handleDirectStream(app))))
+	mux.Handle("GET /api/stream/{file_id}/hls/master.m3u8", authed(http.HandlerFunc(handleHLSMaster(app))))
+	mux.Handle("GET /api/stream/{file_id}/hls/{quality}/index.m3u8", authed(http.HandlerFunc(handleHLSPlaylist(app))))
+	mux.Handle("GET /api/stream/{file_id}/hls/{quality}/{segment}", authed(http.HandlerFunc(handleHLSSegment(app))))
+
+	// Subtitles
+	mux.Handle("GET /api/stream/{file_id}/subtitles", authed(http.HandlerFunc(handleListSubtitles(app))))
+	mux.Handle("GET /api/stream/{file_id}/subtitles/{index}", authed(http.HandlerFunc(handleGetSubtitle(app))))
+
+	// Watch progress
+	mux.Handle("POST /api/watch/{media_item_id}/progress", authed(http.HandlerFunc(handleWatchProgress(app))))
+	mux.Handle("GET /api/watch/continue", authed(http.HandlerFunc(handleContinueWatching(app))))
+	mux.Handle("GET /api/watch/history", authed(http.HandlerFunc(handleWatchHistory(app))))
 }
 
 func registerHumaRoutes(api huma.API, app *service.App) {

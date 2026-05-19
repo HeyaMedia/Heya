@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -57,53 +56,25 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 	}
 
 	if updated.Status == sqlc.FileStatusMatched && updated.MediaItemID.Valid {
-		client := river.ClientFromContext[pgx.Tx](ctx)
+		matchResult := w.Matcher.LastMatchResult()
 
-		client.Insert(ctx, DetectLocalAssetsArgs{
+		client := river.ClientFromContext[pgx.Tx](ctx)
+		client.Insert(ctx, MetadataFetchArgs{
 			MediaItemID:   updated.MediaItemID.Int64,
+			LibraryID:     job.Args.LibraryID,
 			LibraryFileID: file.ID,
 			FilePath:      file.Path,
 			MediaType:     job.Args.MediaType,
+			ProviderName:  matchResult.ProviderName,
+			ProviderID:    matchResult.ProviderID,
 		}, nil)
 
-		w.enqueueRemoteImages(ctx, client, updated.MediaItemID.Int64, job.Args.MediaType)
+		log.Info().
+			Int64("media_id", updated.MediaItemID.Int64).
+			Str("provider", matchResult.ProviderName).
+			Str("provider_id", matchResult.ProviderID).
+			Msg("matched, enqueued metadata fetch")
 	}
 
 	return nil
-}
-
-func (w *MetadataMatchWorker) enqueueRemoteImages(ctx context.Context, client *river.Client[pgx.Tx], mediaItemID int64, mediaType string) {
-	q := sqlc.New(w.DB)
-	item, err := q.GetMediaItemByID(ctx, mediaItemID)
-	if err != nil {
-		return
-	}
-
-	if item.PosterPath != "" && isURL(item.PosterPath) {
-		client.Insert(ctx, DownloadImageArgs{
-			MediaItemID: mediaItemID,
-			URL:         item.PosterPath,
-			AssetType:   "poster",
-			MediaType:   mediaType,
-			SortOrder:   0,
-		}, nil)
-	}
-
-	if item.BackdropPath != "" && isURL(item.BackdropPath) {
-		client.Insert(ctx, DownloadImageArgs{
-			MediaItemID: mediaItemID,
-			URL:         item.BackdropPath,
-			AssetType:   "backdrop",
-			MediaType:   mediaType,
-			SortOrder:   0,
-		}, nil)
-	}
-}
-
-func isURL(s string) bool {
-	return len(s) > 8 && (s[:7] == "http://" || s[:8] == "https://")
-}
-
-func init() {
-	_ = fmt.Sprintf
 }

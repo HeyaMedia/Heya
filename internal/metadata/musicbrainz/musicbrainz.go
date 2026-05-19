@@ -15,12 +15,14 @@ const (
 )
 
 type Provider struct {
-	client *metadata.RateLimitedClient
+	client      *metadata.RateLimitedClient
+	BaseURL     string
+	CoverArtURL string
 }
 
 func NewProvider() *Provider {
 	client := metadata.NewRateLimitedClient(1.0, 1, "Heya/1.0 (https://github.com/karbowiak/heya)")
-	return &Provider{client: client}
+	return &Provider{client: client, BaseURL: baseURL, CoverArtURL: coverArtURL}
 }
 
 func (p *Provider) Name() string { return "musicbrainz" }
@@ -57,7 +59,7 @@ func (p *Provider) Search(ctx context.Context, kind metadata.MediaKind, query me
 		"limit": {"10"},
 	}
 
-	u := baseURL + "/release-group/?" + params.Encode()
+	u := p.BaseURL + "/release-group/?" + params.Encode()
 	var resp searchResponse
 	if err := p.client.GetJSON(ctx, u, &resp); err != nil {
 		return nil, err
@@ -104,7 +106,7 @@ func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.
 		"inc": {"artists+releases+genres+tags"},
 		"fmt": {"json"},
 	}
-	u := baseURL + "/release-group/" + mbid + "?" + params.Encode()
+	u := p.BaseURL + "/release-group/" + mbid + "?" + params.Encode()
 
 	var rg releaseGroupDetail
 	if err := p.client.GetJSON(ctx, u, &rg); err != nil {
@@ -159,7 +161,25 @@ func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.
 
 	detail.CoverURL = p.fetchCoverArt(ctx, mbid)
 
+	if artistMBID != "" {
+		detail.ArtistBio = p.fetchArtistAnnotation(ctx, artistMBID)
+	}
+
 	return detail, nil
+}
+
+func (p *Provider) fetchArtistAnnotation(ctx context.Context, artistMBID string) string {
+	params := url.Values{
+		"inc": {"annotation"},
+		"fmt": {"json"},
+	}
+	u := p.BaseURL + "/artist/" + artistMBID + "?" + params.Encode()
+
+	var artist mbArtistDetail
+	if err := p.client.GetJSON(ctx, u, &artist); err != nil {
+		return ""
+	}
+	return artist.Annotation
 }
 
 func (p *Provider) fetchTracks(ctx context.Context, releaseID string) ([]metadata.TrackDetail, int) {
@@ -167,7 +187,7 @@ func (p *Provider) fetchTracks(ctx context.Context, releaseID string) ([]metadat
 		"inc": {"recordings"},
 		"fmt": {"json"},
 	}
-	u := baseURL + "/release/" + releaseID + "?" + params.Encode()
+	u := p.BaseURL + "/release/" + releaseID + "?" + params.Encode()
 
 	var rel releaseDetail
 	if err := p.client.GetJSON(ctx, u, &rel); err != nil {
@@ -198,7 +218,7 @@ func (p *Provider) fetchTracks(ctx context.Context, releaseID string) ([]metadat
 }
 
 func (p *Provider) fetchCoverArt(ctx context.Context, releaseGroupID string) string {
-	u := coverArtURL + "/release-group/" + releaseGroupID
+	u := p.CoverArtURL + "/release-group/" + releaseGroupID
 	var resp coverArtResponse
 	if err := p.client.GetJSON(ctx, u, &resp); err != nil {
 		return ""

@@ -15,7 +15,7 @@ const createMovie = `-- name: CreateMovie :one
 INSERT INTO movies (media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date,
     original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-RETURNING id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data
+RETURNING id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country
 `
 
 type CreateMovieParams struct {
@@ -78,6 +78,11 @@ func (q *Queries) CreateMovie(ctx context.Context, arg CreateMovieParams) (Movie
 		&i.ProductionCompanies,
 		&i.CastData,
 		&i.CrewData,
+		&i.CollectionID,
+		&i.Status,
+		&i.Homepage,
+		&i.SpokenLanguages,
+		&i.OriginCountry,
 	)
 	return i, err
 }
@@ -92,7 +97,7 @@ func (q *Queries) DeleteMovie(ctx context.Context, id int64) error {
 }
 
 const getMovieByMediaItemID = `-- name: GetMovieByMediaItemID :one
-SELECT id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data FROM movies WHERE media_item_id = $1
+SELECT id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country FROM movies WHERE media_item_id = $1
 `
 
 func (q *Queries) GetMovieByMediaItemID(ctx context.Context, mediaItemID int64) (Movie, error) {
@@ -117,12 +122,17 @@ func (q *Queries) GetMovieByMediaItemID(ctx context.Context, mediaItemID int64) 
 		&i.ProductionCompanies,
 		&i.CastData,
 		&i.CrewData,
+		&i.CollectionID,
+		&i.Status,
+		&i.Homepage,
+		&i.SpokenLanguages,
+		&i.OriginCountry,
 	)
 	return i, err
 }
 
 const getMovieByTmdbID = `-- name: GetMovieByTmdbID :one
-SELECT id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data FROM movies WHERE tmdb_id = $1
+SELECT id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country FROM movies WHERE tmdb_id = $1
 `
 
 func (q *Queries) GetMovieByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Movie, error) {
@@ -147,6 +157,11 @@ func (q *Queries) GetMovieByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Mov
 		&i.ProductionCompanies,
 		&i.CastData,
 		&i.CrewData,
+		&i.CollectionID,
+		&i.Status,
+		&i.Homepage,
+		&i.SpokenLanguages,
+		&i.OriginCountry,
 	)
 	return i, err
 }
@@ -158,7 +173,7 @@ SET tmdb_id = $2, imdb_id = $3, runtime_minutes = $4, tagline = $5,
     original_title = $9, original_language = $10, budget = $11, revenue = $12,
     popularity = $13, vote_count = $14, production_companies = $15, cast_data = $16, crew_data = $17
 WHERE id = $1
-RETURNING id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data
+RETURNING id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country
 `
 
 type UpdateMovieParams struct {
@@ -221,6 +236,11 @@ func (q *Queries) UpdateMovie(ctx context.Context, arg UpdateMovieParams) (Movie
 		&i.ProductionCompanies,
 		&i.CastData,
 		&i.CrewData,
+		&i.CollectionID,
+		&i.Status,
+		&i.Homepage,
+		&i.SpokenLanguages,
+		&i.OriginCountry,
 	)
 	return i, err
 }

@@ -6,13 +6,16 @@ import (
 )
 
 type Config struct {
-	DatabaseURL string
-	Host        string
-	Port        string
-	LogLevel    string
-	LogFormat   string
-	TMDBToken   string
-	DataDir     string
+	DatabaseURL        string
+	Host               string
+	Port               string
+	LogLevel           string
+	LogFormat          string
+	TMDBToken          string
+	DataDir            string
+	FanartAPIKey       string
+	TranscodeCacheDir  string
+	TranscodeCacheMaxGB int
 }
 
 func Load() *Config {
@@ -23,13 +26,14 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		DatabaseURL: getenv("DATABASE_URL", ""),
-		Host:        getenv("HOST", ""),
-		Port:        getenv("PORT", ""),
-		LogLevel:    getenv("LOG_LEVEL", ""),
-		LogFormat:   getenv("LOG_FORMAT", ""),
-		TMDBToken:   getenv("TMDB_API_TOKEN", ""),
-		DataDir:     getenv("DATA_DIR", ""),
+		DatabaseURL:  getenv("DATABASE_URL", ""),
+		Host:         getenv("HOST", ""),
+		Port:         getenv("PORT", ""),
+		LogLevel:     getenv("LOG_LEVEL", ""),
+		LogFormat:    getenv("LOG_FORMAT", ""),
+		TMDBToken:    getenv("TMDB_API_TOKEN", ""),
+		DataDir:      getenv("DATA_DIR", ""),
+		FanartAPIKey: getenv("FANART_API_KEY", ""),
 	}
 	applyDefaults(cfg)
 	return cfg
@@ -53,6 +57,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data"
+	}
+	if cfg.TranscodeCacheDir == "" {
+		cfg.TranscodeCacheDir = cfg.DataDir + "/transcode"
+	}
+	if cfg.TranscodeCacheMaxGB == 0 {
+		cfg.TranscodeCacheMaxGB = 50
 	}
 }
 

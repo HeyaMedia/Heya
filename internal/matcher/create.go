@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -43,7 +47,7 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 	}
 
 	if m.downloader != nil {
-		go m.downloadImages(detail, string(mediaType), item.ID)
+		m.processMediaImages(detail, string(mediaType), item.ID, filePath)
 	}
 
 	switch kind {
@@ -64,6 +68,11 @@ func (m *Matcher) createMovie(ctx context.Context, mediaItemID int64, d *metadat
 	castJSON, _ := json.Marshal(d.Cast)
 	crewJSON, _ := json.Marshal(d.Crew)
 
+	companyNames := make([]string, len(d.ProductionCompanies))
+	for i, c := range d.ProductionCompanies {
+		companyNames[i] = c.Name
+	}
+
 	_, err := m.q.CreateMovie(ctx, sqlc.CreateMovieParams{
 		MediaItemID:         mediaItemID,
 		TmdbID:              pgInt4FromString(d.ExternalIDs["tmdb"]),
@@ -79,11 +88,165 @@ func (m *Matcher) createMovie(ctx context.Context, mediaItemID int64, d *metadat
 		Revenue:             d.Revenue,
 		Popularity:          numericFromFloat(d.Popularity),
 		VoteCount:           int32(d.VoteCount),
-		ProductionCompanies: emptyIfNil(d.ProductionCompanies),
+		ProductionCompanies: emptyIfNil(companyNames),
 		CastData:            castJSON,
 		CrewData:            crewJSON,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	m.storeRichMetadata(ctx, mediaItemID, d)
+	return nil
+}
+
+func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) {
+	for _, c := range d.Cast {
+		person, err := m.q.CreatePerson(ctx, sqlc.CreatePersonParams{
+			TmdbID:      pgInt4(int32(c.TmdbID)),
+			Name:        c.Name,
+			AlsoKnownAs: []string{},
+			Gender:      int32(c.Gender),
+			ProfilePath: c.ProfilePath,
+			Popularity:  numericFromFloat(c.Popularity),
+		})
+		if err != nil {
+			log.Debug().Err(err).Str("name", c.Name).Int("tmdb", c.TmdbID).Msg("failed to create person for cast")
+			continue
+		}
+		m.q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
+			MediaItemID:  mediaItemID,
+			PersonID:     person.ID,
+			Character:    c.Character,
+			DisplayOrder: int32(c.Order),
+		})
+	}
+
+	for _, c := range d.Crew {
+		person, err := m.q.CreatePerson(ctx, sqlc.CreatePersonParams{
+			TmdbID:      pgInt4(int32(c.TmdbID)),
+			Name:        c.Name,
+			AlsoKnownAs: []string{},
+			Gender:      int32(c.Gender),
+			ProfilePath: c.ProfilePath,
+			Popularity:  numericFromFloat(0),
+		})
+		if err != nil {
+			continue
+		}
+		m.q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
+			MediaItemID: mediaItemID,
+			PersonID:    person.ID,
+			Job:         c.Job,
+			Department:  c.Department,
+		})
+	}
+
+	for _, k := range d.Keywords {
+		kw, err := m.q.CreateKeyword(ctx, sqlc.CreateKeywordParams{
+			TmdbID: pgInt4(int32(k.TmdbID)),
+			Name:   k.Name,
+		})
+		if err != nil {
+			continue
+		}
+		m.q.LinkMediaKeyword(ctx, sqlc.LinkMediaKeywordParams{
+			MediaItemID: mediaItemID,
+			KeywordID:   kw.ID,
+		})
+	}
+
+	for _, pc := range d.ProductionCompanies {
+		co, err := m.q.CreateProductionCompany(ctx, sqlc.CreateProductionCompanyParams{
+			TmdbID:        pgInt4(int32(pc.TmdbID)),
+			Name:          pc.Name,
+			LogoPath:      pc.LogoPath,
+			OriginCountry: pc.OriginCountry,
+		})
+		if err != nil {
+			continue
+		}
+		m.q.LinkMediaProductionCompany(ctx, sqlc.LinkMediaProductionCompanyParams{
+			MediaItemID: mediaItemID,
+			CompanyID:   co.ID,
+		})
+	}
+
+	for _, v := range d.Videos {
+		m.q.CreateMediaVideo(ctx, sqlc.CreateMediaVideoParams{
+			MediaItemID: mediaItemID,
+			TmdbKey:     v.TmdbKey,
+			Name:        v.Name,
+			Site:        v.Site,
+			VideoKey:    v.Key,
+			VideoType:   v.Type,
+			Language:    v.Language,
+			Official:    v.Official,
+		})
+	}
+
+	for _, c := range d.Certifications {
+		m.q.CreateMediaCertification(ctx, sqlc.CreateMediaCertificationParams{
+			MediaItemID:   mediaItemID,
+			Country:       c.Country,
+			Certification: c.Certification,
+			ReleaseDate:   pgDateFromString(c.ReleaseDate),
+			ReleaseType:   int32(c.ReleaseType),
+		})
+	}
+
+	for _, r := range d.Recommendations {
+		m.q.CreateMediaRecommendation(ctx, sqlc.CreateMediaRecommendationParams{
+			MediaItemID:       mediaItemID,
+			RecommendedTmdbID: int32(r.TmdbID),
+			Title:             r.Title,
+			PosterPath:        r.PosterPath,
+			MediaType:         r.MediaType,
+			VoteAverage:       numericFromFloat(r.VoteAverage),
+			ReleaseDate:       r.ReleaseDate,
+		})
+	}
+
+	if d.Collection != nil {
+		m.q.CreateCollection(ctx, sqlc.CreateCollectionParams{
+			TmdbID:       pgInt4(int32(d.Collection.TmdbID)),
+			Name:         d.Collection.Name,
+			Overview:     d.Collection.Overview,
+			PosterPath:   d.Collection.PosterPath,
+			BackdropPath: d.Collection.BackdropPath,
+		})
+	}
+
+	if d.WikidataID != "" || d.FacebookID != "" || d.InstagramID != "" || d.TwitterID != "" || d.Homepage != "" {
+		item, err := m.q.GetMediaItemByID(ctx, mediaItemID)
+		if err == nil {
+			m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+				ID:           item.ID,
+				Title:        item.Title,
+				SortTitle:    item.SortTitle,
+				Year:         item.Year,
+				Description:  item.Description,
+				PosterPath:   item.PosterPath,
+				BackdropPath: item.BackdropPath,
+				ExternalIds:  item.ExternalIds,
+			})
+		}
+	}
+
+	log.Info().Int64("media_id", mediaItemID).
+		Int("cast", len(d.Cast)).
+		Int("crew", len(d.Crew)).
+		Int("keywords", len(d.Keywords)).
+		Int("videos", len(d.Videos)).
+		Int("recs", len(d.Recommendations)).
+		Msg("stored rich metadata")
+}
+
+func pgInt4(v int32) pgtype.Int4 {
+	if v == 0 {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: v, Valid: true}
 }
 
 func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
@@ -135,6 +298,8 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 				StillPath:      ep.StillURL,
 				RuntimeMinutes: int32(ep.RuntimeMinutes),
 				AirDate:        pgDateFromString(ep.AirDate),
+				Rating:         numericFromFloat(ep.Rating),
+				VoteCount:      int32(ep.VoteCount),
 			})
 			if err != nil {
 				log.Warn().Err(err).Int("episode", ep.Number).Msg("error creating episode")
@@ -150,6 +315,7 @@ func (m *Matcher) createMusic(ctx context.Context, mediaItemID int64, d *metadat
 		MediaItemID:   mediaItemID,
 		MusicbrainzID: d.ExternalIDs["musicbrainz_artist"],
 		SortName:      d.ArtistName,
+		Biography:     d.ArtistBio,
 	})
 	if err != nil {
 		return fmt.Errorf("creating artist: %w", err)
@@ -202,6 +368,9 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 			author, err := m.q.CreateAuthor(ctx, sqlc.CreateAuthorParams{
 				Name:          d.AuthorName,
 				OpenlibraryID: d.ExternalIDs["openlibrary_author"],
+				Biography:     d.AuthorBio,
+				BirthDate:     d.AuthorBirthDate,
+				DeathDate:     d.AuthorDeathDate,
 			})
 			if err != nil {
 				log.Warn().Err(err).Str("author", d.AuthorName).Msg("error creating author")
@@ -235,38 +404,230 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 	return err
 }
 
-func (m *Matcher) downloadImages(detail *metadata.MediaDetail, mediaType string, mediaItemID int64) {
+var (
+	imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
+
+	knownImages = map[string]sqlc.AssetType{
+		"poster":    sqlc.AssetTypePoster,
+		"fanart":    sqlc.AssetTypeFanart,
+		"banner":    sqlc.AssetTypeBanner,
+		"clearart":  sqlc.AssetTypeClearart,
+		"clearlogo": sqlc.AssetTypeClearlogo,
+		"landscape": sqlc.AssetTypeLandscape,
+		"logo":      sqlc.AssetTypeLogo,
+		"folder":    sqlc.AssetTypeFolder,
+		"backdrop":  sqlc.AssetTypeBackdrop,
+		"disc":      sqlc.AssetTypeDisc,
+		"discart":   sqlc.AssetTypeDisc,
+		"cdart":     sqlc.AssetTypeDisc,
+	}
+
+	backdropNumRE = regexp.MustCompile(`^backdrop(\d+)\.`)
+)
+
+func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType string, mediaItemID int64, filePath string) {
 	ctx := context.Background()
+	mediaDir := filepath.Dir(filePath)
+	if strings.HasPrefix(strings.ToLower(filepath.Base(mediaDir)), "season") {
+		mediaDir = filepath.Dir(mediaDir)
+	}
 
-	if detail.PosterURL != "" {
+	cacheDir := filepath.Join(m.downloader.CacheDir(), "images", mediaType, fmt.Sprintf("%d", mediaItemID))
+	os.MkdirAll(cacheDir, 0o755)
+
+	var primaryPoster, primaryBackdrop string
+
+	entries, err := os.ReadDir(mediaDir)
+	if err != nil {
+		log.Warn().Err(err).Str("dir", mediaDir).Msg("cannot read media directory for images")
+		entries = nil
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if !imageExts[ext] {
+			continue
+		}
+
+		nameNoExt := strings.TrimSuffix(strings.ToLower(name), ext)
+		srcPath := filepath.Join(mediaDir, name)
+		dstPath := filepath.Join(cacheDir, name)
+
+		if err := copyFile(srcPath, dstPath); err != nil {
+			continue
+		}
+
+		info, _ := e.Info()
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+
+		if at, ok := knownImages[nameNoExt]; ok {
+			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   at,
+				Source:      "local",
+				LocalPath:   dstPath,
+				FileSize:    size,
+			})
+			if at == sqlc.AssetTypePoster && primaryPoster == "" {
+				primaryPoster = dstPath
+			}
+			if (at == sqlc.AssetTypeBackdrop || at == sqlc.AssetTypeFanart) && primaryBackdrop == "" {
+				primaryBackdrop = dstPath
+			}
+			log.Debug().Str("file", name).Str("type", string(at)).Msg("cached local image")
+			continue
+		}
+
+		if sub := backdropNumRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
+			order := 0
+			if len(sub) > 1 {
+				for _, c := range sub[1] {
+					order = order*10 + int(c-'0')
+				}
+			}
+			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetTypeBackdrop,
+				Source:      "local",
+				LocalPath:   dstPath,
+				SortOrder:   int32(order),
+				FileSize:    size,
+			})
+			log.Debug().Str("file", name).Int("order", order).Msg("cached numbered backdrop")
+		}
+	}
+
+	if primaryPoster == "" && detail.PosterURL != "" {
 		if path, err := m.downloader.Download(ctx, detail.PosterURL, mediaType, mediaItemID, "poster.jpg"); err == nil && path != "" {
-			m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-				ID:          mediaItemID,
-				Title:       detail.Title,
-				SortTitle:   strings.ToLower(detail.Title),
-				Year:        detail.Year,
-				Description: detail.Description,
-				PosterPath:  path,
-				BackdropPath: detail.BackdropURL,
-				ExternalIds: mustJSON(detail.ExternalIDs),
-			})
+			primaryPoster = path
+		}
+	}
+	if primaryBackdrop == "" && detail.BackdropURL != "" {
+		if path, err := m.downloader.Download(ctx, detail.BackdropURL, mediaType, mediaItemID, "backdrop.jpg"); err == nil && path != "" {
+			primaryBackdrop = path
 		}
 	}
 
-	if detail.BackdropURL != "" {
-		if path, err := m.downloader.Download(ctx, detail.BackdropURL, mediaType, mediaItemID, "backdrop.jpg"); err == nil && path != "" {
-			m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-				ID:          mediaItemID,
-				Title:       detail.Title,
-				SortTitle:   strings.ToLower(detail.Title),
-				Year:        detail.Year,
-				Description: detail.Description,
-				PosterPath:  detail.PosterURL,
-				BackdropPath: path,
-				ExternalIds: mustJSON(detail.ExternalIDs),
+	item, err := m.q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return
+	}
+	p := item.PosterPath
+	b := item.BackdropPath
+	if primaryPoster != "" {
+		p = primaryPoster
+	}
+	if primaryBackdrop != "" {
+		b = primaryBackdrop
+	}
+	if p != item.PosterPath || b != item.BackdropPath {
+		m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+			ID:           item.ID,
+			Title:        item.Title,
+			SortTitle:    item.SortTitle,
+			Year:         item.Year,
+			Description:  item.Description,
+			PosterPath:   p,
+			BackdropPath: b,
+			ExternalIds:  item.ExternalIds,
+		})
+	}
+
+	m.detectExtras(ctx, mediaItemID, mediaDir)
+
+	log.Info().
+		Int64("media_id", mediaItemID).
+		Str("poster", p).
+		Str("backdrop", b).
+		Msg("processed media images")
+}
+
+var (
+	videoExts = map[string]bool{".mkv": true, ".mp4": true, ".avi": true, ".mov": true, ".m4v": true, ".wmv": true}
+
+	extraFolders = map[string]sqlc.ExtraType{
+		"trailers":          sqlc.ExtraTypeTrailer,
+		"trailer":           sqlc.ExtraTypeTrailer,
+		"behind the scenes": sqlc.ExtraTypeBehindTheScenes,
+		"deleted scenes":    sqlc.ExtraTypeDeletedScene,
+		"featurettes":       sqlc.ExtraTypeFeaturette,
+		"interviews":        sqlc.ExtraTypeInterview,
+		"scenes":            sqlc.ExtraTypeScene,
+		"shorts":            sqlc.ExtraTypeShort,
+		"other":             sqlc.ExtraTypeOther,
+	}
+)
+
+func (m *Matcher) detectExtras(ctx context.Context, mediaItemID int64, mediaDir string) {
+	entries, err := os.ReadDir(mediaDir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		folderName := strings.ToLower(e.Name())
+		extraType, ok := extraFolders[folderName]
+		if !ok {
+			continue
+		}
+
+		extraDir := filepath.Join(mediaDir, e.Name())
+		extraEntries, err := os.ReadDir(extraDir)
+		if err != nil {
+			continue
+		}
+
+		for _, ee := range extraEntries {
+			if ee.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(ee.Name()))
+			if !videoExts[ext] {
+				continue
+			}
+			title := strings.TrimSuffix(ee.Name(), filepath.Ext(ee.Name()))
+			info, _ := ee.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+			m.q.CreateMediaExtra(ctx, sqlc.CreateMediaExtraParams{
+				MediaItemID: mediaItemID,
+				ExtraType:   extraType,
+				Title:       title,
+				FilePath:    filepath.Join(extraDir, ee.Name()),
+				FileSize:    size,
 			})
 		}
 	}
+}
+
+func copyFile(src, dst string) error {
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func kindToMediaType(kind metadata.MediaKind) sqlc.MediaType {
@@ -297,4 +658,21 @@ func mustJSON(v any) []byte {
 		return []byte("{}")
 	}
 	return b
+}
+
+func (m *Matcher) StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail) {
+	switch kind {
+	case metadata.KindMovie:
+		m.createMovie(ctx, mediaItemID, detail)
+	case metadata.KindTV:
+		m.createTVSeries(ctx, mediaItemID, detail)
+	case metadata.KindMusic:
+		m.createMusic(ctx, mediaItemID, detail)
+	case metadata.KindBook:
+		m.createBook(ctx, mediaItemID, detail, "")
+	}
+}
+
+func (m *Matcher) StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) {
+	m.storeRichMetadata(ctx, mediaItemID, detail)
 }

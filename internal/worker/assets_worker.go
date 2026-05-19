@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,15 +22,18 @@ var (
 	lyricsExts   = map[string]bool{".lrc": true}
 
 	imageAssetMap = map[string]sqlc.AssetType{
-		"poster":     sqlc.AssetTypePoster,
-		"fanart":     sqlc.AssetTypeFanart,
-		"banner":     sqlc.AssetTypeBanner,
-		"clearart":   sqlc.AssetTypeClearart,
-		"clearlogo":  sqlc.AssetTypeClearlogo,
-		"landscape":  sqlc.AssetTypeLandscape,
-		"logo":       sqlc.AssetTypeLogo,
-		"folder":     sqlc.AssetTypeFolder,
-		"backdrop":   sqlc.AssetTypeBackdrop,
+		"poster":    sqlc.AssetTypePoster,
+		"fanart":    sqlc.AssetTypeFanart,
+		"banner":    sqlc.AssetTypeBanner,
+		"clearart":  sqlc.AssetTypeClearart,
+		"clearlogo": sqlc.AssetTypeClearlogo,
+		"landscape": sqlc.AssetTypeLandscape,
+		"logo":      sqlc.AssetTypeLogo,
+		"folder":    sqlc.AssetTypeFolder,
+		"backdrop":  sqlc.AssetTypeBackdrop,
+		"disc":      sqlc.AssetTypeDisc,
+		"discart":   sqlc.AssetTypeDisc,
+		"cdart":     sqlc.AssetTypeDisc,
 	}
 
 	backdropRE     = regexp.MustCompile(`^backdrop(\d*)\.`)
@@ -63,12 +68,15 @@ var (
 
 type DetectLocalAssetsWorker struct {
 	river.WorkerDefaults[DetectLocalAssetsArgs]
-	DB *pgxpool.Pool
+	DB      *pgxpool.Pool
+	DataDir string
 }
 
 func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[DetectLocalAssetsArgs]) error {
 	q := sqlc.New(w.DB)
 	filePath := job.Args.FilePath
+	mediaType := job.Args.MediaType
+	mediaItemID := job.Args.MediaItemID
 	dir := filepath.Dir(filePath)
 	base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 
@@ -77,11 +85,140 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		showDir = filepath.Dir(dir)
 	}
 
-	w.detectSiblingAssets(ctx, q, job.Args.MediaItemID, dir, base)
-	w.detectShowLevelAssets(ctx, q, job.Args.MediaItemID, showDir)
-	w.detectExtras(ctx, q, job.Args.MediaItemID, showDir)
+	cacheDir := filepath.Join(w.DataDir, "images", mediaType, fmt.Sprintf("%d", mediaItemID))
+	os.MkdirAll(cacheDir, 0o755)
+
+	w.detectSiblingAssets(ctx, q, mediaItemID, dir, base)
+	w.detectShowLevelImages(ctx, q, mediaItemID, showDir, cacheDir)
+	w.detectExtras(ctx, q, mediaItemID, showDir)
+
+	posterPath := filepath.Join(cacheDir, "poster.jpg")
+	backdropPath := filepath.Join(cacheDir, "backdrop.jpg")
+
+	hasPoster := fileExists(posterPath)
+	hasBackdrop := fileExists(backdropPath)
+
+	if !hasPoster {
+		for _, name := range []string{"poster.jpg", "poster.png", "folder.jpg", "folder.png"} {
+			if p := findAndCopy(filepath.Join(showDir, name), posterPath); p != "" {
+				hasPoster = true
+				break
+			}
+		}
+	}
+	if !hasBackdrop {
+		for _, name := range []string{"backdrop.jpg", "backdrop.png", "fanart.jpg", "fanart.png"} {
+			if p := findAndCopy(filepath.Join(showDir, name), backdropPath); p != "" {
+				hasBackdrop = true
+				break
+			}
+		}
+	}
+
+	item, err := q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return nil
+	}
+
+	newPoster := item.PosterPath
+	newBackdrop := item.BackdropPath
+	if hasPoster {
+		newPoster = posterPath
+	}
+	if hasBackdrop {
+		newBackdrop = backdropPath
+	}
+
+	if newPoster != item.PosterPath || newBackdrop != item.BackdropPath {
+		q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+			ID:           item.ID,
+			Title:        item.Title,
+			SortTitle:    item.SortTitle,
+			Year:         item.Year,
+			Description:  item.Description,
+			PosterPath:   newPoster,
+			BackdropPath: newBackdrop,
+			ExternalIds:  item.ExternalIds,
+		})
+		log.Info().Str("poster", newPoster).Str("backdrop", newBackdrop).Int64("media_id", mediaItemID).Msg("local images copied to cache")
+	}
 
 	return nil
+}
+
+func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *sqlc.Queries, mediaItemID int64, showDir, cacheDir string) {
+	entries, err := os.ReadDir(showDir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if !imageExts[ext] {
+			continue
+		}
+
+		nameNoExt := strings.TrimSuffix(strings.ToLower(name), ext)
+		srcPath := filepath.Join(showDir, name)
+
+		if at, ok := imageAssetMap[nameNoExt]; ok {
+			cacheName := nameNoExt + ext
+			destPath := filepath.Join(cacheDir, cacheName)
+			copyFile(srcPath, destPath)
+
+			info, _ := e.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   at,
+				Source:      "local",
+				LocalPath:   destPath,
+				FileSize:    size,
+			})
+			continue
+		}
+
+		if m := backdropRE.FindStringSubmatch(strings.ToLower(name)); m != nil {
+			order := 0
+			if m[1] != "" {
+				for _, c := range m[1] {
+					order = order*10 + int(c-'0')
+				}
+			}
+			cacheName := name
+			destPath := filepath.Join(cacheDir, cacheName)
+			copyFile(srcPath, destPath)
+
+			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetTypeBackdrop,
+				Source:      "local",
+				LocalPath:   destPath,
+				SortOrder:   int32(order),
+			})
+			continue
+		}
+
+		if seasonPosterRE.MatchString(strings.ToLower(name)) {
+			destPath := filepath.Join(cacheDir, name)
+			copyFile(srcPath, destPath)
+
+			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetTypeSeasonPoster,
+				Source:      "local",
+				LocalPath:   destPath,
+				Label:       nameNoExt,
+			})
+		}
+	}
 }
 
 func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sqlc.Queries, mediaItemID int64, dir, baseName string) {
@@ -114,7 +251,6 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 				Language:    lang,
 				FileSize:    size,
 			})
-			log.Debug().Str("path", name).Str("lang", lang).Msg("found local subtitle")
 		}
 
 		if lyricsExts[ext] && strings.HasPrefix(nameNoExt, baseName) {
@@ -132,70 +268,6 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 				AssetType:   sqlc.AssetTypeThumb,
 				Source:      "local",
 				LocalPath:   fullPath,
-			})
-		}
-	}
-}
-
-func (w *DetectLocalAssetsWorker) detectShowLevelAssets(ctx context.Context, q *sqlc.Queries, mediaItemID int64, showDir string) {
-	entries, err := os.ReadDir(showDir)
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		if !imageExts[ext] {
-			continue
-		}
-
-		nameNoExt := strings.TrimSuffix(strings.ToLower(name), ext)
-		fullPath := filepath.Join(showDir, name)
-
-		if at, ok := imageAssetMap[nameNoExt]; ok {
-			info, _ := e.Info()
-			size := int64(0)
-			if info != nil {
-				size = info.Size()
-			}
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   at,
-				Source:      "local",
-				LocalPath:   fullPath,
-				FileSize:    size,
-			})
-			continue
-		}
-
-		if m := backdropRE.FindStringSubmatch(strings.ToLower(name)); m != nil {
-			order := 0
-			if m[1] != "" {
-				for _, c := range m[1] {
-					order = order*10 + int(c-'0')
-				}
-			}
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   sqlc.AssetTypeBackdrop,
-				Source:      "local",
-				LocalPath:   fullPath,
-				SortOrder:   int32(order),
-			})
-			continue
-		}
-
-		if seasonPosterRE.MatchString(strings.ToLower(name)) {
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   sqlc.AssetTypeSeasonPoster,
-				Source:      "local",
-				LocalPath:   fullPath,
-				Label:       nameNoExt,
 			})
 		}
 	}
@@ -256,14 +328,12 @@ func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Quer
 			if !videoExts[ext] {
 				continue
 			}
-
 			title := strings.TrimSuffix(ee.Name(), filepath.Ext(ee.Name()))
 			info, _ := ee.Info()
 			size := int64(0)
 			if info != nil {
 				size = info.Size()
 			}
-
 			q.CreateMediaExtra(ctx, sqlc.CreateMediaExtraParams{
 				MediaItemID: mediaItemID,
 				ExtraType:   extraType,
@@ -284,4 +354,39 @@ func extractLanguageCode(nameNoExt, baseName string) string {
 		return parts[0]
 	}
 	return ""
+}
+
+func copyFile(src, dst string) error {
+	if fileExists(dst) {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func findAndCopy(src, dst string) string {
+	if !fileExists(src) {
+		return ""
+	}
+	if err := copyFile(src, dst); err != nil {
+		return ""
+	}
+	return dst
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

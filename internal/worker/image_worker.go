@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -21,6 +22,21 @@ type DownloadImageWorker struct {
 func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
 	if job.Args.URL == "" {
 		return nil
+	}
+
+	q := sqlc.New(w.DB)
+	if job.Args.AssetType == "poster" || job.Args.AssetType == "backdrop" {
+		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
+		if err == nil {
+			path := item.PosterPath
+			if job.Args.AssetType == "backdrop" {
+				path = item.BackdropPath
+			}
+			if path != "" && !strings.HasPrefix(path, "http") {
+				log.Debug().Str("type", job.Args.AssetType).Str("path", path).Msg("local image exists, skipping download")
+				return nil
+			}
+		}
 	}
 
 	ext := filepath.Ext(job.Args.URL)
@@ -44,7 +60,6 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		return nil
 	}
 
-	q := sqlc.New(w.DB)
 	q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 		MediaItemID: job.Args.MediaItemID,
 		AssetType:   sqlc.AssetType(job.Args.AssetType),

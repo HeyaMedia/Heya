@@ -1,0 +1,14 @@
+[build]
+  cmd = "go build -o ./tmp/heya ./cmd/heya"
+  full_bin = "./tmp/heya serve"
+  delay = 1000
+  exclude_dir = ["tmp", "web", "node_modules", "testdata", "data", "bin", ".git"]
+  exclude_regex = ["_test\\.go$"]
+  include_ext = ["go", "sql", "yaml"]
+  kill_delay = 500
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

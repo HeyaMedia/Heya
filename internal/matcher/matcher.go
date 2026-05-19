@@ -14,12 +14,22 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type MatchInfo struct {
+	ProviderName string
+	ProviderID   string
+}
+
 type Matcher struct {
-	db         *pgxpool.Pool
-	q          *sqlc.Queries
-	providers  []metadata.Provider
-	downloader *images.Downloader
-	opts       MatchOptions
+	db              *pgxpool.Pool
+	q               *sqlc.Queries
+	providers       []metadata.Provider
+	downloader      *images.Downloader
+	opts            MatchOptions
+	lastMatchResult MatchInfo
+}
+
+func (m *Matcher) LastMatchResult() MatchInfo {
+	return m.lastMatchResult
 }
 
 func New(db *pgxpool.Pool, dl *images.Downloader, opts MatchOptions, providers ...metadata.Provider) *Matcher {
@@ -76,7 +86,7 @@ func (m *Matcher) MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, me
 func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) error {
 	parsed, nfoIDs := parseFileResult(file.ParseResult)
 
-	kind := mediaTypeToKind(mediaType)
+	kind := MediaTypeToKind(mediaType)
 
 	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.MBID != "") {
 		if matched := m.tryNFOLookup(ctx, file, kind, libraryID, nfoIDs); matched {
@@ -169,6 +179,11 @@ func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result m
 	mediaItemID, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
 	if err != nil {
 		return fmt.Errorf("creating media item: %w", err)
+	}
+
+	m.lastMatchResult = MatchInfo{
+		ProviderName: result.ProviderName,
+		ProviderID:   result.ProviderID,
 	}
 
 	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
@@ -285,6 +300,11 @@ func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind 
 			continue
 		}
 
+		m.lastMatchResult = MatchInfo{
+			ProviderName: p.Name(),
+			ProviderID:   providerID,
+		}
+
 		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:          file.ID,
 			Status:      sqlc.FileStatusMatched,
@@ -357,7 +377,7 @@ func buildSearchQuery(parsed parser.ParsedStorageEntry, kind metadata.MediaKind)
 	return q
 }
 
-func mediaTypeToKind(mt sqlc.MediaType) metadata.MediaKind {
+func MediaTypeToKind(mt sqlc.MediaType) metadata.MediaKind {
 	switch mt {
 	case sqlc.MediaTypeMovie:
 		return metadata.KindMovie

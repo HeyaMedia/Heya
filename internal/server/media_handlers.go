@@ -92,6 +92,16 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 			}
 		}
 
+		assets, _ := q.ListMediaAssets(r.Context(), id)
+		if assets != nil {
+			result["assets"] = assets
+		}
+
+		extras, _ := q.ListMediaExtras(r.Context(), id)
+		if extras != nil {
+			result["extras"] = extras
+		}
+
 		writeJSON(w, http.StatusOK, result)
 	}
 }
@@ -116,6 +126,23 @@ func handleSearchMedia(app *service.App) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, items)
+	}
+}
+
+func handleRefreshMedia(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid media id")
+			return
+		}
+
+		if err := app.RefreshMediaItem(r.Context(), id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "refreshed"})
 	}
 }
 

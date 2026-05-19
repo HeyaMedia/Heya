@@ -13,12 +13,13 @@ import (
 const baseURL = "https://openlibrary.org"
 
 type Provider struct {
-	client *metadata.RateLimitedClient
+	client  *metadata.RateLimitedClient
+	BaseURL string
 }
 
 func NewProvider() *Provider {
 	client := metadata.NewRateLimitedClient(5.0, 5, "Heya/1.0 (https://github.com/karbowiak/heya)")
-	return &Provider{client: client}
+	return &Provider{client: client, BaseURL: baseURL}
 }
 
 func (p *Provider) Name() string { return "openlibrary" }
@@ -42,7 +43,7 @@ func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.
 	workKey := parts[1]
 
 	var work workDetail
-	if err := p.client.GetJSON(ctx, baseURL+workKey+".json", &work); err != nil {
+	if err := p.client.GetJSON(ctx, p.BaseURL+workKey+".json", &work); err != nil {
 		return nil, fmt.Errorf("fetching work: %w", err)
 	}
 
@@ -63,14 +64,17 @@ func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.
 	if len(work.Authors) > 0 {
 		authorKey := work.Authors[0].Author.Key
 		var author authorDetail
-		if err := p.client.GetJSON(ctx, baseURL+authorKey+".json", &author); err == nil {
+		if err := p.client.GetJSON(ctx, p.BaseURL+authorKey+".json", &author); err == nil {
 			detail.AuthorName = author.Name
+			detail.AuthorBio = extractText(author.Bio)
+			detail.AuthorBirthDate = author.BirthDate
+			detail.AuthorDeathDate = author.DeathDate
 			detail.ExternalIDs["openlibrary_author"] = authorKey
 		}
 	}
 
 	var editions editionsResponse
-	edURL := baseURL + workKey + "/editions.json?limit=5"
+	edURL := p.BaseURL + workKey + "/editions.json?limit=5"
 	if err := p.client.GetJSON(ctx, edURL, &editions); err == nil && len(editions.Entries) > 0 {
 		ed := pickBestEdition(editions.Entries)
 		if len(ed.ISBN13) > 0 {
@@ -108,7 +112,7 @@ func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.
 
 func (p *Provider) searchByISBN(ctx context.Context, isbn string) ([]metadata.SearchResult, error) {
 	var resp isbnResponse
-	u := baseURL + "/isbn/" + isbn + ".json"
+	u := p.BaseURL + "/isbn/" + isbn + ".json"
 	if err := p.client.GetJSON(ctx, u, &resp); err != nil {
 		return nil, nil
 	}
@@ -143,7 +147,7 @@ func (p *Provider) searchByTitle(ctx context.Context, query metadata.SearchQuery
 		params.Set("author", query.Author)
 	}
 
-	u := baseURL + "/search.json?" + params.Encode()
+	u := p.BaseURL + "/search.json?" + params.Encode()
 	var resp searchResponse
 	if err := p.client.GetJSON(ctx, u, &resp); err != nil {
 		return nil, err

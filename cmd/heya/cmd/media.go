@@ -358,7 +358,23 @@ var mediaRefreshCmd = &cobra.Command{
 	Use:   "refresh",
 	Short: "Re-fetch metadata for a media item",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ui.Warn("media refresh: not yet implemented")
+		id, _ := cmd.Flags().GetInt64("id")
+		if id == 0 {
+			return fmt.Errorf("--id is required")
+		}
+
+		ctx := context.Background()
+		app, err := service.New(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		if err := app.RefreshMediaItem(ctx, id); err != nil {
+			return err
+		}
+
+		ui.Success("Metadata refreshed for media item %d", id)
 		return nil
 	},
 }

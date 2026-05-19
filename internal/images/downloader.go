@@ -24,6 +24,10 @@ func NewDownloader(dataDir string) *Downloader {
 	}
 }
 
+func (d *Downloader) CacheDir() string {
+	return d.dataDir
+}
+
 func (d *Downloader) Download(ctx context.Context, url, mediaType string, mediaItemID int64, filename string) (string, error) {
 	if url == "" {
 		return "", nil

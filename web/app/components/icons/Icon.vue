@@ -1,0 +1,88 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import {
+  PhHouse, PhFilmSlate, PhTelevisionSimple, PhMusicNotes, PhBookOpen,
+  PhMagnifyingGlass, PhGearSix, PhPlay, PhPause, PhSkipBack, PhSkipForward,
+  PhShuffle, PhRepeat, PhSpeakerHigh, PhSpeakerX, PhQueue, PhHeart,
+  PhPlus, PhDotsThree, PhStar, PhCheck, PhCaretDown, PhCaretRight,
+  PhCaretLeft, PhX, PhAirplay, PhDownloadSimple, PhGlobe, PhMicrophone,
+  PhRadio, PhList, PhSquaresFour, PhFunnel, PhSortAscending, PhArrowLeft,
+  PhUser, PhBell, PhFolder, PhTreeStructure, PhBookmarkSimple,
+  PhBookOpenText, PhTextAa, PhSun, PhSliders, PhChatText,
+  PhArrowsOut, PhArrowsIn,
+} from '@phosphor-icons/vue'
+
+const props = defineProps<{
+  name: string
+  size?: number
+  weight?: 'thin' | 'light' | 'regular' | 'bold' | 'fill' | 'duotone'
+}>()
+
+const nameMap: Record<string, any> = {
+  home: PhHouse,
+  film: PhFilmSlate,
+  tv: PhTelevisionSimple,
+  music: PhMusicNotes,
+  book: PhBookOpen,
+  search: PhMagnifyingGlass,
+  settings: PhGearSix,
+  play: PhPlay,
+  pause: PhPause,
+  prev: PhSkipBack,
+  next: PhSkipForward,
+  shuffle: PhShuffle,
+  repeat: PhRepeat,
+  vol: PhSpeakerHigh,
+  volmute: PhSpeakerX,
+  queue: PhQueue,
+  heart: PhHeart,
+  heartfill: PhHeart,
+  plus: PhPlus,
+  more: PhDotsThree,
+  star: PhStar,
+  check: PhCheck,
+  chevdown: PhCaretDown,
+  chevright: PhCaretRight,
+  chevleft: PhCaretLeft,
+  close: PhX,
+  cast: PhAirplay,
+  download: PhDownloadSimple,
+  globe: PhGlobe,
+  mic: PhMicrophone,
+  radio: PhRadio,
+  list: PhList,
+  grid: PhSquaresFour,
+  filter: PhFunnel,
+  sort: PhSortAscending,
+  back: PhArrowLeft,
+  user: PhUser,
+  bell: PhBell,
+  folder: PhFolder,
+  network: PhTreeStructure,
+  bookmark: PhBookmarkSimple,
+  reader: PhBookOpenText,
+  type: PhTextAa,
+  brightness: PhSun,
+  eq: PhSliders,
+  lyrics: PhChatText,
+  expand: PhArrowsOut,
+  collapse: PhArrowsIn,
+}
+
+const iconComponent = computed(() => nameMap[props.name] || null)
+
+const iconWeight = computed(() => {
+  if (props.weight) return props.weight
+  if (props.name === 'heartfill') return 'fill'
+  return 'regular'
+})
+</script>
+
+<template>
+  <component
+    v-if="iconComponent"
+    :is="iconComponent"
+    :size="size || 18"
+    :weight="iconWeight"
+  />
+</template>

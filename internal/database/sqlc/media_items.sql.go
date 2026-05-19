@@ -34,7 +34,7 @@ func (q *Queries) CountMediaItemsByType(ctx context.Context, mediaType MediaType
 const createMediaItem = `-- name: CreateMediaItem :one
 INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector
+RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id
 `
 
 type CreateMediaItemParams struct {
@@ -76,6 +76,11 @@ func (q *Queries) CreateMediaItem(ctx context.Context, arg CreateMediaItemParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.Homepage,
+		&i.WikidataID,
+		&i.FacebookID,
+		&i.InstagramID,
+		&i.TwitterID,
 	)
 	return i, err
 }
@@ -90,7 +95,7 @@ func (q *Queries) DeleteMediaItem(ctx context.Context, id int64) error {
 }
 
 const getMediaItemByID = `-- name: GetMediaItemByID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector FROM media_items WHERE id = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id FROM media_items WHERE id = $1
 `
 
 func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, error) {
@@ -110,12 +115,17 @@ func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.Homepage,
+		&i.WikidataID,
+		&i.FacebookID,
+		&i.InstagramID,
+		&i.TwitterID,
 	)
 	return i, err
 }
 
 const listMediaItemsByLibrary = `-- name: ListMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id FROM media_items
 WHERE library_id = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -150,6 +160,11 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.Homepage,
+			&i.WikidataID,
+			&i.FacebookID,
+			&i.InstagramID,
+			&i.TwitterID,
 		); err != nil {
 			return nil, err
 		}
@@ -162,7 +177,7 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 }
 
 const listMediaItemsByType = `-- name: ListMediaItemsByType :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id FROM media_items
 WHERE media_type = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -197,6 +212,11 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.Homepage,
+			&i.WikidataID,
+			&i.FacebookID,
+			&i.InstagramID,
+			&i.TwitterID,
 		); err != nil {
 			return nil, err
 		}
@@ -209,7 +229,7 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 }
 
 const searchMediaItems = `-- name: SearchMediaItems :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id FROM media_items
 WHERE search_vector @@ plainto_tsquery('english', $1)
 ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC
 LIMIT $2 OFFSET $3
@@ -244,6 +264,11 @@ func (q *Queries) SearchMediaItems(ctx context.Context, arg SearchMediaItemsPara
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.Homepage,
+			&i.WikidataID,
+			&i.FacebookID,
+			&i.InstagramID,
+			&i.TwitterID,
 		); err != nil {
 			return nil, err
 		}
@@ -260,7 +285,7 @@ UPDATE media_items
 SET title = $2, sort_title = $3, year = $4, description = $5,
     poster_path = $6, backdrop_path = $7, external_ids = $8, updated_at = now()
 WHERE id = $1
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector
+RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id
 `
 
 type UpdateMediaItemParams struct {
@@ -300,6 +325,11 @@ func (q *Queries) UpdateMediaItem(ctx context.Context, arg UpdateMediaItemParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.Homepage,
+		&i.WikidataID,
+		&i.FacebookID,
+		&i.InstagramID,
+		&i.TwitterID,
 	)
 	return i, err
 }

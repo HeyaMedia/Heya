@@ -10,9 +10,11 @@ import (
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/fanart"
 	"github.com/karbowiak/heya/internal/metadata/musicbrainz"
 	"github.com/karbowiak/heya/internal/metadata/openlibrary"
 	"github.com/karbowiak/heya/internal/metadata/tmdb"
+	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/watcher"
 	"github.com/karbowiak/heya/internal/worker"
@@ -20,14 +22,17 @@ import (
 )
 
 type App struct {
-	Config     *config.Config
-	DB         *pgxpool.Pool
-	Scanner    *scanner.Scanner
-	Matcher    *matcher.Matcher
-	Downloader *images.Downloader
-	River      *river.Client[pgx.Tx]
-	Watcher    *watcher.Manager
-	Providers  []metadata.Provider
+	Config           *config.Config
+	DB               *pgxpool.Pool
+	Scanner          *scanner.Scanner
+	Matcher          *matcher.Matcher
+	Downloader       *images.Downloader
+	River            *river.Client[pgx.Tx]
+	Watcher          *watcher.Manager
+	Providers        []metadata.Provider
+	ArtworkProviders []metadata.ArtworkProvider
+	Transcoder       *transcoder.SessionManager
+	TranscodeCache   *transcoder.CacheManager
 }
 
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
@@ -40,19 +45,37 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	sc := scanner.New(db)
 
 	var providers []metadata.Provider
+	var artworkProviders []metadata.ArtworkProvider
+
 	if cfg.TMDBToken != "" {
-		providers = append(providers, tmdb.NewProvider(cfg.TMDBToken))
+		tmdbProvider := tmdb.NewProvider(cfg.TMDBToken)
+		providers = append(providers, tmdbProvider)
+		artworkProviders = append(artworkProviders, tmdbProvider)
 	}
 	providers = append(providers, musicbrainz.NewProvider())
 	providers = append(providers, openlibrary.NewProvider())
 
+	if cfg.FanartAPIKey != "" {
+		artworkProviders = append(artworkProviders, fanart.NewProvider(cfg.FanartAPIKey))
+	}
+
 	m := matcher.New(db, dl, matcher.DefaultOptions(), providers...)
 
+	var tc *transcoder.SessionManager
+	var tcCache *transcoder.CacheManager
+	if transcoder.IsFFmpegAvailable() {
+		tcCache = transcoder.NewCacheManager(cfg.TranscodeCacheDir, cfg.TranscodeCacheMaxGB)
+		tc = transcoder.NewSessionManager(tcCache)
+	}
+
 	riverClient, err := worker.Setup(ctx, worker.Config{
-		DB:         db,
-		Matcher:    m,
-		Downloader: dl,
-		Providers:  providers,
+		DB:               db,
+		DataDir:          cfg.DataDir,
+		Matcher:          m,
+		Downloader:       dl,
+		Providers:        providers,
+		ArtworkProviders: artworkProviders,
+		TranscodeCache:   tcCache,
 	})
 	if err != nil {
 		db.Close()
@@ -69,7 +92,10 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		Downloader: dl,
 		River:      riverClient,
 		Watcher:    wm,
-		Providers:  providers,
+		Providers:        providers,
+		ArtworkProviders: artworkProviders,
+		Transcoder:       tc,
+		TranscodeCache:   tcCache,
 	}, nil
 }
 

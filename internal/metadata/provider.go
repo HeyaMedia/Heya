@@ -53,9 +53,22 @@ type MediaDetail struct {
 	Revenue             int64    `json:"revenue,omitempty"`
 	Popularity          float64  `json:"popularity,omitempty"`
 	VoteCount           int      `json:"vote_count,omitempty"`
-	ProductionCompanies []string `json:"production_companies,omitempty"`
-	Cast                []CastMember `json:"cast,omitempty"`
-	Crew                []CrewMember `json:"crew,omitempty"`
+	ProductionCompanies []ProductionCompanyDetail `json:"production_companies,omitempty"`
+	Cast                []CastMember              `json:"cast,omitempty"`
+	Crew                []CrewMember              `json:"crew,omitempty"`
+	Keywords            []KeywordDetail            `json:"keywords,omitempty"`
+	Videos              []VideoDetail              `json:"videos,omitempty"`
+	Certifications      []CertificationDetail      `json:"certifications,omitempty"`
+	Recommendations     []RecommendationDetail     `json:"recommendations,omitempty"`
+	Collection          *CollectionDetail           `json:"collection,omitempty"`
+	Homepage            string                     `json:"homepage,omitempty"`
+	SpokenLanguages     []string                   `json:"spoken_languages,omitempty"`
+	OriginCountry       []string                   `json:"origin_country,omitempty"`
+	MovieStatus         string                     `json:"movie_status,omitempty"`
+	WikidataID          string                     `json:"wikidata_id,omitempty"`
+	FacebookID          string                     `json:"facebook_id,omitempty"`
+	InstagramID         string                     `json:"instagram_id,omitempty"`
+	TwitterID           string                     `json:"twitter_id,omitempty"`
 
 	// TV
 	Status           string          `json:"status,omitempty"`
@@ -81,28 +94,99 @@ type MediaDetail struct {
 	Tracks     []TrackDetail `json:"tracks,omitempty"`
 
 	// Book
-	AuthorName  string   `json:"author_name,omitempty"`
-	ISBN        string   `json:"isbn,omitempty"`
-	PageCount   int      `json:"page_count,omitempty"`
-	Publisher   string   `json:"publisher,omitempty"`
-	PublishDate string   `json:"publish_date,omitempty"`
-	Subjects    []string `json:"subjects,omitempty"`
-	Language    string   `json:"language,omitempty"`
-	SeriesName  string   `json:"series_name,omitempty"`
-	SeriesNum   int      `json:"series_num,omitempty"`
+	AuthorName      string   `json:"author_name,omitempty"`
+	AuthorBio       string   `json:"author_bio,omitempty"`
+	AuthorBirthDate string   `json:"author_birth_date,omitempty"`
+	AuthorDeathDate string   `json:"author_death_date,omitempty"`
+	ISBN            string   `json:"isbn,omitempty"`
+	PageCount       int      `json:"page_count,omitempty"`
+	Publisher       string   `json:"publisher,omitempty"`
+	PublishDate     string   `json:"publish_date,omitempty"`
+	Subjects        []string `json:"subjects,omitempty"`
+	Language        string   `json:"language,omitempty"`
+	SeriesName      string   `json:"series_name,omitempty"`
+	SeriesNum       int      `json:"series_num,omitempty"`
+
+	// Music (extra)
+	ArtistBio string `json:"artist_bio,omitempty"`
+}
+
+type ArtworkProvider interface {
+	Name() string
+	FetchArtwork(ctx context.Context, kind MediaKind, externalIDs map[string]string) ([]ArtworkResult, error)
+}
+
+type ArtworkResult struct {
+	URL       string `json:"url"`
+	AssetType string `json:"asset_type"`
+	Language  string `json:"language,omitempty"`
+	Likes     int    `json:"likes,omitempty"`
 }
 
 type CastMember struct {
+	TmdbID      int    `json:"tmdb_id"`
 	Name        string `json:"name"`
 	Character   string `json:"character"`
 	Order       int    `json:"order"`
+	Gender      int    `json:"gender"`
 	ProfilePath string `json:"profile_path"`
+	Popularity  float64 `json:"popularity"`
 }
 
 type CrewMember struct {
-	Name       string `json:"name"`
-	Job        string `json:"job"`
-	Department string `json:"department"`
+	TmdbID      int    `json:"tmdb_id"`
+	Name        string `json:"name"`
+	Job         string `json:"job"`
+	Department  string `json:"department"`
+	Gender      int    `json:"gender"`
+	ProfilePath string `json:"profile_path"`
+}
+
+type KeywordDetail struct {
+	TmdbID int    `json:"tmdb_id"`
+	Name   string `json:"name"`
+}
+
+type VideoDetail struct {
+	TmdbKey     string `json:"tmdb_key"`
+	Name        string `json:"name"`
+	Site        string `json:"site"`
+	Key         string `json:"key"`
+	Type        string `json:"type"`
+	Language    string `json:"language"`
+	Official    bool   `json:"official"`
+	PublishedAt string `json:"published_at,omitempty"`
+}
+
+type CertificationDetail struct {
+	Country       string `json:"country"`
+	Certification string `json:"certification"`
+	ReleaseDate   string `json:"release_date,omitempty"`
+	ReleaseType   int    `json:"release_type"`
+}
+
+type RecommendationDetail struct {
+	TmdbID      int     `json:"tmdb_id"`
+	Title       string  `json:"title"`
+	PosterPath  string  `json:"poster_path"`
+	MediaType   string  `json:"media_type"`
+	VoteAverage float64 `json:"vote_average"`
+	ReleaseDate string  `json:"release_date,omitempty"`
+}
+
+type CollectionDetail struct {
+	TmdbID       int    `json:"tmdb_id"`
+	Name         string `json:"name"`
+	Overview     string `json:"overview"`
+	PosterPath   string `json:"poster_path"`
+	BackdropPath string `json:"backdrop_path"`
+}
+
+type ProductionCompanyDetail struct {
+	TmdbID        int    `json:"tmdb_id"`
+	Name          string `json:"name"`
+	LogoPath      string `json:"logo_path"`
+	OriginCountry string `json:"origin_country"`
 }
 
 type SeasonDetail struct {
@@ -115,12 +199,14 @@ type SeasonDetail struct {
 }
 
 type EpisodeDetail struct {
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	Overview       string `json:"overview"`
-	StillURL       string `json:"still_url"`
-	RuntimeMinutes int    `json:"runtime_minutes"`
-	AirDate        string `json:"air_date"`
+	Number         int     `json:"number"`
+	Title          string  `json:"title"`
+	Overview       string  `json:"overview"`
+	StillURL       string  `json:"still_url"`
+	RuntimeMinutes int     `json:"runtime_minutes"`
+	AirDate        string  `json:"air_date"`
+	Rating         float64 `json:"rating,omitempty"`
+	VoteCount      int     `json:"vote_count,omitempty"`
 }
 
 type TrackDetail struct {

@@ -1,39 +1,41 @@
 <template>
-  <div class="w-full max-w-sm">
-    <div class="mb-8 text-center">
-      <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-heya-primary text-2xl font-bold text-white">
-        H
+  <div class="login-page">
+    <div class="login-card">
+      <div class="login-brand">
+        <svg width="36" height="36" viewBox="0 0 22 22">
+          <circle cx="11" cy="11" r="10" fill="none" stroke="var(--gold)" stroke-width="1.5" />
+          <circle cx="11" cy="11" r="4" fill="var(--gold)" />
+          <circle cx="11" cy="11" r="1.5" fill="var(--bg-1)" />
+        </svg>
+        <span class="brand-name">heya<span style="color: var(--gold)">.</span>media</span>
       </div>
-      <h1 class="text-2xl font-semibold">Welcome to Heya</h1>
-      <p class="mt-1 text-sm text-gray-500">Sign in to your media server</p>
+      <p class="login-sub">Sign in to your media server</p>
+
+      <form @submit.prevent="submit">
+        <div v-if="isRegister" class="field">
+          <label>Email</label>
+          <input v-model="email" type="email" placeholder="you@example.com" required />
+        </div>
+        <div class="field">
+          <label>Username</label>
+          <input v-model="username" type="text" placeholder="username" required />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input v-model="password" type="password" placeholder="••••••••" required />
+        </div>
+
+        <div v-if="error" class="error-msg">{{ error }}</div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px" :disabled="loading">
+          {{ loading ? 'Please wait…' : (isRegister ? 'Create Account' : 'Sign In') }}
+        </button>
+
+        <button type="button" class="toggle-btn" @click="isRegister = !isRegister">
+          {{ isRegister ? 'Already have an account? Sign in' : 'Need an account? Register' }}
+        </button>
+      </form>
     </div>
-
-    <form class="card space-y-4 p-6" @submit.prevent="submit">
-      <div v-if="isRegister">
-        <label class="mb-1 block text-xs font-medium text-gray-400">Email</label>
-        <input v-model="email" type="email" class="input" placeholder="you@example.com" required />
-      </div>
-      <div>
-        <label class="mb-1 block text-xs font-medium text-gray-400">Username</label>
-        <input v-model="username" type="text" class="input" placeholder="username" required />
-      </div>
-      <div>
-        <label class="mb-1 block text-xs font-medium text-gray-400">Password</label>
-        <input v-model="password" type="password" class="input" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" required />
-      </div>
-
-      <div v-if="error" class="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-        {{ error }}
-      </div>
-
-      <button type="submit" class="btn-primary w-full" :disabled="loading">
-        {{ loading ? 'Please wait...' : (isRegister ? 'Create Account' : 'Sign In') }}
-      </button>
-
-      <button type="button" class="btn-ghost w-full text-xs" @click="isRegister = !isRegister">
-        {{ isRegister ? 'Already have an account? Sign in' : 'Need an account? Register' }}
-      </button>
-    </form>
   </div>
 </template>
 
@@ -48,10 +50,6 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 const isRegister = ref(false)
-
-watchEffect(() => {
-  if (isAuthenticated.value) navigateTo('/')
-})
 
 async function submit() {
   error.value = ''
@@ -70,3 +68,73 @@ async function submit() {
   }
 }
 </script>
+
+<style scoped>
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg-0);
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 40px;
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.brand-name { font-size: 20px; font-weight: 600; }
+.login-sub { font-size: 13px; color: var(--fg-2); margin: 0 0 28px; }
+.field { margin-bottom: 16px; }
+.field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.field input {
+  width: 100%;
+  height: 40px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0 14px;
+  color: var(--fg-0);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.field input:focus { border-color: var(--gold); }
+.field input::placeholder { color: var(--fg-3); }
+.error-msg {
+  background: rgba(217, 107, 107, 0.1);
+  border: 1px solid rgba(217, 107, 107, 0.3);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--bad);
+  margin-bottom: 12px;
+}
+.toggle-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.toggle-btn:hover { color: var(--gold); }
+</style>

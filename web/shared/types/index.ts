@@ -108,6 +108,31 @@ export interface Book {
   open_library_key: string
 }
 
+export interface MediaAsset {
+  id: number
+  media_item_id: number
+  asset_type: string
+  source: string
+  local_path: string
+  remote_url: string
+  language: string
+  label: string
+  sort_order: number
+  width: number
+  height: number
+  file_size: number
+}
+
+export interface MediaExtra {
+  id: number
+  media_item_id: number
+  extra_type: string
+  title: string
+  file_path: string
+  duration_ms: number
+  file_size: number
+}
+
 export interface MediaDetail {
   media_item: MediaItem
   movie?: Movie
@@ -117,6 +142,8 @@ export interface MediaDetail {
   albums?: Album[]
   book?: Book
   author?: { id: number; name: string }
+  assets?: MediaAsset[]
+  extras?: MediaExtra[]
 }
 
 export interface LibraryFile {

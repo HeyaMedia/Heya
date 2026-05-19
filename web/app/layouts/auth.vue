@@ -1,5 +1,5 @@
 <template>
-  <div class="flex min-h-screen items-center justify-center">
+  <div style="background: var(--bg-0); min-height: 100vh">
     <slot />
   </div>
 </template>

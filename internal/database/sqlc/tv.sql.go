@@ -12,19 +12,21 @@ import (
 )
 
 const createTVEpisode = `-- name: CreateTVEpisode :one
-INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date
+INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, vote_count)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, vote_count
 `
 
 type CreateTVEpisodeParams struct {
-	SeasonID       int64       `json:"season_id"`
-	EpisodeNumber  int32       `json:"episode_number"`
-	Title          string      `json:"title"`
-	Overview       string      `json:"overview"`
-	StillPath      string      `json:"still_path"`
-	RuntimeMinutes int32       `json:"runtime_minutes"`
-	AirDate        pgtype.Date `json:"air_date"`
+	SeasonID       int64          `json:"season_id"`
+	EpisodeNumber  int32          `json:"episode_number"`
+	Title          string         `json:"title"`
+	Overview       string         `json:"overview"`
+	StillPath      string         `json:"still_path"`
+	RuntimeMinutes int32          `json:"runtime_minutes"`
+	AirDate        pgtype.Date    `json:"air_date"`
+	Rating         pgtype.Numeric `json:"rating"`
+	VoteCount      int32          `json:"vote_count"`
 }
 
 func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams) (TvEpisode, error) {
@@ -36,6 +38,8 @@ func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams
 		arg.StillPath,
 		arg.RuntimeMinutes,
 		arg.AirDate,
+		arg.Rating,
+		arg.VoteCount,
 	)
 	var i TvEpisode
 	err := row.Scan(
@@ -47,6 +51,8 @@ func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams
 		&i.StillPath,
 		&i.RuntimeMinutes,
 		&i.AirDate,
+		&i.Rating,
+		&i.VoteCount,
 	)
 	return i, err
 }
@@ -161,7 +167,7 @@ func (q *Queries) CreateTVSeries(ctx context.Context, arg CreateTVSeriesParams) 
 }
 
 const getTVEpisode = `-- name: GetTVEpisode :one
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date FROM tv_episodes WHERE season_id = $1 AND episode_number = $2
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, vote_count FROM tv_episodes WHERE season_id = $1 AND episode_number = $2
 `
 
 type GetTVEpisodeParams struct {
@@ -181,6 +187,8 @@ func (q *Queries) GetTVEpisode(ctx context.Context, arg GetTVEpisodeParams) (TvE
 		&i.StillPath,
 		&i.RuntimeMinutes,
 		&i.AirDate,
+		&i.Rating,
+		&i.VoteCount,
 	)
 	return i, err
 }
@@ -270,7 +278,7 @@ func (q *Queries) GetTVSeriesByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (
 }
 
 const listTVEpisodesBySeason = `-- name: ListTVEpisodesBySeason :many
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date FROM tv_episodes WHERE season_id = $1 ORDER BY episode_number ASC
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, vote_count FROM tv_episodes WHERE season_id = $1 ORDER BY episode_number ASC
 `
 
 func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([]TvEpisode, error) {
@@ -291,6 +299,8 @@ func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([
 			&i.StillPath,
 			&i.RuntimeMinutes,
 			&i.AirDate,
+			&i.Rating,
+			&i.VoteCount,
 		); err != nil {
 			return nil, err
 		}
@@ -336,18 +346,20 @@ func (q *Queries) ListTVSeasonsBySeries(ctx context.Context, seriesID int64) ([]
 
 const updateTVEpisode = `-- name: UpdateTVEpisode :one
 UPDATE tv_episodes
-SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date = $6
+SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date = $6, rating = $7, vote_count = $8
 WHERE id = $1
-RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date
+RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, vote_count
 `
 
 type UpdateTVEpisodeParams struct {
-	ID             int64       `json:"id"`
-	Title          string      `json:"title"`
-	Overview       string      `json:"overview"`
-	StillPath      string      `json:"still_path"`
-	RuntimeMinutes int32       `json:"runtime_minutes"`
-	AirDate        pgtype.Date `json:"air_date"`
+	ID             int64          `json:"id"`
+	Title          string         `json:"title"`
+	Overview       string         `json:"overview"`
+	StillPath      string         `json:"still_path"`
+	RuntimeMinutes int32          `json:"runtime_minutes"`
+	AirDate        pgtype.Date    `json:"air_date"`
+	Rating         pgtype.Numeric `json:"rating"`
+	VoteCount      int32          `json:"vote_count"`
 }
 
 func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams) (TvEpisode, error) {
@@ -358,6 +370,8 @@ func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams
 		arg.StillPath,
 		arg.RuntimeMinutes,
 		arg.AirDate,
+		arg.Rating,
+		arg.VoteCount,
 	)
 	var i TvEpisode
 	err := row.Scan(
@@ -369,6 +383,8 @@ func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams
 		&i.StillPath,
 		&i.RuntimeMinutes,
 		&i.AirDate,
+		&i.Rating,
+		&i.VoteCount,
 	)
 	return i, err
 }

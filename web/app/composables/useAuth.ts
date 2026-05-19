@@ -2,15 +2,22 @@ import type { User, AuthResponse } from '~~/shared/types'
 
 const TOKEN_KEY = 'heya_token'
 
+const _ready = ref(false)
+
 export function useAuth() {
   const user = useState<User | null>('auth_user', () => null)
-  const token = useState<string | null>('auth_token', () => {
-    if (import.meta.client) {
-      return localStorage.getItem(TOKEN_KEY)
-    }
-    return null
-  })
+  const token = useState<string | null>('auth_token', () => null)
+  const ready = _ready
+
   const isAuthenticated = computed(() => !!token.value)
+
+  function hydrate() {
+    if (import.meta.client && !_ready.value) {
+      const stored = localStorage.getItem(TOKEN_KEY)
+      if (stored) token.value = stored
+      _ready.value = true
+    }
+  }
 
   async function login(username: string, password: string) {
     const data = await $fetch<AuthResponse>('/api/auth/login', {
@@ -57,5 +64,5 @@ export function useAuth() {
     navigateTo('/login')
   }
 
-  return { user, token, isAuthenticated, login, register, fetchUser, logout }
+  return { user, token, isAuthenticated, ready, hydrate, login, register, fetchUser, logout }
 }

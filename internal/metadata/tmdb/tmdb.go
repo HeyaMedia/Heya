@@ -23,13 +23,14 @@ const (
 )
 
 type Provider struct {
-	client *metadata.RateLimitedClient
-	token  string
+	client  *metadata.RateLimitedClient
+	token   string
+	BaseURL string
 }
 
 func NewProvider(token string) *Provider {
 	client := metadata.NewRateLimitedClient(4.0, 4, "Heya/1.0")
-	return &Provider{client: client, token: token}
+	return &Provider{client: client, token: token, BaseURL: baseURL}
 }
 
 func (p *Provider) Name() string { return "tmdb" }
@@ -210,7 +211,7 @@ func (p *Provider) searchTV(ctx context.Context, query metadata.SearchQuery) ([]
 func (p *Provider) getMovieDetail(ctx context.Context, id string) (*metadata.MediaDetail, error) {
 	var d movieDetail
 	params := url.Values{
-		"append_to_response": {"credits,external_ids"},
+		"append_to_response": {"credits,external_ids,keywords,release_dates,videos,recommendations"},
 	}
 	if err := p.get(ctx, "/movie/"+id, params, &d); err != nil {
 		return nil, err
@@ -226,13 +227,61 @@ func (p *Provider) getMovieDetail(ctx context.Context, id string) (*metadata.Med
 		genres[i] = g.Name
 	}
 
-	companies := make([]string, len(d.ProductionCompanies))
+	companies := make([]metadata.ProductionCompanyDetail, len(d.ProductionCompanies))
 	for i, c := range d.ProductionCompanies {
-		companies[i] = c.Name
+		companies[i] = metadata.ProductionCompanyDetail{
+			TmdbID: c.ID, Name: c.Name, LogoPath: c.LogoPath, OriginCountry: c.OriginCountry,
+		}
 	}
 
-	cast := convertCast(d.Credits.Cast, 20)
+	cast := convertCast(d.Credits.Cast, 30)
 	crew := convertCrew(d.Credits.Crew)
+
+	keywords := make([]metadata.KeywordDetail, len(d.Keywords.Keywords))
+	for i, k := range d.Keywords.Keywords {
+		keywords[i] = metadata.KeywordDetail{TmdbID: k.ID, Name: k.Name}
+	}
+
+	var videos []metadata.VideoDetail
+	for _, v := range d.Videos.Results {
+		videos = append(videos, metadata.VideoDetail{
+			TmdbKey: v.ID, Name: v.Name, Site: v.Site, Key: v.Key,
+			Type: v.Type, Language: v.ISO639, Official: v.Official, PublishedAt: v.PublishedAt,
+		})
+	}
+
+	var certs []metadata.CertificationDetail
+	for _, rd := range d.ReleaseDates.Results {
+		for _, r := range rd.ReleaseDates {
+			if r.Certification != "" {
+				certs = append(certs, metadata.CertificationDetail{
+					Country: rd.Country, Certification: r.Certification,
+					ReleaseDate: r.ReleaseDate, ReleaseType: r.Type,
+				})
+			}
+		}
+	}
+
+	var recs []metadata.RecommendationDetail
+	for _, r := range d.Recommendations.Results {
+		recs = append(recs, metadata.RecommendationDetail{
+			TmdbID: r.ID, Title: r.Title, PosterPath: r.PosterPath,
+			MediaType: r.MediaType, VoteAverage: r.VoteAverage, ReleaseDate: r.ReleaseDate,
+		})
+	}
+
+	var collection *metadata.CollectionDetail
+	if d.Collection != nil && d.Collection.ID > 0 {
+		collection = &metadata.CollectionDetail{
+			TmdbID: d.Collection.ID, Name: d.Collection.Name,
+			PosterPath: d.Collection.PosterPath, BackdropPath: d.Collection.BackdropPath,
+		}
+	}
+
+	langs := make([]string, len(d.SpokenLanguages))
+	for i, l := range d.SpokenLanguages {
+		langs[i] = l.EnglishName
+	}
 
 	return &metadata.MediaDetail{
 		Title:               d.Title,
@@ -256,6 +305,19 @@ func (p *Provider) getMovieDetail(ctx context.Context, id string) (*metadata.Med
 		ProductionCompanies: companies,
 		Cast:                cast,
 		Crew:                crew,
+		Keywords:            keywords,
+		Videos:              videos,
+		Certifications:      certs,
+		Recommendations:     recs,
+		Collection:          collection,
+		Homepage:            d.Homepage,
+		SpokenLanguages:     langs,
+		OriginCountry:       d.OriginCountry,
+		MovieStatus:         d.Status,
+		WikidataID:          d.ExternalIDs.WikidataID,
+		FacebookID:          d.ExternalIDs.FacebookID,
+		InstagramID:         d.ExternalIDs.InstagramID,
+		TwitterID:           d.ExternalIDs.TwitterID,
 	}, nil
 }
 
@@ -310,6 +372,7 @@ func (p *Provider) getTVDetail(ctx context.Context, id string) (*metadata.MediaD
 				StillURL:       imageURLFor(ep.StillPath),
 				RuntimeMinutes: ep.Runtime,
 				AirDate:        ep.AirDate,
+				Rating:         ep.VoteAverage,
 			})
 		}
 
@@ -359,7 +422,7 @@ func (p *Provider) getSeasonDetail(ctx context.Context, tvID string, seasonNum i
 }
 
 func (p *Provider) get(ctx context.Context, path string, params url.Values, result any) error {
-	u := baseURL + path
+	u := p.BaseURL + path
 	if params != nil {
 		u += "?" + params.Encode()
 	}
@@ -391,10 +454,13 @@ func convertCast(entries []castEntry, limit int) []metadata.CastMember {
 			break
 		}
 		result = append(result, metadata.CastMember{
+			TmdbID:      c.ID,
 			Name:        c.Name,
 			Character:   c.Character,
 			Order:       c.Order,
+			Gender:      c.Gender,
 			ProfilePath: imageURLFor(c.ProfilePath),
+			Popularity:  c.Popularity,
 		})
 	}
 	return result
@@ -402,17 +468,63 @@ func convertCast(entries []castEntry, limit int) []metadata.CastMember {
 
 func convertCrew(entries []crewEntry) []metadata.CrewMember {
 	var result []metadata.CrewMember
-	important := map[string]bool{"Director": true, "Writer": true, "Screenplay": true, "Producer": true, "Executive Producer": true}
 	for _, c := range entries {
-		if important[c.Job] {
-			result = append(result, metadata.CrewMember{
-				Name:       c.Name,
-				Job:        c.Job,
-				Department: c.Department,
-			})
-		}
+		result = append(result, metadata.CrewMember{
+			TmdbID:      c.ID,
+			Name:        c.Name,
+			Job:         c.Job,
+			Department:  c.Department,
+			Gender:      c.Gender,
+			ProfilePath: imageURLFor(c.ProfilePath),
+		})
 	}
 	return result
+}
+
+func (p *Provider) FetchArtwork(ctx context.Context, kind metadata.MediaKind, externalIDs map[string]string) ([]metadata.ArtworkResult, error) {
+	tmdbID := externalIDs["tmdb"]
+	if tmdbID == "" {
+		return nil, nil
+	}
+
+	var path string
+	switch kind {
+	case metadata.KindMovie:
+		path = "/movie/" + tmdbID + "/images"
+	case metadata.KindTV:
+		path = "/tv/" + tmdbID + "/images"
+	default:
+		return nil, nil
+	}
+
+	var resp imagesResponse
+	if err := p.get(ctx, path, nil, &resp); err != nil {
+		return nil, err
+	}
+
+	var results []metadata.ArtworkResult
+	for _, img := range resp.Backdrops {
+		results = append(results, metadata.ArtworkResult{
+			URL:       imageURL + img.FilePath,
+			AssetType: "backdrop",
+			Language:  img.Language,
+		})
+	}
+	for _, img := range resp.Logos {
+		results = append(results, metadata.ArtworkResult{
+			URL:       imageURL + img.FilePath,
+			AssetType: "clearlogo",
+			Language:  img.Language,
+		})
+	}
+	for _, img := range resp.Posters {
+		results = append(results, metadata.ArtworkResult{
+			URL:       imageURL + img.FilePath,
+			AssetType: "poster",
+			Language:  img.Language,
+		})
+	}
+	return results, nil
 }
 
 func imageURLFor(path string) string {

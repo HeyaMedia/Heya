@@ -87,6 +87,12 @@ type recordingRef struct {
 	Length int    `json:"length"`
 }
 
+type mbArtistDetail struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Annotation string `json:"annotation"`
+}
+
 type coverArtResponse struct {
 	Images []coverImage `json:"images"`
 }

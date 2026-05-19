@@ -1,92 +1,122 @@
 <template>
-  <div class="space-y-6">
-    <h1 class="text-2xl font-semibold">Dashboard</h1>
+  <div class="scroll" style="height: 100%">
+    <HeroA :items="heroItems" :movies="movieDetails" />
 
-    <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      <StatCard label="Movies" :value="stats.movies" color="movie" />
-      <StatCard label="TV Shows" :value="stats.tv" color="tv" />
-      <StatCard label="Music" :value="stats.music" color="music" />
-      <StatCard label="Books" :value="stats.books" color="book" />
-    </div>
+    <div class="page-pad">
+      <ContentRow
+        v-if="recentMovies.length"
+        title="Recently Added Films"
+        subtitle="Across all libraries"
+        :items="recentMovies"
+        more="See all"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+        @more="navigateTo('/movies')"
+      />
 
-    <section v-if="recentItems.length">
-      <h2 class="mb-3 text-lg font-medium text-gray-300">Recently Added</h2>
-      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8">
-        <MediaCard v-for="item in recentItems" :key="item.id" :item="item" />
-      </div>
-    </section>
+      <ContentRow
+        v-if="recentTV.length"
+        title="TV Shows"
+        subtitle="Across all libraries"
+        :items="recentTV"
+        more="See all"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+        @more="navigateTo('/tv')"
+      />
 
-    <section>
-      <h2 class="mb-3 text-lg font-medium text-gray-300">Libraries</h2>
-      <div v-if="libraries.length" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <NuxtLink
-          v-for="lib in libraries"
-          :key="lib.id"
-          :to="`/libraries?id=${lib.id}`"
-          class="card flex items-center gap-4 p-4 transition-colors hover:border-heya-primary/30"
-        >
-          <div
-            class="flex h-10 w-10 items-center justify-center rounded-lg text-lg"
-            :class="mediaTypeBg(lib.media_type)"
-          >
-            {{ mediaTypeLabel(lib.media_type)[0] }}
-          </div>
-          <div>
-            <div class="font-medium">{{ lib.name }}</div>
-            <div class="text-xs text-gray-500">{{ mediaTypeLabel(lib.media_type) }} &middot; {{ lib.paths.length }} path{{ lib.paths.length !== 1 ? 's' : '' }}</div>
-          </div>
+      <ContentRow
+        v-if="recentMusic.length"
+        title="Music"
+        :items="recentMusic"
+        :aspect="'1/1'"
+        :tile-width="168"
+        more="See all"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+        @more="navigateTo('/music')"
+      />
+
+      <ContentRow
+        v-if="recentBooks.length"
+        title="Books"
+        :items="recentBooks"
+        more="See all"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+        @more="navigateTo('/books')"
+      />
+
+      <div v-if="!loading && !hasContent" class="empty-home">
+        <h2>Welcome to Heya</h2>
+        <p>Add a library and scan it to see your media here.</p>
+        <NuxtLink to="/libraries" class="btn btn-primary" style="margin-top: 16px">
+          <Icon name="plus" :size="16" />
+          Add Library
         </NuxtLink>
       </div>
-      <div v-else class="card p-8 text-center text-gray-500">
-        <p>No libraries yet</p>
-        <NuxtLink to="/libraries" class="btn-primary mt-3 inline-flex">Add Library</NuxtLink>
-      </div>
-    </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { MediaItem, Library } from '~~/shared/types'
+import type { MediaItem, MediaDetail, Movie } from '~~/shared/types'
 
-const { isAuthenticated } = useAuth()
-watchEffect(() => {
-  if (!isAuthenticated.value) navigateTo('/login')
-})
+const recentMovies = ref<MediaItem[]>([])
+const recentTV = ref<MediaItem[]>([])
+const recentMusic = ref<MediaItem[]>([])
+const recentBooks = ref<MediaItem[]>([])
+const movieDetails = ref<Record<number, Movie>>({})
+const loading = ref(true)
 
-const stats = ref({ movies: 0, tv: 0, music: 0, books: 0 })
-const recentItems = ref<MediaItem[]>([])
-const libraries = ref<Library[]>([])
+const heroItems = computed(() => recentMovies.value.slice(0, 3))
 
-onMounted(async () => {
-  const [movieData, tvData, musicData, bookData, libData] = await Promise.allSettled([
-    apiFetch<MediaItem[]>('/api/media?type=movie&limit=1'),
-    apiFetch<MediaItem[]>('/api/media?type=tv&limit=1'),
-    apiFetch<MediaItem[]>('/api/media?type=music&limit=1'),
-    apiFetch<MediaItem[]>('/api/media?type=book&limit=1'),
-    apiFetch<Library[]>('/api/libraries'),
-  ])
+const hasContent = computed(() =>
+  recentMovies.value.length + recentTV.value.length + recentMusic.value.length + recentBooks.value.length > 0
+)
 
-  if (libData.status === 'fulfilled') libraries.value = libData.value
-
+async function loadMedia() {
   const types = ['movie', 'tv', 'music', 'book'] as const
-  const counts = [movieData, tvData, musicData, bookData]
-  for (let i = 0; i < types.length; i++) {
-    const result = counts[i]
-    if (result.status === 'fulfilled') {
-      stats.value[types[i] === 'tv' ? 'tv' : types[i] === 'movie' ? 'movies' : types[i] === 'book' ? 'books' : types[i]] = result.value.length
-    }
+  const refs = [recentMovies, recentTV, recentMusic, recentBooks]
+
+  await Promise.all(
+    types.map(async (t, i) => {
+      try {
+        refs[i].value = await apiFetch<MediaItem[]>(`/api/media?type=${t}&limit=20`)
+      } catch (e) {
+        console.warn(`Failed to load ${t}:`, e)
+      }
+    })
+  )
+
+  for (const item of recentMovies.value.slice(0, 3)) {
+    try {
+      const detail = await apiFetch<MediaDetail>(`/api/media/${item.id}`)
+      if (detail.movie) {
+        movieDetails.value[item.id] = detail.movie
+      }
+    } catch { /* empty */ }
   }
 
-  const all = await Promise.allSettled(
-    (['movie', 'tv', 'music', 'book'] as const).map(t =>
-      apiFetch<MediaItem[]>(`/api/media?type=${t}&limit=8`)
-    )
-  )
-  const items: MediaItem[] = []
-  for (const r of all) {
-    if (r.status === 'fulfilled') items.push(...r.value)
-  }
-  items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-  recentItems.value = items.slice(0, 16)
-})
+  loading.value = false
+}
+
+onMounted(loadMedia)
 </script>
+
+<style scoped>
+.empty-home {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0;
+  text-align: center;
+  color: var(--fg-2);
+}
+.empty-home h2 {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin-bottom: 8px;
+}
+.empty-home p {
+  font-size: 15px;
+}
+</style>

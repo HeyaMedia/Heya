@@ -5,7 +5,22 @@ export default defineNuxtConfig({
 
   modules: ['@nuxtjs/tailwindcss'],
 
-  css: ['~/assets/css/main.css'],
+  components: [
+    { path: '~/components', pathPrefix: false },
+  ],
+
+  css: [
+    '@fontsource/inter/400.css',
+    '@fontsource/inter/500.css',
+    '@fontsource/inter/600.css',
+    '@fontsource/inter/700.css',
+    '@fontsource/jetbrains-mono/400.css',
+    '@fontsource/jetbrains-mono/500.css',
+    '@fontsource/jetbrains-mono/600.css',
+    '@fontsource/jetbrains-mono/700.css',
+    '~/assets/css/heya.css',
+    '~/assets/css/main.css',
+  ],
 
   runtimeConfig: {
     public: {
@@ -24,6 +39,12 @@ export default defineNuxtConfig({
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
       ],
+    },
+  },
+
+  vite: {
+    optimizeDeps: {
+      exclude: ['@phosphor-icons/vue'],
     },
   },
 

@@ -32,8 +32,8 @@ SELECT * FROM tv_seasons WHERE series_id = $1 ORDER BY season_number ASC;
 SELECT * FROM tv_seasons WHERE series_id = $1 AND season_number = $2;
 
 -- name: CreateTVEpisode :one
-INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, vote_count)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: ListTVEpisodesBySeason :many
@@ -44,6 +44,6 @@ SELECT * FROM tv_episodes WHERE season_id = $1 AND episode_number = $2;
 
 -- name: UpdateTVEpisode :one
 UPDATE tv_episodes
-SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date = $6
+SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date = $6, rating = $7, vote_count = $8
 WHERE id = $1
 RETURNING *;
