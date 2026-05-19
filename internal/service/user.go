@@ -93,6 +93,25 @@ func (a *App) DeleteUser(ctx context.Context, username string) error {
 	return q.DeleteUser(ctx, user.ID)
 }
 
+func (a *App) ResetPassword(ctx context.Context, username, newPassword string) error {
+	q := sqlc.New(a.DB)
+
+	user, err := q.GetUserByUsername(ctx, username)
+	if err != nil {
+		return fmt.Errorf("user not found: %s", username)
+	}
+
+	hash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("hashing password: %w", err)
+	}
+
+	return q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
+		ID:           user.ID,
+		PasswordHash: hash,
+	})
+}
+
 func (a *App) Queries() *sqlc.Queries {
 	return sqlc.New(a.DB)
 }

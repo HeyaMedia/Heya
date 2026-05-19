@@ -29,6 +29,8 @@ tmp/
 Thumbs.db
 
 # Frontend
-frontend/node_modules/
-frontend/.output/
-frontend/.nuxt/
+web/node_modules/
+web/.output/
+web/.nuxt/
+web/dist/*
+!web/dist/.gitkeep

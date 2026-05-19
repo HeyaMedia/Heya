@@ -116,6 +116,33 @@ var userDeleteCmd = &cobra.Command{
 	},
 }
 
+var userResetPasswordCmd = &cobra.Command{
+	Use:   "reset-password",
+	Short: "Reset a user's password",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		username, _ := cmd.Flags().GetString("username")
+		password, _ := cmd.Flags().GetString("password")
+
+		if username == "" || password == "" {
+			return fmt.Errorf("--username and --password are required")
+		}
+
+		ctx := context.Background()
+		app, err := service.New(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		if err := app.ResetPassword(ctx, username, password); err != nil {
+			return err
+		}
+
+		ui.Success("Password reset for user: %s", username)
+		return nil
+	},
+}
+
 func init() {
 	userCreateCmd.Flags().String("username", "", "Username for the new user")
 	userCreateCmd.Flags().String("email", "", "Email for the new user")
@@ -124,7 +151,11 @@ func init() {
 
 	userDeleteCmd.Flags().String("username", "", "Username to delete")
 
+	userResetPasswordCmd.Flags().String("username", "", "Username to reset")
+	userResetPasswordCmd.Flags().String("password", "", "New password")
+
 	userCmd.AddCommand(userCreateCmd)
 	userCmd.AddCommand(userListCmd)
 	userCmd.AddCommand(userDeleteCmd)
+	userCmd.AddCommand(userResetPasswordCmd)
 }

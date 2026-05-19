@@ -1,10 +1,21 @@
-.PHONY: build run test lint clean db-up db-down migrate
+.PHONY: build run test lint clean db-up db-down migrate build-frontend dev-frontend
 
-build:
+build-frontend:
+	cd web && npm install && npx nuxi generate
+	rm -rf web/dist/*
+	cp -r web/.output/public/* web/dist/
+
+build: build-frontend
 	go build -o bin/heya ./cmd/heya
 
-run: build
+build-go:
+	go build -o bin/heya ./cmd/heya
+
+run: build-go
 	./bin/heya
+
+dev-frontend:
+	cd web && npm install && npx nuxi dev
 
 test:
 	go test ./...
@@ -14,6 +25,7 @@ lint:
 
 clean:
 	rm -rf bin/
+	rm -rf web/.output web/.nuxt web/node_modules
 
 db-up:
 	docker compose up -d postgres
