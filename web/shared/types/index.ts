@@ -133,6 +133,111 @@ export interface MediaExtra {
   file_size: number
 }
 
+export interface CastMember {
+  id: number
+  name: string
+  character: string
+  display_order: number
+  gender: number
+  profile_path: string
+}
+
+export interface CrewMember {
+  id: number
+  name: string
+  job: string
+  department: string
+  profile_path: string
+}
+
+export interface Keyword {
+  id: number
+  tmdb_id: number
+  name: string
+}
+
+export interface MediaVideo {
+  id: number
+  media_item_id: number
+  name: string
+  site: string
+  video_key: string
+  video_type: string
+  language: string
+  official: boolean
+}
+
+export interface MediaCertification {
+  id: number
+  media_item_id: number
+  country: string
+  certification: string
+  release_date: string | null
+  release_type: number
+}
+
+export interface MediaRecommendation {
+  id: number
+  media_item_id: number
+  recommended_tmdb_id: number
+  title: string
+  poster_path: string
+  media_type: string
+  vote_average: string
+  release_date: string
+  local_media_item_id: number | null
+  local_poster_path: string | null
+}
+
+export interface ProductionCompany {
+  id: number
+  tmdb_id: number
+  name: string
+  logo_path: string
+  origin_country: string
+}
+
+export interface PersonDetail {
+  id: number
+  tmdb_id: number
+  name: string
+  also_known_as: string[]
+  biography: string
+  birthday: string
+  deathday: string
+  place_of_birth: string
+  gender: number
+  profile_path: string
+  homepage: string
+  imdb_id: string
+}
+
+export interface PersonCastCredit {
+  character: string
+  display_order: number
+  media_item_id: number
+  title: string
+  year: string
+  media_type: string
+  poster_path: string
+}
+
+export interface PersonCrewCredit {
+  job: string
+  department: string
+  media_item_id: number
+  title: string
+  year: string
+  media_type: string
+  poster_path: string
+}
+
+export interface PersonResponse {
+  person: PersonDetail
+  cast_credits?: PersonCastCredit[]
+  crew_credits?: PersonCrewCredit[]
+}
+
 export interface MediaDetail {
   media_item: MediaItem
   movie?: Movie
@@ -142,6 +247,13 @@ export interface MediaDetail {
   albums?: Album[]
   book?: Book
   author?: { id: number; name: string }
+  cast?: CastMember[]
+  crew?: CrewMember[]
+  keywords?: Keyword[]
+  videos?: MediaVideo[]
+  certifications?: MediaCertification[]
+  recommendations?: MediaRecommendation[]
+  production_companies?: ProductionCompany[]
   assets?: MediaAsset[]
   extras?: MediaExtra[]
 }

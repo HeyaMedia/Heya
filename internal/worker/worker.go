@@ -21,6 +21,7 @@ var _ pgx.Tx // ensure import used
 type Config struct {
 	DB               *pgxpool.Pool
 	DataDir          string
+	TMDBToken        string
 	Matcher          *matcher.Matcher
 	Downloader       *images.Downloader
 	Providers        []metadata.Provider
@@ -46,6 +47,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir})
+	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, TMDBToken: cfg.TMDBToken})
 	river.AddWorker(workers, &EnrichmentWorker{DB: cfg.DB, ArtworkProviders: cfg.ArtworkProviders})
 	river.AddWorker(workers, &TranscodeWorker{DB: cfg.DB, Cache: cfg.TranscodeCache})
 	river.AddWorker(workers, &SoftDeleteWorker{DB: cfg.DB})

@@ -107,13 +107,12 @@ var libraryListCmd = &cobra.Command{
 var libraryScanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan a library for media files",
+	Long:  "Discovers files and enqueues them for processing. Use 'heya queue process' to run the queue, or 'heya serve'/'heya dev' will process automatically.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, _ := cmd.Flags().GetInt64("id")
 		all, _ := cmd.Flags().GetBool("all")
 		scanOnly, _ := cmd.Flags().GetBool("scan-only")
-		interactive, _ := cmd.Flags().GetBool("interactive")
 		force, _ := cmd.Flags().GetBool("force")
-		async, _ := cmd.Flags().GetBool("async")
 
 		if id == 0 && !all {
 			return fmt.Errorf("--id or --all is required")
@@ -140,18 +139,6 @@ var libraryScanCmd = &cobra.Command{
 			libs = []sqlc.Library{lib}
 		}
 
-		if async {
-			for _, lib := range libs {
-				if err := app.EnqueueScanLibrary(ctx, lib.ID, force); err != nil {
-					ui.Error("enqueue failed for %s: %v", lib.Name, err)
-					continue
-				}
-				ui.Success("Enqueued scan for %s (id=%d)", lib.Name, lib.ID)
-			}
-			ui.Println(ui.Dim("Jobs enqueued. Start the server with 'heya serve' to process them."))
-			return nil
-		}
-
 		opts := scanner.ScanOptions{ForceRescan: force}
 
 		for _, lib := range libs {
@@ -169,33 +156,21 @@ var libraryScanCmd = &cobra.Command{
 			ui.Info("New", strconv.Itoa(scanResult.New))
 			ui.Info("Unchanged", strconv.Itoa(scanResult.Unchanged))
 			ui.Info("Deleted", strconv.Itoa(scanResult.Deleted))
-			if scanResult.Errors > 0 {
-				ui.Info("Errors", ui.Bold(strconv.Itoa(scanResult.Errors)))
-			}
 
 			if scanOnly {
 				continue
 			}
 
-			fmt.Println()
-			ui.Header("Matching " + lib.Name)
-			matchResult, err := app.MatchLibrary(ctx, lib.ID)
-			if err != nil {
-				ui.Error("match failed: %v", err)
+			if err := app.EnqueueScanLibrary(ctx, lib.ID, force); err != nil {
+				ui.Error("enqueue failed: %v", err)
 				continue
 			}
-			ui.Success("Match complete")
-			ui.Info("Matched", strconv.Itoa(matchResult.Matched))
-			if matchResult.Unmatched > 0 {
-				ui.Info("Unmatched", ui.Bold(strconv.Itoa(matchResult.Unmatched)))
-			}
-			if matchResult.Errors > 0 {
-				ui.Info("Errors", ui.Bold(strconv.Itoa(matchResult.Errors)))
-			}
+			ui.Success("Processing jobs enqueued for %s", lib.Name)
+		}
 
-			if interactive && matchResult.Unmatched > 0 {
-				runInteractiveResolve(ctx, app, lib.ID)
-			}
+		if !scanOnly {
+			fmt.Println()
+			ui.Println(ui.Dim("Run 'heya queue process' to process now, or jobs will be picked up by 'heya serve' / 'heya dev'."))
 		}
 
 		return nil
@@ -412,10 +387,8 @@ func init() {
 	libraryScanCmd.Flags().Int64("id", 0, "Library ID to scan")
 	libraryScanCmd.Flags().String("name", "", "Library name to scan")
 	libraryScanCmd.Flags().Bool("all", false, "Scan all libraries")
-	libraryScanCmd.Flags().Bool("scan-only", false, "Only scan, don't match")
-	libraryScanCmd.Flags().BoolP("interactive", "i", false, "Interactively resolve unmatched files")
+	libraryScanCmd.Flags().Bool("scan-only", false, "Only discover files, don't enqueue processing")
 	libraryScanCmd.Flags().Bool("force", false, "Force re-scan all files")
-	libraryScanCmd.Flags().Bool("async", false, "Enqueue scan as background job (requires heya serve)")
 
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
 

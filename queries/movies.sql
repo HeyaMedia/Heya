@@ -2,6 +2,7 @@
 INSERT INTO movies (media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date,
     original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+ON CONFLICT (media_item_id) DO NOTHING
 RETURNING *;
 
 -- name: GetMovieByMediaItemID :one

@@ -127,6 +127,33 @@ func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Per
 	return i, err
 }
 
+const getPersonByID = `-- name: GetPersonByID :one
+SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at FROM people WHERE id = $1
+`
+
+func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
+	row := q.db.QueryRow(ctx, getPersonByID, id)
+	var i Person
+	err := row.Scan(
+		&i.ID,
+		&i.TmdbID,
+		&i.Name,
+		&i.AlsoKnownAs,
+		&i.Biography,
+		&i.Birthday,
+		&i.Deathday,
+		&i.PlaceOfBirth,
+		&i.Gender,
+		&i.ProfilePath,
+		&i.Homepage,
+		&i.ImdbID,
+		&i.Popularity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPersonByTmdbID = `-- name: GetPersonByTmdbID :one
 SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at FROM people WHERE tmdb_id = $1
 `
@@ -220,6 +247,50 @@ func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListM
 	return items, nil
 }
 
+const listMediaCastSlim = `-- name: ListMediaCastSlim :many
+SELECT mc.character, mc.display_order, p.id, p.name, p.profile_path, p.gender
+FROM media_cast mc
+JOIN people p ON p.id = mc.person_id
+WHERE mc.media_item_id = $1
+ORDER BY mc.display_order
+`
+
+type ListMediaCastSlimRow struct {
+	Character    string `json:"character"`
+	DisplayOrder int32  `json:"display_order"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	ProfilePath  string `json:"profile_path"`
+	Gender       int32  `json:"gender"`
+}
+
+func (q *Queries) ListMediaCastSlim(ctx context.Context, mediaItemID int64) ([]ListMediaCastSlimRow, error) {
+	rows, err := q.db.Query(ctx, listMediaCastSlim, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMediaCastSlimRow{}
+	for rows.Next() {
+		var i ListMediaCastSlimRow
+		if err := rows.Scan(
+			&i.Character,
+			&i.DisplayOrder,
+			&i.ID,
+			&i.Name,
+			&i.ProfilePath,
+			&i.Gender,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMediaCrew = `-- name: ListMediaCrew :many
 SELECT mc.job, mc.department, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at
 FROM media_crew mc
@@ -284,4 +355,152 @@ func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListM
 		return nil, err
 	}
 	return items, nil
+}
+
+const listMediaCrewSlim = `-- name: ListMediaCrewSlim :many
+SELECT mc.job, mc.department, p.id, p.name, p.profile_path
+FROM media_crew mc
+JOIN people p ON p.id = mc.person_id
+WHERE mc.media_item_id = $1
+ORDER BY mc.department, mc.job
+`
+
+type ListMediaCrewSlimRow struct {
+	Job         string `json:"job"`
+	Department  string `json:"department"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ProfilePath string `json:"profile_path"`
+}
+
+func (q *Queries) ListMediaCrewSlim(ctx context.Context, mediaItemID int64) ([]ListMediaCrewSlimRow, error) {
+	rows, err := q.db.Query(ctx, listMediaCrewSlim, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMediaCrewSlimRow{}
+	for rows.Next() {
+		var i ListMediaCrewSlimRow
+		if err := rows.Scan(
+			&i.Job,
+			&i.Department,
+			&i.ID,
+			&i.Name,
+			&i.ProfilePath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonCastCredits = `-- name: ListPersonCastCredits :many
+SELECT mc.character, mc.display_order, mi.id as media_item_id, mi.title, mi.year, mi.media_type, mi.poster_path
+FROM media_cast mc
+JOIN media_items mi ON mi.id = mc.media_item_id
+WHERE mc.person_id = $1
+ORDER BY mi.year DESC, mi.title
+`
+
+type ListPersonCastCreditsRow struct {
+	Character    string    `json:"character"`
+	DisplayOrder int32     `json:"display_order"`
+	MediaItemID  int64     `json:"media_item_id"`
+	Title        string    `json:"title"`
+	Year         string    `json:"year"`
+	MediaType    MediaType `json:"media_type"`
+	PosterPath   string    `json:"poster_path"`
+}
+
+func (q *Queries) ListPersonCastCredits(ctx context.Context, personID int64) ([]ListPersonCastCreditsRow, error) {
+	rows, err := q.db.Query(ctx, listPersonCastCredits, personID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonCastCreditsRow{}
+	for rows.Next() {
+		var i ListPersonCastCreditsRow
+		if err := rows.Scan(
+			&i.Character,
+			&i.DisplayOrder,
+			&i.MediaItemID,
+			&i.Title,
+			&i.Year,
+			&i.MediaType,
+			&i.PosterPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonCrewCredits = `-- name: ListPersonCrewCredits :many
+SELECT mc.job, mc.department, mi.id as media_item_id, mi.title, mi.year, mi.media_type, mi.poster_path
+FROM media_crew mc
+JOIN media_items mi ON mi.id = mc.media_item_id
+WHERE mc.person_id = $1
+ORDER BY mi.year DESC, mi.title
+`
+
+type ListPersonCrewCreditsRow struct {
+	Job         string    `json:"job"`
+	Department  string    `json:"department"`
+	MediaItemID int64     `json:"media_item_id"`
+	Title       string    `json:"title"`
+	Year        string    `json:"year"`
+	MediaType   MediaType `json:"media_type"`
+	PosterPath  string    `json:"poster_path"`
+}
+
+func (q *Queries) ListPersonCrewCredits(ctx context.Context, personID int64) ([]ListPersonCrewCreditsRow, error) {
+	rows, err := q.db.Query(ctx, listPersonCrewCredits, personID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonCrewCreditsRow{}
+	for rows.Next() {
+		var i ListPersonCrewCreditsRow
+		if err := rows.Scan(
+			&i.Job,
+			&i.Department,
+			&i.MediaItemID,
+			&i.Title,
+			&i.Year,
+			&i.MediaType,
+			&i.PosterPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updatePersonProfilePath = `-- name: UpdatePersonProfilePath :exec
+UPDATE people SET profile_path = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdatePersonProfilePathParams struct {
+	ID          int64  `json:"id"`
+	ProfilePath string `json:"profile_path"`
+}
+
+func (q *Queries) UpdatePersonProfilePath(ctx context.Context, arg UpdatePersonProfilePathParams) error {
+	_, err := q.db.Exec(ctx, updatePersonProfilePath, arg.ID, arg.ProfilePath)
+	return err
 }

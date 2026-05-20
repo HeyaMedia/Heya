@@ -24,6 +24,10 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		return nil
 	}
 
+	if job.Args.EntityType == "person" {
+		return w.downloadPersonImage(ctx, job)
+	}
+
 	q := sqlc.New(w.DB)
 	if job.Args.AssetType == "poster" || job.Args.AssetType == "backdrop" {
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
@@ -102,5 +106,25 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		}
 	}
 
+	return nil
+}
+
+func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
+	localPath, err := w.Downloader.Download(ctx, job.Args.URL, "person", job.Args.PersonID, "profile.jpg")
+	if err != nil {
+		log.Warn().Err(err).Str("url", job.Args.URL).Msg("person image download failed")
+		return nil
+	}
+	if localPath == "" {
+		return nil
+	}
+
+	q := sqlc.New(w.DB)
+	q.UpdatePersonProfilePath(ctx, sqlc.UpdatePersonProfilePathParams{
+		ID:          job.Args.PersonID,
+		ProfilePath: localPath,
+	})
+
+	log.Debug().Int64("person_id", job.Args.PersonID).Str("path", localPath).Msg("person headshot downloaded")
 	return nil
 }

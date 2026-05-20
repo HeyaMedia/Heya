@@ -12,6 +12,7 @@ import (
 func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.HandleFunc("GET /api/health", healthHandler(app.DB))
 	mux.HandleFunc("GET /api/media/{id}/image/{type}", handleMediaImage(app))
+	mux.HandleFunc("GET /api/person/{id}/image", handlePersonImage(app))
 
 	mux.HandleFunc("POST /api/auth/register", handleRegister(app))
 	mux.HandleFunc("POST /api/auth/login", handleLogin(app))
@@ -36,6 +37,7 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 
 	mux.Handle("GET /api/media", authed(http.HandlerFunc(handleListMedia(app))))
 	mux.Handle("GET /api/media/{id}", authed(http.HandlerFunc(handleGetMedia(app))))
+	mux.Handle("GET /api/person/{id}", authed(http.HandlerFunc(handleGetPerson(app))))
 	mux.Handle("POST /api/media/{id}/refresh", authed(http.HandlerFunc(handleRefreshMedia(app))))
 	mux.Handle("GET /api/search", authed(http.HandlerFunc(handleSearchMedia(app))))
 

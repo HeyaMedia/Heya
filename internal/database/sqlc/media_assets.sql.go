@@ -44,6 +44,7 @@ func (q *Queries) CountMediaAssetsByType(ctx context.Context, mediaItemID int64)
 const createMediaAsset = `-- name: CreateMediaAsset :one
 INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (media_item_id, asset_type, sort_order, local_path) DO NOTHING
 RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, created_at
 `
 

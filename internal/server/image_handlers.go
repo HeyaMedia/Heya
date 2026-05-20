@@ -22,6 +22,23 @@ func handleMediaImage(app *service.App) http.HandlerFunc {
 		imageType := r.PathValue("type")
 		q := sqlc.New(app.DB)
 
+		sortOrder := -1
+		if s := r.URL.Query().Get("sort"); s != "" {
+			sortOrder, _ = strconv.Atoi(s)
+		}
+
+		if sortOrder >= 0 {
+			assets, err := q.ListMediaAssets(r.Context(), id)
+			if err == nil {
+				for _, a := range assets {
+					if string(a.AssetType) == imageType && int(a.SortOrder) == sortOrder && a.LocalPath != "" {
+						serveFile(w, r, a.LocalPath)
+						return
+					}
+				}
+			}
+		}
+
 		if imageType == "poster" || imageType == "backdrop" {
 			item, err := q.GetMediaItemByID(r.Context(), id)
 			if err != nil {
@@ -47,22 +64,33 @@ func handleMediaImage(app *service.App) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-
-		sortOrder := 0
-		if s := r.URL.Query().Get("sort"); s != "" {
-			sortOrder, _ = strconv.Atoi(s)
-		}
-
 		for _, a := range assets {
-			if string(a.AssetType) == imageType && int(a.SortOrder) == sortOrder {
-				if a.LocalPath != "" {
-					serveFile(w, r, a.LocalPath)
-					return
-				}
+			if string(a.AssetType) == imageType && a.LocalPath != "" {
+				serveFile(w, r, a.LocalPath)
+				return
 			}
 		}
 
 		http.NotFound(w, r)
+	}
+}
+
+func handlePersonImage(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		q := sqlc.New(app.DB)
+		person, err := q.GetPersonByID(r.Context(), id)
+		if err != nil || person.ProfilePath == "" || strings.HasPrefix(person.ProfilePath, "http") {
+			http.NotFound(w, r)
+			return
+		}
+
+		serveFile(w, r, person.ProfilePath)
 	}
 }
 

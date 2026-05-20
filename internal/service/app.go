@@ -71,6 +71,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	riverClient, err := worker.Setup(ctx, worker.Config{
 		DB:               db,
 		DataDir:          cfg.DataDir,
+		TMDBToken:        cfg.TMDBToken,
 		Matcher:          m,
 		Downloader:       dl,
 		Providers:        providers,
@@ -101,6 +102,12 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 func (a *App) StartWorkers(ctx context.Context) error {
 	return a.River.Start(ctx)
+}
+
+func (a *App) QueueCounts(ctx context.Context) (pending, running int) {
+	row := a.DB.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'available' OR state = 'retryable'), count(*) FILTER (WHERE state = 'running') FROM river_job")
+	row.Scan(&pending, &running)
+	return
 }
 
 func (a *App) StartWatchers(ctx context.Context) error {

@@ -75,3 +75,57 @@ func (q *Queries) ListMediaRecommendations(ctx context.Context, mediaItemID int6
 	}
 	return items, nil
 }
+
+const listMediaRecommendationsWithLibrary = `-- name: ListMediaRecommendationsWithLibrary :many
+SELECT mr.id, mr.media_item_id, mr.recommended_tmdb_id, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
+  mi.id as local_media_item_id,
+  mi.poster_path as local_poster_path
+FROM media_recommendations mr
+LEFT JOIN media_items mi ON mi.external_ids::jsonb @> jsonb_build_object('tmdb', mr.recommended_tmdb_id::text)
+WHERE mr.media_item_id = $1
+ORDER BY (mi.id IS NOT NULL) DESC, mr.vote_average DESC
+`
+
+type ListMediaRecommendationsWithLibraryRow struct {
+	ID                int64          `json:"id"`
+	MediaItemID       int64          `json:"media_item_id"`
+	RecommendedTmdbID int32          `json:"recommended_tmdb_id"`
+	Title             string         `json:"title"`
+	PosterPath        string         `json:"poster_path"`
+	MediaType         string         `json:"media_type"`
+	VoteAverage       pgtype.Numeric `json:"vote_average"`
+	ReleaseDate       string         `json:"release_date"`
+	LocalMediaItemID  pgtype.Int8    `json:"local_media_item_id"`
+	LocalPosterPath   pgtype.Text    `json:"local_poster_path"`
+}
+
+func (q *Queries) ListMediaRecommendationsWithLibrary(ctx context.Context, mediaItemID int64) ([]ListMediaRecommendationsWithLibraryRow, error) {
+	rows, err := q.db.Query(ctx, listMediaRecommendationsWithLibrary, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMediaRecommendationsWithLibraryRow{}
+	for rows.Next() {
+		var i ListMediaRecommendationsWithLibraryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaItemID,
+			&i.RecommendedTmdbID,
+			&i.Title,
+			&i.PosterPath,
+			&i.MediaType,
+			&i.VoteAverage,
+			&i.ReleaseDate,
+			&i.LocalMediaItemID,
+			&i.LocalPosterPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

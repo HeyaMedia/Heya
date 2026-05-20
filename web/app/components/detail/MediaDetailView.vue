@@ -4,50 +4,54 @@
   </div>
 
   <div v-else-if="detail" class="scroll" style="height: 100%">
-    <!-- Hero backdrop (cycles through all backdrops) -->
-    <div class="detail-hero">
-      <img
-        v-if="currentBackdrop"
-        :src="currentBackdrop"
-        :key="backdropIdx"
-        style="width: 100%; height: 100%; object-fit: cover; transition: opacity 0.8s ease"
-        @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
-      />
-      <div class="detail-hero-fade" />
-      <button class="back-btn" @click="$router.back()">
-        <Icon name="back" :size="16" />
-        Back
-      </button>
-    </div>
+    <!-- Hero: backdrop + poster + info merged -->
+    <div class="hero-section">
+      <div class="hero-bg">
+        <img
+          v-if="backdropA"
+          :src="backdropA"
+          class="hero-bg-img"
+          :class="{ visible: showA }"
+          @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+        />
+        <img
+          v-if="backdropB"
+          :src="backdropB"
+          class="hero-bg-img"
+          :class="{ visible: !showA }"
+          @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+        />
+        <div class="hero-bg-fade" />
+      </div>
 
-    <div class="detail-body">
-      <div class="detail-grid">
-        <div class="detail-poster">
+      <div class="hero-content">
+        <div class="hero-poster">
           <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" />
         </div>
 
-        <div class="detail-info">
+        <div class="hero-info">
           <div class="detail-badges">
             <Chip gold>{{ mediaTypeLabel(detail.media_item.media_type) }}</Chip>
+            <Chip v-if="certification">{{ certification }}</Chip>
             <Chip v-if="detail.media_item.year">{{ detail.media_item.year }}</Chip>
-            <Chip v-if="detail.movie?.runtime_minutes">{{ detail.movie.runtime_minutes }} min</Chip>
+            <Chip v-if="detail.movie?.runtime_minutes">{{ Math.floor(detail.movie.runtime_minutes / 60) }}h {{ detail.movie.runtime_minutes % 60 }}m</Chip>
             <Chip v-if="detail.tv_series?.status">{{ detail.tv_series.status }}</Chip>
           </div>
 
           <h1 class="detail-title">{{ detail.media_item.title }}</h1>
           <p v-if="detail.movie?.tagline" class="detail-tagline">{{ detail.movie.tagline }}</p>
 
-          <div v-if="genres.length" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px">
-            <Chip v-for="g in genres" :key="g">{{ g }}</Chip>
-          </div>
-
           <div class="hero-meta-row" v-if="rating">
             <Icon name="star" :size="14" style="color: var(--gold)" />
-            <span>{{ rating }}/10</span>
-            <template v-if="detail.movie?.runtime_minutes">
+            <span style="color: var(--gold)">{{ rating }}/10</span>
+            <template v-if="detail.movie?.vote_count">
               <span class="dot" />
-              <span>{{ Math.floor(detail.movie.runtime_minutes / 60) }}h {{ detail.movie.runtime_minutes % 60 }}m</span>
+              <span>{{ detail.movie.vote_count.toLocaleString() }} votes</span>
             </template>
+          </div>
+
+          <div v-if="genres.length" style="display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0">
+            <Chip v-for="g in genres" :key="g">{{ g }}</Chip>
           </div>
 
           <div class="detail-actions">
@@ -59,78 +63,206 @@
 
           <p v-if="detail.media_item.description" class="detail-synopsis">{{ detail.media_item.description }}</p>
 
-          <!-- Credits -->
-          <div v-if="crew.length" class="detail-credits">
-            <div v-for="c in crew" :key="c.label" class="credit-row">
-              <div class="credit-label">{{ c.label }}</div>
-              <div class="credit-val">{{ c.value }}</div>
+          <!-- Inline crew summary + keywords + media info -->
+          <div class="info-grid">
+            <template v-for="c in crewSummary" :key="c.label">
+              <div class="info-label">{{ c.label }}</div>
+              <div class="info-value">{{ c.value }}</div>
+            </template>
+            <template v-if="detail.production_companies?.length">
+              <div class="info-label">Studio</div>
+              <div class="info-value">{{ detail.production_companies.map(c => c.name).join(', ') }}</div>
+            </template>
+            <template v-if="detail.movie?.original_language">
+              <div class="info-label">Language</div>
+              <div class="info-value">{{ detail.movie.original_language.toUpperCase() }}</div>
+            </template>
+            <template v-if="detail.movie?.budget">
+              <div class="info-label">Budget</div>
+              <div class="info-value">${{ (detail.movie.budget / 1_000_000).toFixed(0) }}M</div>
+            </template>
+            <template v-if="detail.movie?.revenue">
+              <div class="info-label">Revenue</div>
+              <div class="info-value">${{ (detail.movie.revenue / 1_000_000).toFixed(0) }}M</div>
+            </template>
+          </div>
+
+          <div v-if="detail.keywords?.length" style="display: flex; gap: 5px; flex-wrap: wrap; margin-top: 16px">
+            <span v-for="k in detail.keywords" :key="k.id" class="keyword-tag">{{ k.name }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-body-below">
+      <!-- Cast & Crew (tabbed) -->
+      <div v-if="detail.cast?.length || detail.crew?.length" class="detail-section">
+        <div class="section-row-head" style="margin-bottom: 0">
+          <div class="tab-bar" style="margin-bottom: 0">
+            <button class="tab-btn" :class="{ active: peopleTab === 'cast' }" @click="peopleTab = 'cast'">
+              Cast <span class="tab-count">{{ detail.cast?.length || 0 }}</span>
+            </button>
+            <button class="tab-btn" :class="{ active: peopleTab === 'crew' }" @click="peopleTab = 'crew'">
+              Crew <span class="tab-count">{{ detail.crew?.length || 0 }}</span>
+            </button>
+          </div>
+          <div v-if="peopleTab === 'cast'" style="display: flex; gap: 8px">
+            <button class="scroll-arrow" @click="scrollEl('castScroll', -1)"><Icon name="chevleft" :size="16" /></button>
+            <button class="scroll-arrow" @click="scrollEl('castScroll', 1)"><Icon name="chevright" :size="16" /></button>
+          </div>
+        </div>
+
+        <div v-if="peopleTab === 'cast'" class="hscroll" ref="castScroll" style="margin-top: 16px">
+          <NuxtLink
+            v-for="c in detail.cast"
+            :key="c.id"
+            :to="`/person/${slugify(c.name)}-${c.id}`"
+            class="cast-card"
+          >
+            <img
+              v-if="c.profile_path && !c.profile_path.startsWith('http')"
+              :src="`/api/person/${c.id}/image`"
+              class="cast-photo"
+              @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+            />
+            <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
+            <div class="cast-name">{{ c.name }}</div>
+            <div class="cast-role">{{ c.character }}</div>
+          </NuxtLink>
+        </div>
+
+        <div v-if="peopleTab === 'crew'" style="margin-top: 16px">
+          <div v-for="dept in crewByDepartment" :key="dept.name" style="margin-bottom: 24px">
+            <div class="section-title" style="font-size: 11px; margin-bottom: 10px">{{ dept.name }}</div>
+            <div class="crew-dept-grid">
+              <NuxtLink
+                v-for="c in dept.members"
+                :key="`${c.id}-${c.job}`"
+                :to="`/person/${slugify(c.name)}-${c.id}`"
+                class="crew-card"
+              >
+                <img
+                  v-if="c.profile_path && !c.profile_path.startsWith('http')"
+                  :src="`/api/person/${c.id}/image`"
+                  class="crew-photo"
+                  @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+                />
+                <div v-else class="crew-initials">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
+                <div>
+                  <div class="crew-name">{{ c.name }}</div>
+                  <div class="crew-job">{{ c.job }}</div>
+                </div>
+              </NuxtLink>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Cast -->
-      <div v-if="cast.length" class="detail-section">
-        <h3 class="section-title" style="margin-bottom: 16px">Cast</h3>
-        <div class="cast-grid">
-          <div v-for="c in cast.slice(0, 12)" :key="c.name" class="cast-card">
-            <div class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-            <div class="cast-name">{{ c.name }}</div>
-            <div class="cast-role">{{ c.character }}</div>
+      <!-- Content tabs: Videos / Extras / Seasons -->
+      <div v-if="contentTabs.length" class="detail-section">
+        <div class="section-row-head" style="margin-bottom: 0">
+          <div class="tab-bar" style="margin-bottom: 0">
+            <button
+              v-for="t in contentTabs"
+              :key="t.id"
+              class="tab-btn"
+              :class="{ active: contentTab === t.id }"
+              @click="contentTab = t.id"
+            >
+              {{ t.label }} <span class="tab-count">{{ t.count }}</span>
+            </button>
+          </div>
+          <div v-if="contentTab === 'videos'" style="display: flex; gap: 8px">
+            <button class="scroll-arrow" @click="scrollContentLeft"><Icon name="chevleft" :size="16" /></button>
+            <button class="scroll-arrow" @click="scrollContentRight"><Icon name="chevright" :size="16" /></button>
+            <button class="scroll-arrow" @click="contentExpanded = !contentExpanded">
+              <Icon name="chevdown" :size="16" :style="{ transform: contentExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
+            </button>
           </div>
         </div>
-      </div>
 
-      <!-- Extras -->
-      <div v-if="groupedExtras.length" class="detail-section">
-        <h3 class="section-title" style="margin-bottom: 16px">Extras</h3>
-        <div v-for="group in groupedExtras" :key="group.type" style="margin-bottom: 24px">
-          <div class="section-title" style="font-size: 11px; margin-bottom: 10px">{{ formatExtraType(group.type) }}</div>
-          <div class="extras-grid">
-            <div v-for="e in group.items" :key="e.id" class="extra-card">
-              <div class="extra-thumb"><Icon name="play" :size="20" /></div>
-              <div class="extra-info">
+        <div v-if="contentTab === 'videos'" style="margin-top: 16px">
+          <div :class="contentExpanded ? 'expanded-grid videos-expanded' : 'hscroll'" ref="videosScroll">
+            <a
+              v-for="v in detail.videos"
+              :key="v.id"
+              :href="`https://www.youtube.com/watch?v=${v.video_key}`"
+              target="_blank"
+              class="video-card"
+            >
+              <div class="video-thumb">
+                <img :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                <div class="video-play"><Icon name="play" :size="20" /></div>
+              </div>
+              <div class="video-name">{{ v.name }}</div>
+              <div class="video-type">{{ v.video_type }}</div>
+            </a>
+          </div>
+        </div>
+
+        <div v-if="contentTab === 'extras'" style="margin-top: 16px">
+          <div v-for="group in groupedExtras" :key="group.type" style="margin-bottom: 20px">
+            <div class="section-row-head" style="margin-bottom: 8px">
+              <div class="section-title" style="font-size: 11px">{{ formatExtraType(group.type) }} ({{ group.items.length }})</div>
+              <div style="display: flex; gap: 6px">
+                <template v-if="!extrasExpanded[group.type]">
+                  <button class="scroll-arrow" @click="scrollEl(`extras-${group.type}`, -1)"><Icon name="chevleft" :size="14" /></button>
+                  <button class="scroll-arrow" @click="scrollEl(`extras-${group.type}`, 1)"><Icon name="chevright" :size="14" /></button>
+                </template>
+                <button class="scroll-arrow" @click="extrasExpanded[group.type] = !extrasExpanded[group.type]">
+                  <Icon name="chevdown" :size="14" :style="{ transform: extrasExpanded[group.type] ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
+                </button>
+              </div>
+            </div>
+            <div :class="extrasExpanded[group.type] ? 'fold-grid extras-expanded' : 'hscroll'" :ref="(el: any) => setScrollRef(`extras-${group.type}`, el)">
+              <div v-for="e in group.items" :key="e.id" class="extra-card">
+                <div class="extra-thumb"><Icon name="play" :size="20" /></div>
                 <div class="extra-title">{{ e.title }}</div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Media Info -->
-      <div v-if="detail.movie" class="detail-section">
-        <h3 class="section-title" style="margin-bottom: 16px">Media Info</h3>
-        <div class="media-info">
-          <div v-if="detail.movie.original_title" class="mi-row">
-            <div>Original Title</div>
-            <div>{{ detail.movie.original_title }}</div>
-          </div>
-          <div v-if="detail.movie.original_language" class="mi-row">
-            <div>Language</div>
-            <div>{{ detail.movie.original_language.toUpperCase() }}</div>
-          </div>
-          <div v-if="detail.movie.budget" class="mi-row">
-            <div>Budget</div>
-            <div>${{ (detail.movie.budget / 1_000_000).toFixed(0) }}M</div>
-          </div>
-          <div v-if="detail.movie.revenue" class="mi-row">
-            <div>Revenue</div>
-            <div>${{ (detail.movie.revenue / 1_000_000).toFixed(0) }}M</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Seasons -->
-      <div v-if="detail.seasons?.length" class="detail-section">
-        <h3 class="section-title" style="margin-bottom: 16px">Seasons</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px">
+        <div v-if="contentTab === 'seasons'" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; margin-top: 16px">
           <div v-for="s in detail.seasons" :key="s.id" class="card-tile">
-            <Poster :idx="s.season_number" :src="usePosterUrl(undefined)" aspect="2/3" :title="s.name" />
+            <Poster :idx="s.season_number" aspect="2/3" :title="s.name" />
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ s.name }}</div>
               <div class="grid-tile-sub">{{ s.episode_count }} episodes</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Recommendations (horizontal scroll) -->
+      <div v-if="detail.recommendations?.length" class="detail-section">
+        <div class="section-row-head">
+          <h3 class="section-title-lg">Recommended</h3>
+          <div style="display: flex; gap: 8px">
+            <button class="scroll-arrow" @click="scrollRecs(-1)"><Icon name="chevleft" :size="16" /></button>
+            <button class="scroll-arrow" @click="scrollRecs(1)"><Icon name="chevright" :size="16" /></button>
+          </div>
+        </div>
+        <div class="rec-scroll" ref="recScrollEl">
+          <component
+            v-for="r in detail.recommendations"
+            :key="r.id"
+            :is="r.local_media_item_id ? 'NuxtLink' : 'div'"
+            :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, media_type: r.media_type }) : undefined"
+            class="rec-tile"
+            :class="{ dimmed: !r.local_media_item_id }"
+          >
+            <Poster
+              :idx="r.recommended_tmdb_id"
+              :src="r.local_media_item_id ? usePosterUrl(r.local_media_item_id) : undefined"
+              aspect="2/3"
+              :title="r.title"
+            />
+            <div class="grid-tile-meta">
+              <div class="grid-tile-title">{{ r.title }}</div>
+              <div class="grid-tile-sub">{{ r.release_date?.slice(0, 4) || '?' }}</div>
+            </div>
+          </component>
         </div>
       </div>
     </div>
@@ -152,50 +284,128 @@ const props = defineProps<{ mediaId: number }>()
 const detail = ref<MediaDetail | null>(null)
 const loading = ref(true)
 const backdropIdx = ref(0)
+const peopleTab = ref<'cast' | 'crew'>('cast')
+const contentTab = ref('')
+const contentExpanded = ref(false)
+const extrasExpanded = reactive<Record<string, boolean>>({})
+const recScrollEl = ref<HTMLElement>()
+const videosScroll = ref<HTMLElement>()
+const castScroll = ref<HTMLElement>()
+const scrollRefs: Record<string, HTMLElement> = {}
+
+function setScrollRef(key: string, el: any) {
+  if (el) scrollRefs[key] = el
+}
+
+function scrollEl(refName: string, dir: number) {
+  let el: HTMLElement | undefined
+  if (refName === 'videosScroll') el = videosScroll.value
+  else if (refName === 'castScroll') el = castScroll.value
+  else el = scrollRefs[refName]
+  el?.scrollBy({ left: dir * 500, behavior: 'smooth' })
+}
+
+function scrollContentLeft() { scrollActiveContent(-1) }
+function scrollContentRight() { scrollActiveContent(1) }
+
+function scrollActiveContent(dir: number) {
+  if (contentTab.value === 'videos') {
+    videosScroll.value?.scrollBy({ left: dir * 500, behavior: 'smooth' })
+  } else if (contentTab.value === 'extras') {
+    const firstKey = Object.keys(scrollRefs).find(k => k.startsWith('extras-'))
+    if (firstKey) scrollRefs[firstKey]?.scrollBy({ left: dir * 500, behavior: 'smooth' })
+  }
+}
 
 const backdropAssets = computed(() => {
   if (!detail.value?.assets) return []
+  const seen = new Set<number>()
   return detail.value.assets
     .filter(a => a.asset_type === 'backdrop')
     .sort((a, b) => a.sort_order - b.sort_order)
+    .filter(a => {
+      if (seen.has(a.sort_order)) return false
+      seen.add(a.sort_order)
+      return true
+    })
 })
 
-const currentBackdrop = computed(() => {
+const showA = ref(true)
+const backdropA = ref<string | null>(null)
+const backdropB = ref<string | null>(null)
+
+function getBackdropUrl(idx: number) {
   if (backdropAssets.value.length > 0) {
-    const asset = backdropAssets.value[backdropIdx.value % backdropAssets.value.length]
+    const asset = backdropAssets.value[idx % backdropAssets.value.length]
     return `/api/media/${detail.value?.media_item.id}/image/backdrop?sort=${asset.sort_order}`
   }
   return detail.value ? useBackdropUrl(detail.value.media_item.id) : null
-})
+}
 
-const genres = computed(() => {
-  if (!detail.value) return []
-  return detail.value.movie?.genres || detail.value.tv_series?.genres || detail.value.book?.genres || []
-})
+function advanceBackdrop() {
+  if (backdropAssets.value.length <= 1) return
+  backdropIdx.value = (backdropIdx.value + 1) % backdropAssets.value.length
+  const url = getBackdropUrl(backdropIdx.value)
+  if (showA.value) {
+    backdropB.value = url
+  } else {
+    backdropA.value = url
+  }
+  showA.value = !showA.value
+}
+
+const genres = computed(() => detail.value?.movie?.genres || detail.value?.tv_series?.genres || detail.value?.book?.genres || [])
 
 const rating = computed(() => {
   const r = detail.value?.movie?.rating || detail.value?.tv_series?.rating || detail.value?.book?.rating
   return r ? parseFloat(String(r)).toFixed(1) : ''
 })
 
-const cast = computed(() => {
-  if (!detail.value?.movie?.cast_data) return []
-  try { return JSON.parse(detail.value.movie.cast_data as any) || [] } catch { return [] }
+const certification = computed(() => {
+  if (!detail.value?.certifications?.length) return ''
+  const us = detail.value.certifications.find(c => c.country === 'US' && c.certification)
+  return us?.certification || detail.value.certifications.find(c => c.certification)?.certification || ''
 })
 
-const crew = computed(() => {
-  if (!detail.value?.movie?.crew_data) return []
-  try {
-    const data = JSON.parse(detail.value.movie.crew_data as any) || []
-    const directors = data.filter((c: any) => c.job === 'Director').map((c: any) => c.name)
-    const writers = data.filter((c: any) => c.job === 'Writer' || c.job === 'Screenplay').map((c: any) => c.name)
-    const producers = data.filter((c: any) => c.job === 'Producer').map((c: any) => c.name)
-    const result = []
-    if (directors.length) result.push({ label: 'Director', value: directors.join(', ') })
-    if (writers.length) result.push({ label: 'Writer', value: writers.join(', ') })
-    if (producers.length) result.push({ label: 'Producer', value: producers.slice(0, 3).join(', ') })
-    return result
-  } catch { return [] }
+const crewSummary = computed(() => {
+  if (!detail.value?.crew?.length) return []
+  const byJob: Record<string, string[]> = {}
+  for (const c of detail.value.crew) {
+    if (['Director', 'Screenplay', 'Writer', 'Producer', 'Original Music Composer', 'Director of Photography'].includes(c.job)) {
+      if (!byJob[c.job]) byJob[c.job] = []
+      if (!byJob[c.job].includes(c.name)) byJob[c.job].push(c.name)
+    }
+  }
+  const order = ['Director', 'Screenplay', 'Producer', 'Original Music Composer', 'Director of Photography']
+  const labels: Record<string, string> = {
+    Director: 'Director', Screenplay: 'Writer', Writer: 'Writer', Producer: 'Producer',
+    'Original Music Composer': 'Music', 'Director of Photography': 'Cinematography',
+  }
+  return order.filter(j => byJob[j]).map(j => ({ label: labels[j] || j, value: byJob[j].slice(0, 3).join(', ') }))
+})
+
+const crewByDepartment = computed(() => {
+  if (!detail.value?.crew?.length) return []
+  const depts: Record<string, typeof detail.value.crew> = {}
+  for (const c of detail.value.crew!) {
+    const d = c.department || 'Other'
+    if (!depts[d]) depts[d] = []
+    depts[d].push(c)
+  }
+  const order = ['Directing', 'Writing', 'Production', 'Camera', 'Sound', 'Editing', 'Art', 'Costume & Make-Up', 'Visual Effects', 'Lighting', 'Crew']
+  const sorted = order.filter(d => depts[d]).map(d => ({ name: d, members: depts[d] }))
+  for (const d of Object.keys(depts)) {
+    if (!order.includes(d)) sorted.push({ name: d, members: depts[d] })
+  }
+  return sorted
+})
+
+const contentTabs = computed(() => {
+  const tabs: { id: string; label: string; count: number }[] = []
+  if (detail.value?.videos?.length) tabs.push({ id: 'videos', label: 'Videos', count: detail.value.videos.length })
+  if (detail.value?.extras?.length) tabs.push({ id: 'extras', label: 'Extras', count: detail.value.extras.length })
+  if (detail.value?.seasons?.length) tabs.push({ id: 'seasons', label: 'Seasons', count: detail.value.seasons.length })
+  return tabs
 })
 
 const groupedExtras = computed(() => {
@@ -206,22 +416,15 @@ const groupedExtras = computed(() => {
     groups[e.extra_type].push(e)
   }
   const order = ['trailer', 'behind_the_scenes', 'featurette', 'other', 'teaser', 'deleted_scene', 'interview']
-  return order
-    .filter(t => groups[t])
-    .map(t => ({ type: t, items: groups[t] }))
+  return order.filter(t => groups[t]).map(t => ({ type: t, items: groups[t] }))
 })
 
 function formatExtraType(t: string) {
-  const labels: Record<string, string> = {
-    trailer: 'Trailers',
-    behind_the_scenes: 'Behind the Scenes',
-    featurette: 'Featurettes',
-    other: 'Other',
-    teaser: 'Teasers',
-    deleted_scene: 'Deleted Scenes',
-    interview: 'Interviews',
-  }
-  return labels[t] || t
+  return ({ trailer: 'Trailers', behind_the_scenes: 'Behind the Scenes', featurette: 'Featurettes', other: 'Other', teaser: 'Teasers', deleted_scene: 'Deleted Scenes', interview: 'Interviews' } as Record<string, string>)[t] || t
+}
+
+function scrollRecs(dir: number) {
+  recScrollEl.value?.scrollBy({ left: dir * 500, behavior: 'smooth' })
 }
 
 let backdropInterval: ReturnType<typeof setInterval> | null = null
@@ -232,68 +435,189 @@ onMounted(async () => {
   } catch { /* empty */ }
   loading.value = false
 
+  if (contentTabs.value.length) contentTab.value = contentTabs.value[0].id
+
+  backdropA.value = getBackdropUrl(0)
+
   if (backdropAssets.value.length > 1) {
-    backdropInterval = setInterval(() => {
-      backdropIdx.value = (backdropIdx.value + 1) % backdropAssets.value.length
-    }, 8000)
+    backdropInterval = setInterval(advanceBackdrop, 8000)
   }
 })
 
-onUnmounted(() => {
-  if (backdropInterval) clearInterval(backdropInterval)
-})
+onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
 </script>
 
 <style scoped>
-.cast-grid {
+.hero-section {
+  position: relative;
+  min-height: 520px;
+}
+.hero-bg { position: absolute; inset: 0; }
+.hero-bg-img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  opacity: 0; transition: opacity 1.8s ease-in-out;
+}
+.hero-bg-img.visible { opacity: 1; }
+.hero-bg-img:only-of-type { opacity: 1; transition: none; }
+.hero-bg-fade {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.7) 40%, rgba(12,12,16,0.4) 100%),
+    linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
+}
+.hero-content {
+  position: relative; z-index: 2;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 20px;
+  grid-template-columns: 240px 1fr;
+  gap: 40px;
+  padding: 40px 40px 48px;
+  max-width: 1300px;
 }
-.cast-card { text-align: center; }
-.cast-avatar {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--bg-4), var(--bg-3));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 8px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--fg-2);
-}
-.cast-name { font-size: 13px; font-weight: 500; color: var(--fg-0); }
-.cast-role { font-size: 11px; color: var(--fg-2); margin-top: 2px; }
-
-.extras-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
-}
-.extra-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+.hero-poster {
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
   border-radius: var(--r-md);
-  cursor: pointer;
-  transition: background 0.12s;
+  overflow: hidden;
+  align-self: start;
+}
+.hero-info { display: flex; flex-direction: column; justify-content: center; }
+.detail-title { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0 0 4px; }
+.detail-tagline { font-style: italic; color: var(--fg-2); font-size: 15px; margin: 4px 0 12px; }
+.detail-synopsis { font-size: 14px; line-height: 1.65; color: var(--fg-1); max-width: 640px; margin: 12px 0 0; }
+.detail-actions { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
+
+.info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 20px;
+  margin-top: 16px;
+  max-width: 500px;
+}
+.info-label {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-3);
+  padding-top: 2px;
+}
+.info-value { font-size: 13px; color: var(--fg-1); line-height: 1.5; }
+
+.keyword-tag {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  letter-spacing: 0.02em;
+}
+
+.detail-body-below { padding: 0 40px 80px; }
+.detail-section { margin-top: 40px; }
+
+.tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tab-btn {
+  padding: 10px 20px; font-size: 13px; font-weight: 500; color: var(--fg-2);
+  border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: var(--fg-0); }
+.tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+.tab-count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-left: 6px; }
+
+.cast-card {
+  width: 100px; flex-shrink: 0;
+  text-align: center; text-decoration: none; color: inherit; cursor: pointer;
+}
+.cast-card:hover .cast-name { color: var(--gold); }
+.cast-photo { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; margin: 0 auto 8px; display: block; }
+.cast-avatar {
+  width: 76px; height: 76px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--bg-4), var(--bg-3));
+  display: flex; align-items: center; justify-content: center; margin: 0 auto 8px;
+  font-size: 16px; font-weight: 600; color: var(--fg-2);
+}
+.cast-name { font-size: 12px; font-weight: 500; color: var(--fg-0); transition: color 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cast-role { font-size: 10px; color: var(--fg-3); margin-top: 2px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.crew-dept-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px;
+}
+.crew-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; border-radius: var(--r-sm);
+  text-decoration: none; color: inherit; transition: background 0.12s;
+}
+.crew-card:hover { background: rgba(255,255,255,0.04); }
+.crew-card:hover .crew-name { color: var(--gold); }
+.crew-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.crew-initials {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  background: var(--bg-3); display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: var(--fg-3);
+}
+.crew-name { font-size: 13px; font-weight: 500; color: var(--fg-0); transition: color 0.15s; }
+.crew-job { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
+
+.hscroll {
+  display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px;
+}
+.hscroll::-webkit-scrollbar { display: none; }
+
+.expanded-grid, .fold-grid {
+  display: grid; gap: 14px;
+  animation: fold-open 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.videos-expanded { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.extras-expanded { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.expanded-grid .video-card, .fold-grid .video-card { width: auto; }
+.expanded-grid .extra-card, .fold-grid .extra-card { min-width: 0; }
+
+@keyframes fold-open {
+  from { max-height: 200px; opacity: 0.6; overflow: hidden; }
+  to { max-height: 2000px; opacity: 1; }
+}
+
+.video-card { width: 240px; flex-shrink: 0; text-decoration: none; color: inherit; }
+.video-card:hover .video-name { color: var(--gold); }
+.video-thumb { position: relative; aspect-ratio: 16/9; border-radius: var(--r-md); overflow: hidden; background: var(--bg-3); }
+.video-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.video-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.15s; }
+.video-card:hover .video-play { opacity: 1; }
+.video-name { font-size: 12px; font-weight: 500; margin-top: 8px; color: var(--fg-0); transition: color 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-type { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; }
+
+.extra-card {
+  display: flex; align-items: center; gap: 12px; padding: 10px; min-width: 260px; flex-shrink: 0;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+  cursor: pointer; transition: background 0.12s;
 }
 .extra-card:hover { background: var(--bg-3); }
-.extra-thumb {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--r-sm);
-  background: var(--bg-4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-2);
-  flex-shrink: 0;
+.extra-thumb { width: 36px; height: 36px; border-radius: var(--r-xs); background: var(--bg-4); display: flex; align-items: center; justify-content: center; color: var(--fg-2); flex-shrink: 0; }
+.extra-title { font-size: 12px; font-weight: 500; color: var(--fg-0); white-space: nowrap; }
+
+.rec-scroll {
+  display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px;
 }
-.extra-title { font-size: 13px; font-weight: 500; color: var(--fg-0); }
+.rec-scroll::-webkit-scrollbar { display: none; }
+.rec-tile { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; }
+.rec-tile.dimmed { opacity: 0.35; pointer-events: none; }
+.rec-tile:not(.dimmed):hover { transform: translateY(-3px); }
+
+.scroll-arrow {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  color: var(--fg-2); transition: all 0.15s;
+}
+.scroll-arrow:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
+
+@media (max-width: 900px) {
+  .hero-content { grid-template-columns: 1fr; gap: 20px; }
+  .hero-poster { display: none; }
+  .detail-title { font-size: 32px; }
+  .detail-body-below { padding: 0 20px 60px; }
+}
 </style>

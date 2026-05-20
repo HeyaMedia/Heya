@@ -55,6 +55,7 @@ func init() {
 	rootCmd.AddCommand(libraryCmd)
 	rootCmd.AddCommand(parseCmd)
 	rootCmd.AddCommand(jobCmd)
+	rootCmd.AddCommand(queueCmd)
 	rootCmd.AddCommand(mediaCmd)
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(transcodeCmd)

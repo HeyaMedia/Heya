@@ -92,14 +92,69 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 			}
 		}
 
-		assets, _ := q.ListMediaAssets(r.Context(), id)
-		if assets != nil {
+		if cast, err := q.ListMediaCastSlim(r.Context(), id); err == nil && len(cast) > 0 {
+			result["cast"] = cast
+		}
+
+		if crew, err := q.ListMediaCrewSlim(r.Context(), id); err == nil && len(crew) > 0 {
+			result["crew"] = crew
+		}
+
+		if keywords, err := q.ListMediaKeywords(r.Context(), id); err == nil && len(keywords) > 0 {
+			result["keywords"] = keywords
+		}
+
+		if videos, err := q.ListMediaVideos(r.Context(), id); err == nil && len(videos) > 0 {
+			result["videos"] = videos
+		}
+
+		if certs, err := q.ListMediaCertifications(r.Context(), id); err == nil && len(certs) > 0 {
+			result["certifications"] = certs
+		}
+
+		if recs, err := q.ListMediaRecommendationsWithLibrary(r.Context(), id); err == nil && len(recs) > 0 {
+			result["recommendations"] = recs
+		}
+
+		if companies, err := q.ListMediaProductionCompanies(r.Context(), id); err == nil && len(companies) > 0 {
+			result["production_companies"] = companies
+		}
+
+		if assets, err := q.ListMediaAssets(r.Context(), id); err == nil && len(assets) > 0 {
 			result["assets"] = assets
 		}
 
-		extras, _ := q.ListMediaExtras(r.Context(), id)
-		if extras != nil {
+		if extras, err := q.ListMediaExtras(r.Context(), id); err == nil && len(extras) > 0 {
 			result["extras"] = extras
+		}
+
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func handleGetPerson(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid person id")
+			return
+		}
+
+		q := sqlc.New(app.DB)
+		person, err := q.GetPersonByID(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "person not found")
+			return
+		}
+
+		result := map[string]any{"person": person}
+
+		if castCredits, err := q.ListPersonCastCredits(r.Context(), id); err == nil && len(castCredits) > 0 {
+			result["cast_credits"] = castCredits
+		}
+
+		if crewCredits, err := q.ListPersonCrewCredits(r.Context(), id); err == nil && len(crewCredits) > 0 {
+			result["crew_credits"] = crewCredits
 		}
 
 		writeJSON(w, http.StatusOK, result)
