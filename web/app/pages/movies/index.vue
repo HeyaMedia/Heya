@@ -3,14 +3,17 @@
     <LibrarySidebar
       :libraries="libraries"
       :active-lib="activeLib"
+      :active-view="activeView"
       type-label="Movies"
       :total-count="items.length"
-      @select="activeLib = $event"
+      :loved-count="favoritedSet.size"
+      @select="activeLib = $event; activeView = null"
+      @view="activeView = $event"
     />
     <div class="library-main scroll">
       <LibraryToolbar
-        title="Movies"
-        :count="items.length"
+        :title="activeView === 'loved' ? 'Loved Movies' : 'Movies'"
+        :count="sorted.length"
         :sort="sort"
         :view="view"
         @sort="sort = $event"
@@ -35,6 +38,8 @@
             <div style="position: relative">
               <Poster :idx="i" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
               <div v-if="item.available === false" class="missing-badge">Missing</div>
+              <div v-if="isWatched(item.id)" class="watched-badge"><Icon name="check" :size="10" /></div>
+              <div v-if="isFavorited(item.id)" class="fav-badge"><Icon name="heartfill" :size="10" /></div>
             </div>
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ item.title }}</div>
@@ -83,12 +88,37 @@ const items = ref<MediaItem[]>([])
 const libraries = ref<Library[]>([])
 const loading = ref(true)
 const activeLib = ref<number | null>(null)
+const activeView = ref<string | null>(null)
 const sort = ref('added')
 const view = ref('grid')
 
+const favoritedSet = ref<Set<number>>(new Set())
+const watchedSet = ref<Set<number>>(new Set())
+function isWatched(id: number) { return watchedSet.value.has(id) }
+function isFavorited(id: number) { return favoritedSet.value.has(id) }
+
+const listItems = ref<Set<number>>(new Set())
+
+watch(activeView, async (v) => {
+  if (!v) { listItems.value = new Set(); return }
+  if (v.startsWith('list-')) {
+    const listId = v.replace('list-', '')
+    try {
+      const res = await apiFetch<{ items: any[] }>(`/api/lists/${listId}`)
+      listItems.value = new Set((res.items || []).map((i: any) => i.id))
+    } catch { listItems.value = new Set() }
+  }
+})
+
 const sorted = computed(() => {
   let list = [...items.value]
-  if (activeLib.value) list = list.filter(i => i.library_id === activeLib.value)
+  if (activeView.value === 'loved') {
+    list = list.filter(i => favoritedSet.value.has(i.id))
+  } else if (activeView.value?.startsWith('list-')) {
+    list = list.filter(i => listItems.value.has(i.id))
+  } else if (activeLib.value) {
+    list = list.filter(i => i.library_id === activeLib.value)
+  }
   switch (sort.value) {
     case 'title': list.sort((a, b) => a.title.localeCompare(b.title)); break
     case 'year-desc': list.sort((a, b) => (b.year || '').localeCompare(a.year || '')); break
@@ -104,12 +134,17 @@ function formatDate(d: string) {
 }
 
 onMounted(async () => {
-  const [mediaRes, libRes] = await Promise.allSettled([
+  const [mediaRes, libRes, stateRes] = await Promise.allSettled([
     apiFetch<MediaItem[]>('/api/media?type=movie&limit=500'),
     apiFetch<Library[]>('/api/libraries'),
+    fetchUserState('movies'),
   ])
   if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'movie')
+  if (stateRes.status === 'fulfilled') {
+    favoritedSet.value = new Set(stateRes.value.favorited || [])
+    watchedSet.value = new Set(stateRes.value.watched || [])
+  }
   loading.value = false
 })
 </script>
@@ -125,5 +160,17 @@ onMounted(async () => {
   text-transform: uppercase; letter-spacing: 0.08em;
   padding: 3px 8px; border-radius: 100px;
   background: rgba(217,107,107,0.85); color: #fff;
+}
+.watched-badge {
+  position: absolute; bottom: 8px; right: 8px;
+  width: 24px; height: 24px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.65); color: var(--good);
+  display: flex; align-items: center; justify-content: center;
+}
+.fav-badge {
+  position: absolute; bottom: 8px; left: 8px;
+  width: 24px; height: 24px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.65); color: var(--bad);
+  display: flex; align-items: center; justify-content: center;
 }
 </style>

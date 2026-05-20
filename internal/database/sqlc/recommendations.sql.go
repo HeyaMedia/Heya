@@ -129,3 +129,62 @@ func (q *Queries) ListMediaRecommendationsWithLibrary(ctx context.Context, media
 	}
 	return items, nil
 }
+
+const listTopRecommendations = `-- name: ListTopRecommendations :many
+SELECT mr.recommended_tmdb_id, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
+  mi.id as local_media_item_id,
+  mi.slug as local_slug,
+  mi.poster_path as local_poster_path,
+  count(DISTINCT mr.media_item_id)::int as source_count
+FROM media_recommendations mr
+LEFT JOIN media_items mi ON mi.external_ids::jsonb @> jsonb_build_object('tmdb', mr.recommended_tmdb_id::text)
+GROUP BY mr.recommended_tmdb_id, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
+         mi.id, mi.slug, mi.poster_path
+ORDER BY source_count DESC, mr.vote_average DESC
+LIMIT $1
+`
+
+type ListTopRecommendationsRow struct {
+	RecommendedTmdbID int32          `json:"recommended_tmdb_id"`
+	Title             string         `json:"title"`
+	PosterPath        string         `json:"poster_path"`
+	MediaType         string         `json:"media_type"`
+	VoteAverage       pgtype.Numeric `json:"vote_average"`
+	ReleaseDate       string         `json:"release_date"`
+	LocalMediaItemID  pgtype.Int8    `json:"local_media_item_id"`
+	LocalSlug         pgtype.Text    `json:"local_slug"`
+	LocalPosterPath   pgtype.Text    `json:"local_poster_path"`
+	SourceCount       int32          `json:"source_count"`
+}
+
+// Top recommendations for home page: items recommended by multiple sources, weighted by vote
+func (q *Queries) ListTopRecommendations(ctx context.Context, limit int32) ([]ListTopRecommendationsRow, error) {
+	rows, err := q.db.Query(ctx, listTopRecommendations, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTopRecommendationsRow{}
+	for rows.Next() {
+		var i ListTopRecommendationsRow
+		if err := rows.Scan(
+			&i.RecommendedTmdbID,
+			&i.Title,
+			&i.PosterPath,
+			&i.MediaType,
+			&i.VoteAverage,
+			&i.ReleaseDate,
+			&i.LocalMediaItemID,
+			&i.LocalSlug,
+			&i.LocalPosterPath,
+			&i.SourceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

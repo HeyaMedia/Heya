@@ -47,6 +47,7 @@ const tabs = [
   { to: '/settings/libraries', label: 'Libraries', icon: 'folder', hint: 'Media sources' },
   { to: '/settings/users', label: 'Users', icon: 'users', hint: 'Accounts & access' },
   { to: '/settings/server', label: 'Server', icon: 'hard-drives', hint: 'Health & diagnostics' },
+  { to: '/settings/transcoding', label: 'Transcoding', icon: 'film', hint: 'Hardware & cache' },
   { to: '/settings/jobs', label: 'Jobs', icon: 'timer', hint: 'Background tasks' },
   { to: '/settings/logs', label: 'Logs', icon: 'list', hint: 'Server log stream' },
   { to: '/settings/about', label: 'About', icon: 'info', hint: 'Version & credits' },

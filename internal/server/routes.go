@@ -33,6 +33,8 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.Handle("PUT /api/libraries/{id}/settings", authed(http.HandlerFunc(handleUpdateLibrarySettings(app))))
 	mux.Handle("GET /api/libraries/{id}/settings", authed(http.HandlerFunc(handleGetLibrarySettings(app))))
 	mux.Handle("POST /api/libraries/{id}/scan", authed(http.HandlerFunc(handleScanLibrary(app))))
+	mux.Handle("POST /api/libraries/{id}/scan/cancel", authed(http.HandlerFunc(handleCancelLibraryScan(app))))
+	mux.Handle("POST /api/libraries/scan/cancel-all", authed(http.HandlerFunc(handleCancelAllScans(app))))
 	mux.Handle("GET /api/libraries/{id}/files", authed(http.HandlerFunc(handleListLibraryFiles(app))))
 	mux.Handle("GET /api/libraries/{id}/files/stats", authed(http.HandlerFunc(handleLibraryFileStats(app))))
 	mux.Handle("GET /api/libraries/{id}/unmatched", authed(http.HandlerFunc(handleListUnmatched(app))))
@@ -48,24 +50,69 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.Handle("GET /api/media/{id}", authed(http.HandlerFunc(handleGetMedia(app))))
 	mux.Handle("GET /api/person/{id}", authed(http.HandlerFunc(handleGetPerson(app))))
 	mux.Handle("POST /api/media/{id}/refresh", authed(http.HandlerFunc(handleRefreshMedia(app))))
-	mux.Handle("GET /api/search", authed(http.HandlerFunc(handleSearchMedia(app))))
+	mux.Handle("GET /api/search", authed(http.HandlerFunc(handleSearchAll(app))))
+	mux.Handle("GET /api/search/quick", authed(http.HandlerFunc(handleSearchQuick(app))))
+
+	mux.Handle("GET /api/genres", authed(http.HandlerFunc(handleListGenres(app))))
+	mux.Handle("GET /api/genres/{name}", authed(http.HandlerFunc(handleGetGenre(app))))
+	mux.Handle("GET /api/keywords/{name}", authed(http.HandlerFunc(handleGetKeyword(app))))
+	mux.Handle("GET /api/collections", authed(http.HandlerFunc(handleListCollections(app))))
+	mux.Handle("GET /api/collections/{id}", authed(http.HandlerFunc(handleGetCollection(app))))
 
 	mux.Handle("GET /api/watchers", authed(http.HandlerFunc(handleWatcherStatus(app))))
+
+	// Recommendations
+	mux.Handle("GET /api/recommendations", authed(http.HandlerFunc(handleListTopRecommendations(app))))
+	mux.HandleFunc("GET /api/tmdb/image/{path...}", handleTMDBImageProxy(app))
+
+	// Filesystem browser
+	mux.Handle("GET /api/fs/browse", authed(http.HandlerFunc(handleFSBrowse(app))))
+
+	// Transcoding settings
+	mux.Handle("GET /api/transcode/status", authed(http.HandlerFunc(handleGetTranscodeStatus(app))))
+	mux.Handle("PUT /api/transcode/settings", authed(http.HandlerFunc(handleUpdateTranscodeSettings(app))))
+	mux.Handle("DELETE /api/transcode/cache", authed(http.HandlerFunc(handleClearTranscodeCache(app))))
 
 	// Streaming
 	mux.Handle("GET /api/stream/{file_id}", authed(http.HandlerFunc(handleDirectStream(app))))
 	mux.Handle("GET /api/stream/{file_id}/hls/master.m3u8", authed(http.HandlerFunc(handleHLSMaster(app))))
-	mux.Handle("GET /api/stream/{file_id}/hls/{quality}/index.m3u8", authed(http.HandlerFunc(handleHLSPlaylist(app))))
-	mux.Handle("GET /api/stream/{file_id}/hls/{quality}/{segment}", authed(http.HandlerFunc(handleHLSSegment(app))))
+	mux.Handle("GET /api/stream/{file_id}/hls/index.m3u8", authed(http.HandlerFunc(handleHLSPlaylist(app))))
+	mux.Handle("GET /api/stream/{file_id}/hls/{segment}", authed(http.HandlerFunc(handleHLSSegment(app))))
 
-	// Subtitles
+	// Stream info & subtitles
+	mux.Handle("GET /api/stream/{file_id}/info", authed(http.HandlerFunc(handleGetStreamInfo(app))))
 	mux.Handle("GET /api/stream/{file_id}/subtitles", authed(http.HandlerFunc(handleListSubtitles(app))))
 	mux.Handle("GET /api/stream/{file_id}/subtitles/{index}", authed(http.HandlerFunc(handleGetSubtitle(app))))
 
 	// Watch progress
 	mux.Handle("POST /api/watch/{media_item_id}/progress", authed(http.HandlerFunc(handleWatchProgress(app))))
+	mux.Handle("POST /api/watch/progress", authed(http.HandlerFunc(handleWatchProgress(app))))
 	mux.Handle("GET /api/watch/continue", authed(http.HandlerFunc(handleContinueWatching(app))))
+	mux.Handle("GET /api/watch/recent", authed(http.HandlerFunc(handleRecentlyWatched(app))))
 	mux.Handle("GET /api/watch/history", authed(http.HandlerFunc(handleWatchHistory(app))))
+
+	// Favorites
+	mux.Handle("POST /api/favorites/toggle", authed(http.HandlerFunc(handleToggleFavorite(app))))
+	mux.Handle("GET /api/favorites/check", authed(http.HandlerFunc(handleCheckFavorite(app))))
+
+	// User lists
+	mux.Handle("GET /api/lists", authed(http.HandlerFunc(handleListUserLists(app))))
+	mux.Handle("POST /api/lists", authed(http.HandlerFunc(handleCreateUserList(app))))
+	mux.Handle("GET /api/lists/{id}", authed(http.HandlerFunc(handleGetUserList(app))))
+	mux.Handle("DELETE /api/lists/{id}", authed(http.HandlerFunc(handleDeleteUserList(app))))
+	mux.Handle("POST /api/lists/{id}/items", authed(http.HandlerFunc(handleAddToList(app))))
+	mux.Handle("DELETE /api/lists/{id}/items/{media_id}", authed(http.HandlerFunc(handleRemoveFromList(app))))
+
+	// Episode watched tracking
+	mux.Handle("POST /api/episodes/{episode_id}/watched", authed(http.HandlerFunc(handleMarkEpisodeWatched(app))))
+	mux.Handle("DELETE /api/episodes/{episode_id}/watched", authed(http.HandlerFunc(handleUnmarkEpisodeWatched(app))))
+	mux.Handle("POST /api/seasons/{season_id}/watched", authed(http.HandlerFunc(handleMarkSeasonWatched(app))))
+	mux.Handle("POST /api/media/{id}/watched", authed(http.HandlerFunc(handleMarkShowWatched(app))))
+	mux.Handle("POST /api/movies/{id}/watched", authed(http.HandlerFunc(handleMarkMovieWatched(app))))
+	mux.Handle("GET /api/media/{id}/watched-episodes", authed(http.HandlerFunc(handleGetWatchedEpisodes(app))))
+	mux.Handle("GET /api/media/{id}/up-next", authed(http.HandlerFunc(handleGetUpNext(app))))
+	mux.Handle("GET /api/user/media-state", authed(http.HandlerFunc(handleGetUserMediaState(app))))
+	mux.Handle("POST /api/user/state", authed(http.HandlerFunc(handleGetUserState(app))))
 
 	// Jobs & schedules
 	mux.Handle("GET /api/jobs", authed(http.HandlerFunc(handleListJobs(app))))

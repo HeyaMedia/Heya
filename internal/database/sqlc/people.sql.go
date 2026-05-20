@@ -73,7 +73,7 @@ ON CONFLICT (tmdb_id) DO UPDATE SET
   imdb_id = EXCLUDED.imdb_id,
   popularity = EXCLUDED.popularity,
   updated_at = now()
-RETURNING id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug
+RETURNING id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector
 `
 
 type CreatePersonParams struct {
@@ -124,12 +124,13 @@ func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Per
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Slug,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getPersonByID = `-- name: GetPersonByID :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug FROM people WHERE id = $1
+SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector FROM people WHERE id = $1
 `
 
 func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
@@ -152,12 +153,13 @@ func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Slug,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getPersonBySlug = `-- name: GetPersonBySlug :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug FROM people WHERE slug = $1
+SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector FROM people WHERE slug = $1
 `
 
 func (q *Queries) GetPersonBySlug(ctx context.Context, slug string) (Person, error) {
@@ -180,12 +182,13 @@ func (q *Queries) GetPersonBySlug(ctx context.Context, slug string) (Person, err
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Slug,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getPersonByTmdbID = `-- name: GetPersonByTmdbID :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug FROM people WHERE tmdb_id = $1
+SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector FROM people WHERE tmdb_id = $1
 `
 
 func (q *Queries) GetPersonByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Person, error) {
@@ -208,12 +211,13 @@ func (q *Queries) GetPersonByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Pe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Slug,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const listMediaCast = `-- name: ListMediaCast :many
-SELECT mc.character, mc.display_order, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug
+SELECT mc.character, mc.display_order, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug, p.search_vector
 FROM media_cast mc
 JOIN people p ON p.id = mc.person_id
 WHERE mc.media_item_id = $1
@@ -239,6 +243,7 @@ type ListMediaCastRow struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Slug         string             `json:"slug"`
+	SearchVector interface{}        `json:"search_vector"`
 }
 
 func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListMediaCastRow, error) {
@@ -269,6 +274,7 @@ func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Slug,
+			&i.SearchVector,
 		); err != nil {
 			return nil, err
 		}
@@ -325,7 +331,7 @@ func (q *Queries) ListMediaCastSlim(ctx context.Context, mediaItemID int64) ([]L
 }
 
 const listMediaCrew = `-- name: ListMediaCrew :many
-SELECT mc.job, mc.department, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug
+SELECT mc.job, mc.department, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug, p.search_vector
 FROM media_crew mc
 JOIN people p ON p.id = mc.person_id
 WHERE mc.media_item_id = $1
@@ -351,6 +357,7 @@ type ListMediaCrewRow struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Slug         string             `json:"slug"`
+	SearchVector interface{}        `json:"search_vector"`
 }
 
 func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListMediaCrewRow, error) {
@@ -381,6 +388,7 @@ func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Slug,
+			&i.SearchVector,
 		); err != nil {
 			return nil, err
 		}

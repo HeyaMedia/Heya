@@ -27,12 +27,6 @@ WHERE media_type = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
 
--- name: SearchMediaItems :many
-SELECT * FROM media_items
-WHERE search_vector @@ plainto_tsquery('english', $1)
-ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC
-LIMIT $2 OFFSET $3;
-
 -- name: UpdateMediaItem :one
 UPDATE media_items
 SET title = $2, sort_title = $3, year = $4, description = $5,

@@ -12,9 +12,10 @@ const (
 	EventMediaUpdated EventType = "media.updated"
 	EventMediaRemoved EventType = "media.removed"
 	EventMediaWatched EventType = "media.watched"
-	EventQueueStatus  EventType = "queue.status"
-	EventActiveJobs   EventType = "active_jobs"
-	EventStatsUpdated EventType = "stats.updated"
+	EventQueueStatus   EventType = "queue.status"
+	EventActiveJobs    EventType = "active_jobs"
+	EventStatsUpdated  EventType = "stats.updated"
+	EventScanProgress  EventType = "scan.progress"
 )
 
 type Event struct {
@@ -67,6 +68,20 @@ type ActiveJob struct {
 
 type ActiveJobsPayload struct {
 	Jobs []ActiveJob `json:"jobs"`
+}
+
+type ScanProgressPayload struct {
+	Libraries []LibraryScanProgress `json:"libraries"`
+}
+
+type LibraryScanProgress struct {
+	LibraryID  int64  `json:"library_id"`
+	Name       string `json:"name"`
+	Total      int    `json:"total"`
+	Processed  int    `json:"processed"`
+	Matched    int    `json:"matched"`
+	Unmatched  int    `json:"unmatched"`
+	Errors     int    `json:"errors"`
 }
 
 type StatsPayload struct {

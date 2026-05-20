@@ -63,6 +63,7 @@ func TestIntegration(t *testing.T) {
 		Paths:        []string{"/media/movies"},
 		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
 		CreatedBy:    user.ID,
+		Settings:     []byte("{}"),
 	})
 	if err != nil {
 		t.Fatalf("creating library: %v", err)
@@ -123,10 +124,10 @@ func TestIntegration(t *testing.T) {
 		t.Errorf("expected imdb tt15239678, got %s", gotMovie.ImdbID)
 	}
 
-	results, err := qtx.SearchMediaItems(ctx, sqlc.SearchMediaItemsParams{
-		PlaintoTsquery: "dune",
-		Limit:          10,
-		Offset:         0,
+	results, err := qtx.SearchAllMedia(ctx, sqlc.SearchAllMediaParams{
+		Lower:  "dune",
+		Limit:  10,
+		Offset: 0,
 	})
 	if err != nil {
 		t.Fatalf("searching: %v", err)

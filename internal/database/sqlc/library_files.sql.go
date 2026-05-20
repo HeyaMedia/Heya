@@ -79,7 +79,7 @@ func (q *Queries) DeleteLibraryFilesByPath(ctx context.Context, arg DeleteLibrar
 }
 
 const getLibraryFileByID = `-- name: GetLibraryFileByID :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files WHERE id = $1
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info, keyframes FROM library_files WHERE id = $1
 `
 
 func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile, error) {
@@ -99,12 +99,13 @@ func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.MediaInfo,
+		&i.Keyframes,
 	)
 	return i, err
 }
 
 const getLibraryFileByPath = `-- name: GetLibraryFileByPath :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files WHERE library_id = $1 AND path = $2
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info, keyframes FROM library_files WHERE library_id = $1 AND path = $2
 `
 
 type GetLibraryFileByPathParams struct {
@@ -129,6 +130,7 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.MediaInfo,
+		&i.Keyframes,
 	)
 	return i, err
 }
@@ -196,7 +198,7 @@ func (q *Queries) ListAllLibraryFilePaths(ctx context.Context, libraryID int64) 
 }
 
 const listDeletedLibraryFiles = `-- name: ListDeletedLibraryFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info, keyframes FROM library_files
 WHERE library_id = $1 AND deleted_at IS NOT NULL
 ORDER BY deleted_at DESC
 LIMIT $2 OFFSET $3
@@ -231,6 +233,7 @@ func (q *Queries) ListDeletedLibraryFiles(ctx context.Context, arg ListDeletedLi
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.MediaInfo,
+			&i.Keyframes,
 		); err != nil {
 			return nil, err
 		}
@@ -242,8 +245,40 @@ func (q *Queries) ListDeletedLibraryFiles(ctx context.Context, arg ListDeletedLi
 	return items, nil
 }
 
+const listEpisodeFiles = `-- name: ListEpisodeFiles :many
+SELECT id, size, parse_result FROM library_files
+WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'
+ORDER BY path ASC
+`
+
+type ListEpisodeFilesRow struct {
+	ID          int64  `json:"id"`
+	Size        int64  `json:"size"`
+	ParseResult []byte `json:"parse_result"`
+}
+
+func (q *Queries) ListEpisodeFiles(ctx context.Context, mediaItemID pgtype.Int8) ([]ListEpisodeFilesRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeFiles, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEpisodeFilesRow{}
+	for rows.Next() {
+		var i ListEpisodeFilesRow
+		if err := rows.Scan(&i.ID, &i.Size, &i.ParseResult); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLibraryFiles = `-- name: ListLibraryFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info, keyframes FROM library_files
 WHERE library_id = $1 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
@@ -278,6 +313,7 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.MediaInfo,
+			&i.Keyframes,
 		); err != nil {
 			return nil, err
 		}
@@ -290,7 +326,7 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 }
 
 const listLibraryFilesByMediaItem = `-- name: ListLibraryFilesByMediaItem :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL LIMIT 1
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info, keyframes FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDER BY path ASC
 `
 
 func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID pgtype.Int8) ([]LibraryFile, error) {
@@ -316,6 +352,7 @@ func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID p
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.MediaInfo,
+			&i.Keyframes,
 		); err != nil {
 			return nil, err
 		}
@@ -328,7 +365,7 @@ func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID p
 }
 
 const listLibraryFilesByStatus = `-- name: ListLibraryFilesByStatus :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info, keyframes FROM library_files
 WHERE library_id = $1 AND status = $4 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
@@ -369,6 +406,7 @@ func (q *Queries) ListLibraryFilesByStatus(ctx context.Context, arg ListLibraryF
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.MediaInfo,
+			&i.Keyframes,
 		); err != nil {
 			return nil, err
 		}
@@ -433,6 +471,22 @@ func (q *Queries) SoftDeleteLibraryFilesByPath(ctx context.Context, arg SoftDele
 	return err
 }
 
+const updateLibraryFileKeyframes = `-- name: UpdateLibraryFileKeyframes :exec
+UPDATE library_files
+SET keyframes = $2, updated_at = now()
+WHERE id = $1
+`
+
+type UpdateLibraryFileKeyframesParams struct {
+	ID        int64  `json:"id"`
+	Keyframes []byte `json:"keyframes"`
+}
+
+func (q *Queries) UpdateLibraryFileKeyframes(ctx context.Context, arg UpdateLibraryFileKeyframesParams) error {
+	_, err := q.db.Exec(ctx, updateLibraryFileKeyframes, arg.ID, arg.Keyframes)
+	return err
+}
+
 const updateLibraryFileMediaInfo = `-- name: UpdateLibraryFileMediaInfo :exec
 UPDATE library_files
 SET media_info = $2, updated_at = now()
@@ -479,7 +533,7 @@ ON CONFLICT (library_id, path) DO UPDATE
 SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
     deleted_at = NULL, updated_at = now()
-RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info
+RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info, keyframes
 `
 
 type UpsertLibraryFileParams struct {
@@ -515,6 +569,7 @@ func (q *Queries) UpsertLibraryFile(ctx context.Context, arg UpsertLibraryFilePa
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.MediaInfo,
+		&i.Keyframes,
 	)
 	return i, err
 }

@@ -11,25 +11,18 @@ import (
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/fanart"
-	"github.com/karbowiak/heya/internal/metadata/musicbrainz"
-	"github.com/karbowiak/heya/internal/metadata/omdb"
-	"github.com/karbowiak/heya/internal/metadata/openlibrary"
-	"github.com/karbowiak/heya/internal/metadata/anidb"
-	"github.com/karbowiak/heya/internal/metadata/tmdb"
-	"github.com/karbowiak/heya/internal/metadata/tvdb"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/watcher"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
+	"github.com/rs/zerolog/log"
 )
 
 type App struct {
 	Config         *config.Config
 	DB             *pgxpool.Pool
-	Scanner        *scanner.Scanner
 	Matcher        *matcher.Matcher
 	Downloader     *images.Downloader
 	River          *river.Client[pgx.Tx]
@@ -51,32 +44,27 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 
 	dl := images.NewDownloader(cfg.DataDir)
-	sc := scanner.New(db)
+
+	hm := heyamedia.NewClient(cfg.HeyaMediaURL)
 
 	registry := metadata.NewRegistry()
 
-	if cfg.TMDBToken != "" {
-		tmdbProvider := tmdb.NewProvider(cfg.TMDBToken)
-		registry.Register(tmdbProvider)
-		registry.RegisterArtwork(tmdbProvider)
-	}
-	if cfg.TVDBAPIKey != "" {
-		registry.Register(tvdb.NewProvider(cfg.TVDBAPIKey))
-	}
-	if cfg.AniDBClient != "" {
-		registry.Register(anidb.NewProvider(cfg.AniDBClient, cfg.DataDir))
-	}
-	registry.Register(musicbrainz.NewProvider())
-	registry.Register(openlibrary.NewProvider())
+	tmdbProvider := heyamedia.NewTMDBProvider(hm)
+	registry.Register(tmdbProvider)
+	registry.RegisterArtwork(heyamedia.NewTMDBArtworkProvider(hm))
 
-	if cfg.FanartAPIKey != "" {
-		registry.RegisterArtwork(fanart.NewProvider(cfg.FanartAPIKey))
-	}
-	if cfg.OMDbAPIKey != "" {
-		omdbProvider := omdb.NewProvider(cfg.OMDbAPIKey)
-		registry.Register(omdbProvider)
-		registry.RegisterRatings(omdbProvider)
-	}
+	registry.Register(heyamedia.NewTVDBProvider(hm))
+
+	omdbProvider := heyamedia.NewOMDBProvider(hm)
+	registry.Register(omdbProvider)
+	registry.RegisterRatings(omdbProvider)
+
+	registry.RegisterArtwork(heyamedia.NewFanartProvider(hm))
+
+	registry.Register(heyamedia.NewMusicBrainzProvider(hm))
+	registry.Register(heyamedia.NewOpenLibraryProvider(hm))
+
+	log.Info().Str("url", cfg.HeyaMediaURL).Msg("metadata providers registered via heya.media")
 
 	hub := eventhub.New()
 
@@ -84,19 +72,34 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	var tc *transcoder.SessionManager
 	var tcCache *transcoder.CacheManager
+	var hwAccel transcoder.HwAccelConfig
 	if transcoder.IsFFmpegAvailable() {
 		tcCache = transcoder.NewCacheManager(cfg.TranscodeCacheDir, cfg.TranscodeCacheMaxGB)
-		tc = transcoder.NewSessionManager(tcCache)
+
+		switch cfg.HWAccel {
+		case "auto":
+			accelType := transcoder.DetectHardwareAccel()
+			hwAccel = transcoder.BuildHwAccelConfig(accelType)
+			log.Info().Str("hwaccel", string(accelType)).Msg("hardware acceleration detected")
+		case "none", "":
+			hwAccel = transcoder.BuildHwAccelConfig(transcoder.HwAccelNone)
+		default:
+			hwAccel = transcoder.BuildHwAccelConfig(transcoder.HwAccelType(cfg.HWAccel))
+			log.Info().Str("hwaccel", cfg.HWAccel).Msg("hardware acceleration forced")
+		}
+
+		tc = transcoder.NewSessionManager(tcCache, hwAccel)
 	}
 
 	riverClient, err := worker.Setup(ctx, worker.Config{
 		DB:             db,
 		DataDir:        cfg.DataDir,
-		TMDBToken:      cfg.TMDBToken,
+		HeyaMedia:      hm,
 		Matcher:        m,
 		Downloader:     dl,
 		Registry:       registry,
 		TranscodeCache: tcCache,
+		HWAccel:        hwAccel,
 		Hub:            hub,
 	})
 	if err != nil {
@@ -109,7 +112,6 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	return &App{
 		Config:         cfg,
 		DB:             db,
-		Scanner:        sc,
 		Matcher:        m,
 		Downloader:     dl,
 		River:          riverClient,
@@ -177,3 +179,4 @@ func (a *App) Close() {
 		a.DB.Close()
 	}
 }
+

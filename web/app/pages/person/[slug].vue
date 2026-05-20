@@ -6,12 +6,14 @@
   <div v-else-if="data" class="scroll" style="height: 100%">
     <div class="page-pad" style="max-width: 1200px">
       <div class="person-header">
-        <img
-          v-if="data.person.profile_path && !data.person.profile_path.startsWith('http')"
-          :src="`/api/person/${data.person.id}/image`"
-          class="person-photo"
-          @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
-        />
+        <div v-if="data.person.profile_path && !data.person.profile_path.startsWith('http')" class="person-photo-wrap">
+          <img
+            :src="`/api/person/${data.person.id}/image`"
+            class="person-photo"
+            @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+          />
+          <button class="zoom-btn" @click="lightbox.open(`/api/person/${data.person.id}/image`)"><Icon name="expand" :size="14" /></button>
+        </div>
         <div v-else class="person-photo-placeholder">
           {{ data.person.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}
         </div>
@@ -23,6 +25,10 @@
             <template v-if="data.person.birthday && data.person.place_of_birth"><span class="dot" /></template>
             <span v-if="data.person.place_of_birth">{{ data.person.place_of_birth }}</span>
             <template v-if="data.person.deathday"><span class="dot" /><span>Died {{ formatDate(data.person.deathday) }}</span></template>
+          </div>
+          <div class="person-stats">
+            <span v-if="data.cast_credits?.length" class="stat">{{ data.cast_credits.length }} role{{ data.cast_credits.length !== 1 ? 's' : '' }}</span>
+            <span v-if="data.crew_credits?.length" class="stat">{{ data.crew_credits.length }} crew credit{{ data.crew_credits.length !== 1 ? 's' : '' }}</span>
           </div>
           <div v-if="data.person.also_known_as?.length" class="person-aka">
             Also known as: {{ data.person.also_known_as.slice(0, 5).join(', ') }}
@@ -37,44 +43,73 @@
 
       <div v-if="data.person.biography" class="person-bio">
         <h3 class="section-title" style="margin-bottom: 12px">Biography</h3>
-        <p v-for="(para, i) in data.person.biography.split('\n\n').filter(Boolean)" :key="i" class="bio-para">{{ para }}</p>
+        <p v-for="(para, i) in bioParas" :key="i" class="bio-para">{{ para }}</p>
+        <button v-if="bioTruncated" class="bio-toggle" @click="bioExpanded = !bioExpanded">
+          {{ bioExpanded ? 'Show less' : 'Read more' }}
+        </button>
       </div>
 
-      <div v-if="data.cast_credits?.length" class="detail-section">
-        <h3 class="section-title" style="margin-bottom: 16px">Known For</h3>
-        <div class="credits-grid">
-          <NuxtLink
-            v-for="c in data.cast_credits"
-            :key="`cast-${c.media_item_id}`"
-            :to="mediaUrl({ id: c.media_item_id, title: c.title, year: c.year, media_type: c.media_type })"
-            class="credit-card card-tile"
-          >
-            <Poster :idx="c.media_item_id" :src="usePosterUrl(c.media_item_id)" aspect="2/3" :title="c.title" />
-            <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ c.title }}</div>
-              <div class="grid-tile-sub">{{ c.year }} · {{ c.character }}</div>
-            </div>
-          </NuxtLink>
-        </div>
+      <!-- Filter tabs -->
+      <div v-if="data.cast_credits?.length || data.crew_credits?.length" class="filmography-filters">
+        <button
+          v-for="f in filterOptions"
+          :key="f.key"
+          class="filter-tab"
+          :class="{ active: activeFilter === f.key }"
+          @click="activeFilter = f.key"
+        >
+          {{ f.label }}
+          <span class="filter-count">{{ f.count }}</span>
+        </button>
       </div>
 
-      <div v-if="data.crew_credits?.length" class="detail-section">
-        <h3 class="section-title" style="margin-bottom: 16px">Crew</h3>
-        <div class="credits-grid">
-          <NuxtLink
-            v-for="c in data.crew_credits"
-            :key="`crew-${c.media_item_id}-${c.job}`"
-            :to="mediaUrl({ id: c.media_item_id, title: c.title, year: c.year, media_type: c.media_type })"
-            class="credit-card card-tile"
-          >
-            <Poster :idx="c.media_item_id" :src="usePosterUrl(c.media_item_id)" aspect="2/3" :title="c.title" />
-            <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ c.title }}</div>
-              <div class="grid-tile-sub">{{ c.year }} · {{ c.job }}</div>
-            </div>
-          </NuxtLink>
-        </div>
+      <!-- Cast / Acting credits -->
+      <div v-if="activeFilter === 'all' || activeFilter === 'acting'" class="detail-section">
+        <template v-if="sortedCast.length">
+          <h3 class="section-title" style="margin-bottom: 16px">Acting</h3>
+          <div class="credits-grid">
+            <NuxtLink
+              v-for="c in sortedCast"
+              :key="`cast-${c.media_item_id}`"
+              :to="mediaUrl({ id: c.media_item_id, title: c.title, year: c.year, media_type: c.media_type })"
+              class="credit-card card-tile"
+            >
+              <Poster :idx="c.media_item_id" :src="usePosterUrl(c.media_item_id)" aspect="2/3" :title="c.title" />
+              <div class="grid-tile-meta">
+                <div class="grid-tile-title">{{ c.title }}</div>
+                <div class="grid-tile-sub">
+                  {{ c.year || '?' }}
+                  <template v-if="c.character"> · {{ c.character }}</template>
+                </div>
+              </div>
+            </NuxtLink>
+          </div>
+        </template>
       </div>
+
+      <!-- Crew credits grouped by department -->
+      <template v-if="activeFilter === 'all' || activeFilter !== 'acting'">
+        <div v-for="dept in filteredCrewDepts" :key="dept.name" class="detail-section">
+          <h3 class="section-title" style="margin-bottom: 16px">{{ dept.name }}</h3>
+          <div class="credits-grid">
+            <NuxtLink
+              v-for="c in dept.credits"
+              :key="`crew-${c.media_item_id}-${c.job}`"
+              :to="mediaUrl({ id: c.media_item_id, title: c.title, year: c.year, media_type: c.media_type })"
+              class="credit-card card-tile"
+            >
+              <Poster :idx="c.media_item_id" :src="usePosterUrl(c.media_item_id)" aspect="2/3" :title="c.title" />
+              <div class="grid-tile-meta">
+                <div class="grid-tile-title">{{ c.title }}</div>
+                <div class="grid-tile-sub">
+                  {{ c.year || '?' }}
+                  <template v-if="c.job"> · {{ c.job }}</template>
+                </div>
+              </div>
+            </NuxtLink>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -91,9 +126,63 @@ import type { PersonResponse } from '~~/shared/types'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
+const lightbox = useLightbox()
 
 const data = ref<PersonResponse | null>(null)
 const loading = ref(true)
+const activeFilter = ref('all')
+const bioExpanded = ref(false)
+
+const allParas = computed(() => data.value?.person.biography?.split('\n\n').filter(Boolean) || [])
+const bioTruncated = computed(() => allParas.value.length > 3)
+const bioParas = computed(() => {
+  if (bioExpanded.value || !bioTruncated.value) return allParas.value
+  return allParas.value.slice(0, 2)
+})
+
+const sortedCast = computed(() => {
+  if (!data.value?.cast_credits) return []
+  return [...data.value.cast_credits].sort((a, b) => (b.year || '').localeCompare(a.year || ''))
+})
+
+interface DeptGroup {
+  name: string
+  credits: any[]
+}
+
+const crewDepts = computed<DeptGroup[]>(() => {
+  if (!data.value?.crew_credits) return []
+  const deptMap = new Map<string, any[]>()
+  for (const c of data.value.crew_credits) {
+    const dept = c.department || 'Other'
+    if (!deptMap.has(dept)) deptMap.set(dept, [])
+    deptMap.get(dept)!.push(c)
+  }
+  return Array.from(deptMap.entries())
+    .map(([name, credits]) => ({
+      name,
+      credits: credits.sort((a: any, b: any) => (b.year || '').localeCompare(a.year || '')),
+    }))
+    .sort((a, b) => b.credits.length - a.credits.length)
+})
+
+const filteredCrewDepts = computed(() => {
+  if (activeFilter.value === 'all') return crewDepts.value
+  if (activeFilter.value === 'acting') return []
+  return crewDepts.value.filter(d => d.name === activeFilter.value)
+})
+
+const filterOptions = computed(() => {
+  const opts: { key: string; label: string; count: number }[] = []
+  const castCount = data.value?.cast_credits?.length || 0
+  const crewCount = data.value?.crew_credits?.length || 0
+  opts.push({ key: 'all', label: 'All', count: castCount + crewCount })
+  if (castCount > 0) opts.push({ key: 'acting', label: 'Acting', count: castCount })
+  for (const d of crewDepts.value) {
+    opts.push({ key: d.name, label: d.name, count: d.credits.length })
+  }
+  return opts
+})
 
 function formatDate(d: string) {
   if (!d) return ''
@@ -111,7 +200,18 @@ onMounted(async () => {
 
 <style scoped>
 .person-header { display: flex; gap: 32px; margin-bottom: 40px; }
-.person-photo { width: 180px; height: 180px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.person-photo-wrap { position: relative; width: 180px; height: 180px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+.person-photo { width: 100%; height: 100%; object-fit: cover; }
+.zoom-btn {
+  position: absolute; top: 8px; right: 8px;
+  width: 28px; height: 28px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.7);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s, background 0.15s;
+  cursor: zoom-in; z-index: 2;
+}
+.zoom-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+.person-photo-wrap:hover .zoom-btn { opacity: 1; }
 .person-photo-placeholder {
   width: 180px; height: 180px; border-radius: 50%;
   background: linear-gradient(135deg, var(--bg-4), var(--bg-3));
@@ -122,9 +222,43 @@ onMounted(async () => {
 .person-name { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 8px; }
 .person-meta { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: 14px; flex-wrap: wrap; }
 .person-meta .dot { width: 3px; height: 3px; background: var(--fg-3); border-radius: 50%; }
+.person-stats {
+  display: flex; gap: 12px; margin-top: 8px;
+}
+.person-stats .stat {
+  font-size: 12px; font-family: var(--font-mono); color: var(--fg-3);
+  padding: 3px 10px; border-radius: 100px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+}
 .person-aka { font-size: 12px; color: var(--fg-3); font-family: var(--font-mono); margin-top: 8px; }
 .person-bio { margin-bottom: 40px; }
 .bio-para { font-size: 15px; line-height: 1.7; color: var(--fg-1); margin: 0 0 16px; max-width: 800px; }
+.bio-toggle {
+  font-size: 12px; font-weight: 600; color: var(--gold);
+  font-family: var(--font-mono); cursor: pointer;
+  transition: opacity 0.12s;
+}
+.bio-toggle:hover { opacity: 0.8; }
+
+.filmography-filters {
+  display: flex; gap: 4px; padding-bottom: 20px;
+  border-bottom: 1px solid var(--border); margin-bottom: 24px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.filmography-filters::-webkit-scrollbar { display: none; }
+.filter-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 600;
+  color: var(--fg-2); background: transparent;
+  border: 1px solid var(--border); white-space: nowrap;
+  transition: all 0.15s;
+}
+.filter-tab:hover { border-color: var(--fg-3); color: var(--fg-0); }
+.filter-tab.active { background: var(--gold-soft); border-color: transparent; color: var(--gold); }
+.filter-count {
+  font-size: 10px; font-family: var(--font-mono); opacity: 0.6;
+}
+
 .credits-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px; }
 .credit-card { text-decoration: none; color: inherit; }
 .credit-card:hover .grid-tile-title { color: var(--gold); }

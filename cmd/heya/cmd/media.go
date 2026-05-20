@@ -292,10 +292,10 @@ var mediaSearchCmd = &cobra.Command{
 		defer app.Close()
 
 		q := sqlc.New(app.DB)
-		results, err := q.SearchMediaItems(ctx, sqlc.SearchMediaItemsParams{
-			PlaintoTsquery: args[0],
-			Limit:          50,
-			Offset:         0,
+		results, err := q.SearchAllMedia(ctx, sqlc.SearchAllMediaParams{
+			Lower:  args[0],
+			Limit:  50,
+			Offset: 0,
 		})
 		if err != nil {
 			return err

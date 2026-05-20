@@ -38,7 +38,7 @@ var configShowCmd = &cobra.Command{
 			{"port", cfg.Port},
 			{"log_level", cfg.LogLevel},
 			{"log_format", cfg.LogFormat},
-			{"tmdb_api_token", maskToken(cfg.TMDBToken)},
+			{"heya_media_url", cfg.HeyaMediaURL},
 			{"data_dir", cfg.DataDir},
 		}
 
@@ -116,8 +116,8 @@ var configSetCmd = &cobra.Command{
 			fc.LogLevel = value
 		case "log_format":
 			fc.LogFormat = value
-		case "tmdb_api_token":
-			fc.TMDBToken = value
+		case "heya_media_url":
+			fc.HeyaMediaURL = value
 		case "data_dir":
 			fc.DataDir = value
 		default:

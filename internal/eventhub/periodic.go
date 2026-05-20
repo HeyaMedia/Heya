@@ -7,9 +7,62 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type ScanEnqueuer func(ctx context.Context, libraryID int64)
+
 func (h *Hub) StartPeriodicEmitters(ctx context.Context, db *pgxpool.Pool) {
 	go h.activityTicker(ctx, db)
 	go h.statsTicker(ctx, db)
+}
+
+func (h *Hub) StartScheduledScans(ctx context.Context, db *pgxpool.Pool, enqueue ScanEnqueuer) {
+	go h.scheduledScanTicker(ctx, db, enqueue)
+}
+
+func (h *Hub) scheduledScanTicker(ctx context.Context, db *pgxpool.Pool, enqueue ScanEnqueuer) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	check := func() {
+		rows, err := db.Query(ctx, `
+			SELECT id, scan_interval, updated_at FROM libraries
+			WHERE scan_interval IS NOT NULL AND scan_interval > '0'::interval
+		`)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var id int64
+			var interval time.Duration
+			var updatedAt time.Time
+			var pgInterval struct {
+				Microseconds int64
+				Valid        bool
+			}
+			if err := rows.Scan(&id, &pgInterval, &updatedAt); err != nil {
+				continue
+			}
+			if !pgInterval.Valid || pgInterval.Microseconds <= 0 {
+				continue
+			}
+			interval = time.Duration(pgInterval.Microseconds) * time.Microsecond
+
+			if time.Since(updatedAt) >= interval {
+				enqueue(ctx, id)
+			}
+		}
+	}
+
+	check()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			check()
+		}
+	}
 }
 
 func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
@@ -50,8 +103,51 @@ func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
 			}
 			rows.Close()
 			h.Emit(EventActiveJobs, ActiveJobsPayload{Jobs: jobs})
+
+			if pending > 0 || running > 0 {
+				h.emitScanProgress(ctx, db)
+			}
 		}
 	}
+}
+
+func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool) {
+	rows, err := db.Query(ctx, `
+		SELECT l.id, l.name,
+			count(*) AS total,
+			count(*) FILTER (WHERE lf.status != 'pending') AS processed,
+			count(*) FILTER (WHERE lf.status = 'matched') AS matched,
+			count(*) FILTER (WHERE lf.status = 'unmatched') AS unmatched,
+			count(*) FILTER (WHERE lf.status = 'error') AS errors
+		FROM library_files lf
+		JOIN libraries l ON l.id = lf.library_id
+		WHERE lf.status = 'pending'
+		   OR l.id IN (
+			   SELECT DISTINCT (rj.args->>'library_id')::bigint
+			   FROM river_job rj
+			   WHERE rj.state IN ('available', 'retryable', 'running')
+			     AND rj.args->>'library_id' IS NOT NULL
+		   )
+		GROUP BY l.id, l.name
+		HAVING count(*) FILTER (WHERE lf.status = 'pending') > 0
+		    OR count(*) < count(*) FILTER (WHERE lf.status IN ('matched','unmatched','error')) + count(*) FILTER (WHERE lf.status = 'pending')
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var libs []LibraryScanProgress
+	for rows.Next() {
+		var lp LibraryScanProgress
+		if err := rows.Scan(&lp.LibraryID, &lp.Name, &lp.Total, &lp.Processed, &lp.Matched, &lp.Unmatched, &lp.Errors); err != nil {
+			continue
+		}
+		if lp.Processed < lp.Total {
+			libs = append(libs, lp)
+		}
+	}
+	h.Emit(EventScanProgress, ScanProgressPayload{Libraries: libs})
 }
 
 func (h *Hub) statsTicker(ctx context.Context, db *pgxpool.Pool) {

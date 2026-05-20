@@ -15,6 +15,7 @@
       <div class="hero-content">
         <div class="hero-poster">
           <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" />
+          <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
         <div class="hero-info">
@@ -37,13 +38,19 @@
           </div>
 
           <div v-if="genres.length" style="display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0">
-            <Chip v-for="g in genres" :key="g">{{ g }}</Chip>
+            <NuxtLink v-for="g in genres" :key="g" :to="`/genre/${encodeURIComponent(g)}`"><Chip>{{ g }}</Chip></NuxtLink>
           </div>
 
           <div class="detail-actions">
-            <button class="btn btn-primary"><Icon name="play" :size="16" /> Play</button>
-            <button class="btn btn-secondary"><Icon name="plus" :size="16" /> My List</button>
-            <button class="btn-icon" style="color: var(--fg-1)"><Icon name="heart" :size="20" /></button>
+            <button v-if="firstEpisodeFileId" class="btn btn-primary" @click="playFirstEpisode"><Icon name="play" :size="16" /> Play {{ nextEpisodeLabel }}</button>
+            <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No Files</button>
+            <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
+            <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
+              <Icon :name="isFavorited ? 'heartfill' : 'heart'" :size="20" />
+            </button>
+            <button class="btn-icon" :style="{ color: showFullyWatched ? 'var(--good)' : 'var(--fg-1)' }" @click="toggleShowWatched" :title="showFullyWatched ? 'Mark as unwatched' : 'Mark as watched'">
+              <Icon name="check" :size="20" />
+            </button>
           </div>
 
           <p v-if="detail.media_item.description" class="detail-synopsis">{{ detail.media_item.description }}</p>
@@ -68,10 +75,26 @@
           </div>
 
           <div v-if="detail.keywords?.length" style="display: flex; gap: 5px; flex-wrap: wrap; margin-top: 16px">
-            <span v-for="k in detail.keywords" :key="k.id" class="keyword-tag">{{ k.name }}</span>
+            <NuxtLink v-for="k in detail.keywords" :key="k.id" :to="`/keyword/${encodeURIComponent(k.name)}`" class="keyword-tag">{{ k.name }}</NuxtLink>
           </div>
         </div>
       </div>
+
+      <!-- Backdrop indicators -->
+      <div v-if="backdropAssets.length > 1" class="bd-indicators" @mouseenter="pauseCarousel" @mouseleave="resumeCarousel">
+        <button
+          v-for="(_, i) in backdropAssets"
+          :key="`bd-${i}-${backdropIdx}`"
+          class="bd-bar"
+          :class="{ active: i === backdropIdx, paused: carouselPaused && i === backdropIdx }"
+          @click="jumpToBackdrop(i)"
+        />
+      </div>
+
+      <!-- Expand backdrop -->
+      <button v-if="backdropAssets.length > 0" class="hero-expand" @click="openBackdropLightbox">
+        <Icon name="expand" :size="14" />
+      </button>
     </div>
 
     <div class="detail-body-below">
@@ -85,11 +108,28 @@
             v-for="s in displaySeasons"
             :key="s.season_number"
             :to="seasonUrl(s)"
-            class="season-card card-tile"
+            class="season-card"
           >
-            <Poster :idx="s.season_number" :src="seasonPosterUrl(s)" :title="seasonLabel(s)" aspect="2/3" />
+            <div class="season-poster-wrap">
+              <Poster :idx="s.season_number" :src="seasonPosterUrl(s)" :title="seasonLabel(s)" aspect="2/3" />
+              <div v-if="seasonWatchInfo(s)" class="season-badge" :class="{ complete: seasonWatchInfo(s)!.remaining === 0 }">
+                <Icon v-if="seasonWatchInfo(s)!.remaining === 0" name="check" :size="10" />
+                <span v-else>{{ seasonWatchInfo(s)!.remaining }}</span>
+              </div>
+              <div class="season-overlay">
+                <button class="season-action" :class="{ loved: isSeasonFavorited(s) }" @click.stop.prevent="toggleSeasonFavorite(s)">
+                  <Icon :name="isSeasonFavorited(s) ? 'heartfill' : 'heart'" :size="14" />
+                </button>
+                <button class="season-action" :class="{ watched: seasonFullyWatched(s) }" @click.stop.prevent="toggleSeasonWatched(s)">
+                  <Icon name="check" :size="14" />
+                </button>
+                <button class="season-action" @click.stop.prevent="openSeasonLightbox(s)">
+                  <Icon name="expand" :size="14" />
+                </button>
+              </div>
+            </div>
             <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ seasonLabel(s) }} <span class="ep-count">({{ s.episodes?.length || 0 }} eps)</span></div>
+              <div class="grid-tile-title">{{ seasonLabel(s) }}</div>
               <div class="grid-tile-sub" v-if="s.air_date">{{ formatYear(s.air_date) }}</div>
             </div>
           </NuxtLink>
@@ -111,7 +151,10 @@
 
         <div v-if="peopleTab === 'cast'" class="hscroll" style="margin-top: 16px">
           <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-            <img v-if="c.profile_path && !c.profile_path.startsWith('http')" :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+            <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
+              <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+              <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
+            </div>
             <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
             <div class="cast-name">{{ c.name }}</div>
             <div class="cast-role">{{ c.character }}</div>
@@ -123,7 +166,10 @@
             <div class="section-title" style="font-size: 11px; margin-bottom: 10px">{{ dept.name }}</div>
             <div class="crew-dept-grid">
               <NuxtLink v-for="c in dept.members" :key="`${c.id}-${c.job}`" :to="personUrl(c)" class="crew-card">
-                <img v-if="c.profile_path && !c.profile_path.startsWith('http')" :src="`/api/person/${c.id}/image`" class="crew-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="crew-photo-wrap">
+                  <img :src="`/api/person/${c.id}/image`" class="crew-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                  <button class="zoom-btn round crew-zoom" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="8" /></button>
+                </div>
                 <div v-else class="crew-initials">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
                 <div>
                   <div class="crew-name">{{ c.name }}</div>
@@ -174,6 +220,45 @@
         </div>
       </div>
     </div>
+
+    <!-- List modal -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="showListModal" class="modal-overlay" @click.self="showListModal = false">
+          <div class="modal-card">
+            <div class="modal-header">
+              <h3>Add to List</h3>
+              <button class="btn-icon" @click="showListModal = false"><Icon name="close" :size="16" /></button>
+            </div>
+            <div class="modal-body">
+              <div v-if="!showCreateList">
+                <button
+                  v-for="l in userLists" :key="l.id"
+                  class="list-option" :class="{ active: l.contains }"
+                  @click="toggleListItem(l)"
+                >
+                  <Icon :name="l.contains ? 'check' : 'plus'" :size="14" />
+                  <span>{{ l.name }}</span>
+                  <span class="list-option-count">{{ l.item_count }}</span>
+                </button>
+                <div v-if="!userLists.length" style="padding: 16px 0; color: var(--fg-3); font-size: 13px; text-align: center">No lists yet</div>
+                <button class="list-create-btn" @click="showCreateList = true">
+                  <Icon name="plus" :size="14" /> Create new list
+                </button>
+              </div>
+              <div v-else>
+                <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
+                <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
+                <div style="display: flex; gap: 8px; margin-top: 12px">
+                  <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
+                  <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -182,6 +267,7 @@ import type { MediaDetail } from '~~/shared/types'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
+const lightbox = useLightbox()
 
 const detail = ref<MediaDetail | null>(null)
 const loading = ref(true)
@@ -192,6 +278,12 @@ const showA = ref(true)
 const backdropA = ref<string | null>(null)
 const backdropB = ref<string | null>(null)
 const backdropIdx = ref(0)
+const carouselPaused = ref(false)
+
+const BACKDROP_INTERVAL = 8000
+let bdTimeout: ReturnType<typeof setTimeout> | null = null
+let bdStart = 0
+let bdRemaining = BACKDROP_INTERVAL
 
 const backdropAssets = computed(() => {
   if (!detail.value?.assets) return []
@@ -204,7 +296,7 @@ const backdropAssets = computed(() => {
 
 function getBackdropUrl(idx: number) {
   if (backdropAssets.value.length > 0) {
-    const asset = backdropAssets.value[idx % backdropAssets.value.length]
+    const asset = backdropAssets.value[idx % backdropAssets.value.length]!
     return `/api/media/${detail.value?.media_item.id}/image/backdrop?sort=${asset.sort_order}`
   }
   return detail.value ? useBackdropUrl(detail.value.media_item.id) : null
@@ -216,6 +308,60 @@ function advanceBackdrop() {
   const url = getBackdropUrl(backdropIdx.value)
   if (showA.value) { backdropB.value = url } else { backdropA.value = url }
   showA.value = !showA.value
+}
+
+function startCarouselTimer() {
+  bdStart = Date.now()
+  bdRemaining = BACKDROP_INTERVAL
+  bdTimeout = setTimeout(() => {
+    advanceBackdrop()
+    startCarouselTimer()
+  }, BACKDROP_INTERVAL)
+}
+
+function pauseCarousel() {
+  carouselPaused.value = true
+  if (bdTimeout) clearTimeout(bdTimeout)
+  bdRemaining -= Date.now() - bdStart
+}
+
+function resumeCarousel() {
+  carouselPaused.value = false
+  bdStart = Date.now()
+  bdTimeout = setTimeout(() => {
+    advanceBackdrop()
+    startCarouselTimer()
+  }, bdRemaining)
+}
+
+function jumpToBackdrop(idx: number) {
+  if (idx === backdropIdx.value) return
+  if (bdTimeout) clearTimeout(bdTimeout)
+  backdropIdx.value = idx
+  const url = getBackdropUrl(idx)
+  if (showA.value) { backdropB.value = url } else { backdropA.value = url }
+  showA.value = !showA.value
+  if (!carouselPaused.value) startCarouselTimer()
+}
+
+// Lightbox openers
+function openPosterLightbox() {
+  const src = usePosterUrl(detail.value!.media_item.id)
+  if (src) lightbox.open(src)
+}
+
+function openBackdropLightbox() {
+  const urls = backdropAssets.value.map((_, i) => getBackdropUrl(i)!)
+  if (urls.length) lightbox.open(urls, backdropIdx.value)
+  else {
+    const src = useBackdropUrl(detail.value!.media_item.id)
+    if (src) lightbox.open(src)
+  }
+}
+
+function openSeasonLightbox(s: any) {
+  const url = seasonPosterUrl(s)
+  if (url) lightbox.open(url)
 }
 
 const displaySeasons = computed(() => {
@@ -250,6 +396,159 @@ const crewByDepartment = computed(() => {
   return Array.from(depts.entries()).map(([name, members]) => ({ name, members }))
 })
 
+interface UpNextData {
+  has_next: boolean
+  episode_id?: number
+  episode_number?: number
+  episode_title?: string
+  season_number?: number
+  media_item_id?: number
+}
+const upNext = ref<UpNextData | null>(null)
+
+const nextEpisodeKey = computed(() => {
+  if (upNext.value?.has_next && upNext.value.season_number && upNext.value.episode_number) {
+    return `s${upNext.value.season_number}e${upNext.value.episode_number}`
+  }
+  if (!detail.value?.episode_files) return null
+  const keys = Object.keys(detail.value.episode_files).sort()
+  return keys.length > 0 ? keys[0] : null
+})
+
+const firstEpisodeFileId = computed(() => {
+  if (!nextEpisodeKey.value || !detail.value?.episode_files) return null
+  return detail.value.episode_files[nextEpisodeKey.value]?.file_id ?? null
+})
+
+const nextEpisodeLabel = computed(() => {
+  if (!nextEpisodeKey.value) return ''
+  const match = nextEpisodeKey.value.match(/^s(\d+)e(\d+)$/)
+  if (!match) return ''
+  const label = `S${match[1].padStart(2, '0')}E${match[2].padStart(2, '0')}`
+  return label
+})
+
+function playFirstEpisode() {
+  if (!firstEpisodeFileId.value || !detail.value || !nextEpisodeKey.value) return
+  const params = new URLSearchParams({
+    media_item_id: String(detail.value.media_item.id),
+    title: `${detail.value.media_item.title} - ${nextEpisodeLabel.value}`,
+  })
+  navigateTo(`/watch/${firstEpisodeFileId.value}?${params}`)
+}
+
+async function loadUpNext() {
+  if (!detail.value) return
+  try {
+    upNext.value = await apiFetch<UpNextData>(`/api/media/${detail.value.media_item.id}/up-next`)
+  } catch { /* empty */ }
+}
+
+// Favorites
+const isFavorited = ref(false)
+
+async function toggleFavorite() {
+  if (!detail.value) return
+  const res = await apiFetch<{ favorited: boolean }>('/api/favorites/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ entity_type: 'media_item', entity_id: detail.value.media_item.id }),
+  })
+  isFavorited.value = res.favorited
+}
+
+async function loadState() {
+  if (!detail.value) return
+  try {
+    const st = await fetchUserState('seasons', detail.value.media_item.id)
+    seasonStates.value = new Map((st.seasons || []).map(s => [s.season_id, s]))
+    isFavorited.value = (st.favorited_media || []).includes(detail.value.media_item.id)
+    seasonFavorites.value = new Set(st.favorited_seasons || [])
+  } catch { /* empty */ }
+}
+
+// Season favorites
+const seasonFavorites = ref<Set<number>>(new Set())
+
+function isSeasonFavorited(s: any) { return seasonFavorites.value.has(s.id) }
+
+async function toggleSeasonFavorite(s: any) {
+  const res = await apiFetch<{ favorited: boolean }>('/api/favorites/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ entity_type: 'season', entity_id: s.id }),
+  })
+  if (res.favorited) seasonFavorites.value.add(s.id)
+  else seasonFavorites.value.delete(s.id)
+}
+
+// Season watched tracking
+const seasonStates = ref<Map<number, { season_id: number; total_episodes: number; watched_episodes: number }>>(new Map())
+
+const showFullyWatched = computed(() => {
+  if (seasonStates.value.size === 0) return false
+  for (const s of seasonStates.value.values()) {
+    if (s.total_episodes === 0 || s.watched_episodes < s.total_episodes) return false
+  }
+  return true
+})
+
+function seasonWatchInfo(s: any): { remaining: number } | null {
+  const info = seasonStates.value.get(s.id)
+  if (!info || info.total_episodes === 0) return null
+  return { remaining: info.total_episodes - info.watched_episodes }
+}
+
+function seasonFullyWatched(s: any): boolean {
+  const info = seasonStates.value.get(s.id)
+  return !!info && info.total_episodes > 0 && info.watched_episodes >= info.total_episodes
+}
+
+async function toggleSeasonWatched(s: any) {
+  const watched = seasonFullyWatched(s)
+  await apiFetch(`/api/seasons/${s.id}/watched`, { method: 'POST', body: JSON.stringify({ watched: !watched }) })
+  await loadState()
+}
+
+async function toggleShowWatched() {
+  if (!detail.value) return
+  await apiFetch(`/api/media/${detail.value.media_item.id}/watched`, { method: 'POST', body: JSON.stringify({ watched: !showFullyWatched.value }) })
+  await loadState()
+}
+
+// User lists
+const showListModal = ref(false)
+const showCreateList = ref(false)
+const newListName = ref('')
+const newListDesc = ref('')
+const userLists = ref<any[]>([])
+
+async function loadLists() {
+  if (!detail.value) return
+  try {
+    userLists.value = await apiFetch<any[]>(`/api/lists?media_item_id=${detail.value.media_item.id}`)
+  } catch { /* empty */ }
+}
+
+async function createList() {
+  if (!newListName.value.trim()) return
+  await apiFetch('/api/lists', { method: 'POST', body: JSON.stringify({ name: newListName.value.trim(), description: newListDesc.value.trim() }) })
+  newListName.value = ''
+  newListDesc.value = ''
+  showCreateList.value = false
+  await loadLists()
+}
+
+async function toggleListItem(l: any) {
+  if (!detail.value) return
+  if (l.contains) {
+    await apiFetch(`/api/lists/${l.id}/items/${detail.value.media_item.id}`, { method: 'DELETE' })
+  } else {
+    await apiFetch(`/api/lists/${l.id}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: detail.value.media_item.id }) })
+  }
+  await loadLists()
+}
+
+watch(showListModal, (v) => { if (v) loadLists() })
+
 function seasonUrl(s: any) {
   const num = s.season_number === 0 ? 'specials' : String(s.season_number)
   return `/tv/${slug.value}/season/${num}`
@@ -278,21 +577,21 @@ function formatRatingSource(s: string) {
   return map[s] || s
 }
 
-let timer: ReturnType<typeof setInterval> | null = null
-
 onMounted(async () => {
   try {
     detail.value = await apiFetch<MediaDetail>(`/api/media/${slug.value}`)
     await nextTick()
     backdropA.value = getBackdropUrl(0)
     if (backdropAssets.value.length > 1) {
-      timer = setInterval(advanceBackdrop, 8000)
+      startCarouselTimer()
     }
+    loadState()
+    loadUpNext()
   } catch { navigateTo('/tv') }
   loading.value = false
 })
 
-onUnmounted(() => { if (timer) clearInterval(timer) })
+onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 </script>
 
 <style scoped>
@@ -312,7 +611,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   display: grid; grid-template-columns: 240px 1fr;
   gap: 40px; padding: 40px 40px 48px; max-width: 1300px;
 }
-.hero-poster { align-self: start; }
+.hero-poster { align-self: start; position: relative; }
 .hero-info { display: flex; flex-direction: column; justify-content: center; }
 .detail-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .detail-title { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0 0 4px; }
@@ -324,7 +623,124 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .info-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 20px; font-size: 12px; margin-top: 16px; max-width: 500px; }
 .info-label { color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; padding-top: 2px; }
 .info-value { font-size: 13px; color: var(--fg-1); line-height: 1.5; }
-.keyword-tag { font-size: 10px; padding: 3px 10px; border-radius: 100px; background: var(--bg-3); color: var(--fg-2); font-family: var(--font-mono); }
+.keyword-tag { font-size: 10px; padding: 3px 10px; border-radius: 100px; background: var(--bg-3); color: var(--fg-2); font-family: var(--font-mono); transition: background 0.15s, color 0.15s; }
+.keyword-tag:hover { background: var(--gold-soft); color: var(--gold); }
+
+/* Backdrop indicators */
+.bd-indicators {
+  position: absolute;
+  bottom: 24px;
+  right: 48px;
+  z-index: 4;
+  display: flex;
+  gap: 5px;
+}
+.bd-bar {
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.bd-bar:hover { background: rgba(255,255,255,0.4); }
+.bd-bar.active { background: rgba(255,255,255,0.12); }
+.bd-bar.active::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: var(--gold);
+  border-radius: 2px;
+  animation: bd-fill 8s linear forwards;
+}
+.bd-bar.paused::after { animation-play-state: paused; }
+@keyframes bd-fill { from { width: 0; } to { width: 100%; } }
+
+/* Expand button */
+.hero-expand {
+  position: absolute;
+  bottom: 24px;
+  right: 16px;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  opacity: 0;
+}
+.hero-section:hover .hero-expand { opacity: 1; }
+.hero-expand:hover { background: rgba(0,0,0,0.6); color: #fff; }
+
+/* Zoom button on images */
+.zoom-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.55);
+  color: rgba(255,255,255,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  cursor: zoom-in;
+  z-index: 2;
+}
+.zoom-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+.zoom-btn.sm { width: 22px; height: 22px; top: 6px; right: 6px; }
+.zoom-btn.round { border-radius: 50%; top: 2px; right: 2px; width: 20px; height: 20px; }
+.zoom-btn.crew-zoom { top: 0; right: 0; width: 16px; height: 16px; }
+.hero-poster:hover .zoom-btn,
+.season-poster-wrap:hover .zoom-btn,
+.cast-photo-wrap:hover .zoom-btn,
+.crew-photo-wrap:hover .zoom-btn { opacity: 1; }
+
+/* Season poster wrap */
+.season-poster-wrap { position: relative; border-radius: var(--r-md); overflow: hidden; }
+
+/* Season badge (episodes remaining / checkmark) */
+.season-badge {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: 100px; font-size: 11px; font-weight: 700; font-family: var(--font-mono);
+  background: rgba(0,0,0,0.7); color: var(--fg-0);
+  display: flex; align-items: center; justify-content: center;
+}
+.season-badge.complete { background: var(--good); color: #000; }
+
+/* Season overlay actions (heart, check, expand) */
+.season-overlay {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 2;
+  display: flex; gap: 4px; padding: 6px;
+  background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+  opacity: 0; transition: opacity 0.15s;
+}
+.season-poster-wrap:hover .season-overlay { opacity: 1; }
+.season-action {
+  width: 28px; height: 28px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.5); color: rgba(255,255,255,0.7);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.season-action:hover { background: rgba(0,0,0,0.8); color: #fff; }
+.season-action.loved { color: var(--bad); }
+.season-action.watched { color: var(--good); }
+
+/* Cast / crew photo wrap */
+.cast-photo-wrap { position: relative; width: 80px; height: 80px; border-radius: 50%; overflow: hidden; margin: 0 auto; }
+.crew-photo-wrap { position: relative; width: 36px; height: 36px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
 
 /* Seasons grid */
 .seasons-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 18px; }
@@ -337,7 +753,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .detail-section { margin-top: 36px; }
 .section-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 
-/* Tabs + Cast + Crew + Videos + Recs — same as movie page */
+/* Tabs + Cast + Crew + Videos + Recs */
 .tab-bar { display: flex; gap: 4px; }
 .tab-btn { padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; color: var(--fg-2); background: none; border: none; cursor: pointer; transition: all 0.15s; }
 .tab-btn:hover { background: rgba(255,255,255,0.04); }
@@ -347,14 +763,14 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .hscroll::-webkit-scrollbar { display: none; }
 .cast-card { width: 110px; flex-shrink: 0; text-decoration: none; color: inherit; text-align: center; }
 .cast-card:hover .cast-name { color: var(--gold); }
-.cast-photo { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; }
+.cast-photo { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; display: block; }
 .cast-avatar { width: 80px; height: 80px; border-radius: 50%; margin: 0 auto; background: linear-gradient(135deg, var(--bg-4), var(--bg-3)); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 600; color: var(--fg-2); }
 .cast-name { font-size: 12px; font-weight: 500; margin-top: 8px; transition: color 0.15s; }
 .cast-role { font-size: 10px; color: var(--fg-3); margin-top: 2px; }
 .crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 .crew-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--r-md); text-decoration: none; color: inherit; transition: background 0.15s; }
 .crew-card:hover { background: rgba(255,255,255,0.04); }
-.crew-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.crew-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; display: block; }
 .crew-initials { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; background: var(--bg-4); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--fg-2); }
 .crew-name { font-size: 13px; font-weight: 500; }
 .crew-job { font-size: 11px; color: var(--fg-3); }
@@ -373,11 +789,54 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .rating-source { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
 .rating-value { font-size: 20px; font-weight: 700; margin-top: 4px; }
 
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;
+}
+.modal-card {
+  background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+  width: 380px; max-width: 90vw; max-height: 80vh; overflow: auto;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.modal-header h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.modal-body { padding: 12px 20px 20px; }
+.modal-input {
+  width: 100%; padding: 10px 14px; background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: var(--r-md); color: var(--fg-0); font-size: 14px; outline: none;
+}
+.modal-input:focus { border-color: var(--gold); }
+
+.list-option {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 12px; border-radius: var(--r-sm); font-size: 13px;
+  color: var(--fg-1); transition: background 0.12s; text-align: left;
+}
+.list-option:hover { background: rgba(255,255,255,0.04); }
+.list-option.active { color: var(--gold); }
+.list-option-count { margin-left: auto; font-size: 10px; font-family: var(--font-mono); color: var(--fg-4); }
+
+.list-create-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 12px; margin-top: 4px; border-top: 1px solid var(--border);
+  font-size: 13px; color: var(--fg-2); transition: color 0.12s;
+}
+.list-create-btn:hover { color: var(--gold); }
+
+.modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
+
 @media (max-width: 900px) {
   .hero-content { grid-template-columns: 1fr; gap: 20px; padding: 32px 20px 24px; }
   .hero-poster { display: none; }
   .detail-title { font-size: 32px; }
   .detail-body-below { padding: 0 20px 60px; }
   .seasons-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+  .bd-indicators { right: 20px; bottom: 16px; }
+  .hero-expand { display: none; }
 }
 </style>

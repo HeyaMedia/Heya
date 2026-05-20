@@ -1,6 +1,8 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -84,17 +86,30 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 		}
 
 		hasFiles := false
+		var mediaFiles []map[string]any
 		if files, err := q.ListLibraryFilesByMediaItem(r.Context(), pgtype.Int8{Int64: item.ID, Valid: true}); err == nil && len(files) > 0 {
 			hasFiles = true
+			for _, f := range files {
+				mediaFiles = append(mediaFiles, map[string]any{
+					"id":   f.ID,
+					"size": f.Size,
+				})
+			}
 		}
 
-		result := map[string]any{"media_item": item, "available": hasFiles}
+		result := map[string]any{"media_item": item, "available": hasFiles, "files": mediaFiles}
 
 		switch item.MediaType {
 		case sqlc.MediaTypeMovie:
 			movie, err := q.GetMovieByMediaItemID(r.Context(), item.ID)
 			if err == nil {
 				result["movie"] = movie
+				if movie.CollectionID.Valid {
+					col, colErr := q.GetCollectionByID(r.Context(), movie.CollectionID.Int64)
+					if colErr == nil {
+						result["collection"] = col
+					}
+				}
 			}
 		case sqlc.MediaTypeTv:
 			series, err := q.GetTVSeriesByMediaItemID(r.Context(), item.ID)
@@ -170,6 +185,15 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 			result["external_ratings"] = ratings
 		}
 
+		if item.MediaType == sqlc.MediaTypeTv {
+			if epFiles, err := q.ListEpisodeFiles(r.Context(), pgtype.Int8{Int64: item.ID, Valid: true}); err == nil && len(epFiles) > 0 {
+				episodeFileMap := buildEpisodeFileMap(epFiles)
+				if len(episodeFileMap) > 0 {
+					result["episode_files"] = episodeFileMap
+				}
+			}
+		}
+
 		writeJSON(w, http.StatusOK, result)
 	}
 }
@@ -202,29 +226,6 @@ func handleGetPerson(app *service.App) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, result)
-	}
-}
-
-func handleSearchMedia(app *service.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query().Get("q")
-		if query == "" {
-			writeError(w, http.StatusBadRequest, "?q= parameter is required")
-			return
-		}
-
-		q := sqlc.New(app.DB)
-		items, err := q.SearchMediaItems(r.Context(), sqlc.SearchMediaItemsParams{
-			PlaintoTsquery: query,
-			Limit:          50,
-			Offset:         0,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		writeJSON(w, http.StatusOK, items)
 	}
 }
 
@@ -305,4 +306,38 @@ func handleListUnmatched(app *service.App) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, result)
 	}
+}
+
+type episodeFileEntry struct {
+	FileID int64 `json:"file_id"`
+	Size   int64 `json:"size"`
+}
+
+func buildEpisodeFileMap(files []sqlc.ListEpisodeFilesRow) map[string]episodeFileEntry {
+	type parseResult struct {
+		Parsed struct {
+			Release struct {
+				Seasons  []int `json:"seasons"`
+				Episodes []int `json:"episodes"`
+			} `json:"release"`
+		} `json:"parsed"`
+	}
+
+	result := make(map[string]episodeFileEntry)
+	for _, f := range files {
+		if len(f.ParseResult) == 0 {
+			continue
+		}
+		var pr parseResult
+		if err := json.Unmarshal(f.ParseResult, &pr); err != nil {
+			continue
+		}
+		for _, s := range pr.Parsed.Release.Seasons {
+			for _, e := range pr.Parsed.Release.Episodes {
+				key := fmt.Sprintf("s%de%d", s, e)
+				result[key] = episodeFileEntry{FileID: f.ID, Size: f.Size}
+			}
+		}
+	}
+	return result
 }

@@ -1,0 +1,147 @@
+-- name: UpsertWatchProgress :one
+INSERT INTO user_watch_progress (user_id, entity_type, entity_id, progress_seconds, total_seconds, completed, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, now())
+ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET
+    progress_seconds = EXCLUDED.progress_seconds,
+    total_seconds = EXCLUDED.total_seconds,
+    completed = EXCLUDED.completed,
+    updated_at = now()
+RETURNING *;
+
+-- name: GetWatchProgress :one
+SELECT * FROM user_watch_progress
+WHERE user_id = $1 AND entity_type = $2 AND entity_id = $3;
+
+-- name: MarkEpisodeWatched :exec
+INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
+VALUES ($1, 'episode', $2, true, now())
+ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now();
+
+-- name: UnmarkEpisodeWatched :exec
+DELETE FROM user_watch_progress WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = $2;
+
+-- name: IsEpisodeWatched :one
+SELECT EXISTS(
+  SELECT 1 FROM user_watch_progress WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = $2 AND completed = true
+) AS watched;
+
+-- name: ListWatchedEpisodeIDs :many
+SELECT entity_id AS episode_id FROM user_watch_progress
+WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = ANY($2::bigint[]) AND completed = true;
+
+-- name: MarkSeasonWatched :exec
+INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
+SELECT $1, 'episode', e.id, true, now()
+FROM tv_episodes e WHERE e.season_id = $2
+ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now();
+
+-- name: UnmarkSeasonWatched :exec
+DELETE FROM user_watch_progress
+WHERE user_id = $1 AND entity_type = 'episode'
+AND entity_id IN (SELECT id FROM tv_episodes WHERE season_id = $2);
+
+-- name: CountWatchedInSeason :one
+SELECT count(*)::int AS watched
+FROM user_watch_progress wp
+JOIN tv_episodes e ON e.id = wp.entity_id
+WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true AND e.season_id = $2;
+
+-- name: MarkShowWatched :exec
+INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
+SELECT $1, 'episode', e.id, true, now()
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE ts.media_item_id = $2
+ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now();
+
+-- name: UnmarkShowWatched :exec
+DELETE FROM user_watch_progress
+WHERE user_id = $1 AND entity_type = 'episode' AND entity_id IN (
+  SELECT e.id FROM tv_episodes e
+  JOIN tv_seasons s ON s.id = e.season_id
+  JOIN tv_series ts ON ts.id = s.series_id
+  WHERE ts.media_item_id = $2
+);
+
+-- name: MarkMovieWatched :exec
+INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
+VALUES ($1, 'movie', $2, true, now())
+ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now();
+
+-- name: UnmarkMovieWatched :exec
+DELETE FROM user_watch_progress WHERE user_id = $1 AND entity_type = 'movie' AND entity_id = $2;
+
+-- name: ListFullyWatchedShows :many
+SELECT ts.media_item_id
+FROM tv_series ts
+JOIN tv_seasons s ON s.series_id = ts.id
+JOIN tv_episodes e ON e.season_id = s.id
+LEFT JOIN user_watch_progress wp ON wp.entity_id = e.id AND wp.entity_type = 'episode' AND wp.user_id = $1 AND wp.completed = true
+GROUP BY ts.media_item_id
+HAVING count(e.id) > 0 AND count(e.id) = count(wp.entity_id);
+
+-- name: ListFavoritedMediaItemIDs :many
+SELECT entity_id FROM user_favorites
+WHERE user_id = $1 AND entity_type = 'media_item';
+
+-- Continue watching: incomplete progress across movies and episodes
+-- name: ListContinueWatching :many
+SELECT wp.id, wp.entity_type, wp.entity_id, wp.progress_seconds, wp.total_seconds, wp.updated_at,
+       COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.title, ep_mi.title) AS title,
+       COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
+       COALESCE(mi.slug, ep_mi.slug) AS slug,
+       COALESCE(mi.media_type, ep_mi.media_type)::text AS media_type,
+       ep.episode_number,
+       ep.title AS episode_title,
+       s.season_number
+FROM user_watch_progress wp
+LEFT JOIN media_items mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
+LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
+LEFT JOIN tv_seasons s ON ep.season_id = s.id
+LEFT JOIN tv_series ts ON s.series_id = ts.id
+LEFT JOIN media_items ep_mi ON ts.media_item_id = ep_mi.id
+WHERE wp.user_id = $1 AND wp.completed = false AND wp.progress_seconds > 30
+ORDER BY wp.updated_at DESC
+LIMIT 20;
+
+-- Recently watched (completed items)
+-- name: ListRecentlyWatched :many
+SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
+       wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
+       COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.title, ep_mi.title) AS title,
+       COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
+       COALESCE(mi.slug, ep_mi.slug) AS slug,
+       COALESCE(mi.media_type, ep_mi.media_type)::text AS media_type
+FROM user_watch_progress wp
+LEFT JOIN media_items mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
+LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
+LEFT JOIN tv_seasons s ON ep.season_id = s.id
+LEFT JOIN tv_series ts ON s.series_id = ts.id
+LEFT JOIN media_items ep_mi ON ts.media_item_id = ep_mi.id
+WHERE wp.user_id = $1 AND wp.completed = true
+ORDER BY COALESCE(mi.id, ep_mi.id), wp.updated_at DESC
+LIMIT 20;
+
+-- Episode progress for a specific series (for showing progress bars on episode cards)
+-- name: ListEpisodeProgressForSeries :many
+SELECT wp.entity_id AS episode_id, wp.progress_seconds, wp.total_seconds, wp.completed
+FROM user_watch_progress wp
+JOIN tv_episodes e ON e.id = wp.entity_id
+JOIN tv_seasons s ON s.id = e.season_id
+WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND s.series_id = $2;
+
+-- Next unwatched episode for a series (ordered by season then episode number)
+-- name: GetNextUnwatchedEpisode :one
+SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,
+       s.id AS season_id, s.season_number,
+       ts.media_item_id
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+LEFT JOIN user_watch_progress wp ON wp.entity_id = e.id AND wp.entity_type = 'episode' AND wp.completed = true AND wp.user_id = $1
+WHERE ts.media_item_id = $2 AND wp.entity_id IS NULL
+ORDER BY s.season_number ASC, e.episode_number ASC
+LIMIT 1;

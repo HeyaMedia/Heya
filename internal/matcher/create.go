@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/slug"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -44,6 +46,14 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 		ExternalIds:  extJSON,
 	})
 	if err != nil {
+		existing, retryErr := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
+			LibraryID: libraryID,
+			Column2:   extJSON,
+		})
+		if retryErr == nil {
+			log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing media item (race resolved)")
+			return existing.ID, false, nil
+		}
 		return 0, false, fmt.Errorf("creating media item: %w", err)
 	}
 
@@ -459,9 +469,9 @@ var (
 
 func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType string, mediaItemID int64, filePath string) {
 	ctx := context.Background()
-	mediaDir := filepath.Dir(filePath)
-	if strings.HasPrefix(strings.ToLower(filepath.Base(mediaDir)), "season") {
-		mediaDir = filepath.Dir(mediaDir)
+	mediaDir := vfs.Dir(filePath)
+	if strings.HasPrefix(strings.ToLower(vfs.Base(mediaDir)), "season") {
+		mediaDir = vfs.Dir(mediaDir)
 	}
 
 	cacheDir := filepath.Join(m.downloader.CacheDir(), "images", mediaType, fmt.Sprintf("%d", mediaItemID))
@@ -469,112 +479,123 @@ func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType str
 
 	var primaryPoster, primaryBackdrop string
 
-	entries, err := os.ReadDir(mediaDir)
+	source, err := vfs.Open(mediaDir)
 	if err != nil {
-		log.Warn().Err(err).Str("dir", mediaDir).Msg("cannot read media directory for images")
-		entries = nil
+		log.Warn().Err(err).Str("dir", mediaDir).Msg("cannot open media directory for images")
 	}
 
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		if !imageExts[ext] {
-			continue
-		}
+	if source != nil {
+		defer source.Close()
 
-		nameNoExt := strings.TrimSuffix(strings.ToLower(name), ext)
-		srcPath := filepath.Join(mediaDir, name)
-		dstPath := filepath.Join(cacheDir, name)
-
-		if err := copyFile(srcPath, dstPath); err != nil {
-			continue
+		entries, err := fs.ReadDir(source.FS, ".")
+		if err != nil {
+			log.Warn().Err(err).Str("dir", mediaDir).Msg("cannot read media directory for images")
+			entries = nil
 		}
 
-		info, _ := e.Info()
-		size := int64(0)
-		if info != nil {
-			size = info.Size()
-		}
-
-		if at, ok := knownImages[nameNoExt]; ok {
-			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   at,
-				Source:      "local",
-				LocalPath:   dstPath,
-				FileSize:    size,
-			})
-			if at == sqlc.AssetTypePoster && primaryPoster == "" {
-				primaryPoster = dstPath
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
 			}
-			if (at == sqlc.AssetTypeBackdrop || at == sqlc.AssetTypeFanart) && primaryBackdrop == "" {
-				primaryBackdrop = dstPath
+			name := e.Name()
+			ext := strings.ToLower(filepath.Ext(name))
+			if !imageExts[ext] {
+				continue
 			}
-			log.Debug().Str("file", name).Str("type", string(at)).Msg("cached local image")
-			continue
-		}
 
-		if sub := backdropNumRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
-			order := 0
-			if len(sub) > 1 {
-				for _, c := range sub[1] {
-					order = order*10 + int(c-'0')
+			nameNoExt := strings.TrimSuffix(strings.ToLower(name), ext)
+			dstPath := filepath.Join(cacheDir, name)
+
+			if err := copyFromFS(source.FS, name, dstPath); err != nil {
+				continue
+			}
+
+			info, _ := e.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+
+			if at, ok := knownImages[nameNoExt]; ok {
+				m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+					MediaItemID: mediaItemID,
+					AssetType:   at,
+					Source:      "local",
+					LocalPath:   dstPath,
+					FileSize:    size,
+				})
+				if at == sqlc.AssetTypePoster && primaryPoster == "" {
+					primaryPoster = dstPath
 				}
+				if (at == sqlc.AssetTypeBackdrop || at == sqlc.AssetTypeFanart) && primaryBackdrop == "" {
+					primaryBackdrop = dstPath
+				}
+				log.Debug().Str("file", name).Str("type", string(at)).Msg("cached local image")
+				continue
 			}
-			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   sqlc.AssetTypeBackdrop,
-				Source:      "local",
-				LocalPath:   dstPath,
-				SortOrder:   int32(order),
-				FileSize:    size,
-			})
-			log.Debug().Str("file", name).Int("order", order).Msg("cached numbered backdrop")
-			continue
+
+			if sub := backdropNumRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
+				order := 0
+				if len(sub) > 1 {
+					for _, c := range sub[1] {
+						order = order*10 + int(c-'0')
+					}
+				}
+				m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+					MediaItemID: mediaItemID,
+					AssetType:   sqlc.AssetTypeBackdrop,
+					Source:      "local",
+					LocalPath:   dstPath,
+					SortOrder:   int32(order),
+					FileSize:    size,
+				})
+				log.Debug().Str("file", name).Int("order", order).Msg("cached numbered backdrop")
+				continue
+			}
+
+			if sub := seasonImageRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
+				seasonNum := 0
+				for _, c := range sub[1] {
+					seasonNum = seasonNum*10 + int(c-'0')
+				}
+				label := fmt.Sprintf("season%02d-%s", seasonNum, sub[2])
+				assetType := sqlc.AssetTypeBanner
+				if sub[2] == "poster" {
+					assetType = sqlc.AssetTypeSeasonPoster
+				}
+				m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+					MediaItemID: mediaItemID,
+					AssetType:   assetType,
+					Source:      "local",
+					LocalPath:   dstPath,
+					Label:       label,
+					FileSize:    size,
+				})
+				log.Debug().Str("file", name).Str("label", label).Msg("cached season image")
+				continue
+			}
+
+			if sub := seasonSpecialRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
+				label := fmt.Sprintf("season00-%s", sub[1])
+				assetType := sqlc.AssetTypeBanner
+				if sub[1] == "poster" {
+					assetType = sqlc.AssetTypeSeasonPoster
+				}
+				m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+					MediaItemID: mediaItemID,
+					AssetType:   assetType,
+					Source:      "local",
+					LocalPath:   dstPath,
+					Label:       label,
+					FileSize:    size,
+				})
+				log.Debug().Str("file", name).Str("label", label).Msg("cached specials image")
+				continue
+			}
 		}
 
-		if sub := seasonImageRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
-			seasonNum := 0
-			for _, c := range sub[1] {
-				seasonNum = seasonNum*10 + int(c-'0')
-			}
-			label := fmt.Sprintf("season%02d-%s", seasonNum, sub[2])
-			assetType := sqlc.AssetTypeBanner
-			if sub[2] == "poster" {
-				assetType = sqlc.AssetTypeSeasonPoster
-			}
-			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   assetType,
-				Source:      "local",
-				LocalPath:   dstPath,
-				Label:       label,
-				FileSize:    size,
-			})
-			log.Debug().Str("file", name).Str("label", label).Msg("cached season image")
-			continue
-		}
-
-		if sub := seasonSpecialRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
-			label := fmt.Sprintf("season00-%s", sub[1])
-			assetType := sqlc.AssetTypeBanner
-			if sub[1] == "poster" {
-				assetType = sqlc.AssetTypeSeasonPoster
-			}
-			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   assetType,
-				Source:      "local",
-				LocalPath:   dstPath,
-				Label:       label,
-				FileSize:    size,
-			})
-			log.Debug().Str("file", name).Str("label", label).Msg("cached specials image")
-			continue
-		}
+		m.detectExtras(ctx, mediaItemID, source.FS, mediaDir)
+		m.scanSeasonImages(ctx, mediaItemID, source.FS, cacheDir)
 	}
 
 	if primaryPoster == "" && detail.PosterURL != "" {
@@ -613,9 +634,6 @@ func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType str
 		})
 	}
 
-	m.detectExtras(ctx, mediaItemID, mediaDir)
-	m.scanSeasonImages(ctx, mediaItemID, mediaDir, cacheDir)
-
 	log.Info().
 		Int64("media_id", mediaItemID).
 		Str("poster", p).
@@ -625,8 +643,8 @@ func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType str
 
 var thumbRE = regexp.MustCompile(`(?i)S(\d+)E(\d+).*-thumb\.`)
 
-func (m *Matcher) scanSeasonImages(ctx context.Context, mediaItemID int64, mediaDir string, cacheDir string) {
-	entries, err := os.ReadDir(mediaDir)
+func (m *Matcher) scanSeasonImages(ctx context.Context, mediaItemID int64, fsys fs.FS, cacheDir string) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return
 	}
@@ -640,8 +658,7 @@ func (m *Matcher) scanSeasonImages(ctx context.Context, mediaItemID int64, media
 			continue
 		}
 
-		seasonDir := filepath.Join(mediaDir, e.Name())
-		seasonEntries, err := os.ReadDir(seasonDir)
+		seasonEntries, err := fs.ReadDir(fsys, e.Name())
 		if err != nil {
 			continue
 		}
@@ -666,11 +683,11 @@ func (m *Matcher) scanSeasonImages(ctx context.Context, mediaItemID int64, media
 					epNum = epNum*10 + int(c-'0')
 				}
 
-				srcPath := filepath.Join(seasonDir, name)
+				fsPath := e.Name() + "/" + name
 				label := fmt.Sprintf("s%02de%02d", seasonNum, epNum)
 				dstPath := filepath.Join(cacheDir, label+"-thumb"+ext)
 
-				if err := copyFile(srcPath, dstPath); err != nil {
+				if err := copyFromFS(fsys, fsPath, dstPath); err != nil {
 					continue
 				}
 
@@ -711,8 +728,8 @@ var (
 	}
 )
 
-func (m *Matcher) detectExtras(ctx context.Context, mediaItemID int64, mediaDir string) {
-	entries, err := os.ReadDir(mediaDir)
+func (m *Matcher) detectExtras(ctx context.Context, mediaItemID int64, fsys fs.FS, mediaDir string) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return
 	}
@@ -727,8 +744,7 @@ func (m *Matcher) detectExtras(ctx context.Context, mediaItemID int64, mediaDir 
 			continue
 		}
 
-		extraDir := filepath.Join(mediaDir, e.Name())
-		extraEntries, err := os.ReadDir(extraDir)
+		extraEntries, err := fs.ReadDir(fsys, e.Name())
 		if err != nil {
 			continue
 		}
@@ -751,18 +767,18 @@ func (m *Matcher) detectExtras(ctx context.Context, mediaItemID int64, mediaDir 
 				MediaItemID: mediaItemID,
 				ExtraType:   extraType,
 				Title:       title,
-				FilePath:    filepath.Join(extraDir, ee.Name()),
+				FilePath:    vfs.Join(mediaDir, e.Name(), ee.Name()),
 				FileSize:    size,
 			})
 		}
 	}
 }
 
-func copyFile(src, dst string) error {
+func copyFromFS(fsys fs.FS, name string, dst string) error {
 	if _, err := os.Stat(dst); err == nil {
 		return nil
 	}
-	in, err := os.Open(src)
+	in, err := fsys.Open(name)
 	if err != nil {
 		return err
 	}

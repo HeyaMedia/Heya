@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import {
   PhHouse, PhFilmSlate, PhTelevisionSimple, PhMusicNotes, PhBookOpen,
   PhMagnifyingGlass, PhGearSix, PhPlay, PhPause, PhSkipBack, PhSkipForward,
-  PhShuffle, PhRepeat, PhSpeakerHigh, PhSpeakerX, PhQueue, PhHeart,
+  PhShuffle, PhRepeat, PhSpeakerHigh, PhSpeakerLow, PhSpeakerNone, PhSpeakerX, PhQueue, PhHeart,
   PhPlus, PhDotsThree, PhStar, PhCheck, PhCaretDown, PhCaretRight,
   PhCaretLeft, PhX, PhAirplay, PhDownloadSimple, PhGlobe, PhMicrophone,
   PhRadio, PhList, PhSquaresFour, PhFunnel, PhSortAscending, PhArrowLeft,
@@ -16,6 +16,7 @@ import {
   PhHardDrives, PhPulse, PhSpinner, PhCloudArrowDown, PhGithubLogo,
   PhArrowClockwise, PhLightning, PhCircleNotch, PhToggleRight, PhToggleLeft,
   PhClipboardText, PhTimer, PhHash, PhCopyright,
+  PhSubtitles, PhClosedCaptioning, PhTranslate,
 } from '@phosphor-icons/vue'
 
 const props = defineProps<{
@@ -105,6 +106,14 @@ const nameMap: Record<string, any> = {
   timer: PhTimer,
   hash: PhHash,
   copyright: PhCopyright,
+  speakerhigh: PhSpeakerHigh,
+  speakerlow: PhSpeakerLow,
+  speakernone: PhSpeakerNone,
+  speakerx: PhSpeakerX,
+  subtitles: PhSubtitles,
+  captions: PhClosedCaptioning,
+  translate: PhTranslate,
+  shrink: PhArrowsIn,
 }
 
 const iconComponent = computed(() => nameMap[props.name] || null)

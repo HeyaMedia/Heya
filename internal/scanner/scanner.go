@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -164,7 +165,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 					result.New++
 					return nil
 				}
-				if existing.Size == size && existing.Mtime.Valid && existing.Mtime.Time.Equal(mtime) {
+				if existing.Size == size && existing.Mtime.Valid && existing.Mtime.Time.Truncate(time.Microsecond).Equal(mtime.Truncate(time.Microsecond)) {
 					log.Debug().Str("file", relPath).Msg("unchanged, skipping")
 					result.Unchanged++
 					return nil

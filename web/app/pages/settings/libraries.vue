@@ -5,16 +5,35 @@
         <h2 class="page-title">Libraries</h2>
         <p class="page-desc">Manage your media folders and metadata sources</p>
       </div>
-      <button class="btn btn-primary" @click="openAdd">
-        <Icon name="plus" :size="16" />
-        Add Library
-      </button>
+      <div class="header-actions">
+        <button v-if="hasAnyProgress" class="btn btn-danger-subtle" @click="cancelAll">
+          <Icon name="close" :size="14" />
+          Cancel All
+        </button>
+        <button v-if="libraries.length" class="btn btn-secondary" @click="scanAll" :disabled="scanningAll">
+          <Icon :name="scanningAll ? 'loading' : 'refresh'" :size="15" :class="{ spinning: scanningAll }" />
+          {{ scanningAll ? 'Scanning…' : 'Scan All' }}
+        </button>
+        <button class="btn btn-primary" @click="openAdd">
+          <Icon name="plus" :size="16" />
+          Add Library
+        </button>
+      </div>
     </div>
 
     <div v-if="libraries.length" class="lib-list">
-      <div v-for="lib in libraries" :key="lib.id" class="lib-card">
+      <div v-for="lib in libraries" :key="lib.id" class="lib-card" :class="{ active: libProgress(lib.id) }">
         <div class="lib-card-left">
           <div class="lib-icon" :class="lib.media_type">
+            <svg v-if="libProgress(lib.id)" class="progress-ring" viewBox="0 0 48 48">
+              <circle class="ring-track" cx="24" cy="24" r="20" />
+              <circle
+                class="ring-fill"
+                cx="24" cy="24" r="20"
+                :stroke-dasharray="125.66"
+                :stroke-dashoffset="125.66 - 125.66 * libPercent(lib.id)"
+              />
+            </svg>
             <Icon :name="mediaIcon(lib.media_type)" :size="20" />
           </div>
         </div>
@@ -23,7 +42,18 @@
             <span class="lib-name">{{ lib.name }}</span>
             <span class="lib-type">{{ lib.media_type }}</span>
           </div>
-          <div class="lib-paths">
+
+          <div v-if="libProgress(lib.id)" class="lib-progress">
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" :style="{ width: (libPercent(lib.id) * 100) + '%' }" />
+            </div>
+            <span class="progress-text">
+              Processed {{ libProgress(lib.id)!.processed }} of {{ libProgress(lib.id)!.total }} files
+              <template v-if="libProgress(lib.id)!.matched"> &middot; {{ libProgress(lib.id)!.matched }} matched</template>
+            </span>
+          </div>
+
+          <div v-else class="lib-paths">
             <span v-for="(p, i) in lib.paths" :key="i" class="lib-path">
               <Icon name="folder" :size="11" />
               {{ p }}
@@ -44,7 +74,10 @@
           <button class="action-btn" @click="openSettings(lib)" title="Configure">
             <Icon name="settings" :size="15" />
           </button>
-          <button class="action-btn" @click="scanLib(lib.id)" :disabled="scanning === lib.id" title="Scan">
+          <button v-if="libProgress(lib.id)" class="action-btn danger" @click="cancelLib(lib.id)" title="Cancel scan">
+            <Icon name="close" :size="15" />
+          </button>
+          <button v-else class="action-btn" @click="scanLib(lib.id)" :disabled="scanning === lib.id" title="Scan">
             <Icon :name="scanning === lib.id ? 'loading' : 'refresh'" :size="15" :class="{ spinning: scanning === lib.id }" />
           </button>
           <button class="action-btn danger" @click="deleteLib(lib.id)" title="Remove">
@@ -104,8 +137,7 @@
                 <label class="form-label">Folders</label>
                 <div class="paths-list">
                   <div v-for="(p, i) in newLib.paths" :key="i" class="path-row">
-                    <Icon name="folder" :size="14" class="path-icon" />
-                    <input v-model="newLib.paths[i]" class="form-input" placeholder="/path/to/media" required />
+                    <LibraryPathInput v-model="newLib.paths[i]" />
                     <button v-if="newLib.paths.length > 1" type="button" class="path-remove" @click="newLib.paths.splice(i, 1)">
                       <Icon name="close" :size="12" />
                     </button>
@@ -164,8 +196,7 @@
                 <label class="form-label">Folders</label>
                 <div class="paths-list">
                   <div v-for="(p, i) in editPaths" :key="i" class="path-row">
-                    <Icon name="folder" :size="14" class="path-icon" />
-                    <input v-model="editPaths[i]" class="form-input" placeholder="/path/to/media" />
+                    <LibraryPathInput v-model="editPaths[i]" />
                     <button v-if="editPaths.length > 1" type="button" class="path-remove" @click="editPaths.splice(i, 1)">
                       <Icon name="close" :size="12" />
                     </button>
@@ -203,9 +234,41 @@
 
 <script setup lang="ts">
 import type { Library, LibrarySettings } from '~~/shared/types'
+import type { LibraryScanProgress } from '~/composables/useEventBus'
+
+const { scanProgress } = useEventBus()
 
 const libraries = ref<Library[]>([])
 const scanning = ref<number | null>(null)
+const scanningAll = ref(false)
+
+function libProgress(id: number): LibraryScanProgress | null {
+  return scanProgress.value[id] ?? null
+}
+
+function libPercent(id: number): number {
+  const p = scanProgress.value[id]
+  if (!p || p.total === 0) return 0
+  return Math.min(p.processed / p.total, 1)
+}
+
+const hasAnyProgress = computed(() => Object.keys(scanProgress.value).length > 0)
+
+async function scanAll() {
+  scanningAll.value = true
+  try {
+    await Promise.all(libraries.value.map(lib => apiFetch(`/api/libraries/${lib.id}/scan`, { method: 'POST' })))
+  } catch {}
+  scanningAll.value = false
+}
+
+async function cancelLib(id: number) {
+  try { await apiFetch(`/api/libraries/${id}/scan/cancel`, { method: 'POST' }) } catch {}
+}
+
+async function cancelAll() {
+  try { await apiFetch('/api/libraries/scan/cancel-all', { method: 'POST' }) } catch {}
+}
 
 function defaultSettings(type: string): LibrarySettings {
   const base: LibrarySettings = {
@@ -339,6 +402,7 @@ onMounted(fetchLibraries)
 }
 .page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
 .page-desc { font-size: 13px; color: var(--fg-3); margin: 6px 0 0; }
+.header-actions { display: flex; gap: 8px; }
 
 /* Library list */
 .lib-list { display: flex; flex-direction: column; gap: 8px; }
@@ -355,6 +419,7 @@ onMounted(fetchLibraries)
 }
 
 .lib-card:hover { border-color: var(--border-strong); }
+.lib-card.active { border-color: var(--gold-deep); }
 
 .lib-card-left { flex-shrink: 0; }
 
@@ -373,6 +438,49 @@ onMounted(fetchLibraries)
 .lib-icon.book { background: rgba(140, 220, 180, 0.12); color: rgb(140, 220, 180); }
 
 .lib-card-center { flex: 1; min-width: 0; }
+
+/* Progress ring on icon */
+.lib-icon { position: relative; }
+.progress-ring {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  transform: rotate(-90deg);
+}
+.ring-track {
+  fill: none;
+  stroke: rgba(255,255,255,0.06);
+  stroke-width: 3;
+}
+.ring-fill {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+/* Progress bar + text */
+.lib-progress { margin-bottom: 8px; }
+.progress-bar-track {
+  height: 3px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--gold);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.progress-text {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--fg-2);
+}
 
 .lib-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .lib-name { font-size: 15px; font-weight: 600; }
@@ -630,14 +738,6 @@ onMounted(fetchLibraries)
 
 .paths-list { display: flex; flex-direction: column; gap: 6px; }
 .path-row { display: flex; gap: 6px; align-items: center; }
-.path-row .form-input { flex: 1; padding-left: 36px; }
-.path-icon {
-  position: absolute;
-  left: 12px;
-  color: var(--fg-3);
-  pointer-events: none;
-}
-.path-row { position: relative; }
 .path-remove {
   width: 34px;
   height: 40px;

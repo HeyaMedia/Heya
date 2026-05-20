@@ -2,6 +2,7 @@
   <NuxtLayout>
     <NuxtPage v-if="ready" />
   </NuxtLayout>
+  <Lightbox />
 </template>
 
 <script setup lang="ts">

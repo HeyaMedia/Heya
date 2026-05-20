@@ -13,13 +13,9 @@ type FileConfig struct {
 	Port         string `yaml:"port,omitempty"`
 	LogLevel     string `yaml:"log_level,omitempty"`
 	LogFormat    string `yaml:"log_format,omitempty"`
-	TMDBToken    string `yaml:"tmdb_api_token,omitempty"`
+	HeyaMediaURL string `yaml:"heya_media_url,omitempty"`
 	DataDir      string `yaml:"data_dir,omitempty"`
-	FanartAPIKey string `yaml:"fanart_api_key,omitempty"`
-	TVDBAPIKey   string `yaml:"tvdb_api_key,omitempty"`
-	AniDBClient   string `yaml:"anidb_client,omitempty"`
-	OMDbAPIKey    string `yaml:"omdb_api_key,omitempty"`
-	DiscogsAPIKey string `yaml:"discogs_api_key,omitempty"`
+	HWAccel      string `yaml:"hw_accel,omitempty"`
 }
 
 var searchPaths = []string{
@@ -68,13 +64,9 @@ func MergeFileWithEnv(fc *FileConfig) *Config {
 		Port:         fc.Port,
 		LogLevel:     fc.LogLevel,
 		LogFormat:    fc.LogFormat,
-		TMDBToken:    fc.TMDBToken,
+		HeyaMediaURL: fc.HeyaMediaURL,
 		DataDir:      fc.DataDir,
-		FanartAPIKey: fc.FanartAPIKey,
-		TVDBAPIKey:   fc.TVDBAPIKey,
-		AniDBClient:   fc.AniDBClient,
-		OMDbAPIKey:    fc.OMDbAPIKey,
-		DiscogsAPIKey: fc.DiscogsAPIKey,
+		HWAccel:      fc.HWAccel,
 	}
 
 	envOverrides := []struct {
@@ -86,13 +78,9 @@ func MergeFileWithEnv(fc *FileConfig) *Config {
 		{"PORT", &cfg.Port},
 		{"LOG_LEVEL", &cfg.LogLevel},
 		{"LOG_FORMAT", &cfg.LogFormat},
-		{"TMDB_API_TOKEN", &cfg.TMDBToken},
+		{"HEYA_MEDIA_URL", &cfg.HeyaMediaURL},
 		{"DATA_DIR", &cfg.DataDir},
-		{"FANART_API_KEY", &cfg.FanartAPIKey},
-		{"TVDB_API_KEY", &cfg.TVDBAPIKey},
-		{"ANIDB_CLIENT", &cfg.AniDBClient},
-		{"OMDB_API_KEY", &cfg.OMDbAPIKey},
-		{"DISCOGS_API_KEY", &cfg.DiscogsAPIKey},
+		{"HEYA_HWACCEL", &cfg.HWAccel},
 	}
 	for _, o := range envOverrides {
 		if v := os.Getenv(o.key); v != "" {
@@ -125,8 +113,9 @@ func (c *Config) Sources() map[string]string {
 		{"port", "PORT", c.Port, fileStr(fc, "port"), "8080"},
 		{"log_level", "LOG_LEVEL", c.LogLevel, fileStr(fc, "log_level"), "info"},
 		{"log_format", "LOG_FORMAT", c.LogFormat, fileStr(fc, "log_format"), "console"},
-		{"tmdb_api_token", "TMDB_API_TOKEN", c.TMDBToken, fileStr(fc, "tmdb_api_token"), ""},
+		{"heya_media_url", "HEYA_MEDIA_URL", c.HeyaMediaURL, fileStr(fc, "heya_media_url"), "http://localhost:3030"},
 		{"data_dir", "DATA_DIR", c.DataDir, fileStr(fc, "data_dir"), "./data"},
+		{"hw_accel", "HEYA_HWACCEL", c.HWAccel, fileStr(fc, "hw_accel"), "auto"},
 	}
 
 	for _, f := range fields {
@@ -157,10 +146,12 @@ func fileStr(fc *FileConfig, key string) string {
 		return fc.LogLevel
 	case "log_format":
 		return fc.LogFormat
-	case "tmdb_api_token":
-		return fc.TMDBToken
+	case "heya_media_url":
+		return fc.HeyaMediaURL
 	case "data_dir":
 		return fc.DataDir
+	case "hw_accel":
+		return fc.HWAccel
 	}
 	return ""
 }

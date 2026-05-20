@@ -35,6 +35,11 @@ UPDATE library_files
 SET media_info = $2, updated_at = now()
 WHERE id = $1;
 
+-- name: UpdateLibraryFileKeyframes :exec
+UPDATE library_files
+SET keyframes = $2, updated_at = now()
+WHERE id = $1;
+
 -- name: SoftDeleteLibraryFile :exec
 UPDATE library_files
 SET deleted_at = now(), updated_at = now()
@@ -80,7 +85,12 @@ GROUP BY status;
 SELECT path FROM library_files WHERE library_id = $1 AND deleted_at IS NULL;
 
 -- name: ListLibraryFilesByMediaItem :many
-SELECT * FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL LIMIT 1;
+SELECT * FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDER BY path ASC;
+
+-- name: ListEpisodeFiles :many
+SELECT id, size, parse_result FROM library_files
+WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'
+ORDER BY path ASC;
 
 -- name: GetMediaItemByExternalID :one
 SELECT * FROM media_items

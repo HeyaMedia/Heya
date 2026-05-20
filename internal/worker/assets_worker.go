@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -77,20 +79,39 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	filePath := job.Args.FilePath
 	mediaType := job.Args.MediaType
 	mediaItemID := job.Args.MediaItemID
-	dir := filepath.Dir(filePath)
-	base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	dir := vfs.Dir(filePath)
+	base := strings.TrimSuffix(vfs.Base(filePath), filepath.Ext(vfs.Base(filePath)))
 
 	showDir := dir
-	if strings.HasPrefix(strings.ToLower(filepath.Base(dir)), "season") {
-		showDir = filepath.Dir(dir)
+	if strings.HasPrefix(strings.ToLower(vfs.Base(dir)), "season") {
+		showDir = vfs.Dir(dir)
 	}
 
 	cacheDir := filepath.Join(w.DataDir, "images", mediaType, fmt.Sprintf("%d", mediaItemID))
 	os.MkdirAll(cacheDir, 0o755)
 
-	w.detectSiblingAssets(ctx, q, mediaItemID, dir, base)
-	w.detectShowLevelImages(ctx, q, mediaItemID, showDir, cacheDir)
-	w.detectExtras(ctx, q, mediaItemID, showDir)
+	source, err := vfs.Open(showDir)
+	if err != nil {
+		log.Warn().Err(err).Str("dir", showDir).Msg("cannot open show directory for assets")
+	}
+
+	if source != nil {
+		defer source.Close()
+		w.detectShowLevelImages(ctx, q, mediaItemID, source.FS, cacheDir)
+		w.detectExtras(ctx, q, mediaItemID, source.FS, showDir)
+	}
+
+	if !vfs.IsSMBPath(dir) {
+		w.detectSiblingAssets(ctx, q, mediaItemID, dir, base)
+	} else if source != nil {
+		relDir := vfs.Base(dir)
+		if relDir != vfs.Base(showDir) {
+			subFS, err := fs.Sub(source.FS, relDir)
+			if err == nil {
+				w.detectSiblingAssetsFS(ctx, q, mediaItemID, subFS, dir, base)
+			}
+		}
+	}
 
 	posterPath := filepath.Join(cacheDir, "poster.jpg")
 	backdropPath := filepath.Join(cacheDir, "backdrop.jpg")
@@ -98,17 +119,17 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	hasPoster := fileExists(posterPath)
 	hasBackdrop := fileExists(backdropPath)
 
-	if !hasPoster {
+	if !hasPoster && source != nil {
 		for _, name := range []string{"poster.jpg", "poster.png", "folder.jpg", "folder.png"} {
-			if p := findAndCopy(filepath.Join(showDir, name), posterPath); p != "" {
+			if findAndCopyFS(source.FS, name, posterPath) != "" {
 				hasPoster = true
 				break
 			}
 		}
 	}
-	if !hasBackdrop {
+	if !hasBackdrop && source != nil {
 		for _, name := range []string{"backdrop.jpg", "backdrop.png", "fanart.jpg", "fanart.png"} {
-			if p := findAndCopy(filepath.Join(showDir, name), backdropPath); p != "" {
+			if findAndCopyFS(source.FS, name, backdropPath) != "" {
 				hasBackdrop = true
 				break
 			}
@@ -146,8 +167,8 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	return nil
 }
 
-func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *sqlc.Queries, mediaItemID int64, showDir, cacheDir string) {
-	entries, err := os.ReadDir(showDir)
+func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, cacheDir string) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return
 	}
@@ -163,12 +184,11 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 		}
 
 		nameNoExt := strings.TrimSuffix(strings.ToLower(name), ext)
-		srcPath := filepath.Join(showDir, name)
 
 		if at, ok := imageAssetMap[nameNoExt]; ok {
 			cacheName := nameNoExt + ext
 			destPath := filepath.Join(cacheDir, cacheName)
-			copyFile(srcPath, destPath)
+			copyFileFromFS(fsys, name, destPath)
 
 			info, _ := e.Info()
 			size := int64(0)
@@ -192,9 +212,8 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 					order = order*10 + int(c-'0')
 				}
 			}
-			cacheName := name
-			destPath := filepath.Join(cacheDir, cacheName)
-			copyFile(srcPath, destPath)
+			destPath := filepath.Join(cacheDir, name)
+			copyFileFromFS(fsys, name, destPath)
 
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
@@ -208,7 +227,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 
 		if seasonPosterRE.MatchString(strings.ToLower(name)) {
 			destPath := filepath.Join(cacheDir, name)
-			copyFile(srcPath, destPath)
+			copyFileFromFS(fsys, name, destPath)
 
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
@@ -273,8 +292,8 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 	}
 }
 
-func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Queries, mediaItemID int64, showDir string) {
-	entries, err := os.ReadDir(showDir)
+func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, showDir string) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return
 	}
@@ -299,7 +318,7 @@ func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Quer
 						MediaItemID: mediaItemID,
 						ExtraType:   extraType,
 						Title:       title,
-						FilePath:    filepath.Join(showDir, name),
+						FilePath:    vfs.Join(showDir, name),
 						FileSize:    size,
 					})
 					break
@@ -314,8 +333,7 @@ func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Quer
 			continue
 		}
 
-		extraDir := filepath.Join(showDir, e.Name())
-		extraEntries, err := os.ReadDir(extraDir)
+		extraEntries, err := fs.ReadDir(fsys, e.Name())
 		if err != nil {
 			continue
 		}
@@ -338,10 +356,62 @@ func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Quer
 				MediaItemID: mediaItemID,
 				ExtraType:   extraType,
 				Title:       title,
-				FilePath:    filepath.Join(extraDir, ee.Name()),
+				FilePath:    vfs.Join(showDir, e.Name(), ee.Name()),
 				FileSize:    size,
 			})
 			log.Debug().Str("title", title).Str("type", string(extraType)).Msg("found extra")
+		}
+	}
+}
+
+func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, dir, baseName string) {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
+		fullPath := vfs.Join(dir, name)
+
+		if subtitleExts[ext] && strings.HasPrefix(nameNoExt, baseName) {
+			lang := extractLanguageCode(nameNoExt, baseName)
+			info, _ := e.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetTypeSubtitle,
+				Source:      "local",
+				LocalPath:   fullPath,
+				Language:    lang,
+				FileSize:    size,
+			})
+		}
+
+		if lyricsExts[ext] && strings.HasPrefix(nameNoExt, baseName) {
+			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetTypeLyrics,
+				Source:      "local",
+				LocalPath:   fullPath,
+			})
+		}
+
+		if imageExts[ext] && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
+			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetTypeThumb,
+				Source:      "local",
+				LocalPath:   fullPath,
+			})
 		}
 	}
 }
@@ -376,11 +446,38 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+func copyFileFromFS(fsys fs.FS, name, dst string) error {
+	if fileExists(dst) {
+		return nil
+	}
+	in, err := fsys.Open(name)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
 func findAndCopy(src, dst string) string {
 	if !fileExists(src) {
 		return ""
 	}
 	if err := copyFile(src, dst); err != nil {
+		return ""
+	}
+	return dst
+}
+
+func findAndCopyFS(fsys fs.FS, name, dst string) string {
+	if err := copyFileFromFS(fsys, name, dst); err != nil {
 		return ""
 	}
 	return dst

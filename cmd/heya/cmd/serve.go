@@ -13,6 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/server"
 	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -56,6 +57,11 @@ var serveCmd = &cobra.Command{
 
 		bridgeLogToHub(ctx, logRing, app.Hub)
 		app.Hub.StartPeriodicEmitters(ctx, app.DB)
+		app.Hub.StartScheduledScans(ctx, app.DB, func(scanCtx context.Context, libraryID int64) {
+			if app.River != nil {
+				app.River.Insert(scanCtx, worker.ScanLibraryArgs{LibraryID: libraryID}, nil)
+			}
+		})
 
 		srv := server.New(cfg, app,
 			server.WithLogBuffer(logRing),

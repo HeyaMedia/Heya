@@ -50,6 +50,20 @@ export interface ActiveJobsPayload {
   jobs: ActiveJob[]
 }
 
+export interface LibraryScanProgress {
+  library_id: number
+  name: string
+  total: number
+  processed: number
+  matched: number
+  unmatched: number
+  errors: number
+}
+
+export interface ScanProgressPayload {
+  libraries: LibraryScanProgress[]
+}
+
 export interface StatsPayload {
   libraries: number
   media_counts: Record<string, number>
@@ -72,6 +86,7 @@ export function useEventBus() {
   const activeScans = useState<ScanPayload[]>('ws_active_scans', () => [])
   const activeJobs = useState<ActiveJob[]>('ws_active_jobs', () => [])
   const queueStatus = useState<QueueStatusPayload>('ws_queue_status', () => ({ pending: 0, running: 0 }))
+  const scanProgress = useState<Record<number, LibraryScanProgress>>('ws_scan_progress', () => ({}))
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
@@ -92,7 +107,7 @@ export function useEventBus() {
     ws.onmessage = (msg) => {
       try {
         const event = JSON.parse(msg.data) as WsEvent
-        handleEvent(event, connected, activeScans, activeJobs, queueStatus)
+        handleEvent(event, connected, activeScans, activeJobs, queueStatus, scanProgress)
       } catch {}
     }
 
@@ -136,6 +151,7 @@ export function useEventBus() {
     activeScans: readonly(activeScans),
     activeJobs: readonly(activeJobs),
     queueStatus: readonly(queueStatus),
+    scanProgress: readonly(scanProgress),
     connect,
     disconnect,
     on,
@@ -148,6 +164,7 @@ function handleEvent(
   activeScans: Ref<ScanPayload[]>,
   activeJobs: Ref<ActiveJob[]>,
   queueStatus: Ref<QueueStatusPayload>,
+  scanProgress: Ref<Record<number, LibraryScanProgress>>,
 ) {
   switch (event.type) {
     case 'scan.started': {
@@ -160,10 +177,22 @@ function handleEvent(
       break
     case 'queue.status':
       queueStatus.value = event.payload as QueueStatusPayload
+      if (queueStatus.value.pending === 0 && queueStatus.value.running === 0) {
+        scanProgress.value = {}
+      }
       break
     case 'active_jobs':
       activeJobs.value = (event.payload as ActiveJobsPayload).jobs
       break
+    case 'scan.progress': {
+      const p = event.payload as ScanProgressPayload
+      const next: Record<number, LibraryScanProgress> = {}
+      for (const lib of p.libraries) {
+        next[lib.library_id] = lib
+      }
+      scanProgress.value = next
+      break
+    }
   }
 
   const handlers = listeners.get(event.type)

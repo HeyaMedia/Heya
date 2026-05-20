@@ -20,7 +20,7 @@ type ProcessFileArgs struct {
 
 func (ProcessFileArgs) Kind() string { return "process_file" }
 func (ProcessFileArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "process", MaxAttempts: 3}
+	return river.InsertOpts{Queue: "process", MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 type MetadataMatchArgs struct {

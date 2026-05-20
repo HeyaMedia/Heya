@@ -323,60 +323,6 @@ func (q *Queries) MediaItemSlugExists(ctx context.Context, arg MediaItemSlugExis
 	return exists, err
 }
 
-const searchMediaItems = `-- name: SearchMediaItems :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id, slug, metadata_refreshed_at FROM media_items
-WHERE search_vector @@ plainto_tsquery('english', $1)
-ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC
-LIMIT $2 OFFSET $3
-`
-
-type SearchMediaItemsParams struct {
-	PlaintoTsquery string `json:"plainto_tsquery"`
-	Limit          int32  `json:"limit"`
-	Offset         int32  `json:"offset"`
-}
-
-func (q *Queries) SearchMediaItems(ctx context.Context, arg SearchMediaItemsParams) ([]MediaItem, error) {
-	rows, err := q.db.Query(ctx, searchMediaItems, arg.PlaintoTsquery, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []MediaItem{}
-	for rows.Next() {
-		var i MediaItem
-		if err := rows.Scan(
-			&i.ID,
-			&i.LibraryID,
-			&i.MediaType,
-			&i.Title,
-			&i.SortTitle,
-			&i.Year,
-			&i.Description,
-			&i.PosterPath,
-			&i.BackdropPath,
-			&i.ExternalIds,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.SearchVector,
-			&i.Homepage,
-			&i.WikidataID,
-			&i.FacebookID,
-			&i.InstagramID,
-			&i.TwitterID,
-			&i.Slug,
-			&i.MetadataRefreshedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const updateMediaItem = `-- name: UpdateMediaItem :one
 UPDATE media_items
 SET title = $2, sort_title = $3, year = $4, description = $5,

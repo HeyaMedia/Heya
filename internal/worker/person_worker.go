@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/metadata/tmdb"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/slug"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -17,11 +17,11 @@ import (
 type PersonFetchWorker struct {
 	river.WorkerDefaults[PersonFetchArgs]
 	DB        *pgxpool.Pool
-	TMDBToken string
+	HeyaMedia *heyamedia.Client
 }
 
 func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetchArgs]) error {
-	if w.TMDBToken == "" {
+	if w.HeyaMedia == nil {
 		return nil
 	}
 
@@ -35,8 +35,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		return nil
 	}
 
-	provider := tmdb.NewProvider(w.TMDBToken)
-	detail, err := provider.GetPersonDetail(ctx, int(job.Args.TmdbID))
+	detail, err := w.HeyaMedia.GetPersonDetail(ctx, int(job.Args.TmdbID))
 	if err != nil {
 		log.Debug().Err(err).Int32("tmdb_id", job.Args.TmdbID).Msg("person fetch failed")
 		return nil
@@ -56,7 +55,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		Deathday:     detail.Deathday,
 		PlaceOfBirth: detail.PlaceOfBirth,
 		Gender:       int32(detail.Gender),
-		ProfilePath:  imageURL(detail.ProfilePath),
+		ProfilePath:  personImageURL(detail.ProfilePath),
 		Homepage:     detail.Homepage,
 		ImdbID:       detail.ImdbID,
 		Popularity:   pgtype.Numeric{Valid: true},
@@ -77,7 +76,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		client.Insert(ctx, DownloadImageArgs{
 			PersonID:   job.Args.PersonID,
 			EntityType: "person",
-			URL:        imageURL(detail.ProfilePath),
+			URL:        personImageURL(detail.ProfilePath),
 			AssetType:  "profile",
 			MediaType:  "person",
 		}, &river.InsertOpts{Priority: 4})
@@ -91,7 +90,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 	return nil
 }
 
-func imageURL(path string) string {
+func personImageURL(path string) string {
 	if path == "" {
 		return ""
 	}

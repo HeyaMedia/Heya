@@ -14,7 +14,7 @@ import (
 const createAuthor = `-- name: CreateAuthor :one
 INSERT INTO authors (name, openlibrary_id, biography, birth_date, death_date)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, openlibrary_id, biography, birth_date, death_date
+RETURNING id, name, openlibrary_id, biography, birth_date, death_date, search_vector
 `
 
 type CreateAuthorParams struct {
@@ -41,6 +41,7 @@ func (q *Queries) CreateAuthor(ctx context.Context, arg CreateAuthorParams) (Aut
 		&i.Biography,
 		&i.BirthDate,
 		&i.DeathDate,
+		&i.SearchVector,
 	)
 	return i, err
 }
@@ -108,7 +109,7 @@ func (q *Queries) CreateBook(ctx context.Context, arg CreateBookParams) (Book, e
 }
 
 const getAuthorByID = `-- name: GetAuthorByID :one
-SELECT id, name, openlibrary_id, biography, birth_date, death_date FROM authors WHERE id = $1
+SELECT id, name, openlibrary_id, biography, birth_date, death_date, search_vector FROM authors WHERE id = $1
 `
 
 func (q *Queries) GetAuthorByID(ctx context.Context, id int64) (Author, error) {
@@ -121,12 +122,13 @@ func (q *Queries) GetAuthorByID(ctx context.Context, id int64) (Author, error) {
 		&i.Biography,
 		&i.BirthDate,
 		&i.DeathDate,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getAuthorByName = `-- name: GetAuthorByName :one
-SELECT id, name, openlibrary_id, biography, birth_date, death_date FROM authors WHERE lower(name) = lower($1)
+SELECT id, name, openlibrary_id, biography, birth_date, death_date, search_vector FROM authors WHERE lower(name) = lower($1)
 `
 
 func (q *Queries) GetAuthorByName(ctx context.Context, lower string) (Author, error) {
@@ -139,12 +141,13 @@ func (q *Queries) GetAuthorByName(ctx context.Context, lower string) (Author, er
 		&i.Biography,
 		&i.BirthDate,
 		&i.DeathDate,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getAuthorByOpenLibraryID = `-- name: GetAuthorByOpenLibraryID :one
-SELECT id, name, openlibrary_id, biography, birth_date, death_date FROM authors WHERE openlibrary_id = $1
+SELECT id, name, openlibrary_id, biography, birth_date, death_date, search_vector FROM authors WHERE openlibrary_id = $1
 `
 
 func (q *Queries) GetAuthorByOpenLibraryID(ctx context.Context, openlibraryID string) (Author, error) {
@@ -157,6 +160,7 @@ func (q *Queries) GetAuthorByOpenLibraryID(ctx context.Context, openlibraryID st
 		&i.Biography,
 		&i.BirthDate,
 		&i.DeathDate,
+		&i.SearchVector,
 	)
 	return i, err
 }
@@ -259,7 +263,7 @@ const updateAuthor = `-- name: UpdateAuthor :one
 UPDATE authors
 SET name = $2, openlibrary_id = $3, biography = $4, birth_date = $5, death_date = $6
 WHERE id = $1
-RETURNING id, name, openlibrary_id, biography, birth_date, death_date
+RETURNING id, name, openlibrary_id, biography, birth_date, death_date, search_vector
 `
 
 type UpdateAuthorParams struct {
@@ -288,6 +292,7 @@ func (q *Queries) UpdateAuthor(ctx context.Context, arg UpdateAuthorParams) (Aut
 		&i.Biography,
 		&i.BirthDate,
 		&i.DeathDate,
+		&i.SearchVector,
 	)
 	return i, err
 }

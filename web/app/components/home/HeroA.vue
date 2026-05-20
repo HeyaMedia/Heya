@@ -2,9 +2,17 @@
   <section class="hero" v-if="items.length">
     <div class="hero-bg">
       <img
-        v-if="backdropUrl"
-        :src="backdropUrl"
+        v-if="bgA"
+        :src="bgA"
         class="hero-bg-img"
+        :class="{ visible: showA }"
+        @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+      />
+      <img
+        v-if="bgB"
+        :src="bgB"
+        class="hero-bg-img"
+        :class="{ visible: !showA }"
         @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
       />
       <div class="hero-bg-gradient" />
@@ -49,13 +57,13 @@
           </button>
         </div>
 
-        <div class="hero-dots" v-if="items.length > 1">
+        <div class="hero-dots" v-if="items.length > 1" @mouseenter="pauseHero" @mouseleave="resumeHero">
           <button
             v-for="(_, i) in items"
-            :key="i"
+            :key="`hero-${i}-${currentIdx}`"
             class="hero-dot"
-            :class="{ active: i === currentIdx }"
-            @click="currentIdx = i"
+            :class="{ active: i === currentIdx, paused: heroPaused && i === currentIdx }"
+            @click="jumpHero(i)"
           />
         </div>
       </div>
@@ -71,34 +79,75 @@ const props = defineProps<{
   movies?: Record<number, Movie>
 }>()
 
+const INTERVAL = 7000
 const currentIdx = ref(0)
+const heroPaused = ref(false)
+const showA = ref(true)
+const bgA = ref<string | null>(null)
+const bgB = ref<string | null>(null)
 
 const current = computed(() => props.items[currentIdx.value] || props.items[0])
 const movie = computed(() => props.movies?.[current.value?.id])
 const posterUrl = computed(() => current.value ? usePosterUrl(current.value.id) : null)
-const backdropUrl = computed(() => current.value ? useBackdropUrl(current.value.id) : null)
 
-let interval: ReturnType<typeof setInterval> | null = null
+function getBackdropUrl(idx: number) {
+  const item = props.items[idx]
+  return item ? useBackdropUrl(item.id) : null
+}
+
+function advanceHero() {
+  const nextIdx = (currentIdx.value + 1) % props.items.length
+  const url = getBackdropUrl(nextIdx)
+  if (showA.value) { bgB.value = url } else { bgA.value = url }
+  showA.value = !showA.value
+  currentIdx.value = nextIdx
+}
+
+let timeout: ReturnType<typeof setTimeout> | null = null
+let startTime = 0
+let remaining = INTERVAL
+
+function startTimer() {
+  startTime = Date.now()
+  remaining = INTERVAL
+  timeout = setTimeout(() => {
+    advanceHero()
+    startTimer()
+  }, INTERVAL)
+}
+
+function pauseHero() {
+  heroPaused.value = true
+  if (timeout) clearTimeout(timeout)
+  remaining -= Date.now() - startTime
+}
+
+function resumeHero() {
+  heroPaused.value = false
+  startTime = Date.now()
+  timeout = setTimeout(() => {
+    advanceHero()
+    startTimer()
+  }, remaining)
+}
+
+function jumpHero(idx: number) {
+  if (idx === currentIdx.value) return
+  if (timeout) clearTimeout(timeout)
+  const url = getBackdropUrl(idx)
+  if (showA.value) { bgB.value = url } else { bgA.value = url }
+  showA.value = !showA.value
+  currentIdx.value = idx
+  if (!heroPaused.value) startTimer()
+}
 
 onMounted(() => {
-  if (props.items.length > 1) {
-    interval = setInterval(() => {
-      currentIdx.value = (currentIdx.value + 1) % props.items.length
-    }, 7000)
-  }
+  bgA.value = getBackdropUrl(0)
+  if (props.items.length > 1) startTimer()
 })
 
 onUnmounted(() => {
-  if (interval) clearInterval(interval)
-})
-
-watch(currentIdx, () => {
-  if (interval) clearInterval(interval)
-  if (props.items.length > 1) {
-    interval = setInterval(() => {
-      currentIdx.value = (currentIdx.value + 1) % props.items.length
-    }, 7000)
-  }
+  if (timeout) clearTimeout(timeout)
 })
 </script>
 
@@ -113,11 +162,15 @@ watch(currentIdx, () => {
   inset: 0;
 }
 .hero-bg-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: opacity 0.6s ease;
+  opacity: 0;
+  transition: opacity 1.2s ease;
 }
+.hero-bg-img.visible { opacity: 1; }
 .hero-bg-gradient {
   position: absolute;
   inset: 0;
@@ -174,19 +227,35 @@ watch(currentIdx, () => {
 }
 .hero-dots {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   margin-top: 24px;
 }
 .hero-dot {
-  width: 24px;
+  width: 32px;
   height: 3px;
   border-radius: 2px;
-  background: var(--fg-4);
-  transition: width 0.3s ease, background 0.3s ease;
+  background: rgba(255,255,255,0.2);
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.15s;
 }
-.hero-dot.active {
-  width: 44px;
+.hero-dot:hover { background: rgba(255,255,255,0.35); }
+.hero-dot.active { background: rgba(255,255,255,0.15); }
+.hero-dot.active::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
   background: var(--gold);
+  border-radius: 2px;
+  animation: hero-fill 7s linear forwards;
+}
+.hero-dot.paused::after {
+  animation-play-state: paused;
+}
+@keyframes hero-fill {
+  from { width: 0; }
+  to { width: 100%; }
 }
 @media (max-width: 900px) {
   .hero-inner { grid-template-columns: 1fr; gap: 24px; }

@@ -1,12 +1,55 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
-	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/service"
 )
+
+func handleCancelLibraryScan(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid library id")
+			return
+		}
+
+		tag, err := app.DB.Exec(r.Context(),
+			`UPDATE river_job SET state = 'cancelled', finalized_at = now()
+			 WHERE state IN ('available', 'retryable', 'scheduled')
+			   AND (args->>'library_id')::bigint = $1`, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":    "cancelled",
+			"cancelled": tag.RowsAffected(),
+			"message":   fmt.Sprintf("cancelled %d jobs for library %d", tag.RowsAffected(), id),
+		})
+	}
+}
+
+func handleCancelAllScans(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tag, err := app.DB.Exec(r.Context(),
+			`UPDATE river_job SET state = 'cancelled', finalized_at = now()
+			 WHERE state IN ('available', 'retryable', 'scheduled')`)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":    "cancelled",
+			"cancelled": tag.RowsAffected(),
+			"message":   fmt.Sprintf("cancelled %d jobs", tag.RowsAffected()),
+		})
+	}
+}
 
 func handleScanLibrary(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -16,39 +59,16 @@ func handleScanLibrary(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		async := r.URL.Query().Get("async") == "true"
+		force := r.URL.Query().Get("force") == "true"
 
-		if async {
-			if err := app.EnqueueScanLibrary(r.Context(), id, false); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusAccepted, map[string]string{
-				"status":  "queued",
-				"message": "library scan enqueued",
-			})
-			return
-		}
-
-		scanResult, err := app.ScanLibrary(r.Context(), id, scanner.ScanOptions{})
-		if err != nil {
+		if err := app.EnqueueScanLibrary(r.Context(), id, force); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		matchResult, err := app.MatchLibrary(r.Context(), id)
-		if err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"scan":  scanResult,
-				"match": nil,
-				"error": err.Error(),
-			})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"scan":  scanResult,
-			"match": matchResult,
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status":  "queued",
+			"message": "library scan enqueued",
 		})
 	}
 }

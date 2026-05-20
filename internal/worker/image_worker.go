@@ -13,6 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -21,12 +22,19 @@ type DownloadImageWorker struct {
 	river.WorkerDefaults[DownloadImageArgs]
 	DB         *pgxpool.Pool
 	Downloader *images.Downloader
+	HeyaMedia  *heyamedia.Client
 	Hub        *eventhub.Hub
 }
 
 func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
 	if job.Args.URL == "" {
 		return nil
+	}
+
+	if w.HeyaMedia != nil && strings.HasPrefix(job.Args.URL, "http") {
+		if cdnURL := w.HeyaMedia.ProxyImageURL(ctx, job.Args.URL); cdnURL != job.Args.URL {
+			job.Args.URL = cdnURL
+		}
 	}
 
 	if job.Args.EntityType == "person" {

@@ -33,13 +33,13 @@ var setupCmd = &cobra.Command{
 		fmt.Println()
 
 		fc := &config.FileConfig{
-			DatabaseURL: cfg.DatabaseURL,
-			Host:        cfg.Host,
-			Port:        cfg.Port,
-			LogLevel:    cfg.LogLevel,
-			LogFormat:   cfg.LogFormat,
-			TMDBToken:   cfg.TMDBToken,
-			DataDir:     cfg.DataDir,
+			DatabaseURL:  cfg.DatabaseURL,
+			Host:         cfg.Host,
+			Port:         cfg.Port,
+			LogLevel:     cfg.LogLevel,
+			LogFormat:    cfg.LogFormat,
+			HeyaMediaURL: cfg.HeyaMediaURL,
+			DataDir:      cfg.DataDir,
 		}
 
 		// Step 1: Database connection
@@ -209,22 +209,21 @@ var setupCmd = &cobra.Command{
 			}
 		}
 
-		// Step 5: TMDB token
+		// Step 5: heya.media URL
 		fmt.Println()
-		if fc.TMDBToken != "" {
-			ui.Success("TMDB API token configured")
+		if fc.HeyaMediaURL != "" {
+			ui.Success("heya.media API: %s", fc.HeyaMediaURL)
 		} else {
-			ui.Println(ui.Dim("  TMDB token enables movie/TV metadata. Get one at https://www.themoviedb.org/settings/api"))
+			fc.HeyaMediaURL = "http://localhost:3030"
+			ui.Println(ui.Dim("  heya.media provides metadata from TMDB, OMDB, Fanart, TVDB, MusicBrainz, and more."))
 			huh.NewForm(
 				huh.NewGroup(
 					huh.NewInput().
-						Title("TMDB API read access token (optional, press Enter to skip)").
-						Value(&fc.TMDBToken),
+						Title("heya.media API URL").
+						Value(&fc.HeyaMediaURL),
 				),
 			).Run()
-			if fc.TMDBToken != "" {
-				ui.Success("TMDB token saved")
-			}
+			ui.Success("heya.media URL: %s", fc.HeyaMediaURL)
 		}
 
 		// Step 6: Save config

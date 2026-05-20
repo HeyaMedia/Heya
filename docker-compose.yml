@@ -1,15 +1,12 @@
 services:
   postgres:
     image: postgres:17
-    container_name: kura-postgres
+    container_name: heya-postgres
     environment:
-      POSTGRES_USER: kura
-      POSTGRES_PASSWORD: kura
-      POSTGRES_DB: kura
+      POSTGRES_USER: heya
+      POSTGRES_PASSWORD: heya
+      POSTGRES_DB: heya
     ports:
       - "5440:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-
-volumes:
-  pgdata:
+      - ./data/postgres:/var/lib/postgresql/data

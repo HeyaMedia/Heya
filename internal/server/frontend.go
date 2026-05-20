@@ -25,6 +25,34 @@ func spaHandler() http.Handler {
 				origDirector(r)
 				r.Host = target.Host
 			}
+			proxy.ModifyResponse = func(resp *http.Response) error {
+				ct := resp.Header.Get("Content-Type")
+				if ct == "" {
+					p := resp.Request.URL.Path
+					dot := strings.LastIndex(p, ".")
+					if dot >= 0 {
+						ext := p[dot:]
+						if q := strings.Index(ext, "?"); q >= 0 {
+							ext = ext[:q]
+						}
+						switch ext {
+						case ".js", ".mjs":
+							resp.Header.Set("Content-Type", "text/javascript")
+						case ".css":
+							resp.Header.Set("Content-Type", "text/css")
+						case ".wasm":
+							resp.Header.Set("Content-Type", "application/wasm")
+						case ".json", ".map":
+							resp.Header.Set("Content-Type", "application/json")
+						case ".woff2":
+							resp.Header.Set("Content-Type", "font/woff2")
+						case ".vue", ".ts", ".tsx", ".jsx":
+							resp.Header.Set("Content-Type", "text/javascript")
+						}
+					}
+				}
+				return nil
+			}
 			return proxy
 		}
 	}

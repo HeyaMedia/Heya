@@ -3,6 +3,34 @@
     <HeroA :items="heroItems" :movies="movieDetails" />
 
     <div class="page-pad">
+      <ContinueWatchingRow
+        v-if="continueWatching.length"
+        :items="continueWatching"
+        @play="onPlayContinue"
+      />
+
+      <ContentRow
+        v-if="recentlyWatched.length"
+        title="Recently Watched"
+        :items="recentlyWatched"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+      />
+
+      <ContentRow
+        v-if="favoriteItems.length"
+        title="Your Favorites"
+        :items="favoriteItems"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+      />
+
+      <ContentRow
+        v-if="recommendedItems.length"
+        title="Recommended For You"
+        subtitle="Based on your library"
+        :items="recommendedItems"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+      />
+
       <ContentRow
         v-if="recentMovies.length"
         title="Recently Added Films"
@@ -57,12 +85,17 @@
 
 <script setup lang="ts">
 import type { MediaItem, MediaDetail, Movie } from '~~/shared/types'
+import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 
 const recentMovies = ref<MediaItem[]>([])
 const recentTV = ref<MediaItem[]>([])
 const recentMusic = ref<MediaItem[]>([])
 const recentBooks = ref<MediaItem[]>([])
 const movieDetails = ref<Record<number, Movie>>({})
+const continueWatching = ref<ContinueWatchingItem[]>([])
+const recentlyWatched = ref<MediaItem[]>([])
+const favoriteItems = ref<MediaItem[]>([])
+const recommendedItems = ref<MediaItem[]>([])
 const loading = ref(true)
 
 const heroItems = computed(() => {
@@ -78,19 +111,70 @@ const hasContent = computed(() =>
   recentMovies.value.length + recentTV.value.length + recentMusic.value.length + recentBooks.value.length > 0
 )
 
+function onPlayContinue(item: ContinueWatchingItem) {
+  if (item.entity_type === 'episode') {
+    navigateTo(mediaUrl({ id: item.media_item_id, title: item.title, media_type: item.media_type as any } as MediaItem))
+  } else {
+    navigateTo(mediaUrl({ id: item.media_item_id, title: item.title, media_type: item.media_type as any } as MediaItem))
+  }
+}
+
 async function loadMedia() {
   const types = ['movie', 'tv', 'music', 'book'] as const
   const refs = [recentMovies, recentTV, recentMusic, recentBooks]
 
-  await Promise.all(
-    types.map(async (t, i) => {
+  const [, , , , cwRes, rwRes, favRes, recRes] = await Promise.allSettled([
+    ...types.map(async (t, i) => {
       try {
         refs[i].value = await apiFetch<MediaItem[]>(`/api/media?type=${t}&limit=20`)
       } catch (e) {
         console.warn(`Failed to load ${t}:`, e)
       }
-    })
-  )
+    }),
+    apiFetch<ContinueWatchingItem[]>('/api/watch/continue'),
+    apiFetch<any[]>('/api/watch/recent'),
+    apiFetch<{ favorited: number[] }>('/api/user/state', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'movies' }),
+    }),
+    apiFetch<any[]>('/api/recommendations?limit=20'),
+  ])
+
+  if (cwRes.status === 'fulfilled') {
+    continueWatching.value = cwRes.value || []
+  }
+
+  if (rwRes.status === 'fulfilled' && rwRes.value?.length) {
+    const rwItems = rwRes.value
+    const allMedia = [...recentMovies.value, ...recentTV.value]
+    const mediaMap = new Map(allMedia.map(m => [m.id, m]))
+    recentlyWatched.value = rwItems
+      .map((rw: any) => mediaMap.get(rw.media_item_id))
+      .filter((m): m is MediaItem => !!m)
+      .slice(0, 20)
+  }
+
+  if (favRes.status === 'fulfilled') {
+    const favIDs = new Set(favRes.value?.favorited || [])
+    if (favIDs.size > 0) {
+      const allMedia = [...recentMovies.value, ...recentTV.value]
+      favoriteItems.value = allMedia.filter(m => favIDs.has(m.id))
+    }
+  }
+
+  if (recRes.status === 'fulfilled' && recRes.value?.length) {
+    const allMedia = [...recentMovies.value, ...recentTV.value]
+    const mediaMap = new Map(allMedia.map(m => [m.id, m]))
+    const localRecs = recRes.value
+      .filter((r: any) => r.local_media_item_id)
+      .map((r: any) => mediaMap.get(r.local_media_item_id))
+      .filter((m): m is MediaItem => !!m)
+    const existingIds = new Set([
+      ...favoriteItems.value.map(m => m.id),
+      ...recentlyWatched.value.map(m => m.id),
+    ])
+    recommendedItems.value = localRecs.filter(m => !existingIds.has(m.id)).slice(0, 20)
+  }
 
   for (const item of heroItems.value) {
     try {

@@ -3,14 +3,17 @@
     <LibrarySidebar
       :libraries="libraries"
       :active-lib="activeLib"
+      :active-view="activeView"
       type-label="Shows"
       :total-count="items.length"
-      @select="activeLib = $event"
+      :loved-count="favoritedSet.size"
+      @select="activeLib = $event; activeView = null"
+      @view="activeView = $event"
     />
     <div class="library-main scroll">
       <LibraryToolbar
-        title="TV Shows"
-        :count="items.length"
+        :title="activeView === 'loved' ? 'Loved Shows' : 'TV Shows'"
+        :count="sorted.length"
         :sort="sort"
         :view="view"
         @sort="sort = $event"
@@ -35,6 +38,9 @@
             <div style="position: relative">
               <Poster :idx="i" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
               <div v-if="item.available === false" class="missing-badge">Missing</div>
+              <div v-if="isFullyWatched(item.id)" class="watched-badge"><Icon name="check" :size="10" /></div>
+              <div v-else-if="unwatchedCount(item.id) > 0 && unwatchedCount(item.id) < (showStates.get(item.id)?.total || 0)" class="unwatched-badge">{{ unwatchedCount(item.id) }}</div>
+              <div v-if="isFavorited(item.id)" class="fav-badge"><Icon name="heartfill" :size="10" /></div>
             </div>
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ item.title }}</div>
@@ -58,7 +64,11 @@
             <div class="list-title-cell">
               <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
               <div>
-                <div class="list-title">{{ item.title }}</div>
+                <div class="list-title">
+                  {{ item.title }}
+                  <Icon v-if="isWatched(item.id)" name="check" :size="12" style="color: var(--good); margin-left: 4px" />
+                  <Icon v-if="isFavorited(item.id)" name="heartfill" :size="12" style="color: var(--bad); margin-left: 2px" />
+                </div>
                 <div class="list-sub">{{ item.year }}</div>
               </div>
             </div>
@@ -78,17 +88,51 @@
 <script setup lang="ts">
 import type { MediaItem, Library } from '~~/shared/types'
 
-
 const items = ref<MediaItem[]>([])
 const libraries = ref<Library[]>([])
 const loading = ref(true)
 const activeLib = ref<number | null>(null)
+const activeView = ref<string | null>(null)
 const sort = ref('added')
 const view = ref('grid')
 
+const showStates = ref<Map<number, { total: number; watched: number }>>(new Map())
+const favoritedSet = ref<Set<number>>(new Set())
+
+function isFullyWatched(id: number) {
+  const s = showStates.value.get(id)
+  return !!s && s.total > 0 && s.watched >= s.total
+}
+function unwatchedCount(id: number) {
+  const s = showStates.value.get(id)
+  if (!s || s.total === 0) return 0
+  return s.total - s.watched
+}
+function isWatched(id: number) { return isFullyWatched(id) }
+function isFavorited(id: number) { return favoritedSet.value.has(id) }
+
+const listItems = ref<Set<number>>(new Set())
+
+watch(activeView, async (v) => {
+  if (!v) { listItems.value = new Set(); return }
+  if (v.startsWith('list-')) {
+    const listId = v.replace('list-', '')
+    try {
+      const res = await apiFetch<{ items: any[] }>(`/api/lists/${listId}`)
+      listItems.value = new Set((res.items || []).map((i: any) => i.id))
+    } catch { listItems.value = new Set() }
+  }
+})
+
 const sorted = computed(() => {
   let list = [...items.value]
-  if (activeLib.value) list = list.filter(i => i.library_id === activeLib.value)
+  if (activeView.value === 'loved') {
+    list = list.filter(i => favoritedSet.value.has(i.id))
+  } else if (activeView.value?.startsWith('list-')) {
+    list = list.filter(i => listItems.value.has(i.id))
+  } else if (activeLib.value) {
+    list = list.filter(i => i.library_id === activeLib.value)
+  }
   switch (sort.value) {
     case 'title': list.sort((a, b) => a.title.localeCompare(b.title)); break
     case 'year-desc': list.sort((a, b) => (b.year || '').localeCompare(a.year || '')); break
@@ -104,12 +148,20 @@ function formatDate(d: string) {
 }
 
 onMounted(async () => {
-  const [mediaRes, libRes] = await Promise.allSettled([
+  const [mediaRes, libRes, stateRes] = await Promise.allSettled([
     apiFetch<MediaItem[]>('/api/media?type=tv&limit=500'),
     apiFetch<Library[]>('/api/libraries'),
+    fetchUserState('series'),
   ])
   if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'tv')
+  if (stateRes.status === 'fulfilled') {
+    const st = stateRes.value
+    for (const s of (st.shows || [])) {
+      showStates.value.set(s.media_item_id, { total: s.total_episodes, watched: s.watched_episodes })
+    }
+    favoritedSet.value = new Set(st.favorited || [])
+  }
   loading.value = false
 })
 </script>
@@ -125,5 +177,25 @@ onMounted(async () => {
   text-transform: uppercase; letter-spacing: 0.08em;
   padding: 3px 8px; border-radius: 100px;
   background: rgba(217,107,107,0.85); color: #fff;
+}
+.watched-badge {
+  position: absolute; bottom: 8px; right: 8px;
+  width: 24px; height: 24px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.65); color: var(--good);
+  display: flex; align-items: center; justify-content: center;
+}
+.unwatched-badge {
+  position: absolute; bottom: 8px; right: 8px;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  border-radius: var(--r-sm); font-size: 11px; font-weight: 700;
+  font-family: var(--font-mono);
+  background: rgba(0,0,0,0.65); color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+}
+.fav-badge {
+  position: absolute; bottom: 8px; left: 8px;
+  width: 24px; height: 24px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.65); color: var(--bad);
+  display: flex; align-items: center; justify-content: center;
 }
 </style>

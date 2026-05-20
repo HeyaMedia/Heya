@@ -28,9 +28,13 @@ tmp/
 .DS_Store
 Thumbs.db
 
+# Full media test data (real files, too large for git)
+fulldata/
+
 # Frontend
 web/node_modules/
 web/.output/
 web/.nuxt/
 web/dist/*
 !web/dist/.gitkeep
+data/postgres/

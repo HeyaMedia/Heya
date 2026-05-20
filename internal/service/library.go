@@ -11,7 +11,6 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
 )
@@ -125,14 +124,6 @@ func (a *App) GetLibrarySettings(ctx context.Context, id int64) (metadata.Librar
 func (a *App) DeleteLibrary(ctx context.Context, id int64) error {
 	q := sqlc.New(a.DB)
 	return q.DeleteLibrary(ctx, id)
-}
-
-func (a *App) ScanLibrary(ctx context.Context, id int64, opts scanner.ScanOptions) (scanner.ScanResult, error) {
-	lib, err := a.GetLibrary(ctx, id)
-	if err != nil {
-		return scanner.ScanResult{}, fmt.Errorf("library %d: %w", id, err)
-	}
-	return a.Scanner.ScanLibrary(ctx, lib, opts)
 }
 
 func (a *App) MatchLibrary(ctx context.Context, id int64) (matcher.MatchResult, error) {

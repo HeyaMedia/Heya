@@ -10,6 +10,7 @@ import (
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -22,11 +23,12 @@ var _ pgx.Tx // ensure import used
 type Config struct {
 	DB             *pgxpool.Pool
 	DataDir        string
-	TMDBToken      string
+	HeyaMedia      *heyamedia.Client
 	Matcher        *matcher.Matcher
 	Downloader     *images.Downloader
 	Registry       *metadata.Registry
 	TranscodeCache *transcoder.CacheManager
+	HWAccel        transcoder.HwAccelConfig
 	Hub            *eventhub.Hub
 }
 
@@ -45,16 +47,16 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &ProcessFileWorker{DB: cfg.DB})
 	river.AddWorker(workers, &MetadataMatchWorker{DB: cfg.DB, Matcher: cfg.Matcher, Registry: cfg.Registry, Hub: cfg.Hub})
 	river.AddWorker(workers, &MetadataFetchWorker{DB: cfg.DB, Matcher: cfg.Matcher, Registry: cfg.Registry, Hub: cfg.Hub})
-	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, Hub: cfg.Hub})
+	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, HeyaMedia: cfg.HeyaMedia, Hub: cfg.Hub})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir})
-	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, TMDBToken: cfg.TMDBToken})
+	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, HeyaMedia: cfg.HeyaMedia})
 	river.AddWorker(workers, &EnrichmentWorker{DB: cfg.DB, Registry: cfg.Registry})
 	river.AddWorker(workers, &RatingsFetchWorker{DB: cfg.DB, Registry: cfg.Registry})
 	river.AddWorker(workers, &SaveNFOWorker{DB: cfg.DB})
 	river.AddWorker(workers, &SaveImagesWorker{DB: cfg.DB})
 	river.AddWorker(workers, &MetadataRefreshWorker{DB: cfg.DB})
-	river.AddWorker(workers, &TranscodeWorker{DB: cfg.DB, Cache: cfg.TranscodeCache})
+	river.AddWorker(workers, &TranscodeWorker{DB: cfg.DB, Cache: cfg.TranscodeCache, HWAccel: cfg.HWAccel})
 	river.AddWorker(workers, &SoftDeleteWorker{DB: cfg.DB, Hub: cfg.Hub})
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.DB), &river.Config{

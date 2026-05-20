@@ -1,0 +1,154 @@
+<template>
+  <section v-if="items.length" class="content-row">
+    <div class="section-row-head">
+      <div>
+        <h2 class="section-title-lg">Continue Watching</h2>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <button class="scroll-btn" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-btn" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
+      </div>
+    </div>
+    <div class="row-scroll" ref="scrollEl">
+      <div
+        v-for="item in items"
+        :key="item.id"
+        class="cw-tile"
+        @click="$emit('play', item)"
+      >
+        <div class="cw-thumb">
+          <img :src="thumbUrl(item)" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+          <div class="cw-play-overlay">
+            <div class="cw-play-btn"><Icon name="play" :size="16" /></div>
+          </div>
+          <div class="cw-progress-bar">
+            <div class="cw-progress-fill" :style="{ width: progressPct(item) + '%' }" />
+          </div>
+        </div>
+        <div class="cw-meta">
+          <div class="cw-title">{{ item.title }}</div>
+          <div class="cw-sub">
+            <template v-if="item.entity_type === 'episode' && item.season_number">
+              S{{ String(item.season_number).padStart(2, '0') }}E{{ String(item.episode_number).padStart(2, '0') }}
+              <span v-if="item.episode_title"> · {{ item.episode_title }}</span>
+            </template>
+            <template v-else>
+              {{ formatRemaining(item) }}
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<script setup lang="ts">
+export interface ContinueWatchingItem {
+  id: number
+  entity_type: string
+  entity_id: number
+  progress_seconds: number
+  total_seconds: number
+  media_item_id: number
+  title: string
+  poster_path: string
+  slug: string
+  media_type: string
+  episode_number?: number
+  episode_title?: string
+  season_number?: number
+}
+
+defineProps<{ items: ContinueWatchingItem[] }>()
+defineEmits<{ play: [item: ContinueWatchingItem] }>()
+
+const scrollEl = ref<HTMLElement>()
+
+function scrollBy(dir: number) {
+  if (!scrollEl.value) return
+  scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
+}
+
+function thumbUrl(item: ContinueWatchingItem): string {
+  if (item.entity_type === 'episode' && item.season_number && item.episode_number) {
+    const label = `s${String(item.season_number).padStart(2, '0')}e${String(item.episode_number).padStart(2, '0')}`
+    return `/api/media/${item.media_item_id}/image/backdrop?label=${label}`
+  }
+  return `/api/media/${item.media_item_id}/image/backdrop`
+}
+
+function progressPct(item: ContinueWatchingItem): number {
+  if (!item.total_seconds) return 0
+  return Math.min(95, Math.round((item.progress_seconds / item.total_seconds) * 100))
+}
+
+function formatRemaining(item: ContinueWatchingItem): string {
+  const remaining = item.total_seconds - item.progress_seconds
+  if (remaining <= 0) return ''
+  const m = Math.ceil(remaining / 60)
+  if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m remaining`
+  return `${m}m remaining`
+}
+</script>
+
+<style scoped>
+.content-row { margin-bottom: 40px; }
+
+.row-scroll {
+  display: flex; gap: 16px;
+  overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 4px; scrollbar-width: none;
+}
+.row-scroll::-webkit-scrollbar { display: none; }
+.row-scroll > * { scroll-snap-align: start; }
+
+.scroll-btn {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  color: var(--fg-2); transition: all 0.15s;
+}
+.scroll-btn:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
+
+.cw-tile {
+  width: 280px; flex-shrink: 0; cursor: pointer;
+}
+.cw-thumb {
+  position: relative; aspect-ratio: 16/9;
+  border-radius: var(--r-md); overflow: hidden;
+  background: var(--bg-3);
+}
+.cw-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.cw-play-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.3);
+  opacity: 0; transition: opacity 0.15s;
+}
+.cw-tile:hover .cw-play-overlay { opacity: 1; }
+.cw-play-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(255,255,255,0.15); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+
+.cw-progress-bar {
+  position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+  background: rgba(255,255,255,0.15);
+}
+.cw-progress-fill {
+  height: 100%; background: var(--gold); border-radius: 0 2px 2px 0;
+}
+
+.cw-meta { padding: 8px 2px 0; }
+.cw-title {
+  font-size: 13px; font-weight: 500; color: var(--fg-0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cw-sub {
+  font-size: 11px; color: var(--fg-3); font-family: var(--font-mono);
+  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+</style>

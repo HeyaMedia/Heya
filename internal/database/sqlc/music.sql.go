@@ -15,7 +15,7 @@ const createAlbum = `-- name: CreateAlbum :one
 INSERT INTO albums (artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date,
     label, country, barcode, total_tracks, total_discs, tags)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-RETURNING id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags
+RETURNING id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector
 `
 
 type CreateAlbumParams struct {
@@ -69,6 +69,7 @@ func (q *Queries) CreateAlbum(ctx context.Context, arg CreateAlbumParams) (Album
 		&i.TotalTracks,
 		&i.TotalDiscs,
 		&i.Tags,
+		&i.SearchVector,
 	)
 	return i, err
 }
@@ -107,7 +108,7 @@ func (q *Queries) CreateArtist(ctx context.Context, arg CreateArtistParams) (Art
 const createTrack = `-- name: CreateTrack :one
 INSERT INTO tracks (album_id, disc_number, track_number, title, duration_ms, file_path)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, album_id, disc_number, track_number, title, duration_ms, file_path
+RETURNING id, album_id, disc_number, track_number, title, duration_ms, file_path, search_vector
 `
 
 type CreateTrackParams struct {
@@ -137,12 +138,13 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		&i.Title,
 		&i.DurationMs,
 		&i.FilePath,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getAlbumByID = `-- name: GetAlbumByID :one
-SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags FROM albums WHERE id = $1
+SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector FROM albums WHERE id = $1
 `
 
 func (q *Queries) GetAlbumByID(ctx context.Context, id int64) (Album, error) {
@@ -164,12 +166,13 @@ func (q *Queries) GetAlbumByID(ctx context.Context, id int64) (Album, error) {
 		&i.TotalTracks,
 		&i.TotalDiscs,
 		&i.Tags,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getAlbumByMusicBrainzID = `-- name: GetAlbumByMusicBrainzID :one
-SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags FROM albums WHERE musicbrainz_id = $1
+SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector FROM albums WHERE musicbrainz_id = $1
 `
 
 func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID string) (Album, error) {
@@ -191,6 +194,7 @@ func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID str
 		&i.TotalTracks,
 		&i.TotalDiscs,
 		&i.Tags,
+		&i.SearchVector,
 	)
 	return i, err
 }
@@ -230,7 +234,7 @@ func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID st
 }
 
 const getTrackByID = `-- name: GetTrackByID :one
-SELECT id, album_id, disc_number, track_number, title, duration_ms, file_path FROM tracks WHERE id = $1
+SELECT id, album_id, disc_number, track_number, title, duration_ms, file_path, search_vector FROM tracks WHERE id = $1
 `
 
 func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
@@ -244,12 +248,13 @@ func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
 		&i.Title,
 		&i.DurationMs,
 		&i.FilePath,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const listAlbumsByArtist = `-- name: ListAlbumsByArtist :many
-SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC
+SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC
 `
 
 func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Album, error) {
@@ -277,6 +282,7 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 			&i.TotalTracks,
 			&i.TotalDiscs,
 			&i.Tags,
+			&i.SearchVector,
 		); err != nil {
 			return nil, err
 		}
@@ -289,7 +295,7 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 }
 
 const listTracksByAlbum = `-- name: ListTracksByAlbum :many
-SELECT id, album_id, disc_number, track_number, title, duration_ms, file_path FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
+SELECT id, album_id, disc_number, track_number, title, duration_ms, file_path, search_vector FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
 `
 
 func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track, error) {
@@ -309,6 +315,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 			&i.Title,
 			&i.DurationMs,
 			&i.FilePath,
+			&i.SearchVector,
 		); err != nil {
 			return nil, err
 		}
@@ -326,7 +333,7 @@ SET title = $2, year = $3, musicbrainz_id = $4, album_type = $5,
     genres = $6, cover_path = $7, release_date = $8,
     label = $9, country = $10, barcode = $11, total_tracks = $12, total_discs = $13, tags = $14
 WHERE id = $1
-RETURNING id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags
+RETURNING id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector
 `
 
 type UpdateAlbumParams struct {
@@ -380,6 +387,7 @@ func (q *Queries) UpdateAlbum(ctx context.Context, arg UpdateAlbumParams) (Album
 		&i.TotalTracks,
 		&i.TotalDiscs,
 		&i.Tags,
+		&i.SearchVector,
 	)
 	return i, err
 }

@@ -47,7 +47,4 @@ export default defineNuxtConfig({
       exclude: ['@phosphor-icons/vue'],
     },
   },
-
-  // In dev, Go (port 8080) is the entry point and proxies all non-/api/*
-  // requests to this Nuxt dev server. No proxy needed from Nuxt's side.
 })

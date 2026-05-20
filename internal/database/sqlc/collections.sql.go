@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAllCollections = `-- name: CountAllCollections :one
+SELECT count(*) FROM collections
+`
+
+func (q *Queries) CountAllCollections(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAllCollections)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCollection = `-- name: CreateCollection :one
 INSERT INTO collections (tmdb_id, name, overview, poster_path, backdrop_path)
 VALUES ($1, $2, $3, $4, $5)
@@ -19,7 +30,7 @@ ON CONFLICT (tmdb_id) DO UPDATE SET
   overview = EXCLUDED.overview,
   poster_path = EXCLUDED.poster_path,
   backdrop_path = EXCLUDED.backdrop_path
-RETURNING id, tmdb_id, name, overview, poster_path, backdrop_path
+RETURNING id, tmdb_id, name, overview, poster_path, backdrop_path, search_vector
 `
 
 type CreateCollectionParams struct {
@@ -46,12 +57,32 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 		&i.Overview,
 		&i.PosterPath,
 		&i.BackdropPath,
+		&i.SearchVector,
+	)
+	return i, err
+}
+
+const getCollectionByID = `-- name: GetCollectionByID :one
+SELECT id, tmdb_id, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE id = $1
+`
+
+func (q *Queries) GetCollectionByID(ctx context.Context, id int64) (Collection, error) {
+	row := q.db.QueryRow(ctx, getCollectionByID, id)
+	var i Collection
+	err := row.Scan(
+		&i.ID,
+		&i.TmdbID,
+		&i.Name,
+		&i.Overview,
+		&i.PosterPath,
+		&i.BackdropPath,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getCollectionByTmdbID = `-- name: GetCollectionByTmdbID :one
-SELECT id, tmdb_id, name, overview, poster_path, backdrop_path FROM collections WHERE tmdb_id = $1
+SELECT id, tmdb_id, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE tmdb_id = $1
 `
 
 func (q *Queries) GetCollectionByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Collection, error) {
@@ -64,6 +95,109 @@ func (q *Queries) GetCollectionByTmdbID(ctx context.Context, tmdbID pgtype.Int4)
 		&i.Overview,
 		&i.PosterPath,
 		&i.BackdropPath,
+		&i.SearchVector,
 	)
 	return i, err
+}
+
+const listAllCollections = `-- name: ListAllCollections :many
+SELECT c.id, c.tmdb_id, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector,
+       (SELECT count(*) FROM movies m WHERE m.collection_id = c.id)::int AS movie_count
+FROM collections c
+ORDER BY c.name
+LIMIT $1 OFFSET $2
+`
+
+type ListAllCollectionsParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+type ListAllCollectionsRow struct {
+	ID           int64       `json:"id"`
+	TmdbID       pgtype.Int4 `json:"tmdb_id"`
+	Name         string      `json:"name"`
+	Overview     string      `json:"overview"`
+	PosterPath   string      `json:"poster_path"`
+	BackdropPath string      `json:"backdrop_path"`
+	SearchVector interface{} `json:"search_vector"`
+	MovieCount   int32       `json:"movie_count"`
+}
+
+func (q *Queries) ListAllCollections(ctx context.Context, arg ListAllCollectionsParams) ([]ListAllCollectionsRow, error) {
+	rows, err := q.db.Query(ctx, listAllCollections, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllCollectionsRow{}
+	for rows.Next() {
+		var i ListAllCollectionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TmdbID,
+			&i.Name,
+			&i.Overview,
+			&i.PosterPath,
+			&i.BackdropPath,
+			&i.SearchVector,
+			&i.MovieCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCollectionMovies = `-- name: ListCollectionMovies :many
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.created_at, mi.updated_at, mi.search_vector, mi.homepage, mi.wikidata_id, mi.facebook_id, mi.instagram_id, mi.twitter_id, mi.slug, mi.metadata_refreshed_at
+FROM media_items mi
+JOIN movies m ON m.media_item_id = mi.id
+WHERE m.collection_id = $1
+ORDER BY m.release_date NULLS LAST
+`
+
+func (q *Queries) ListCollectionMovies(ctx context.Context, collectionID pgtype.Int8) ([]MediaItem, error) {
+	rows, err := q.db.Query(ctx, listCollectionMovies, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MediaItem{}
+	for rows.Next() {
+		var i MediaItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.MediaType,
+			&i.Title,
+			&i.SortTitle,
+			&i.Year,
+			&i.Description,
+			&i.PosterPath,
+			&i.BackdropPath,
+			&i.ExternalIds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SearchVector,
+			&i.Homepage,
+			&i.WikidataID,
+			&i.FacebookID,
+			&i.InstagramID,
+			&i.TwitterID,
+			&i.Slug,
+			&i.MetadataRefreshedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -263,8 +263,87 @@ export interface PersonResponse {
   crew_credits?: PersonCrewCredit[]
 }
 
+export interface MediaFile {
+  id: number
+  size: number
+}
+
+export interface PlaybackDecision {
+  action: 'direct_play' | 'remux' | 'transcode'
+  profile: string
+  reason: string
+  copy_video: boolean
+  copy_audio: boolean
+}
+
+export interface StreamInfoResponse {
+  container: string
+  duration: number
+  size: number
+  bit_rate: number
+  playback: PlaybackDecision
+  video: StreamVideo[]
+  audio: StreamAudio[]
+  subtitle: StreamSubtitle[]
+}
+
+export interface StreamVideo {
+  index: number
+  codec: string
+  codec_long: string
+  profile?: string
+  width: number
+  height: number
+  pix_fmt?: string
+  hdr: boolean
+  color_transfer?: string
+  color_primaries?: string
+  color_space?: string
+  bit_rate?: string
+  is_default: boolean
+}
+
+export interface StreamAudio {
+  index: number
+  codec: string
+  codec_long: string
+  channels: number
+  channel_layout?: string
+  sample_rate?: string
+  bit_rate?: string
+  language: string
+  title?: string
+  is_default: boolean
+}
+
+export interface StreamSubtitle {
+  index: number
+  codec: string
+  language: string
+  title?: string
+  is_default: boolean
+  is_forced: boolean
+  is_hearing_impaired: boolean
+}
+
+export interface EpisodeFileEntry {
+  file_id: number
+  size: number
+}
+
+export interface Collection {
+  id: number
+  name: string
+  overview: string
+  poster_path: string
+  backdrop_path: string
+}
+
 export interface MediaDetail {
   media_item: MediaItem
+  available: boolean
+  files?: MediaFile[]
+  episode_files?: Record<string, EpisodeFileEntry>
   movie?: Movie
   tv_series?: TVSeries
   seasons?: TVSeason[]
@@ -272,6 +351,7 @@ export interface MediaDetail {
   albums?: Album[]
   book?: Book
   author?: { id: number; name: string }
+  collection?: Collection
   cast?: CastMember[]
   crew?: CrewMember[]
   keywords?: Keyword[]
@@ -279,8 +359,16 @@ export interface MediaDetail {
   certifications?: MediaCertification[]
   recommendations?: MediaRecommendation[]
   production_companies?: ProductionCompany[]
+  external_ratings?: ExternalRating[]
   assets?: MediaAsset[]
   extras?: MediaExtra[]
+}
+
+export interface ExternalRating {
+  id: number
+  source: string
+  value: string
+  score: string
 }
 
 export interface LibraryFile {

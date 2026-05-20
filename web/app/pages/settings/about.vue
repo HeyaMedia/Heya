@@ -95,6 +95,22 @@
       </div>
     </section>
 
+    <section class="section">
+      <h3 class="section-heading">
+        <Icon name="heart" :size="14" />
+        Inspired By
+      </h3>
+      <div class="source-list">
+        <div class="source-row">
+          <span class="source-name">Kyoo</span>
+          <span class="source-desc">
+            Transcoding architecture: hardware acceleration, keyframe-aligned segmentation, and adaptive bitrate ladder design.
+            <a href="https://github.com/zoriya/kyoo" target="_blank" rel="noopener" class="source-link">github.com/zoriya/kyoo</a>
+          </span>
+        </div>
+      </div>
+    </section>
+
     <div class="about-footer">
       <Icon name="copyright" :size="12" />
       <span>Heya Media — Built with care.</span>
@@ -240,6 +256,14 @@ onMounted(async () => {
   border: 1px solid var(--border);
   color: var(--fg-1);
 }
+
+.source-link {
+  color: var(--gold);
+  text-decoration: none;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.source-link:hover { text-decoration: underline; }
 
 /* Footer */
 .about-footer {

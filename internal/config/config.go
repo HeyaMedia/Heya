@@ -12,15 +12,11 @@ type Config struct {
 	Port                string
 	LogLevel            string
 	LogFormat           string
-	TMDBToken           string
+	HeyaMediaURL        string
 	DataDir             string
-	FanartAPIKey        string
-	TVDBAPIKey          string
-	AniDBClient         string
-	OMDbAPIKey          string
-	DiscogsAPIKey       string
 	TranscodeCacheDir   string
 	TranscodeCacheMaxGB int
+	HWAccel             string
 }
 
 func Load() *Config {
@@ -38,13 +34,9 @@ func Load() *Config {
 		Port:         getenv("PORT", ""),
 		LogLevel:     getenv("LOG_LEVEL", ""),
 		LogFormat:    getenv("LOG_FORMAT", ""),
-		TMDBToken:    getenv("TMDB_API_TOKEN", ""),
+		HeyaMediaURL: getenv("HEYA_MEDIA_URL", ""),
 		DataDir:      getenv("DATA_DIR", ""),
-		FanartAPIKey: getenv("FANART_API_KEY", ""),
-		TVDBAPIKey:   getenv("TVDB_API_KEY", ""),
-		AniDBClient:  getenv("ANIDB_CLIENT", ""),
-		OMDbAPIKey:    getenv("OMDB_API_KEY", ""),
-		DiscogsAPIKey: getenv("DISCOGS_API_KEY", ""),
+		HWAccel:      getenv("HEYA_HWACCEL", ""),
 	}
 	applyDefaults(cfg)
 	return cfg
@@ -90,6 +82,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.LogFormat == "" {
 		cfg.LogFormat = "console"
 	}
+	if cfg.HeyaMediaURL == "" {
+		cfg.HeyaMediaURL = "http://localhost:3030"
+	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data"
 	}
@@ -98,6 +93,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.TranscodeCacheMaxGB == 0 {
 		cfg.TranscodeCacheMaxGB = 50
+	}
+	if cfg.HWAccel == "" {
+		cfg.HWAccel = "auto"
 	}
 }
 
@@ -112,13 +110,9 @@ func (c *Config) ToFileConfig() *FileConfig {
 		Port:         c.Port,
 		LogLevel:     c.LogLevel,
 		LogFormat:    c.LogFormat,
-		TMDBToken:    c.TMDBToken,
+		HeyaMediaURL: c.HeyaMediaURL,
 		DataDir:      c.DataDir,
-		FanartAPIKey: c.FanartAPIKey,
-		TVDBAPIKey:   c.TVDBAPIKey,
-		AniDBClient:  c.AniDBClient,
-		OMDbAPIKey:    c.OMDbAPIKey,
-		DiscogsAPIKey: c.DiscogsAPIKey,
+		HWAccel:      c.HWAccel,
 	}
 }
 

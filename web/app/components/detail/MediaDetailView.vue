@@ -27,6 +27,7 @@
       <div class="hero-content">
         <div class="hero-poster">
           <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" />
+          <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
         <div class="hero-info">
@@ -50,15 +51,27 @@
             </template>
           </div>
 
+          <div v-if="detail.external_ratings?.length" class="ratings-row">
+            <div v-for="er in detail.external_ratings" :key="er.source" class="ext-rating">
+              <span class="ext-rating-source">{{ ratingSourceLabel(er.source) }}</span>
+              <span class="ext-rating-value">{{ er.value }}</span>
+            </div>
+          </div>
+
           <div v-if="genres.length" style="display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0">
-            <Chip v-for="g in genres" :key="g">{{ g }}</Chip>
+            <NuxtLink v-for="g in genres" :key="g" :to="`/genre/${encodeURIComponent(g)}`"><Chip>{{ g }}</Chip></NuxtLink>
           </div>
 
           <div class="detail-actions">
-            <button class="btn btn-primary"><Icon name="play" :size="16" /> Play</button>
-            <button class="btn btn-secondary"><Icon name="plus" :size="16" /> My List</button>
-            <button class="btn-icon" style="color: var(--fg-1)"><Icon name="heart" :size="20" /></button>
-            <button class="btn-icon" style="color: var(--fg-1)"><Icon name="download" :size="20" /></button>
+            <button v-if="playableFileId" class="btn btn-primary" @click="navigateToPlayer"><Icon name="play" :size="16" /> Play</button>
+            <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No File</button>
+            <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
+            <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
+              <Icon :name="isFavorited ? 'heartfill' : 'heart'" :size="20" />
+            </button>
+            <button class="btn-icon" :style="{ color: isWatched ? 'var(--good)' : 'var(--fg-1)' }" @click="toggleWatched">
+              <Icon name="check" :size="20" />
+            </button>
           </div>
 
           <p v-if="detail.media_item.description" class="detail-synopsis">{{ detail.media_item.description }}</p>
@@ -87,11 +100,34 @@
             </template>
           </div>
 
+          <div v-if="detail.collection" class="collection-link" style="margin-top: 16px">
+            <NuxtLink :to="`/collection/${detail.collection.id}`" class="collection-badge">
+              <Icon name="folder" :size="14" />
+              Part of <strong>{{ detail.collection.name }}</strong>
+            </NuxtLink>
+          </div>
+
           <div v-if="detail.keywords?.length" style="display: flex; gap: 5px; flex-wrap: wrap; margin-top: 16px">
-            <span v-for="k in detail.keywords" :key="k.id" class="keyword-tag">{{ k.name }}</span>
+            <NuxtLink v-for="k in detail.keywords" :key="k.id" :to="`/keyword/${encodeURIComponent(k.name)}`" class="keyword-tag">{{ k.name }}</NuxtLink>
           </div>
         </div>
       </div>
+
+      <!-- Backdrop indicators -->
+      <div v-if="backdropAssets.length > 1" class="bd-indicators" @mouseenter="pauseCarousel" @mouseleave="resumeCarousel">
+        <button
+          v-for="(_, i) in backdropAssets"
+          :key="`bd-${i}-${backdropIdx}`"
+          class="bd-bar"
+          :class="{ active: i === backdropIdx, paused: carouselPaused && i === backdropIdx }"
+          @click="jumpToBackdrop(i)"
+        />
+      </div>
+
+      <!-- Expand backdrop -->
+      <button v-if="backdropAssets.length > 0" class="hero-expand" @click="openBackdropLightbox">
+        <Icon name="expand" :size="14" />
+      </button>
     </div>
 
     <div class="detail-body-below">
@@ -119,12 +155,10 @@
             :to="personUrl(c)"
             class="cast-card"
           >
-            <img
-              v-if="c.profile_path && !c.profile_path.startsWith('http')"
-              :src="`/api/person/${c.id}/image`"
-              class="cast-photo"
-              @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
-            />
+            <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
+              <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+              <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
+            </div>
             <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
             <div class="cast-name">{{ c.name }}</div>
             <div class="cast-role">{{ c.character }}</div>
@@ -141,12 +175,10 @@
                 :to="personUrl(c)"
                 class="crew-card"
               >
-                <img
-                  v-if="c.profile_path && !c.profile_path.startsWith('http')"
-                  :src="`/api/person/${c.id}/image`"
-                  class="crew-photo"
-                  @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
-                />
+                <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="crew-photo-wrap">
+                  <img :src="`/api/person/${c.id}/image`" class="crew-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                  <button class="zoom-btn round crew-zoom" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="8" /></button>
+                </div>
                 <div v-else class="crew-initials">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
                 <div>
                   <div class="crew-name">{{ c.name }}</div>
@@ -234,10 +266,10 @@
         </div>
       </div>
 
-      <!-- Recommendations (horizontal scroll) -->
+      <!-- More Like This (horizontal scroll) -->
       <div v-if="detail.recommendations?.length" class="detail-section">
         <div class="section-row-head">
-          <h3 class="section-title-lg">Recommended</h3>
+          <h3 class="section-title-lg">More Like This</h3>
           <div style="display: flex; gap: 8px">
             <button class="scroll-arrow" @click="scrollRecs(-1)"><Icon name="chevleft" :size="16" /></button>
             <button class="scroll-arrow" @click="scrollRecs(1)"><Icon name="chevright" :size="16" /></button>
@@ -248,24 +280,60 @@
             v-for="r in detail.recommendations"
             :key="r.id"
             :is="r.local_media_item_id ? 'NuxtLink' : 'div'"
-            :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, media_type: r.media_type }) : undefined"
+            :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, media_type: r.media_type } as any) : undefined"
             class="rec-tile"
             :class="{ dimmed: !r.local_media_item_id }"
           >
             <Poster
               :idx="r.recommended_tmdb_id"
-              :src="r.local_media_item_id ? usePosterUrl(r.local_media_item_id) : undefined"
+              :src="recPosterUrl(r)"
               aspect="2/3"
               :title="r.title"
             />
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ r.title }}</div>
-              <div class="grid-tile-sub">{{ r.release_date?.slice(0, 4) || '?' }}</div>
+              <div class="grid-tile-sub">
+                {{ r.release_date?.slice(0, 4) || '?' }}
+                <span v-if="r.local_media_item_id" class="rec-in-library">In library</span>
+              </div>
             </div>
           </component>
         </div>
       </div>
     </div>
+
+    <!-- List modal -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="showListModal" class="modal-overlay" @click.self="showListModal = false">
+          <div class="modal-card">
+            <div class="modal-header">
+              <h3>Add to List</h3>
+              <button class="btn-icon" @click="showListModal = false"><Icon name="close" :size="16" /></button>
+            </div>
+            <div class="modal-body">
+              <div v-if="!showCreateList">
+                <button v-for="l in userLists" :key="l.id" class="list-option" :class="{ active: l.contains }" @click="toggleListItem(l)">
+                  <Icon :name="l.contains ? 'check' : 'plus'" :size="14" />
+                  <span>{{ l.name }}</span>
+                  <span class="list-option-count">{{ l.item_count }}</span>
+                </button>
+                <div v-if="!userLists.length" style="padding: 16px 0; color: var(--fg-3); font-size: 13px; text-align: center">No lists yet</div>
+                <button class="list-create-btn" @click="showCreateList = true"><Icon name="plus" :size="14" /> Create new list</button>
+              </div>
+              <div v-else>
+                <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
+                <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
+                <div style="display: flex; gap: 8px; margin-top: 12px">
+                  <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
+                  <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 
   <div v-else class="scroll" style="height: 100%; display: flex; align-items: center; justify-content: center">
@@ -280,6 +348,7 @@
 import type { MediaDetail, MediaExtra } from '~~/shared/types'
 
 const props = defineProps<{ mediaId: number }>()
+const lightbox = useLightbox()
 
 const detail = ref<MediaDetail | null>(null)
 const loading = ref(true)
@@ -287,11 +356,61 @@ const backdropIdx = ref(0)
 const peopleTab = ref<'cast' | 'crew'>('cast')
 const contentTab = ref('')
 const contentExpanded = ref(false)
+
+// Favorites
+const isFavorited = ref(false)
+async function toggleFavorite() {
+  if (!detail.value) return
+  const res = await apiFetch<{ favorited: boolean }>('/api/favorites/toggle', {
+    method: 'POST', body: JSON.stringify({ entity_type: 'media_item', entity_id: detail.value.media_item.id }),
+  })
+  isFavorited.value = res.favorited
+}
+
+// Watched (for movies)
+const isWatched = ref(false)
+async function toggleWatched() {
+  if (!detail.value) return
+  await apiFetch(`/api/media/${detail.value.media_item.id}/watched`, { method: 'POST', body: JSON.stringify({ watched: !isWatched.value }) })
+  isWatched.value = !isWatched.value
+}
+
+// Lists
+const showListModal = ref(false)
+const showCreateList = ref(false)
+const newListName = ref('')
+const newListDesc = ref('')
+const userLists = ref<any[]>([])
+
+async function loadLists() {
+  if (!detail.value) return
+  try { userLists.value = await apiFetch<any[]>(`/api/lists?media_item_id=${detail.value.media_item.id}`) } catch { /* empty */ }
+}
+async function createList() {
+  if (!newListName.value.trim()) return
+  await apiFetch('/api/lists', { method: 'POST', body: JSON.stringify({ name: newListName.value.trim(), description: newListDesc.value.trim() }) })
+  newListName.value = ''; newListDesc.value = ''; showCreateList.value = false
+  await loadLists()
+}
+async function toggleListItem(l: any) {
+  if (!detail.value) return
+  if (l.contains) { await apiFetch(`/api/lists/${l.id}/items/${detail.value.media_item.id}`, { method: 'DELETE' }) }
+  else { await apiFetch(`/api/lists/${l.id}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: detail.value.media_item.id }) }) }
+  await loadLists()
+}
+watch(showListModal, (v) => { if (v) loadLists() })
 const extrasExpanded = reactive<Record<string, boolean>>({})
 const recScrollEl = ref<HTMLElement>()
 const videosScroll = ref<HTMLElement>()
 const castScroll = ref<HTMLElement>()
 const scrollRefs: Record<string, HTMLElement> = {}
+
+// Carousel state
+const carouselPaused = ref(false)
+const BACKDROP_INTERVAL = 8000
+let bdTimeout: ReturnType<typeof setTimeout> | null = null
+let bdStart = 0
+let bdRemaining = BACKDROP_INTERVAL
 
 function setScrollRef(key: string, el: any) {
   if (el) scrollRefs[key] = el
@@ -346,12 +465,68 @@ function advanceBackdrop() {
   if (backdropAssets.value.length <= 1) return
   backdropIdx.value = (backdropIdx.value + 1) % backdropAssets.value.length
   const url = getBackdropUrl(backdropIdx.value)
-  if (showA.value) {
-    backdropB.value = url
-  } else {
-    backdropA.value = url
-  }
+  if (showA.value) { backdropB.value = url } else { backdropA.value = url }
   showA.value = !showA.value
+}
+
+function startCarouselTimer() {
+  bdStart = Date.now()
+  bdRemaining = BACKDROP_INTERVAL
+  bdTimeout = setTimeout(() => {
+    advanceBackdrop()
+    startCarouselTimer()
+  }, BACKDROP_INTERVAL)
+}
+
+function pauseCarousel() {
+  carouselPaused.value = true
+  if (bdTimeout) clearTimeout(bdTimeout)
+  bdRemaining -= Date.now() - bdStart
+}
+
+function resumeCarousel() {
+  carouselPaused.value = false
+  bdStart = Date.now()
+  bdTimeout = setTimeout(() => {
+    advanceBackdrop()
+    startCarouselTimer()
+  }, bdRemaining)
+}
+
+function jumpToBackdrop(idx: number) {
+  if (idx === backdropIdx.value) return
+  if (bdTimeout) clearTimeout(bdTimeout)
+  backdropIdx.value = idx
+  const url = getBackdropUrl(idx)
+  if (showA.value) { backdropB.value = url } else { backdropA.value = url }
+  showA.value = !showA.value
+  if (!carouselPaused.value) startCarouselTimer()
+}
+
+// Lightbox
+function openPosterLightbox() {
+  const src = usePosterUrl(detail.value!.media_item.id)
+  if (src) lightbox.open(src)
+}
+
+function openBackdropLightbox() {
+  const urls = backdropAssets.value.map((_, i) => getBackdropUrl(i)!)
+  if (urls.length) lightbox.open(urls, backdropIdx.value)
+  else {
+    const src = useBackdropUrl(detail.value!.media_item.id)
+    if (src) lightbox.open(src)
+  }
+}
+
+const playableFileId = computed(() => detail.value?.files?.[0]?.id)
+
+function navigateToPlayer() {
+  if (!playableFileId.value || !detail.value) return
+  const params = new URLSearchParams({
+    media_item_id: String(detail.value.media_item.id),
+    title: detail.value.media_item.title,
+  })
+  navigateTo(`/watch/${playableFileId.value}?${params}`)
 }
 
 const genres = computed(() => detail.value?.movie?.genres || detail.value?.tv_series?.genres || detail.value?.book?.genres || [])
@@ -427,7 +602,24 @@ function scrollRecs(dir: number) {
   recScrollEl.value?.scrollBy({ left: dir * 500, behavior: 'smooth' })
 }
 
-let backdropInterval: ReturnType<typeof setInterval> | null = null
+const RATING_LABELS: Record<string, string> = {
+  imdb: 'IMDb',
+  rottentomatoes: 'Rotten Tomatoes',
+  metacritic: 'Metacritic',
+  tmdb: 'TMDB',
+  letterboxd: 'Letterboxd',
+  trakt: 'Trakt',
+}
+
+function ratingSourceLabel(source: string): string {
+  return RATING_LABELS[source] || source.charAt(0).toUpperCase() + source.slice(1)
+}
+
+function recPosterUrl(r: any): string {
+  if (r.local_media_item_id) return usePosterUrl(r.local_media_item_id)
+  if (r.poster_path) return `/api/tmdb/image${r.poster_path}?size=w342`
+  return ''
+}
 
 onMounted(async () => {
   try {
@@ -440,18 +632,20 @@ onMounted(async () => {
   backdropA.value = getBackdropUrl(0)
 
   if (backdropAssets.value.length > 1) {
-    backdropInterval = setInterval(advanceBackdrop, 8000)
+    startCarouselTimer()
+  }
+
+  if (detail.value) {
+    const res = await apiFetch<{ favorited: boolean }>(`/api/favorites/check?entity_type=media_item&entity_id=${detail.value.media_item.id}`)
+    isFavorited.value = res.favorited
   }
 })
 
-onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
+onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 </script>
 
 <style scoped>
-.hero-section {
-  position: relative;
-  min-height: 520px;
-}
+.hero-section { position: relative; min-height: 520px; }
 .hero-bg { position: absolute; inset: 0; }
 .hero-bg-img {
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
@@ -467,51 +661,122 @@ onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
 }
 .hero-content {
   position: relative; z-index: 2;
-  display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 40px;
-  padding: 40px 40px 48px;
-  max-width: 1300px;
+  display: grid; grid-template-columns: 240px 1fr;
+  gap: 40px; padding: 40px 40px 48px; max-width: 1300px;
 }
 .hero-poster {
+  position: relative;
   box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
-  border-radius: var(--r-md);
-  overflow: hidden;
-  align-self: start;
+  border-radius: var(--r-md); overflow: hidden; align-self: start;
 }
 .hero-info { display: flex; flex-direction: column; justify-content: center; }
 .detail-title { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0 0 4px; }
 .detail-tagline { font-style: italic; color: var(--fg-2); font-size: 15px; margin: 4px 0 12px; }
 .detail-synopsis { font-size: 14px; line-height: 1.65; color: var(--fg-1); max-width: 640px; margin: 12px 0 0; }
+.ratings-row {
+  display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px;
+}
+.ext-rating {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  font-size: 12px;
+}
+.ext-rating-source {
+  font-family: var(--font-mono); font-weight: 600; color: var(--fg-3);
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.ext-rating-value { color: var(--fg-0); font-weight: 600; }
+
 .detail-actions { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
 
-.info-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 20px;
-  margin-top: 16px;
-  max-width: 500px;
-}
-.info-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-3);
-  padding-top: 2px;
-}
+.info-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 20px; margin-top: 16px; max-width: 500px; }
+.info-label { font-size: 11px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3); padding-top: 2px; }
 .info-value { font-size: 13px; color: var(--fg-1); line-height: 1.5; }
 
 .keyword-tag {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  color: var(--fg-2);
-  letter-spacing: 0.02em;
+  font-size: 10px; font-family: var(--font-mono); padding: 3px 8px; border-radius: 999px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--fg-2); letter-spacing: 0.02em;
+  transition: background 0.15s, color 0.15s;
 }
+.keyword-tag:hover { background: var(--gold-soft); color: var(--gold); border-color: transparent; }
+
+.collection-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--fg-2); padding: 6px 14px;
+  border-radius: var(--r-md); border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+.collection-badge:hover { background: var(--gold-soft); color: var(--gold); border-color: transparent; }
+.collection-badge strong { color: var(--fg-0); font-weight: 500; }
+.collection-badge:hover strong { color: var(--gold); }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
+.modal-card { background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg); width: 380px; max-width: 90vw; max-height: 80vh; overflow: auto; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.modal-header h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.modal-body { padding: 12px 20px 20px; }
+.modal-input { width: 100%; padding: 10px 14px; background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--fg-0); font-size: 14px; outline: none; }
+.modal-input:focus { border-color: var(--gold); }
+.list-option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: var(--r-sm); font-size: 13px; color: var(--fg-1); transition: background 0.12s; text-align: left; }
+.list-option:hover { background: rgba(255,255,255,0.04); }
+.list-option.active { color: var(--gold); }
+.list-option-count { margin-left: auto; font-size: 10px; font-family: var(--font-mono); color: var(--fg-4); }
+.list-create-btn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; margin-top: 4px; border-top: 1px solid var(--border); font-size: 13px; color: var(--fg-2); transition: color 0.12s; }
+.list-create-btn:hover { color: var(--gold); }
+.modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
+
+/* Backdrop indicators */
+.bd-indicators {
+  position: absolute; bottom: 24px; right: 48px; z-index: 4;
+  display: flex; gap: 5px;
+}
+.bd-bar {
+  width: 28px; height: 3px; border-radius: 2px;
+  background: rgba(255,255,255,0.2); position: relative; overflow: hidden;
+  cursor: pointer; transition: background 0.15s;
+}
+.bd-bar:hover { background: rgba(255,255,255,0.4); }
+.bd-bar.active { background: rgba(255,255,255,0.12); }
+.bd-bar.active::after {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--gold); border-radius: 2px;
+  animation: bd-fill 8s linear forwards;
+}
+.bd-bar.paused::after { animation-play-state: paused; }
+@keyframes bd-fill { from { width: 0; } to { width: 100%; } }
+
+/* Expand button */
+.hero-expand {
+  position: absolute; bottom: 24px; right: 16px; z-index: 4;
+  width: 30px; height: 30px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.6); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s; opacity: 0;
+}
+.hero-section:hover .hero-expand { opacity: 1; }
+.hero-expand:hover { background: rgba(0,0,0,0.6); color: #fff; }
+
+/* Zoom button on images */
+.zoom-btn {
+  position: absolute; top: 8px; right: 8px;
+  width: 28px; height: 28px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.7);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s, background 0.15s;
+  cursor: zoom-in; z-index: 2;
+}
+.zoom-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+.zoom-btn.round { border-radius: 50%; top: 2px; right: 2px; width: 20px; height: 20px; }
+.zoom-btn.crew-zoom { top: 0; right: 0; width: 16px; height: 16px; }
+.hero-poster:hover .zoom-btn,
+.cast-photo-wrap:hover .zoom-btn,
+.crew-photo-wrap:hover .zoom-btn { opacity: 1; }
+
+.cast-photo-wrap { position: relative; width: 76px; height: 76px; border-radius: 50%; overflow: hidden; margin: 0 auto 8px; }
+.crew-photo-wrap { position: relative; width: 36px; height: 36px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
 
 .detail-body-below { padding: 0 40px 80px; }
 .detail-section { margin-top: 40px; }
@@ -530,7 +795,7 @@ onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
   text-align: center; text-decoration: none; color: inherit; cursor: pointer;
 }
 .cast-card:hover .cast-name { color: var(--gold); }
-.cast-photo { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; margin: 0 auto 8px; display: block; }
+.cast-photo { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; margin: 0 auto; display: block; }
 .cast-avatar {
   width: 76px; height: 76px; border-radius: 50%;
   background: linear-gradient(135deg, var(--bg-4), var(--bg-3));
@@ -540,11 +805,7 @@ onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
 .cast-name { font-size: 12px; font-weight: 500; color: var(--fg-0); transition: color 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cast-role { font-size: 10px; color: var(--fg-3); margin-top: 2px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.crew-dept-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 6px;
-}
+.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
 .crew-card {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 12px; border-radius: var(--r-sm);
@@ -552,7 +813,7 @@ onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
 }
 .crew-card:hover { background: rgba(255,255,255,0.04); }
 .crew-card:hover .crew-name { color: var(--gold); }
-.crew-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.crew-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; display: block; }
 .crew-initials {
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
   background: var(--bg-3); display: flex; align-items: center; justify-content: center;
@@ -561,9 +822,7 @@ onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
 .crew-name { font-size: 13px; font-weight: 500; color: var(--fg-0); transition: color 0.15s; }
 .crew-job { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
 
-.hscroll {
-  display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px;
-}
+.hscroll { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
 .hscroll::-webkit-scrollbar { display: none; }
 
 .expanded-grid, .fold-grid {
@@ -598,13 +857,16 @@ onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
 .extra-thumb { width: 36px; height: 36px; border-radius: var(--r-xs); background: var(--bg-4); display: flex; align-items: center; justify-content: center; color: var(--fg-2); flex-shrink: 0; }
 .extra-title { font-size: 12px; font-weight: 500; color: var(--fg-0); white-space: nowrap; }
 
-.rec-scroll {
-  display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px;
-}
+.rec-scroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
 .rec-scroll::-webkit-scrollbar { display: none; }
 .rec-tile { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; }
-.rec-tile.dimmed { opacity: 0.35; pointer-events: none; }
+.rec-tile.dimmed { opacity: 0.5; }
 .rec-tile:not(.dimmed):hover { transform: translateY(-3px); }
+.rec-in-library {
+  display: inline-block; font-size: 9px; font-weight: 700;
+  color: var(--good); text-transform: uppercase; letter-spacing: 0.06em;
+  margin-left: 4px;
+}
 
 .scroll-arrow {
   width: 28px; height: 28px; border-radius: 50%;
@@ -619,5 +881,7 @@ onUnmounted(() => { if (backdropInterval) clearInterval(backdropInterval) })
   .hero-poster { display: none; }
   .detail-title { font-size: 32px; }
   .detail-body-below { padding: 0 20px 60px; }
+  .bd-indicators { right: 20px; bottom: 16px; }
+  .hero-expand { display: none; }
 }
 </style>

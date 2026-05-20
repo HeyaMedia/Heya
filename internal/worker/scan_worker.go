@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -44,10 +45,15 @@ type ScanLibraryWorker struct {
 	Hub *eventhub.Hub
 }
 
+func (ScanLibraryArgs) Timeout(job *river.Job[ScanLibraryArgs]) time.Duration {
+	return 30 * time.Minute
+}
+
 func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibraryArgs]) error {
+	dbCtx := context.Background()
 	q := sqlc.New(w.DB)
 
-	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	lib, err := q.GetLibraryByID(dbCtx, job.Args.LibraryID)
 	if err != nil {
 		return err
 	}
@@ -132,13 +138,25 @@ func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibrary
 			}
 
 			if !job.Args.Force {
-				existing, err := q.GetLibraryFileByPath(ctx, sqlc.GetLibraryFileByPathParams{
+				existing, err := q.GetLibraryFileByPath(dbCtx, sqlc.GetLibraryFileByPathParams{
 					LibraryID: lib.ID,
 					Path:      fullPath,
 				})
-				if err == nil && existing.Size == info.Size() && existing.Mtime.Valid && existing.Mtime.Time.Equal(info.ModTime()) && !existing.DeletedAt.Valid {
-					log.Debug().Str("file", relPath).Msg("unchanged, skipping")
-					return nil
+				if err == nil {
+					if existing.DeletedAt.Valid {
+						q.RestoreLibraryFile(dbCtx, existing.ID)
+						log.Info().Str("file", relPath).Msg("restored previously soft-deleted file")
+					} else if existing.Size == info.Size() && existing.Mtime.Valid && existing.Mtime.Time.Truncate(time.Microsecond).Equal(info.ModTime().Truncate(time.Microsecond)) {
+						if existing.Status == sqlc.FileStatusPending {
+							newFiles = append(newFiles, ProcessFileArgs{
+								LibraryFileID: existing.ID,
+								LibraryID:     lib.ID,
+								FilePath:      fullPath,
+							})
+							log.Debug().Str("file", relPath).Msg("re-enqueuing pending file")
+						}
+						return nil
+					}
 				}
 			}
 
@@ -151,7 +169,7 @@ func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibrary
 			}
 			parseJSON, _ := json.Marshal(parseData)
 
-			file, err := q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+			file, err := q.UpsertLibraryFile(dbCtx, sqlc.UpsertLibraryFileParams{
 				LibraryID:   lib.ID,
 				Path:        fullPath,
 				Size:        info.Size(),
@@ -193,7 +211,7 @@ func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibrary
 		source.Close()
 	}
 
-	dbPaths, _ := q.ListAllLibraryFilePaths(ctx, lib.ID)
+	dbPaths, _ := q.ListAllLibraryFilePaths(dbCtx, lib.ID)
 	var missing []string
 	for _, p := range dbPaths {
 		if discovered[p] {

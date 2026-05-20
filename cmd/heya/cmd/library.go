@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
@@ -115,7 +114,6 @@ var libraryScanCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, _ := cmd.Flags().GetInt64("id")
 		all, _ := cmd.Flags().GetBool("all")
-		scanOnly, _ := cmd.Flags().GetBool("scan-only")
 		force, _ := cmd.Flags().GetBool("force")
 
 		if id == 0 && !all {
@@ -143,40 +141,20 @@ var libraryScanCmd = &cobra.Command{
 			libs = []sqlc.Library{lib}
 		}
 
-		opts := scanner.ScanOptions{ForceRescan: force}
-
 		for _, lib := range libs {
 			ui.Header(fmt.Sprintf("Scanning %s", lib.Name))
 			ui.Info("Library", fmt.Sprintf("%s (id=%d)", lib.Name, lib.ID))
 			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
 
-			scanResult, err := app.ScanLibrary(ctx, lib.ID, opts)
-			if err != nil {
-				ui.Error("scan failed: %v", err)
-				continue
-			}
-			ui.Success("Scan complete")
-			ui.Info("Discovered", strconv.Itoa(scanResult.Discovered))
-			ui.Info("New", strconv.Itoa(scanResult.New))
-			ui.Info("Unchanged", strconv.Itoa(scanResult.Unchanged))
-			ui.Info("Deleted", strconv.Itoa(scanResult.Deleted))
-
-			if scanOnly {
-				continue
-			}
-
-			count, err := app.EnqueuePendingFiles(ctx, lib.ID)
-			if err != nil {
+			if err := app.EnqueueScanLibrary(ctx, lib.ID, force); err != nil {
 				ui.Error("enqueue failed: %v", err)
 				continue
 			}
-			ui.Success("Enqueued %d files for processing", count)
+			ui.Success("Scan enqueued")
 		}
 
-		if !scanOnly {
-			fmt.Println()
-			ui.Println(ui.Dim("Run 'heya queue process' to process now, or jobs will be picked up by 'heya serve' / 'heya dev'."))
-		}
+		fmt.Println()
+		ui.Println(ui.Dim("Jobs will be processed by 'heya serve' / 'heya dev', or run 'heya queue process'."))
 
 		return nil
 	},
@@ -546,7 +524,6 @@ func init() {
 	libraryScanCmd.Flags().Int64("id", 0, "Library ID to scan")
 	libraryScanCmd.Flags().String("name", "", "Library name to scan")
 	libraryScanCmd.Flags().Bool("all", false, "Scan all libraries")
-	libraryScanCmd.Flags().Bool("scan-only", false, "Only discover files, don't enqueue processing")
 	libraryScanCmd.Flags().Bool("force", false, "Force re-scan all files")
 
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")

@@ -11,8 +11,10 @@ import (
 )
 
 type watchProgressRequest struct {
-	ProgressSeconds int32 `json:"progress_seconds"`
-	TotalSeconds    int32 `json:"total_seconds"`
+	EntityType string `json:"entity_type"`
+	EntityID   int64  `json:"entity_id"`
+	Progress   int32  `json:"progress_seconds"`
+	Total      int32  `json:"total_seconds"`
 }
 
 func handleWatchProgress(app *service.App) http.HandlerFunc {
@@ -23,63 +25,50 @@ func handleWatchProgress(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		mediaItemID, err := strconv.ParseInt(r.PathValue("media_item_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid media item id")
-			return
-		}
-
 		var req watchProgressRequest
 		if err := readJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
 
-		completed := req.TotalSeconds > 0 && req.ProgressSeconds >= req.TotalSeconds-30
+		if req.EntityType == "" {
+			req.EntityType = "movie"
+		}
+		if req.EntityID == 0 {
+			mediaItemID, err := strconv.ParseInt(r.PathValue("media_item_id"), 10, 64)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid media item id")
+				return
+			}
+			req.EntityID = mediaItemID
+		}
+
+		completed := req.Total > 0 && req.Progress >= req.Total-30
 
 		if app.Hub != nil {
 			app.Hub.Emit(eventhub.EventMediaWatched, eventhub.WatchPayload{
 				UserID:      user.ID,
-				MediaItemID: mediaItemID,
-				Progress:    req.ProgressSeconds,
-				Total:       req.TotalSeconds,
+				MediaItemID: req.EntityID,
+				Progress:    req.Progress,
+				Total:       req.Total,
 				Completed:   completed,
 			})
 		}
 
 		q := sqlc.New(app.DB)
-
-		existing, err := q.GetLatestWatchHistory(r.Context(), sqlc.GetLatestWatchHistoryParams{
-			UserID:      user.ID,
-			MediaItemID: mediaItemID,
-		})
-		if err == nil {
-			entry, err := q.UpdateWatchProgress(r.Context(), sqlc.UpdateWatchProgressParams{
-				ID:              existing.ID,
-				ProgressSeconds: req.ProgressSeconds,
-				TotalSeconds:    req.TotalSeconds,
-				Completed:       completed,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, entry)
-			return
-		}
-
-		entry, err := q.CreateWatchHistory(r.Context(), sqlc.CreateWatchHistoryParams{
+		entry, err := q.UpsertWatchProgress(r.Context(), sqlc.UpsertWatchProgressParams{
 			UserID:          user.ID,
-			MediaItemID:     mediaItemID,
-			ProgressSeconds: req.ProgressSeconds,
-			TotalSeconds:    req.TotalSeconds,
+			EntityType:      req.EntityType,
+			EntityID:        req.EntityID,
+			ProgressSeconds: req.Progress,
+			TotalSeconds:    req.Total,
 			Completed:       completed,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusCreated, entry)
+		writeJSON(w, http.StatusOK, entry)
 	}
 }
 
@@ -101,6 +90,24 @@ func handleContinueWatching(app *service.App) http.HandlerFunc {
 	}
 }
 
+func handleRecentlyWatched(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := auth.UserFromContext(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+
+		q := sqlc.New(app.DB)
+		items, err := q.ListRecentlyWatched(r.Context(), user.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
+	}
+}
+
 func handleWatchHistory(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFromContext(r.Context())
@@ -109,25 +116,8 @@ func handleWatchHistory(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		limit := int32(50)
-		offset := int32(0)
-		if l := r.URL.Query().Get("limit"); l != "" {
-			if n, err := strconv.ParseInt(l, 10, 32); err == nil {
-				limit = int32(n)
-			}
-		}
-		if o := r.URL.Query().Get("offset"); o != "" {
-			if n, err := strconv.ParseInt(o, 10, 32); err == nil {
-				offset = int32(n)
-			}
-		}
-
 		q := sqlc.New(app.DB)
-		items, err := q.ListWatchHistoryByUser(r.Context(), sqlc.ListWatchHistoryByUserParams{
-			UserID: user.ID,
-			Limit:  limit,
-			Offset: offset,
-		})
+		items, err := q.ListRecentlyWatched(r.Context(), user.ID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

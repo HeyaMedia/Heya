@@ -1,0 +1,112 @@
+package transcoder
+
+import (
+	"bufio"
+	"context"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Keyframes struct {
+	IFrames  []float64 `json:"iframes"`
+	Duration float64   `json:"duration"`
+}
+
+func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) {
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ffprobe",
+		"-v", "quiet",
+		"-select_streams", "v:0",
+		"-show_entries", "frame=pts_time,pict_type",
+		"-of", "csv=p=0",
+		filePath,
+	)
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var iframes []float64
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 {
+			continue
+		}
+		if strings.TrimSpace(parts[1]) != "I" {
+			continue
+		}
+		ts, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		if err != nil {
+			continue
+		}
+		iframes = append(iframes, ts)
+	}
+
+	var duration float64
+	if len(iframes) > 0 {
+		duration = iframes[len(iframes)-1]
+	}
+
+	durationCmd := exec.CommandContext(ctx, "ffprobe",
+		"-v", "quiet",
+		"-show_entries", "format=duration",
+		"-of", "csv=p=0",
+		filePath,
+	)
+	if dOut, err := durationCmd.Output(); err == nil {
+		if d, err := strconv.ParseFloat(strings.TrimSpace(string(dOut)), 64); err == nil {
+			duration = d
+		}
+	}
+
+	return &Keyframes{IFrames: iframes, Duration: duration}, nil
+}
+
+func KeyframesToSegmentTimes(kf *Keyframes, minDuration float64) []float64 {
+	if kf == nil || len(kf.IFrames) == 0 {
+		return nil
+	}
+	if minDuration <= 0 {
+		minDuration = 4.0
+	}
+
+	var times []float64
+	lastCut := 0.0
+
+	for _, ts := range kf.IFrames {
+		if ts <= 0 {
+			continue
+		}
+		if ts-lastCut >= minDuration {
+			times = append(times, ts)
+			lastCut = ts
+		}
+	}
+
+	return times
+}
+
+func AudioSegmentTimes(duration float64, interval float64) []float64 {
+	if duration <= 0 {
+		return nil
+	}
+	if interval <= 0 {
+		interval = 4.0
+	}
+
+	var times []float64
+	for t := interval; t < duration; t += interval {
+		times = append(times, t)
+	}
+	return times
+}

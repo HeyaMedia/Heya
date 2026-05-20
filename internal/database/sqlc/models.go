@@ -223,6 +223,7 @@ type Album struct {
 	TotalTracks   int32       `json:"total_tracks"`
 	TotalDiscs    int32       `json:"total_discs"`
 	Tags          []string    `json:"tags"`
+	SearchVector  interface{} `json:"search_vector"`
 }
 
 type Artist struct {
@@ -234,12 +235,13 @@ type Artist struct {
 }
 
 type Author struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	OpenlibraryID string `json:"openlibrary_id"`
-	Biography     string `json:"biography"`
-	BirthDate     string `json:"birth_date"`
-	DeathDate     string `json:"death_date"`
+	ID            int64       `json:"id"`
+	Name          string      `json:"name"`
+	OpenlibraryID string      `json:"openlibrary_id"`
+	Biography     string      `json:"biography"`
+	BirthDate     string      `json:"birth_date"`
+	DeathDate     string      `json:"death_date"`
+	SearchVector  interface{} `json:"search_vector"`
 }
 
 type Book struct {
@@ -267,6 +269,7 @@ type Collection struct {
 	Overview     string      `json:"overview"`
 	PosterPath   string      `json:"poster_path"`
 	BackdropPath string      `json:"backdrop_path"`
+	SearchVector interface{} `json:"search_vector"`
 }
 
 type ExternalRating struct {
@@ -309,6 +312,7 @@ type LibraryFile struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 	MediaInfo    []byte             `json:"media_info"`
+	Keyframes    []byte             `json:"keyframes"`
 }
 
 type MatchCandidate struct {
@@ -478,6 +482,7 @@ type Person struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Slug         string             `json:"slug"`
+	SearchVector interface{}        `json:"search_vector"`
 }
 
 type ProductionCompany struct {
@@ -497,13 +502,14 @@ type Session struct {
 }
 
 type Track struct {
-	ID          int64  `json:"id"`
-	AlbumID     int64  `json:"album_id"`
-	DiscNumber  int32  `json:"disc_number"`
-	TrackNumber int32  `json:"track_number"`
-	Title       string `json:"title"`
-	DurationMs  int32  `json:"duration_ms"`
-	FilePath    string `json:"file_path"`
+	ID           int64       `json:"id"`
+	AlbumID      int64       `json:"album_id"`
+	DiscNumber   int32       `json:"disc_number"`
+	TrackNumber  int32       `json:"track_number"`
+	Title        string      `json:"title"`
+	DurationMs   int32       `json:"duration_ms"`
+	FilePath     string      `json:"file_path"`
+	SearchVector interface{} `json:"search_vector"`
 }
 
 type TvEpisode struct {
@@ -560,12 +566,38 @@ type User struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
-type WatchHistory struct {
+type UserFavorite struct {
+	ID         int64              `json:"id"`
+	UserID     int64              `json:"user_id"`
+	EntityType string             `json:"entity_type"`
+	EntityID   int64              `json:"entity_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserList struct {
+	ID          int64              `json:"id"`
+	UserID      int64              `json:"user_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserListItem struct {
+	ID          int64              `json:"id"`
+	ListID      int64              `json:"list_id"`
+	MediaItemID int64              `json:"media_item_id"`
+	SortOrder   int32              `json:"sort_order"`
+	AddedAt     pgtype.Timestamptz `json:"added_at"`
+}
+
+type UserWatchProgress struct {
 	ID              int64              `json:"id"`
 	UserID          int64              `json:"user_id"`
-	MediaItemID     int64              `json:"media_item_id"`
+	EntityType      string             `json:"entity_type"`
+	EntityID        int64              `json:"entity_id"`
 	ProgressSeconds int32              `json:"progress_seconds"`
 	TotalSeconds    int32              `json:"total_seconds"`
 	Completed       bool               `json:"completed"`
-	WatchedAt       pgtype.Timestamptz `json:"watched_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
