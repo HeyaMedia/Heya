@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
@@ -53,7 +54,9 @@ var libraryAddCmd = &cobra.Command{
 			return fmt.Errorf("no users exist — create a user first with `kura user create`")
 		}
 
-		lib, err := app.CreateLibrary(ctx, name, mt, paths, users[0].ID)
+		settings := settingsFromFlags(cmd, mediaTypeStr)
+
+		lib, err := app.CreateLibrary(ctx, name, mt, paths, users[0].ID, settings)
 		if err != nil {
 			return err
 		}
@@ -61,6 +64,7 @@ var libraryAddCmd = &cobra.Command{
 		ui.Success("Created library: %s (id=%d)", lib.Name, lib.ID)
 		ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
 		ui.Info("Paths", strings.Join(lib.Paths, ", "))
+		printLibrarySettings(lib)
 		return nil
 	},
 }
@@ -314,6 +318,159 @@ var libraryWatchCmd = &cobra.Command{
 	},
 }
 
+var libraryInfoCmd = &cobra.Command{
+	Use:   "info",
+	Short: "Show library details and settings",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, _ := cmd.Flags().GetInt64("id")
+		if id == 0 {
+			return fmt.Errorf("--id is required")
+		}
+
+		ctx := context.Background()
+		app, err := service.New(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		lib, err := app.GetLibrary(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		ui.Header(lib.Name)
+		ui.Info("ID", strconv.FormatInt(lib.ID, 10))
+		ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
+		ui.Info("Paths", strings.Join(lib.Paths, ", "))
+		printLibrarySettings(lib)
+		return nil
+	},
+}
+
+var librarySettingsCmd = &cobra.Command{
+	Use:   "settings",
+	Short: "Update library settings",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, _ := cmd.Flags().GetInt64("id")
+		if id == 0 {
+			return fmt.Errorf("--id is required")
+		}
+
+		ctx := context.Background()
+		app, err := service.New(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		lib, err := app.GetLibrary(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		current := metadata.ParseSettings(lib.Settings)
+		updated := applySettingsFlags(cmd, current)
+
+		lib, err = app.UpdateLibrarySettings(ctx, id, updated)
+		if err != nil {
+			return err
+		}
+
+		ui.Success("Updated settings for library: %s (id=%d)", lib.Name, lib.ID)
+		printLibrarySettings(lib)
+		return nil
+	},
+}
+
+func settingsFromFlags(cmd *cobra.Command, mediaType string) *metadata.LibrarySettings {
+	defaults := metadata.DefaultSettings(mediaType)
+	s := applySettingsFlags(cmd, defaults)
+	return &s
+}
+
+func applySettingsFlags(cmd *cobra.Command, s metadata.LibrarySettings) metadata.LibrarySettings {
+	if cmd.Flags().Changed("language") {
+		s.PreferredLanguage, _ = cmd.Flags().GetString("language")
+	}
+	if cmd.Flags().Changed("country") {
+		s.PreferredCountry, _ = cmd.Flags().GetString("country")
+	}
+	if cmd.Flags().Changed("metadata-providers") {
+		v, _ := cmd.Flags().GetString("metadata-providers")
+		s.MetadataProviders = splitComma(v)
+	}
+	if cmd.Flags().Changed("artwork-providers") {
+		v, _ := cmd.Flags().GetString("artwork-providers")
+		s.ArtworkProviders = splitComma(v)
+	}
+	if cmd.Flags().Changed("ratings-providers") {
+		v, _ := cmd.Flags().GetString("ratings-providers")
+		s.RatingsProviders = splitComma(v)
+	}
+	if cmd.Flags().Changed("watch") {
+		s.Watch, _ = cmd.Flags().GetBool("watch")
+	}
+	if cmd.Flags().Changed("auto-collections") {
+		s.AutoCollections, _ = cmd.Flags().GetBool("auto-collections")
+	}
+	if cmd.Flags().Changed("metadata-refresh") {
+		s.MetadataRefreshDays, _ = cmd.Flags().GetInt("metadata-refresh")
+	}
+	if cmd.Flags().Changed("save-nfo") {
+		s.SaveNFO, _ = cmd.Flags().GetBool("save-nfo")
+	}
+	if cmd.Flags().Changed("save-images") {
+		s.SaveImages, _ = cmd.Flags().GetBool("save-images")
+	}
+	return s
+}
+
+func splitComma(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+func printLibrarySettings(lib sqlc.Library) {
+	s := metadata.ParseSettings(lib.Settings)
+	fmt.Println()
+	ui.Info("Settings", "")
+	if len(s.MetadataProviders) > 0 {
+		ui.Info("  Metadata providers", strings.Join(s.MetadataProviders, ", "))
+	}
+	if len(s.ArtworkProviders) > 0 {
+		ui.Info("  Artwork providers", strings.Join(s.ArtworkProviders, ", "))
+	}
+	if len(s.RatingsProviders) > 0 {
+		ui.Info("  Ratings providers", strings.Join(s.RatingsProviders, ", "))
+	}
+	if s.PreferredLanguage != "" {
+		ui.Info("  Language", s.PreferredLanguage)
+	}
+	if s.PreferredCountry != "" {
+		ui.Info("  Country", s.PreferredCountry)
+	}
+	ui.Info("  Watch", strconv.FormatBool(s.Watch))
+	ui.Info("  Auto collections", strconv.FormatBool(s.AutoCollections))
+	if s.MetadataRefreshDays > 0 {
+		ui.Info("  Metadata refresh", fmt.Sprintf("every %d days", s.MetadataRefreshDays))
+	} else {
+		ui.Info("  Metadata refresh", "never")
+	}
+	ui.Info("  Save NFO", strconv.FormatBool(s.SaveNFO))
+	ui.Info("  Save images", strconv.FormatBool(s.SaveImages))
+}
+
 func runInteractiveResolve(ctx context.Context, app *service.App, libraryID int64) {
 	q := sqlc.New(app.DB)
 	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
@@ -384,6 +541,7 @@ func init() {
 	libraryAddCmd.Flags().String("name", "", "Library name")
 	libraryAddCmd.Flags().String("type", "", "Media type (movie, tv, music, book)")
 	libraryAddCmd.Flags().StringSlice("path", nil, "Filesystem paths to watch")
+	addSettingsFlags(libraryAddCmd)
 
 	libraryScanCmd.Flags().Int64("id", 0, "Library ID to scan")
 	libraryScanCmd.Flags().String("name", "", "Library name to scan")
@@ -401,6 +559,11 @@ func init() {
 
 	libraryWatchCmd.Flags().Int64("id", 0, "Library ID")
 
+	libraryInfoCmd.Flags().Int64("id", 0, "Library ID")
+
+	librarySettingsCmd.Flags().Int64("id", 0, "Library ID to update")
+	addSettingsFlags(librarySettingsCmd)
+
 	libraryCmd.AddCommand(libraryAddCmd)
 	libraryCmd.AddCommand(libraryListCmd)
 	libraryCmd.AddCommand(libraryScanCmd)
@@ -408,4 +571,19 @@ func init() {
 	libraryCmd.AddCommand(libraryFilesCmd)
 	libraryCmd.AddCommand(libraryStatsCmd)
 	libraryCmd.AddCommand(libraryWatchCmd)
+	libraryCmd.AddCommand(libraryInfoCmd)
+	libraryCmd.AddCommand(librarySettingsCmd)
+}
+
+func addSettingsFlags(cmd *cobra.Command) {
+	cmd.Flags().String("language", "", "Preferred metadata language (e.g. en)")
+	cmd.Flags().String("country", "", "Preferred country/region (e.g. US)")
+	cmd.Flags().String("metadata-providers", "", "Comma-separated metadata providers (e.g. tmdb,tvdb,anidb)")
+	cmd.Flags().String("artwork-providers", "", "Comma-separated artwork providers (e.g. tmdb,fanart.tv)")
+	cmd.Flags().String("ratings-providers", "", "Comma-separated ratings providers (e.g. omdb)")
+	cmd.Flags().Bool("watch", false, "Enable filesystem watching")
+	cmd.Flags().Bool("auto-collections", false, "Automatically add to collections (movies)")
+	cmd.Flags().Int("metadata-refresh", 0, "Auto-refresh metadata every N days (0=never)")
+	cmd.Flags().Bool("save-nfo", false, "Write NFO files to media directory")
+	cmd.Flags().Bool("save-images", false, "Write images to media directory")
 }

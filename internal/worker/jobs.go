@@ -111,6 +111,49 @@ func (EnrichmentArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3}
 }
 
+type SaveNFOArgs struct {
+	MediaItemID   int64  `json:"media_item_id"`
+	LibraryFileID int64  `json:"library_file_id"`
+	FilePath      string `json:"file_path"`
+	MediaType     string `json:"media_type"`
+}
+
+func (SaveNFOArgs) Kind() string { return "save_nfo" }
+func (SaveNFOArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "saver", MaxAttempts: 2}
+}
+
+type SaveImagesArgs struct {
+	MediaItemID int64  `json:"media_item_id"`
+	FilePath    string `json:"file_path"`
+	CachedPath  string `json:"cached_path"`
+	AssetType   string `json:"asset_type"`
+}
+
+func (SaveImagesArgs) Kind() string { return "save_images" }
+func (SaveImagesArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "saver", MaxAttempts: 2}
+}
+
+type MetadataRefreshArgs struct {
+	LibraryID int64 `json:"library_id"`
+}
+
+func (MetadataRefreshArgs) Kind() string { return "metadata_refresh" }
+func (MetadataRefreshArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "metadata", MaxAttempts: 1}
+}
+
+type RatingsFetchArgs struct {
+	MediaItemID int64 `json:"media_item_id"`
+	LibraryID   int64 `json:"library_id"`
+}
+
+func (RatingsFetchArgs) Kind() string { return "ratings_fetch" }
+func (RatingsFetchArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "ratings", MaxAttempts: 3}
+}
+
 type TranscodeArgs struct {
 	LibraryFileID int64  `json:"library_file_id"`
 	Profile       string `json:"profile"`

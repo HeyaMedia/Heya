@@ -14,8 +14,8 @@ import (
 
 type EnrichmentWorker struct {
 	river.WorkerDefaults[EnrichmentArgs]
-	DB               *pgxpool.Pool
-	ArtworkProviders []metadata.ArtworkProvider
+	DB       *pgxpool.Pool
+	Registry *metadata.Registry
 }
 
 func (w *EnrichmentWorker) Work(ctx context.Context, job *river.Job[EnrichmentArgs]) error {
@@ -33,10 +33,29 @@ func (w *EnrichmentWorker) Work(ctx context.Context, job *river.Job[EnrichmentAr
 
 	kind := metadata.MediaKind(job.Args.MediaType)
 
+	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		log.Warn().Err(err).Msg("enrichment: library not found")
+		return nil
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+	artworkProviders := w.Registry.ArtworkProviders(settings.ArtworkProviders, kind)
+
 	client := river.ClientFromContext[pgx.Tx](ctx)
 
+	maxPerType := map[string]int{
+		"backdrop":  5,
+		"poster":    1,
+		"clearlogo": 1,
+		"banner":    1,
+		"clearart":  1,
+		"landscape": 1,
+		"disc":      1,
+	}
+	countPerType := map[string]int{}
+
 	sortOrder := 10
-	for _, ap := range w.ArtworkProviders {
+	for _, ap := range artworkProviders {
 		artworks, err := ap.FetchArtwork(ctx, kind, externalIDs)
 		if err != nil {
 			log.Debug().Err(err).Str("provider", ap.Name()).Msg("artwork fetch failed")
@@ -46,6 +65,14 @@ func (w *EnrichmentWorker) Work(ctx context.Context, job *river.Job[EnrichmentAr
 			if art.URL == "" {
 				continue
 			}
+			limit := maxPerType[art.AssetType]
+			if limit == 0 {
+				limit = 1
+			}
+			if countPerType[art.AssetType] >= limit {
+				continue
+			}
+			countPerType[art.AssetType]++
 			client.Insert(ctx, DownloadImageArgs{
 				MediaItemID: job.Args.MediaItemID,
 				URL:         art.URL,

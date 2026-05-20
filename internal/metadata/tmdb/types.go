@@ -74,27 +74,45 @@ type tvResult struct {
 }
 
 type tvDetail struct {
-	ID               int               `json:"id"`
-	Name             string            `json:"name"`
-	OriginalName     string            `json:"original_name"`
-	OriginalLanguage string            `json:"original_language"`
-	Overview         string            `json:"overview"`
-	FirstAirDate     string            `json:"first_air_date"`
-	LastAirDate      string            `json:"last_air_date"`
-	Status           string            `json:"status"`
-	NumberOfSeasons  int               `json:"number_of_seasons"`
-	NumberOfEpisodes int               `json:"number_of_episodes"`
-	Popularity       float64           `json:"popularity"`
-	VoteAverage      float64           `json:"vote_average"`
-	VoteCount        int               `json:"vote_count"`
-	PosterPath       string            `json:"poster_path"`
-	BackdropPath     string            `json:"backdrop_path"`
-	Genres           []genreEntry      `json:"genres"`
-	Networks         []networkEntry    `json:"networks"`
-	CreatedBy        []creatorEntry    `json:"created_by"`
-	Seasons          []seasonEntry     `json:"seasons"`
-	Credits          creditsResponse   `json:"credits"`
-	ExternalIDs      externalIDsResult `json:"external_ids"`
+	ID               int                    `json:"id"`
+	Name             string                 `json:"name"`
+	OriginalName     string                 `json:"original_name"`
+	OriginalLanguage string                 `json:"original_language"`
+	Overview         string                 `json:"overview"`
+	FirstAirDate     string                 `json:"first_air_date"`
+	LastAirDate      string                 `json:"last_air_date"`
+	Status           string                 `json:"status"`
+	NumberOfSeasons  int                    `json:"number_of_seasons"`
+	NumberOfEpisodes int                    `json:"number_of_episodes"`
+	Popularity       float64                `json:"popularity"`
+	VoteAverage      float64                `json:"vote_average"`
+	VoteCount        int                    `json:"vote_count"`
+	PosterPath       string                 `json:"poster_path"`
+	BackdropPath     string                 `json:"backdrop_path"`
+	Genres           []genreEntry           `json:"genres"`
+	Networks         []networkEntry         `json:"networks"`
+	CreatedBy        []creatorEntry         `json:"created_by"`
+	Seasons          []seasonEntry          `json:"seasons"`
+	Credits          creditsResponse        `json:"credits"`
+	ExternalIDs      externalIDsResult      `json:"external_ids"`
+	Keywords         tvKeywordsResponse     `json:"keywords"`
+	Videos           videosResponse         `json:"videos"`
+	ContentRatings   contentRatingsResponse `json:"content_ratings"`
+	Recommendations  recommendResponse      `json:"recommendations"`
+	ProductionCompanies []productionCo      `json:"production_companies"`
+}
+
+type tvKeywordsResponse struct {
+	Results []keywordEntry `json:"results"`
+}
+
+type contentRatingsResponse struct {
+	Results []contentRatingEntry `json:"results"`
+}
+
+type contentRatingEntry struct {
+	Country string `json:"iso_3166_1"`
+	Rating  string `json:"rating"`
 }
 
 type seasonDetail struct {

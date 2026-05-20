@@ -6,9 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -17,6 +21,7 @@ type DownloadImageWorker struct {
 	river.WorkerDefaults[DownloadImageArgs]
 	DB         *pgxpool.Pool
 	Downloader *images.Downloader
+	Hub        *eventhub.Hub
 }
 
 func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
@@ -29,7 +34,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 	}
 
 	q := sqlc.New(w.DB)
-	if job.Args.AssetType == "poster" || job.Args.AssetType == "backdrop" {
+	if job.Args.SortOrder == 0 && (job.Args.AssetType == "poster" || job.Args.AssetType == "backdrop") {
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 		if err == nil {
 			path := item.PosterPath
@@ -87,6 +92,12 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 				BackdropPath: item.BackdropPath,
 				ExternalIds:  item.ExternalIds,
 			})
+			if w.Hub != nil && job.Args.SortOrder == 0 {
+				w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+					MediaItemID: job.Args.MediaItemID,
+					MediaType:   job.Args.MediaType,
+				})
+			}
 		}
 	}
 
@@ -106,7 +117,45 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		}
 	}
 
+	w.maybeSaveToMediaDir(ctx, job, localPath)
+
 	return nil
+}
+
+func (w *DownloadImageWorker) maybeSaveToMediaDir(ctx context.Context, job *river.Job[DownloadImageArgs], localPath string) {
+	if job.Args.AssetType != "poster" && job.Args.AssetType != "backdrop" && job.Args.AssetType != "fanart" {
+		return
+	}
+	if job.Args.SortOrder > 0 {
+		return
+	}
+
+	q := sqlc.New(w.DB)
+	item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
+	if err != nil {
+		return
+	}
+	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		return
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+	if !settings.SaveImages {
+		return
+	}
+
+	files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: job.Args.MediaItemID, Valid: true})
+	if err != nil || len(files) == 0 {
+		return
+	}
+
+	client := river.ClientFromContext[pgx.Tx](ctx)
+	client.Insert(ctx, SaveImagesArgs{
+		MediaItemID: job.Args.MediaItemID,
+		FilePath:    files[0].Path,
+		CachedPath:  localPath,
+		AssetType:   job.Args.AssetType,
+	}, nil)
 }
 
 func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *river.Job[DownloadImageArgs]) error {

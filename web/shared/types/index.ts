@@ -10,12 +10,35 @@ export interface AuthResponse {
   user: User
 }
 
+export interface LibrarySettings {
+  watch: boolean
+  metadata_providers: string[]
+  artwork_providers: string[]
+  ratings_providers: string[]
+  preferred_language: string
+  preferred_country: string
+  auto_collections: boolean
+  metadata_refresh_days: number
+  save_nfo: boolean
+  save_images: boolean
+}
+
 export interface Library {
   id: number
   name: string
   media_type: MediaType
   paths: string[]
   created_by: number
+  settings: LibrarySettings
+}
+
+export interface ProviderInfo {
+  name: string
+  display_name: string
+  kinds: string[]
+  type: string
+  needs_api_key: boolean
+  configured: boolean
 }
 
 export type MediaType = 'movie' | 'tv' | 'music' | 'book'
@@ -34,6 +57,7 @@ export interface MediaItem {
   external_ids: Record<string, string>
   created_at: string
   updated_at: string
+  available?: boolean
 }
 
 export interface Movie {

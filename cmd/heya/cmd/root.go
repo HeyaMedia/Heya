@@ -59,4 +59,5 @@ func init() {
 	rootCmd.AddCommand(mediaCmd)
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(transcodeCmd)
+	rootCmd.AddCommand(studiosCmd)
 }

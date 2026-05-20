@@ -16,15 +16,19 @@
         v-for="(item, i) in items"
         :key="item.id"
         class="card-tile"
+        :class="{ unavailable: item.available === false }"
         :style="{ width: `${tileWidth || 168}px`, flexShrink: 0 }"
-        @click="$emit('tile', item)"
+        @click="item.available !== false && $emit('tile', item)"
       >
-        <Poster
-          :idx="i"
-          :src="usePosterUrl(item.id)"
-          :title="item.title"
-          :aspect="aspect || '2/3'"
-        />
+        <div style="position: relative">
+          <Poster
+            :idx="i"
+            :src="usePosterUrl(item.id)"
+            :title="item.title"
+            :aspect="aspect || '2/3'"
+          />
+          <div v-if="item.available === false" class="missing-badge">Missing</div>
+        </div>
         <div class="grid-tile-meta">
           <div class="grid-tile-title">{{ item.title }}</div>
           <div class="grid-tile-sub">{{ item.year || item.sub }}</div>
@@ -97,5 +101,14 @@ function scrollBy(dir: number) {
 .scroll-btn:hover {
   background: rgba(255,255,255,0.12);
   color: var(--fg-0);
+}
+.unavailable { opacity: 0.4; cursor: default !important; }
+.unavailable:hover .grid-tile-title { color: inherit !important; }
+.missing-badge {
+  position: absolute; top: 8px; right: 8px;
+  font-size: 9px; font-weight: 700; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 3px 8px; border-radius: 100px;
+  background: rgba(217,107,107,0.85); color: #fff;
 }
 </style>

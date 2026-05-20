@@ -92,7 +92,7 @@ func TestGetMovieDetail(t *testing.T) {
 	})
 
 	p := newTestProvider(t, mux)
-	detail, err := p.GetDetail(context.Background(), "movie:693134")
+	detail, err := p.GetDetail(context.Background(), "movie:693134", nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Dune: Part Two", detail.Title)
@@ -155,6 +155,6 @@ func TestProviderName(t *testing.T) {
 
 func TestGetDetailInvalidProviderID(t *testing.T) {
 	p := NewProvider("tok")
-	_, err := p.GetDetail(context.Background(), "invalid")
+	_, err := p.GetDetail(context.Background(), "invalid", nil)
 	assert.Error(t, err)
 }

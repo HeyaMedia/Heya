@@ -17,12 +17,13 @@ import (
 type MatchInfo struct {
 	ProviderName string
 	ProviderID   string
+	IsNew        bool
 }
 
 type Matcher struct {
 	db              *pgxpool.Pool
 	q               *sqlc.Queries
-	providers       []metadata.Provider
+	registry        *metadata.Registry
 	downloader      *images.Downloader
 	opts            MatchOptions
 	lastMatchResult MatchInfo
@@ -32,14 +33,23 @@ func (m *Matcher) LastMatchResult() MatchInfo {
 	return m.lastMatchResult
 }
 
-func New(db *pgxpool.Pool, dl *images.Downloader, opts MatchOptions, providers ...metadata.Provider) *Matcher {
+func New(db *pgxpool.Pool, dl *images.Downloader, opts MatchOptions, registry *metadata.Registry) *Matcher {
 	return &Matcher{
 		db:         db,
 		q:          sqlc.New(db),
-		providers:  providers,
+		registry:   registry,
 		downloader: dl,
 		opts:       opts,
 	}
+}
+
+func (m *Matcher) providersForLibrary(ctx context.Context, libraryID int64, kind metadata.MediaKind) []metadata.Provider {
+	lib, err := m.q.GetLibraryByID(ctx, libraryID)
+	if err != nil {
+		return m.registry.AllProviders()
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+	return m.registry.Providers(settings.MetadataProviders, kind)
 }
 
 func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType sqlc.MediaType) (MatchResult, error) {
@@ -97,6 +107,11 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 
 	query := buildSearchQuery(parsed, kind)
 
+	if fetchOpts := m.fetchOptsForLibrary(ctx, libraryID); fetchOpts != nil {
+		query.Language = fetchOpts.Language
+		query.Country = fetchOpts.Country
+	}
+
 	if query.Title == "" && query.ISBN == "" {
 		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:           file.ID,
@@ -106,11 +121,10 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		return nil
 	}
 
+	providers := m.providersForLibrary(ctx, libraryID, kind)
+
 	var allResults []metadata.SearchResult
-	for _, p := range m.providers {
-		if !p.Supports(kind) {
-			continue
-		}
+	for _, p := range providers {
 
 		results, err := p.Search(ctx, kind, query)
 		if err != nil {
@@ -165,18 +179,31 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 	return nil
 }
 
+func (m *Matcher) fetchOptsForLibrary(ctx context.Context, libraryID int64) *metadata.FetchOptions {
+	lib, err := m.q.GetLibraryByID(ctx, libraryID)
+	if err != nil {
+		return nil
+	}
+	s := metadata.ParseSettings(lib.Settings)
+	if s.PreferredLanguage == "" && s.PreferredCountry == "" {
+		return nil
+	}
+	return &metadata.FetchOptions{Language: s.PreferredLanguage, Country: s.PreferredCountry}
+}
+
 func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result metadata.SearchResult, kind metadata.MediaKind, libraryID int64) error {
 	provider := m.findProvider(result.ProviderName)
 	if provider == nil {
 		return fmt.Errorf("provider %q not found", result.ProviderName)
 	}
 
-	detail, err := provider.GetDetail(ctx, result.ProviderID)
+	opts := m.fetchOptsForLibrary(ctx, libraryID)
+	detail, err := provider.GetDetail(ctx, result.ProviderID, opts)
 	if err != nil {
 		return fmt.Errorf("getting detail: %w", err)
 	}
 
-	mediaItemID, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
+	mediaItemID, isNew, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
 	if err != nil {
 		return fmt.Errorf("creating media item: %w", err)
 	}
@@ -184,6 +211,7 @@ func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result m
 	m.lastMatchResult = MatchInfo{
 		ProviderName: result.ProviderName,
 		ProviderID:   result.ProviderID,
+		IsNew:        isNew,
 	}
 
 	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
@@ -206,18 +234,19 @@ func (m *Matcher) ResolveMatch(ctx context.Context, libraryFileID int64, candida
 		return fmt.Errorf("provider %q not found", candidate.ProviderName)
 	}
 
-	detail, err := provider.GetDetail(ctx, candidate.ProviderID)
-	if err != nil {
-		return fmt.Errorf("getting detail: %w", err)
-	}
-
 	file, err := m.q.GetLibraryFileByID(ctx, libraryFileID)
 	if err != nil {
 		return fmt.Errorf("getting library file: %w", err)
 	}
 
+	opts := m.fetchOptsForLibrary(ctx, file.LibraryID)
+	detail, err := provider.GetDetail(ctx, candidate.ProviderID, opts)
+	if err != nil {
+		return fmt.Errorf("getting detail: %w", err)
+	}
+
 	kind := metadata.MediaKind(mediaTypeFromProvider(candidate.ProviderName))
-	mediaItemID, err := m.createOrLinkMediaItem(ctx, detail, kind, file.LibraryID, file.Path)
+	mediaItemID, _, err := m.createOrLinkMediaItem(ctx, detail, kind, file.LibraryID, file.Path)
 	if err != nil {
 		return fmt.Errorf("creating media item: %w", err)
 	}
@@ -271,17 +300,20 @@ func parseFileResult(data []byte) (parser.ParsedStorageEntry, *metadata.NFOIDs) 
 }
 
 func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind metadata.MediaKind, libraryID int64, ids *metadata.NFOIDs) bool {
-	for _, p := range m.providers {
-		if !p.Supports(kind) {
-			continue
-		}
+	if linked := m.tryLinkExistingByNFO(ctx, file, libraryID, ids); linked {
+		return true
+	}
 
+	providers := m.providersForLibrary(ctx, libraryID, kind)
+	opts := m.fetchOptsForLibrary(ctx, libraryID)
+
+	for _, p := range providers {
 		dlp, ok := p.(metadata.DirectLookupProvider)
 		if !ok {
 			continue
 		}
 
-		detail, providerID, err := dlp.LookupByNFO(ctx, kind, *ids)
+		detail, providerID, err := dlp.LookupByNFO(ctx, kind, *ids, opts)
 		if err != nil {
 			log.Debug().Err(err).Str("provider", p.Name()).Msg("NFO lookup failed")
 			continue
@@ -292,9 +324,9 @@ func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind 
 			Str("provider_id", providerID).
 			Str("title", detail.Title).
 			Int64("file_id", file.ID).
-			Msg("matched via NFO direct lookup")
+			Msg("matched via NFO provider lookup")
 
-		mediaItemID, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
+		mediaItemID, isNew, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to create media item from NFO lookup")
 			continue
@@ -303,6 +335,7 @@ func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind 
 		m.lastMatchResult = MatchInfo{
 			ProviderName: p.Name(),
 			ProviderID:   providerID,
+			IsNew:        isNew,
 		}
 
 		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
@@ -312,6 +345,44 @@ func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind 
 		})
 		return true
 	}
+	return false
+}
+
+func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFile, libraryID int64, ids *metadata.NFOIDs) bool {
+	candidates := []map[string]string{}
+
+	if ids.TMDBID != "" {
+		candidates = append(candidates, map[string]string{"tmdb": ids.TMDBID})
+	}
+	if ids.IMDBID != "" {
+		candidates = append(candidates, map[string]string{"imdb": ids.IMDBID})
+	}
+	if ids.TVDBID != "" {
+		candidates = append(candidates, map[string]string{"tvdb": ids.TVDBID})
+	}
+
+	for _, extIDs := range candidates {
+		extJSON, _ := json.Marshal(extIDs)
+		existing, err := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
+			LibraryID: libraryID,
+			Column2:   extJSON,
+		})
+		if err != nil {
+			continue
+		}
+
+		m.lastMatchResult = MatchInfo{IsNew: false}
+
+		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+			ID:          file.ID,
+			Status:      sqlc.FileStatusMatched,
+			MediaItemID: pgInt8(existing.ID),
+		})
+
+		log.Debug().Int64("file_id", file.ID).Int64("media_id", existing.ID).Str("title", existing.Title).Msg("linked to existing item via NFO IDs")
+		return true
+	}
+
 	return false
 }
 
@@ -337,12 +408,8 @@ func (m *Matcher) storeCandidates(ctx context.Context, fileID int64, results []m
 }
 
 func (m *Matcher) findProvider(name string) metadata.Provider {
-	for _, p := range m.providers {
-		if p.Name() == name {
-			return p
-		}
-	}
-	return nil
+	p, _ := m.registry.Provider(name)
+	return p
 }
 
 func buildSearchQuery(parsed parser.ParsedStorageEntry, kind metadata.MediaKind) metadata.SearchQuery {

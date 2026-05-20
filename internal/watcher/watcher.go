@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
@@ -52,6 +53,11 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	}
 
 	for _, lib := range libs {
+		settings := metadata.ParseSettings(lib.Settings)
+		if !settings.Watch {
+			log.Debug().Int64("library_id", lib.ID).Str("name", lib.Name).Msg("skipping watcher (watch disabled)")
+			continue
+		}
 		for _, p := range lib.Paths {
 			if isLocalPath(p) {
 				m.Watch(ctx, lib.ID, p)
@@ -183,6 +189,9 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 		if parser.IsMediaExtension(ext) {
 			log.Info().Str("path", path).Str("op", event.Op.String()).Msg("media file removed")
 			m.enqueueSoftDelete(ctx, lw.libraryID, path)
+		} else if ext == "" {
+			log.Info().Str("path", path).Str("op", event.Op.String()).Int64("library_id", lw.libraryID).Msg("directory removed, scheduling rescan")
+			m.enqueueRescan(ctx, lw.libraryID)
 		}
 		return
 	}
@@ -245,6 +254,31 @@ func (m *Manager) enqueueSoftDelete(ctx context.Context, libraryID int64, path s
 		LibraryID: libraryID,
 		Paths:     []string{path},
 	}, nil)
+}
+
+var (
+	rescanTimers   = make(map[int64]*time.Timer)
+	rescanTimersMu sync.Mutex
+)
+
+func (m *Manager) enqueueRescan(ctx context.Context, libraryID int64) {
+	rescanTimersMu.Lock()
+	defer rescanTimersMu.Unlock()
+
+	if t, ok := rescanTimers[libraryID]; ok {
+		t.Stop()
+	}
+
+	rescanTimers[libraryID] = time.AfterFunc(5*time.Second, func() {
+		rescanTimersMu.Lock()
+		delete(rescanTimers, libraryID)
+		rescanTimersMu.Unlock()
+
+		m.river.Insert(context.Background(), worker.ScanLibraryArgs{
+			LibraryID: libraryID,
+		}, nil)
+		log.Info().Int64("library_id", libraryID).Msg("rescan enqueued after directory change")
+	})
 }
 
 func addRecursive(fsw *fsnotify.Watcher, root string) error {

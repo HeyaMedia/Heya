@@ -8,13 +8,18 @@ import (
 )
 
 type FileConfig struct {
-	DatabaseURL string `yaml:"database_url,omitempty"`
-	Host        string `yaml:"host,omitempty"`
-	Port        string `yaml:"port,omitempty"`
-	LogLevel    string `yaml:"log_level,omitempty"`
-	LogFormat   string `yaml:"log_format,omitempty"`
-	TMDBToken   string `yaml:"tmdb_api_token,omitempty"`
-	DataDir     string `yaml:"data_dir,omitempty"`
+	DatabaseURL  string `yaml:"database_url,omitempty"`
+	Host         string `yaml:"host,omitempty"`
+	Port         string `yaml:"port,omitempty"`
+	LogLevel     string `yaml:"log_level,omitempty"`
+	LogFormat    string `yaml:"log_format,omitempty"`
+	TMDBToken    string `yaml:"tmdb_api_token,omitempty"`
+	DataDir      string `yaml:"data_dir,omitempty"`
+	FanartAPIKey string `yaml:"fanart_api_key,omitempty"`
+	TVDBAPIKey   string `yaml:"tvdb_api_key,omitempty"`
+	AniDBClient   string `yaml:"anidb_client,omitempty"`
+	OMDbAPIKey    string `yaml:"omdb_api_key,omitempty"`
+	DiscogsAPIKey string `yaml:"discogs_api_key,omitempty"`
 }
 
 var searchPaths = []string{
@@ -58,35 +63,41 @@ func SaveFile(path string, fc *FileConfig) error {
 
 func MergeFileWithEnv(fc *FileConfig) *Config {
 	cfg := &Config{
-		DatabaseURL: fc.DatabaseURL,
-		Host:        fc.Host,
-		Port:        fc.Port,
-		LogLevel:    fc.LogLevel,
-		LogFormat:   fc.LogFormat,
-		TMDBToken:   fc.TMDBToken,
-		DataDir:     fc.DataDir,
+		DatabaseURL:  fc.DatabaseURL,
+		Host:         fc.Host,
+		Port:         fc.Port,
+		LogLevel:     fc.LogLevel,
+		LogFormat:    fc.LogFormat,
+		TMDBToken:    fc.TMDBToken,
+		DataDir:      fc.DataDir,
+		FanartAPIKey: fc.FanartAPIKey,
+		TVDBAPIKey:   fc.TVDBAPIKey,
+		AniDBClient:   fc.AniDBClient,
+		OMDbAPIKey:    fc.OMDbAPIKey,
+		DiscogsAPIKey: fc.DiscogsAPIKey,
 	}
 
-	if v := os.Getenv("DATABASE_URL"); v != "" {
-		cfg.DatabaseURL = v
+	envOverrides := []struct {
+		key string
+		dst *string
+	}{
+		{"DATABASE_URL", &cfg.DatabaseURL},
+		{"HOST", &cfg.Host},
+		{"PORT", &cfg.Port},
+		{"LOG_LEVEL", &cfg.LogLevel},
+		{"LOG_FORMAT", &cfg.LogFormat},
+		{"TMDB_API_TOKEN", &cfg.TMDBToken},
+		{"DATA_DIR", &cfg.DataDir},
+		{"FANART_API_KEY", &cfg.FanartAPIKey},
+		{"TVDB_API_KEY", &cfg.TVDBAPIKey},
+		{"ANIDB_CLIENT", &cfg.AniDBClient},
+		{"OMDB_API_KEY", &cfg.OMDbAPIKey},
+		{"DISCOGS_API_KEY", &cfg.DiscogsAPIKey},
 	}
-	if v := os.Getenv("HOST"); v != "" {
-		cfg.Host = v
-	}
-	if v := os.Getenv("PORT"); v != "" {
-		cfg.Port = v
-	}
-	if v := os.Getenv("LOG_LEVEL"); v != "" {
-		cfg.LogLevel = v
-	}
-	if v := os.Getenv("LOG_FORMAT"); v != "" {
-		cfg.LogFormat = v
-	}
-	if v := os.Getenv("TMDB_API_TOKEN"); v != "" {
-		cfg.TMDBToken = v
-	}
-	if v := os.Getenv("DATA_DIR"); v != "" {
-		cfg.DataDir = v
+	for _, o := range envOverrides {
+		if v := os.Getenv(o.key); v != "" {
+			*o.dst = v
+		}
 	}
 
 	applyDefaults(cfg)

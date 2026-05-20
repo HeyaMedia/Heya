@@ -7,13 +7,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/fanart"
 	"github.com/karbowiak/heya/internal/metadata/musicbrainz"
+	"github.com/karbowiak/heya/internal/metadata/omdb"
 	"github.com/karbowiak/heya/internal/metadata/openlibrary"
+	"github.com/karbowiak/heya/internal/metadata/anidb"
 	"github.com/karbowiak/heya/internal/metadata/tmdb"
+	"github.com/karbowiak/heya/internal/metadata/tvdb"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/watcher"
@@ -23,20 +27,24 @@ import (
 )
 
 type App struct {
-	Config           *config.Config
-	DB               *pgxpool.Pool
-	Scanner          *scanner.Scanner
-	Matcher          *matcher.Matcher
-	Downloader       *images.Downloader
-	River            *river.Client[pgx.Tx]
-	Watcher          *watcher.Manager
-	Providers        []metadata.Provider
-	ArtworkProviders []metadata.ArtworkProvider
-	Transcoder       *transcoder.SessionManager
-	TranscodeCache   *transcoder.CacheManager
+	Config         *config.Config
+	DB             *pgxpool.Pool
+	Scanner        *scanner.Scanner
+	Matcher        *matcher.Matcher
+	Downloader     *images.Downloader
+	River          *river.Client[pgx.Tx]
+	Watcher        *watcher.Manager
+	Registry       *metadata.Registry
+	Transcoder     *transcoder.SessionManager
+	TranscodeCache *transcoder.CacheManager
+	Hub            *eventhub.Hub
 }
 
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
+	if err := AutoMigrate(cfg.DatabaseURL); err != nil {
+		return nil, err
+	}
+
 	db, err := database.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
@@ -45,22 +53,34 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	dl := images.NewDownloader(cfg.DataDir)
 	sc := scanner.New(db)
 
-	var providers []metadata.Provider
-	var artworkProviders []metadata.ArtworkProvider
+	registry := metadata.NewRegistry()
 
 	if cfg.TMDBToken != "" {
 		tmdbProvider := tmdb.NewProvider(cfg.TMDBToken)
-		providers = append(providers, tmdbProvider)
-		artworkProviders = append(artworkProviders, tmdbProvider)
+		registry.Register(tmdbProvider)
+		registry.RegisterArtwork(tmdbProvider)
 	}
-	providers = append(providers, musicbrainz.NewProvider())
-	providers = append(providers, openlibrary.NewProvider())
+	if cfg.TVDBAPIKey != "" {
+		registry.Register(tvdb.NewProvider(cfg.TVDBAPIKey))
+	}
+	if cfg.AniDBClient != "" {
+		registry.Register(anidb.NewProvider(cfg.AniDBClient, cfg.DataDir))
+	}
+	registry.Register(musicbrainz.NewProvider())
+	registry.Register(openlibrary.NewProvider())
 
 	if cfg.FanartAPIKey != "" {
-		artworkProviders = append(artworkProviders, fanart.NewProvider(cfg.FanartAPIKey))
+		registry.RegisterArtwork(fanart.NewProvider(cfg.FanartAPIKey))
+	}
+	if cfg.OMDbAPIKey != "" {
+		omdbProvider := omdb.NewProvider(cfg.OMDbAPIKey)
+		registry.Register(omdbProvider)
+		registry.RegisterRatings(omdbProvider)
 	}
 
-	m := matcher.New(db, dl, matcher.DefaultOptions(), providers...)
+	hub := eventhub.New()
+
+	m := matcher.New(db, dl, matcher.DefaultOptions(), registry)
 
 	var tc *transcoder.SessionManager
 	var tcCache *transcoder.CacheManager
@@ -70,14 +90,14 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 
 	riverClient, err := worker.Setup(ctx, worker.Config{
-		DB:               db,
-		DataDir:          cfg.DataDir,
-		TMDBToken:        cfg.TMDBToken,
-		Matcher:          m,
-		Downloader:       dl,
-		Providers:        providers,
-		ArtworkProviders: artworkProviders,
-		TranscodeCache:   tcCache,
+		DB:             db,
+		DataDir:        cfg.DataDir,
+		TMDBToken:      cfg.TMDBToken,
+		Matcher:        m,
+		Downloader:     dl,
+		Registry:       registry,
+		TranscodeCache: tcCache,
+		Hub:            hub,
 	})
 	if err != nil {
 		db.Close()
@@ -87,17 +107,17 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	wm := watcher.NewManager(db, riverClient)
 
 	return &App{
-		Config:     cfg,
-		DB:         db,
-		Scanner:    sc,
-		Matcher:    m,
-		Downloader: dl,
-		River:      riverClient,
-		Watcher:    wm,
-		Providers:        providers,
-		ArtworkProviders: artworkProviders,
-		Transcoder:       tc,
-		TranscodeCache:   tcCache,
+		Config:         cfg,
+		DB:             db,
+		Scanner:        sc,
+		Matcher:        m,
+		Downloader:     dl,
+		River:          riverClient,
+		Watcher:        wm,
+		Registry:       registry,
+		Transcoder:     tc,
+		TranscodeCache: tcCache,
+		Hub:            hub,
 	}, nil
 }
 

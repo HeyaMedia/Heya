@@ -35,7 +35,7 @@ func (p *Provider) Search(ctx context.Context, kind metadata.MediaKind, query me
 	return p.searchByTitle(ctx, query)
 }
 
-func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.MediaDetail, error) {
+func (p *Provider) GetDetail(ctx context.Context, providerID string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {
 	parts := strings.SplitN(providerID, ":", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid provider ID: %s", providerID)

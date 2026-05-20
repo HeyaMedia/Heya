@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/matcher"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
@@ -32,7 +34,7 @@ func ParseMediaType(s string) (sqlc.MediaType, error) {
 	return mt, nil
 }
 
-func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.MediaType, paths []string, userID int64) (sqlc.Library, error) {
+func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.MediaType, paths []string, userID int64, settings *metadata.LibrarySettings) (sqlc.Library, error) {
 	for _, p := range paths {
 		if vfs.IsSMBPath(p) {
 			continue
@@ -46,6 +48,14 @@ func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.Med
 		}
 	}
 
+	var settingsJSON []byte
+	if settings != nil {
+		settingsJSON, _ = json.Marshal(settings)
+	} else {
+		defaults := metadata.DefaultSettings(string(mediaType))
+		settingsJSON, _ = json.Marshal(defaults)
+	}
+
 	q := sqlc.New(a.DB)
 	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
 		Name:         name,
@@ -53,6 +63,7 @@ func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.Med
 		Paths:        paths,
 		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
 		CreatedBy:    userID,
+		Settings:     settingsJSON,
 	})
 	if err != nil {
 		return sqlc.Library{}, fmt.Errorf("creating library: %w", err)
@@ -92,6 +103,23 @@ func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []
 		Paths:        paths,
 		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
 	})
+}
+
+func (a *App) UpdateLibrarySettings(ctx context.Context, id int64, settings metadata.LibrarySettings) (sqlc.Library, error) {
+	settingsJSON, _ := json.Marshal(settings)
+	q := sqlc.New(a.DB)
+	return q.UpdateLibrarySettings(ctx, sqlc.UpdateLibrarySettingsParams{
+		ID:       id,
+		Settings: settingsJSON,
+	})
+}
+
+func (a *App) GetLibrarySettings(ctx context.Context, id int64) (metadata.LibrarySettings, error) {
+	lib, err := a.GetLibrary(ctx, id)
+	if err != nil {
+		return metadata.LibrarySettings{}, err
+	}
+	return metadata.ParseSettings(lib.Settings), nil
 }
 
 func (a *App) DeleteLibrary(ctx context.Context, id int64) error {

@@ -80,7 +80,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 			URL:        imageURL(detail.ProfilePath),
 			AssetType:  "profile",
 			MediaType:  "person",
-		}, nil)
+		}, &river.InsertOpts{Priority: 4})
 	}
 
 	log.Debug().

@@ -50,7 +50,7 @@ func (p *Provider) Search(ctx context.Context, kind metadata.MediaKind, query me
 	}
 }
 
-func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.MediaDetail, error) {
+func (p *Provider) GetDetail(ctx context.Context, providerID string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {
 	parts := strings.SplitN(providerID, ":", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid provider ID: %s", providerID)
@@ -60,15 +60,15 @@ func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.
 
 	switch kind {
 	case "movie":
-		return p.getMovieDetail(ctx, id)
+		return p.getMovieDetail(ctx, id, opts)
 	case "tv":
-		return p.getTVDetail(ctx, id)
+		return p.getTVDetail(ctx, id, opts)
 	default:
 		return nil, fmt.Errorf("unknown kind in provider ID: %s", kind)
 	}
 }
 
-func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids metadata.NFOIDs) (*metadata.MediaDetail, string, error) {
+func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids metadata.NFOIDs, opts *metadata.FetchOptions) (*metadata.MediaDetail, string, error) {
 	tmdbID := ids.TMDBID
 
 	if tmdbID == "" && ids.IMDBID != "" {
@@ -95,10 +95,10 @@ func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids
 	switch kind {
 	case metadata.KindMovie:
 		providerID = "movie:" + tmdbID
-		detail, err = p.getMovieDetail(ctx, tmdbID)
+		detail, err = p.getMovieDetail(ctx, tmdbID, opts)
 	case metadata.KindTV:
 		providerID = "tv:" + tmdbID
-		detail, err = p.getTVDetail(ctx, tmdbID)
+		detail, err = p.getTVDetail(ctx, tmdbID, opts)
 	default:
 		return nil, "", fmt.Errorf("TMDB does not support kind %s", kind)
 	}
@@ -110,11 +110,11 @@ func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids
 }
 
 func (p *Provider) GetMovieDetailByID(ctx context.Context, tmdbID string) (*metadata.MediaDetail, error) {
-	return p.getMovieDetail(ctx, tmdbID)
+	return p.getMovieDetail(ctx, tmdbID, nil)
 }
 
 func (p *Provider) GetTVDetailByID(ctx context.Context, tmdbID string) (*metadata.MediaDetail, error) {
-	return p.getTVDetail(ctx, tmdbID)
+	return p.getTVDetail(ctx, tmdbID, nil)
 }
 
 type findResponse struct {
@@ -144,6 +144,12 @@ func (p *Provider) searchMovies(ctx context.Context, query metadata.SearchQuery)
 	}
 	if query.Year != "" {
 		params.Set("year", query.Year)
+	}
+	if query.Language != "" {
+		params.Set("language", query.Language)
+	}
+	if query.Country != "" {
+		params.Set("region", query.Country)
 	}
 
 	var resp searchMovieResponse
@@ -180,6 +186,9 @@ func (p *Provider) searchTV(ctx context.Context, query metadata.SearchQuery) ([]
 	if query.Year != "" {
 		params.Set("first_air_date_year", query.Year)
 	}
+	if query.Language != "" {
+		params.Set("language", query.Language)
+	}
 
 	var resp searchTVResponse
 	if err := p.get(ctx, "/search/tv", params, &resp); err != nil {
@@ -208,10 +217,13 @@ func (p *Provider) searchTV(ctx context.Context, query metadata.SearchQuery) ([]
 	return results, nil
 }
 
-func (p *Provider) getMovieDetail(ctx context.Context, id string) (*metadata.MediaDetail, error) {
+func (p *Provider) getMovieDetail(ctx context.Context, id string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {
 	var d movieDetail
 	params := url.Values{
 		"append_to_response": {"credits,external_ids,keywords,release_dates,videos,recommendations"},
+	}
+	if opts != nil && opts.Language != "" {
+		params.Set("language", opts.Language)
 	}
 	if err := p.get(ctx, "/movie/"+id, params, &d); err != nil {
 		return nil, err
@@ -321,10 +333,13 @@ func (p *Provider) getMovieDetail(ctx context.Context, id string) (*metadata.Med
 	}, nil
 }
 
-func (p *Provider) getTVDetail(ctx context.Context, id string) (*metadata.MediaDetail, error) {
+func (p *Provider) getTVDetail(ctx context.Context, id string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {
 	var d tvDetail
 	params := url.Values{
-		"append_to_response": {"credits,external_ids"},
+		"append_to_response": {"credits,external_ids,keywords,videos,content_ratings,recommendations"},
+	}
+	if opts != nil && opts.Language != "" {
+		params.Set("language", opts.Language)
 	}
 	if err := p.get(ctx, "/tv/"+id, params, &d); err != nil {
 		return nil, err
@@ -350,7 +365,50 @@ func (p *Provider) getTVDetail(ctx context.Context, id string) (*metadata.MediaD
 		createdBy[i] = c.Name
 	}
 
-	cast := convertCast(d.Credits.Cast, 20)
+	cast := convertCast(d.Credits.Cast, 30)
+	crew := convertCrew(d.Credits.Crew)
+
+	keywords := make([]metadata.KeywordDetail, len(d.Keywords.Results))
+	for i, k := range d.Keywords.Results {
+		keywords[i] = metadata.KeywordDetail{TmdbID: k.ID, Name: k.Name}
+	}
+
+	var videos []metadata.VideoDetail
+	for _, v := range d.Videos.Results {
+		videos = append(videos, metadata.VideoDetail{
+			TmdbKey: v.ID, Name: v.Name, Site: v.Site, Key: v.Key,
+			Type: v.Type, Language: v.ISO639, Official: v.Official, PublishedAt: v.PublishedAt,
+		})
+	}
+
+	var certs []metadata.CertificationDetail
+	for _, cr := range d.ContentRatings.Results {
+		if cr.Rating != "" {
+			certs = append(certs, metadata.CertificationDetail{
+				Country:       cr.Country,
+				Certification: cr.Rating,
+			})
+		}
+	}
+
+	var recs []metadata.RecommendationDetail
+	for _, r := range d.Recommendations.Results {
+		title := r.Title
+		if title == "" {
+			title = r.Name
+		}
+		recs = append(recs, metadata.RecommendationDetail{
+			TmdbID: r.ID, Title: title, PosterPath: r.PosterPath,
+			MediaType: r.MediaType, VoteAverage: r.VoteAverage, ReleaseDate: r.ReleaseDate,
+		})
+	}
+
+	companies := make([]metadata.ProductionCompanyDetail, len(d.ProductionCompanies))
+	for i, c := range d.ProductionCompanies {
+		companies[i] = metadata.ProductionCompanyDetail{
+			TmdbID: c.ID, Name: c.Name, LogoPath: c.LogoPath, OriginCountry: c.OriginCountry,
+		}
+	}
 
 	var seasons []metadata.SeasonDetail
 	for _, s := range d.Seasons {
@@ -403,12 +461,18 @@ func (p *Provider) getTVDetail(ctx context.Context, id string) (*metadata.MediaD
 		OriginalLanguage: d.OriginalLanguage,
 		Networks:         networks,
 		CreatedBy:        createdBy,
-		NumberOfSeasons:  d.NumberOfSeasons,
-		NumberOfEpisodes: d.NumberOfEpisodes,
-		Popularity:       d.Popularity,
-		VoteCount:        d.VoteCount,
-		Cast:             cast,
-		Seasons:          seasons,
+		NumberOfSeasons:     d.NumberOfSeasons,
+		NumberOfEpisodes:    d.NumberOfEpisodes,
+		Popularity:          d.Popularity,
+		VoteCount:           d.VoteCount,
+		Cast:                cast,
+		Crew:                crew,
+		Keywords:            keywords,
+		Videos:              videos,
+		Certifications:      certs,
+		Recommendations:     recs,
+		ProductionCompanies: companies,
+		Seasons:             seasons,
 	}, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata/studios"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -27,11 +28,17 @@ func handleMediaImage(app *service.App) http.HandlerFunc {
 			sortOrder, _ = strconv.Atoi(s)
 		}
 
-		if sortOrder >= 0 {
+		label := r.URL.Query().Get("label")
+
+		if sortOrder >= 0 || label != "" {
 			assets, err := q.ListMediaAssets(r.Context(), id)
 			if err == nil {
 				for _, a := range assets {
-					if string(a.AssetType) == imageType && int(a.SortOrder) == sortOrder && a.LocalPath != "" {
+					if label != "" && a.Label == label && a.LocalPath != "" {
+						serveFile(w, r, a.LocalPath)
+						return
+					}
+					if sortOrder >= 0 && string(a.AssetType) == imageType && int(a.SortOrder) == sortOrder && a.LocalPath != "" {
 						serveFile(w, r, a.LocalPath)
 						return
 					}
@@ -91,6 +98,32 @@ func handlePersonImage(app *service.App) http.HandlerFunc {
 		}
 
 		serveFile(w, r, person.ProfilePath)
+	}
+}
+
+func handleStudioImage(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		q := sqlc.New(app.DB)
+		company, err := q.GetProductionCompanyByID(r.Context(), id)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		resolver := studios.NewResolver(app.Config.DataDir)
+		logoPath := resolver.LogoPath(company.Name)
+		if logoPath == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		serveFile(w, r, logoPath)
 	}
 }
 

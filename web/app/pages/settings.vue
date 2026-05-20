@@ -1,155 +1,202 @@
 <template>
-  <div class="mt-layout">
-    <aside class="settings-nav scroll">
-      <div class="section-title" style="padding: 0 14px; margin-bottom: 12px">Settings</div>
-      <div
-        v-for="tab in tabs"
-        :key="tab.id"
-        class="lib-item"
-        :class="{ active: activeTab === tab.id }"
-        @click="activeTab = tab.id"
-      >
-        <Icon :name="tab.icon" :size="16" />
-        <span>{{ tab.label }}</span>
+  <div class="settings-layout">
+    <aside class="settings-sidebar scroll">
+      <div class="sidebar-header">
+        <Icon name="settings" :size="18" />
+        <span>Settings</span>
+      </div>
+      <nav class="sidebar-nav">
+        <NuxtLink
+          v-for="tab in tabs"
+          :key="tab.to"
+          :to="tab.to"
+          class="nav-item"
+          :class="{ active: isActive(tab.to) }"
+        >
+          <div class="nav-icon">
+            <Icon :name="tab.icon" :size="16" />
+          </div>
+          <div class="nav-text">
+            <span class="nav-label">{{ tab.label }}</span>
+            <span class="nav-hint">{{ tab.hint }}</span>
+          </div>
+        </NuxtLink>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="version-tag">Heya v1.0.0</div>
       </div>
     </aside>
-    <div class="library-main scroll page-pad">
-
-      <!-- Libraries -->
-      <template v-if="activeTab === 'libraries'">
-        <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 24px">Libraries</h2>
-        <div v-if="libraries.length" style="display: flex; flex-direction: column; gap: 16px">
-          <div v-for="lib in libraries" :key="lib.id" class="settings-card">
-            <div style="display: flex; align-items: center; gap: 14px">
-              <div class="lib-icon" :class="lib.media_type">
-                <Icon :name="lib.media_type === 'movie' ? 'film' : lib.media_type === 'tv' ? 'tv' : lib.media_type === 'music' ? 'music' : 'book'" :size="20" />
-              </div>
-              <div>
-                <div style="font-size: 16px; font-weight: 500">{{ lib.name }}</div>
-                <div style="font-size: 12px; color: var(--fg-2); font-family: var(--font-mono)">{{ lib.paths.join(', ') }}</div>
-              </div>
-            </div>
-            <div style="display: flex; gap: 8px; margin-top: 12px">
-              <button class="btn-ghost-sm" @click="scanLib(lib.id)">Scan Now</button>
-              <button class="btn-ghost-sm" style="color: var(--bad)">Remove</button>
-            </div>
-          </div>
-        </div>
-        <button class="btn btn-primary" style="margin-top: 20px" @click="navigateTo('/libraries')">
-          <Icon name="plus" :size="16" />
-          Add Library
-        </button>
-      </template>
-
-      <!-- Server -->
-      <template v-if="activeTab === 'server'">
-        <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 24px">Server</h2>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px">
-          <div class="settings-card">
-            <div style="font-size: 11px; color: var(--fg-2); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em">Status</div>
-            <div style="font-size: 20px; font-weight: 600; margin-top: 4px; color: var(--good)">{{ health?.status === 'ok' ? 'Online' : 'Offline' }}</div>
-          </div>
-          <div class="settings-card">
-            <div style="font-size: 11px; color: var(--fg-2); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em">Database</div>
-            <div style="font-size: 20px; font-weight: 600; margin-top: 4px" :style="{ color: health?.database === 'connected' ? 'var(--good)' : 'var(--bad)' }">{{ health?.database || '…' }}</div>
-          </div>
-        </div>
-        <div class="settings-card">
-          <div style="font-size: 14px; font-weight: 500; margin-bottom: 12px">API Reference</div>
-          <div style="display: flex; gap: 12px">
-            <a href="/api/openapi.json" target="_blank" class="btn-ghost-sm">OpenAPI Spec</a>
-            <a href="/api/docs" target="_blank" class="btn-ghost-sm">Scalar Docs</a>
-          </div>
-        </div>
-      </template>
-
-      <!-- Users -->
-      <template v-if="activeTab === 'users'">
-        <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 24px">Users</h2>
-        <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 20px">
-          <div class="avatar" style="width: 48px; height: 48px; font-size: 14px">
-            {{ user?.username?.slice(0, 2).toUpperCase() }}
-          </div>
-          <div>
-            <div style="font-size: 16px; font-weight: 500">{{ user?.username }}</div>
-            <div style="font-size: 12px; color: var(--fg-2)">{{ user?.email }}</div>
-          </div>
-          <Chip v-if="user?.is_admin" gold>Admin</Chip>
-        </div>
-      </template>
-
-      <!-- About -->
-      <template v-if="activeTab === 'about'">
-        <h2 style="font-size: 24px; font-weight: 600; margin-bottom: 24px">About Heya</h2>
-        <div class="settings-card">
-          <div style="font-family: var(--font-mono); font-size: 13px; color: var(--fg-1); line-height: 2">
-            <div>Server: <span style="color: var(--fg-0)">Heya v1.0.0</span></div>
-            <div>Backend: <span style="color: var(--fg-0)">Go 1.26</span></div>
-            <div>Frontend: <span style="color: var(--fg-0)">Nuxt 4</span></div>
-            <div>Database: <span style="color: var(--fg-0)">PostgreSQL 17</span></div>
-          </div>
-        </div>
-      </template>
+    <div class="settings-content scroll">
+      <div class="settings-page">
+        <NuxtPage />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { Library, HealthResponse } from '~~/shared/types'
+const route = useRoute()
 
-const { user, isAuthenticated } = useAuth()
-
-const activeTab = ref('libraries')
-const libraries = ref<Library[]>([])
-const health = ref<HealthResponse | null>(null)
-
-const tabs = [
-  { id: 'libraries', label: 'Libraries', icon: 'folder' },
-  { id: 'server', label: 'Server', icon: 'network' },
-  { id: 'users', label: 'Users', icon: 'user' },
-  { id: 'about', label: 'About', icon: 'globe' },
-]
-
-async function scanLib(id: number) {
-  try { await apiFetch(`/api/libraries/${id}/scan`, { method: 'POST' }) } catch {}
+function isActive(to: string) {
+  if (to === '/settings') return route.path === '/settings' || route.path === '/settings/'
+  return route.path.startsWith(to)
 }
 
-onMounted(async () => {
-  const [libRes, healthRes] = await Promise.allSettled([
-    apiFetch<Library[]>('/api/libraries'),
-    $fetch<HealthResponse>('/api/health'),
-  ])
-  if (libRes.status === 'fulfilled') libraries.value = libRes.value
-  if (healthRes.status === 'fulfilled') health.value = healthRes.value
-})
+const tabs = [
+  { to: '/settings', label: 'Dashboard', icon: 'chart-bar', hint: 'Overview & stats' },
+  { to: '/settings/libraries', label: 'Libraries', icon: 'folder', hint: 'Media sources' },
+  { to: '/settings/users', label: 'Users', icon: 'users', hint: 'Accounts & access' },
+  { to: '/settings/server', label: 'Server', icon: 'hard-drives', hint: 'Health & diagnostics' },
+  { to: '/settings/jobs', label: 'Jobs', icon: 'timer', hint: 'Background tasks' },
+  { to: '/settings/logs', label: 'Logs', icon: 'list', hint: 'Server log stream' },
+  { to: '/settings/about', label: 'About', icon: 'info', hint: 'Version & credits' },
+]
 </script>
 
 <style scoped>
-.settings-nav {
-  width: 240px;
+.settings-layout {
+  display: flex;
+  height: 100%;
+}
+
+.settings-sidebar {
+  width: 260px;
   flex-shrink: 0;
   background: var(--bg-2);
   border-right: 1px solid var(--border);
-  padding: 20px 10px;
+  display: flex;
+  flex-direction: column;
 }
-.settings-card {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 20px;
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 20px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-0);
+  letter-spacing: -0.01em;
 }
-.lib-icon {
-  width: 40px; height: 40px;
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 10px;
+  flex: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
   border-radius: var(--r-md);
-  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nav-item.active {
   background: var(--gold-soft);
-  color: var(--gold);
 }
-.avatar {
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--gold-deep), var(--gold));
-  color: #1a1408;
-  font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--gold);
+}
+
+.nav-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-3);
+  background: rgba(255, 255, 255, 0.03);
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.nav-item:hover .nav-icon {
+  color: var(--fg-1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-item.active .nav-icon {
+  color: var(--gold);
+  background: rgba(230, 185, 74, 0.12);
+}
+
+.nav-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.nav-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-1);
+  transition: color 0.15s ease;
+}
+
+.nav-item.active .nav-label {
+  color: var(--gold-bright);
+  font-weight: 600;
+}
+
+.nav-hint {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  margin-top: 1px;
+}
+
+.nav-item.active .nav-hint {
+  color: rgba(230, 185, 74, 0.5);
+}
+
+.sidebar-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.version-tag {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-4);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-1);
+}
+
+.settings-page {
+  padding: 32px 48px 80px;
+  max-width: 960px;
+}
+
+@media (max-width: 1100px) {
+  .settings-page {
+    padding: 24px 24px 80px;
+  }
 }
 </style>

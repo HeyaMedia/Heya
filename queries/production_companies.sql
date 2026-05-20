@@ -9,6 +9,12 @@ INSERT INTO media_production_companies (media_item_id, company_id)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING;
 
+-- name: ListAllProductionCompanies :many
+SELECT * FROM production_companies ORDER BY name;
+
+-- name: GetProductionCompanyByID :one
+SELECT * FROM production_companies WHERE id = $1;
+
 -- name: ListMediaProductionCompanies :many
 SELECT pc.* FROM production_companies pc
 JOIN media_production_companies mpc ON mpc.company_id = pc.id

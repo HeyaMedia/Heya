@@ -157,10 +157,18 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 				LibraryID: libraryID,
 				Path:      fullPath,
 			})
-			if err == nil && existing.Size == size && existing.Mtime.Valid && existing.Mtime.Time.Equal(mtime) {
-				log.Debug().Str("file", relPath).Msg("unchanged, skipping")
-				result.Unchanged++
-				return nil
+			if err == nil {
+				if existing.DeletedAt.Valid {
+					s.q.RestoreLibraryFile(ctx, existing.ID)
+					log.Info().Str("file", relPath).Msg("restored previously soft-deleted file")
+					result.New++
+					return nil
+				}
+				if existing.Size == size && existing.Mtime.Valid && existing.Mtime.Time.Equal(mtime) {
+					log.Debug().Str("file", relPath).Msg("unchanged, skipping")
+					result.Unchanged++
+					return nil
+				}
 			}
 		}
 

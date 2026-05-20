@@ -7,15 +7,19 @@ import (
 )
 
 type Config struct {
-	DatabaseURL        string
-	Host               string
-	Port               string
-	LogLevel           string
-	LogFormat          string
-	TMDBToken          string
-	DataDir            string
-	FanartAPIKey       string
-	TranscodeCacheDir  string
+	DatabaseURL         string
+	Host                string
+	Port                string
+	LogLevel            string
+	LogFormat           string
+	TMDBToken           string
+	DataDir             string
+	FanartAPIKey        string
+	TVDBAPIKey          string
+	AniDBClient         string
+	OMDbAPIKey          string
+	DiscogsAPIKey       string
+	TranscodeCacheDir   string
 	TranscodeCacheMaxGB int
 }
 
@@ -37,6 +41,10 @@ func Load() *Config {
 		TMDBToken:    getenv("TMDB_API_TOKEN", ""),
 		DataDir:      getenv("DATA_DIR", ""),
 		FanartAPIKey: getenv("FANART_API_KEY", ""),
+		TVDBAPIKey:   getenv("TVDB_API_KEY", ""),
+		AniDBClient:  getenv("ANIDB_CLIENT", ""),
+		OMDbAPIKey:    getenv("OMDB_API_KEY", ""),
+		DiscogsAPIKey: getenv("DISCOGS_API_KEY", ""),
 	}
 	applyDefaults(cfg)
 	return cfg
@@ -99,13 +107,18 @@ func (c *Config) Addr() string {
 
 func (c *Config) ToFileConfig() *FileConfig {
 	return &FileConfig{
-		DatabaseURL: c.DatabaseURL,
-		Host:        c.Host,
-		Port:        c.Port,
-		LogLevel:    c.LogLevel,
-		LogFormat:   c.LogFormat,
-		TMDBToken:   c.TMDBToken,
-		DataDir:     c.DataDir,
+		DatabaseURL:  c.DatabaseURL,
+		Host:         c.Host,
+		Port:         c.Port,
+		LogLevel:     c.LogLevel,
+		LogFormat:    c.LogFormat,
+		TMDBToken:    c.TMDBToken,
+		DataDir:      c.DataDir,
+		FanartAPIKey: c.FanartAPIKey,
+		TVDBAPIKey:   c.TVDBAPIKey,
+		AniDBClient:  c.AniDBClient,
+		OMDbAPIKey:    c.OMDbAPIKey,
+		DiscogsAPIKey: c.DiscogsAPIKey,
 	}
 }
 

@@ -134,7 +134,7 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 }
 
 const getMediaItemByExternalID = `-- name: GetMediaItemByExternalID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id, slug FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, created_at, updated_at, search_vector, homepage, wikidata_id, facebook_id, instagram_id, twitter_id, slug, metadata_refreshed_at FROM media_items
 WHERE library_id = $1 AND external_ids @> $2::jsonb
 `
 
@@ -166,6 +166,7 @@ func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItem
 		&i.InstagramID,
 		&i.TwitterID,
 		&i.Slug,
+		&i.MetadataRefreshedAt,
 	)
 	return i, err
 }
@@ -256,6 +257,44 @@ type ListLibraryFilesParams struct {
 
 func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesParams) ([]LibraryFile, error) {
 	rows, err := q.db.Query(ctx, listLibraryFiles, arg.LibraryID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryFile{}
+	for rows.Next() {
+		var i LibraryFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.MediaItemID,
+			&i.ParseResult,
+			&i.Status,
+			&i.ErrorMessage,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.MediaInfo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLibraryFilesByMediaItem = `-- name: ListLibraryFilesByMediaItem :many
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, created_at, updated_at, deleted_at, media_info FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL LIMIT 1
+`
+
+func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID pgtype.Int8) ([]LibraryFile, error) {
+	rows, err := q.db.Query(ctx, listLibraryFilesByMediaItem, mediaItemID)
 	if err != nil {
 		return nil, err
 	}

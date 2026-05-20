@@ -4,9 +4,15 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 )
+
+type mediaItemView struct {
+	sqlc.MediaItem
+	Available bool `json:"available"`
+}
 
 func handleListMedia(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -26,21 +32,37 @@ func handleListMedia(app *service.App) http.HandlerFunc {
 		}
 
 		mediaType := r.URL.Query().Get("type")
-		if mediaType != "" {
-			items, err := q.ListMediaItemsByType(r.Context(), sqlc.ListMediaItemsByTypeParams{
-				MediaType: sqlc.MediaType(mediaType),
-				Limit:     limit,
-				Offset:    offset,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, items)
+		if mediaType == "" {
+			writeError(w, http.StatusBadRequest, "?type= parameter is required")
 			return
 		}
 
-		writeError(w, http.StatusBadRequest, "?type= parameter is required")
+		mt := sqlc.MediaType(mediaType)
+		items, err := q.ListMediaItemsByType(r.Context(), sqlc.ListMediaItemsByTypeParams{
+			MediaType: mt,
+			Limit:     limit,
+			Offset:    offset,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		unavailableIDs, _ := q.ListUnavailableMediaItemIDs(r.Context(), mt)
+		unavailable := make(map[int64]bool, len(unavailableIDs))
+		for _, id := range unavailableIDs {
+			unavailable[id] = true
+		}
+
+		views := make([]mediaItemView, len(items))
+		for i, item := range items {
+			views[i] = mediaItemView{
+				MediaItem: item,
+				Available: !unavailable[item.ID],
+			}
+		}
+
+		writeJSON(w, http.StatusOK, views)
 	}
 }
 
@@ -61,7 +83,12 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		result := map[string]any{"media_item": item}
+		hasFiles := false
+		if files, err := q.ListLibraryFilesByMediaItem(r.Context(), pgtype.Int8{Int64: item.ID, Valid: true}); err == nil && len(files) > 0 {
+			hasFiles = true
+		}
+
+		result := map[string]any{"media_item": item, "available": hasFiles}
 
 		switch item.MediaType {
 		case sqlc.MediaTypeMovie:
@@ -74,7 +101,16 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 			if err == nil {
 				result["tv_series"] = series
 				seasons, _ := q.ListTVSeasonsBySeries(r.Context(), series.ID)
-				result["seasons"] = seasons
+				type seasonWithEpisodes struct {
+					sqlc.TvSeason
+					Episodes []sqlc.TvEpisode `json:"episodes"`
+				}
+				var enriched []seasonWithEpisodes
+				for _, s := range seasons {
+					eps, _ := q.ListTVEpisodesBySeason(r.Context(), s.ID)
+					enriched = append(enriched, seasonWithEpisodes{TvSeason: s, Episodes: eps})
+				}
+				result["seasons"] = enriched
 			}
 		case sqlc.MediaTypeMusic:
 			artist, err := q.GetArtistByMediaItemID(r.Context(), item.ID)
@@ -128,6 +164,10 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 
 		if extras, err := q.ListMediaExtras(r.Context(), item.ID); err == nil && len(extras) > 0 {
 			result["extras"] = extras
+		}
+
+		if ratings, err := q.ListExternalRatings(r.Context(), item.ID); err == nil && len(ratings) > 0 {
+			result["external_ratings"] = ratings
 		}
 
 		writeJSON(w, http.StatusOK, result)

@@ -93,7 +93,7 @@ func TestGetDetail(t *testing.T) {
 	})
 
 	p := newTestProvider(t, mux)
-	detail, err := p.GetDetail(context.Background(), "musicbrainz:test-mbid")
+	detail, err := p.GetDetail(context.Background(), "musicbrainz:test-mbid", nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "OK Computer", detail.AlbumTitle)
@@ -124,7 +124,7 @@ func TestProviderName(t *testing.T) {
 
 func TestGetDetailInvalidProviderID(t *testing.T) {
 	p := NewProvider()
-	_, err := p.GetDetail(context.Background(), "invalid")
+	_, err := p.GetDetail(context.Background(), "invalid", nil)
 	assert.Error(t, err)
 }
 

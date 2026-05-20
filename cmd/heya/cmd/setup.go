@@ -198,7 +198,7 @@ var setupCmd = &cobra.Command{
 				mt, _ := service.ParseMediaType(libType)
 				users, _ := q.ListUsers(ctx)
 				if len(users) > 0 {
-					_, err = app.CreateLibrary(ctx, libName, mt, []string{libPath}, users[0].ID)
+					_, err = app.CreateLibrary(ctx, libName, mt, []string{libPath}, users[0].ID, nil)
 					if err != nil {
 						ui.Error("failed to create library: %v", err)
 					} else {

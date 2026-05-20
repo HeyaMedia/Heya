@@ -24,17 +24,26 @@ func (a *App) RefreshMediaItem(ctx context.Context, mediaItemID int64) error {
 
 	kind := mediaTypeToKind(item.MediaType)
 
-	for _, p := range a.Providers {
-		if !p.Supports(kind) {
-			continue
-		}
+	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		return fmt.Errorf("library not found: %w", err)
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+	providers := a.Registry.Providers(settings.MetadataProviders, kind)
+
+	var fetchOpts *metadata.FetchOptions
+	if settings.PreferredLanguage != "" || settings.PreferredCountry != "" {
+		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
+	}
+
+	for _, p := range providers {
 
 		providerID := buildProviderID(p.Name(), kind, externalIDs)
 		if providerID == "" {
 			continue
 		}
 
-		detail, err := p.GetDetail(ctx, providerID)
+		detail, err := p.GetDetail(ctx, providerID, fetchOpts)
 		if err != nil {
 			continue
 		}

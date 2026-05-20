@@ -43,6 +43,23 @@ func (q *Queries) CreateProductionCompany(ctx context.Context, arg CreateProduct
 	return i, err
 }
 
+const getProductionCompanyByID = `-- name: GetProductionCompanyByID :one
+SELECT id, tmdb_id, name, logo_path, origin_country FROM production_companies WHERE id = $1
+`
+
+func (q *Queries) GetProductionCompanyByID(ctx context.Context, id int64) (ProductionCompany, error) {
+	row := q.db.QueryRow(ctx, getProductionCompanyByID, id)
+	var i ProductionCompany
+	err := row.Scan(
+		&i.ID,
+		&i.TmdbID,
+		&i.Name,
+		&i.LogoPath,
+		&i.OriginCountry,
+	)
+	return i, err
+}
+
 const linkMediaProductionCompany = `-- name: LinkMediaProductionCompany :exec
 INSERT INTO media_production_companies (media_item_id, company_id)
 VALUES ($1, $2)
@@ -57,6 +74,36 @@ type LinkMediaProductionCompanyParams struct {
 func (q *Queries) LinkMediaProductionCompany(ctx context.Context, arg LinkMediaProductionCompanyParams) error {
 	_, err := q.db.Exec(ctx, linkMediaProductionCompany, arg.MediaItemID, arg.CompanyID)
 	return err
+}
+
+const listAllProductionCompanies = `-- name: ListAllProductionCompanies :many
+SELECT id, tmdb_id, name, logo_path, origin_country FROM production_companies ORDER BY name
+`
+
+func (q *Queries) ListAllProductionCompanies(ctx context.Context) ([]ProductionCompany, error) {
+	rows, err := q.db.Query(ctx, listAllProductionCompanies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProductionCompany{}
+	for rows.Next() {
+		var i ProductionCompany
+		if err := rows.Scan(
+			&i.ID,
+			&i.TmdbID,
+			&i.Name,
+			&i.LogoPath,
+			&i.OriginCountry,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMediaProductionCompanies = `-- name: ListMediaProductionCompanies :many

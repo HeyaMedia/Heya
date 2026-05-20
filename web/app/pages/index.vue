@@ -65,7 +65,14 @@ const recentBooks = ref<MediaItem[]>([])
 const movieDetails = ref<Record<number, Movie>>({})
 const loading = ref(true)
 
-const heroItems = computed(() => recentMovies.value.slice(0, 3))
+const heroItems = computed(() => {
+  const combined = [
+    ...recentMovies.value.map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
+    ...recentTV.value.map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
+  ]
+  combined.sort((a, b) => b._sort - a._sort)
+  return combined.slice(0, 5)
+})
 
 const hasContent = computed(() =>
   recentMovies.value.length + recentTV.value.length + recentMusic.value.length + recentBooks.value.length > 0
@@ -85,11 +92,19 @@ async function loadMedia() {
     })
   )
 
-  for (const item of recentMovies.value.slice(0, 3)) {
+  for (const item of heroItems.value) {
     try {
       const detail = await apiFetch<MediaDetail>(`/api/media/${item.id}`)
       if (detail.movie) {
         movieDetails.value[item.id] = detail.movie
+      }
+      if (detail.tv_series) {
+        movieDetails.value[item.id] = {
+          id: 0, media_item_id: item.id, tmdb_id: null, imdb_id: '',
+          runtime_minutes: 0, tagline: '', genres: detail.tv_series.genres || [],
+          rating: detail.tv_series.rating, release_date: detail.tv_series.first_air_date,
+          original_title: '', original_language: '', budget: 0, revenue: 0,
+        } as Movie
       }
     } catch { /* empty */ }
   }
@@ -97,7 +112,43 @@ async function loadMedia() {
   loading.value = false
 }
 
-onMounted(loadMedia)
+const { on } = useEventBus()
+const mediaRefreshTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+const typeRefs: Record<string, Ref<MediaItem[]>> = {
+  movie: recentMovies, tv: recentTV, music: recentMusic, book: recentBooks,
+}
+
+onMounted(() => {
+  loadMedia()
+
+  const unsubs = [
+    on('media.added', (event) => {
+      const mt = (event.payload as { media_type?: string }).media_type
+      if (!mt || !typeRefs[mt]) return
+      if (mediaRefreshTimers[mt]) clearTimeout(mediaRefreshTimers[mt])
+      mediaRefreshTimers[mt] = setTimeout(() => {
+        apiFetch<MediaItem[]>(`/api/media?type=${mt}&limit=20`)
+          .then(items => { typeRefs[mt].value = items })
+          .catch(() => {})
+      }, 2000)
+    }),
+    on('media.updated', (event) => {
+      const mt = (event.payload as { media_type?: string }).media_type
+      if (!mt || !typeRefs[mt]) return
+      if (mediaRefreshTimers[mt]) clearTimeout(mediaRefreshTimers[mt])
+      mediaRefreshTimers[mt] = setTimeout(() => {
+        apiFetch<MediaItem[]>(`/api/media?type=${mt}&limit=20`)
+          .then(items => { typeRefs[mt].value = items })
+          .catch(() => {})
+      }, 3000)
+    }),
+  ]
+
+  onUnmounted(() => {
+    unsubs.forEach(fn => fn())
+    Object.values(mediaRefreshTimers).forEach(t => clearTimeout(t))
+  })
+})
 </script>
 
 <style scoped>

@@ -6,6 +6,7 @@ import (
 
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -35,6 +36,16 @@ func handleWatchProgress(app *service.App) http.HandlerFunc {
 		}
 
 		completed := req.TotalSeconds > 0 && req.ProgressSeconds >= req.TotalSeconds-30
+
+		if app.Hub != nil {
+			app.Hub.Emit(eventhub.EventMediaWatched, eventhub.WatchPayload{
+				UserID:      user.ID,
+				MediaItemID: mediaItemID,
+				Progress:    req.ProgressSeconds,
+				Total:       req.TotalSeconds,
+				Completed:   completed,
+			})
+		}
 
 		q := sqlc.New(app.DB)
 

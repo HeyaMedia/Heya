@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/parser"
@@ -16,9 +17,10 @@ import (
 
 type MetadataMatchWorker struct {
 	river.WorkerDefaults[MetadataMatchArgs]
-	DB        *pgxpool.Pool
-	Matcher   *matcher.Matcher
-	Providers []metadata.Provider
+	DB       *pgxpool.Pool
+	Matcher  *matcher.Matcher
+	Registry *metadata.Registry
+	Hub      *eventhub.Hub
 }
 
 func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataMatchArgs]) error {
@@ -56,24 +58,33 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 	}
 
 	if updated.Status == sqlc.FileStatusMatched && updated.MediaItemID.Valid {
+		if w.Hub != nil {
+			w.Hub.Emit(eventhub.EventMediaAdded, eventhub.MediaPayload{
+				MediaItemID: updated.MediaItemID.Int64,
+				LibraryID:   job.Args.LibraryID,
+				MediaType:   job.Args.MediaType,
+			})
+		}
+
 		matchResult := w.Matcher.LastMatchResult()
 
-		client := river.ClientFromContext[pgx.Tx](ctx)
-		client.Insert(ctx, MetadataFetchArgs{
-			MediaItemID:   updated.MediaItemID.Int64,
-			LibraryID:     job.Args.LibraryID,
-			LibraryFileID: file.ID,
-			FilePath:      file.Path,
-			MediaType:     job.Args.MediaType,
-			ProviderName:  matchResult.ProviderName,
-			ProviderID:    matchResult.ProviderID,
-		}, nil)
+		if matchResult.IsNew {
+			client := river.ClientFromContext[pgx.Tx](ctx)
+			client.Insert(ctx, MetadataFetchArgs{
+				MediaItemID:   updated.MediaItemID.Int64,
+				LibraryID:     job.Args.LibraryID,
+				LibraryFileID: file.ID,
+				FilePath:      file.Path,
+				MediaType:     job.Args.MediaType,
+				ProviderName:  matchResult.ProviderName,
+				ProviderID:    matchResult.ProviderID,
+			}, nil)
+		}
 
 		log.Info().
 			Int64("media_id", updated.MediaItemID.Int64).
-			Str("provider", matchResult.ProviderName).
-			Str("provider_id", matchResult.ProviderID).
-			Msg("matched, enqueued metadata fetch")
+			Bool("new", matchResult.IsNew).
+			Msg("matched")
 	}
 
 	return nil

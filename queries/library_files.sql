@@ -79,6 +79,9 @@ GROUP BY status;
 -- name: ListAllLibraryFilePaths :many
 SELECT path FROM library_files WHERE library_id = $1 AND deleted_at IS NULL;
 
+-- name: ListLibraryFilesByMediaItem :many
+SELECT * FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL LIMIT 1;
+
 -- name: GetMediaItemByExternalID :one
 SELECT * FROM media_items
 WHERE library_id = $1 AND external_ids @> $2::jsonb;

@@ -269,6 +269,14 @@ type Collection struct {
 	BackdropPath string      `json:"backdrop_path"`
 }
 
+type ExternalRating struct {
+	ID          int64          `json:"id"`
+	MediaItemID int64          `json:"media_item_id"`
+	Source      string         `json:"source"`
+	Value       string         `json:"value"`
+	Score       pgtype.Numeric `json:"score"`
+}
+
 type Keyword struct {
 	ID     int64       `json:"id"`
 	TmdbID pgtype.Int4 `json:"tmdb_id"`
@@ -284,6 +292,7 @@ type Library struct {
 	CreatedBy    int64              `json:"created_by"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Settings     []byte             `json:"settings"`
 }
 
 type LibraryFile struct {
@@ -370,25 +379,26 @@ type MediaExtra struct {
 }
 
 type MediaItem struct {
-	ID           int64              `json:"id"`
-	LibraryID    int64              `json:"library_id"`
-	MediaType    MediaType          `json:"media_type"`
-	Title        string             `json:"title"`
-	SortTitle    string             `json:"sort_title"`
-	Year         string             `json:"year"`
-	Description  string             `json:"description"`
-	PosterPath   string             `json:"poster_path"`
-	BackdropPath string             `json:"backdrop_path"`
-	ExternalIds  []byte             `json:"external_ids"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	SearchVector interface{}        `json:"search_vector"`
-	Homepage     string             `json:"homepage"`
-	WikidataID   string             `json:"wikidata_id"`
-	FacebookID   string             `json:"facebook_id"`
-	InstagramID  string             `json:"instagram_id"`
-	TwitterID    string             `json:"twitter_id"`
-	Slug         string             `json:"slug"`
+	ID                  int64              `json:"id"`
+	LibraryID           int64              `json:"library_id"`
+	MediaType           MediaType          `json:"media_type"`
+	Title               string             `json:"title"`
+	SortTitle           string             `json:"sort_title"`
+	Year                string             `json:"year"`
+	Description         string             `json:"description"`
+	PosterPath          string             `json:"poster_path"`
+	BackdropPath        string             `json:"backdrop_path"`
+	ExternalIds         []byte             `json:"external_ids"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	SearchVector        interface{}        `json:"search_vector"`
+	Homepage            string             `json:"homepage"`
+	WikidataID          string             `json:"wikidata_id"`
+	FacebookID          string             `json:"facebook_id"`
+	InstagramID         string             `json:"instagram_id"`
+	TwitterID           string             `json:"twitter_id"`
+	Slug                string             `json:"slug"`
+	MetadataRefreshedAt pgtype.Timestamptz `json:"metadata_refreshed_at"`
 }
 
 type MediaKeyword struct {

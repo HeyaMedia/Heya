@@ -109,7 +109,7 @@ func TestGetDetail(t *testing.T) {
 	})
 
 	p := newTestProvider(t, mux)
-	detail, err := p.GetDetail(context.Background(), "openlibrary:/works/OL45883W")
+	detail, err := p.GetDetail(context.Background(), "openlibrary:/works/OL45883W", nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Dune", detail.Title)
@@ -138,7 +138,7 @@ func TestProviderName(t *testing.T) {
 
 func TestGetDetailInvalidProviderID(t *testing.T) {
 	p := NewProvider()
-	_, err := p.GetDetail(context.Background(), "invalid")
+	_, err := p.GetDetail(context.Background(), "invalid", nil)
 	assert.Error(t, err)
 }
 

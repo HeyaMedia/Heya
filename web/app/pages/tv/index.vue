@@ -29,9 +29,13 @@
             v-for="(item, i) in sorted"
             :key="item.id"
             class="grid-tile card-tile"
-            @click="navigateTo(mediaUrl(item))"
+            :class="{ unavailable: item.available === false }"
+            @click="item.available !== false && navigateTo(mediaUrl(item))"
           >
-            <Poster :idx="i" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
+            <div style="position: relative">
+              <Poster :idx="i" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
+              <div v-if="item.available === false" class="missing-badge">Missing</div>
+            </div>
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ item.title }}</div>
               <div class="grid-tile-sub">{{ item.year }}</div>
@@ -113,4 +117,13 @@ onMounted(async () => {
 <style scoped>
 .lib-content { min-height: 200px; }
 .empty-lib { padding: 80px 32px; text-align: center; color: var(--fg-2); font-size: 15px; }
+.unavailable { opacity: 0.4; cursor: default !important; }
+.unavailable:hover .grid-tile-title { color: inherit !important; }
+.missing-badge {
+  position: absolute; top: 8px; right: 8px;
+  font-size: 9px; font-weight: 700; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 3px 8px; border-radius: 100px;
+  background: rgba(217,107,107,0.85); color: #fff;
+}
 </style>

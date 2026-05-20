@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -39,7 +40,8 @@ var nfoFileNames = map[string]bool{
 
 type ScanLibraryWorker struct {
 	river.WorkerDefaults[ScanLibraryArgs]
-	DB *pgxpool.Pool
+	DB  *pgxpool.Pool
+	Hub *eventhub.Hub
 }
 
 func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibraryArgs]) error {
@@ -51,6 +53,10 @@ func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibrary
 	}
 
 	log.Info().Int64("library_id", lib.ID).Str("name", lib.Name).Str("type", string(lib.MediaType)).Msg("async scan starting")
+
+	if w.Hub != nil {
+		w.Hub.Emit(eventhub.EventScanStarted, eventhub.ScanPayload{LibraryID: lib.ID, LibraryName: lib.Name})
+	}
 
 	discovered := make(map[string]bool)
 	var newFiles []ProcessFileArgs
@@ -222,6 +228,17 @@ func (w *ScanLibraryWorker) Work(ctx context.Context, job *river.Job[ScanLibrary
 	}
 
 	log.Info().Int64("library_id", lib.ID).Int("discovered", len(discovered)).Int("new", len(newFiles)).Int("missing", len(missing)).Msg("async scan complete")
+
+	if w.Hub != nil {
+		w.Hub.Emit(eventhub.EventScanCompleted, eventhub.ScanPayload{
+			LibraryID:   lib.ID,
+			LibraryName: lib.Name,
+			Discovered:  len(discovered),
+			New:         len(newFiles),
+			Missing:     len(missing),
+		})
+	}
+
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/auth"
+	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -13,6 +14,7 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.HandleFunc("GET /api/health", healthHandler(app.DB))
 	mux.HandleFunc("GET /api/media/{id}/image/{type}", handleMediaImage(app))
 	mux.HandleFunc("GET /api/person/{id}/image", handlePersonImage(app))
+	mux.HandleFunc("GET /api/studio/{id}/image", handleStudioImage(app))
 
 	mux.HandleFunc("POST /api/auth/register", handleRegister(app))
 	mux.HandleFunc("POST /api/auth/login", handleLogin(app))
@@ -28,12 +30,19 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.Handle("PUT /api/libraries/{id}", authed(http.HandlerFunc(handleUpdateLibrary(app))))
 	mux.Handle("DELETE /api/libraries/{id}", authed(http.HandlerFunc(handleDeleteLibrary(app))))
 
+	mux.Handle("PUT /api/libraries/{id}/settings", authed(http.HandlerFunc(handleUpdateLibrarySettings(app))))
+	mux.Handle("GET /api/libraries/{id}/settings", authed(http.HandlerFunc(handleGetLibrarySettings(app))))
 	mux.Handle("POST /api/libraries/{id}/scan", authed(http.HandlerFunc(handleScanLibrary(app))))
 	mux.Handle("GET /api/libraries/{id}/files", authed(http.HandlerFunc(handleListLibraryFiles(app))))
 	mux.Handle("GET /api/libraries/{id}/files/stats", authed(http.HandlerFunc(handleLibraryFileStats(app))))
 	mux.Handle("GET /api/libraries/{id}/unmatched", authed(http.HandlerFunc(handleListUnmatched(app))))
 
 	mux.Handle("POST /api/library-files/{id}/resolve", authed(http.HandlerFunc(handleResolveMatch(app))))
+
+	mux.Handle("GET /api/providers", authed(http.HandlerFunc(handleListProviders(app))))
+	mux.Handle("GET /api/stats", authed(http.HandlerFunc(handleDashboardStats(app))))
+	mux.Handle("GET /api/media/missing", authed(http.HandlerFunc(handleListMissing(app))))
+	mux.Handle("DELETE /api/media/missing", authed(http.HandlerFunc(handleCleanupMissing(app))))
 
 	mux.Handle("GET /api/media", authed(http.HandlerFunc(handleListMedia(app))))
 	mux.Handle("GET /api/media/{id}", authed(http.HandlerFunc(handleGetMedia(app))))
@@ -57,6 +66,21 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.Handle("POST /api/watch/{media_item_id}/progress", authed(http.HandlerFunc(handleWatchProgress(app))))
 	mux.Handle("GET /api/watch/continue", authed(http.HandlerFunc(handleContinueWatching(app))))
 	mux.Handle("GET /api/watch/history", authed(http.HandlerFunc(handleWatchHistory(app))))
+
+	// Jobs & schedules
+	mux.Handle("GET /api/jobs", authed(http.HandlerFunc(handleListJobs(app))))
+	mux.Handle("GET /api/jobs/summary", authed(http.HandlerFunc(handleJobSummary(app))))
+	mux.Handle("POST /api/jobs/{id}/retry", authed(http.HandlerFunc(handleRetryJob(app))))
+	mux.Handle("POST /api/jobs/{id}/cancel", authed(http.HandlerFunc(handleCancelJob(app))))
+	mux.Handle("DELETE /api/jobs/completed", authed(http.HandlerFunc(handleClearJobs(app))))
+	mux.Handle("DELETE /api/jobs", authed(http.HandlerFunc(handleClearAllJobs(app))))
+	mux.Handle("GET /api/schedules", authed(http.HandlerFunc(handleListSchedules(app))))
+}
+
+func registerLogRoutes(mux *http.ServeMux, app *service.App, buf *logbuf.RingBuffer) {
+	authed := auth.Middleware(app.Queries())
+	mux.Handle("GET /api/logs", authed(http.HandlerFunc(handleGetLogs(buf))))
+	mux.Handle("GET /api/logs/stream", authed(http.HandlerFunc(handleLogStream(buf))))
 }
 
 func registerHumaRoutes(api huma.API, app *service.App) {

@@ -48,3 +48,15 @@ SELECT count(*) FROM media_items WHERE library_id = $1;
 
 -- name: CountMediaItemsByType :one
 SELECT count(*) FROM media_items WHERE media_type = $1;
+
+-- name: MarkMetadataRefreshed :exec
+UPDATE media_items SET metadata_refreshed_at = now() WHERE id = $1;
+
+-- name: ListUnavailableMediaItemIDs :many
+SELECT DISTINCT mi.id
+FROM media_items mi
+WHERE mi.media_type = $1
+  AND NOT EXISTS (
+    SELECT 1 FROM library_files lf
+    WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
+  );

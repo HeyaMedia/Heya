@@ -17,7 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.MediaDetail, kind metadata.MediaKind, libraryID int64, filePath string) (int64, error) {
+func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.MediaDetail, kind metadata.MediaKind, libraryID int64, filePath string) (int64, bool, error) {
 	extJSON, _ := json.Marshal(detail.ExternalIDs)
 
 	existing, err := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
@@ -26,7 +26,7 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 	})
 	if err == nil {
 		log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing media item")
-		return existing.ID, nil
+		return existing.ID, false, nil
 	}
 
 	mediaType := kindToMediaType(kind)
@@ -44,7 +44,7 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 		ExternalIds:  extJSON,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("creating media item: %w", err)
+		return 0, false, fmt.Errorf("creating media item: %w", err)
 	}
 
 	itemSlug := slug.GenerateUnique(ctx, detail.Title, detail.Year, item.ID,
@@ -61,18 +61,19 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 		m.processMediaImages(detail, string(mediaType), item.ID, filePath)
 	}
 
+	var createErr error
 	switch kind {
 	case metadata.KindMovie:
-		return item.ID, m.createMovie(ctx, item.ID, detail)
+		createErr = m.createMovie(ctx, item.ID, detail)
 	case metadata.KindTV:
-		return item.ID, m.createTVSeries(ctx, item.ID, detail)
+		createErr = m.createTVSeries(ctx, item.ID, detail)
 	case metadata.KindMusic:
-		return item.ID, m.createMusic(ctx, item.ID, detail)
+		createErr = m.createMusic(ctx, item.ID, detail)
 	case metadata.KindBook:
-		return item.ID, m.createBook(ctx, item.ID, detail, filePath)
+		createErr = m.createBook(ctx, item.ID, detail, filePath)
 	}
 
-	return item.ID, nil
+	return item.ID, true, createErr
 }
 
 func (m *Matcher) createMovie(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
@@ -218,7 +219,7 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		})
 	}
 
-	if d.Collection != nil {
+	if d.Collection != nil && m.shouldAutoCollect(ctx, mediaItemID) {
 		m.q.CreateCollection(ctx, sqlc.CreateCollectionParams{
 			TmdbID:       pgInt4(int32(d.Collection.TmdbID)),
 			Name:         d.Collection.Name,
@@ -251,6 +252,22 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		Int("videos", len(d.Videos)).
 		Int("recs", len(d.Recommendations)).
 		Msg("stored rich metadata")
+}
+
+func (m *Matcher) shouldAutoCollect(ctx context.Context, mediaItemID int64) bool {
+	item, err := m.q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return true
+	}
+	lib, err := m.q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		return true
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+	if settings.IsEmpty() {
+		return true
+	}
+	return settings.AutoCollections
 }
 
 func pgInt4(v int32) pgtype.Int4 {
@@ -317,6 +334,8 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 			}
 		}
 	}
+
+	m.storeRichMetadata(ctx, mediaItemID, d)
 
 	return nil
 }
@@ -433,7 +452,9 @@ var (
 		"cdart":     sqlc.AssetTypeDisc,
 	}
 
-	backdropNumRE = regexp.MustCompile(`^backdrop(\d+)\.`)
+	backdropNumRE  = regexp.MustCompile(`^backdrop(\d+)\.`)
+	seasonImageRE  = regexp.MustCompile(`^season(\d+)-(poster|banner)\.`)
+	seasonSpecialRE = regexp.MustCompile(`^season-specials-(poster|banner)\.`)
 )
 
 func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType string, mediaItemID int64, filePath string) {
@@ -512,6 +533,47 @@ func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType str
 				FileSize:    size,
 			})
 			log.Debug().Str("file", name).Int("order", order).Msg("cached numbered backdrop")
+			continue
+		}
+
+		if sub := seasonImageRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
+			seasonNum := 0
+			for _, c := range sub[1] {
+				seasonNum = seasonNum*10 + int(c-'0')
+			}
+			label := fmt.Sprintf("season%02d-%s", seasonNum, sub[2])
+			assetType := sqlc.AssetTypeBanner
+			if sub[2] == "poster" {
+				assetType = sqlc.AssetTypeSeasonPoster
+			}
+			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   assetType,
+				Source:      "local",
+				LocalPath:   dstPath,
+				Label:       label,
+				FileSize:    size,
+			})
+			log.Debug().Str("file", name).Str("label", label).Msg("cached season image")
+			continue
+		}
+
+		if sub := seasonSpecialRE.FindStringSubmatch(strings.ToLower(name)); sub != nil {
+			label := fmt.Sprintf("season00-%s", sub[1])
+			assetType := sqlc.AssetTypeBanner
+			if sub[1] == "poster" {
+				assetType = sqlc.AssetTypeSeasonPoster
+			}
+			m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   assetType,
+				Source:      "local",
+				LocalPath:   dstPath,
+				Label:       label,
+				FileSize:    size,
+			})
+			log.Debug().Str("file", name).Str("label", label).Msg("cached specials image")
+			continue
 		}
 	}
 
@@ -552,12 +614,85 @@ func (m *Matcher) processMediaImages(detail *metadata.MediaDetail, mediaType str
 	}
 
 	m.detectExtras(ctx, mediaItemID, mediaDir)
+	m.scanSeasonImages(ctx, mediaItemID, mediaDir, cacheDir)
 
 	log.Info().
 		Int64("media_id", mediaItemID).
 		Str("poster", p).
 		Str("backdrop", b).
 		Msg("processed media images")
+}
+
+var thumbRE = regexp.MustCompile(`(?i)S(\d+)E(\d+).*-thumb\.`)
+
+func (m *Matcher) scanSeasonImages(ctx context.Context, mediaItemID int64, mediaDir string, cacheDir string) {
+	entries, err := os.ReadDir(mediaDir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		nameLower := strings.ToLower(e.Name())
+		if !strings.HasPrefix(nameLower, "season") {
+			continue
+		}
+
+		seasonDir := filepath.Join(mediaDir, e.Name())
+		seasonEntries, err := os.ReadDir(seasonDir)
+		if err != nil {
+			continue
+		}
+
+		for _, se := range seasonEntries {
+			if se.IsDir() {
+				continue
+			}
+			name := se.Name()
+			ext := strings.ToLower(filepath.Ext(name))
+			if !imageExts[ext] {
+				continue
+			}
+
+			if sub := thumbRE.FindStringSubmatch(name); sub != nil {
+				seasonNum := 0
+				epNum := 0
+				for _, c := range sub[1] {
+					seasonNum = seasonNum*10 + int(c-'0')
+				}
+				for _, c := range sub[2] {
+					epNum = epNum*10 + int(c-'0')
+				}
+
+				srcPath := filepath.Join(seasonDir, name)
+				label := fmt.Sprintf("s%02de%02d", seasonNum, epNum)
+				dstPath := filepath.Join(cacheDir, label+"-thumb"+ext)
+
+				if err := copyFile(srcPath, dstPath); err != nil {
+					continue
+				}
+
+				info, _ := se.Info()
+				size := int64(0)
+				if info != nil {
+					size = info.Size()
+				}
+
+				m.q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+					MediaItemID: mediaItemID,
+					AssetType:   sqlc.AssetTypeBackdrop,
+					Source:      "local",
+					LocalPath:   dstPath,
+					Label:       label,
+					SortOrder:   int32(2000 + seasonNum*100 + epNum),
+					FileSize:    size,
+				})
+				log.Debug().Str("file", name).Str("label", label).Msg("cached episode thumbnail")
+			}
+		}
+	}
 }
 
 var (

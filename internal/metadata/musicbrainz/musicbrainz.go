@@ -31,12 +31,12 @@ func (p *Provider) Supports(kind metadata.MediaKind) bool {
 	return kind == metadata.KindMusic
 }
 
-func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids metadata.NFOIDs) (*metadata.MediaDetail, string, error) {
+func (p *Provider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids metadata.NFOIDs, opts *metadata.FetchOptions) (*metadata.MediaDetail, string, error) {
 	if ids.MBID == "" {
 		return nil, "", fmt.Errorf("no MusicBrainz ID available")
 	}
 	providerID := "musicbrainz:" + ids.MBID
-	detail, err := p.GetDetail(ctx, providerID)
+	detail, err := p.GetDetail(ctx, providerID, opts)
 	if err != nil {
 		return nil, "", err
 	}
@@ -95,7 +95,7 @@ func (p *Provider) Search(ctx context.Context, kind metadata.MediaKind, query me
 	return results, nil
 }
 
-func (p *Provider) GetDetail(ctx context.Context, providerID string) (*metadata.MediaDetail, error) {
+func (p *Provider) GetDetail(ctx context.Context, providerID string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {
 	parts := strings.SplitN(providerID, ":", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid provider ID: %s", providerID)

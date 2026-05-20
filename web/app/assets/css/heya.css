@@ -196,6 +196,12 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--border);
 }
 .btn-secondary:hover { background: rgba(255,255,255,0.14); }
+.btn-danger {
+  background: rgba(217,107,107,0.12);
+  color: var(--bad);
+  border: 1px solid rgba(217,107,107,0.25);
+}
+.btn-danger:hover { background: rgba(217,107,107,0.2); }
 .btn-ghost {
   background: transparent;
   color: var(--fg-1);

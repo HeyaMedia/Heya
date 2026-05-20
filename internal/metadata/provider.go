@@ -12,13 +12,20 @@ const (
 )
 
 type SearchQuery struct {
-	Title   string
-	Year    string
-	Artist  string
-	Album   string
-	Author  string
-	ISBN    string
-	Seasons []int
+	Title    string
+	Year     string
+	Artist   string
+	Album    string
+	Author   string
+	ISBN     string
+	Seasons  []int
+	Language string
+	Country  string
+}
+
+type FetchOptions struct {
+	Language string
+	Country  string
 }
 
 type SearchResult struct {
@@ -220,7 +227,7 @@ type Provider interface {
 	Name() string
 	Supports(kind MediaKind) bool
 	Search(ctx context.Context, kind MediaKind, query SearchQuery) ([]SearchResult, error)
-	GetDetail(ctx context.Context, providerID string) (*MediaDetail, error)
+	GetDetail(ctx context.Context, providerID string, opts *FetchOptions) (*MediaDetail, error)
 }
 
 type NFOIDs struct {
@@ -232,5 +239,23 @@ type NFOIDs struct {
 
 type DirectLookupProvider interface {
 	Provider
-	LookupByNFO(ctx context.Context, kind MediaKind, ids NFOIDs) (*MediaDetail, string, error)
+	LookupByNFO(ctx context.Context, kind MediaKind, ids NFOIDs, opts *FetchOptions) (*MediaDetail, string, error)
+}
+
+type RatingsProvider interface {
+	Name() string
+	Supports(kind MediaKind) bool
+	FetchRatings(ctx context.Context, externalIDs map[string]string) (*RatingsData, error)
+}
+
+type RatingsData struct {
+	Ratings   []ExternalRating `json:"ratings"`
+	Awards    string           `json:"awards,omitempty"`
+	BoxOffice string           `json:"box_office,omitempty"`
+}
+
+type ExternalRating struct {
+	Source string  `json:"source"`
+	Value  string  `json:"value"`
+	Score  float64 `json:"score"`
 }

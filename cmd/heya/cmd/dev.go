@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -44,20 +45,21 @@ var devCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Println("  \033[1;33m⚡ Heya Dev Mode\033[0m")
 		fmt.Println()
-		fmt.Println("  API server:  \033[36mhttp://localhost:8080\033[0m  (Go + air hot reload)")
-		fmt.Println("  Frontend:    \033[36mhttp://localhost:3000\033[0m  ← open this")
+		fmt.Println("  Open:        \033[36mhttp://localhost:8080\033[0m  ← single URL, Go proxies to Nuxt")
+		fmt.Println("  Nuxt dev:    \033[90mhttp://localhost:3000  (internal, don't open directly)\033[0m")
 		fmt.Println()
-		fmt.Println("  Frontend proxies /api/* to the Go server.")
+		fmt.Println("  Go handles /api/* (including WebSocket at /api/ws).")
+		fmt.Println("  All other requests are proxied to Nuxt for HMR.")
 		fmt.Println("  Edit .go files → auto rebuild. Edit .vue files → instant HMR.")
 		fmt.Println("  Press Ctrl+C to stop.")
 		fmt.Println()
 
 		var wg sync.WaitGroup
 
-		// Start air (Go hot reload)
+		// Start air (Go hot reload) — tell it to proxy SPA requests to Nuxt
 		air := exec.CommandContext(ctx, "go", "run", "github.com/air-verse/air@latest")
 		air.Dir = rootDir
-		air.Env = os.Environ()
+		air.Env = append(os.Environ(), "HEYA_DEV_PROXY=http://localhost:3000")
 		airOut, _ := air.StdoutPipe()
 		airErr, _ := air.StderrPipe()
 		if err := air.Start(); err != nil {
@@ -67,10 +69,17 @@ var devCmd = &cobra.Command{
 		go func() { defer wg.Done(); pipeOutput(airOut, "\033[32mgo\033[0m") }()
 		go func() { defer wg.Done(); pipeOutput(airErr, "\033[32mgo\033[0m") }()
 
-		// Start Nuxt dev
-		nuxt := exec.CommandContext(ctx, runtime, "run", "dev")
+		// Start Nuxt dev — force port 3000 even if PORT env var is set (Go uses PORT=8080)
+		nuxt := exec.CommandContext(ctx, runtime, "run", "dev", "--", "--port", "3000")
 		nuxt.Dir = webDir
-		nuxt.Env = os.Environ()
+		nuxtEnv := make([]string, 0, len(os.Environ()))
+		for _, e := range os.Environ() {
+			if !strings.HasPrefix(e, "PORT=") && !strings.HasPrefix(e, "NITRO_PORT=") && !strings.HasPrefix(e, "NUXT_PORT=") {
+				nuxtEnv = append(nuxtEnv, e)
+			}
+		}
+		nuxtEnv = append(nuxtEnv, "NITRO_PORT=3000")
+		nuxt.Env = nuxtEnv
 		nuxtOut, _ := nuxt.StdoutPipe()
 		nuxtErr, _ := nuxt.StderrPipe()
 		if err := nuxt.Start(); err != nil {

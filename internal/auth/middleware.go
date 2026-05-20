@@ -57,5 +57,8 @@ func extractToken(r *http.Request) string {
 	if c, err := r.Cookie("session_token"); err == nil {
 		return c.Value
 	}
+	if t := r.URL.Query().Get("token"); t != "" {
+		return t
+	}
 	return ""
 }

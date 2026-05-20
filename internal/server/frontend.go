@@ -3,12 +3,32 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/karbowiak/heya/web"
+	"github.com/rs/zerolog/log"
 )
 
 func spaHandler() http.Handler {
+	if devURL := os.Getenv("HEYA_DEV_PROXY"); devURL != "" {
+		target, err := url.Parse(devURL)
+		if err != nil {
+			log.Warn().Err(err).Str("url", devURL).Msg("invalid HEYA_DEV_PROXY, falling back to embedded dist")
+		} else {
+			log.Info().Str("upstream", devURL).Msg("dev mode: proxying SPA requests to Nuxt")
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			origDirector := proxy.Director
+			proxy.Director = func(r *http.Request) {
+				origDirector(r)
+				r.Host = target.Host
+			}
+			return proxy
+		}
+	}
+
 	fsys := web.DistFS
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
