@@ -38,8 +38,7 @@ export function slugify(title: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-export function mediaUrl(item: { id: number; title: string; media_type: string }): string {
-  const slug = slugify(item.title)
+export function mediaUrl(item: { id: number; title: string; year?: string; media_type: string; slug?: string }): string {
   const typeMap: Record<string, string> = {
     movie: 'movies',
     tv: 'tv',
@@ -47,12 +46,13 @@ export function mediaUrl(item: { id: number; title: string; media_type: string }
     book: 'books',
   }
   const prefix = typeMap[item.media_type] || 'media'
-  return `/${prefix}/${slug}-${item.id}`
+  const s = item.slug || slugify(item.title) + (item.year ? '-' + item.year : '')
+  return `/${prefix}/${s}`
 }
 
-export function parseSlugId(slug: string): number | null {
-  const match = slug.match(/-(\d+)$/)
-  return match ? parseInt(match[1], 10) : null
+export function personUrl(person: { id: number; name: string; slug?: string }): string {
+  const s = person.slug || slugify(person.name)
+  return `/person/${s}`
 }
 
 export function mediaTypeLabel(type: string) {

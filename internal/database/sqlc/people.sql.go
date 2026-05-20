@@ -73,7 +73,7 @@ ON CONFLICT (tmdb_id) DO UPDATE SET
   imdb_id = EXCLUDED.imdb_id,
   popularity = EXCLUDED.popularity,
   updated_at = now()
-RETURNING id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at
+RETURNING id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug
 `
 
 type CreatePersonParams struct {
@@ -123,12 +123,13 @@ func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Per
 		&i.Popularity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Slug,
 	)
 	return i, err
 }
 
 const getPersonByID = `-- name: GetPersonByID :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at FROM people WHERE id = $1
+SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug FROM people WHERE id = $1
 `
 
 func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
@@ -150,12 +151,41 @@ func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
 		&i.Popularity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Slug,
+	)
+	return i, err
+}
+
+const getPersonBySlug = `-- name: GetPersonBySlug :one
+SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug FROM people WHERE slug = $1
+`
+
+func (q *Queries) GetPersonBySlug(ctx context.Context, slug string) (Person, error) {
+	row := q.db.QueryRow(ctx, getPersonBySlug, slug)
+	var i Person
+	err := row.Scan(
+		&i.ID,
+		&i.TmdbID,
+		&i.Name,
+		&i.AlsoKnownAs,
+		&i.Biography,
+		&i.Birthday,
+		&i.Deathday,
+		&i.PlaceOfBirth,
+		&i.Gender,
+		&i.ProfilePath,
+		&i.Homepage,
+		&i.ImdbID,
+		&i.Popularity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Slug,
 	)
 	return i, err
 }
 
 const getPersonByTmdbID = `-- name: GetPersonByTmdbID :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at FROM people WHERE tmdb_id = $1
+SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug FROM people WHERE tmdb_id = $1
 `
 
 func (q *Queries) GetPersonByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Person, error) {
@@ -177,12 +207,13 @@ func (q *Queries) GetPersonByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Pe
 		&i.Popularity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Slug,
 	)
 	return i, err
 }
 
 const listMediaCast = `-- name: ListMediaCast :many
-SELECT mc.character, mc.display_order, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at
+SELECT mc.character, mc.display_order, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug
 FROM media_cast mc
 JOIN people p ON p.id = mc.person_id
 WHERE mc.media_item_id = $1
@@ -207,6 +238,7 @@ type ListMediaCastRow struct {
 	Popularity   pgtype.Numeric     `json:"popularity"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Slug         string             `json:"slug"`
 }
 
 func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListMediaCastRow, error) {
@@ -236,6 +268,7 @@ func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.Popularity,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Slug,
 		); err != nil {
 			return nil, err
 		}
@@ -292,7 +325,7 @@ func (q *Queries) ListMediaCastSlim(ctx context.Context, mediaItemID int64) ([]L
 }
 
 const listMediaCrew = `-- name: ListMediaCrew :many
-SELECT mc.job, mc.department, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at
+SELECT mc.job, mc.department, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug
 FROM media_crew mc
 JOIN people p ON p.id = mc.person_id
 WHERE mc.media_item_id = $1
@@ -317,6 +350,7 @@ type ListMediaCrewRow struct {
 	Popularity   pgtype.Numeric     `json:"popularity"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Slug         string             `json:"slug"`
 }
 
 func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListMediaCrewRow, error) {
@@ -346,6 +380,7 @@ func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.Popularity,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Slug,
 		); err != nil {
 			return nil, err
 		}
@@ -491,6 +526,22 @@ func (q *Queries) ListPersonCrewCredits(ctx context.Context, personID int64) ([]
 	return items, nil
 }
 
+const personSlugExists = `-- name: PersonSlugExists :one
+SELECT EXISTS(SELECT 1 FROM people WHERE slug = $1 AND id != $2) as exists
+`
+
+type PersonSlugExistsParams struct {
+	Slug string `json:"slug"`
+	ID   int64  `json:"id"`
+}
+
+func (q *Queries) PersonSlugExists(ctx context.Context, arg PersonSlugExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, personSlugExists, arg.Slug, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const updatePersonProfilePath = `-- name: UpdatePersonProfilePath :exec
 UPDATE people SET profile_path = $2, updated_at = now() WHERE id = $1
 `
@@ -502,5 +553,19 @@ type UpdatePersonProfilePathParams struct {
 
 func (q *Queries) UpdatePersonProfilePath(ctx context.Context, arg UpdatePersonProfilePathParams) error {
 	_, err := q.db.Exec(ctx, updatePersonProfilePath, arg.ID, arg.ProfilePath)
+	return err
+}
+
+const updatePersonSlug = `-- name: UpdatePersonSlug :exec
+UPDATE people SET slug = $2 WHERE id = $1
+`
+
+type UpdatePersonSlugParams struct {
+	ID   int64  `json:"id"`
+	Slug string `json:"slug"`
+}
+
+func (q *Queries) UpdatePersonSlug(ctx context.Context, arg UpdatePersonSlugParams) error {
+	_, err := q.db.Exec(ctx, updatePersonSlug, arg.ID, arg.Slug)
 	return err
 }

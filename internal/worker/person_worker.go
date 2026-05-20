@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata/tmdb"
+	"github.com/karbowiak/heya/internal/slug"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -60,6 +61,16 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		ImdbID:       detail.ImdbID,
 		Popularity:   pgtype.Numeric{Valid: true},
 	})
+
+	personSlug := slug.GenerateUnique(ctx, detail.Name, "", job.Args.PersonID,
+		func(ctx context.Context, s string, excludeID int64) (bool, error) {
+			r, err := q.PersonSlugExists(ctx, sqlc.PersonSlugExistsParams{Slug: s, ID: excludeID})
+			if err != nil {
+				return false, err
+			}
+			return r, nil
+		})
+	q.UpdatePersonSlug(ctx, sqlc.UpdatePersonSlugParams{ID: job.Args.PersonID, Slug: personSlug})
 
 	if detail.ProfilePath != "" {
 		client := river.ClientFromContext[pgx.Tx](ctx)

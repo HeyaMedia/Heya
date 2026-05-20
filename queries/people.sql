@@ -56,6 +56,15 @@ UPDATE people SET profile_path = $2, updated_at = now() WHERE id = $1;
 -- name: GetPersonByID :one
 SELECT * FROM people WHERE id = $1;
 
+-- name: GetPersonBySlug :one
+SELECT * FROM people WHERE slug = $1;
+
+-- name: UpdatePersonSlug :exec
+UPDATE people SET slug = $2 WHERE id = $1;
+
+-- name: PersonSlugExists :one
+SELECT EXISTS(SELECT 1 FROM people WHERE slug = $1 AND id != $2) as exists;
+
 -- name: ListMediaCrew :many
 SELECT mc.job, mc.department, p.*
 FROM media_crew mc

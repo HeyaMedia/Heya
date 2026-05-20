@@ -161,11 +161,12 @@ var libraryScanCmd = &cobra.Command{
 				continue
 			}
 
-			if err := app.EnqueueScanLibrary(ctx, lib.ID, force); err != nil {
+			count, err := app.EnqueuePendingFiles(ctx, lib.ID)
+			if err != nil {
 				ui.Error("enqueue failed: %v", err)
 				continue
 			}
-			ui.Success("Processing jobs enqueued for %s", lib.Name)
+			ui.Success("Enqueued %d files for processing", count)
 		}
 
 		if !scanOnly {

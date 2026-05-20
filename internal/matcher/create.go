@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/slug"
 	"github.com/rs/zerolog/log"
 )
 
@@ -45,6 +46,16 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 	if err != nil {
 		return 0, fmt.Errorf("creating media item: %w", err)
 	}
+
+	itemSlug := slug.GenerateUnique(ctx, detail.Title, detail.Year, item.ID,
+		func(ctx context.Context, s string, excludeID int64) (bool, error) {
+			r, err := m.q.MediaItemSlugExists(ctx, sqlc.MediaItemSlugExistsParams{Slug: s, ID: excludeID})
+			if err != nil {
+				return false, err
+			}
+			return r, nil
+		})
+	m.q.UpdateMediaItemSlug(ctx, sqlc.UpdateMediaItemSlugParams{ID: item.ID, Slug: itemSlug})
 
 	if m.downloader != nil {
 		m.processMediaImages(detail, string(mediaType), item.ID, filePath)

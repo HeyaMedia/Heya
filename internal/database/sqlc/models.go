@@ -388,6 +388,7 @@ type MediaItem struct {
 	FacebookID   string             `json:"facebook_id"`
 	InstagramID  string             `json:"instagram_id"`
 	TwitterID    string             `json:"twitter_id"`
+	Slug         string             `json:"slug"`
 }
 
 type MediaKeyword struct {
@@ -466,6 +467,7 @@ type Person struct {
 	Popularity   pgtype.Numeric     `json:"popularity"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Slug         string             `json:"slug"`
 }
 
 type ProductionCompany struct {

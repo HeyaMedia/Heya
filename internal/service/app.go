@@ -17,6 +17,7 @@ import (
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/watcher"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
 )
@@ -108,6 +109,29 @@ func (a *App) QueueCounts(ctx context.Context) (pending, running int) {
 	row := a.DB.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'available' OR state = 'retryable'), count(*) FILTER (WHERE state = 'running') FROM river_job")
 	row.Scan(&pending, &running)
 	return
+}
+
+func (a *App) EnqueuePendingFiles(ctx context.Context, libraryID int64) (int, error) {
+	q := sqlc.New(a.DB)
+	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
+		LibraryID: libraryID,
+		Limit:     10000,
+		Offset:    0,
+		Status:    sqlc.FileStatusPending,
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	for _, f := range files {
+		a.River.Insert(ctx, worker.ProcessFileArgs{
+			LibraryFileID: f.ID,
+			LibraryID:     libraryID,
+			FilePath:      f.Path,
+		}, nil)
+	}
+
+	return len(files), nil
 }
 
 func (a *App) StartWatchers(ctx context.Context) error {

@@ -46,14 +46,16 @@ func handleListMedia(app *service.App) http.HandlerFunc {
 
 func handleGetMedia(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid media id")
-			return
-		}
-
+		idOrSlug := r.PathValue("id")
 		q := sqlc.New(app.DB)
-		item, err := q.GetMediaItemByID(r.Context(), id)
+
+		var item sqlc.MediaItem
+		var err error
+		if id, parseErr := strconv.ParseInt(idOrSlug, 10, 64); parseErr == nil {
+			item, err = q.GetMediaItemByID(r.Context(), id)
+		} else {
+			item, err = q.GetMediaItemBySlug(r.Context(), idOrSlug)
+		}
 		if err != nil {
 			writeError(w, http.StatusNotFound, "media item not found")
 			return
@@ -63,26 +65,26 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 
 		switch item.MediaType {
 		case sqlc.MediaTypeMovie:
-			movie, err := q.GetMovieByMediaItemID(r.Context(), id)
+			movie, err := q.GetMovieByMediaItemID(r.Context(), item.ID)
 			if err == nil {
 				result["movie"] = movie
 			}
 		case sqlc.MediaTypeTv:
-			series, err := q.GetTVSeriesByMediaItemID(r.Context(), id)
+			series, err := q.GetTVSeriesByMediaItemID(r.Context(), item.ID)
 			if err == nil {
 				result["tv_series"] = series
 				seasons, _ := q.ListTVSeasonsBySeries(r.Context(), series.ID)
 				result["seasons"] = seasons
 			}
 		case sqlc.MediaTypeMusic:
-			artist, err := q.GetArtistByMediaItemID(r.Context(), id)
+			artist, err := q.GetArtistByMediaItemID(r.Context(), item.ID)
 			if err == nil {
 				result["artist"] = artist
 				albums, _ := q.ListAlbumsByArtist(r.Context(), artist.ID)
 				result["albums"] = albums
 			}
 		case sqlc.MediaTypeBook:
-			book, err := q.GetBookByMediaItemID(r.Context(), id)
+			book, err := q.GetBookByMediaItemID(r.Context(), item.ID)
 			if err == nil {
 				result["book"] = book
 				if book.AuthorID.Valid {
@@ -92,39 +94,39 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 			}
 		}
 
-		if cast, err := q.ListMediaCastSlim(r.Context(), id); err == nil && len(cast) > 0 {
+		if cast, err := q.ListMediaCastSlim(r.Context(), item.ID); err == nil && len(cast) > 0 {
 			result["cast"] = cast
 		}
 
-		if crew, err := q.ListMediaCrewSlim(r.Context(), id); err == nil && len(crew) > 0 {
+		if crew, err := q.ListMediaCrewSlim(r.Context(), item.ID); err == nil && len(crew) > 0 {
 			result["crew"] = crew
 		}
 
-		if keywords, err := q.ListMediaKeywords(r.Context(), id); err == nil && len(keywords) > 0 {
+		if keywords, err := q.ListMediaKeywords(r.Context(), item.ID); err == nil && len(keywords) > 0 {
 			result["keywords"] = keywords
 		}
 
-		if videos, err := q.ListMediaVideos(r.Context(), id); err == nil && len(videos) > 0 {
+		if videos, err := q.ListMediaVideos(r.Context(), item.ID); err == nil && len(videos) > 0 {
 			result["videos"] = videos
 		}
 
-		if certs, err := q.ListMediaCertifications(r.Context(), id); err == nil && len(certs) > 0 {
+		if certs, err := q.ListMediaCertifications(r.Context(), item.ID); err == nil && len(certs) > 0 {
 			result["certifications"] = certs
 		}
 
-		if recs, err := q.ListMediaRecommendationsWithLibrary(r.Context(), id); err == nil && len(recs) > 0 {
+		if recs, err := q.ListMediaRecommendationsWithLibrary(r.Context(), item.ID); err == nil && len(recs) > 0 {
 			result["recommendations"] = recs
 		}
 
-		if companies, err := q.ListMediaProductionCompanies(r.Context(), id); err == nil && len(companies) > 0 {
+		if companies, err := q.ListMediaProductionCompanies(r.Context(), item.ID); err == nil && len(companies) > 0 {
 			result["production_companies"] = companies
 		}
 
-		if assets, err := q.ListMediaAssets(r.Context(), id); err == nil && len(assets) > 0 {
+		if assets, err := q.ListMediaAssets(r.Context(), item.ID); err == nil && len(assets) > 0 {
 			result["assets"] = assets
 		}
 
-		if extras, err := q.ListMediaExtras(r.Context(), id); err == nil && len(extras) > 0 {
+		if extras, err := q.ListMediaExtras(r.Context(), item.ID); err == nil && len(extras) > 0 {
 			result["extras"] = extras
 		}
 
@@ -134,14 +136,16 @@ func handleGetMedia(app *service.App) http.HandlerFunc {
 
 func handleGetPerson(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid person id")
-			return
-		}
-
+		idOrSlug := r.PathValue("id")
 		q := sqlc.New(app.DB)
-		person, err := q.GetPersonByID(r.Context(), id)
+
+		var person sqlc.Person
+		var err error
+		if id, parseErr := strconv.ParseInt(idOrSlug, 10, 64); parseErr == nil {
+			person, err = q.GetPersonByID(r.Context(), id)
+		} else {
+			person, err = q.GetPersonBySlug(r.Context(), idOrSlug)
+		}
 		if err != nil {
 			writeError(w, http.StatusNotFound, "person not found")
 			return
@@ -149,11 +153,11 @@ func handleGetPerson(app *service.App) http.HandlerFunc {
 
 		result := map[string]any{"person": person}
 
-		if castCredits, err := q.ListPersonCastCredits(r.Context(), id); err == nil && len(castCredits) > 0 {
+		if castCredits, err := q.ListPersonCastCredits(r.Context(), person.ID); err == nil && len(castCredits) > 0 {
 			result["cast_credits"] = castCredits
 		}
 
-		if crewCredits, err := q.ListPersonCrewCredits(r.Context(), id); err == nil && len(crewCredits) > 0 {
+		if crewCredits, err := q.ListPersonCrewCredits(r.Context(), person.ID); err == nil && len(crewCredits) > 0 {
 			result["crew_credits"] = crewCredits
 		}
 

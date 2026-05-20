@@ -26,6 +26,7 @@ export interface MediaItem {
   media_type: MediaType
   title: string
   sort_title: string
+  slug: string
   year: string
   description: string
   poster_path: string

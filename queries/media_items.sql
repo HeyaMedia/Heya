@@ -6,6 +6,15 @@ RETURNING *;
 -- name: GetMediaItemByID :one
 SELECT * FROM media_items WHERE id = $1;
 
+-- name: GetMediaItemBySlug :one
+SELECT * FROM media_items WHERE slug = $1;
+
+-- name: UpdateMediaItemSlug :exec
+UPDATE media_items SET slug = $2 WHERE id = $1;
+
+-- name: MediaItemSlugExists :one
+SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND id != $2) as exists;
+
 -- name: ListMediaItemsByLibrary :many
 SELECT * FROM media_items
 WHERE library_id = $1

@@ -116,7 +116,7 @@
           <NuxtLink
             v-for="c in detail.cast"
             :key="c.id"
-            :to="`/person/${slugify(c.name)}-${c.id}`"
+            :to="personUrl(c)"
             class="cast-card"
           >
             <img
@@ -138,7 +138,7 @@
               <NuxtLink
                 v-for="c in dept.members"
                 :key="`${c.id}-${c.job}`"
-                :to="`/person/${slugify(c.name)}-${c.id}`"
+                :to="personUrl(c)"
                 class="crew-card"
               >
                 <img

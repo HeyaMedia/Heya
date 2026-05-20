@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -19,6 +20,8 @@ type Config struct {
 }
 
 func Load() *Config {
+	loadDotEnv()
+
 	if path := FindConfigFile(); path != "" {
 		if fc, err := LoadFile(path); err == nil {
 			return MergeFileWithEnv(fc)
@@ -37,6 +40,30 @@ func Load() *Config {
 	}
 	applyDefaults(cfg)
 	return cfg
+}
+
+func loadDotEnv() {
+	for _, path := range []string{".env", ".env.local"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			k, v, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if os.Getenv(k) == "" {
+				os.Setenv(k, v)
+			}
+		}
+	}
 }
 
 func applyDefaults(cfg *Config) {
