@@ -185,6 +185,7 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 func registerTailscaleRoutes(mux *http.ServeMux, app *service.App, cfg *config.Config) {
 	authed := auth.Middleware(app.SessionLookup())
 	mux.Handle("GET /api/tailscale/status", authed(handleTailscaleStatus(app, cfg)))
+	mux.Handle("GET /api/tailscale/raw", authed(handleTailscaleRaw(app, cfg)))
 	mux.Handle("PUT /api/tailscale/config", authed(handleTailscaleConfig(app, cfg)))
 	mux.Handle("POST /api/tailscale/funnel", authed(handleTailscaleFunnel(app, cfg)))
 	mux.Handle("POST /api/tailscale/logout", authed(handleTailscaleLogout(app, cfg)))

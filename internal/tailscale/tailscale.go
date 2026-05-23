@@ -37,6 +37,13 @@ type Config struct {
 
 // Status is the snapshot the UI / CLI read. The fields below are all that
 // the rest of Heya cares about; everything richer comes from the LocalClient.
+//
+// HTTPS / Funnel reflect *intent* (the user-saved preference). HTTPSActive /
+// FunnelActive reflect *reality* — whether the corresponding listener
+// actually bound. Tailscale itself can refuse Funnel (tailnet ACLs / admin
+// console settings); the toggle should stay on so the user knows what
+// they asked for, but the "active" flag stays off and LastError carries
+// the reason.
 type Status struct {
 	Enabled      bool      `json:"enabled"`
 	Running      bool      `json:"running"`
@@ -47,10 +54,32 @@ type Status struct {
 	IPv6         string    `json:"ipv6,omitempty"`
 	CertDomain   string    `json:"cert_domain,omitempty"`
 	HTTPS        bool      `json:"https"`
+	HTTPSActive  bool      `json:"https_active"`
+	HTTPSURL     string    `json:"https_url,omitempty"`
 	Funnel       bool      `json:"funnel"`
+	FunnelActive bool      `json:"funnel_active"`
+	FunnelURL    string    `json:"funnel_url,omitempty"`
 	LoginURL     string    `json:"login_url,omitempty"`
 	LastError    string    `json:"last_error,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// RawStatus returns the live ipnstate.Status from tsnet's LocalClient.
+// This is the same blob `tailscale status --json` would print — useful
+// for the debug panel and for diagnosing tailnet-side problems
+// (auth, ACL tag mismatches, Funnel allowlist, etc.).
+func (s *Server) RawStatus(ctx context.Context) (*ipnstate.Status, error) {
+	s.mu.Lock()
+	ts := s.ts
+	s.mu.Unlock()
+	if ts == nil {
+		return nil, errors.New("tailscale: node not running")
+	}
+	lc, err := ts.LocalClient()
+	if err != nil {
+		return nil, err
+	}
+	return lc.Status(ctx)
 }
 
 // StatusFn is called whenever the status snapshot changes — wire this to the
@@ -132,6 +161,11 @@ func (s *Server) Disable() error {
 	st := s.snapshotLocked()
 	st.Running = false
 	st.BackendState = ""
+	st.HTTPSActive = false
+	st.HTTPSURL = ""
+	st.FunnelActive = false
+	st.FunnelURL = ""
+	st.LoginURL = ""
 	s.publishLocked(st)
 	return nil
 }
@@ -244,16 +278,39 @@ func (s *Server) startNodeLocked(ctx context.Context) error {
 
 // openListenersLocked binds tailnet :80 / :443 / Funnel based on cfg and
 // kicks off http.Server goroutines for each. Caller must hold s.mu.
+//
+// Each addListener call returns whether the listener actually opened.
+// The :443 binding decides whether HTTPSActive / FunnelActive end up true.
 func (s *Server) openListenersLocked() {
 	if s.ts == nil {
 		return
 	}
 
-	addListener := func(label string, makeListener func() (net.Listener, error), handler http.Handler) {
+	// Reset listener-derived status before re-binding. LastError will be
+	// re-populated below if any listener fails; *Active flags start false
+	// and flip true only if the corresponding bind succeeded.
+	cur := s.snapshotLocked()
+	cur.LastError = ""
+	cur.HTTPSActive = false
+	cur.HTTPSURL = ""
+	cur.FunnelActive = false
+	cur.FunnelURL = ""
+	s.publishLocked(cur)
+
+	addListener := func(label string, makeListener func() (net.Listener, error), handler http.Handler) bool {
 		ln, err := makeListener()
 		if err != nil {
 			s.logger.Warn().Err(err).Str("listener", label).Msg("listener failed to open")
-			return
+			// Surface to the UI. The most common cause is Funnel not being
+			// enabled for the tailnet, or HTTPS not being enabled in the
+			// admin console — both need user action in the Tailscale UI.
+			cur := s.snapshotLocked()
+			if cur.LastError == "" {
+				cur.LastError = label + ": " + err.Error()
+				cur.UpdatedAt = time.Now()
+				s.publishLocked(cur)
+			}
+			return false
 		}
 		srv := &http.Server{Handler: handler, ReadHeaderTimeout: 15 * time.Second}
 		s.listeners = append(s.listeners, ln)
@@ -264,19 +321,31 @@ func (s *Server) openListenersLocked() {
 				s.logger.Warn().Err(err).Str("listener", label).Msg("listener stopped")
 			}
 		}()
+		return true
 	}
 
 	switch {
 	case s.cfg.Funnel:
-		addListener("tailscale-funnel:443",
+		ok := addListener("tailscale-funnel:443",
 			func() (net.Listener, error) { return s.ts.ListenFunnel("tcp", ":443") },
 			s.handler)
 		addListener("tailscale-redirect:80",
 			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
 			s.httpRedirectorLocked())
+		if ok {
+			cur := s.snapshotLocked()
+			cur.FunnelActive = true
+			cur.FunnelURL = httpsURLFor(cur.CertDomain)
+			// The Funnel listener also terminates TLS on :443 for tailnet
+			// members, so HTTPS is effectively up too. Don't set HTTPSURL
+			// though — FunnelURL is the same URL and covers both audiences.
+			cur.HTTPSActive = true
+			cur.UpdatedAt = time.Now()
+			s.publishLocked(cur)
+		}
 
 	case s.cfg.HTTPS:
-		addListener("tailscale-https:443",
+		ok := addListener("tailscale-https:443",
 			func() (net.Listener, error) {
 				lc, err := s.ts.LocalClient()
 				if err != nil {
@@ -292,12 +361,26 @@ func (s *Server) openListenersLocked() {
 		addListener("tailscale-redirect:80",
 			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
 			s.httpRedirectorLocked())
+		if ok {
+			cur := s.snapshotLocked()
+			cur.HTTPSActive = true
+			cur.HTTPSURL = httpsURLFor(cur.CertDomain)
+			cur.UpdatedAt = time.Now()
+			s.publishLocked(cur)
+		}
 
 	default:
 		addListener("tailscale-http:80",
 			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
 			s.handler)
 	}
+}
+
+func httpsURLFor(certDomain string) string {
+	if certDomain == "" {
+		return ""
+	}
+	return "https://" + certDomain
 }
 
 // teardownLocked tears down the listeners AND the tsnet node. Caller must

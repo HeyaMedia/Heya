@@ -21,12 +21,12 @@ type Config struct {
 }
 
 type TailscaleConfig struct {
-	Enabled  bool
-	Hostname string
-	AuthKey  string
-	StateDir string
-	HTTPS    bool
-	Funnel   bool
+	Enabled  bool   `json:"enabled"`
+	Hostname string `json:"hostname"`
+	AuthKey  string `json:"-"` // never expose over the API
+	StateDir string `json:"state_dir,omitempty"`
+	HTTPS    bool   `json:"https"`
+	Funnel   bool   `json:"funnel"`
 }
 
 func Load() *Config {

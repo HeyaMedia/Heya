@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/service"
 	tsnetwrap "github.com/karbowiak/heya/internal/tailscale"
+	"github.com/rs/zerolog/log"
 )
 
 type tailscaleConfigPayload struct {
@@ -68,9 +70,16 @@ func handleTailscaleConfig(app *service.App, cfg *config.Config) http.HandlerFun
 		app.UpdateTailscaleConfig(newCfg)
 
 		if err := config.SaveTailscale(newCfg); err != nil {
+			log.Error().Err(err).Msg("failed to save tailscale config to heya.yaml")
 			writeError(w, http.StatusInternalServerError, "save heya.yaml: "+err.Error())
 			return
 		}
+		log.Info().
+			Bool("enabled", newCfg.Enabled).
+			Bool("https", newCfg.HTTPS).
+			Bool("funnel", newCfg.Funnel).
+			Str("hostname", newCfg.Hostname).
+			Msg("tailscale config saved")
 
 		ts := app.Tailscale()
 		if ts == nil {
@@ -79,11 +88,12 @@ func handleTailscaleConfig(app *service.App, cfg *config.Config) http.HandlerFun
 		}
 
 		if !newCfg.Enabled {
-			if err := ts.Disable(); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"status": "disabled"})
+			// Disable closes tsnet listeners. If this request itself came
+			// in over a tsnet listener, doing the close synchronously
+			// would deadlock on http.Server.Shutdown (active connection
+			// = us). Background the work and reply immediately.
+			go func() { _ = ts.Disable() }()
+			writeJSON(w, http.StatusOK, map[string]any{"status": "disabling"})
 			return
 		}
 
@@ -91,7 +101,7 @@ func handleTailscaleConfig(app *service.App, cfg *config.Config) http.HandlerFun
 		// Kick it off in the background and return immediately — the UI
 		// will pick up the login URL via the tailscale.status event.
 		go func() {
-			if err := ts.Enable(r.Context(), tsnetwrap.Config{
+			if err := ts.Enable(context.Background(), tsnetwrap.Config{
 				Enabled:  true,
 				Hostname: newCfg.Hostname,
 				AuthKey:  newCfg.AuthKey,
@@ -110,7 +120,8 @@ func handleTailscaleConfig(app *service.App, cfg *config.Config) http.HandlerFun
 
 func handleTailscaleFunnel(app *service.App, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if app.Tailscale() == nil {
+		ts := app.Tailscale()
+		if ts == nil {
 			writeError(w, http.StatusBadRequest, "Tailscale is not running")
 			return
 		}
@@ -121,33 +132,65 @@ func handleTailscaleFunnel(app *service.App, cfg *config.Config) http.HandlerFun
 			writeError(w, http.StatusBadRequest, "invalid body")
 			return
 		}
-		if err := app.Tailscale().SetFunnel(r.Context(), req.Enabled); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		// Persist so the choice survives restart.
+
+		// Persist the preference immediately — the toggle should be sticky
+		// regardless of how the listener rebind goes.
 		cur := app.ConfigSnapshot().Tailscale
 		cur.Funnel = req.Enabled
 		app.UpdateTailscaleConfig(cur)
-		_ = config.SaveTailscale(cur)
+		if err := config.SaveTailscale(cur); err != nil {
+			log.Warn().Err(err).Msg("failed to persist tailscale funnel preference to heya.yaml")
+		} else {
+			log.Info().Bool("funnel", req.Enabled).Msg("tailscale funnel preference saved")
+		}
+
+		// SetFunnel closes the current :443 listener and opens a new one
+		// in the new mode. If THIS request was served on the tsnet listener
+		// we're about to close, doing the rebind synchronously deadlocks
+		// on http.Server.Shutdown (the only active connection on that
+		// server is us, and we're blocked inside SetFunnel). Background
+		// the work — UI picks up the new state via the WS status event.
+		go func() {
+			_ = ts.SetFunnel(context.Background(), req.Enabled)
+		}()
+
 		writeJSON(w, http.StatusOK, map[string]any{"funnel": req.Enabled})
+	}
+}
+
+// handleTailscaleRaw dumps the live ipnstate.Status from tsnet's LocalClient.
+// Same content as `tailscale status --json` against a system tailscaled.
+// Mounted at /api/tailscale/raw — admin-only.
+func handleTailscaleRaw(app *service.App, cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ts := app.Tailscale()
+		if ts == nil {
+			writeError(w, http.StatusBadRequest, "Tailscale is not running")
+			return
+		}
+		st, err := ts.RawStatus(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
 	}
 }
 
 func handleTailscaleLogout(app *service.App, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if app.Tailscale() == nil {
+		ts := app.Tailscale()
+		if ts == nil {
 			writeError(w, http.StatusBadRequest, "Tailscale is not running")
 			return
 		}
-		if err := app.Tailscale().Logout(r.Context()); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		// Same deadlock concern as Funnel toggle: Logout tears down the
+		// listeners after talking to tailscale.com. Background it.
 		cur := app.ConfigSnapshot().Tailscale
 		cur.Enabled = false
 		app.UpdateTailscaleConfig(cur)
 		_ = config.SaveTailscale(cur)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
+		go func() { _ = ts.Logout(context.Background()) }()
+		writeJSON(w, http.StatusOK, map[string]string{"status": "logging out"})
 	}
 }

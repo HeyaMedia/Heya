@@ -8,7 +8,11 @@ export interface TailscaleStatus {
   ipv6?: string
   cert_domain?: string
   https: boolean
+  https_active: boolean
+  https_url?: string
   funnel: boolean
+  funnel_active: boolean
+  funnel_url?: string
   login_url?: string
   last_error?: string
   updated_at: string
@@ -79,6 +83,10 @@ export function useTailscale() {
     await refresh()
   }
 
+  async function fetchRaw() {
+    return apiFetch<Record<string, unknown>>('/api/tailscale/raw')
+  }
+
   function subscribeToEvents() {
     const bus = useEventBus()
     return bus.on('tailscale.status', (ev) => {
@@ -86,5 +94,5 @@ export function useTailscale() {
     })
   }
 
-  return { enabled, status, cfg, message, loading, refresh, saveConfig, setFunnel, logout, subscribeToEvents }
+  return { enabled, status, cfg, message, loading, refresh, saveConfig, setFunnel, logout, fetchRaw, subscribeToEvents }
 }

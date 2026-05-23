@@ -70,6 +70,31 @@
         </div>
       </section>
 
+      <section v-if="status?.https_url || status?.funnel_url" class="section">
+        <h3 class="section-heading">
+          <Icon name="link" :size="14" />
+          Access URLs
+        </h3>
+        <div class="url-grid">
+          <a v-if="status?.https_url" :href="status.https_url" target="_blank" rel="noopener" class="url-card">
+            <div class="url-label">
+              HTTPS · tailnet only
+              <span class="badge ok">active</span>
+            </div>
+            <div class="url-value mono">{{ status.https_url }}</div>
+            <div class="url-hint">Reachable from any device on your tailnet.</div>
+          </a>
+          <a v-if="status?.funnel_url" :href="status.funnel_url" target="_blank" rel="noopener" class="url-card funnel">
+            <div class="url-label">
+              Funnel · public internet
+              <span class="badge ok">active</span>
+            </div>
+            <div class="url-value mono">{{ status.funnel_url }}</div>
+            <div class="url-hint">Reachable from anywhere — auth still applies.</div>
+          </a>
+        </div>
+      </section>
+
       <section v-if="status?.last_error" class="section">
         <div class="error-card">
           <Icon name="warning" :size="20" />
@@ -96,7 +121,11 @@
 
         <div class="toggle-row">
           <div class="toggle-text">
-            <div class="toggle-title">HTTPS</div>
+            <div class="toggle-title">
+              HTTPS
+              <span v-if="cfg?.https && status?.https_active" class="badge ok">active</span>
+              <span v-else-if="cfg?.https" class="badge warn">requested · not active</span>
+            </div>
             <div class="toggle-hint">
               Serve TLS on tailnet :443 using a Tailscale-issued cert.
               Requires HTTPS to be enabled for your tailnet in the
@@ -111,11 +140,19 @@
 
         <div class="toggle-row">
           <div class="toggle-text">
-            <div class="toggle-title">Funnel (public exposure)</div>
+            <div class="toggle-title">
+              Funnel (public exposure)
+              <span v-if="cfg?.funnel && status?.funnel_active" class="badge ok">active</span>
+              <span v-else-if="cfg?.funnel" class="badge warn">requested · not active</span>
+            </div>
             <div class="toggle-hint">
               Expose Heya on the public internet at
               <code v-if="status?.cert_domain">{{ status.cert_domain }}</code><code v-else>your MagicDNS name</code>.
-              Heya's auth still applies. Requires Funnel to be allowed for your tailnet.
+              Heya's auth still applies. Requires Funnel to be
+              <a href="https://login.tailscale.com/admin/settings/funnel" target="_blank" rel="noopener">allowed for your tailnet</a>
+              and the node to be advertised with a permitted ACL tag.
+              Flipping the toggle saves your preference — what tsnet
+              actually does is up to your tailnet config.
             </div>
           </div>
           <label class="switch">
@@ -141,6 +178,34 @@
           Toggle Tailscale back on to re-onboard.
         </p>
       </section>
+
+      <section class="section">
+        <h3 class="section-heading">
+          <Icon name="terminal" :size="14" />
+          Raw tsnet status
+          <button class="btn-link" @click="toggleRaw">
+            {{ rawOpen ? 'Hide' : 'Show' }}
+          </button>
+        </h3>
+        <div v-if="rawOpen" class="raw-panel">
+          <div class="raw-toolbar">
+            <button class="btn btn-secondary btn-sm" :disabled="rawLoading" @click="loadRaw">
+              <Icon name="refresh" :size="12" />
+              {{ rawLoading ? 'Loading…' : 'Refresh' }}
+            </button>
+            <button v-if="rawJSON" class="btn btn-secondary btn-sm" @click="copyRaw">
+              <Icon name="copy" :size="12" />
+              Copy JSON
+            </button>
+          </div>
+          <div v-if="rawError" class="error-card">
+            <Icon name="warning" :size="20" />
+            <pre class="code">{{ rawError }}</pre>
+          </div>
+          <pre v-else-if="rawJSON" class="raw-json">{{ rawJSON }}</pre>
+          <p v-else class="hint">Click Refresh to fetch the live status from tsnet's LocalClient — same blob <code>tailscale status --json</code> would print.</p>
+        </div>
+      </section>
     </template>
 
     <template v-else>
@@ -159,11 +224,15 @@
 </template>
 
 <script setup lang="ts">
-const { enabled, status, cfg, loading, refresh, saveConfig, setFunnel, logout, subscribeToEvents } = useTailscale()
+const { enabled, status, cfg, loading, refresh, saveConfig, setFunnel, logout, fetchRaw, subscribeToEvents } = useTailscale()
 
 const saving = ref(false)
 const loggingOut = ref(false)
 const hostnameDraft = ref('')
+const rawOpen = ref(false)
+const rawLoading = ref(false)
+const rawJSON = ref<string>('')
+const rawError = ref<string>('')
 
 const stateDirHint = computed(() => cfg.value?.state_dir || 'data/tailscale/')
 
@@ -232,6 +301,35 @@ async function onLogout() {
   }
 }
 
+async function toggleRaw() {
+  rawOpen.value = !rawOpen.value
+  if (rawOpen.value && !rawJSON.value && !rawError.value) {
+    await loadRaw()
+  }
+}
+
+async function loadRaw() {
+  rawLoading.value = true
+  rawError.value = ''
+  try {
+    const data = await fetchRaw()
+    rawJSON.value = JSON.stringify(data, null, 2)
+  } catch (err: unknown) {
+    rawError.value = err instanceof Error ? err.message : String(err)
+    rawJSON.value = ''
+  } finally {
+    rawLoading.value = false
+  }
+}
+
+async function copyRaw() {
+  try {
+    await navigator.clipboard.writeText(rawJSON.value)
+  } catch {
+    // best-effort; clipboard permissions can be denied
+  }
+}
+
 // keep loading reactive
 void loading
 </script>
@@ -288,6 +386,141 @@ void loading
 .master-hint {
   font-size: 13px;
   color: var(--fg-3);
+}
+
+.badge {
+  margin-left: 8px;
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  vertical-align: middle;
+}
+
+.badge.ok {
+  background: rgba(120, 200, 120, 0.18);
+  color: rgb(150, 220, 150);
+  border: 1px solid rgba(120, 200, 120, 0.4);
+}
+
+.badge.warn {
+  background: rgba(230, 185, 74, 0.12);
+  color: var(--gold-bright);
+  border: 1px solid rgba(230, 185, 74, 0.4);
+}
+
+.url-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.url-card {
+  display: block;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 16px 18px;
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+
+.url-card:hover {
+  border-color: var(--gold);
+  text-decoration: none;
+}
+
+.url-card.funnel {
+  border-color: rgba(120, 200, 120, 0.4);
+  background: rgba(120, 200, 120, 0.06);
+}
+
+.url-card.funnel:hover {
+  border-color: rgb(150, 220, 150);
+}
+
+.url-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-1);
+  margin-bottom: 8px;
+}
+
+.url-card.funnel .url-label {
+  color: rgb(150, 220, 150);
+}
+
+.url-value {
+  color: var(--fg-1);
+  font-size: 15px;
+  font-weight: 500;
+  word-break: break-all;
+  margin-bottom: 6px;
+}
+
+.url-hint {
+  font-size: 13px;
+  color: var(--fg-2);
+  line-height: 1.4;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--gold-bright);
+  font-size: 12px;
+  margin-left: auto;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.raw-panel {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+}
+
+.raw-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.raw-json {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-1);
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 600px;
+  overflow: auto;
 }
 
 .empty-card {
