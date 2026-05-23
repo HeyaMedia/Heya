@@ -30,6 +30,7 @@ type SceneParserStrategy string
 const (
 	StrategyVideoFilenameParser SceneParserStrategy = "video-filename-parser"
 	StrategyAudioHeuristic      SceneParserStrategy = "audio-heuristic"
+	StrategyMusicCurated        SceneParserStrategy = "music-curated"
 	StrategyBookHeuristic       SceneParserStrategy = "book-heuristic"
 )
 
@@ -53,6 +54,15 @@ type SceneReleaseParse struct {
 	Episodes       []int               `json:"episodes"`
 	IsTv           bool                `json:"isTv"`
 	Score          int                 `json:"score"`
+
+	Artist               string `json:"artist,omitempty"`
+	ArtistDisambiguation string `json:"artistDisambiguation,omitempty"`
+	Album                string `json:"album,omitempty"`
+	ReleaseKind          string `json:"releaseKind,omitempty"`
+	DiscNumber           int    `json:"discNumber,omitempty"`
+	TrackNumber          int    `json:"trackNumber,omitempty"`
+	TrackTitle           string `json:"trackTitle,omitempty"`
+	HasTrackInfo         bool   `json:"hasTrackInfo,omitempty"`
 }
 
 type ParsedStorageEntry struct {

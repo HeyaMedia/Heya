@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -148,12 +149,22 @@ func (t *ScanLibrariesTask) scanOneLibrary(ctx context.Context, s *scanner.Scann
 
 	enqueued := t.enqueuePendingFiles(ctx, q, lib.ID)
 
+	// Music libraries get a fan-out of per-artist refresh jobs after the scan
+	// completes (the matcher will create new artist rows when MetadataMatchWorker
+	// processes the per-file jobs above; this loop covers existing artists that
+	// have stale or never-fetched enrichment data).
+	refreshed := 0
+	if lib.MediaType == sqlc.MediaTypeMusic {
+		refreshed = t.enqueueMusicArtistRefreshes(ctx, q, lib, force)
+	}
+
 	log.Info().
 		Int64("library_id", lib.ID).
 		Int("discovered", result.Discovered).
 		Int("new", result.New).
 		Int("deleted", result.Deleted).
 		Int("enqueued", enqueued).
+		Int("music_refreshed", refreshed).
 		Msg("scan task: library done")
 
 	if t.Hub != nil {
@@ -170,6 +181,56 @@ func (t *ScanLibrariesTask) scanOneLibrary(ctx context.Context, s *scanner.Scann
 		}
 	}
 
+}
+
+// enqueueMusicArtistRefreshes fans out one RefreshMusicArtist job per artist
+// in the library. When force=true (operator explicitly re-scanned), it
+// refreshes every artist; otherwise it skips artists enriched within the last
+// 7 days. The match-side path (MetadataMatchWorker) handles new-artist refresh
+// for incremental file adds; this covers existing-artist staleness on scan.
+func (t *ScanLibrariesTask) enqueueMusicArtistRefreshes(ctx context.Context, q *sqlc.Queries, lib sqlc.Library, force bool) int {
+	artists, err := q.ListArtistsByLibrary(ctx, lib.ID)
+	if err != nil {
+		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("scan task: list artists failed")
+		return 0
+	}
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+
+	// First pass: figure out batch size so each enqueued job carries the
+	// correct total. (Worker reports per-artist progress against this total.)
+	var due []sqlc.Artist
+	for _, a := range artists {
+		if !force && a.EnrichedAt.Valid && a.EnrichedAt.Time.After(cutoff) {
+			continue
+		}
+		due = append(due, a)
+	}
+
+	if len(due) > 0 && t.Hub != nil {
+		t.Hub.Emit(eventhub.EventScanProgress, eventhub.ScanPayload{
+			LibraryID:   lib.ID,
+			LibraryName: lib.Name,
+			Phase:       "refresh",
+			Total:       len(due),
+			Done:        0,
+		})
+	}
+
+	count := 0
+	for i, a := range due {
+		if _, err := t.River.Insert(ctx, worker.RefreshMusicArtistArgs{
+			ArtistID:       a.ID,
+			Force:          force,
+			BatchLibraryID: lib.ID,
+			BatchTotal:     len(due),
+			BatchPosition:  i + 1, // 1-indexed; matches MaxWorkers=1 serial order
+		}, nil); err != nil {
+			log.Warn().Err(err).Int64("artist_id", a.ID).Msg("enqueue RefreshMusicArtist failed")
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func (t *ScanLibrariesTask) enqueuePendingFiles(ctx context.Context, q *sqlc.Queries, libraryID int64) int {

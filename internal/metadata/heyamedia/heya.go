@@ -265,7 +265,16 @@ func (p *HeyaProvider) mapDetail(resp *heyaItemResponse) *metadata.MediaDetail {
 	if resp.IDs.OLWorkID != "" {
 		extIDs["ol_work_id"] = resp.IDs.OLWorkID
 	}
-	// Merge payload external_ids (wikidata, facebook, etc.)
+	if resp.IDs.Discogs != 0 {
+		extIDs["discogs"] = strconv.FormatInt(resp.IDs.Discogs, 10)
+	}
+	if resp.IDs.Deezer != 0 {
+		extIDs["deezer"] = strconv.FormatInt(resp.IDs.Deezer, 10)
+	}
+	if resp.IDs.Apple != 0 {
+		extIDs["apple"] = strconv.FormatInt(resp.IDs.Apple, 10)
+	}
+	// Merge payload external_ids (wikidata, spotify, facebook, etc.)
 	for k, v := range pay.ExternalIDs {
 		if v != "" && extIDs[k] == "" {
 			extIDs[k] = v
@@ -532,7 +541,101 @@ func (p *HeyaProvider) mapDetail(resp *heyaItemResponse) *metadata.MediaDetail {
 		Seasons:          seasons,
 	}
 
+	if resp.Kind == "artist" {
+		artistName := coalesce(pay.Name, pay.Title)
+		detail.Title = artistName
+		detail.SortTitle = strings.ToLower(coalesce(pay.SortName, artistName))
+		detail.Description = pay.Profile
+		detail.ArtistName = artistName
+		detail.ArtistBio = pay.Profile
+		detail.ArtistSortName = pay.SortName
+		detail.ArtistDisambiguation = pay.Disambiguation
+		detail.ArtistNativeName = pay.NativeName
+		detail.ArtistNativeLanguage = pay.NativeLanguage
+		detail.ArtistCountry = pay.Country
+		detail.ArtistType = pay.Type
+		detail.ArtistGender = pay.Gender
+		detail.ArtistBeginDate = coalesce(pay.Begin, pay.Birthday)
+		detail.ArtistBeginYear = pay.BeginYear
+		detail.ArtistBirthplace = pay.Birthplace
+		if len(pay.Tags) > 0 {
+			detail.Genres = mergeStrings(detail.Genres, pay.Tags)
+		}
+		detail.Albums = mapHeyaAlbums(pay.Albums)
+	}
+
 	return detail
+}
+
+func mapHeyaAlbums(albums []heyaAlbumEntry) []metadata.AlbumEntry {
+	if len(albums) == 0 {
+		return nil
+	}
+	out := make([]metadata.AlbumEntry, 0, len(albums))
+	for _, a := range albums {
+		coverURL := ""
+		if len(a.Artwork) > 0 {
+			coverURL = a.Artwork[0].URL
+		}
+		out = append(out, metadata.AlbumEntry{
+			Title:       a.Title,
+			Type:        a.Type,
+			ReleaseDate: a.ReleaseDate,
+			Year:        a.Year,
+			Label:       a.Label,
+			CatalogNo:   a.CatalogNo,
+			Country:     a.Country,
+			Barcode:     a.Barcode,
+			ISRCs:       a.ISRCs,
+			ExternalIDs: a.ExternalIDs,
+			TrackCount:  a.TrackCount,
+			Popularity:  a.Popularity,
+			CoverURL:    coverURL,
+			Tracks:      mapHeyaAlbumTracks(a.Tracks),
+		})
+	}
+	return out
+}
+
+func mapHeyaAlbumTracks(tracks []heyaAlbumTrackEntry) []metadata.TrackDetail {
+	if len(tracks) == 0 {
+		return nil
+	}
+	out := make([]metadata.TrackDetail, 0, len(tracks))
+	for _, t := range tracks {
+		disc := t.Disc
+		if disc == 0 {
+			disc = 1
+		}
+		out = append(out, metadata.TrackDetail{
+			DiscNumber:    disc,
+			TrackNumber:   t.Position,
+			Title:         t.Title,
+			Duration:      t.Duration,
+			ISRC:          t.ISRC,
+			RecordingMBID: t.RecordingMBID,
+			PreviewURL:    t.Preview,
+		})
+	}
+	return out
+}
+
+func mergeStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // mapArtwork extracts all artwork categories from the payload.
@@ -603,7 +706,9 @@ func heyaKind(kind metadata.MediaKind) string {
 	case metadata.KindTV:
 		return "tv"
 	case metadata.KindMusic:
-		return "album"
+		// heya.media indexes artists (with embedded discography) as the music
+		// entry point; album-level search isn't available yet.
+		return "artist"
 	case metadata.KindBook:
 		return "book"
 	default:
@@ -712,6 +817,11 @@ type heyaIDs struct {
 	MAL      int    `json:"mal"`
 	MBID     string `json:"mbid"`
 	OLWorkID string `json:"ol_work_id"`
+
+	// Music providers (numeric in top-level ids, string in payload.external_ids).
+	Discogs int64 `json:"discogs"`
+	Deezer  int64 `json:"deezer"`
+	Apple   int64 `json:"apple"`
 }
 
 type heyaPayload struct {
@@ -757,6 +867,63 @@ type heyaPayload struct {
 	Homepage  string        `json:"homepage"`
 	Networks  []heyaNetwork `json:"networks"`
 	CreatedBy []heyaCreator `json:"created_by"`
+
+	// Music (artist payload).
+	Name           string            `json:"name"`
+	SortName       string            `json:"sort_name"`
+	NativeName     string            `json:"native_name"`
+	NativeLanguage string            `json:"native_language"`
+	Disambiguation string            `json:"disambiguation"`
+	Type           string            `json:"type"`
+	Gender         string            `json:"gender"`
+	Country        string            `json:"country"`
+	Area           string            `json:"area"`
+	BeginArea      string            `json:"begin_area"`
+	Birthplace     string            `json:"birthplace"`
+	Begin          string            `json:"begin"`
+	BeginYear      int               `json:"begin_year"`
+	Birthday       string            `json:"birthday"`
+	Profile        string            `json:"profile"`
+	Tags           []string          `json:"tags"`
+	AlbumCount     int               `json:"album_count"`
+	URLs           []heyaArtistURL   `json:"urls"`
+	WikipediaLinks map[string]string `json:"wikipedia_links"`
+	Albums         []heyaAlbumEntry  `json:"albums"`
+	EnrichedAt     string            `json:"enriched_at"`
+}
+
+type heyaArtistURL struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+type heyaAlbumEntry struct {
+	Title       string                `json:"title"`
+	Type        string                `json:"type"`
+	ReleaseDate string                `json:"release_date"`
+	Year        int                   `json:"year"`
+	Label       string                `json:"label"`
+	CatalogNo   string                `json:"catalog_no"`
+	Country     string                `json:"country"`
+	ExternalIDs map[string]string     `json:"external_ids"`
+	Barcode     string                `json:"barcode"`
+	ISRCs       []string              `json:"isrcs"`
+	Artwork     []heyaArtworkEntry    `json:"artwork"`
+	TrackCount  int                   `json:"track_count"`
+	Popularity  float64               `json:"popularity"`
+	Tracks      []heyaAlbumTrackEntry `json:"tracks"`
+	Source      string                `json:"source"`
+}
+
+type heyaAlbumTrackEntry struct {
+	Disc          int               `json:"disc"`
+	Position      int               `json:"position"`
+	Title         string            `json:"title"`
+	Duration      int               `json:"duration"` // seconds
+	ISRC          string            `json:"isrc"`
+	RecordingMBID string            `json:"recording_mbid"`
+	ExternalIDs   map[string]string `json:"external_ids"`
+	Preview       string            `json:"preview"`
 }
 
 type heyaTitleEntry struct {

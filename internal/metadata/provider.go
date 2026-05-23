@@ -121,7 +121,18 @@ type MediaDetail struct {
 	SeriesNum       int      `json:"series_num,omitempty"`
 
 	// Music (extra)
-	ArtistBio string `json:"artist_bio,omitempty"`
+	ArtistBio            string       `json:"artist_bio,omitempty"`
+	Albums               []AlbumEntry `json:"albums,omitempty"`
+	ArtistSortName       string       `json:"artist_sort_name,omitempty"`
+	ArtistDisambiguation string       `json:"artist_disambiguation,omitempty"`
+	ArtistNativeName     string       `json:"artist_native_name,omitempty"`
+	ArtistNativeLanguage string       `json:"artist_native_language,omitempty"`
+	ArtistCountry        string       `json:"artist_country,omitempty"`
+	ArtistType           string       `json:"artist_type,omitempty"` // "Person" | "Group"
+	ArtistGender         string       `json:"artist_gender,omitempty"`
+	ArtistBeginDate      string       `json:"artist_begin_date,omitempty"`
+	ArtistBeginYear      int          `json:"artist_begin_year,omitempty"`
+	ArtistBirthplace     string       `json:"artist_birthplace,omitempty"`
 }
 
 type ArtworkResult struct {
@@ -270,7 +281,30 @@ type TrackDetail struct {
 	DiscNumber  int    `json:"disc_number"`
 	TrackNumber int    `json:"track_number"`
 	Title       string `json:"title"`
-	DurationMs  int    `json:"duration_ms"`
+	// Duration in seconds (heya.media's native unit).
+	Duration      int    `json:"duration"`
+	ISRC          string `json:"isrc,omitempty"`
+	RecordingMBID string `json:"recording_mbid,omitempty"`
+	PreviewURL    string `json:"preview_url,omitempty"`
+}
+
+// AlbumEntry is one album as returned in payload.albums on an artist lookup.
+// Carries full track listing — no extra request needed to enrich tracks.
+type AlbumEntry struct {
+	Title       string            `json:"title"`
+	Type        string            `json:"type"` // "album" | "single" | "ep" | "compilation"
+	ReleaseDate string            `json:"release_date,omitempty"`
+	Year        int               `json:"year,omitempty"`
+	Label       string            `json:"label,omitempty"`
+	CatalogNo   string            `json:"catalog_no,omitempty"`
+	Country     string            `json:"country,omitempty"`
+	Barcode     string            `json:"barcode,omitempty"`
+	ISRCs       []string          `json:"isrcs,omitempty"`
+	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	TrackCount  int               `json:"track_count,omitempty"`
+	Popularity  float64           `json:"popularity,omitempty"`
+	CoverURL    string            `json:"cover_url,omitempty"`
+	Tracks      []TrackDetail     `json:"tracks,omitempty"`
 }
 
 type NFOIDs struct {

@@ -4,9 +4,12 @@ CREATE TABLE artists (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     media_item_id  BIGINT NOT NULL UNIQUE REFERENCES media_items(id) ON DELETE CASCADE,
     musicbrainz_id TEXT   NOT NULL DEFAULT '',
+    name           TEXT   NOT NULL DEFAULT '',
     sort_name      TEXT   NOT NULL DEFAULT '',
+    disambiguation TEXT   NOT NULL DEFAULT '',
     biography      TEXT   NOT NULL DEFAULT '',
     search_vector  tsvector GENERATED ALWAYS AS (
+                       setweight(to_tsvector('simple', coalesce(name, '')), 'A') ||
                        setweight(to_tsvector('simple', coalesce(sort_name, '')), 'A') ||
                        setweight(to_tsvector('english', coalesce(biography, '')), 'D')
                    ) STORED
@@ -14,7 +17,9 @@ CREATE TABLE artists (
 
 CREATE INDEX idx_artists_musicbrainz_id ON artists (musicbrainz_id) WHERE musicbrainz_id != '';
 CREATE INDEX idx_artists_search ON artists USING GIN (search_vector);
+CREATE INDEX idx_artists_name_trgm ON artists USING GIN (lower(name) gin_trgm_ops);
 CREATE INDEX idx_artists_sort_name_trgm ON artists USING GIN (lower(sort_name) gin_trgm_ops);
+CREATE UNIQUE INDEX uq_artists_name_disambig ON artists (lower(name), lower(disambiguation)) WHERE name != '';
 
 CREATE TABLE albums (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -42,6 +47,7 @@ CREATE INDEX idx_albums_artist_id ON albums (artist_id);
 CREATE INDEX idx_albums_musicbrainz_id ON albums (musicbrainz_id) WHERE musicbrainz_id != '';
 CREATE INDEX idx_albums_search ON albums USING GIN (search_vector);
 CREATE INDEX idx_albums_title_trgm ON albums USING GIN (lower(title) gin_trgm_ops);
+CREATE UNIQUE INDEX uq_albums_artist_title_year ON albums (artist_id, lower(title), year);
 
 CREATE TABLE tracks (
     id            BIGINT  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -51,6 +57,7 @@ CREATE TABLE tracks (
     title         TEXT    NOT NULL,
     duration_ms   INTEGER NOT NULL DEFAULT 0,
     file_path     TEXT    NOT NULL DEFAULT '',
+    lyrics_path   TEXT    NOT NULL DEFAULT '',
     search_vector tsvector GENERATED ALWAYS AS (
                       to_tsvector('simple', coalesce(title, ''))
                   ) STORED,

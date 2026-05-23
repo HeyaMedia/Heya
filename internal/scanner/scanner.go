@@ -34,7 +34,7 @@ var extrasDirNames = map[string]bool{
 }
 
 var nfoFiles = map[string]bool{
-	"tvshow.nfo": true, "movie.nfo": true, "artist.nfo": true,
+	"tvshow.nfo": true, "movie.nfo": true, "artist.nfo": true, "album.nfo": true,
 }
 
 type Scanner struct {

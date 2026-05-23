@@ -22,6 +22,14 @@ type releaseExpected struct {
 	Seasons      []int    `json:"seasons"`
 	Episodes     []int    `json:"episodes"`
 	FlagsContain []string `json:"flagsContain"`
+
+	Artist               *string `json:"artist"`
+	ArtistDisambiguation *string `json:"artistDisambiguation"`
+	Album                *string `json:"album"`
+	ReleaseKind          *string `json:"releaseKind"`
+	DiscNumber           *int    `json:"discNumber"`
+	TrackNumber          *int    `json:"trackNumber"`
+	TrackTitle           *string `json:"trackTitle"`
 }
 
 type testExpected struct {
@@ -59,6 +67,9 @@ func runReleaseParsing(t *testing.T, fixture string) {
 	cases := loadTestCases(t, fixture)
 
 	for _, tc := range cases {
+		if tc.Kind != "storage-path" && tc.Kind != "release-name" {
+			continue
+		}
 		t.Run(tc.Label, func(t *testing.T) {
 			if tc.Kind == "storage-path" {
 				result := ParseStoragePath(tc.Input)
@@ -166,6 +177,28 @@ func checkRelease(t *testing.T, release *SceneReleaseParse, expected releaseExpe
 			t.Errorf("flag %q not found in %v", flag, release.Flags)
 		}
 	}
+
+	if expected.Artist != nil && release.Artist != *expected.Artist {
+		t.Errorf("artist: got %q, want %q", release.Artist, *expected.Artist)
+	}
+	if expected.ArtistDisambiguation != nil && release.ArtistDisambiguation != *expected.ArtistDisambiguation {
+		t.Errorf("artistDisambiguation: got %q, want %q", release.ArtistDisambiguation, *expected.ArtistDisambiguation)
+	}
+	if expected.Album != nil && release.Album != *expected.Album {
+		t.Errorf("album: got %q, want %q", release.Album, *expected.Album)
+	}
+	if expected.ReleaseKind != nil && release.ReleaseKind != *expected.ReleaseKind {
+		t.Errorf("releaseKind: got %q, want %q", release.ReleaseKind, *expected.ReleaseKind)
+	}
+	if expected.DiscNumber != nil && release.DiscNumber != *expected.DiscNumber {
+		t.Errorf("discNumber: got %d, want %d", release.DiscNumber, *expected.DiscNumber)
+	}
+	if expected.TrackNumber != nil && release.TrackNumber != *expected.TrackNumber {
+		t.Errorf("trackNumber: got %d, want %d", release.TrackNumber, *expected.TrackNumber)
+	}
+	if expected.TrackTitle != nil && release.TrackTitle != *expected.TrackTitle {
+		t.Errorf("trackTitle: got %q, want %q", release.TrackTitle, *expected.TrackTitle)
+	}
 }
 
 func intSliceEqual(a, b []int) bool {
@@ -190,6 +223,10 @@ func TestMovieReleaseParsing(t *testing.T) {
 
 func TestMusicReleaseParsing(t *testing.T) {
 	runReleaseParsing(t, "../../testdata/parser/music/release-parsing.json")
+}
+
+func TestMusicCuratedLayouts(t *testing.T) {
+	runReleaseParsing(t, "../../testdata/parser/music/curated-layouts.json")
 }
 
 func TestBookReleaseParsing(t *testing.T) {

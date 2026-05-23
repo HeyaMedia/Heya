@@ -30,7 +30,11 @@ func ParseStoragePath(inputPath string) ParsedStorageEntry {
 	}
 
 	leafSegment := PrepareSegment(basename)
-	releaseCandidate := findBestReleaseCandidate(segments)
+	forcedHint := MediaUnknown
+	if leafSegment.Extension != "" {
+		forcedHint = MediaKindForExtension(leafSegment.Extension)
+	}
+	releaseCandidate := findBestReleaseCandidate(segments, forcedHint)
 	media := InferMediaKind(segments, leafSegment.Extension, releaseFromCandidate(releaseCandidate))
 
 	var entryType StorageEntryType
@@ -45,6 +49,22 @@ func ParseStoragePath(inputPath string) ParsedStorageEntry {
 	if releaseCandidate != nil {
 		release = releaseCandidate.release
 		releaseSegment = releaseCandidate.segment
+	}
+
+	if release != nil && release.Strategy == StrategyMusicCurated {
+		if releaseCandidate.index > 0 {
+			if _, disambig := splitArtistDisambiguator(segments[releaseCandidate.index-1]); disambig != "" {
+				release.ArtistDisambiguation = disambig
+			}
+		}
+		if entryType == EntryFile && releaseCandidate.index < len(segments)-1 && isTrackExtension(leafSegment.Extension) {
+			if disc, track, title, ok := parseTrackFilename(basename); ok {
+				release.DiscNumber = disc
+				release.TrackNumber = track
+				release.TrackTitle = title
+				release.HasTrackInfo = true
+			}
+		}
 	}
 
 	return ParsedStorageEntry{
@@ -81,7 +101,7 @@ type releaseCandidate struct {
 	index   int
 }
 
-func findBestReleaseCandidate(segments []string) *releaseCandidate {
+func findBestReleaseCandidate(segments []string, forcedHint SceneMediaKind) *releaseCandidate {
 	var best *releaseCandidate
 
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -95,7 +115,10 @@ func findBestReleaseCandidate(segments []string) *releaseCandidate {
 			continue
 		}
 
-		hint := InferSegmentMediaHint(segments, i, prepared)
+		hint := forcedHint
+		if hint == MediaUnknown {
+			hint = InferSegmentMediaHint(segments, i, prepared)
+		}
 		release := parsePreparedRelease(prepared, hint)
 		if release == nil {
 			continue

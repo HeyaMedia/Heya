@@ -88,23 +88,14 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	var tc *transcoder.SessionManager
 	var tcCache *transcoder.CacheManager
-	var hwAccel transcoder.HwAccelConfig
+	var hwAccelProvider *transcoder.HwAccelProvider
 	if transcoder.IsFFmpegAvailable() {
 		tcCache = transcoder.NewCacheManager(cfg.TranscodeCacheDir, cfg.TranscodeCacheMaxGB)
-
-		switch cfg.HWAccel {
-		case "auto":
-			accelType := transcoder.DetectHardwareAccel()
-			hwAccel = transcoder.BuildHwAccelConfig(accelType)
-			log.Info().Str("hwaccel", string(accelType)).Msg("hardware acceleration detected")
-		case "none", "":
-			hwAccel = transcoder.BuildHwAccelConfig(transcoder.HwAccelNone)
-		default:
-			hwAccel = transcoder.BuildHwAccelConfig(transcoder.HwAccelType(cfg.HWAccel))
-			log.Info().Str("hwaccel", cfg.HWAccel).Msg("hardware acceleration forced")
-		}
-
-		tc = transcoder.NewSessionManager(tcCache, hwAccel, transcoder.NewFFmpegBuilder())
+		// Provider resolves on first transcode session, not at startup —
+		// keeps service.New fork-free. See hwaccel_provider.go for the
+		// Network.framework/atfork rationale.
+		hwAccelProvider = transcoder.NewHwAccelProvider(cfg.DataDir, cfg.HWAccel)
+		tc = transcoder.NewSessionManager(tcCache, hwAccelProvider, transcoder.NewFFmpegBuilder())
 	}
 
 	riverClient, err := worker.Setup(ctx, worker.Config{
@@ -115,7 +106,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		Matcher:        m,
 		Downloader:     dl,
 		TranscodeCache: tcCache,
-		HWAccel:        hwAccel,
+		HWAccel:        hwAccelProvider,
 		Hub:            hub,
 	})
 	if err != nil {

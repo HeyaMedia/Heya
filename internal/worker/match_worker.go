@@ -65,8 +65,16 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 			})
 		}
 
-		if matchResult.IsNew {
-			client := river.ClientFromContext[pgx.Tx](ctx)
+		client := river.ClientFromContext[pgx.Tx](ctx)
+
+		// Music: enrichment happens out-of-band via RefreshMusicArtistWorker
+		// (heya.media has no per-album fetch yet — the artist payload carries
+		// the full discography). Fan that out instead of MetadataFetchArgs.
+		if mediaType == sqlc.MediaTypeMusic {
+			if matchResult.IsNew && matchResult.ArtistID > 0 {
+				_, _ = client.Insert(ctx, RefreshMusicArtistArgs{ArtistID: matchResult.ArtistID}, nil)
+			}
+		} else if matchResult.IsNew {
 			client.Insert(ctx, MetadataFetchArgs{
 				MediaItemID:   updated.MediaItemID.Int64,
 				LibraryID:     job.Args.LibraryID,

@@ -223,12 +223,15 @@ type Album struct {
 }
 
 type Artist struct {
-	ID            int64       `json:"id"`
-	MediaItemID   int64       `json:"media_item_id"`
-	MusicbrainzID string      `json:"musicbrainz_id"`
-	SortName      string      `json:"sort_name"`
-	Biography     string      `json:"biography"`
-	SearchVector  interface{} `json:"search_vector"`
+	ID             int64              `json:"id"`
+	MediaItemID    int64              `json:"media_item_id"`
+	MusicbrainzID  string             `json:"musicbrainz_id"`
+	Name           string             `json:"name"`
+	SortName       string             `json:"sort_name"`
+	Disambiguation string             `json:"disambiguation"`
+	Biography      string             `json:"biography"`
+	SearchVector   interface{}        `json:"search_vector"`
+	EnrichedAt     pgtype.Timestamptz `json:"enriched_at"`
 }
 
 type Author struct {
@@ -597,15 +600,39 @@ type Session struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type SystemSetting struct {
+	Key       string             `json:"key"`
+	Value     []byte             `json:"value"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Track struct {
-	ID           int64       `json:"id"`
-	AlbumID      int64       `json:"album_id"`
-	DiscNumber   int32       `json:"disc_number"`
-	TrackNumber  int32       `json:"track_number"`
-	Title        string      `json:"title"`
-	DurationMs   int32       `json:"duration_ms"`
-	FilePath     string      `json:"file_path"`
-	SearchVector interface{} `json:"search_vector"`
+	ID            int64       `json:"id"`
+	AlbumID       int64       `json:"album_id"`
+	DiscNumber    int32       `json:"disc_number"`
+	TrackNumber   int32       `json:"track_number"`
+	Title         string      `json:"title"`
+	Duration      int32       `json:"duration"`
+	FilePath      string      `json:"file_path"`
+	LyricsPath    string      `json:"lyrics_path"`
+	SearchVector  interface{} `json:"search_vector"`
+	LibraryFileID pgtype.Int8 `json:"library_file_id"`
+}
+
+type TrackFile struct {
+	ID            int64              `json:"id"`
+	TrackID       int64              `json:"track_id"`
+	LibraryFileID int64              `json:"library_file_id"`
+	Format        string             `json:"format"`
+	QualityScore  int32              `json:"quality_score"`
+	BitrateKbps   int32              `json:"bitrate_kbps"`
+	SampleRateHz  int32              `json:"sample_rate_hz"`
+	BitDepth      int32              `json:"bit_depth"`
+	Channels      int32              `json:"channels"`
+	Duration      int32              `json:"duration"`
+	SizeBytes     int64              `json:"size_bytes"`
+	LyricsPath    string             `json:"lyrics_path"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type TvEpisode struct {

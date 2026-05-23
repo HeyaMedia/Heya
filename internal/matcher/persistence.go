@@ -594,7 +594,7 @@ func (m *Matcher) createMusic(ctx context.Context, mediaItemID int64, d *metadat
 			DiscNumber:  int32(t.DiscNumber),
 			TrackNumber: int32(t.TrackNumber),
 			Title:       t.Title,
-			DurationMs:  int32(t.DurationMs),
+			Duration:    int32(t.Duration),
 		})
 		if err != nil {
 			log.Warn().Err(err).Str("track", t.Title).Msg("error creating track")

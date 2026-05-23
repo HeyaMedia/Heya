@@ -53,7 +53,11 @@ CREATE TABLE match_candidates (
 CREATE INDEX idx_match_candidates_file ON match_candidates (library_file_id);
 CREATE INDEX idx_match_candidates_confidence ON match_candidates (confidence DESC);
 
+ALTER TABLE tracks ADD COLUMN library_file_id BIGINT REFERENCES library_files(id) ON DELETE CASCADE;
+CREATE INDEX idx_tracks_library_file_id ON tracks (library_file_id) WHERE library_file_id IS NOT NULL;
+
 -- +goose Down
+ALTER TABLE tracks DROP COLUMN library_file_id;
 DROP TABLE match_candidates;
 DROP TABLE library_files;
 DROP TYPE file_status;

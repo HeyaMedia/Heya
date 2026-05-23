@@ -118,6 +118,122 @@ func buildUniqueIDs(item sqlc.MediaItem) []UniqueID {
 	return result
 }
 
+// ArtistNFO mirrors the schema that internal/nfo reads back. Field order +
+// element names match real Jellyfin/Emby artist.nfo so round-tripping works.
+type ArtistNFO struct {
+	XMLName        xml.Name      `xml:"artist"`
+	Title          string        `xml:"title"`
+	SortName       string        `xml:"sortname,omitempty"`
+	Disambiguation string        `xml:"disambiguation,omitempty"`
+	Biography      string        `xml:"biography,omitempty"`
+	MBID           string        `xml:"musicbrainzartistid,omitempty"`
+	Genres         []string      `xml:"genre,omitempty"`
+	Albums         []AlbumRefNFO `xml:"album,omitempty"`
+}
+
+type AlbumRefNFO struct {
+	Title string `xml:"title"`
+}
+
+type AlbumNFO struct {
+	XMLName          xml.Name        `xml:"album"`
+	Title            string          `xml:"title"`
+	Artist           string          `xml:"artist,omitempty"`
+	AlbumArtist      string          `xml:"albumartist,omitempty"`
+	Year             string          `xml:"year,omitempty"`
+	ReleaseDate      string          `xml:"releasedate,omitempty"`
+	AlbumType        string          `xml:"type,omitempty"`
+	Label            string          `xml:"label,omitempty"`
+	Country          string          `xml:"country,omitempty"`
+	Barcode          string          `xml:"barcode,omitempty"`
+	MBAlbumID        string          `xml:"musicbrainzalbumid,omitempty"`
+	MBAlbumArtistID  string          `xml:"musicbrainzalbumartistid,omitempty"`
+	MBReleaseGroupID string          `xml:"musicbrainzreleasegroupid,omitempty"`
+	Genres           []string        `xml:"genre,omitempty"`
+	Tracks           []AlbumTrackNFO `xml:"track,omitempty"`
+}
+
+type AlbumTrackNFO struct {
+	Disc     int    `xml:"disc"`
+	Position int    `xml:"position"`
+	Title    string `xml:"title"`
+	Duration string `xml:"duration,omitempty"` // MM:SS
+}
+
+// WriteArtistNFO writes an artist.nfo at the artist directory. Overwrites
+// any existing file (the matcher's enrichment data is canonical and replaces
+// stale on-disk NFOs). artistDir is typically Library/Artist/.
+func WriteArtistNFO(artistDir string, artist sqlc.Artist, mediaItem sqlc.MediaItem, albumTitles []string) error {
+	nfoPath := filepath.Join(artistDir, "artist.nfo")
+
+	refs := make([]AlbumRefNFO, 0, len(albumTitles))
+	for _, t := range albumTitles {
+		if t != "" {
+			refs = append(refs, AlbumRefNFO{Title: t})
+		}
+	}
+
+	nfo := ArtistNFO{
+		Title:          artist.Name,
+		SortName:       artist.SortName,
+		Disambiguation: artist.Disambiguation,
+		Biography:      artist.Biography,
+		MBID:           artist.MusicbrainzID,
+		Albums:         refs,
+	}
+	_ = mediaItem // reserved for future genre/external_ids merging
+	return writeXML(nfoPath, nfo)
+}
+
+// WriteAlbumNFO writes album.nfo at the release directory. tracks must be
+// pre-ordered by (disc, position) for stable round-tripping.
+func WriteAlbumNFO(releaseDir string, artist sqlc.Artist, album sqlc.Album, tracks []sqlc.Track) error {
+	nfoPath := filepath.Join(releaseDir, "album.nfo")
+
+	trackNFOs := make([]AlbumTrackNFO, 0, len(tracks))
+	for _, t := range tracks {
+		disc := int(t.DiscNumber)
+		if disc == 0 {
+			disc = 1
+		}
+		trackNFOs = append(trackNFOs, AlbumTrackNFO{
+			Disc:     disc,
+			Position: int(t.TrackNumber),
+			Title:    t.Title,
+			Duration: formatDurationMinSec(int(t.Duration)),
+		})
+	}
+
+	releaseDateStr := ""
+	if album.ReleaseDate.Valid {
+		releaseDateStr = album.ReleaseDate.Time.Format("2006-01-02")
+	}
+
+	nfo := AlbumNFO{
+		Title:           album.Title,
+		Artist:          artist.Name,
+		AlbumArtist:     artist.Name,
+		Year:            album.Year,
+		ReleaseDate:     releaseDateStr,
+		AlbumType:       album.AlbumType,
+		Label:           album.Label,
+		Country:         album.Country,
+		Barcode:         album.Barcode,
+		MBAlbumID:       album.MusicbrainzID,
+		MBAlbumArtistID: artist.MusicbrainzID,
+		Genres:          append([]string(nil), album.Genres...),
+		Tracks:          trackNFOs,
+	}
+	return writeXML(nfoPath, nfo)
+}
+
+func formatDurationMinSec(seconds int) string {
+	if seconds <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%02d:%02d", seconds/60, seconds%60)
+}
+
 func MediaDir(filePath string) string {
 	dir := filepath.Dir(filePath)
 	base := strings.ToLower(filepath.Base(dir))

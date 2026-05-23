@@ -216,10 +216,10 @@ func InferSegmentMediaHint(segments []string, index int, prepared PreparedSegmen
 		return inferred
 	}
 
+	if LooksLikeAudioRelease(prepared.CleanedName) {
+		return MediaAudio
+	}
 	if LooksLikeVideoRelease(prepared.CleanedName) {
-		if LooksLikeAudioRelease(prepared.CleanedName) {
-			return MediaUnknown
-		}
 		return MediaVideo
 	}
 
@@ -243,10 +243,15 @@ func LooksLikeTvRelease(name string) bool {
 	return tvMarkerRE.MatchString(name) || LooksLikeAnimeRelease(name)
 }
 
+var curatedMusicRE = regexp.MustCompile(`(?i)\s-\s(?:Album|EP|Single)\s-\s(?:19|20)\d{2}\s-\s`)
+
 func LooksLikeAudioRelease(name string) bool {
 	audioRE := regexp.MustCompile(`(?i)\b(?:FLAC|MP3|AAC|ALAC|WAV|OGG|OPUS)\b`)
 	videoCodecRE := regexp.MustCompile(`(?i)\b(?:x26[45]|H[. ]?26[45])\b`)
-	return audioRE.MatchString(name) && !videoCodecRE.MatchString(name)
+	if audioRE.MatchString(name) && !videoCodecRE.MatchString(name) {
+		return true
+	}
+	return curatedMusicRE.MatchString(name)
 }
 
 func LooksLikeAnimeRelease(name string) bool {

@@ -241,7 +241,7 @@ func renderMusicDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem
 			fmt.Println()
 			t := ui.NewTable("#", "TITLE", "DURATION")
 			for _, tr := range tracks {
-				dur := fmt.Sprintf("%d:%02d", tr.DurationMs/60000, (tr.DurationMs%60000)/1000)
+				dur := fmt.Sprintf("%d:%02d", tr.Duration/60, tr.Duration%60)
 				t.AddRow(strconv.Itoa(int(tr.TrackNumber)), tr.Title, dur)
 			}
 			fmt.Println(t.Render())

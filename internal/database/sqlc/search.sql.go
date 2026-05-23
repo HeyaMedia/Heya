@@ -474,7 +474,7 @@ func (q *Queries) SearchPeopleCount(ctx context.Context, lower string) (int64, e
 }
 
 const searchTracks = `-- name: SearchTracks :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration_ms, t.file_path, t.search_vector,
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id,
        a.title AS album_title,
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
@@ -511,9 +511,11 @@ type SearchTracksRow struct {
 	DiscNumber        int32       `json:"disc_number"`
 	TrackNumber       int32       `json:"track_number"`
 	Title             string      `json:"title"`
-	DurationMs        int32       `json:"duration_ms"`
+	Duration          int32       `json:"duration"`
 	FilePath          string      `json:"file_path"`
+	LyricsPath        string      `json:"lyrics_path"`
 	SearchVector      interface{} `json:"search_vector"`
+	LibraryFileID     pgtype.Int8 `json:"library_file_id"`
 	AlbumTitle        string      `json:"album_title"`
 	AlbumCoverPath    string      `json:"album_cover_path"`
 	ArtistMediaItemID int64       `json:"artist_media_item_id"`
@@ -536,9 +538,11 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.DiscNumber,
 			&i.TrackNumber,
 			&i.Title,
-			&i.DurationMs,
+			&i.Duration,
 			&i.FilePath,
+			&i.LyricsPath,
 			&i.SearchVector,
+			&i.LibraryFileID,
 			&i.AlbumTitle,
 			&i.AlbumCoverPath,
 			&i.ArtistMediaItemID,

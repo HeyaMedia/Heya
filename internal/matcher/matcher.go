@@ -18,6 +18,10 @@ type MatchInfo struct {
 	ProviderName string
 	ProviderID   string
 	IsNew        bool
+	// ArtistID is set when a music match creates or links to an artist. The
+	// MetadataMatchWorker uses it to enqueue a RefreshMusicArtist job for
+	// post-match enrichment.
+	ArtistID int64
 }
 
 type Matcher struct {
@@ -38,6 +42,10 @@ func New(db *pgxpool.Pool, opts MatchOptions, heya *heyamedia.HeyaProvider) *Mat
 
 func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType sqlc.MediaType) (MatchResult, error) {
 	var result MatchResult
+
+	if mediaType == sqlc.MediaTypeMusic {
+		return m.matchMusicLibrary(ctx, libraryID)
+	}
 
 	files, err := m.q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
 		LibraryID: libraryID,
@@ -74,6 +82,9 @@ func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType s
 }
 
 func (m *Matcher) MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) (MatchInfo, error) {
+	if mediaType == sqlc.MediaTypeMusic {
+		return m.matchMusicSingleFile(ctx, file, libraryID)
+	}
 	return m.matchFile(ctx, file, mediaType, libraryID)
 }
 

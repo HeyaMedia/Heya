@@ -101,6 +101,12 @@
             v-if="activeTab === 'mediainfo'"
             :media-id="mediaId!"
           />
+          <MetadataEditorSubtitles
+            v-if="activeTab === 'subtitles'"
+            :media-id="mediaId!"
+            :detail="detail"
+            @refresh="fetchDetail"
+          />
         </template>
 
         <template v-if="mode === 'season'">
@@ -152,6 +158,13 @@
             :media-id="mediaId!"
             :file-id="episodeFileId"
           />
+          <MetadataEditorSubtitles
+            v-if="activeTab === 'subtitles'"
+            :media-id="mediaId!"
+            :file-id="episodeFileId"
+            :detail="detail"
+            @refresh="fetchDetail"
+          />
         </template>
       </div>
     </div>
@@ -191,6 +204,7 @@ const allTabs = [
   { key: 'people', label: 'Cast & Crew', icon: 'users', modes: ['media'] },
   { key: 'images', label: 'Images', icon: 'grid', modes: ['media', 'season', 'episode'] },
   { key: 'mediainfo', label: 'Media Info', icon: 'film', modes: ['media', 'episode'] },
+  { key: 'subtitles', label: 'Subtitles', icon: 'subtitles', modes: ['media', 'episode'] },
 ]
 
 const visibleTabs = computed(() => allTabs.filter(t => t.modes.includes(mode.value)))

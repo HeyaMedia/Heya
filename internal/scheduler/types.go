@@ -5,10 +5,11 @@ import "context"
 type TaskID string
 
 const (
-	TaskGenerateTrickplay  TaskID = "generate_trickplay"
-	TaskGenerateThumbnails TaskID = "generate_thumbnails"
-	TaskScanLibraries      TaskID = "scan_libraries"
-	TaskRefreshMetadata    TaskID = "refresh_metadata"
+	TaskGenerateTrickplay   TaskID = "generate_trickplay"
+	TaskGenerateThumbnails  TaskID = "generate_thumbnails"
+	TaskScanLibraries       TaskID = "scan_libraries"
+	TaskRefreshMetadata     TaskID = "refresh_metadata"
+	TaskRefreshMusicArtists TaskID = "refresh_music_artists"
 )
 
 type TaskState string

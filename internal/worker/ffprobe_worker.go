@@ -197,11 +197,23 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 		Msg("ffprobe complete")
 
 	hasVideo := false
-	for _, s := range info.Streams {
-		if s.CodecType == "video" {
+	hasAudio := false
+	var primaryAudio *StreamInfo
+	for i := range info.Streams {
+		s := &info.Streams[i]
+		switch s.CodecType {
+		case "video":
 			hasVideo = true
-			break
+		case "audio":
+			hasAudio = true
+			if primaryAudio == nil {
+				primaryAudio = s
+			}
 		}
+	}
+
+	if hasAudio && primaryAudio != nil {
+		w.updateAudioTrackFile(ctx, q, job.Args.LibraryFileID, info, primaryAudio)
 	}
 
 	if hasVideo && !vfs.IsSMBPath(job.Args.FilePath) {
@@ -268,4 +280,120 @@ func ffprobeSMB(ctx context.Context, smbPath string) ([]byte, error) {
 	)
 	cmd.Stdin = f.(io.Reader)
 	return cmd.Output()
+}
+
+// updateAudioTrackFile writes probe results to the matching track_files row
+// (if one exists — matcher creates it). Updates bitrate / sample_rate /
+// bit_depth / channels / duration / size and recomputes quality_score using
+// the real numbers (no longer extension-only).
+func (w *FFProbeWorker) updateAudioTrackFile(ctx context.Context, q *sqlc.Queries, libraryFileID int64, info *MediaInfo, audio *StreamInfo) {
+	tf, err := q.GetTrackFileByLibraryFileID(ctx, libraryFileID)
+	if err != nil {
+		// Matcher hasn't run yet; nothing to update. The matcher will fill
+		// these fields itself when it reads media_info on track_files insert.
+		log.Debug().Int64("library_file_id", libraryFileID).Msg("no track_files row yet for audio probe")
+		return
+	}
+
+	bitrate := int32(parseFloatString(audio.BitRate) / 1000)
+	if bitrate == 0 && info.Format.BitRate != "" {
+		bitrate = int32(parseFloatString(info.Format.BitRate) / 1000)
+	}
+	sampleRate := int32(parseFloatString(audio.SampleRate))
+	bitDepth := int32(parseIntString(audio.BitsPerRawSample))
+	channels := int32(audio.Channels)
+	duration := int32(info.Duration)
+	if duration == 0 && audio.Duration != "" {
+		duration = int32(parseFloatString(audio.Duration))
+	}
+
+	score := refinedQualityScore(tf.Format, bitrate, bitDepth, sampleRate)
+
+	if err := q.UpdateTrackFileProbeData(ctx, sqlc.UpdateTrackFileProbeDataParams{
+		ID:           tf.ID,
+		BitrateKbps:  bitrate,
+		SampleRateHz: sampleRate,
+		BitDepth:     bitDepth,
+		Channels:     channels,
+		Duration:     duration,
+		QualityScore: int32(score),
+	}); err != nil {
+		log.Warn().Err(err).Int64("track_file_id", tf.ID).Msg("update track_file probe data failed")
+		return
+	}
+
+	log.Debug().
+		Int64("track_file_id", tf.ID).
+		Str("format", tf.Format).
+		Int32("bitrate_kbps", bitrate).
+		Int32("sample_rate", sampleRate).
+		Int32("bit_depth", bitDepth).
+		Int("score", score).
+		Msg("audio probe written")
+}
+
+// refinedQualityScore is the v2 ranking that incorporates actual ffprobe
+// data. Base by codec; lossless bumps for bit-depth (24-bit > 16-bit) and
+// sample rate (96k > 48k > 44.1k); lossy bumps for bitrate.
+func refinedQualityScore(format string, bitrateKbps, bitDepth, sampleRateHz int32) int {
+	base := extensionQualityBase(format)
+	switch format {
+	case "flac", "alac", "wav":
+		if bitDepth > 16 {
+			base += int(bitDepth-16) * 30
+		}
+		if sampleRateHz > 48000 {
+			base += int((sampleRateHz - 48000) / 1000)
+		}
+	default:
+		// Lossy: bitrate is the dominant signal. 320kbps gets +120, 192 gets +72.
+		base += int(bitrateKbps) * 4 / 10
+	}
+	return base
+}
+
+// extensionQualityBase mirrors matcher.audioQualityScore (which we can't
+// import here without a cycle). Kept in sync by hand.
+func extensionQualityBase(format string) int {
+	switch strings.ToLower(strings.TrimPrefix(format, ".")) {
+	case "flac":
+		return 1000
+	case "alac":
+		return 950
+	case "wav":
+		return 900
+	case "opus":
+		return 500
+	case "ogg":
+		return 450
+	case "aac":
+		return 350
+	case "m4a":
+		return 300
+	case "mp3":
+		return 200
+	}
+	return 0
+}
+
+func parseFloatString(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return f
+}
+
+func parseIntString(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }

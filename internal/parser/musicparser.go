@@ -2,6 +2,7 @@ package parser
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -10,6 +11,157 @@ func canParseMusic(_ PreparedSegment, mediaHint SceneMediaKind) bool {
 }
 
 func parseMusic(prepared PreparedSegment) *SceneReleaseParse {
+	if curated := parseMusicCurated(prepared); curated != nil {
+		return curated
+	}
+	return parseMusicScene(prepared)
+}
+
+var (
+	curatedTrackRejectRE = regexp.MustCompile(`^\d{2,4}\s*-\s*`)
+	curatedYearRE        = regexp.MustCompile(`^(?:19|20)\d{2}$`)
+	trackFourDigitRE     = regexp.MustCompile(`^(\d{2})(\d{2})\s*-\s*(.+)$`)
+	trackTwoDigitRE      = regexp.MustCompile(`^(\d{2})\s*-\s*(.+)$`)
+	artistDisambigRE     = regexp.MustCompile(`^(.*?)\s*\(([^()]+)\)\s*$`)
+	sceneMarkerRE        = regexp.MustCompile(`(?i)\b(?:FLAC|MP3|AAC|ALAC|WAV|OGG|OPUS|WEB|WEBFLAC|WEBMP3|WEBAAC|WEBALAC|BLURAY|VINYL|CASSETTE|BIT|KHZ|REPACK|RERIP|PROPER|xpost)\b`)
+	sceneCatalogRE       = regexp.MustCompile(`[\[(][A-Z][A-Z0-9_]{2,}[\])]`)
+	sceneYearBracketRE   = regexp.MustCompile(`[\[(](?:19|20)\d{2}[\])]`)
+)
+
+func parseMusicCurated(prepared PreparedSegment) *SceneReleaseParse {
+	name := strings.TrimSpace(prepared.CleanedName)
+	if name == "" || !strings.Contains(name, " - ") {
+		return nil
+	}
+	if curatedTrackRejectRE.MatchString(name) {
+		return nil
+	}
+
+	if structured := parseCuratedStructured(name); structured != nil {
+		structured.RawName = prepared.RawName
+		structured.NormalizedName = prepared.CleanedName
+		structured.Flags = append([]string{}, prepared.Flags...)
+		return structured
+	}
+
+	if prepared.Extension != "" {
+		return nil
+	}
+	if sceneMarkerRE.MatchString(name) || sceneCatalogRE.MatchString(name) || sceneYearBracketRE.MatchString(name) {
+		return nil
+	}
+
+	sparse := parseCuratedSparse(name)
+	if sparse == nil {
+		return nil
+	}
+	sparse.RawName = prepared.RawName
+	sparse.NormalizedName = prepared.CleanedName
+	sparse.Flags = append([]string{}, prepared.Flags...)
+	return sparse
+}
+
+func parseCuratedStructured(name string) *SceneReleaseParse {
+	parts := strings.SplitN(name, " - ", 4)
+	if len(parts) < 4 {
+		return nil
+	}
+	artist := strings.TrimSpace(parts[0])
+	kindToken := strings.TrimSpace(parts[1])
+	year := strings.TrimSpace(parts[2])
+	album := strings.TrimSpace(parts[3])
+
+	kind := strings.ToLower(kindToken)
+	if kind != "album" && kind != "ep" && kind != "single" {
+		return nil
+	}
+	if !curatedYearRE.MatchString(year) {
+		return nil
+	}
+	if artist == "" || album == "" {
+		return nil
+	}
+
+	return &SceneReleaseParse{
+		Strategy:    StrategyMusicCurated,
+		Media:       MediaAudio,
+		Title:       album,
+		Artist:      artist,
+		Album:       album,
+		ReleaseKind: kind,
+		Year:        year,
+		Sources:     []string{},
+		Codecs:      []string{},
+		Seasons:     []int{},
+		Episodes:    []int{},
+		Score:       50,
+	}
+}
+
+func parseCuratedSparse(name string) *SceneReleaseParse {
+	idx := strings.Index(name, " - ")
+	if idx < 0 {
+		return nil
+	}
+	artist := strings.TrimSpace(name[:idx])
+	album := strings.TrimSpace(name[idx+3:])
+	if artist == "" || album == "" {
+		return nil
+	}
+
+	return &SceneReleaseParse{
+		Strategy: StrategyMusicCurated,
+		Media:    MediaAudio,
+		Title:    album,
+		Artist:   artist,
+		Album:    album,
+		Sources:  []string{},
+		Codecs:   []string{},
+		Seasons:  []int{},
+		Episodes: []int{},
+		Score:    25,
+	}
+}
+
+func splitArtistDisambiguator(folderName string) (artist, disambiguation string) {
+	name := strings.TrimSpace(folderName)
+	if m := artistDisambigRE.FindStringSubmatch(name); m != nil {
+		return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
+	}
+	return name, ""
+}
+
+func parseTrackFilename(basename string) (disc, track int, title string, ok bool) {
+	name := basename
+	if idx := strings.LastIndex(name, "."); idx > 0 {
+		name = name[:idx]
+	}
+	name = strings.TrimSpace(name)
+
+	if m := trackFourDigitRE.FindStringSubmatch(name); m != nil {
+		d, _ := strconv.Atoi(m[1])
+		t, _ := strconv.Atoi(m[2])
+		if d == 0 {
+			d = 1
+		}
+		return d, t, strings.TrimSpace(m[3]), true
+	}
+	if m := trackTwoDigitRE.FindStringSubmatch(name); m != nil {
+		t, _ := strconv.Atoi(m[1])
+		return 1, t, strings.TrimSpace(m[2]), true
+	}
+	return 0, 0, "", false
+}
+
+func isTrackExtension(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".flac", ".m4a", ".mp3", ".aac", ".wav", ".ogg", ".opus":
+		return true
+	}
+	return false
+}
+
+func parseMusicScene(prepared PreparedSegment) *SceneReleaseParse {
 	workingName := prepared.CleanedName
 	workingName = regexp.MustCompile(`(?i)\bWEBFLAC\b`).ReplaceAllString(workingName, "WEB FLAC")
 	workingName = regexp.MustCompile(`(?i)\bWEBMP3\b`).ReplaceAllString(workingName, "WEB MP3")

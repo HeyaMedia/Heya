@@ -38,6 +38,12 @@ type ScanPayload struct {
 	Discovered  int    `json:"discovered,omitempty"`
 	New         int    `json:"new,omitempty"`
 	Missing     int    `json:"missing,omitempty"`
+	// Phase + Total + Done are used by the music post-scan fan-out to report
+	// per-artist refresh progress on EventScanProgress (e.g. "refresh 17/200").
+	Phase      string `json:"phase,omitempty"` // "scan" | "match" | "refresh"
+	Total      int    `json:"total,omitempty"`
+	Done       int    `json:"done,omitempty"`
+	CurrentRef string `json:"current_ref,omitempty"` // e.g. artist name
 }
 
 type MediaPayload struct {

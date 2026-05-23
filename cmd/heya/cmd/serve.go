@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -65,12 +66,14 @@ var serveCmd = &cobra.Command{
 
 		bridgeLogToHub(appCtx, logRing, app.EventHub())
 		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
+		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
 
 		taskRunner := scheduler.NewRunner(app.DBPool(), app.EventHub(), cfg.DataDir)
 		taskRunner.Register(&scheduler.GenerateTrickplayTask{DB: app.DBPool(), DataDir: cfg.DataDir})
 		taskRunner.Register(&scheduler.GenerateThumbnailsTask{DB: app.DBPool(), DataDir: cfg.DataDir})
 		taskRunner.Register(app.ScanLibrariesTask())
 		taskRunner.Register(&scheduler.RefreshMetadataTask{DB: app.DBPool(), River: app.RiverClient()})
+		taskRunner.Register(&scheduler.RefreshMusicArtistsTask{DB: app.DBPool(), River: app.RiverClient()})
 		app.SetScheduler(taskRunner)
 		taskRunner.Start(appCtx)
 
@@ -118,15 +121,17 @@ var serveCmd = &cobra.Command{
 		<-sigCtx.Done()
 		log.Info().Msg("shutting down")
 
-		// Hard backstop: if anything in the shutdown sequence hangs
-		// (tsnet's WireGuard / magicsock teardown has been the worst
-		// offender — it spins goroutines that don't always notice Close
-		// in dev cycles, pegging a CPU until the kernel reaps them),
-		// kill the process forcefully. 3s is enough for the graceful
-		// path below to finish in the happy case.
+		// Hard backstop: if anything in the shutdown sequence hangs,
+		// kill the process forcefully. 8 seconds is enough for the
+		// graceful path below (which gives tsnet a real chance to
+		// flush its state dir + close magicsock cleanly — abandoning
+		// tsnet mid-teardown leaves the state dir in a partial state
+		// that can put the *next* start into a busy loop, which is
+		// almost certainly what's causing the 100% CPU after rapid
+		// air reloads).
 		go func() {
-			<-time.After(3 * time.Second)
-			log.Warn().Msg("shutdown took >3s, forcing exit")
+			<-time.After(8 * time.Second)
+			log.Warn().Msg("shutdown took >8s, forcing exit")
 			os.Exit(1)
 		}()
 
@@ -137,12 +142,12 @@ var serveCmd = &cobra.Command{
 		// observes cancellation before we touch their resources.
 		appCancel()
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
 
-		// Each step runs in its own goroutine with the shared 2s budget.
-		// Tailscale Close especially can spin if magicsock is mid-handshake;
-		// time-boxing it keeps a stuck tsnet from blocking the whole exit.
+		// Three independent shutdowns in parallel. The 6s budget covers
+		// the slowest one (tsnet); workers + http server finish in well
+		// under a second.
 		var wg sync.WaitGroup
 		wg.Add(3)
 		go func() {
@@ -167,20 +172,21 @@ var serveCmd = &cobra.Command{
 				}()
 				select {
 				case <-done:
+					log.Info().Msg("tailscale shut down cleanly")
 				case <-shutdownCtx.Done():
-					log.Warn().Msg("tailscale shutdown timed out, abandoning")
+					log.Warn().Msg("tailscale shutdown timed out — state dir may be partial, next start may need extra time")
 				}
 			}
 		}()
 
-		// Bounded wait — never block beyond shutdownCtx + a tiny grace.
-		waitWithDeadline(&wg, 2500*time.Millisecond)
+		// Bounded wait — give shutdown the full 6s budget plus a small
+		// grace before we trust waitWithDeadline to give up.
+		waitWithDeadline(&wg, 6500*time.Millisecond)
 
 		// Bypass the defer chain entirely: pgxpool.Close in deferred
 		// app.Close has been observed to block when River goroutines
-		// retry queries against a closing pool, and we don't trust the
-		// runtime to tear cleanly with tsnet's cgo goroutines still
-		// active. Explicit exit is the only reliable way out.
+		// retry queries against a closing pool. Explicit exit is the
+		// only reliable way out.
 		log.Info().Msg("clean shutdown complete")
 		os.Exit(0)
 		return nil
@@ -201,10 +207,27 @@ func waitWithDeadline(wg *sync.WaitGroup, d time.Duration) {
 
 func reuseAddrListen(addr string) (net.Listener, error) {
 	lc := net.ListenConfig{
+		// SO_REUSEADDR alone lets us bind a port that's in TIME_WAIT,
+		// but on macOS/BSD it does NOT let us bind a port whose previous
+		// owner just exited with active connections still draining (the
+		// usual air-reload case: old proc has WS handlers + in-flight
+		// requests, kernel needs ~a second to FIN them all). Adding
+		// SO_REUSEPORT bypasses that wait: the new process can grab
+		// the listener even while the old socket is mid-teardown.
+		// Both flags are safe under Linux (REUSEPORT is the load-
+		// balancing flag there, but our use case never has two heya
+		// processes alive together).
 		Control: func(network, address string, c syscall.RawConn) error {
 			var opErr error
 			if err := c.Control(func(fd uintptr) {
-				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+				if e := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); e != nil {
+					opErr = e
+					return
+				}
+				if e := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); e != nil {
+					opErr = e
+					return
+				}
 			}); err != nil {
 				return err
 			}
@@ -212,6 +235,30 @@ func reuseAddrListen(addr string) (net.Listener, error) {
 		},
 	}
 	return lc.Listen(context.Background(), "tcp", addr)
+}
+
+// logRuntimeStatsPeriodically emits a single-line trend signal every 30s so
+// we can spot goroutine leaks / heap growth from the logs without active
+// pprof. If goroutines climb monotonically while CPU sits high, something
+// is leaking; if they're stable but huge, something is *populated* badly.
+func logRuntimeStatsPeriodically(ctx context.Context, hub *eventhub.Hub) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var ms runtime.MemStats
+			runtime.ReadMemStats(&ms)
+			log.Debug().
+				Int("goroutines", runtime.NumGoroutine()).
+				Int("hub_subs", hub.SubscriberCount()).
+				Uint64("heap_inuse_mb", ms.HeapInuse>>20).
+				Int64("cgo_calls", runtime.NumCgoCall()).
+				Msg("runtime stats")
+		}
+	}
 }
 
 func bridgeLogToHub(ctx context.Context, ring *logbuf.RingBuffer, hub *eventhub.Hub) {

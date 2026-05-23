@@ -194,3 +194,43 @@ func (ForceRefreshImagesArgs) Kind() string { return "force_refresh_images" }
 func (ForceRefreshImagesArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "images", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
+
+// SaveMusicNFOArgs writes artist.nfo + album.nfo files for one artist's
+// release tree. Triggered by RefreshMusicArtistWorker when the library's
+// SaveNFO setting is on. Scoped to one artist so a refresh that only touched
+// Calvin Harris doesn't rewrite Ado's NFOs unnecessarily.
+type SaveMusicNFOArgs struct {
+	ArtistID int64 `json:"artist_id"`
+}
+
+func (SaveMusicNFOArgs) Kind() string { return "save_music_nfo" }
+func (SaveMusicNFOArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+}
+
+// RefreshMusicArtistArgs schedules a heya.media enrichment pass for one
+// artist. Fanned out per-artist after a music library scan and also enqueued
+// inline by MetadataMatchWorker when a new artist is created mid-scan. Unique
+// by (ArtistID, Force) so concurrent matches won't duplicate work.
+//
+// BatchLibraryID + BatchTotal + BatchPosition together let the worker emit
+// "Refreshing 17/200 (Calvin Harris)" progress events without consulting
+// River's job table — they're set by the fan-out caller. Since the
+// music_metadata queue runs MaxWorkers=1, BatchPosition is just the loop
+// index from the fan-out and matches the order workers will pick jobs up.
+type RefreshMusicArtistArgs struct {
+	ArtistID       int64 `json:"artist_id"`
+	Force          bool  `json:"force,omitempty"`
+	BatchLibraryID int64 `json:"batch_library_id,omitempty"`
+	BatchTotal     int   `json:"batch_total,omitempty"`
+	BatchPosition  int   `json:"batch_position,omitempty"`
+}
+
+func (RefreshMusicArtistArgs) Kind() string { return "refresh_music_artist" }
+func (RefreshMusicArtistArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "music_metadata",
+		MaxAttempts: 3,
+		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+	}
+}

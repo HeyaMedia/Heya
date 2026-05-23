@@ -718,14 +718,14 @@ func parseSegIdx(name string) int {
 
 type SessionManager struct {
 	cache   *CacheManager
-	hwAccel HwAccelConfig
+	hwAccel *HwAccelProvider // resolves lazily on first HWAccel() call
 	builder CommandBuilder
 
 	mu       sync.Mutex
 	sessions map[string]*TranscodeSession
 }
 
-func NewSessionManager(cache *CacheManager, hwAccel HwAccelConfig, builder CommandBuilder) *SessionManager {
+func NewSessionManager(cache *CacheManager, hwAccel *HwAccelProvider, builder CommandBuilder) *SessionManager {
 	cache.Clear()
 	sm := &SessionManager{
 		cache:    cache,
@@ -750,7 +750,7 @@ func FormatKey(fileID int64, audioTrack int, sessionID string) string {
 }
 
 func (m *SessionManager) HWAccel() HwAccelConfig {
-	return m.hwAccel
+	return m.hwAccel.Get()
 }
 
 func (m *SessionManager) GetExisting(fileID int64) *TranscodeSession {

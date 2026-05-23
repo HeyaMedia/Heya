@@ -53,12 +53,66 @@ type MovieNFO struct {
 }
 
 type ArtistNFO struct {
-	XMLName   xml.Name `xml:"artist"`
-	Name      string   `xml:"name"`
-	Biography string   `xml:"biography"`
-	Born      string   `xml:"born"`
-	Died      string   `xml:"died"`
-	MBID      string   `xml:"musicBrainzArtistID"`
+	XMLName     xml.Name      `xml:"artist"`
+	Title       string        `xml:"title"`
+	Name        string        `xml:"name"`
+	Biography   string        `xml:"biography"`
+	Born        string        `xml:"born"`
+	Died        string        `xml:"died"`
+	MBID        string        `xml:"musicbrainzartistid"`
+	AudioDBID   string        `xml:"audiodbartistid"`
+	Disambig    string        `xml:"disambiguation"`
+	SortName    string        `xml:"sortname"`
+	Genres      []string      `xml:"genre"`
+	Art         ArtNFO        `xml:"art"`
+	AlbumTitles []AlbumRefNFO `xml:"album"`
+}
+
+type AlbumRefNFO struct {
+	Title string `xml:"title"`
+}
+
+type AlbumNFO struct {
+	XMLName          xml.Name   `xml:"album"`
+	Title            string     `xml:"title"`
+	Artist           string     `xml:"artist"`
+	AlbumArtist      string     `xml:"albumartist"`
+	Year             string     `xml:"year"`
+	Premiered        string     `xml:"premiered"`
+	ReleaseDate      string     `xml:"releasedate"`
+	Runtime          string     `xml:"runtime"`
+	Review           string     `xml:"review"`
+	Outline          string     `xml:"outline"`
+	Genres           []string   `xml:"genre"`
+	Studios          []string   `xml:"studio"`
+	Tags             []string   `xml:"tag"`
+	Label            string     `xml:"label"`
+	Country          string     `xml:"country"`
+	Barcode          string     `xml:"barcode"`
+	AlbumType        string     `xml:"type"`
+	MBAlbumID        string     `xml:"musicbrainzalbumid"`
+	MBAlbumArtistID  string     `xml:"musicbrainzalbumartistid"`
+	MBReleaseGroupID string     `xml:"musicbrainzreleasegroupid"`
+	AudioDBAlbumID   string     `xml:"audiodbalbumid"`
+	AudioDBArtistID  string     `xml:"audiodbartistid"`
+	Art              ArtNFO     `xml:"art"`
+	Tracks           []TrackNFO `xml:"track"`
+}
+
+type TrackNFO struct {
+	Disc     int    `xml:"disc"`
+	Position int    `xml:"position"`
+	Title    string `xml:"title"`
+	Duration string `xml:"duration"`
+}
+
+type ArtNFO struct {
+	Poster    string   `xml:"poster"`
+	Fanart    []string `xml:"fanart"`
+	Banner    string   `xml:"banner"`
+	Clearart  string   `xml:"clearart"`
+	Clearlogo string   `xml:"clearlogo"`
+	Disc      string   `xml:"disc"`
 }
 
 type UniqueID struct {
@@ -76,20 +130,34 @@ type ActorNFO struct {
 }
 
 type ParsedNFO struct {
-	Title         string
-	OriginalTitle string
-	Year          string
-	Plot          string
-	TMDBID        string
-	IMDBID        string
-	TVDBID        string
-	MBID          string
-	Rating        string
-	Genres        []string
-	Tags          []string
-	Studios       []string
-	Actors        []ActorNFO
-	Kind          string // "tvshow", "movie", "artist"
+	Title            string
+	OriginalTitle    string
+	Year             string
+	Plot             string
+	TMDBID           string
+	IMDBID           string
+	TVDBID           string
+	MBID             string
+	MBAlbumID        string
+	MBAlbumArtistID  string
+	MBReleaseGroupID string
+	AlbumArtist      string
+	ReleaseDate      string
+	Disambiguation   string
+	SortName         string
+	Label            string
+	Country          string
+	Barcode          string
+	AlbumType        string
+	Rating           string
+	Genres           []string
+	Tags             []string
+	Studios          []string
+	Actors           []ActorNFO
+	Tracks           []TrackNFO
+	Art              ArtNFO
+	AlbumTitles      []string
+	Kind             string // "tvshow", "movie", "artist", "album"
 }
 
 func FindAndParse(fsys fs.FS, dir string) *ParsedNFO {
@@ -100,6 +168,7 @@ func FindAndParse(fsys fs.FS, dir string) *ParsedNFO {
 		{"tvshow.nfo", "tvshow"},
 		{"movie.nfo", "movie"},
 		{"artist.nfo", "artist"},
+		{"album.nfo", "album"},
 	}
 
 	for _, nf := range nfoFiles {
@@ -131,6 +200,7 @@ func FindAndParseInDir(dir string) *ParsedNFO {
 		{"tvshow.nfo", "tvshow"},
 		{"movie.nfo", "movie"},
 		{"artist.nfo", "artist"},
+		{"album.nfo", "album"},
 	}
 
 	for _, nf := range nfoFiles {
@@ -215,15 +285,69 @@ func parseNFOBytes(data []byte, kind string) (*ParsedNFO, error) {
 		if err := xml.Unmarshal(data, &a); err != nil {
 			return nil, err
 		}
+		title := a.Title
+		if title == "" {
+			title = a.Name
+		}
+		albumTitles := make([]string, 0, len(a.AlbumTitles))
+		for _, al := range a.AlbumTitles {
+			if al.Title != "" {
+				albumTitles = append(albumTitles, al.Title)
+			}
+		}
 		return &ParsedNFO{
-			Title: a.Name,
-			Plot:  a.Biography,
-			MBID:  a.MBID,
-			Kind:  "artist",
+			Title:          title,
+			Plot:           a.Biography,
+			MBID:           a.MBID,
+			Disambiguation: a.Disambig,
+			SortName:       a.SortName,
+			Genres:         a.Genres,
+			Art:            a.Art,
+			AlbumTitles:    albumTitles,
+			Kind:           "artist",
+		}, nil
+
+	case "album":
+		var al AlbumNFO
+		if err := xml.Unmarshal(data, &al); err != nil {
+			return nil, err
+		}
+		artistName := al.AlbumArtist
+		if artistName == "" {
+			artistName = al.Artist
+		}
+		return &ParsedNFO{
+			Title:            al.Title,
+			Year:             al.Year,
+			Plot:             al.Outline,
+			AlbumArtist:      artistName,
+			ReleaseDate:      firstNonEmpty(al.ReleaseDate, al.Premiered),
+			Label:            al.Label,
+			Country:          al.Country,
+			Barcode:          al.Barcode,
+			AlbumType:        al.AlbumType,
+			Genres:           al.Genres,
+			Tags:             al.Tags,
+			Studios:          al.Studios,
+			MBAlbumID:        al.MBAlbumID,
+			MBAlbumArtistID:  al.MBAlbumArtistID,
+			MBReleaseGroupID: al.MBReleaseGroupID,
+			Tracks:           al.Tracks,
+			Art:              al.Art,
+			Kind:             "album",
 		}, nil
 	}
 
 	return nil, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func fillFromUniqueIDs(p *ParsedNFO, ids []UniqueID) {

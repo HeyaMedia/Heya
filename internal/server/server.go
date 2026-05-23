@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/logbuf"
@@ -28,6 +29,12 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 
 	if o.hub != nil {
 		mux.HandleFunc("GET /api/ws", handleWebSocket(o.hub, app.SessionLookup()))
+		// pprof + runtime stats. Admin-only because these dump goroutine
+		// stacks, heap contents, and 30-second CPU profiles. The mux is
+		// wrapped by the admin gate when we register it.
+		debugMux := http.NewServeMux()
+		registerDebugRoutes(debugMux, o.hub)
+		mux.Handle("/api/debug/", auth.Middleware(app.SessionLookup())(adminOnly(debugMux)))
 	}
 
 	docsMux := http.NewServeMux()

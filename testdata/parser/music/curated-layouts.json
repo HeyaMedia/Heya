@@ -1,0 +1,539 @@
+[
+  {
+    "label": "META: schema for the new music-curated fields",
+    "kind": "doc",
+    "input": "(not run — describes the fields this fixture adds to SceneReleaseParse in Phase 1)",
+    "expected": {
+      "release": {
+        "_doc_strategy": "music-curated — distinct from audio-heuristic; selected when the path looks like Artist/Release/Track and not like a scene release",
+        "_doc_artist": "artist display name with any (parenthetical disambiguator) stripped",
+        "_doc_artistDisambiguation": "the bare disambiguator text, e.g. 'Scottish DJ and producer' (no parens)",
+        "_doc_album": "release title alone (NOT 'Artist - Album'); audio-heuristic strategy still keeps the legacy 'Artist - Album' in title",
+        "_doc_releaseKind": "lowercase 'album' | 'ep' | 'single' | '' when sparse layout",
+        "_doc_year": "4-digit string, '' when sparse",
+        "_doc_discNumber": "int, default 1 when track file is matched; 0/omitted at release/artist scope",
+        "_doc_trackNumber": "int; 0 is allowed (real fixtures use '00 - …' for single-track releases)",
+        "_doc_trackTitle": "track title from the filename portion after 'NN - '",
+        "_doc_lyrics_handling": ".lrc files are tracked as lyrics sidecars (NOT tracks). Parser still extracts release context. Matcher pairs each .lrc with its same-basename audio sibling and stores the path on the track row (tracks.lyrics_path, Phase 2 schema).",
+        "_doc_nfo_handling": "album.nfo and artist.nfo are read by internal/nfo (Phase 2 extends ParsedNFO with music fields) and override path-derived data. NFO MBIDs feed the matcher's NFO-first lookup just like movies/TV. This fixture only asserts that the parser extracts release/artist context from the NFO's path; NFO content parsing is tested separately in internal/nfo/nfo_test.go."
+      }
+    }
+  },
+
+  {
+    "label": "structured album track: 4-digit prefix yields disc+track split",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Album - 2012 - 18 Months/0101 - Green Valley.flac",
+    "expected": {
+      "media": "audio",
+      "entryType": "file",
+      "extension": ".flac",
+      "releaseSegment": "Calvin Harris - Album - 2012 - 18 Months",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "media": "audio",
+        "artist": "Calvin Harris",
+        "artistDisambiguation": "Scottish DJ and producer",
+        "album": "18 Months",
+        "releaseKind": "album",
+        "year": "2012",
+        "discNumber": 1,
+        "trackNumber": 1,
+        "trackTitle": "Green Valley"
+      }
+    }
+  },
+
+  {
+    "label": "structured album: disc 2 track 1 from 0201 prefix",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Album - 2012 - 18 Months/0201 - 18 Months continuous mix.flac",
+    "expected": {
+      "media": "audio",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Calvin Harris",
+        "album": "18 Months",
+        "releaseKind": "album",
+        "year": "2012",
+        "discNumber": 2,
+        "trackNumber": 1,
+        "trackTitle": "18 Months continuous mix"
+      }
+    }
+  },
+
+  {
+    "label": "structured album: 2-digit track within high range (0115 → disc 1, track 15)",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Album - 2012 - 18 Months/0115 - Thinking About You.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Calvin Harris",
+        "album": "18 Months",
+        "releaseKind": "album",
+        "year": "2012",
+        "discNumber": 1,
+        "trackNumber": 15,
+        "trackTitle": "Thinking About You"
+      }
+    }
+  },
+
+  {
+    "label": "structured single: 0101 prefix, only one track",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Single - 2022 - Potion/0101 - Potion.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Calvin Harris",
+        "album": "Potion",
+        "releaseKind": "single",
+        "year": "2022",
+        "discNumber": 1,
+        "trackNumber": 1,
+        "trackTitle": "Potion"
+      }
+    }
+  },
+
+  {
+    "label": "structured EP: capitalized kind 'EP' normalizes to lowercase",
+    "kind": "storage-path",
+    "input": "Charli XCX/Charli XCX - EP - 2016 - Vroom Vroom/0101 - Vroom Vroom.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Charli XCX",
+        "artistDisambiguation": "",
+        "album": "Vroom Vroom",
+        "releaseKind": "ep",
+        "year": "2016",
+        "discNumber": 1,
+        "trackNumber": 1,
+        "trackTitle": "Vroom Vroom"
+      }
+    }
+  },
+
+  {
+    "label": "structured release with 2-digit track prefix (sparse 'TT' instead of 'DDTT')",
+    "kind": "storage-path",
+    "input": "Ado/Ado - Album - 2020 - utsuseewa/01 - track one.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "utsuseewa",
+        "releaseKind": "album",
+        "year": "2020",
+        "discNumber": 1,
+        "trackNumber": 1,
+        "trackTitle": "track one"
+      }
+    }
+  },
+
+  {
+    "label": "track number zero: '00 - Title' for single-track albums is preserved as 0",
+    "kind": "storage-path",
+    "input": "Ado/Ado - Album - 2020 - utsuseewa/00 - utsuseewa.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "utsuseewa",
+        "releaseKind": "album",
+        "year": "2020",
+        "discNumber": 1,
+        "trackNumber": 0,
+        "trackTitle": "utsuseewa"
+      }
+    }
+  },
+
+  {
+    "label": "Japanese title preserved verbatim",
+    "kind": "storage-path",
+    "input": "Ado/Ado - うっせぇわ/01 - うっせぇわ.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "うっせぇわ",
+        "releaseKind": "",
+        "year": "",
+        "trackNumber": 1,
+        "trackTitle": "うっせぇわ"
+      }
+    }
+  },
+
+  {
+    "label": "sparse layout: 'Artist - Title' folder (no kind, no year)",
+    "kind": "storage-path",
+    "input": "Ado/Ado - Vivarium/01 - Vivarium.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "Vivarium",
+        "releaseKind": "",
+        "year": "",
+        "trackNumber": 1,
+        "trackTitle": "Vivarium"
+      }
+    }
+  },
+
+  {
+    "label": "title with parenthetical descriptor: '(From _BEYBLADE X_)' stays in album title",
+    "kind": "storage-path",
+    "input": "Ado/Ado - Stay Gold (From _BEYBLADE X_)/01 - Stay Gold (From _Beyblade X_).flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "Stay Gold (From _BEYBLADE X_)",
+        "releaseKind": "",
+        "trackNumber": 1,
+        "trackTitle": "Stay Gold (From _Beyblade X_)"
+      }
+    }
+  },
+
+  {
+    "label": "title with '(feat. X)' suffix: parenthetical kept as part of title",
+    "kind": "storage-path",
+    "input": "Ado/Ado - Anemone (feat. Ado)/01 - Anemone.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "Anemone (feat. Ado)",
+        "trackNumber": 1,
+        "trackTitle": "Anemone"
+      }
+    }
+  },
+
+  {
+    "label": "Unicode right-single-quote in track title preserved",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Album - 2012 - 18 Months/0113 - Let’s Go.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Calvin Harris",
+        "album": "18 Months",
+        "year": "2012",
+        "discNumber": 1,
+        "trackNumber": 13,
+        "trackTitle": "Let’s Go"
+      }
+    }
+  },
+
+  {
+    "label": "case-mismatch: artist folder 'Charli XCX' vs release folder 'Charli xcx'; release folder wins as display name",
+    "kind": "storage-path",
+    "input": "Charli XCX/Charli xcx - Album - 2024 - Brat and it’s completely different but also still brat/0101 - 360 featuring robyn and yung lean.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Charli xcx",
+        "album": "Brat and it’s completely different but also still brat",
+        "releaseKind": "album",
+        "year": "2024",
+        "discNumber": 1,
+        "trackNumber": 1,
+        "trackTitle": "360 featuring robyn and yung lean"
+      }
+    }
+  },
+
+  {
+    "label": "all-uppercase album title preserved (BRAT)",
+    "kind": "storage-path",
+    "input": "Charli XCX/Charli XCX - Album - 2024 - BRAT/0101 - 360.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Charli XCX",
+        "album": "BRAT",
+        "releaseKind": "album",
+        "year": "2024",
+        "trackNumber": 1,
+        "trackTitle": "360"
+      }
+    }
+  },
+
+  {
+    "label": "all-lowercase album title preserved (how i’m feeling now)",
+    "kind": "storage-path",
+    "input": "Charli XCX/Charli XCX - Album - 2020 - how i’m feeling now/0101 - pink diamond.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Charli XCX",
+        "album": "how i’m feeling now",
+        "releaseKind": "album",
+        "year": "2020",
+        "trackNumber": 1,
+        "trackTitle": "pink diamond"
+      }
+    }
+  },
+
+  {
+    "label": "artist disambiguator 'formerly Raving George' is captured separately",
+    "kind": "storage-path",
+    "input": "Charlotte de Witte (formerly Raving George)/Charlotte de Witte - Single - 2024 - Roar/0101 - Roar.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Charlotte de Witte",
+        "artistDisambiguation": "formerly Raving George",
+        "album": "Roar",
+        "releaseKind": "single",
+        "year": "2024",
+        "trackNumber": 1,
+        "trackTitle": "Roar"
+      }
+    }
+  },
+
+  {
+    "label": "alternate-format track (.m4a) parses identically to the .flac sibling",
+    "kind": "storage-path",
+    "input": "Charlotte de Witte (formerly Raving George)/Charlotte de Witte - Single - 2024 - Roar/0101 - Roar.m4a",
+    "expected": {
+      "media": "audio",
+      "extension": ".m4a",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Charlotte de Witte",
+        "album": "Roar",
+        "year": "2024",
+        "trackNumber": 1,
+        "trackTitle": "Roar"
+      }
+    }
+  },
+
+  {
+    "label": "release folder alone (no track file): extracts release metadata, no track fields",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Album - 2012 - 18 Months",
+    "expected": {
+      "media": "audio",
+      "entryType": "directory",
+      "releaseSegment": "Calvin Harris - Album - 2012 - 18 Months",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Calvin Harris",
+        "artistDisambiguation": "Scottish DJ and producer",
+        "album": "18 Months",
+        "releaseKind": "album",
+        "year": "2012"
+      }
+    }
+  },
+
+  {
+    "label": "artist folder alone (no release): no release parse, media=unknown without parent context",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)",
+    "expected": {
+      "media": "unknown",
+      "entryType": "directory",
+      "release": {
+        "exists": false
+      }
+    }
+  },
+
+  {
+    "label": "title with trailing parenthetical containing diacritics: 'cassö Remix'",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Single - 2024 - Lovers In A Past Life cassö Remix/0101 - Lovers In A Past Life cassö Remix.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Calvin Harris",
+        "album": "Lovers In A Past Life cassö Remix",
+        "releaseKind": "single",
+        "year": "2024",
+        "trackNumber": 1,
+        "trackTitle": "Lovers In A Past Life cassö Remix"
+      }
+    }
+  },
+
+  {
+    "label": ".lrc lyrics sidecar: kept in audioExtensions for lyrics support; parser extracts release context but emits no track fields (matcher pairs it with the same-basename audio sibling)",
+    "kind": "storage-path",
+    "input": "Ado/Ado - Album - 2020 - utsuseewa/00 - utsuseewa.lrc",
+    "expected": {
+      "media": "audio",
+      "entryType": "file",
+      "extension": ".lrc",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "utsuseewa",
+        "releaseKind": "album",
+        "year": "2020"
+      }
+    }
+  },
+
+  {
+    "label": "album.nfo sidecar: parser extracts release context from the path; NFO XML content (MBIDs, canonical title, track list) is read by internal/nfo in Phase 2",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/Calvin Harris - Album - 2012 - 18 Months/album.nfo",
+    "expected": {
+      "entryType": "file",
+      "extension": ".nfo",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Calvin Harris",
+        "album": "18 Months",
+        "releaseKind": "album",
+        "year": "2012"
+      }
+    }
+  },
+
+  {
+    "label": "artist.nfo sidecar: artist-scope context only; NFO XML content (artist MBID, biography, album roster) is read by internal/nfo in Phase 2",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/artist.nfo",
+    "expected": {
+      "entryType": "file",
+      "extension": ".nfo",
+      "release": {
+        "exists": false
+      }
+    }
+  },
+
+  {
+    "label": "release-folder artwork (cover.jpg): no release parse from image alone; carries release context",
+    "kind": "storage-path",
+    "input": "Ado/Ado - うっせぇわ/cover.jpg",
+    "expected": {
+      "entryType": "file",
+      "extension": ".jpg",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "うっせぇわ"
+      }
+    }
+  },
+
+  {
+    "label": "artist-folder artwork (folder.jpg): no release fields, only artist context",
+    "kind": "storage-path",
+    "input": "Calvin Harris (Scottish DJ and producer)/folder.jpg",
+    "expected": {
+      "entryType": "file",
+      "extension": ".jpg",
+      "release": {
+        "exists": false
+      }
+    }
+  },
+
+  {
+    "label": "release folder with hyphenated kind segment that ISN'T 'Album|EP|Single' falls back to sparse",
+    "kind": "storage-path",
+    "input": "Some Artist/Some Artist - Live - 2023 - Live At Wembley/01 - Opening.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Some Artist",
+        "album": "Live - 2023 - Live At Wembley",
+        "releaseKind": "",
+        "year": "",
+        "trackNumber": 1,
+        "trackTitle": "Opening"
+      }
+    }
+  },
+
+  {
+    "label": "release folder with extra ' - ' segments in the title (no kind word) parses sparsely",
+    "kind": "storage-path",
+    "input": "Ado/Ado - Stay Gold - From Beyblade X/01 - Stay Gold.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "music-curated",
+        "artist": "Ado",
+        "album": "Stay Gold - From Beyblade X",
+        "releaseKind": "",
+        "trackNumber": 1,
+        "trackTitle": "Stay Gold"
+      }
+    }
+  },
+
+  {
+    "label": "scene-style path inside Music library should still match audio-heuristic, NOT curated",
+    "kind": "storage-path",
+    "input": "Downloads/audio/Charli.XCX.-.BRAT.(2024).WEB.FLAC-ENRiCH/01-charli.xcx-360.flac",
+    "expected": {
+      "media": "audio",
+      "release": {
+        "exists": true,
+        "strategy": "audio-heuristic"
+      }
+    }
+  }
+]

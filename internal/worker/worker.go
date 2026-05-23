@@ -29,6 +29,8 @@ type MatchService interface {
 	StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail)
 	StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail)
 	ResolveMatch(ctx context.Context, fileID, candidateID int64) error
+	RefreshMusicArtist(ctx context.Context, artistID int64) (matcher.RefreshArtistResult, error)
+	MediaItemIDForArtist(ctx context.Context, artistID int64) (int64, error)
 }
 
 // EventPublisher abstracts the event-emitting side of the event hub so that
@@ -45,7 +47,7 @@ type Config struct {
 	Matcher        MatchService
 	Downloader     *images.Downloader
 	TranscodeCache *transcoder.CacheManager
-	HWAccel        transcoder.HwAccelConfig
+	HWAccel        *transcoder.HwAccelProvider
 	Hub            EventPublisher
 }
 
@@ -75,11 +77,14 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &ForceRefreshImagesWorker{DB: cfg.DB})
 	river.AddWorker(workers, &TranscodeWorker{DB: cfg.DB, Cache: cfg.TranscodeCache, HWAccel: cfg.HWAccel})
 	river.AddWorker(workers, &SoftDeleteWorker{DB: cfg.DB, Hub: cfg.Hub})
+	river.AddWorker(workers, &RefreshMusicArtistWorker{DB: cfg.DB, Matcher: cfg.Matcher, Hub: cfg.Hub})
+	river.AddWorker(workers, &SaveMusicNFOWorker{DB: cfg.DB})
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.DB), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			"process":          {MaxWorkers: 4},
 			"metadata":         {MaxWorkers: 2},
+			"music_metadata":   {MaxWorkers: 1}, // serialise heya.media calls so cold artist lookups (~27s each) don't pile up on the upstream
 			"images":           {MaxWorkers: 4},
 			"ratings":          {MaxWorkers: 1},
 			"saver":            {MaxWorkers: 2},

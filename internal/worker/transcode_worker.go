@@ -13,7 +13,7 @@ type TranscodeWorker struct {
 	river.WorkerDefaults[TranscodeArgs]
 	DB      *pgxpool.Pool
 	Cache   *transcoder.CacheManager
-	HWAccel transcoder.HwAccelConfig
+	HWAccel *transcoder.HwAccelProvider
 }
 
 func (w *TranscodeWorker) Work(ctx context.Context, job *river.Job[TranscodeArgs]) error {

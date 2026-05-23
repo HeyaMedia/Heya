@@ -71,9 +71,12 @@ func TestParseMovieNFO(t *testing.T) {
 func TestParseArtistNFO(t *testing.T) {
 	xml := `<?xml version="1.0"?>
 <artist>
-  <name>Radiohead</name>
+  <title>Radiohead</title>
   <biography>English rock band.</biography>
-  <musicBrainzArtistID>a74b1b7f-71a5-4011-9441-d0b5e4122711</musicBrainzArtistID>
+  <musicbrainzartistid>a74b1b7f-71a5-4011-9441-d0b5e4122711</musicbrainzartistid>
+  <genre>Alternative Rock</genre>
+  <genre>Experimental</genre>
+  <album><title>Radiohead - Album - 1997 - OK Computer</title></album>
 </artist>`
 
 	parsed, err := parseNFO(strings.NewReader(xml), "artist")
@@ -82,6 +85,42 @@ func TestParseArtistNFO(t *testing.T) {
 	assert.Equal(t, "English rock band.", parsed.Plot)
 	assert.Equal(t, "a74b1b7f-71a5-4011-9441-d0b5e4122711", parsed.MBID)
 	assert.Equal(t, "artist", parsed.Kind)
+	assert.Equal(t, []string{"Alternative Rock", "Experimental"}, parsed.Genres)
+	assert.Equal(t, []string{"Radiohead - Album - 1997 - OK Computer"}, parsed.AlbumTitles)
+}
+
+func TestParseAlbumNFO(t *testing.T) {
+	xml := `<?xml version="1.0"?>
+<album>
+  <title>OK Computer</title>
+  <year>1997</year>
+  <releasedate>1997-05-21</releasedate>
+  <artist>Radiohead</artist>
+  <albumartist>Radiohead</albumartist>
+  <musicbrainzalbumid>0b6b4ba0-d36f-47bd-b4ea-6a5b91842d28</musicbrainzalbumid>
+  <musicbrainzalbumartistid>a74b1b7f-71a5-4011-9441-d0b5e4122711</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>b1392450-e666-3926-a536-22c65f834433</musicbrainzreleasegroupid>
+  <genre>Alternative Rock</genre>
+  <track><disc>1</disc><position>1</position><title>Airbag</title><duration>04:44</duration></track>
+  <track><disc>1</disc><position>2</position><title>Paranoid Android</title><duration>06:23</duration></track>
+</album>`
+
+	parsed, err := parseNFO(strings.NewReader(xml), "album")
+	require.NoError(t, err)
+	assert.Equal(t, "OK Computer", parsed.Title)
+	assert.Equal(t, "1997", parsed.Year)
+	assert.Equal(t, "1997-05-21", parsed.ReleaseDate)
+	assert.Equal(t, "Radiohead", parsed.AlbumArtist)
+	assert.Equal(t, "0b6b4ba0-d36f-47bd-b4ea-6a5b91842d28", parsed.MBAlbumID)
+	assert.Equal(t, "a74b1b7f-71a5-4011-9441-d0b5e4122711", parsed.MBAlbumArtistID)
+	assert.Equal(t, "b1392450-e666-3926-a536-22c65f834433", parsed.MBReleaseGroupID)
+	assert.Equal(t, "album", parsed.Kind)
+	assert.Equal(t, []string{"Alternative Rock"}, parsed.Genres)
+	require.Len(t, parsed.Tracks, 2)
+	assert.Equal(t, "Airbag", parsed.Tracks[0].Title)
+	assert.Equal(t, 1, parsed.Tracks[0].Disc)
+	assert.Equal(t, 1, parsed.Tracks[0].Position)
+	assert.Equal(t, "06:23", parsed.Tracks[1].Duration)
 }
 
 func TestParseBOMHandling(t *testing.T) {

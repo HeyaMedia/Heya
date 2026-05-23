@@ -75,23 +75,27 @@ func (q *Queries) CreateAlbum(ctx context.Context, arg CreateAlbumParams) (Album
 }
 
 const createArtist = `-- name: CreateArtist :one
-INSERT INTO artists (media_item_id, musicbrainz_id, sort_name, biography)
-VALUES ($1, $2, $3, $4)
-RETURNING id, media_item_id, musicbrainz_id, sort_name, biography, search_vector
+INSERT INTO artists (media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, enriched_at
 `
 
 type CreateArtistParams struct {
-	MediaItemID   int64  `json:"media_item_id"`
-	MusicbrainzID string `json:"musicbrainz_id"`
-	SortName      string `json:"sort_name"`
-	Biography     string `json:"biography"`
+	MediaItemID    int64  `json:"media_item_id"`
+	MusicbrainzID  string `json:"musicbrainz_id"`
+	Name           string `json:"name"`
+	SortName       string `json:"sort_name"`
+	Disambiguation string `json:"disambiguation"`
+	Biography      string `json:"biography"`
 }
 
 func (q *Queries) CreateArtist(ctx context.Context, arg CreateArtistParams) (Artist, error) {
 	row := q.db.QueryRow(ctx, createArtist,
 		arg.MediaItemID,
 		arg.MusicbrainzID,
+		arg.Name,
 		arg.SortName,
+		arg.Disambiguation,
 		arg.Biography,
 	)
 	var i Artist
@@ -99,26 +103,31 @@ func (q *Queries) CreateArtist(ctx context.Context, arg CreateArtistParams) (Art
 		&i.ID,
 		&i.MediaItemID,
 		&i.MusicbrainzID,
+		&i.Name,
 		&i.SortName,
+		&i.Disambiguation,
 		&i.Biography,
 		&i.SearchVector,
+		&i.EnrichedAt,
 	)
 	return i, err
 }
 
 const createTrack = `-- name: CreateTrack :one
-INSERT INTO tracks (album_id, disc_number, track_number, title, duration_ms, file_path)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, album_id, disc_number, track_number, title, duration_ms, file_path, search_vector
+INSERT INTO tracks (album_id, disc_number, track_number, title, duration, file_path, lyrics_path, library_file_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id
 `
 
 type CreateTrackParams struct {
-	AlbumID     int64  `json:"album_id"`
-	DiscNumber  int32  `json:"disc_number"`
-	TrackNumber int32  `json:"track_number"`
-	Title       string `json:"title"`
-	DurationMs  int32  `json:"duration_ms"`
-	FilePath    string `json:"file_path"`
+	AlbumID       int64       `json:"album_id"`
+	DiscNumber    int32       `json:"disc_number"`
+	TrackNumber   int32       `json:"track_number"`
+	Title         string      `json:"title"`
+	Duration      int32       `json:"duration"`
+	FilePath      string      `json:"file_path"`
+	LyricsPath    string      `json:"lyrics_path"`
+	LibraryFileID pgtype.Int8 `json:"library_file_id"`
 }
 
 func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track, error) {
@@ -127,8 +136,10 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		arg.DiscNumber,
 		arg.TrackNumber,
 		arg.Title,
-		arg.DurationMs,
+		arg.Duration,
 		arg.FilePath,
+		arg.LyricsPath,
+		arg.LibraryFileID,
 	)
 	var i Track
 	err := row.Scan(
@@ -137,8 +148,46 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		&i.DiscNumber,
 		&i.TrackNumber,
 		&i.Title,
-		&i.DurationMs,
+		&i.Duration,
 		&i.FilePath,
+		&i.LyricsPath,
+		&i.SearchVector,
+		&i.LibraryFileID,
+	)
+	return i, err
+}
+
+const getAlbumByArtistTitleYear = `-- name: GetAlbumByArtistTitleYear :one
+SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector FROM albums
+WHERE artist_id = $1 AND lower(title) = lower($2) AND year = $3
+LIMIT 1
+`
+
+type GetAlbumByArtistTitleYearParams struct {
+	ArtistID int64  `json:"artist_id"`
+	Lower    string `json:"lower"`
+	Year     string `json:"year"`
+}
+
+func (q *Queries) GetAlbumByArtistTitleYear(ctx context.Context, arg GetAlbumByArtistTitleYearParams) (Album, error) {
+	row := q.db.QueryRow(ctx, getAlbumByArtistTitleYear, arg.ArtistID, arg.Lower, arg.Year)
+	var i Album
+	err := row.Scan(
+		&i.ID,
+		&i.ArtistID,
+		&i.Title,
+		&i.Year,
+		&i.MusicbrainzID,
+		&i.AlbumType,
+		&i.Genres,
+		&i.CoverPath,
+		&i.ReleaseDate,
+		&i.Label,
+		&i.Country,
+		&i.Barcode,
+		&i.TotalTracks,
+		&i.TotalDiscs,
+		&i.Tags,
 		&i.SearchVector,
 	)
 	return i, err
@@ -173,7 +222,7 @@ func (q *Queries) GetAlbumByID(ctx context.Context, id int64) (Album, error) {
 }
 
 const getAlbumByMusicBrainzID = `-- name: GetAlbumByMusicBrainzID :one
-SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector FROM albums WHERE musicbrainz_id = $1
+SELECT id, artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, search_vector FROM albums WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
 `
 
 func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID string) (Album, error) {
@@ -200,8 +249,43 @@ func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID str
 	return i, err
 }
 
+const getAlbumReleaseDir = `-- name: GetAlbumReleaseDir :one
+SELECT COALESCE(MAX(file_path), '') AS file_path FROM tracks WHERE album_id = $1
+`
+
+// Returns the on-disk release directory for an album (parent dir of any of
+// its tracks). Used by the music NFO writer to know where to drop album.nfo.
+// Empty string if the album has no files (e.g. tracks all soft-deleted).
+func (q *Queries) GetAlbumReleaseDir(ctx context.Context, albumID int64) (interface{}, error) {
+	row := q.db.QueryRow(ctx, getAlbumReleaseDir, albumID)
+	var file_path interface{}
+	err := row.Scan(&file_path)
+	return file_path, err
+}
+
+const getArtistByID = `-- name: GetArtistByID :one
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, enriched_at FROM artists WHERE id = $1
+`
+
+func (q *Queries) GetArtistByID(ctx context.Context, id int64) (Artist, error) {
+	row := q.db.QueryRow(ctx, getArtistByID, id)
+	var i Artist
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.MusicbrainzID,
+		&i.Name,
+		&i.SortName,
+		&i.Disambiguation,
+		&i.Biography,
+		&i.SearchVector,
+		&i.EnrichedAt,
+	)
+	return i, err
+}
+
 const getArtistByMediaItemID = `-- name: GetArtistByMediaItemID :one
-SELECT id, media_item_id, musicbrainz_id, sort_name, biography, search_vector FROM artists WHERE media_item_id = $1
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, enriched_at FROM artists WHERE media_item_id = $1
 `
 
 func (q *Queries) GetArtistByMediaItemID(ctx context.Context, mediaItemID int64) (Artist, error) {
@@ -211,15 +295,18 @@ func (q *Queries) GetArtistByMediaItemID(ctx context.Context, mediaItemID int64)
 		&i.ID,
 		&i.MediaItemID,
 		&i.MusicbrainzID,
+		&i.Name,
 		&i.SortName,
+		&i.Disambiguation,
 		&i.Biography,
 		&i.SearchVector,
+		&i.EnrichedAt,
 	)
 	return i, err
 }
 
 const getArtistByMusicBrainzID = `-- name: GetArtistByMusicBrainzID :one
-SELECT id, media_item_id, musicbrainz_id, sort_name, biography, search_vector FROM artists WHERE musicbrainz_id = $1
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, enriched_at FROM artists WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
 `
 
 func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID string) (Artist, error) {
@@ -229,15 +316,90 @@ func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID st
 		&i.ID,
 		&i.MediaItemID,
 		&i.MusicbrainzID,
+		&i.Name,
 		&i.SortName,
+		&i.Disambiguation,
 		&i.Biography,
 		&i.SearchVector,
+		&i.EnrichedAt,
+	)
+	return i, err
+}
+
+const getArtistByNameAndDisambiguation = `-- name: GetArtistByNameAndDisambiguation :one
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, enriched_at FROM artists
+WHERE lower(name) = lower($1) AND lower(disambiguation) = lower($2)
+LIMIT 1
+`
+
+type GetArtistByNameAndDisambiguationParams struct {
+	Lower   string `json:"lower"`
+	Lower_2 string `json:"lower_2"`
+}
+
+func (q *Queries) GetArtistByNameAndDisambiguation(ctx context.Context, arg GetArtistByNameAndDisambiguationParams) (Artist, error) {
+	row := q.db.QueryRow(ctx, getArtistByNameAndDisambiguation, arg.Lower, arg.Lower_2)
+	var i Artist
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.MusicbrainzID,
+		&i.Name,
+		&i.SortName,
+		&i.Disambiguation,
+		&i.Biography,
+		&i.SearchVector,
+		&i.EnrichedAt,
+	)
+	return i, err
+}
+
+const getOrCreateTrack = `-- name: GetOrCreateTrack :one
+INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (album_id, disc_number, track_number) DO UPDATE
+    SET title = CASE WHEN tracks.title = '' THEN EXCLUDED.title ELSE tracks.title END,
+        duration = CASE WHEN tracks.duration = 0 THEN EXCLUDED.duration ELSE tracks.duration END
+RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id
+`
+
+type GetOrCreateTrackParams struct {
+	AlbumID     int64  `json:"album_id"`
+	DiscNumber  int32  `json:"disc_number"`
+	TrackNumber int32  `json:"track_number"`
+	Title       string `json:"title"`
+	Duration    int32  `json:"duration"`
+}
+
+// Idempotent track creation: on conflict, return the existing row unchanged.
+// Per-file data (file_path / library_file_id / lyrics_path) lives in
+// track_files now and is recomputed when the primary file changes.
+func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackParams) (Track, error) {
+	row := q.db.QueryRow(ctx, getOrCreateTrack,
+		arg.AlbumID,
+		arg.DiscNumber,
+		arg.TrackNumber,
+		arg.Title,
+		arg.Duration,
+	)
+	var i Track
+	err := row.Scan(
+		&i.ID,
+		&i.AlbumID,
+		&i.DiscNumber,
+		&i.TrackNumber,
+		&i.Title,
+		&i.Duration,
+		&i.FilePath,
+		&i.LyricsPath,
+		&i.SearchVector,
+		&i.LibraryFileID,
 	)
 	return i, err
 }
 
 const getTrackByID = `-- name: GetTrackByID :one
-SELECT id, album_id, disc_number, track_number, title, duration_ms, file_path, search_vector FROM tracks WHERE id = $1
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id FROM tracks WHERE id = $1
 `
 
 func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
@@ -249,9 +411,58 @@ func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
 		&i.DiscNumber,
 		&i.TrackNumber,
 		&i.Title,
-		&i.DurationMs,
+		&i.Duration,
 		&i.FilePath,
+		&i.LyricsPath,
 		&i.SearchVector,
+		&i.LibraryFileID,
+	)
+	return i, err
+}
+
+const getTrackByLibraryFileID = `-- name: GetTrackByLibraryFileID :one
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id FROM tracks WHERE library_file_id = $1
+`
+
+func (q *Queries) GetTrackByLibraryFileID(ctx context.Context, libraryFileID pgtype.Int8) (Track, error) {
+	row := q.db.QueryRow(ctx, getTrackByLibraryFileID, libraryFileID)
+	var i Track
+	err := row.Scan(
+		&i.ID,
+		&i.AlbumID,
+		&i.DiscNumber,
+		&i.TrackNumber,
+		&i.Title,
+		&i.Duration,
+		&i.FilePath,
+		&i.LyricsPath,
+		&i.SearchVector,
+		&i.LibraryFileID,
+	)
+	return i, err
+}
+
+const getTrackFileByLibraryFileID = `-- name: GetTrackFileByLibraryFileID :one
+SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, created_at FROM track_files WHERE library_file_id = $1
+`
+
+func (q *Queries) GetTrackFileByLibraryFileID(ctx context.Context, libraryFileID int64) (TrackFile, error) {
+	row := q.db.QueryRow(ctx, getTrackFileByLibraryFileID, libraryFileID)
+	var i TrackFile
+	err := row.Scan(
+		&i.ID,
+		&i.TrackID,
+		&i.LibraryFileID,
+		&i.Format,
+		&i.QualityScore,
+		&i.BitrateKbps,
+		&i.SampleRateHz,
+		&i.BitDepth,
+		&i.Channels,
+		&i.Duration,
+		&i.SizeBytes,
+		&i.LyricsPath,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -297,8 +508,132 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 	return items, nil
 }
 
+const listArtistsByLibrary = `-- name: ListArtistsByLibrary :many
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.enriched_at FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.library_id = $1
+ORDER BY a.name
+`
+
+func (q *Queries) ListArtistsByLibrary(ctx context.Context, libraryID int64) ([]Artist, error) {
+	rows, err := q.db.Query(ctx, listArtistsByLibrary, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Artist{}
+	for rows.Next() {
+		var i Artist
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaItemID,
+			&i.MusicbrainzID,
+			&i.Name,
+			&i.SortName,
+			&i.Disambiguation,
+			&i.Biography,
+			&i.SearchVector,
+			&i.EnrichedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleArtistsByLibrary = `-- name: ListStaleArtistsByLibrary :many
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.enriched_at FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.library_id = $1
+  AND (a.enriched_at IS NULL OR a.enriched_at < $2)
+ORDER BY a.name
+`
+
+type ListStaleArtistsByLibraryParams struct {
+	LibraryID  int64              `json:"library_id"`
+	EnrichedAt pgtype.Timestamptz `json:"enriched_at"`
+}
+
+// Artists in the library whose enrichment is older than $2 (or never enriched).
+func (q *Queries) ListStaleArtistsByLibrary(ctx context.Context, arg ListStaleArtistsByLibraryParams) ([]Artist, error) {
+	rows, err := q.db.Query(ctx, listStaleArtistsByLibrary, arg.LibraryID, arg.EnrichedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Artist{}
+	for rows.Next() {
+		var i Artist
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaItemID,
+			&i.MusicbrainzID,
+			&i.Name,
+			&i.SortName,
+			&i.Disambiguation,
+			&i.Biography,
+			&i.SearchVector,
+			&i.EnrichedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTrackFilesByTrack = `-- name: ListTrackFilesByTrack :many
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.created_at
+FROM track_files tf
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
+ORDER BY tf.quality_score DESC, tf.id ASC
+`
+
+// Ordered by quality (best first) so callers can pick [0] as the primary.
+func (q *Queries) ListTrackFilesByTrack(ctx context.Context, trackID int64) ([]TrackFile, error) {
+	rows, err := q.db.Query(ctx, listTrackFilesByTrack, trackID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TrackFile{}
+	for rows.Next() {
+		var i TrackFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.TrackID,
+			&i.LibraryFileID,
+			&i.Format,
+			&i.QualityScore,
+			&i.BitrateKbps,
+			&i.SampleRateHz,
+			&i.BitDepth,
+			&i.Channels,
+			&i.Duration,
+			&i.SizeBytes,
+			&i.LyricsPath,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTracksByAlbum = `-- name: ListTracksByAlbum :many
-SELECT id, album_id, disc_number, track_number, title, duration_ms, file_path, search_vector FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
 `
 
 func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track, error) {
@@ -316,9 +651,11 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 			&i.DiscNumber,
 			&i.TrackNumber,
 			&i.Title,
-			&i.DurationMs,
+			&i.Duration,
 			&i.FilePath,
+			&i.LyricsPath,
 			&i.SearchVector,
+			&i.LibraryFileID,
 		); err != nil {
 			return nil, err
 		}
@@ -328,6 +665,15 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 		return nil, err
 	}
 	return items, nil
+}
+
+const markArtistEnriched = `-- name: MarkArtistEnriched :exec
+UPDATE artists SET enriched_at = now() WHERE id = $1
+`
+
+func (q *Queries) MarkArtistEnriched(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markArtistEnriched, id)
+	return err
 }
 
 const updateAlbum = `-- name: UpdateAlbum :one
@@ -395,25 +741,73 @@ func (q *Queries) UpdateAlbum(ctx context.Context, arg UpdateAlbumParams) (Album
 	return i, err
 }
 
+const updateAlbumEnrichedFields = `-- name: UpdateAlbumEnrichedFields :exec
+UPDATE albums
+   SET musicbrainz_id = CASE WHEN $2::text  != '' THEN $2 ELSE musicbrainz_id END,
+       title          = CASE WHEN $3::text  != '' THEN $3 ELSE title          END,
+       year           = CASE WHEN $4::text  != '' THEN $4 ELSE year           END,
+       album_type     = CASE WHEN $5::text  != '' THEN $5 ELSE album_type     END,
+       label          = CASE WHEN $6::text  != '' THEN $6 ELSE label          END,
+       country        = CASE WHEN $7::text  != '' THEN $7 ELSE country        END,
+       barcode        = CASE WHEN $8::text  != '' THEN $8 ELSE barcode        END,
+       release_date   = COALESCE($9::date, release_date),
+       cover_path     = CASE WHEN $10::text != '' THEN $10 ELSE cover_path    END
+ WHERE id = $1
+`
+
+type UpdateAlbumEnrichedFieldsParams struct {
+	ID       int64       `json:"id"`
+	Column2  string      `json:"column_2"`
+	Column3  string      `json:"column_3"`
+	Column4  string      `json:"column_4"`
+	Column5  string      `json:"column_5"`
+	Column6  string      `json:"column_6"`
+	Column7  string      `json:"column_7"`
+	Column8  string      `json:"column_8"`
+	Column9  pgtype.Date `json:"column_9"`
+	Column10 string      `json:"column_10"`
+}
+
+// Same pattern: only overwrite when the new value is non-empty.
+func (q *Queries) UpdateAlbumEnrichedFields(ctx context.Context, arg UpdateAlbumEnrichedFieldsParams) error {
+	_, err := q.db.Exec(ctx, updateAlbumEnrichedFields,
+		arg.ID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Column6,
+		arg.Column7,
+		arg.Column8,
+		arg.Column9,
+		arg.Column10,
+	)
+	return err
+}
+
 const updateArtist = `-- name: UpdateArtist :one
 UPDATE artists
-SET musicbrainz_id = $2, sort_name = $3, biography = $4
+SET musicbrainz_id = $2, name = $3, sort_name = $4, disambiguation = $5, biography = $6
 WHERE id = $1
-RETURNING id, media_item_id, musicbrainz_id, sort_name, biography, search_vector
+RETURNING id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, enriched_at
 `
 
 type UpdateArtistParams struct {
-	ID            int64  `json:"id"`
-	MusicbrainzID string `json:"musicbrainz_id"`
-	SortName      string `json:"sort_name"`
-	Biography     string `json:"biography"`
+	ID             int64  `json:"id"`
+	MusicbrainzID  string `json:"musicbrainz_id"`
+	Name           string `json:"name"`
+	SortName       string `json:"sort_name"`
+	Disambiguation string `json:"disambiguation"`
+	Biography      string `json:"biography"`
 }
 
 func (q *Queries) UpdateArtist(ctx context.Context, arg UpdateArtistParams) (Artist, error) {
 	row := q.db.QueryRow(ctx, updateArtist,
 		arg.ID,
 		arg.MusicbrainzID,
+		arg.Name,
 		arg.SortName,
+		arg.Disambiguation,
 		arg.Biography,
 	)
 	var i Artist
@@ -421,9 +815,239 @@ func (q *Queries) UpdateArtist(ctx context.Context, arg UpdateArtistParams) (Art
 		&i.ID,
 		&i.MediaItemID,
 		&i.MusicbrainzID,
+		&i.Name,
 		&i.SortName,
+		&i.Disambiguation,
 		&i.Biography,
 		&i.SearchVector,
+		&i.EnrichedAt,
+	)
+	return i, err
+}
+
+const updateArtistEnrichedFields = `-- name: UpdateArtistEnrichedFields :exec
+UPDATE artists
+   SET musicbrainz_id  = CASE WHEN $2::text  != '' THEN $2 ELSE musicbrainz_id  END,
+       name            = CASE WHEN $3::text  != '' THEN $3 ELSE name            END,
+       sort_name       = CASE WHEN $4::text  != '' THEN $4 ELSE sort_name       END,
+       disambiguation  = CASE WHEN $5::text  != '' THEN $5 ELSE disambiguation  END,
+       biography       = CASE WHEN $6::text  != '' THEN $6 ELSE biography       END,
+       enriched_at     = now()
+ WHERE id = $1
+`
+
+type UpdateArtistEnrichedFieldsParams struct {
+	ID      int64  `json:"id"`
+	Column2 string `json:"column_2"`
+	Column3 string `json:"column_3"`
+	Column4 string `json:"column_4"`
+	Column5 string `json:"column_5"`
+	Column6 string `json:"column_6"`
+}
+
+// Used by RefreshMusicArtistWorker to write the canonical metadata after a
+// successful heya.media lookup. Only overwrites fields when the new value is
+// non-empty, so NFO data isn't clobbered by a sparse upstream response.
+func (q *Queries) UpdateArtistEnrichedFields(ctx context.Context, arg UpdateArtistEnrichedFieldsParams) error {
+	_, err := q.db.Exec(ctx, updateArtistEnrichedFields,
+		arg.ID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Column6,
+	)
+	return err
+}
+
+const updateMediaItemExternalIds = `-- name: UpdateMediaItemExternalIds :exec
+UPDATE media_items SET external_ids = $2 WHERE id = $1
+`
+
+type UpdateMediaItemExternalIdsParams struct {
+	ID          int64  `json:"id"`
+	ExternalIds []byte `json:"external_ids"`
+}
+
+func (q *Queries) UpdateMediaItemExternalIds(ctx context.Context, arg UpdateMediaItemExternalIdsParams) error {
+	_, err := q.db.Exec(ctx, updateMediaItemExternalIds, arg.ID, arg.ExternalIds)
+	return err
+}
+
+const updateTrackFileProbeData = `-- name: UpdateTrackFileProbeData :exec
+UPDATE track_files
+   SET bitrate_kbps   = $2,
+       sample_rate_hz = $3,
+       bit_depth      = $4,
+       channels       = $5,
+       duration       = $6,
+       quality_score  = $7
+ WHERE id = $1
+`
+
+type UpdateTrackFileProbeDataParams struct {
+	ID           int64 `json:"id"`
+	BitrateKbps  int32 `json:"bitrate_kbps"`
+	SampleRateHz int32 `json:"sample_rate_hz"`
+	BitDepth     int32 `json:"bit_depth"`
+	Channels     int32 `json:"channels"`
+	Duration     int32 `json:"duration"`
+	QualityScore int32 `json:"quality_score"`
+}
+
+// Called by FFProbeWorker after probing an audio file. Updates the per-file
+// physical properties and the refined quality_score that incorporates real
+// bitrate / sample rate / bit depth.
+func (q *Queries) UpdateTrackFileProbeData(ctx context.Context, arg UpdateTrackFileProbeDataParams) error {
+	_, err := q.db.Exec(ctx, updateTrackFileProbeData,
+		arg.ID,
+		arg.BitrateKbps,
+		arg.SampleRateHz,
+		arg.BitDepth,
+		arg.Channels,
+		arg.Duration,
+		arg.QualityScore,
+	)
+	return err
+}
+
+const updateTrackFromEnrichment = `-- name: UpdateTrackFromEnrichment :exec
+UPDATE tracks
+   SET title    = CASE WHEN $2::text != '' THEN $2 ELSE title    END,
+       duration = CASE WHEN $3::int  > 0   THEN $3 ELSE duration END
+ WHERE id = $1
+`
+
+type UpdateTrackFromEnrichmentParams struct {
+	ID      int64  `json:"id"`
+	Column2 string `json:"column_2"`
+	Column3 int32  `json:"column_3"`
+}
+
+// Overwrites track title and duration with enriched data (heya.media wins
+// over filename when present). NFO/path data is the seed; this is the upgrade.
+func (q *Queries) UpdateTrackFromEnrichment(ctx context.Context, arg UpdateTrackFromEnrichmentParams) error {
+	_, err := q.db.Exec(ctx, updateTrackFromEnrichment, arg.ID, arg.Column2, arg.Column3)
+	return err
+}
+
+const updateTrackLyricsPath = `-- name: UpdateTrackLyricsPath :exec
+UPDATE tracks SET lyrics_path = $2 WHERE id = $1
+`
+
+type UpdateTrackLyricsPathParams struct {
+	ID         int64  `json:"id"`
+	LyricsPath string `json:"lyrics_path"`
+}
+
+func (q *Queries) UpdateTrackLyricsPath(ctx context.Context, arg UpdateTrackLyricsPathParams) error {
+	_, err := q.db.Exec(ctx, updateTrackLyricsPath, arg.ID, arg.LyricsPath)
+	return err
+}
+
+const updateTrackPrimary = `-- name: UpdateTrackPrimary :exec
+UPDATE tracks
+   SET file_path = $2, library_file_id = $3, lyrics_path = $4
+ WHERE id = $1
+`
+
+type UpdateTrackPrimaryParams struct {
+	ID            int64       `json:"id"`
+	FilePath      string      `json:"file_path"`
+	LibraryFileID pgtype.Int8 `json:"library_file_id"`
+	LyricsPath    string      `json:"lyrics_path"`
+}
+
+// Denormalize the chosen primary file onto the track row for fast playback.
+func (q *Queries) UpdateTrackPrimary(ctx context.Context, arg UpdateTrackPrimaryParams) error {
+	_, err := q.db.Exec(ctx, updateTrackPrimary,
+		arg.ID,
+		arg.FilePath,
+		arg.LibraryFileID,
+		arg.LyricsPath,
+	)
+	return err
+}
+
+const updateTrackTitleAndDuration = `-- name: UpdateTrackTitleAndDuration :one
+UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id
+`
+
+type UpdateTrackTitleAndDurationParams struct {
+	ID       int64  `json:"id"`
+	Title    string `json:"title"`
+	Duration int32  `json:"duration"`
+}
+
+// Used by the enrichment pass to overwrite path-derived data with NFO /
+// heya.media canonical values once they're known.
+func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTrackTitleAndDurationParams) (Track, error) {
+	row := q.db.QueryRow(ctx, updateTrackTitleAndDuration, arg.ID, arg.Title, arg.Duration)
+	var i Track
+	err := row.Scan(
+		&i.ID,
+		&i.AlbumID,
+		&i.DiscNumber,
+		&i.TrackNumber,
+		&i.Title,
+		&i.Duration,
+		&i.FilePath,
+		&i.LyricsPath,
+		&i.SearchVector,
+		&i.LibraryFileID,
+	)
+	return i, err
+}
+
+const upsertTrackFile = `-- name: UpsertTrackFile :one
+INSERT INTO track_files (track_id, library_file_id, format, quality_score, lyrics_path, size_bytes)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (library_file_id) DO UPDATE
+    SET track_id = EXCLUDED.track_id,
+        format = EXCLUDED.format,
+        quality_score = EXCLUDED.quality_score,
+        lyrics_path = EXCLUDED.lyrics_path,
+        size_bytes = EXCLUDED.size_bytes
+RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, created_at
+`
+
+type UpsertTrackFileParams struct {
+	TrackID       int64  `json:"track_id"`
+	LibraryFileID int64  `json:"library_file_id"`
+	Format        string `json:"format"`
+	QualityScore  int32  `json:"quality_score"`
+	LyricsPath    string `json:"lyrics_path"`
+	SizeBytes     int64  `json:"size_bytes"`
+}
+
+// One row per physical audio file. UNIQUE(library_file_id) means a file can
+// only back one track at a time; if the matcher re-routes a file to a
+// different track (e.g. after a re-scan with corrected metadata), the upsert
+// moves it.
+func (q *Queries) UpsertTrackFile(ctx context.Context, arg UpsertTrackFileParams) (TrackFile, error) {
+	row := q.db.QueryRow(ctx, upsertTrackFile,
+		arg.TrackID,
+		arg.LibraryFileID,
+		arg.Format,
+		arg.QualityScore,
+		arg.LyricsPath,
+		arg.SizeBytes,
+	)
+	var i TrackFile
+	err := row.Scan(
+		&i.ID,
+		&i.TrackID,
+		&i.LibraryFileID,
+		&i.Format,
+		&i.QualityScore,
+		&i.BitrateKbps,
+		&i.SampleRateHz,
+		&i.BitDepth,
+		&i.Channels,
+		&i.Duration,
+		&i.SizeBytes,
+		&i.LyricsPath,
+		&i.CreatedAt,
 	)
 	return i, err
 }

@@ -49,3 +49,11 @@ func (h *Hub) HasSubscribers() bool {
 	defer h.mu.RUnlock()
 	return len(h.subs) > 0
 }
+
+// SubscriberCount returns the live subscriber count — useful for the debug
+// stats endpoint to detect WS connection leaks at a glance.
+func (h *Hub) SubscriberCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.subs)
+}

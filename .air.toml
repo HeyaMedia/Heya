@@ -3,7 +3,12 @@
   full_bin = "./tmp/heya serve"
   delay = 1000
   exclude_dir = ["tmp", "web", "node_modules", "testdata", "fulldata", "data", "bin", ".git"]
-  exclude_regex = ["_test\\.go$"]
+  # heya.yaml is the live runtime config. UI/CLI writes to it (Tailscale
+  # toggles, etc.) must not trigger an air rebuild, or the user's in-flight
+  # state gets wiped mid-toggle. exclude_regex is matched against the
+  # relative path so the anchored form catches it regardless of where air
+  # reports it from.
+  exclude_regex = ["_test\\.go$", "^heya\\.yaml$", "(^|/)heya\\.yaml$"]
   include_ext = ["go", "sql", "yaml"]
   kill_delay = 5000
   send_interrupt = true

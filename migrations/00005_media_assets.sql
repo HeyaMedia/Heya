@@ -48,7 +48,14 @@ CREATE TABLE media_extras (
 CREATE INDEX idx_media_extras_media_item ON media_extras (media_item_id);
 CREATE UNIQUE INDEX idx_media_extras_unique ON media_extras (media_item_id, extra_type, title);
 
+CREATE TABLE system_settings (
+    key        TEXT PRIMARY KEY,
+    value      JSONB   NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- +goose Down
+DROP TABLE IF EXISTS system_settings;
 DROP TABLE media_extras;
 DROP TABLE media_assets;
 DROP TYPE extra_type;
