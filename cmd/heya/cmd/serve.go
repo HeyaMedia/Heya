@@ -118,29 +118,33 @@ var serveCmd = &cobra.Command{
 		<-sigCtx.Done()
 		log.Info().Msg("shutting down")
 
-		// Dead-man's switch: if any shutdown step hangs (River with
-		// checked-out connections blocking pgxpool.Close was the original
-		// offender — orphaned heya processes accumulated under air,
-		// holding :8080 and breaking the next reload), terminate the
-		// process forcefully so the next dev cycle can rebind.
+		// Hard backstop: if anything in the shutdown sequence hangs
+		// (tsnet's WireGuard / magicsock teardown has been the worst
+		// offender — it spins goroutines that don't always notice Close
+		// in dev cycles, pegging a CPU until the kernel reaps them),
+		// kill the process forcefully. 3s is enough for the graceful
+		// path below to finish in the happy case.
 		go func() {
-			<-time.After(10 * time.Second)
-			log.Warn().Msg("shutdown took >10s, forcing exit")
+			<-time.After(3 * time.Second)
+			log.Warn().Msg("shutdown took >3s, forcing exit")
 			os.Exit(1)
 		}()
 
 		_ = ln.Close()
 
-		// Cancel appCtx first so all derived contexts (workers, watchers,
-		// periodic emitters, task scheduler, bridgeLogToHub) get the
-		// stop signal before we try to close their resources.
+		// Cancel appCtx first so every derived context (workers,
+		// watchers, periodic emitters, task scheduler, bridgeLogToHub)
+		// observes cancellation before we touch their resources.
 		appCancel()
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
+		// Each step runs in its own goroutine with the shared 2s budget.
+		// Tailscale Close especially can spin if magicsock is mid-handshake;
+		// time-boxing it keeps a stuck tsnet from blocking the whole exit.
 		var wg sync.WaitGroup
-		wg.Add(2)
+		wg.Add(3)
 		go func() {
 			defer wg.Done()
 			app.StopWorkers(shutdownCtx)
@@ -151,16 +155,48 @@ var serveCmd = &cobra.Command{
 				log.Warn().Err(err).Msg("http shutdown error")
 			}
 		}()
-		wg.Wait()
-
-		if ts := app.Tailscale(); ts != nil {
-			if err := ts.Close(); err != nil {
-				log.Warn().Err(err).Msg("tailscale shutdown error")
+		go func() {
+			defer wg.Done()
+			if ts := app.Tailscale(); ts != nil {
+				done := make(chan struct{})
+				go func() {
+					if err := ts.Close(); err != nil {
+						log.Warn().Err(err).Msg("tailscale shutdown error")
+					}
+					close(done)
+				}()
+				select {
+				case <-done:
+				case <-shutdownCtx.Done():
+					log.Warn().Msg("tailscale shutdown timed out, abandoning")
+				}
 			}
-		}
+		}()
 
+		// Bounded wait — never block beyond shutdownCtx + a tiny grace.
+		waitWithDeadline(&wg, 2500*time.Millisecond)
+
+		// Bypass the defer chain entirely: pgxpool.Close in deferred
+		// app.Close has been observed to block when River goroutines
+		// retry queries against a closing pool, and we don't trust the
+		// runtime to tear cleanly with tsnet's cgo goroutines still
+		// active. Explicit exit is the only reliable way out.
+		log.Info().Msg("clean shutdown complete")
+		os.Exit(0)
 		return nil
 	},
+}
+
+// waitWithDeadline returns when wg.Wait() completes or when the deadline
+// elapses, whichever comes first. The wg goroutines keep running on
+// timeout — that's fine, we're about to os.Exit anyway.
+func waitWithDeadline(wg *sync.WaitGroup, d time.Duration) {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
 }
 
 func reuseAddrListen(addr string) (net.Listener, error) {

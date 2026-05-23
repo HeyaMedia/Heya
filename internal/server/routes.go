@@ -57,6 +57,16 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.Handle("POST /api/media/{id}/assets/upload", authed(http.HandlerFunc(handleUploadMediaAsset(app))))
 	mux.Handle("GET /api/media/{id}/files", authed(http.HandlerFunc(handleMediaFiles(app))))
 
+	// System settings (admin only)
+	mux.Handle("GET /api/system-settings/{key}", authed(adminOnly(handleGetSystemSetting(app))))
+	mux.Handle("PUT /api/system-settings/{key}", authed(adminOnly(handleUpdateSystemSetting(app))))
+
+	// OpenSubtitles
+	mux.Handle("POST /api/opensubtitles/test", authed(handleOpenSubtitlesTest(app)))
+	mux.Handle("GET /api/opensubtitles/user-info", authed(handleOpenSubtitlesUserInfo(app)))
+	mux.Handle("GET /api/opensubtitles/search", authed(handleOpenSubtitlesSearch(app)))
+	mux.Handle("POST /api/opensubtitles/download", authed(handleOpenSubtitlesDownload(app)))
+
 	mux.Handle("GET /api/stats", authed(http.HandlerFunc(handleDashboardStats(app))))
 	mux.Handle("GET /api/media/missing", authed(http.HandlerFunc(handleListMissing(app))))
 	mux.Handle("DELETE /api/media/missing", authed(http.HandlerFunc(handleCleanupMissing(app))))
