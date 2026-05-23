@@ -3,80 +3,74 @@
     <div class="page-header">
       <h2 class="page-title">Tailscale</h2>
       <p class="page-desc">
-        Expose Heya over your tailnet — no port forwarding, no reverse proxy.
-        Optional Funnel makes it reachable from the public internet.
+        Join your tailnet directly — no port forwarding, no reverse proxy.
+        Flip the toggle below and you'll get a one-click login button.
       </p>
     </div>
 
-    <section v-if="loading && !status" class="section">
-      <div class="loading-card">Loading Tailscale state…</div>
-    </section>
-
-    <section v-else-if="!enabled" class="section">
-      <div class="empty-card">
-        <Icon name="cloud" :size="32" />
-        <h3>Tailscale is disabled</h3>
-        <p>{{ message || 'Enable Tailscale in heya.yaml under tailscale.enabled and restart the server.' }}</p>
-        <pre class="code">tailscale:
-  enabled: true
-  hostname: heya
-  https: true
-  funnel: false</pre>
-        <p class="hint">
-          Set <code>HEYA_TAILSCALE_AUTHKEY</code> in the environment if you want to skip the
-          interactive login flow on first start.
-        </p>
+    <section class="section">
+      <div class="master-toggle">
+        <div class="master-text">
+          <div class="master-title">Tailscale integration</div>
+          <div class="master-hint">
+            {{ enabled ? 'Heya is exposed on your tailnet.' : 'Off — Heya only listens on the LAN.' }}
+          </div>
+        </div>
+        <label class="switch lg">
+          <input type="checkbox" :checked="enabled" :disabled="saving" @change="onMasterToggle(($event.target as HTMLInputElement).checked)">
+          <span class="slider" />
+        </label>
       </div>
     </section>
 
-    <template v-else-if="status">
+    <section v-if="enabled && status?.login_url" class="section">
+      <a :href="status.login_url" target="_blank" rel="noopener" class="login-cta">
+        <div class="login-cta-icon">
+          <Icon name="cloud" :size="32" />
+        </div>
+        <div class="login-cta-text">
+          <div class="login-cta-title">Authorize this device on your tailnet</div>
+          <div class="login-cta-sub">Click to open Tailscale and approve the <code>{{ status.hostname }}</code> node. One time only.</div>
+        </div>
+        <Icon name="arrow-right" :size="20" />
+      </a>
+    </section>
+
+    <template v-if="enabled">
       <section class="section">
         <h3 class="section-heading">
           <Icon name="pulse" :size="14" />
           Node status
         </h3>
         <div class="status-grid">
-          <div class="status-card" :class="{ ok: status.running, warn: !status.running }">
+          <div class="status-card" :class="{ ok: status?.running, warn: status && !status.running }">
             <div class="status-label">Backend</div>
-            <div class="status-value">{{ status.backend_state || 'Unknown' }}</div>
+            <div class="status-value">{{ status?.backend_state || (saving ? 'Starting…' : 'Pending') }}</div>
           </div>
           <div class="status-card">
             <div class="status-label">Hostname</div>
-            <div class="status-value">{{ status.hostname }}</div>
+            <div class="status-value mono">{{ status?.hostname || cfg?.hostname }}</div>
           </div>
           <div class="status-card">
             <div class="status-label">MagicDNS</div>
-            <div class="status-value mono">{{ status.magic_dns || '—' }}</div>
+            <div class="status-value mono">{{ status?.magic_dns || '—' }}</div>
           </div>
           <div class="status-card">
             <div class="status-label">Tailnet IPv4</div>
-            <div class="status-value mono">{{ status.ipv4 || '—' }}</div>
+            <div class="status-value mono">{{ status?.ipv4 || '—' }}</div>
           </div>
           <div class="status-card">
             <div class="status-label">Tailnet IPv6</div>
-            <div class="status-value mono">{{ status.ipv6 || '—' }}</div>
+            <div class="status-value mono">{{ status?.ipv6 || '—' }}</div>
           </div>
           <div class="status-card">
             <div class="status-label">HTTPS cert</div>
-            <div class="status-value mono">{{ status.cert_domain || '—' }}</div>
+            <div class="status-value mono">{{ status?.cert_domain || '—' }}</div>
           </div>
         </div>
       </section>
 
-      <section v-if="status.login_url" class="section">
-        <div class="login-card">
-          <Icon name="warning" :size="20" />
-          <div>
-            <h3>Authentication required</h3>
-            <p>Open this URL in your browser and approve the node in your tailnet:</p>
-            <a :href="status.login_url" target="_blank" rel="noopener" class="login-link">
-              {{ status.login_url }}
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section v-if="status.last_error" class="section">
+      <section v-if="status?.last_error" class="section">
         <div class="error-card">
           <Icon name="warning" :size="20" />
           <div>
@@ -88,24 +82,47 @@
 
       <section class="section">
         <h3 class="section-heading">
-          <Icon name="globe" :size="14" />
-          Funnel (public exposure)
+          <Icon name="settings" :size="14" />
+          Settings
         </h3>
+
+        <div class="form-row">
+          <div class="form-text">
+            <div class="form-title">Hostname</div>
+            <div class="form-hint">Shown in the tailnet admin console. Changing this re-onboards the node.</div>
+          </div>
+          <input v-model="hostnameDraft" class="input" :disabled="saving" @blur="saveHostname">
+        </div>
+
         <div class="toggle-row">
           <div class="toggle-text">
-            <div class="toggle-title">Expose Heya on the public internet via Funnel</div>
+            <div class="toggle-title">HTTPS</div>
             <div class="toggle-hint">
-              Anyone on the internet can reach
-              <code v-if="status.cert_domain">{{ status.cert_domain }}</code><code v-else>your MagicDNS name</code>.
-              Heya's auth still applies. Requires Funnel to be enabled for your tailnet.
+              Serve TLS on tailnet :443 using a Tailscale-issued cert.
+              Requires HTTPS to be enabled for your tailnet in the
+              <a href="https://login.tailscale.com/admin/dns/https" target="_blank" rel="noopener">admin console</a>.
             </div>
           </div>
           <label class="switch">
-            <input type="checkbox" :checked="status.funnel" :disabled="saving" @change="toggleFunnel(($event.target as HTMLInputElement).checked)">
+            <input type="checkbox" :checked="cfg?.https ?? true" :disabled="saving" @change="saveHTTPS(($event.target as HTMLInputElement).checked)">
             <span class="slider" />
           </label>
         </div>
-        <p v-if="funnelNote" class="hint">{{ funnelNote }}</p>
+
+        <div class="toggle-row">
+          <div class="toggle-text">
+            <div class="toggle-title">Funnel (public exposure)</div>
+            <div class="toggle-hint">
+              Expose Heya on the public internet at
+              <code v-if="status?.cert_domain">{{ status.cert_domain }}</code><code v-else>your MagicDNS name</code>.
+              Heya's auth still applies. Requires Funnel to be allowed for your tailnet.
+            </div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="cfg?.funnel ?? false" :disabled="saving" @change="saveFunnel(($event.target as HTMLInputElement).checked)">
+            <span class="slider" />
+          </label>
+        </div>
       </section>
 
       <section class="section">
@@ -120,27 +137,41 @@
           </button>
         </div>
         <p class="hint">
-          Clears the saved tailnet identity at <code>{{ stateDirHint }}</code>.
-          The next <code>heya serve</code> will go through onboarding again.
+          Clears the saved tailnet identity at <code>{{ stateDirHint }}</code> and disables Tailscale.
+          Toggle Tailscale back on to re-onboard.
         </p>
+      </section>
+    </template>
+
+    <template v-else>
+      <section class="section">
+        <div class="empty-card">
+          <Icon name="cloud" :size="32" />
+          <p>
+            Toggle Tailscale on above and you'll get a one-click sign-in button.
+            Heya will join your tailnet as <code>heya.&lt;your-tailnet&gt;.ts.net</code> and serve
+            the same UI you see now — accessible from any of your tailnet devices.
+          </p>
+        </div>
       </section>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-const { enabled, status, message, loading, refresh, setFunnel, logout, subscribeToEvents } = useTailscale()
+const { enabled, status, cfg, loading, refresh, saveConfig, setFunnel, logout, subscribeToEvents } = useTailscale()
 
 const saving = ref(false)
 const loggingOut = ref(false)
-const funnelNote = ref('')
+const hostnameDraft = ref('')
 
-const stateDirHint = computed(() => 'data/tailscale/')
+const stateDirHint = computed(() => cfg.value?.state_dir || 'data/tailscale/')
 
 let unsubscribe: (() => void) | null = null
 
 onMounted(async () => {
   await refresh()
+  hostnameDraft.value = cfg.value?.hostname ?? 'heya'
   unsubscribe = subscribeToEvents()
 })
 
@@ -148,27 +179,61 @@ onUnmounted(() => {
   unsubscribe?.()
 })
 
-async function toggleFunnel(on: boolean) {
+watch(cfg, (next) => {
+  if (next && hostnameDraft.value !== next.hostname && !saving.value) {
+    hostnameDraft.value = next.hostname
+  }
+})
+
+async function onMasterToggle(on: boolean) {
   saving.value = true
   try {
-    const res = await setFunnel(on)
-    funnelNote.value = res.note
-    await refresh()
+    await saveConfig({ enabled: on })
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveHostname() {
+  if (!cfg.value || hostnameDraft.value === cfg.value.hostname) return
+  saving.value = true
+  try {
+    await saveConfig({ hostname: hostnameDraft.value })
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveHTTPS(on: boolean) {
+  saving.value = true
+  try {
+    await saveConfig({ https: on })
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveFunnel(on: boolean) {
+  saving.value = true
+  try {
+    await setFunnel(on)
   } finally {
     saving.value = false
   }
 }
 
 async function onLogout() {
-  if (!confirm('Log out of the tailnet? Heya will re-onboard on next restart.')) return
+  if (!confirm('Log out of the tailnet and disable Tailscale?')) return
   loggingOut.value = true
   try {
     await logout()
-    await refresh()
   } finally {
     loggingOut.value = false
   }
 }
+
+// keep loading reactive
+void loading
 </script>
 
 <style scoped>
@@ -188,7 +253,7 @@ async function onLogout() {
 }
 
 .section {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .section-heading {
@@ -203,66 +268,108 @@ async function onLogout() {
   margin: 0 0 12px;
 }
 
-.loading-card,
-.empty-card,
-.login-card,
-.error-card {
+.master-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 24px;
+}
+
+.master-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.master-hint {
+  font-size: 13px;
+  color: var(--fg-3);
 }
 
 .empty-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   color: var(--fg-2);
-}
-
-.empty-card h3 {
-  margin: 16px 0 8px;
-  font-size: 16px;
-  color: var(--fg-1);
+  gap: 12px;
 }
 
 .empty-card p {
-  margin: 0 0 12px;
-  max-width: 480px;
-  font-size: 14px;
+  max-width: 540px;
+  margin: 0;
+  line-height: 1.5;
 }
 
-.login-card,
+.login-cta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 22px;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold);
+  border-radius: var(--r-md);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s ease;
+}
+
+.login-cta:hover {
+  background: rgba(230, 185, 74, 0.18);
+}
+
+.login-cta-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-md);
+  background: rgba(230, 185, 74, 0.18);
+  color: var(--gold-bright);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.login-cta-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.login-cta-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gold-bright);
+  margin-bottom: 4px;
+}
+
+.login-cta-sub {
+  font-size: 13px;
+  color: var(--fg-2);
+  line-height: 1.4;
+}
+
 .error-card {
+  background: rgba(220, 80, 80, 0.08);
+  border: 1px solid rgba(220, 80, 80, 0.4);
+  border-radius: var(--r-md);
+  padding: 16px 20px;
   display: flex;
   gap: 16px;
   align-items: flex-start;
 }
 
-.login-card {
-  border-color: var(--gold);
-  background: var(--gold-soft);
-}
-
-.error-card {
-  border-color: rgba(220, 80, 80, 0.4);
-  background: rgba(220, 80, 80, 0.08);
-}
-
-.login-card h3,
 .error-card h3 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 14px;
-}
-
-.login-link {
-  display: inline-block;
-  margin-top: 8px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--gold-bright);
-  word-break: break-all;
+  color: var(--fg-1);
 }
 
 .status-grid {
@@ -306,6 +413,7 @@ async function onLogout() {
   word-break: break-all;
 }
 
+.form-row,
 .toggle-row {
   display: flex;
   align-items: center;
@@ -315,23 +423,43 @@ async function onLogout() {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  margin-bottom: 10px;
 }
 
+.form-text,
 .toggle-text {
   flex: 1;
   min-width: 0;
 }
 
+.form-title,
 .toggle-title {
   font-size: 14px;
   font-weight: 500;
   margin-bottom: 4px;
 }
 
+.form-hint,
 .toggle-hint {
   font-size: 12px;
   color: var(--fg-3);
   line-height: 1.5;
+}
+
+.input {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  width: 200px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--gold);
 }
 
 .switch {
@@ -340,6 +468,11 @@ async function onLogout() {
   width: 44px;
   height: 24px;
   flex-shrink: 0;
+}
+
+.switch.lg {
+  width: 52px;
+  height: 28px;
 }
 
 .switch input {
@@ -352,7 +485,7 @@ async function onLogout() {
   position: absolute;
   inset: 0;
   background: var(--bg-3);
-  border-radius: 12px;
+  border-radius: 14px;
   cursor: pointer;
   transition: background 0.15s ease;
 }
@@ -369,12 +502,21 @@ async function onLogout() {
   transition: transform 0.15s ease;
 }
 
+.switch.lg .slider::before {
+  width: 24px;
+  height: 24px;
+}
+
 .switch input:checked + .slider {
   background: var(--gold);
 }
 
 .switch input:checked + .slider::before {
   transform: translateX(20px);
+}
+
+.switch.lg input:checked + .slider::before {
+  transform: translateX(24px);
 }
 
 .switch input:disabled + .slider {
@@ -389,11 +531,10 @@ async function onLogout() {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg-1);
-  margin: 8px 0;
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
   text-align: left;
-  max-width: 480px;
   border: 1px solid var(--border);
 }
 
@@ -414,5 +555,14 @@ code {
   background: var(--bg-3);
   padding: 1px 6px;
   border-radius: 4px;
+}
+
+a {
+  color: var(--gold-bright);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
 }
 </style>

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
-	"github.com/karbowiak/heya/internal/eventhub"
 	tsnetwrap "github.com/karbowiak/heya/internal/tailscale"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -16,7 +16,7 @@ import (
 var tailscaleCmd = &cobra.Command{
 	Use:   "tailscale",
 	Short: "Manage Tailscale (tsnet) integration",
-	Long:  "Inspect Tailscale node state, run a one-shot login, or wipe the saved tailnet identity.",
+	Long:  "Inspect Tailscale node state or wipe the saved tailnet identity. Run with heya serve not running — both would race for the same state dir.",
 }
 
 var tailscaleStatusCmd = &cobra.Command{
@@ -24,18 +24,19 @@ var tailscaleStatusCmd = &cobra.Command{
 	Short: "Show Tailscale node status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !cfg.Tailscale.Enabled {
-			fmt.Println("Tailscale: disabled (set tailscale.enabled: true in heya.yaml to onboard)")
+			fmt.Println("Tailscale: disabled (toggle on in Settings → Tailscale, or set tailscale.enabled: true in heya.yaml)")
 			return nil
 		}
 
 		ts := newOneShotTailscale()
+		defer func() { _ = ts.Close() }()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 
-		if err := ts.Start(ctx); err != nil {
+		if err := ts.Enable(ctx, oneShotConfig()); err != nil {
 			return err
 		}
-		defer func() { _ = ts.Close() }()
 
 		st := ts.Status()
 		jsonFlag, _ := cmd.Flags().GetBool("json")
@@ -71,12 +72,13 @@ var tailscaleLogoutCmd = &cobra.Command{
 			return fmt.Errorf("tailscale is disabled in heya.yaml")
 		}
 		ts := newOneShotTailscale()
+		defer func() { _ = ts.Close() }()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := ts.Start(ctx); err != nil {
+		if err := ts.Enable(ctx, oneShotConfig()); err != nil {
 			return err
 		}
-		defer func() { _ = ts.Close() }()
 		if err := ts.Logout(ctx); err != nil {
 			return err
 		}
@@ -87,13 +89,20 @@ var tailscaleLogoutCmd = &cobra.Command{
 
 func newOneShotTailscale() *tsnetwrap.Server {
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	return tsnetwrap.New(tsnetwrap.Config{
+	// One-shot CLI doesn't serve HTTP — pass a no-op handler.
+	noop := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	return tsnetwrap.New(noop, logger, nil)
+}
+
+func oneShotConfig() tsnetwrap.Config {
+	return tsnetwrap.Config{
+		Enabled:  true,
 		Hostname: cfg.Tailscale.Hostname,
 		AuthKey:  cfg.Tailscale.AuthKey,
 		StateDir: cfg.Tailscale.StateDir,
 		HTTPS:    cfg.Tailscale.HTTPS,
 		Funnel:   cfg.Tailscale.Funnel,
-	}, logger, nil)
+	}
 }
 
 func emptyDash(s string) string {
@@ -102,10 +111,6 @@ func emptyDash(s string) string {
 	}
 	return s
 }
-
-// keep eventhub import alive for typed payloads in API responses (consumers
-// of this CLI parse via the same event payload struct).
-var _ = eventhub.EventTailscale
 
 func init() {
 	tailscaleStatusCmd.Flags().Bool("json", false, "JSON output")

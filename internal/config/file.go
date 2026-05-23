@@ -66,6 +66,30 @@ func SaveFile(path string, fc *FileConfig) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// SaveTailscale writes the tailscale block of heya.yaml in-place, preserving
+// every other field already on disk. The auth key is intentionally never
+// written here — it stays env-only so secrets don't land in YAML.
+func SaveTailscale(ts TailscaleConfig) error {
+	path := FindConfigFile()
+	if path == "" {
+		path = "./heya.yaml"
+	}
+	var fc *FileConfig
+	if existing, err := LoadFile(path); err == nil {
+		fc = existing
+	} else {
+		fc = &FileConfig{}
+	}
+	fc.Tailscale = FileTailscaleConfig{
+		Enabled:  ts.Enabled,
+		Hostname: ts.Hostname,
+		StateDir: ts.StateDir,
+		HTTPS:    ts.HTTPS,
+		Funnel:   ts.Funnel,
+	}
+	return SaveFile(path, fc)
+}
+
 func MergeFileWithEnv(fc *FileConfig) *Config {
 	cfg := &Config{
 		DatabaseURL:  fc.DatabaseURL,

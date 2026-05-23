@@ -57,6 +57,13 @@ func (a *App) SetScheduler(r *scheduler.Runner) { a.scheduler = r }
 func (a *App) Tailscale() *tailscale.Server      { return a.tailscale }
 func (a *App) SetTailscale(ts *tailscale.Server) { a.tailscale = ts }
 
+// UpdateTailscaleConfig swaps the in-memory tailscale config for new values.
+// Callers persist via config.SaveTailscale separately — this just updates
+// the snapshot used by future reads.
+func (a *App) UpdateTailscaleConfig(ts config.TailscaleConfig) {
+	a.config.Tailscale = ts
+}
+
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err := AutoMigrate(cfg.DatabaseURL); err != nil {
 		return nil, err

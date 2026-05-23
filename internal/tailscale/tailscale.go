@@ -1,6 +1,9 @@
 // Package tailscale wraps tsnet.Server in a Heya-shaped lifecycle:
-// declarative Config, ergonomic listeners, structured status snapshots,
-// and a Funnel toggle that can be flipped at runtime via the API.
+// declarative Config, ergonomic listeners, and hot Enable/Disable so the
+// node can be brought up and torn down from the UI without restarting
+// the whole binary. The Server owns the full listener lifecycle — it
+// manages the tsnet node, the HTTP server(s) bound to it, and the
+// LocalClient status poller as a single unit.
 package tailscale
 
 import (
@@ -24,6 +27,7 @@ import (
 )
 
 type Config struct {
+	Enabled  bool
 	Hostname string
 	AuthKey  string
 	StateDir string
@@ -34,6 +38,7 @@ type Config struct {
 // Status is the snapshot the UI / CLI read. The fields below are all that
 // the rest of Heya cares about; everything richer comes from the LocalClient.
 type Status struct {
+	Enabled      bool      `json:"enabled"`
 	Running      bool      `json:"running"`
 	Hostname     string    `json:"hostname"`
 	BackendState string    `json:"backend_state"`
@@ -53,32 +58,160 @@ type Status struct {
 type StatusFn func(Status)
 
 type Server struct {
-	cfg      Config
+	handler  http.Handler
 	logger   zerolog.Logger
 	onStatus StatusFn
 
-	ts     *tsnet.Server
-	status atomic.Pointer[Status]
+	mu          sync.Mutex
+	cfg         Config
+	ts          *tsnet.Server
+	httpServers []*http.Server
+	listeners   []net.Listener
+	watchCancel context.CancelFunc
 
-	closeMu sync.Mutex
-	closed  bool
+	status atomic.Pointer[Status]
+	closed bool
 }
 
-func New(cfg Config, logger zerolog.Logger, onStatus StatusFn) *Server {
-	s := &Server{cfg: cfg, logger: logger, onStatus: onStatus}
-	s.publish(Status{
-		Hostname:  cfg.Hostname,
-		HTTPS:     cfg.HTTPS,
-		Funnel:    cfg.Funnel,
-		UpdatedAt: time.Now(),
-	})
+func New(handler http.Handler, logger zerolog.Logger, onStatus StatusFn) *Server {
+	s := &Server{handler: handler, logger: logger, onStatus: onStatus}
+	s.publish(Status{UpdatedAt: time.Now()})
 	return s
 }
 
-// Start brings up the tsnet node and blocks until it has a tailnet address
-// (or the context is cancelled / Up errors). After Start returns nil the
-// listeners can be opened.
-func (s *Server) Start(ctx context.Context) error {
+// Enable brings the tsnet node up under the given config and binds the
+// configured listeners. Safe to call when already enabled — it'll restart
+// the node only if hostname / state-dir actually changed, otherwise it just
+// rebuilds the listener set (cheaper).
+//
+// Returns nil immediately if cfg.Enabled is false (use Disable instead).
+func (s *Server) Enable(ctx context.Context, cfg Config) error {
+	if !cfg.Enabled {
+		return errors.New("tailscale: Enable called with Enabled=false")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return errors.New("tailscale: server has been closed")
+	}
+
+	prev := s.cfg
+	s.cfg = cfg
+	s.publishLocked(s.snapshotLocked())
+
+	// Hostname / state-dir change requires a node restart. Funnel + HTTPS
+	// are listener-level — they don't need a fresh tsnet node.
+	needNodeRestart := s.ts == nil ||
+		prev.Hostname != cfg.Hostname ||
+		prev.StateDir != cfg.StateDir ||
+		(cfg.AuthKey != "" && prev.AuthKey != cfg.AuthKey)
+
+	if needNodeRestart {
+		s.teardownLocked()
+		if err := s.startNodeLocked(ctx); err != nil {
+			s.recordErrorLocked(err)
+			return err
+		}
+	} else {
+		s.closeListenersLocked()
+	}
+
+	s.openListenersLocked()
+	return nil
+}
+
+// Disable closes the listeners and shuts the tsnet node down. The state dir
+// is preserved so the next Enable can resume without re-onboarding.
+func (s *Server) Disable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg.Enabled = false
+	s.teardownLocked()
+	st := s.snapshotLocked()
+	st.Running = false
+	st.BackendState = ""
+	s.publishLocked(st)
+	return nil
+}
+
+// SetFunnel flips Funnel on/off at runtime and rebinds the :443 listener.
+// No-op if the node isn't currently enabled.
+func (s *Server) SetFunnel(ctx context.Context, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ts == nil {
+		s.cfg.Funnel = on
+		s.publishLocked(s.snapshotLocked())
+		return nil
+	}
+	s.cfg.Funnel = on
+	s.closeListenersLocked()
+	s.openListenersLocked()
+	return nil
+}
+
+// SetHTTPS flips HTTPS on/off and rebinds listeners.
+func (s *Server) SetHTTPS(ctx context.Context, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ts == nil {
+		s.cfg.HTTPS = on
+		s.publishLocked(s.snapshotLocked())
+		return nil
+	}
+	s.cfg.HTTPS = on
+	s.closeListenersLocked()
+	s.openListenersLocked()
+	return nil
+}
+
+// Status returns the most recent snapshot.
+func (s *Server) Status() Status {
+	if p := s.status.Load(); p != nil {
+		return *p
+	}
+	return Status{}
+}
+
+// Logout clears the local tailnet identity (useful for re-onboarding under a
+// different account). Implicitly disables the node — the next Enable will
+// require a fresh auth flow.
+func (s *Server) Logout(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ts == nil {
+		return errors.New("tailscale: node not running")
+	}
+	lc, err := s.ts.LocalClient()
+	if err != nil {
+		return err
+	}
+	if err := lc.Logout(ctx); err != nil {
+		return err
+	}
+	s.teardownLocked()
+	s.cfg.Enabled = false
+	s.publishLocked(s.snapshotLocked())
+	return nil
+}
+
+// Close permanently shuts down the server. After Close, Enable returns
+// an error.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	s.teardownLocked()
+	return nil
+}
+
+// startNodeLocked is the actual tsnet up. Caller must hold s.mu.
+func (s *Server) startNodeLocked(ctx context.Context) error {
 	if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
 		return fmt.Errorf("tailscale state dir: %w", err)
 	}
@@ -87,7 +220,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Hostname: s.cfg.Hostname,
 		Dir:      s.cfg.StateDir,
 		AuthKey:  s.cfg.AuthKey,
-		Logf:     func(string, ...any) {}, // silence backend chatter
+		Logf:     func(string, ...any) {},
 		UserLogf: s.userLog,
 	}
 
@@ -96,93 +229,104 @@ func (s *Server) Start(ctx context.Context) error {
 
 	st, err := s.ts.Up(upCtx)
 	if err != nil {
-		s.recordError(err)
+		_ = s.ts.Close()
+		s.ts = nil
 		return fmt.Errorf("tailscale Up: %w", err)
 	}
 
-	s.refreshStatus(st)
-	go s.watchStatus(ctx)
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	s.watchCancel = watchCancel
+	go s.watchStatus(watchCtx)
+
+	s.refreshFromIPN(st)
 	return nil
 }
 
-// Listen returns a plain HTTP listener on the tailnet only (port 80).
-func (s *Server) Listen() (net.Listener, error) {
+// openListenersLocked binds tailnet :80 / :443 / Funnel based on cfg and
+// kicks off http.Server goroutines for each. Caller must hold s.mu.
+func (s *Server) openListenersLocked() {
 	if s.ts == nil {
-		return nil, errors.New("tailscale: server not started")
+		return
 	}
-	return s.ts.Listen("tcp", ":80")
+
+	addListener := func(label string, makeListener func() (net.Listener, error), handler http.Handler) {
+		ln, err := makeListener()
+		if err != nil {
+			s.logger.Warn().Err(err).Str("listener", label).Msg("listener failed to open")
+			return
+		}
+		srv := &http.Server{Handler: handler, ReadHeaderTimeout: 15 * time.Second}
+		s.listeners = append(s.listeners, ln)
+		s.httpServers = append(s.httpServers, srv)
+		go func() {
+			s.logger.Info().Str("listener", label).Msg("listener up")
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+				s.logger.Warn().Err(err).Str("listener", label).Msg("listener stopped")
+			}
+		}()
+	}
+
+	switch {
+	case s.cfg.Funnel:
+		addListener("tailscale-funnel:443",
+			func() (net.Listener, error) { return s.ts.ListenFunnel("tcp", ":443") },
+			s.handler)
+		addListener("tailscale-redirect:80",
+			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
+			s.httpRedirectorLocked())
+
+	case s.cfg.HTTPS:
+		addListener("tailscale-https:443",
+			func() (net.Listener, error) {
+				lc, err := s.ts.LocalClient()
+				if err != nil {
+					return nil, err
+				}
+				raw, err := s.ts.Listen("tcp", ":443")
+				if err != nil {
+					return nil, err
+				}
+				return tls.NewListener(raw, &tls.Config{GetCertificate: lc.GetCertificate}), nil
+			},
+			s.handler)
+		addListener("tailscale-redirect:80",
+			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
+			s.httpRedirectorLocked())
+
+	default:
+		addListener("tailscale-http:80",
+			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
+			s.handler)
+	}
 }
 
-// ListenTLS returns an HTTPS listener using a Tailscale-issued cert for the
-// node's MagicDNS name (port 443). Requires HTTPS to be enabled in the
-// tailnet admin console.
-func (s *Server) ListenTLS() (net.Listener, error) {
-	if s.ts == nil {
-		return nil, errors.New("tailscale: server not started")
+// teardownLocked tears down the listeners AND the tsnet node. Caller must
+// hold s.mu.
+func (s *Server) teardownLocked() {
+	s.closeListenersLocked()
+	if s.watchCancel != nil {
+		s.watchCancel()
+		s.watchCancel = nil
 	}
-	lc, err := s.ts.LocalClient()
-	if err != nil {
-		return nil, fmt.Errorf("tailscale local client: %w", err)
+	if s.ts != nil {
+		_ = s.ts.Close()
+		s.ts = nil
 	}
-	raw, err := s.ts.Listen("tcp", ":443")
-	if err != nil {
-		return nil, fmt.Errorf("tailscale :443 listen: %w", err)
-	}
-	tlsCfg := &tls.Config{GetCertificate: lc.GetCertificate}
-	return tls.NewListener(raw, tlsCfg), nil
 }
 
-// ListenFunnel returns a listener that accepts both tailnet *and* public
-// internet traffic via Tailscale Funnel. Always TLS-terminated by Tailscale.
-func (s *Server) ListenFunnel() (net.Listener, error) {
-	if s.ts == nil {
-		return nil, errors.New("tailscale: server not started")
+// closeListenersLocked closes the listeners + http.Servers but leaves the
+// tsnet node up. Caller must hold s.mu.
+func (s *Server) closeListenersLocked() {
+	for _, srv := range s.httpServers {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = srv.Shutdown(shutdownCtx)
+		cancel()
 	}
-	return s.ts.ListenFunnel("tcp", ":443")
-}
-
-// Status returns the most recent snapshot.
-func (s *Server) Status() Status {
-	if p := s.status.Load(); p != nil {
-		return *p
+	for _, ln := range s.listeners {
+		_ = ln.Close()
 	}
-	return Status{Hostname: s.cfg.Hostname, HTTPS: s.cfg.HTTPS, Funnel: s.cfg.Funnel}
-}
-
-// SetFunnel flips Funnel on/off at runtime by re-binding the listener. The
-// returned bool reflects the new state; on error the previous state is kept.
-//
-// Note: callers must restart their listener loop after this — the function
-// signals intent and persists config; serve.go is responsible for re-Listen.
-func (s *Server) SetFunnel(enabled bool) {
-	s.cfg.Funnel = enabled
-	cur := s.Status()
-	cur.Funnel = enabled
-	cur.UpdatedAt = time.Now()
-	s.publish(cur)
-}
-
-// Logout clears the local tailnet identity (useful for re-onboarding under a
-// different account). The next Start will require a fresh auth flow.
-func (s *Server) Logout(ctx context.Context) error {
-	if s.ts == nil {
-		return errors.New("tailscale: server not started")
-	}
-	lc, err := s.ts.LocalClient()
-	if err != nil {
-		return err
-	}
-	return lc.Logout(ctx)
-}
-
-func (s *Server) Close() error {
-	s.closeMu.Lock()
-	defer s.closeMu.Unlock()
-	if s.closed || s.ts == nil {
-		return nil
-	}
-	s.closed = true
-	return s.ts.Close()
+	s.httpServers = nil
+	s.listeners = nil
 }
 
 // userLog catches lines from tsnet (e.g. "To authenticate, visit: https://...")
@@ -192,30 +336,33 @@ func (s *Server) userLog(format string, args ...any) {
 	s.logger.Info().Msg(msg)
 
 	if idx := indexOfLoginURL(msg); idx >= 0 {
-		url := extractURL(msg[idx:])
-		if url != "" {
+		login := extractURL(msg[idx:])
+		if login != "" {
 			cur := s.Status()
-			cur.LoginURL = url
+			cur.LoginURL = login
 			cur.UpdatedAt = time.Now()
 			s.publish(cur)
 		}
 	}
 }
 
-// watchStatus polls the LocalClient on a 10s tick so IP/cert/backend-state
+// watchStatus polls the LocalClient on a 5s tick so IP/cert/backend-state
 // changes propagate to the UI without restart.
 func (s *Server) watchStatus(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if s.ts == nil {
+			s.mu.Lock()
+			ts := s.ts
+			s.mu.Unlock()
+			if ts == nil {
 				return
 			}
-			lc, err := s.ts.LocalClient()
+			lc, err := ts.LocalClient()
 			if err != nil {
 				continue
 			}
@@ -223,19 +370,25 @@ func (s *Server) watchStatus(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			s.refreshStatus(st)
+			s.mu.Lock()
+			s.refreshFromIPN(st)
+			s.mu.Unlock()
 		}
 	}
 }
 
-func (s *Server) refreshStatus(st *ipnstate.Status) {
-	cur := s.Status()
+// refreshFromIPN updates the published Status from a tailscale ipnstate.Status
+// reading. Caller must hold s.mu.
+func (s *Server) refreshFromIPN(st *ipnstate.Status) {
+	cur := s.snapshotLocked()
 	cur.UpdatedAt = time.Now()
 	cur.Running = st != nil && st.BackendState == ipn.Running.String()
 	if st != nil {
 		cur.BackendState = st.BackendState
 		if st.Self != nil {
 			cur.MagicDNS = stripTrailingDot(st.Self.DNSName)
+			cur.IPv4 = ""
+			cur.IPv6 = ""
 			for _, ip := range st.Self.TailscaleIPs {
 				if ip.Is4() && cur.IPv4 == "" {
 					cur.IPv4 = ip.String()
@@ -253,19 +406,40 @@ func (s *Server) refreshStatus(st *ipnstate.Status) {
 	}
 	if cur.Running {
 		cur.LastError = ""
-		if domains := s.ts.CertDomains(); len(domains) > 0 {
-			cur.CertDomain = domains[0]
+		if s.ts != nil {
+			if domains := s.ts.CertDomains(); len(domains) > 0 {
+				cur.CertDomain = domains[0]
+			}
 		}
 	}
-	s.publish(cur)
+	s.publishLocked(cur)
 }
 
-func (s *Server) recordError(err error) {
-	cur := s.Status()
+// snapshotLocked builds a Status from the current cfg. Caller must hold s.mu.
+func (s *Server) snapshotLocked() Status {
+	if p := s.status.Load(); p != nil {
+		cp := *p
+		cp.Enabled = s.cfg.Enabled
+		cp.Hostname = s.cfg.Hostname
+		cp.HTTPS = s.cfg.HTTPS
+		cp.Funnel = s.cfg.Funnel
+		return cp
+	}
+	return Status{
+		Enabled:   s.cfg.Enabled,
+		Hostname:  s.cfg.Hostname,
+		HTTPS:     s.cfg.HTTPS,
+		Funnel:    s.cfg.Funnel,
+		UpdatedAt: time.Now(),
+	}
+}
+
+func (s *Server) recordErrorLocked(err error) {
+	cur := s.snapshotLocked()
 	cur.Running = false
 	cur.LastError = err.Error()
 	cur.UpdatedAt = time.Now()
-	s.publish(cur)
+	s.publishLocked(cur)
 }
 
 func (s *Server) publish(st Status) {
@@ -276,25 +450,32 @@ func (s *Server) publish(st Status) {
 	}
 }
 
+// publishLocked is publish() called from inside the lock — same behavior, just
+// named to make the locking discipline explicit at the call site.
+func (s *Server) publishLocked(st Status) {
+	s.publish(st)
+}
+
 // LocalClient exposes the underlying tailnet LocalAPI for advanced callers
-// (whois, ping, etc.). Returns nil-ish error if the server hasn't started.
+// (whois, ping, etc.). Returns an error if the server isn't enabled.
 func (s *Server) LocalClient() (*local.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.ts == nil {
-		return nil, errors.New("tailscale: server not started")
+		return nil, errors.New("tailscale: node not running")
 	}
 	return s.ts.LocalClient()
 }
 
-// HTTPRedirector returns a handler suitable for the :80 listener when HTTPS
-// is on — bounces every request to the same path on the cert domain.
-func (s *Server) HTTPRedirector() http.Handler {
+// httpRedirectorLocked returns a handler that bounces requests to the cert
+// domain on HTTPS. Caller must hold s.mu (reads s.ts indirectly via Status).
+func (s *Server) httpRedirectorLocked() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := s.Status().CertDomain
 		if host == "" {
 			host = r.Host
 		}
-		// Reconstruct from controlled host + path/query only; never use the
-		// raw RequestURI as that's flagged by gosec G710 (open-redirect).
+		// Build target from controlled host + path/query (gosec G710).
 		u := &url.URL{Scheme: "https", Host: host, Path: r.URL.Path, RawQuery: r.URL.RawQuery}
 		http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
 	})
