@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs of the same PR/branch when a new push lands.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  # Frontend: type-check the Nuxt SPA and audit npm-side deps.
+  # ────────────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend (vue-tsc + audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Guard against trustedDependencies escape hatch
+        run: |
+          if grep -q '"trustedDependencies"' web/package.json; then
+            echo "::error::web/package.json introduces \`trustedDependencies\`."
+            echo "This field lets listed packages run install/postinstall scripts."
+            echo "Confirm you actually need this and update this guard intentionally."
+            exit 1
+          fi
+
+      - name: Install deps (frozen lockfile)
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Type-check (vue-tsc)
+        working-directory: web
+        run: bunx vue-tsc --noEmit
+
+      - name: Audit npm deps for known CVEs
+        working-directory: web
+        run: bun audit
+
+  # ────────────────────────────────────────────────────────────────
+  # Backend static checks: format, lint, build, sqlc drift.
+  # ────────────────────────────────────────────────────────────────
+  go-static:
+    name: Go (lint + build + sqlc drift)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so --new-from-rev can compare against origin/main.
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::The following files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          # Only fail on issues introduced in this PR. Drop --new-from-rev
+          # once the existing baseline (~104 issues) is at 0.
+          args: --new-from-rev=origin/${{ github.base_ref || 'main' }} --timeout=5m
+
+      - name: Compile
+        run: go build -o /dev/null ./...
+
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
+      - name: Verify sqlc generated code is up to date
+        run: |
+          sqlc generate
+          if ! git diff --quiet internal/database/sqlc/; then
+            echo "::error::sqlc-generated code is out of date."
+            echo "Run 'sqlc generate' locally and commit the result."
+            git diff --stat internal/database/sqlc/
+            exit 1
+          fi
+
+  # ────────────────────────────────────────────────────────────────
+  # Backend tests: race-detector enabled, real Postgres.
+  # ────────────────────────────────────────────────────────────────
+  go-test:
+    name: Go (test -race)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: heya
+          POSTGRES_PASSWORD: heya
+          POSTGRES_DB: heya
+        ports:
+          - 5440:5432
+        options: >-
+          --health-cmd "pg_isready -U heya -d heya"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://heya:heya@localhost:5440/heya?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply migrations
+        run: |
+          go install github.com/pressly/goose/v3/cmd/goose@latest
+          goose -dir migrations postgres "$DATABASE_URL" up
+
+      - name: Run tests with race detector
+        run: go test -race -count=1 ./...
+
+  # ────────────────────────────────────────────────────────────────
+  # Supply chain: known CVEs in Go imports + multi-ecosystem scan.
+  # ────────────────────────────────────────────────────────────────
+  security:
+    name: Security (govulncheck + OSV)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: govulncheck (Go vuln DB vs import graph)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: OSV-Scanner (npm + Go via OSV.dev)
+        uses: google/osv-scanner-action/osv-scanner-action@v1
+        with:
+          scan-args: |-
+            --recursive
+            --skip-git
+            ./

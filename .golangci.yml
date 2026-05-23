@@ -1,0 +1,41 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck       # unchecked errors
+    - govet          # bundled go vet
+    - ineffassign    # ineffectual assignments
+    - staticcheck    # SA*/ST*/QF* — type-aware analysis
+    - unused         # dead code
+    - gosec          # security issues
+    - misspell       # spelling
+    - unconvert      # unnecessary conversions
+    - gocritic       # opinionated checks
+  settings:
+    gosec:
+      # G104 (errors not checked) overlaps with errcheck; G115 (integer overflow)
+      # is noisy on legitimate int32 conversions to/from sqlc types.
+      excludes:
+        - G104
+        - G115
+    gocritic:
+      disabled-checks:
+        - ifElseChain      # if-else chains are fine when the body is small
+        - singleCaseSwitch # single-case switches can read better than if
+  exclusions:
+    rules:
+      # Generated code — never lint sqlc output.
+      - path: internal/database/sqlc/
+        linters: [errcheck, govet, ineffassign, staticcheck, unused, gosec, misspell, unconvert, gocritic]
+      # Tests get more leeway around error handling and resource cleanup.
+      - path: _test\.go
+        linters: [errcheck, gosec]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

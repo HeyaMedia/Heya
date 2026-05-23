@@ -1,0 +1,66 @@
+# Local git hooks for Heya. Install with `lefthook install` after cloning.
+# https://lefthook.dev/configuration/
+#
+# Each hook is gated by `glob` so we don't run Go checks for a frontend-only
+# commit (or vice versa). Full-project commands stay full-project — type
+# checking a subset of a Vue/Go codebase isn't meaningful.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: vue-tsc
+      glob: 'web/**/*.{vue,ts,tsx,d.ts}'
+      root: web/
+      run: bunx vue-tsc --noEmit
+
+    # Refuse commits that introduce `trustedDependencies` in package.json.
+    # That field is the only way for a package to escape bun's default
+    # "no dependency lifecycle scripts" block — adding to it must be a
+    # deliberate, reviewed decision, not a quiet inclusion.
+    - name: bun-trusted-deps-guard
+      glob: 'web/package.json'
+      run: |
+        if grep -q '"trustedDependencies"' web/package.json; then
+          echo "::error:: web/package.json introduces \`trustedDependencies\`." >&2
+          echo "This field lets the listed packages run install/postinstall scripts." >&2
+          echo "Confirm you actually need this and remove this guard intentionally." >&2
+          exit 1
+        fi
+
+    - name: gofmt
+      glob: '*.go'
+      run: |
+        unformatted=$(gofmt -l $(echo "{staged_files}" | tr ' ' '\n' | grep '\.go$'))
+        if [ -n "$unformatted" ]; then
+          echo "gofmt: the following files need formatting:" >&2
+          echo "$unformatted" >&2
+          echo "Run: gofmt -w <file>" >&2
+          exit 1
+        fi
+
+    # Lints only NEW issues vs the last commit. The existing baseline has
+    # ~104 known issues; this prevents adding more without forcing a giant
+    # cleanup first. Drop --new-from-rev once the baseline is at 0.
+    - name: golangci-lint
+      glob: '*.go'
+      run: golangci-lint run --new-from-rev=HEAD ./...
+
+    - name: go-build
+      glob: '*.go'
+      run: go build -o /dev/null ./cmd/heya
+
+    # If queries/ or migrations/ change, sqlc-generated Go must regenerate.
+    # Block the commit if the working tree would emit new files.
+    - name: sqlc-drift
+      glob:
+        - 'queries/*.sql'
+        - 'migrations/*.sql'
+        - 'sqlc.yaml'
+      run: |
+        sqlc generate
+        if ! git diff --quiet internal/database/sqlc/; then
+          echo "sqlc: regenerated files differ from committed output." >&2
+          echo "Stage the changes under internal/database/sqlc/ or revert the SQL." >&2
+          git diff --stat internal/database/sqlc/ >&2
+          exit 1
+        fi

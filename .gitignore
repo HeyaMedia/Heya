@@ -38,3 +38,8 @@ web/.nuxt/
 web/dist/*
 !web/dist/.gitkeep
 data/postgres/
+
+# Compiled binary at repo root
+/heya
+# Local runtime config — copy from heya.example.yaml and edit
+/heya.yaml
