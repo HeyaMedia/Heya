@@ -17,6 +17,16 @@ type Config struct {
 	TranscodeCacheDir   string
 	TranscodeCacheMaxGB int
 	HWAccel             string
+	Tailscale           TailscaleConfig
+}
+
+type TailscaleConfig struct {
+	Enabled  bool
+	Hostname string
+	AuthKey  string
+	StateDir string
+	HTTPS    bool
+	Funnel   bool
 }
 
 func Load() *Config {
@@ -37,6 +47,14 @@ func Load() *Config {
 		HeyaMediaURL: getenv("HEYA_MEDIA_URL", ""),
 		DataDir:      getenv("DATA_DIR", ""),
 		HWAccel:      getenv("HEYA_HWACCEL", ""),
+		Tailscale: TailscaleConfig{
+			Enabled:  getenv("HEYA_TAILSCALE_ENABLED", "") == "true",
+			Hostname: getenv("HEYA_TAILSCALE_HOSTNAME", ""),
+			AuthKey:  getenv("HEYA_TAILSCALE_AUTHKEY", ""),
+			StateDir: getenv("HEYA_TAILSCALE_STATE_DIR", ""),
+			HTTPS:    getenv("HEYA_TAILSCALE_HTTPS", "true") != "false",
+			Funnel:   getenv("HEYA_TAILSCALE_FUNNEL", "") == "true",
+		},
 	}
 	applyDefaults(cfg)
 	return cfg
@@ -97,6 +115,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.HWAccel == "" {
 		cfg.HWAccel = "auto"
 	}
+	if cfg.Tailscale.Hostname == "" {
+		cfg.Tailscale.Hostname = "heya"
+	}
+	if cfg.Tailscale.StateDir == "" {
+		cfg.Tailscale.StateDir = cfg.DataDir + "/tailscale"
+	}
 }
 
 func (c *Config) Addr() string {
@@ -113,6 +137,13 @@ func (c *Config) ToFileConfig() *FileConfig {
 		HeyaMediaURL: c.HeyaMediaURL,
 		DataDir:      c.DataDir,
 		HWAccel:      c.HWAccel,
+		Tailscale: FileTailscaleConfig{
+			Enabled:  c.Tailscale.Enabled,
+			Hostname: c.Tailscale.Hostname,
+			StateDir: c.Tailscale.StateDir,
+			HTTPS:    c.Tailscale.HTTPS,
+			Funnel:   c.Tailscale.Funnel,
+		},
 	}
 }
 

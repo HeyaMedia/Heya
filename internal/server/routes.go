@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/auth"
+	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/service"
 )
@@ -169,6 +170,13 @@ func registerRoutes(mux *http.ServeMux, app *service.App) {
 	mux.Handle("POST /api/tasks/{id}/run", authed(http.HandlerFunc(handleRunTask(app))))
 	mux.Handle("POST /api/tasks/{id}/cancel", authed(http.HandlerFunc(handleCancelTask(app))))
 	mux.Handle("PUT /api/tasks/{id}", authed(http.HandlerFunc(handleUpdateTask(app))))
+}
+
+func registerTailscaleRoutes(mux *http.ServeMux, app *service.App, cfg *config.Config) {
+	authed := auth.Middleware(app.SessionLookup())
+	mux.Handle("GET /api/tailscale/status", authed(handleTailscaleStatus(app, cfg)))
+	mux.Handle("POST /api/tailscale/funnel", authed(handleTailscaleFunnel(app, cfg)))
+	mux.Handle("POST /api/tailscale/logout", authed(handleTailscaleLogout(app, cfg)))
 }
 
 func registerLogRoutes(mux *http.ServeMux, app *service.App, buf *logbuf.RingBuffer) {

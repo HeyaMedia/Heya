@@ -8,14 +8,23 @@ import (
 )
 
 type FileConfig struct {
-	DatabaseURL  string `yaml:"database_url,omitempty"`
-	Host         string `yaml:"host,omitempty"`
-	Port         string `yaml:"port,omitempty"`
-	LogLevel     string `yaml:"log_level,omitempty"`
-	LogFormat    string `yaml:"log_format,omitempty"`
-	HeyaMediaURL string `yaml:"heya_media_url,omitempty"`
-	DataDir      string `yaml:"data_dir,omitempty"`
-	HWAccel      string `yaml:"hw_accel,omitempty"`
+	DatabaseURL  string              `yaml:"database_url,omitempty"`
+	Host         string              `yaml:"host,omitempty"`
+	Port         string              `yaml:"port,omitempty"`
+	LogLevel     string              `yaml:"log_level,omitempty"`
+	LogFormat    string              `yaml:"log_format,omitempty"`
+	HeyaMediaURL string              `yaml:"heya_media_url,omitempty"`
+	DataDir      string              `yaml:"data_dir,omitempty"`
+	HWAccel      string              `yaml:"hw_accel,omitempty"`
+	Tailscale    FileTailscaleConfig `yaml:"tailscale,omitempty"`
+}
+
+type FileTailscaleConfig struct {
+	Enabled  bool   `yaml:"enabled,omitempty"`
+	Hostname string `yaml:"hostname,omitempty"`
+	StateDir string `yaml:"state_dir,omitempty"`
+	HTTPS    bool   `yaml:"https,omitempty"`
+	Funnel   bool   `yaml:"funnel,omitempty"`
 }
 
 var searchPaths = []string{
@@ -67,6 +76,13 @@ func MergeFileWithEnv(fc *FileConfig) *Config {
 		HeyaMediaURL: fc.HeyaMediaURL,
 		DataDir:      fc.DataDir,
 		HWAccel:      fc.HWAccel,
+		Tailscale: TailscaleConfig{
+			Enabled:  fc.Tailscale.Enabled,
+			Hostname: fc.Tailscale.Hostname,
+			StateDir: fc.Tailscale.StateDir,
+			HTTPS:    fc.Tailscale.HTTPS,
+			Funnel:   fc.Tailscale.Funnel,
+		},
 	}
 
 	envOverrides := []struct {
@@ -81,11 +97,26 @@ func MergeFileWithEnv(fc *FileConfig) *Config {
 		{"HEYA_MEDIA_URL", &cfg.HeyaMediaURL},
 		{"DATA_DIR", &cfg.DataDir},
 		{"HEYA_HWACCEL", &cfg.HWAccel},
+		{"HEYA_TAILSCALE_HOSTNAME", &cfg.Tailscale.Hostname},
+		{"HEYA_TAILSCALE_STATE_DIR", &cfg.Tailscale.StateDir},
 	}
 	for _, o := range envOverrides {
 		if v := os.Getenv(o.key); v != "" {
 			*o.dst = v
 		}
+	}
+
+	if v := os.Getenv("HEYA_TAILSCALE_ENABLED"); v != "" {
+		cfg.Tailscale.Enabled = v == "true"
+	}
+	if v := os.Getenv("HEYA_TAILSCALE_HTTPS"); v != "" {
+		cfg.Tailscale.HTTPS = v != "false"
+	}
+	if v := os.Getenv("HEYA_TAILSCALE_FUNNEL"); v != "" {
+		cfg.Tailscale.Funnel = v == "true"
+	}
+	if v := os.Getenv("HEYA_TAILSCALE_AUTHKEY"); v != "" {
+		cfg.Tailscale.AuthKey = v
 	}
 
 	applyDefaults(cfg)

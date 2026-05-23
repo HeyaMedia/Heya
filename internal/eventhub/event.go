@@ -17,6 +17,7 @@ const (
 	EventStatsUpdated  EventType = "stats.updated"
 	EventScanProgress  EventType = "scan.progress"
 	EventTaskProgress  EventType = "task.progress"
+	EventTailscale     EventType = "tailscale.status"
 )
 
 type Event struct {

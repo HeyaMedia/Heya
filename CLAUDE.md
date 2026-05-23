@@ -35,6 +35,7 @@ internal/
   server/           # net/http handlers (stdlib router, Go 1.22+ patterns)
   service/          # shared business layer used by CLI + HTTP
   slug/             # URL slug generation
+  tailscale/        # tsnet wrapper — embeds a Tailscale node in the binary
   testutil/         # shared test helpers
   transcoder/       # ffmpeg HLS pipeline
   trickplay/        # scrubbing thumbnails (BIF/sprite generation)
@@ -221,6 +222,7 @@ Enforcement:
 | `user` | User CRUD (create admin: `user create … --admin`) |
 | `transcode` | ffmpeg utilities (probe, test pipeline) |
 | `studios` | Studio/network logo management |
+| `tailscale status \| logout` | Inspect / reset the embedded tsnet node |
 
 Global flags: `--json` (machine output), `--no-color`.
 
@@ -232,10 +234,12 @@ Global flags: `--json` (machine output), `--no-color`.
 - **Frontend types track the API.** When a Go response shape changes, update `web/shared/types/index.ts` to match.
 - **Slugs are user-facing URLs.** Media items have a stable `slug` column; routes are `/movies/{slug}`, `/tv/{slug}`, etc.
 - **Heya Media aggregator** (`heya.media`) is the upstream metadata source; TMDB / TVDB / OMDb / MusicBrainz / OpenLibrary are reached through it, not directly.
+- **Tailscale (tsnet) is optional and additive.** Configured under `tailscale:` in `heya.yaml`. When enabled, Heya joins the tailnet as its own node (default hostname `heya`) and serves the same handler on tailnet :80/:443 alongside the LAN listener. HTTPS uses Tailscale-issued certs from the node's MagicDNS name. Funnel is off by default — flip it on in Settings → Tailscale to expose Heya on the public internet. Auth keys come from `HEYA_TAILSCALE_AUTHKEY` (preferred for unattended boot) or the interactive login URL shown in the UI on first start. State lives in `data/tailscale/`.
 
 ## Useful URLs at runtime
 
 - `/api/health` — basic health probe
 - `/api/docs` — Scalar-rendered OpenAPI 3.1 (auto-generated via Huma v2)
+- `/api/tailscale/status` — current tsnet state (only useful when `tailscale.enabled: true`)
 - `/` — SPA entry (embedded)
-- `ws://…/api/events` — real-time event stream (scan progress, job updates)
+- `ws://…/api/events` — real-time event stream (scan progress, job updates, `tailscale.status`)

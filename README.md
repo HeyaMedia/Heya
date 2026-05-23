@@ -18,6 +18,7 @@ server stays focused on libraries, playback, and the UI.
 | Auth & users       | bcrypt + session tokens, per-user lists / favorites / watch state       |
 | UI                 | Nuxt 4 SPA, dark theme, embedded into the Go binary at build time      |
 | CLI                | Cobra-based: scan, identify, transcode, queue, migrate, dashboard TUI  |
+| Tailscale          | Optional [tsnet](https://tailscale.com/docs/features/tsnet) integration — joins your tailnet directly, no port forwarding ([docs](docs/tailscale.md)) |
 
 The HTTP API is documented at `/api/docs` (Scalar over auto-generated OpenAPI
 3.1 via Huma v2). Real-time events stream at `ws://…/api/events`.

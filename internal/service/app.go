@@ -14,6 +14,7 @@ import (
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/scheduler"
+	"github.com/karbowiak/heya/internal/tailscale"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/watcher"
 	"github.com/karbowiak/heya/internal/worker"
@@ -34,6 +35,7 @@ type App struct {
 	hub            *eventhub.Hub
 	scheduler      *scheduler.Runner
 	scanTask       *scheduler.ScanLibrariesTask
+	tailscale      *tailscale.Server
 }
 
 // Accessor methods for handler packages that need App internals.
@@ -51,6 +53,9 @@ func (a *App) RiverClient() *river.Client[pgx.Tx]              { return a.river 
 func (a *App) ScanLibrariesTask() *scheduler.ScanLibrariesTask { return a.scanTask }
 
 func (a *App) SetScheduler(r *scheduler.Runner) { a.scheduler = r }
+
+func (a *App) Tailscale() *tailscale.Server      { return a.tailscale }
+func (a *App) SetTailscale(ts *tailscale.Server) { a.tailscale = ts }
 
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err := AutoMigrate(cfg.DatabaseURL); err != nil {

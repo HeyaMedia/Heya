@@ -20,6 +20,7 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 	mux := http.NewServeMux()
 
 	registerRoutes(mux, app)
+	registerTailscaleRoutes(mux, app, cfg)
 
 	if o.logBuf != nil {
 		registerLogRoutes(mux, app, o.logBuf)

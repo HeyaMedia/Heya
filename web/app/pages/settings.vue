@@ -47,6 +47,7 @@ const tabs = [
   { to: '/settings/libraries', label: 'Libraries', icon: 'folder', hint: 'Media sources' },
   { to: '/settings/users', label: 'Users', icon: 'users', hint: 'Accounts & access' },
   { to: '/settings/server', label: 'Server', icon: 'hard-drives', hint: 'Health & diagnostics' },
+  { to: '/settings/tailscale', label: 'Tailscale', icon: 'cloud', hint: 'tsnet & Funnel' },
   { to: '/settings/transcoding', label: 'Transcoding', icon: 'film', hint: 'Hardware & cache' },
   { to: '/settings/metadata', label: 'Metadata', icon: 'database', hint: 'Edit & manage' },
   { to: '/settings/tasks', label: 'Tasks', icon: 'timer', hint: 'Scheduled & recurring' },
