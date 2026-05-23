@@ -86,7 +86,7 @@ func loadDotEnv() {
 
 func applyDefaults(cfg *Config) {
 	if cfg.DatabaseURL == "" {
-		cfg.DatabaseURL = "postgres://kura:kura@localhost:5440/kura?sslmode=disable"
+		cfg.DatabaseURL = "postgres://heya:heya@localhost:5440/heya?sslmode=disable"
 	}
 	if cfg.Host == "" {
 		cfg.Host = "0.0.0.0"

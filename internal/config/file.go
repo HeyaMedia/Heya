@@ -29,7 +29,7 @@ type FileTailscaleConfig struct {
 
 var searchPaths = []string{
 	"./heya.yaml",
-	filepath.Join(homeDir(), ".config", "kura", "heya.yaml"),
+	filepath.Join(homeDir(), ".config", "heya", "heya.yaml"),
 	"/etc/heya/heya.yaml",
 }
 
@@ -163,7 +163,7 @@ func (c *Config) Sources() map[string]string {
 		fileVal string
 		defVal  string
 	}{
-		{"database_url", "DATABASE_URL", c.DatabaseURL, fileStr(fc, "database_url"), "postgres://kura:kura@localhost:5440/kura?sslmode=disable"},
+		{"database_url", "DATABASE_URL", c.DatabaseURL, fileStr(fc, "database_url"), "postgres://heya:heya@localhost:5440/heya?sslmode=disable"},
 		{"host", "HOST", c.Host, fileStr(fc, "host"), "0.0.0.0"},
 		{"port", "PORT", c.Port, fileStr(fc, "port"), "8080"},
 		{"log_level", "LOG_LEVEL", c.LogLevel, fileStr(fc, "log_level"), "info"},

@@ -17,7 +17,7 @@ func TestDefaults(t *testing.T) {
 	cfg := &Config{}
 	applyDefaults(cfg)
 
-	assert.Equal(t, "postgres://kura:kura@localhost:5440/kura?sslmode=disable", cfg.DatabaseURL)
+	assert.Equal(t, "postgres://heya:heya@localhost:5440/heya?sslmode=disable", cfg.DatabaseURL)
 	assert.Equal(t, "0.0.0.0", cfg.Host)
 	assert.Equal(t, "8080", cfg.Port)
 	assert.Equal(t, "info", cfg.LogLevel)

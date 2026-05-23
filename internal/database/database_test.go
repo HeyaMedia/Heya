@@ -14,7 +14,7 @@ func getTestDatabaseURL(t *testing.T) string {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL")
 	if url == "" {
-		url = "postgres://kura:kura@localhost:5440/kura?sslmode=disable"
+		url = "postgres://heya:heya@localhost:5440/heya?sslmode=disable"
 	}
 	return url
 }

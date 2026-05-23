@@ -50,7 +50,7 @@ var libraryAddCmd = &cobra.Command{
 		q := sqlc.New(app.DBPool())
 		users, err := q.ListUsers(ctx)
 		if err != nil || len(users) == 0 {
-			return fmt.Errorf("no users exist — create a user first with `kura user create`")
+			return fmt.Errorf("no users exist — create a user first with `heya user create`")
 		}
 
 		settings := settingsFromFlags(cmd, mediaTypeStr)
