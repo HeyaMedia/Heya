@@ -63,7 +63,7 @@ export function usePlayer() {
   function cycleRepeat() {
     const modes: Array<'off' | 'all' | 'one'> = ['off', 'all', 'one']
     const idx = modes.indexOf(repeatMode.value)
-    repeatMode.value = modes[(idx + 1) % 3]
+    repeatMode.value = modes[(idx + 1) % modes.length]!
   }
 
   function nextTrack() {

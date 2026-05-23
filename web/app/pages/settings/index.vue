@@ -90,39 +90,11 @@
       </div>
     </section>
 
-    <section class="section">
-      <h3 class="section-heading">
-        <Icon name="lightning" :size="14" />
-        Metadata Providers
-      </h3>
-      <div v-if="providers.length" class="provider-grid">
-        <div v-for="p in providers" :key="p.name" class="provider-card" :class="{ configured: p.configured }">
-          <div class="provider-top">
-            <span class="provider-name">{{ p.display_name || p.name }}</span>
-            <span v-if="p.configured" class="provider-badge configured">
-              <Icon name="check" :size="10" />
-              Active
-            </span>
-            <span v-else class="provider-badge unconfigured">
-              <Icon name="warning" :size="10" />
-              Needs key
-            </span>
-          </div>
-          <div class="provider-kinds">
-            <span v-for="k in p.kinds" :key="k" class="kind-tag" :class="k">{{ k }}</span>
-          </div>
-        </div>
-      </div>
-      <div v-else class="empty-hint">
-        <Icon name="info" :size="14" />
-        No providers configured — add API keys in your .env file
-      </div>
-    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { HealthResponse, ProviderInfo } from '~~/shared/types'
+import type { HealthResponse } from '~~/shared/types'
 
 interface DashboardStats {
   libraries: number
@@ -146,7 +118,6 @@ interface MissingItem {
 
 const stats = ref<DashboardStats | null>(null)
 const health = ref<HealthResponse | null>(null)
-const providers = ref<ProviderInfo[]>([])
 const missingItems = ref<MissingItem[]>([])
 const cleaning = ref(false)
 
@@ -229,15 +200,13 @@ function debouncedRefetchStats() {
 }
 
 onMounted(async () => {
-  const [s, h, p, m] = await Promise.allSettled([
+  const [s, h, m] = await Promise.allSettled([
     apiFetch<DashboardStats>('/api/stats'),
     $fetch<HealthResponse>('/api/health'),
-    apiFetch<ProviderInfo[]>('/api/providers'),
     apiFetch<MissingItem[]>('/api/media/missing'),
   ])
   if (s.status === 'fulfilled') stats.value = s.value
   if (h.status === 'fulfilled') health.value = h.value
-  if (p.status === 'fulfilled') providers.value = p.value
   if (m.status === 'fulfilled') missingItems.value = m.value ?? []
 
   const unsubs = [
@@ -359,78 +328,6 @@ onMounted(async () => {
 .health-label { font-size: 13px; font-weight: 500; color: var(--fg-1); }
 .health-status { font-size: 12px; color: var(--fg-2); font-family: var(--font-mono); }
 .queue-pending { color: var(--gold); }
-
-.provider-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
-}
-
-.provider-card {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 14px 16px;
-  transition: border-color 0.15s ease;
-}
-
-.provider-card:hover { border-color: var(--border-strong); }
-.provider-card.configured { border-color: rgba(111, 191, 124, 0.15); }
-
-.provider-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.provider-name { font-size: 14px; font-weight: 600; }
-
-.provider-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  padding: 2px 8px;
-  border-radius: 100px;
-  letter-spacing: 0.04em;
-}
-
-.provider-badge.configured { background: rgba(111, 191, 124, 0.12); color: var(--good); }
-.provider-badge.unconfigured { background: rgba(217, 107, 107, 0.1); color: var(--bad); }
-
-.provider-kinds { display: flex; gap: 4px; flex-wrap: wrap; }
-
-.kind-tag {
-  font-size: 9px;
-  font-weight: 600;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 100px;
-  background: var(--bg-4);
-  color: var(--fg-3);
-  letter-spacing: 0.06em;
-}
-
-.kind-tag.metadata { background: rgba(255, 255, 255, 0.05); color: var(--fg-2); }
-.kind-tag.artwork { background: rgba(140, 160, 255, 0.1); color: rgb(140, 160, 255); }
-.kind-tag.ratings { background: rgba(255, 180, 100, 0.1); color: rgb(255, 180, 100); }
-
-.empty-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--fg-3);
-  font-size: 13px;
-  padding: 14px 16px;
-  background: var(--bg-2);
-  border: 1px dashed var(--border);
-  border-radius: var(--r-md);
-}
 
 .missing-header {
   display: flex;

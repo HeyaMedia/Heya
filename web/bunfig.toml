@@ -1,0 +1,22 @@
+# Bun configuration. See https://bun.sh/docs/runtime/bunfig
+#
+# Security policy for this project: NO dependency lifecycle scripts run, ever.
+# Bun already enforces this by default (unlike npm/yarn) — packages have to be
+# listed in `trustedDependencies` in package.json to escape that block, and we
+# intentionally keep that field absent.
+#
+# As of last audit, only `esbuild` and `@parcel/watcher` even declare install
+# scripts in our dep tree, and both ship prebuilt platform binaries so they
+# work without their scripts running. If a future dep insists on running a
+# postinstall, the answer is to evaluate whether it's actually needed — never
+# to add it to trustedDependencies without review.
+
+[install]
+# Always read the lockfile; never let an install silently rewrite it without
+# the developer noticing.
+exact = false
+
+[install.lockfile]
+# Keep the text lockfile (bun.lock) rather than the binary bun.lockb — easier
+# to review in PRs and diff against history.
+save = true

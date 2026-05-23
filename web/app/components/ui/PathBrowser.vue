@@ -168,6 +168,7 @@ async function syncBrowserToInput(val: string) {
 
   const parentDir = parts.length > 1 ? '/' + parts.slice(0, -1).join('/') : '/'
   const partial = parts[parts.length - 1]
+  if (!partial) return
 
   if (parentDir !== currentPath.value) {
     await fetchDir(parentDir)
@@ -183,7 +184,7 @@ async function syncBrowserToInput(val: string) {
   }
 
   const matches = entries.value.filter(e => e.name.toLowerCase() === partial.toLowerCase())
-  if (matches.length === 1) {
+  if (matches.length === 1 && matches[0]) {
     filterText.value = ''
     const corrected = matches[0]
     await fetchDir(corrected.path)
@@ -193,7 +194,7 @@ async function syncBrowserToInput(val: string) {
   }
 
   const prefixMatches = entries.value.filter(e => e.name.toLowerCase().startsWith(partial.toLowerCase()))
-  if (prefixMatches.length === 1) {
+  if (prefixMatches.length === 1 && prefixMatches[0]) {
     filterText.value = ''
     const corrected = prefixMatches[0]
     await fetchDir(corrected.path)

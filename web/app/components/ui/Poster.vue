@@ -49,6 +49,6 @@ const imgError = ref(false)
 
 watch(() => props.src, () => { imgError.value = false })
 
-const p = computed(() => palettes[(props.idx || 0) % palettes.length])
+const p = computed(() => palettes[(props.idx || 0) % palettes.length]!)
 const gradient = computed(() => `linear-gradient(135deg, ${p.value.bg} 0%, ${p.value.mid} 55%, ${p.value.hi} 100%)`)
 </script>

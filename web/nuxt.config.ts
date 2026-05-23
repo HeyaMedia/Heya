@@ -39,6 +39,12 @@ export default defineNuxtConfig({
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
       ],
+      // Inline style so the document is dark from byte 0 — before any CSS file
+      // loads and before the spa-loading-template renders. Kills the white
+      // browser-default flash on cold loads / slow connections.
+      style: [
+        { innerHTML: 'html,body{background:#0a0a12;margin:0;color-scheme:dark}' },
+      ],
     },
   },
 

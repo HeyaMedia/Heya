@@ -60,9 +60,11 @@
             </span>
           </div>
           <div class="lib-tags">
-            <span v-for="p in (lib.settings?.metadata_providers || [])" :key="p" class="tag meta">{{ providerLabel(p) }}</span>
-            <span v-for="p in (lib.settings?.artwork_providers || [])" :key="'a-'+p" class="tag art">{{ providerLabel(p) }}</span>
-            <span v-for="p in (lib.settings?.ratings_providers || [])" :key="'r-'+p" class="tag rate">{{ providerLabel(p) }}</span>
+            <span class="tag meta">heya.media</span>
+            <span v-if="lib.settings?.fetch_ratings" class="tag rate">
+              <Icon name="star" :size="9" />
+              Ratings
+            </span>
             <span v-if="lib.settings?.watch" class="tag watch">
               <Icon name="eye" :size="9" />
               Watching
@@ -74,6 +76,21 @@
           <button class="action-btn" @click="openSettings(lib)" title="Configure">
             <Icon name="settings" :size="15" />
           </button>
+          <div class="more-wrap" :ref="(el) => setMoreRef(lib.id, el as HTMLElement)">
+            <button class="action-btn" @click="toggleMore(lib.id)" title="More actions">
+              <Icon name="more" :size="15" />
+            </button>
+            <div v-if="moreOpen === lib.id" class="more-menu">
+              <button class="more-option" @click="forceRefreshMetadata(lib.id)">
+                <Icon name="refresh" :size="13" />
+                Refresh Metadata
+              </button>
+              <button class="more-option" @click="forceRefreshImages(lib.id)">
+                <Icon name="download" :size="13" />
+                Refresh Images
+              </button>
+            </div>
+          </div>
           <button v-if="libProgress(lib.id)" class="action-btn danger" @click="cancelLib(lib.id)" title="Cancel scan">
             <Icon name="close" :size="15" />
           </button>
@@ -137,7 +154,10 @@
                 <label class="form-label">Folders</label>
                 <div class="paths-list">
                   <div v-for="(p, i) in newLib.paths" :key="i" class="path-row">
-                    <LibraryPathInput v-model="newLib.paths[i]" />
+                    <LibraryPathInput
+                      :model-value="p ?? ''"
+                      @update:model-value="(v: string) => { newLib.paths.splice(i, 1, v) }"
+                    />
                     <button v-if="newLib.paths.length > 1" type="button" class="path-remove" @click="newLib.paths.splice(i, 1)">
                       <Icon name="close" :size="12" />
                     </button>
@@ -196,7 +216,10 @@
                 <label class="form-label">Folders</label>
                 <div class="paths-list">
                   <div v-for="(p, i) in editPaths" :key="i" class="path-row">
-                    <LibraryPathInput v-model="editPaths[i]" />
+                    <LibraryPathInput
+                      :model-value="p ?? ''"
+                      @update:model-value="(v: string) => { editPaths.splice(i, 1, v) }"
+                    />
                     <button v-if="editPaths.length > 1" type="button" class="path-remove" @click="editPaths.splice(i, 1)">
                       <Icon name="close" :size="12" />
                     </button>
@@ -272,24 +295,19 @@ async function cancelAll() {
 
 function defaultSettings(type: string): LibrarySettings {
   const base: LibrarySettings = {
-    watch: true, metadata_providers: [], artwork_providers: [],
-    ratings_providers: [], preferred_language: 'en', preferred_country: 'US',
-    auto_collections: false, metadata_refresh_days: 0, save_nfo: false, save_images: false,
+    watch: true, preferred_language: 'en', preferred_country: 'US',
+    auto_collections: false, metadata_refresh_days: 0, fetch_ratings: true,
+    save_nfo: false, save_images: false,
+    enable_trickplay: false, generate_thumbnails: true,
   }
   switch (type) {
-    case 'movie': return { ...base, metadata_providers: ['tmdb'], artwork_providers: ['tmdb', 'fanart.tv'], ratings_providers: ['omdb'], auto_collections: true }
-    case 'tv': return { ...base, metadata_providers: ['tmdb', 'tvdb'], artwork_providers: ['tmdb', 'fanart.tv'], ratings_providers: ['omdb'] }
-    case 'music': return { ...base, metadata_providers: ['musicbrainz'] }
-    case 'book': return { ...base, metadata_providers: ['openlibrary'] }
+    case 'movie': return { ...base, auto_collections: true }
+    case 'tv': return { ...base }
+    case 'music': return { ...base }
+    case 'book': return { ...base }
     default: return base
   }
 }
-
-const providerLabels: Record<string, string> = {
-  tmdb: 'TMDB', tvdb: 'TVDB', anidb: 'AniDB', musicbrainz: 'MusicBrainz',
-  openlibrary: 'OpenLibrary', 'fanart.tv': 'Fanart.tv', omdb: 'OMDb',
-}
-function providerLabel(n: string) { return providerLabels[n] || n }
 
 function mediaIcon(type: string) {
   return type === 'movie' ? 'film' : type === 'tv' ? 'tv' : type === 'music' ? 'music' : 'book'
@@ -339,9 +357,6 @@ function openSettings(lib: Library) {
   editSettings.value = {
     ...defaultSettings(lib.media_type),
     ...lib.settings,
-    metadata_providers: lib.settings?.metadata_providers || [],
-    artwork_providers: lib.settings?.artwork_providers || [],
-    ratings_providers: lib.settings?.ratings_providers || [],
   }
   editPaths.value = [...lib.paths]
   saveError.value = ''
@@ -372,6 +387,27 @@ async function saveSettings() {
   saving.value = false
 }
 
+const moreOpen = ref<number | null>(null)
+const moreRefs: Record<number, HTMLElement> = {}
+
+function setMoreRef(id: number, el: HTMLElement) {
+  if (el) moreRefs[id] = el
+}
+
+function toggleMore(id: number) {
+  moreOpen.value = moreOpen.value === id ? null : id
+}
+
+async function forceRefreshMetadata(id: number) {
+  moreOpen.value = null
+  try { await apiFetch(`/api/libraries/${id}/refresh-metadata`, { method: 'POST' }) } catch {}
+}
+
+async function forceRefreshImages(id: number) {
+  moreOpen.value = null
+  try { await apiFetch(`/api/libraries/${id}/refresh-images`, { method: 'POST' }) } catch {}
+}
+
 async function scanLib(id: number) {
   scanning.value = id
   try { await apiFetch(`/api/libraries/${id}/scan`, { method: 'POST' }) } catch {}
@@ -390,7 +426,15 @@ async function fetchLibraries() {
   try { libraries.value = await apiFetch<Library[]>('/api/libraries') } catch {}
 }
 
-onMounted(fetchLibraries)
+onMounted(() => {
+  fetchLibraries()
+  document.addEventListener('click', (e) => {
+    if (moreOpen.value !== null) {
+      const el = moreRefs[moreOpen.value]
+      if (el && !el.contains(e.target as Node)) moreOpen.value = null
+    }
+  })
+})
 </script>
 
 <style scoped>
@@ -554,6 +598,25 @@ onMounted(fetchLibraries)
 
 .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.more-wrap { position: relative; }
+.more-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+  min-width: 190px;
+  background: var(--bg-3); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); padding: 4px;
+  box-shadow: var(--shadow-2);
+}
+.more-option {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 12px;
+  font-size: 13px; color: var(--fg-1);
+  border-radius: var(--r-sm); cursor: pointer;
+  transition: background 0.12s;
+}
+.more-option:hover {
+  background: rgba(255,255,255,0.06);
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinning { animation: spin 0.8s linear infinite; }
 
@@ -595,7 +658,7 @@ onMounted(fetchLibraries)
 
 .modal-card {
   width: 100%;
-  max-width: 580px;
+  max-width: 860px;
   background: var(--bg-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-xl);

@@ -7,17 +7,27 @@
       type-label="Movies"
       :total-count="items.length"
       :loved-count="favoritedSet.size"
+      :user-lists="userLists"
+      :drag-over-list-id="dragState.overListId"
       @select="activeLib = $event; activeView = null"
       @view="activeView = $event"
+      @list-drop="onListDrop"
+      @list-dragover="onListDragOver"
+      @list-dragleave="onListDragLeave"
     />
     <div class="library-main scroll">
-      <LibraryToolbar
-        :title="activeView === 'loved' ? 'Loved Movies' : 'Movies'"
+      <FilterBar
+        :title="viewTitle"
         :count="sorted.length"
         :sort="sort"
         :view="view"
+        :filters="filters"
+        :available-genres="availableGenres"
+        :available-languages="availableLanguages"
         @sort="sort = $event"
         @view="view = $event"
+        @update:filters="onFiltersChange"
+        @save-list="saveSmartList"
       />
 
       <div class="lib-content">
@@ -33,17 +43,22 @@
             :key="item.id"
             class="grid-tile card-tile"
             :class="{ unavailable: item.available === false }"
+            draggable="true"
             @click="item.available !== false && navigateTo(mediaUrl(item))"
+            @contextmenu.prevent="openContextMenu($event, item)"
+            @dragstart="onDragStart($event, item)"
+            @dragend="onDragEnd"
           >
             <div style="position: relative">
               <Poster :idx="i" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
               <div v-if="item.available === false" class="missing-badge">Missing</div>
               <div v-if="isWatched(item.id)" class="watched-badge"><Icon name="check" :size="10" /></div>
               <div v-if="isFavorited(item.id)" class="fav-badge"><Icon name="heartfill" :size="10" /></div>
+              <div v-if="item.resolution" class="res-badge">{{ item.resolution === '4k' ? '4K' : item.resolution }}</div>
             </div>
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ item.title }}</div>
-              <div class="grid-tile-sub">{{ item.year }}</div>
+              <div class="grid-tile-sub">{{ item.year }}<template v-if="item.rating"> · {{ item.rating.toFixed(1) }}★</template></div>
             </div>
           </div>
         </div>
@@ -52,6 +67,8 @@
           <div class="list-row list-row-head">
             <div>Title</div>
             <div>Year</div>
+            <div>Rating</div>
+            <div>Genre</div>
             <div>Added</div>
           </div>
           <div
@@ -59,15 +76,22 @@
             :key="item.id"
             class="list-row"
             @click="navigateTo(mediaUrl(item))"
+            @contextmenu.prevent="openContextMenu($event, item)"
           >
             <div class="list-title-cell">
               <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
               <div>
-                <div class="list-title">{{ item.title }}</div>
+                <div class="list-title">
+                  {{ item.title }}
+                  <Icon v-if="isWatched(item.id)" name="check" :size="12" style="color: var(--good); margin-left: 4px" />
+                  <Icon v-if="isFavorited(item.id)" name="heartfill" :size="12" style="color: var(--bad); margin-left: 2px" />
+                </div>
                 <div class="list-sub">{{ item.year }}</div>
               </div>
             </div>
             <div>{{ item.year }}</div>
+            <div>{{ item.rating ? item.rating.toFixed(1) : '–' }}</div>
+            <div class="list-genres">{{ (item.genres || []).slice(0, 2).join(', ') }}</div>
             <div class="list-added">{{ formatDate(item.created_at) }}</div>
           </div>
         </div>
@@ -77,32 +101,66 @@
         </div>
       </div>
     </div>
+
+    <ContextMenu
+      :items="menuState.items"
+      :x="menuState.x"
+      :y="menuState.y"
+      :visible="menuState.visible"
+      @close="closeMenu"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import type { MediaItem, Library } from '~~/shared/types'
+import type { EnrichedMediaItem, Library, UserList, FilterState } from '~~/shared/types'
 
-
-const items = ref<MediaItem[]>([])
+const items = ref<EnrichedMediaItem[]>([])
 const libraries = ref<Library[]>([])
+const userLists = ref<UserList[]>([])
 const loading = ref(true)
 const activeLib = ref<number | null>(null)
 const activeView = ref<string | null>(null)
-const sort = ref('added')
+const sort = ref('title')
 const view = ref('grid')
+const filters = ref<FilterState>(defaultFilters())
 
 const favoritedSet = ref<Set<number>>(new Set())
 const watchedSet = ref<Set<number>>(new Set())
 function isWatched(id: number) { return watchedSet.value.has(id) }
 function isFavorited(id: number) { return favoritedSet.value.has(id) }
 
+const personMediaIds = ref<Set<number>>(new Set())
+const studioMediaIds = ref<Set<number>>(new Set())
+
 const listItems = ref<Set<number>>(new Set())
+
+const { menuState, showMenu, closeMenu } = useContextMenu()
+const { dragState, onDragStart, onDragEnd, onListDragOver, onListDragLeave, onListDrop } = useDragDrop()
+
+const viewTitle = computed(() => {
+  if (activeView.value === 'loved') return 'Loved Movies'
+  if (activeView.value?.startsWith('list-')) {
+    const list = userLists.value.find(l => `list-${l.id}` === activeView.value)
+    return list?.name || 'List'
+  }
+  if (activeView.value?.startsWith('collection-')) return 'Collection'
+  return 'Movies'
+})
+
+const availableGenres = computed(() => extractAvailableGenres(items.value))
+const availableLanguages = computed(() => extractLanguages(items.value))
 
 watch(activeView, async (v) => {
   if (!v) { listItems.value = new Set(); return }
   if (v.startsWith('list-')) {
     const listId = v.replace('list-', '')
+    const list = userLists.value.find(l => String(l.id) === listId)
+    if (list?.list_type === 'smart' && list.filter_json) {
+      filters.value = { ...defaultFilters(), ...list.filter_json }
+      listItems.value = new Set()
+      return
+    }
     try {
       const res = await apiFetch<{ items: any[] }>(`/api/lists/${listId}`)
       listItems.value = new Set((res.items || []).map((i: any) => i.id))
@@ -110,23 +168,131 @@ watch(activeView, async (v) => {
   }
 })
 
-const sorted = computed(() => {
+const filtered = computed(() => {
   let list = [...items.value]
   if (activeView.value === 'loved') {
     list = list.filter(i => favoritedSet.value.has(i.id))
   } else if (activeView.value?.startsWith('list-')) {
-    list = list.filter(i => listItems.value.has(i.id))
+    const listId = activeView.value.replace('list-', '')
+    const userList = userLists.value.find(l => String(l.id) === listId)
+    if (userList?.list_type === 'smart') {
+      // Smart list: filters are applied below
+    } else {
+      list = list.filter(i => listItems.value.has(i.id))
+    }
+  } else if (activeView.value?.startsWith('collection-')) {
+    const colId = Number(activeView.value.replace('collection-', ''))
+    list = list.filter(i => i.collection_id === colId)
   } else if (activeLib.value) {
     list = list.filter(i => i.library_id === activeLib.value)
   }
+  return applyFilters(list, filters.value, watchedSet.value, personMediaIds.value, studioMediaIds.value)
+})
+
+const sorted = computed(() => {
+  const list = [...filtered.value]
   switch (sort.value) {
-    case 'title': list.sort((a, b) => a.title.localeCompare(b.title)); break
+    case 'title': list.sort((a, b) => (a.sort_title || a.title).localeCompare(b.sort_title || b.title)); break
     case 'year-desc': list.sort((a, b) => (b.year || '').localeCompare(a.year || '')); break
     case 'year-asc': list.sort((a, b) => (a.year || '').localeCompare(b.year || '')); break
+    case 'rating': list.sort((a, b) => (b.rating || 0) - (a.rating || 0)); break
     default: list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }
   return list
 })
+
+async function onFiltersChange(f: FilterState) {
+  filters.value = f
+  if (f.personIds.length > 0) {
+    try {
+      const ids: number[] = await apiFetch('/api/people/media-ids', {
+        method: 'POST',
+        body: JSON.stringify({ person_ids: f.personIds }),
+      })
+      personMediaIds.value = new Set(ids)
+    } catch {
+      // Fallback: search cast directly
+      personMediaIds.value = new Set()
+    }
+  } else {
+    personMediaIds.value = new Set()
+  }
+  if (f.studioIds.length > 0) {
+    try {
+      const ids: number[] = await apiFetch('/api/studios/media-ids', {
+        method: 'POST',
+        body: JSON.stringify({ company_ids: f.studioIds }),
+      })
+      studioMediaIds.value = new Set(ids)
+    } catch {
+      studioMediaIds.value = new Set()
+    }
+  } else {
+    studioMediaIds.value = new Set()
+  }
+}
+
+function openContextMenu(event: MouseEvent, item: EnrichedMediaItem) {
+  showMenu(event, item, {
+    watchedSet: watchedSet.value,
+    favoritedSet: favoritedSet.value,
+    userLists: userLists.value,
+    onToggleWatched: async (id, watched) => {
+      try {
+        if (watched) {
+          await apiFetch(`/api/movies/${id}/watched`, { method: 'POST' })
+          watchedSet.value.add(id)
+        } else {
+          await apiFetch(`/api/movies/${id}/watched`, { method: 'DELETE' })
+          watchedSet.value.delete(id)
+        }
+        watchedSet.value = new Set(watchedSet.value)
+      } catch { /* ignore */ }
+    },
+    onToggleFavorite: async (id, favorited) => {
+      try {
+        await apiFetch('/api/favorites/toggle', {
+          method: 'POST',
+          body: JSON.stringify({ entity_type: 'media_item', entity_id: id }),
+        })
+        if (favorited) favoritedSet.value.add(id)
+        else favoritedSet.value.delete(id)
+        favoritedSet.value = new Set(favoritedSet.value)
+      } catch { /* ignore */ }
+    },
+    onAddToList: async (listId, mediaId) => {
+      try {
+        await apiFetch(`/api/lists/${listId}/items`, {
+          method: 'POST',
+          body: JSON.stringify({ media_item_id: mediaId }),
+        })
+      } catch { /* ignore */ }
+    },
+  })
+}
+
+async function saveSmartList() {
+  const name = prompt('Smart list name:')
+  if (!name?.trim()) return
+  try {
+    await apiFetch('/api/lists', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: name.trim(),
+        list_type: 'smart',
+        filter_json: filters.value,
+        media_type: 'movie',
+      }),
+    })
+    await loadLists()
+  } catch { /* ignore */ }
+}
+
+async function loadLists() {
+  try {
+    userLists.value = await apiFetch<UserList[]>('/api/lists')
+  } catch { /* ignore */ }
+}
 
 function formatDate(d: string) {
   if (!d) return ''
@@ -134,10 +300,11 @@ function formatDate(d: string) {
 }
 
 onMounted(async () => {
-  const [mediaRes, libRes, stateRes] = await Promise.allSettled([
-    apiFetch<MediaItem[]>('/api/media?type=movie&limit=500'),
+  const [mediaRes, libRes, stateRes, listsRes] = await Promise.allSettled([
+    apiFetch<EnrichedMediaItem[]>('/api/media/enriched?type=movie&limit=5000'),
     apiFetch<Library[]>('/api/libraries'),
     fetchUserState('movies'),
+    apiFetch<UserList[]>('/api/lists'),
   ])
   if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'movie')
@@ -145,6 +312,7 @@ onMounted(async () => {
     favoritedSet.value = new Set(stateRes.value.favorited || [])
     watchedSet.value = new Set(stateRes.value.watched || [])
   }
+  if (listsRes.status === 'fulfilled') userLists.value = listsRes.value
   loading.value = false
 })
 </script>
@@ -173,4 +341,12 @@ onMounted(async () => {
   background: rgba(0,0,0,0.65); color: var(--bad);
   display: flex; align-items: center; justify-content: center;
 }
+.res-badge {
+  position: absolute; top: 8px; left: 8px;
+  font-size: 9px; font-weight: 700; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(0,0,0,0.6); color: var(--gold);
+}
+.list-genres { font-size: 12px; color: var(--fg-3); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -152,6 +152,27 @@
               </div>
             </div>
 
+            <div v-if="runningTasks.length" class="activity-section">
+              <div class="activity-section-title">Tasks</div>
+              <div v-for="tp in runningTasks" :key="tp.task_id" class="activity-item">
+                <div class="activity-item-icon task">
+                  <svg class="mini-ring" viewBox="0 0 26 26">
+                    <circle class="mini-track" cx="13" cy="13" r="10" />
+                    <circle class="mini-fill" cx="13" cy="13" r="10"
+                      :stroke-dasharray="62.83"
+                      :stroke-dashoffset="62.83 - 62.83 * (tp.total > 0 ? tp.completed / tp.total : 0)"
+                    />
+                  </svg>
+                  <Icon :name="TASK_LABELS[tp.task_id]?.icon ?? 'timer'" :size="10" class="mini-icon" />
+                </div>
+                <div class="activity-item-text">
+                  <span class="activity-item-name">{{ taskActivityLabel(tp) }}</span>
+                  <span class="activity-item-detail">{{ tp.completed }}/{{ tp.total }}</span>
+                </div>
+                <span v-if="tp.total > 1" class="activity-pct">{{ tp.total > 0 ? Math.round(tp.completed / tp.total * 100) : 0 }}%</span>
+              </div>
+            </div>
+
             <div v-if="jobsByKind.length" class="activity-section">
               <div class="activity-section-title">Running</div>
               <div v-for="grp in jobsByKind" :key="grp.kind" class="activity-item">
@@ -183,8 +204,8 @@
             </div>
 
             <div class="activity-footer">
-              <NuxtLink to="/settings/jobs" class="activity-link" @click="activityOpen = false">
-                View all jobs
+              <NuxtLink to="/settings/tasks" class="activity-link" @click="activityOpen = false">
+                View tasks
                 <Icon name="arrow-right" :size="11" />
               </NuxtLink>
               <button v-if="hasActivity" class="activity-cancel" @click="cancelAllJobs">
@@ -195,18 +216,17 @@
         </Transition>
       </div>
 
-      <NuxtLink to="/settings" class="btn-icon" title="Settings"><Icon name="settings" :size="18" /></NuxtLink>
-      <div v-if="user" class="avatar" :title="user.username">
-        <span>{{ user.username.slice(0, 2).toUpperCase() }}</span>
-      </div>
+      <UserDropdown />
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
+import type { TaskProgressPayload } from '~/composables/useEventBus'
+
 const route = useRoute()
 const { user } = useAuth()
-const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgress } = useEventBus()
+const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgress, taskProgress } = useEventBus()
 
 const progressLibs = computed(() => Object.values(scanProgress.value))
 
@@ -286,7 +306,10 @@ const showDropdown = computed(() =>
 
 function flatIndex(sIdx: number, iIdx: number) {
   let n = 0
-  for (let i = 0; i < sIdx; i++) n += sections.value[i].bucket.items.length
+  for (let i = 0; i < sIdx; i++) {
+    const s = sections.value[i]
+    if (s) n += s.bucket.items.length
+  }
   return n + iIdx
 }
 
@@ -414,8 +437,25 @@ function goToResult(kind: Section['key'], item: any) {
   closeDropdown()
 }
 
+const runningTasks = computed(() => Object.values(taskProgress.value))
+
+const TASK_LABELS: Record<string, { label: string, activePrefix: string, icon: string }> = {
+  generate_trickplay:  { label: 'Generating trickplay',   activePrefix: 'Generating trickplay', icon: 'film' },
+  generate_thumbnails: { label: 'Generating thumbnails',  activePrefix: 'Generating thumbnails', icon: 'image' },
+  scan_libraries:      { label: 'Scanning libraries',     activePrefix: 'Scanning',     icon: 'folder' },
+  refresh_metadata:    { label: 'Refreshing metadata',    activePrefix: 'Refreshing',   icon: 'refresh' },
+}
+
+function taskActivityLabel(tp: TaskProgressPayload): string {
+  const meta = TASK_LABELS[tp.task_id]
+  if (meta?.activePrefix && tp.current_item) {
+    return `${meta.activePrefix} ${tp.current_item}`
+  }
+  return meta?.label ?? tp.task_id
+}
+
 const hasActivity = computed(() =>
-  activeScans.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0
+  activeScans.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || runningTasks.value.length > 0
 )
 
 async function cancelAllJobs() {
@@ -667,18 +707,6 @@ watch(() => route.fullPath, () => { closeDropdown() })
   background: rgba(255,255,255,0.02);
 }
 .search-footer:hover { color: var(--gold); }
-.avatar {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--gold-deep), var(--gold));
-  color: #1a1408;
-  font-size: 11px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  margin-left: 6px;
-  cursor: pointer;
-  letter-spacing: 0.04em;
-}
-
 /* Activity button */
 .activity-wrap { position: relative; }
 
@@ -818,6 +846,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
 }
 .activity-item-icon.queue { background: rgba(140, 160, 255, 0.1); color: rgb(140, 160, 255); }
 .activity-item-icon.job { background: rgba(200, 140, 255, 0.1); color: rgb(200, 140, 255); }
+.activity-item-icon.task { background: var(--gold-soft); color: var(--gold); position: relative; }
 
 .activity-count-badge {
   font-size: 10px;

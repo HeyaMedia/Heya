@@ -1,175 +1,147 @@
 <template>
-  <div class="sp">
-    <div class="sp-section">
-      <div class="sp-section-head">
-        <div class="sp-section-icon meta"><Icon name="database" :size="13" /></div>
-        <div>
-          <h4 class="sp-label">Metadata Providers</h4>
-          <p class="sp-hint">Sources for matching and fetching metadata</p>
+  <div class="sp-grid">
+    <!-- Left Column: Locale + Options -->
+    <div class="sp-col">
+      <div class="sp-section">
+        <div class="sp-section-head">
+          <div class="sp-section-icon locale"><Icon name="globe" :size="13" /></div>
+          <div>
+            <h4 class="sp-label">Locale</h4>
+            <p class="sp-hint">Preferred language and region for metadata</p>
+          </div>
+        </div>
+        <div class="locale-row">
+          <div class="locale-field">
+            <span class="locale-field-label">Language</span>
+            <div class="select-wrap">
+              <select v-model="local.preferred_language" class="sp-select" @change="emitUpdate">
+                <option v-for="l in languages" :key="l.code" :value="l.code">{{ l.label }}</option>
+              </select>
+              <Icon name="chevdown" :size="11" class="select-icon" />
+            </div>
+          </div>
+          <div class="locale-field">
+            <span class="locale-field-label">Region</span>
+            <div class="select-wrap">
+              <select v-model="local.preferred_country" class="sp-select" @change="emitUpdate">
+                <option v-for="c in countries" :key="c.code" :value="c.code">{{ c.label }}</option>
+              </select>
+              <Icon name="chevdown" :size="11" class="select-icon" />
+            </div>
+          </div>
         </div>
       </div>
-      <div class="chip-group">
-        <button
-          v-for="p in metadataProviders"
-          :key="p"
-          type="button"
-          class="sp-chip"
-          :class="{ active: local.metadata_providers.includes(p) }"
-          @click="toggleChip('metadata_providers', p)"
-        >
-          <span class="sp-chip-check">
-            <Icon :name="local.metadata_providers.includes(p) ? 'check' : 'plus'" :size="10" />
-          </span>
-          {{ providerLabel(p) }}
-        </button>
+
+      <div class="sp-section">
+        <div class="sp-section-head">
+          <div class="sp-section-icon opts"><Icon name="eq" :size="13" /></div>
+          <div>
+            <h4 class="sp-label">Options</h4>
+            <p class="sp-hint">Library behavior and file writing</p>
+          </div>
+        </div>
+        <div class="toggle-list">
+          <label class="toggle-row" @click.prevent="toggleBool('watch')">
+            <div class="toggle-info">
+              <span class="toggle-name">Watch for file changes</span>
+              <span class="toggle-desc">Automatically scan when files are added or removed</span>
+            </div>
+            <div class="toggle-switch" :class="{ on: local.watch }">
+              <div class="toggle-knob" />
+            </div>
+          </label>
+          <label class="toggle-row" @click.prevent="toggleBool('fetch_ratings')">
+            <div class="toggle-info">
+              <span class="toggle-name">Fetch external ratings</span>
+              <span class="toggle-desc">Pull IMDb, TMDB, and other ratings from heya.media</span>
+            </div>
+            <div class="toggle-switch" :class="{ on: local.fetch_ratings }">
+              <div class="toggle-knob" />
+            </div>
+          </label>
+          <label v-if="mediaType === 'movie'" class="toggle-row" @click.prevent="toggleBool('auto_collections')">
+            <div class="toggle-info">
+              <span class="toggle-name">Auto collections</span>
+              <span class="toggle-desc">Group movies by franchise automatically</span>
+            </div>
+            <div class="toggle-switch" :class="{ on: local.auto_collections }">
+              <div class="toggle-knob" />
+            </div>
+          </label>
+          <label class="toggle-row" @click.prevent="toggleBool('save_nfo')">
+            <div class="toggle-info">
+              <span class="toggle-name">Write NFO files</span>
+              <span class="toggle-desc">Save metadata as NFO files alongside media</span>
+            </div>
+            <div class="toggle-switch" :class="{ on: local.save_nfo }">
+              <div class="toggle-knob" />
+            </div>
+          </label>
+          <label class="toggle-row" @click.prevent="toggleBool('save_images')">
+            <div class="toggle-info">
+              <span class="toggle-name">Write artwork files</span>
+              <span class="toggle-desc">Save poster and backdrop images to media directories</span>
+            </div>
+            <div class="toggle-switch" :class="{ on: local.save_images }">
+              <div class="toggle-knob" />
+            </div>
+          </label>
+          <label v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click.prevent="toggleBool('enable_trickplay')">
+            <div class="toggle-info">
+              <span class="toggle-name">Trickplay thumbnails</span>
+              <span class="toggle-desc">Generate seek preview sprites for the video player</span>
+            </div>
+            <div class="toggle-switch" :class="{ on: local.enable_trickplay }">
+              <div class="toggle-knob" />
+            </div>
+          </label>
+          <label v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click.prevent="toggleBool('generate_thumbnails')">
+            <div class="toggle-info">
+              <span class="toggle-name">Generate missing thumbnails</span>
+              <span class="toggle-desc">Extract video frames for extras and episodes without artwork</span>
+            </div>
+            <div class="toggle-switch" :class="{ on: local.generate_thumbnails }">
+              <div class="toggle-knob" />
+            </div>
+          </label>
+        </div>
       </div>
     </div>
 
-    <div v-if="artworkProviders.length" class="sp-section">
-      <div class="sp-section-head">
-        <div class="sp-section-icon art"><Icon name="star" :size="13" /></div>
-        <div>
-          <h4 class="sp-label">Artwork Providers</h4>
-          <p class="sp-hint">Sources for posters, backdrops, and logos</p>
+    <!-- Right Column: Metadata Source + Auto-Refresh -->
+    <div class="sp-col">
+      <div class="sp-section">
+        <div class="sp-section-head">
+          <div class="sp-section-icon meta"><Icon name="database" :size="13" /></div>
+          <div>
+            <h4 class="sp-label">Metadata Source</h4>
+            <p class="sp-hint">All metadata is fetched from heya.media</p>
+          </div>
+        </div>
+        <div class="source-card">
+          <div class="source-name">heya.media</div>
+          <div class="source-desc">Aggregates TMDB, TVDB, AniDB, fanart.tv, OMDB, MusicBrainz, OpenLibrary and serves consolidated, CDN-cached metadata.</div>
         </div>
       </div>
-      <div class="chip-group">
-        <button
-          v-for="p in artworkProviders"
-          :key="p"
-          type="button"
-          class="sp-chip"
-          :class="{ active: local.artwork_providers.includes(p) }"
-          @click="toggleChip('artwork_providers', p)"
-        >
-          <span class="sp-chip-check">
-            <Icon :name="local.artwork_providers.includes(p) ? 'check' : 'plus'" :size="10" />
-          </span>
-          {{ providerLabel(p) }}
-        </button>
-      </div>
-    </div>
 
-    <div v-if="ratingsProviders.length" class="sp-section">
-      <div class="sp-section-head">
-        <div class="sp-section-icon rate"><Icon name="star" :size="13" /></div>
-        <div>
-          <h4 class="sp-label">Ratings Providers</h4>
-          <p class="sp-hint">Supplementary ratings from Rotten Tomatoes, Metacritic, etc.</p>
-        </div>
-      </div>
-      <div class="chip-group">
-        <button
-          v-for="p in ratingsProviders"
-          :key="p"
-          type="button"
-          class="sp-chip"
-          :class="{ active: local.ratings_providers.includes(p) }"
-          @click="toggleChip('ratings_providers', p)"
-        >
-          <span class="sp-chip-check">
-            <Icon :name="local.ratings_providers.includes(p) ? 'check' : 'plus'" :size="10" />
-          </span>
-          {{ providerLabel(p) }}
-        </button>
-      </div>
-    </div>
-
-    <div class="sp-section">
-      <div class="sp-section-head">
-        <div class="sp-section-icon locale"><Icon name="globe" :size="13" /></div>
-        <div>
-          <h4 class="sp-label">Locale</h4>
-          <p class="sp-hint">Preferred language and region for metadata</p>
-        </div>
-      </div>
-      <div class="locale-row">
-        <div class="locale-field">
-          <span class="locale-field-label">Language</span>
-          <div class="select-wrap">
-            <select v-model="local.preferred_language" class="sp-select" @change="emitUpdate">
-              <option v-for="l in languages" :key="l.code" :value="l.code">{{ l.label }}</option>
-            </select>
-            <Icon name="chevdown" :size="11" class="select-icon" />
+      <div class="sp-section">
+        <div class="sp-section-head">
+          <div class="sp-section-icon refresh"><Icon name="refresh" :size="13" /></div>
+          <div>
+            <h4 class="sp-label">Auto-Refresh Metadata</h4>
+            <p class="sp-hint">Periodically check for updated metadata</p>
           </div>
         </div>
-        <div class="locale-field">
-          <span class="locale-field-label">Region</span>
-          <div class="select-wrap">
-            <select v-model="local.preferred_country" class="sp-select" @change="emitUpdate">
-              <option v-for="c in countries" :key="c.code" :value="c.code">{{ c.label }}</option>
-            </select>
-            <Icon name="chevdown" :size="11" class="select-icon" />
-          </div>
+        <div class="chip-group">
+          <button
+            v-for="opt in refreshOptions"
+            :key="opt.value"
+            type="button"
+            class="sp-chip"
+            :class="{ active: local.metadata_refresh_days === opt.value }"
+            @click="setRefresh(opt.value)"
+          >{{ opt.label }}</button>
         </div>
-      </div>
-    </div>
-
-    <div class="sp-section">
-      <div class="sp-section-head">
-        <div class="sp-section-icon opts"><Icon name="eq" :size="13" /></div>
-        <div>
-          <h4 class="sp-label">Options</h4>
-          <p class="sp-hint">Library behavior and file writing</p>
-        </div>
-      </div>
-      <div class="toggle-list">
-        <label class="toggle-row" @click.prevent="toggleBool('watch')">
-          <div class="toggle-info">
-            <span class="toggle-name">Watch for file changes</span>
-            <span class="toggle-desc">Automatically scan when files are added or removed</span>
-          </div>
-          <div class="toggle-switch" :class="{ on: local.watch }">
-            <div class="toggle-knob" />
-          </div>
-        </label>
-        <label v-if="mediaType === 'movie'" class="toggle-row" @click.prevent="toggleBool('auto_collections')">
-          <div class="toggle-info">
-            <span class="toggle-name">Auto collections</span>
-            <span class="toggle-desc">Group movies by franchise automatically</span>
-          </div>
-          <div class="toggle-switch" :class="{ on: local.auto_collections }">
-            <div class="toggle-knob" />
-          </div>
-        </label>
-        <label class="toggle-row" @click.prevent="toggleBool('save_nfo')">
-          <div class="toggle-info">
-            <span class="toggle-name">Write NFO files</span>
-            <span class="toggle-desc">Save metadata as NFO files alongside media</span>
-          </div>
-          <div class="toggle-switch" :class="{ on: local.save_nfo }">
-            <div class="toggle-knob" />
-          </div>
-        </label>
-        <label class="toggle-row" @click.prevent="toggleBool('save_images')">
-          <div class="toggle-info">
-            <span class="toggle-name">Write artwork files</span>
-            <span class="toggle-desc">Save poster and backdrop images to media directories</span>
-          </div>
-          <div class="toggle-switch" :class="{ on: local.save_images }">
-            <div class="toggle-knob" />
-          </div>
-        </label>
-      </div>
-    </div>
-
-    <div class="sp-section">
-      <div class="sp-section-head">
-        <div class="sp-section-icon refresh"><Icon name="refresh" :size="13" /></div>
-        <div>
-          <h4 class="sp-label">Auto-Refresh Metadata</h4>
-          <p class="sp-hint">Periodically check for updated metadata</p>
-        </div>
-      </div>
-      <div class="chip-group">
-        <button
-          v-for="opt in refreshOptions"
-          :key="opt.value"
-          type="button"
-          class="sp-chip"
-          :class="{ active: local.metadata_refresh_days === opt.value }"
-          @click="setRefresh(opt.value)"
-        >{{ opt.label }}</button>
       </div>
     </div>
   </div>
@@ -189,45 +161,38 @@ const emit = defineEmits<{
 
 const local = reactive<LibrarySettings>({
   watch: false,
-  metadata_providers: [],
-  artwork_providers: [],
-  ratings_providers: [],
   preferred_language: 'en',
   preferred_country: 'US',
   auto_collections: false,
   metadata_refresh_days: 0,
+  fetch_ratings: true,
   save_nfo: false,
   save_images: false,
+  enable_trickplay: false,
+  generate_thumbnails: true,
 })
 
 function syncFromProps() {
   const s = props.modelValue
   local.watch = s.watch ?? false
-  local.metadata_providers = [...(s.metadata_providers || [])]
-  local.artwork_providers = [...(s.artwork_providers || [])]
-  local.ratings_providers = [...(s.ratings_providers || [])]
   local.preferred_language = s.preferred_language || 'en'
   local.preferred_country = s.preferred_country || 'US'
   local.auto_collections = s.auto_collections ?? false
   local.metadata_refresh_days = s.metadata_refresh_days ?? 0
+  local.fetch_ratings = s.fetch_ratings ?? true
   local.save_nfo = s.save_nfo ?? false
   local.save_images = s.save_images ?? false
+  local.enable_trickplay = s.enable_trickplay ?? false
+  local.generate_thumbnails = s.generate_thumbnails ?? true
 }
 
 watch(() => props.modelValue, syncFromProps, { immediate: true, deep: true })
 
 function emitUpdate() {
-  emit('update:modelValue', { ...toRaw(local), metadata_providers: [...local.metadata_providers], artwork_providers: [...local.artwork_providers], ratings_providers: [...local.ratings_providers] })
+  emit('update:modelValue', { ...toRaw(local) })
 }
 
-function toggleChip(field: 'metadata_providers' | 'artwork_providers' | 'ratings_providers', name: string) {
-  const idx = local[field].indexOf(name)
-  if (idx >= 0) local[field].splice(idx, 1)
-  else local[field].push(name)
-  emitUpdate()
-}
-
-function toggleBool(field: 'watch' | 'auto_collections' | 'save_nfo' | 'save_images') {
+function toggleBool(field: 'watch' | 'auto_collections' | 'fetch_ratings' | 'save_nfo' | 'save_images' | 'enable_trickplay' | 'generate_thumbnails') {
   local[field] = !local[field]
   emitUpdate()
 }
@@ -237,38 +202,12 @@ function setRefresh(days: number) {
   emitUpdate()
 }
 
-const metadataProviders = computed(() => {
-  switch (props.mediaType) {
-    case 'movie': return ['tmdb', 'anidb']
-    case 'tv': return ['tmdb', 'tvdb', 'anidb']
-    case 'music': return ['musicbrainz']
-    case 'book': return ['openlibrary']
-    default: return ['tmdb', 'tvdb', 'anidb', 'musicbrainz', 'openlibrary']
-  }
-})
-
-const artworkProviders = computed(() => {
-  if (props.mediaType === 'music' || props.mediaType === 'book') return []
-  return ['tmdb', 'fanart.tv']
-})
-
-const ratingsProviders = computed(() => {
-  if (props.mediaType === 'music' || props.mediaType === 'book') return []
-  return ['omdb']
-})
-
 const refreshOptions = [
   { label: 'Never', value: 0 },
   { label: '30 days', value: 30 },
   { label: '45 days', value: 45 },
   { label: '90 days', value: 90 },
 ]
-
-const providerLabels: Record<string, string> = {
-  tmdb: 'TMDB', tvdb: 'TVDB', anidb: 'AniDB', musicbrainz: 'MusicBrainz',
-  openlibrary: 'OpenLibrary', 'fanart.tv': 'Fanart.tv', omdb: 'OMDb',
-}
-function providerLabel(name: string) { return providerLabels[name] || name }
 
 const languages = [
   { code: 'en', label: 'English' },
@@ -311,7 +250,17 @@ const countries = [
 </script>
 
 <style scoped>
-.sp { display: flex; flex-direction: column; gap: 24px; }
+.sp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+
+.sp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
 
 .sp-section-head {
   display: flex;
@@ -351,7 +300,28 @@ const countries = [
   margin: 2px 0 0;
 }
 
-/* Chips */
+/* Metadata source card */
+.source-card {
+  padding: 14px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.source-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gold);
+  margin-bottom: 4px;
+}
+
+.source-desc {
+  font-size: 11px;
+  color: var(--fg-3);
+  line-height: 1.5;
+}
+
+/* Auto-refresh chips */
 .chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .sp-chip {
@@ -379,22 +349,6 @@ const countries = [
   border-color: rgba(230, 185, 74, 0.4);
   color: var(--gold-bright);
   font-weight: 600;
-}
-
-.sp-chip-check {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
-  transition: all 0.15s ease;
-}
-
-.sp-chip.active .sp-chip-check {
-  background: rgba(230, 185, 74, 0.25);
-  color: var(--gold);
 }
 
 /* Locale */

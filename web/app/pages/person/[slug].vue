@@ -6,20 +6,51 @@
   <div v-else-if="data" class="scroll" style="height: 100%">
     <div class="page-pad" style="max-width: 1200px">
       <div class="person-header">
-        <div v-if="data.person.profile_path && !data.person.profile_path.startsWith('http')" class="person-photo-wrap">
-          <img
-            :src="`/api/person/${data.person.id}/image`"
-            class="person-photo"
-            @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
-          />
-          <button class="zoom-btn" @click="lightbox.open(`/api/person/${data.person.id}/image`)"><Icon name="expand" :size="14" /></button>
-        </div>
-        <div v-else class="person-photo-placeholder">
-          {{ data.person.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}
+        <div class="person-photo-column">
+          <div v-if="data.person.profile_path && !data.person.profile_path.startsWith('http')" class="person-photo-wrap">
+            <img
+              :src="`/api/person/${data.person.id}/image`"
+              class="person-photo"
+              @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+            />
+            <button class="zoom-btn" @click="lightbox.open(`/api/person/${data.person.id}/image`)"><Icon name="expand" :size="14" /></button>
+          </div>
+          <div v-else class="person-photo-placeholder">
+            {{ data.person.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}
+          </div>
+
+          <!-- Profile gallery -->
+          <div v-if="data.profiles && data.profiles.length > 1" class="profile-gallery">
+            <div
+              v-for="(prof, idx) in data.profiles.slice(0, 8)"
+              :key="prof.id"
+              class="profile-thumb-wrap"
+              @click="lightbox.open(prof.url)"
+            >
+              <img :src="prof.url" :alt="`Profile ${idx + 1}`" class="profile-thumb" />
+            </div>
+          </div>
         </div>
 
         <div class="person-info">
           <h1 class="person-name">{{ data.person.name }}</h1>
+          <span v-if="data.person.known_for_department" class="department-badge">{{ data.person.known_for_department }}</span>
+
+          <!-- Social links -->
+          <div v-if="socialLinks.length" class="social-links">
+            <a
+              v-for="link in socialLinks"
+              :key="link.platform"
+              :href="link.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="social-link"
+              :title="link.label"
+            >
+              <Icon :name="link.icon" :size="20" />
+            </a>
+          </div>
+
           <div class="person-meta">
             <span v-if="data.person.birthday">Born {{ formatDate(data.person.birthday) }}</span>
             <template v-if="data.person.birthday && data.person.place_of_birth"><span class="dot" /></template>
@@ -33,16 +64,23 @@
           <div v-if="data.person.also_known_as?.length" class="person-aka">
             Also known as: {{ data.person.also_known_as.slice(0, 5).join(', ') }}
           </div>
-          <div v-if="data.person.imdb_id" style="margin-top: 12px">
-            <a :href="`https://www.imdb.com/name/${data.person.imdb_id}`" target="_blank" class="btn-ghost-sm">
-              <Icon name="globe" :size="14" /> IMDB
-            </a>
-          </div>
         </div>
       </div>
 
-      <div v-if="data.person.biography" class="person-bio">
-        <h3 class="section-title" style="margin-bottom: 12px">Biography</h3>
+      <!-- Biography with multi-language selector -->
+      <div v-if="activeBioText" class="person-bio">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px">
+          <h3 class="section-title" style="margin: 0">Biography</h3>
+          <select
+            v-if="bioLanguageOptions.length > 1"
+            v-model="selectedBioLang"
+            class="bio-lang-select"
+          >
+            <option v-for="opt in bioLanguageOptions" :key="opt.code" :value="opt.code">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
         <p v-for="(para, i) in bioParas" :key="i" class="bio-para">{{ para }}</p>
         <button v-if="bioTruncated" class="bio-toggle" @click="bioExpanded = !bioExpanded">
           {{ bioExpanded ? 'Show less' : 'Read more' }}
@@ -132,12 +170,93 @@ const data = ref<PersonResponse | null>(null)
 const loading = ref(true)
 const activeFilter = ref('all')
 const bioExpanded = ref(false)
+const selectedBioLang = ref('en')
 
-const allParas = computed(() => data.value?.person.biography?.split('\n\n').filter(Boolean) || [])
+// Language display names
+const langNames: Record<string, string> = {
+  en: 'English', de: 'Deutsch', fr: 'Francais', es: 'Espanol', it: 'Italiano',
+  pt: 'Portugues', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', ru: 'Russian',
+  nl: 'Nederlands', sv: 'Svenska', da: 'Dansk', no: 'Norsk', fi: 'Suomi',
+  pl: 'Polski', cs: 'Cestina', hu: 'Magyar', ro: 'Romana', tr: 'Turkce',
+  ar: 'Arabic', he: 'Hebrew', th: 'Thai', vi: 'Tieng Viet', id: 'Indonesian',
+}
+
+// Biography language options
+const bioLanguageOptions = computed(() => {
+  const opts: { code: string; label: string }[] = []
+  // Primary bio is always "primary" option
+  if (data.value?.person.biography) {
+    opts.push({ code: '_primary', label: 'Primary' })
+  }
+  if (data.value?.biographies) {
+    for (const b of data.value.biographies) {
+      // Skip if same as primary
+      if (b.biography === data.value.person.biography) continue
+      opts.push({ code: b.language, label: langNames[b.language] || b.language.toUpperCase() })
+    }
+  }
+  return opts
+})
+
+// Initialize selected language when data loads
+watch(() => data.value, (val) => {
+  if (!val) return
+  // Prefer English bio from biographies, else primary
+  if (val.biographies?.some(b => b.language === 'en')) {
+    selectedBioLang.value = 'en'
+  } else {
+    selectedBioLang.value = '_primary'
+  }
+}, { immediate: true })
+
+// Active biography text based on selected language
+const activeBioText = computed(() => {
+  if (!data.value) return ''
+  if (selectedBioLang.value === '_primary') {
+    return data.value.person.biography || ''
+  }
+  const match = data.value.biographies?.find(b => b.language === selectedBioLang.value)
+  return match?.biography || data.value.person.biography || ''
+})
+
+const allParas = computed(() => activeBioText.value.split('\n\n').filter(Boolean))
 const bioTruncated = computed(() => allParas.value.length > 3)
 const bioParas = computed(() => {
   if (bioExpanded.value || !bioTruncated.value) return allParas.value
   return allParas.value.slice(0, 2)
+})
+
+// Social links from external_ids
+interface SocialLink {
+  platform: string
+  url: string
+  icon: string
+  label: string
+}
+
+const socialLinks = computed<SocialLink[]>(() => {
+  const ids = data.value?.person.external_ids
+  if (!ids) return []
+  const links: SocialLink[] = []
+  if (data.value?.person.imdb_id) {
+    links.push({ platform: 'imdb', url: `https://www.imdb.com/name/${data.value.person.imdb_id}`, icon: 'globe', label: 'IMDb' })
+  }
+  if (ids.twitter) {
+    links.push({ platform: 'twitter', url: `https://twitter.com/${ids.twitter}`, icon: 'globe', label: 'Twitter / X' })
+  }
+  if (ids.instagram) {
+    links.push({ platform: 'instagram', url: `https://instagram.com/${ids.instagram}`, icon: 'globe', label: 'Instagram' })
+  }
+  if (ids.facebook) {
+    links.push({ platform: 'facebook', url: `https://facebook.com/${ids.facebook}`, icon: 'globe', label: 'Facebook' })
+  }
+  if (ids.tiktok) {
+    links.push({ platform: 'tiktok', url: `https://tiktok.com/@${ids.tiktok}`, icon: 'globe', label: 'TikTok' })
+  }
+  if (ids.wikidata) {
+    links.push({ platform: 'wikidata', url: `https://www.wikidata.org/wiki/${ids.wikidata}`, icon: 'globe', label: 'Wikidata' })
+  }
+  return links
 })
 
 const sortedCast = computed(() => {
@@ -200,6 +319,7 @@ onMounted(async () => {
 
 <style scoped>
 .person-header { display: flex; gap: 32px; margin-bottom: 40px; }
+.person-photo-column { display: flex; flex-direction: column; align-items: center; gap: 12px; flex-shrink: 0; }
 .person-photo-wrap { position: relative; width: 180px; height: 180px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
 .person-photo { width: 100%; height: 100%; object-fit: cover; }
 .zoom-btn {
@@ -218,8 +338,34 @@ onMounted(async () => {
   display: flex; align-items: center; justify-content: center;
   font-size: 48px; font-weight: 600; color: var(--fg-2); flex-shrink: 0;
 }
+.profile-gallery {
+  display: flex; gap: 6px; overflow-x: auto; max-width: 180px;
+  scrollbar-width: none; padding: 2px 0;
+}
+.profile-gallery::-webkit-scrollbar { display: none; }
+.profile-thumb-wrap {
+  flex-shrink: 0; width: 40px; height: 60px; border-radius: var(--r-sm);
+  overflow: hidden; cursor: pointer;
+  border: 2px solid transparent; transition: border-color 0.15s;
+}
+.profile-thumb-wrap:hover { border-color: var(--gold); }
+.profile-thumb { width: 100%; height: 100%; object-fit: cover; }
+
 .person-info { display: flex; flex-direction: column; justify-content: center; }
-.person-name { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 8px; }
+.person-name { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px; }
+.department-badge {
+  display: inline-block; font-size: 11px; font-weight: 600; font-family: var(--font-mono);
+  color: var(--gold); background: var(--gold-soft); padding: 3px 10px; border-radius: 100px;
+  margin-bottom: 10px; width: fit-content; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.social-links { display: flex; gap: 6px; margin-bottom: 10px; }
+.social-link {
+  width: 32px; height: 32px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fg-2); transition: all 0.15s; text-decoration: none;
+}
+.social-link:hover { color: var(--fg-0); border-color: var(--fg-3); background: rgba(255,255,255,0.08); }
 .person-meta { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: 14px; flex-wrap: wrap; }
 .person-meta .dot { width: 3px; height: 3px; background: var(--fg-3); border-radius: 50%; }
 .person-stats {
@@ -232,6 +378,13 @@ onMounted(async () => {
 }
 .person-aka { font-size: 12px; color: var(--fg-3); font-family: var(--font-mono); margin-top: 8px; }
 .person-bio { margin-bottom: 40px; }
+.bio-lang-select {
+  font-size: 12px; font-family: var(--font-mono); color: var(--fg-1);
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 4px 8px; cursor: pointer; outline: none;
+}
+.bio-lang-select:hover { border-color: var(--fg-3); }
+.bio-lang-select:focus { border-color: var(--gold); }
 .bio-para { font-size: 15px; line-height: 1.7; color: var(--fg-1); margin: 0 0 16px; max-width: 800px; }
 .bio-toggle {
   font-size: 12px; font-weight: 600; color: var(--gold);

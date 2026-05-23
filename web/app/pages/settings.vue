@@ -48,8 +48,10 @@ const tabs = [
   { to: '/settings/users', label: 'Users', icon: 'users', hint: 'Accounts & access' },
   { to: '/settings/server', label: 'Server', icon: 'hard-drives', hint: 'Health & diagnostics' },
   { to: '/settings/transcoding', label: 'Transcoding', icon: 'film', hint: 'Hardware & cache' },
-  { to: '/settings/jobs', label: 'Jobs', icon: 'timer', hint: 'Background tasks' },
-  { to: '/settings/logs', label: 'Logs', icon: 'list', hint: 'Server log stream' },
+  { to: '/settings/metadata', label: 'Metadata', icon: 'database', hint: 'Edit & manage' },
+  { to: '/settings/tasks', label: 'Tasks', icon: 'timer', hint: 'Scheduled & recurring' },
+  { to: '/settings/jobs', label: 'Jobs', icon: 'list', hint: 'Queue monitor' },
+  { to: '/settings/logs', label: 'Logs', icon: 'clipboard', hint: 'Server log stream' },
   { to: '/settings/about', label: 'About', icon: 'info', hint: 'Version & credits' },
 ]
 </script>

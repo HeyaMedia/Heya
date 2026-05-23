@@ -39,16 +39,12 @@
             <Chip v-if="detail.tv_series?.status">{{ detail.tv_series.status }}</Chip>
           </div>
 
-          <h1 class="detail-title">{{ detail.media_item.title }}</h1>
+          <h1 class="detail-title">{{ detail.preferred_title || detail.media_item.title }}</h1>
           <p v-if="detail.movie?.tagline" class="detail-tagline">{{ detail.movie.tagline }}</p>
 
           <div class="hero-meta-row" v-if="rating">
             <Icon name="star" :size="14" style="color: var(--gold)" />
             <span style="color: var(--gold)">{{ rating }}/10</span>
-            <template v-if="detail.movie?.vote_count">
-              <span class="dot" />
-              <span>{{ detail.movie.vote_count.toLocaleString() }} votes</span>
-            </template>
           </div>
 
           <div v-if="detail.external_ratings?.length" class="ratings-row">
@@ -72,9 +68,15 @@
             <button class="btn-icon" :style="{ color: isWatched ? 'var(--good)' : 'var(--fg-1)' }" @click="toggleWatched">
               <Icon name="check" :size="20" />
             </button>
+            <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">
+              <Icon name="settings" :size="18" />
+            </button>
           </div>
 
-          <p v-if="detail.media_item.description" class="detail-synopsis">{{ detail.media_item.description }}</p>
+          <!-- Playback preferences (audio/subtitle language selection) -->
+          <PlaybackPrefs v-if="detail.available" :media-item-id="detail.media_item.id" />
+
+          <p v-if="detail.preferred_overview || detail.media_item.description" class="detail-synopsis">{{ detail.preferred_overview || detail.media_item.description }}</p>
 
           <!-- Inline crew summary + keywords + media info -->
           <div class="info-grid">
@@ -248,7 +250,10 @@
             </div>
             <div :class="extrasExpanded[group.type] ? 'fold-grid extras-expanded' : 'hscroll'" :ref="(el: any) => setScrollRef(`extras-${group.type}`, el)">
               <div v-for="e in group.items" :key="e.id" class="extra-card">
-                <div class="extra-thumb"><Icon name="play" :size="20" /></div>
+                <div class="extra-thumb">
+                  <img v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" alt="" class="extra-thumb-img" loading="lazy" />
+                  <Icon v-else name="play" :size="20" />
+                </div>
                 <div class="extra-title">{{ e.title }}</div>
               </div>
             </div>
@@ -257,10 +262,10 @@
 
         <div v-if="contentTab === 'seasons'" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; margin-top: 16px">
           <div v-for="s in detail.seasons" :key="s.id" class="card-tile">
-            <Poster :idx="s.season_number" aspect="2/3" :title="s.name" />
+            <Poster :idx="s.season_number" aspect="2/3" :title="s.title" />
             <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ s.name }}</div>
-              <div class="grid-tile-sub">{{ s.episode_count }} episodes</div>
+              <div class="grid-tile-title">{{ s.title }}</div>
+              <div class="grid-tile-sub">{{ s.aired_episodes }} episodes</div>
             </div>
           </div>
         </div>
@@ -285,7 +290,7 @@
             :class="{ dimmed: !r.local_media_item_id }"
           >
             <Poster
-              :idx="r.recommended_tmdb_id"
+              :idx="r.id"
               :src="recPosterUrl(r)"
               aspect="2/3"
               :title="r.title"
@@ -342,6 +347,13 @@
       <button class="btn btn-secondary" style="margin-top: 16px" @click="$router.back()">Go back</button>
     </div>
   </div>
+
+  <MetadataEditorModal
+    v-if="detail"
+    :media-id="detail.media_item.id"
+    :show="showMetadataEditor"
+    @close="showMetadataEditor = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -378,6 +390,7 @@ async function toggleWatched() {
 // Lists
 const showListModal = ref(false)
 const showCreateList = ref(false)
+const showMetadataEditor = ref(false)
 const newListName = ref('')
 const newListDesc = ref('')
 const userLists = ref<any[]>([])
@@ -456,6 +469,7 @@ const backdropB = ref<string | null>(null)
 function getBackdropUrl(idx: number) {
   if (backdropAssets.value.length > 0) {
     const asset = backdropAssets.value[idx % backdropAssets.value.length]
+    if (!asset) return null
     return `/api/media/${detail.value?.media_item.id}/image/backdrop?sort=${asset.sort_order}`
   }
   return detail.value ? useBackdropUrl(detail.value.media_item.id) : null
@@ -537,6 +551,7 @@ const rating = computed(() => {
 })
 
 const certification = computed(() => {
+  if (detail.value?.preferred_certification) return detail.value.preferred_certification
   if (!detail.value?.certifications?.length) return ''
   const us = detail.value.certifications.find(c => c.country === 'US' && c.certification)
   return us?.certification || detail.value.certifications.find(c => c.certification)?.certification || ''
@@ -547,8 +562,8 @@ const crewSummary = computed(() => {
   const byJob: Record<string, string[]> = {}
   for (const c of detail.value.crew) {
     if (['Director', 'Screenplay', 'Writer', 'Producer', 'Original Music Composer', 'Director of Photography'].includes(c.job)) {
-      if (!byJob[c.job]) byJob[c.job] = []
-      if (!byJob[c.job].includes(c.name)) byJob[c.job].push(c.name)
+      const list = byJob[c.job] ?? (byJob[c.job] = [])
+      if (!list.includes(c.name)) list.push(c.name)
     }
   }
   const order = ['Director', 'Screenplay', 'Producer', 'Original Music Composer', 'Director of Photography']
@@ -556,21 +571,32 @@ const crewSummary = computed(() => {
     Director: 'Director', Screenplay: 'Writer', Writer: 'Writer', Producer: 'Producer',
     'Original Music Composer': 'Music', 'Director of Photography': 'Cinematography',
   }
-  return order.filter(j => byJob[j]).map(j => ({ label: labels[j] || j, value: byJob[j].slice(0, 3).join(', ') }))
+  return order
+    .map(j => ({ job: j, names: byJob[j] }))
+    .filter((r): r is { job: string; names: string[] } => !!r.names)
+    .map(r => ({ label: labels[r.job] || r.job, value: r.names.slice(0, 3).join(', ') }))
 })
 
+type CrewMember = NonNullable<MediaDetail['crew']>[number]
 const crewByDepartment = computed(() => {
   if (!detail.value?.crew?.length) return []
-  const depts: Record<string, typeof detail.value.crew> = {}
-  for (const c of detail.value.crew!) {
+  const depts: Record<string, CrewMember[]> = {}
+  for (const c of detail.value.crew) {
     const d = c.department || 'Other'
-    if (!depts[d]) depts[d] = []
-    depts[d].push(c)
+    const list = depts[d] ?? (depts[d] = [])
+    list.push(c)
   }
   const order = ['Directing', 'Writing', 'Production', 'Camera', 'Sound', 'Editing', 'Art', 'Costume & Make-Up', 'Visual Effects', 'Lighting', 'Crew']
-  const sorted = order.filter(d => depts[d]).map(d => ({ name: d, members: depts[d] }))
+  const sorted: { name: string; members: CrewMember[] }[] = []
+  for (const d of order) {
+    const members = depts[d]
+    if (members) sorted.push({ name: d, members })
+  }
   for (const d of Object.keys(depts)) {
-    if (!order.includes(d)) sorted.push({ name: d, members: depts[d] })
+    if (!order.includes(d)) {
+      const members = depts[d]
+      if (members) sorted.push({ name: d, members })
+    }
   }
   return sorted
 })
@@ -587,11 +613,13 @@ const groupedExtras = computed(() => {
   if (!detail.value?.extras?.length) return []
   const groups: Record<string, MediaExtra[]> = {}
   for (const e of detail.value.extras) {
-    if (!groups[e.extra_type]) groups[e.extra_type] = []
-    groups[e.extra_type].push(e)
+    const list = groups[e.extra_type] ?? (groups[e.extra_type] = [])
+    list.push(e)
   }
   const order = ['trailer', 'behind_the_scenes', 'featurette', 'other', 'teaser', 'deleted_scene', 'interview']
-  return order.filter(t => groups[t]).map(t => ({ type: t, items: groups[t] }))
+  return order
+    .map(t => ({ type: t, items: groups[t] }))
+    .filter((g): g is { type: string; items: MediaExtra[] } => !!g.items)
 })
 
 function formatExtraType(t: string) {
@@ -616,7 +644,7 @@ function ratingSourceLabel(source: string): string {
 }
 
 function recPosterUrl(r: any): string {
-  if (r.local_media_item_id) return usePosterUrl(r.local_media_item_id)
+  if (r.local_media_item_id) return usePosterUrl(r.local_media_item_id) ?? ''
   if (r.poster_path) return `/api/tmdb/image${r.poster_path}?size=w342`
   return ''
 }
@@ -627,11 +655,13 @@ onMounted(async () => {
   } catch { /* empty */ }
   loading.value = false
 
-  if (contentTabs.value.length) contentTab.value = contentTabs.value[0].id
+  const first = contentTabs.value[0]
+  if (first) contentTab.value = first.id
 
   backdropA.value = getBackdropUrl(0)
 
   if (backdropAssets.value.length > 1) {
+    backdropB.value = getBackdropUrl(1)
     startCarouselTimer()
   }
 
@@ -652,7 +682,6 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
   opacity: 0; transition: opacity 1.8s ease-in-out;
 }
 .hero-bg-img.visible { opacity: 1; }
-.hero-bg-img:only-of-type { opacity: 1; transition: none; }
 .hero-bg-fade {
   position: absolute; inset: 0;
   background:
@@ -854,7 +883,8 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
   cursor: pointer; transition: background 0.12s;
 }
 .extra-card:hover { background: var(--bg-3); }
-.extra-thumb { width: 36px; height: 36px; border-radius: var(--r-xs); background: var(--bg-4); display: flex; align-items: center; justify-content: center; color: var(--fg-2); flex-shrink: 0; }
+.extra-thumb { width: 80px; height: 45px; border-radius: var(--r-xs); background: var(--bg-4); display: flex; align-items: center; justify-content: center; color: var(--fg-2); flex-shrink: 0; overflow: hidden; }
+.extra-thumb-img { width: 100%; height: 100%; object-fit: cover; }
 .extra-title { font-size: 12px; font-weight: 500; color: var(--fg-0); white-space: nowrap; }
 
 .rec-scroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }

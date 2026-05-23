@@ -32,7 +32,7 @@
       >
         <Icon name="heartfill" :size="16" style="color: var(--bad)" />
         <span>Loved</span>
-        <span v-if="lovedCount > 0" class="count">{{ lovedCount }}</span>
+        <span v-if="(lovedCount ?? 0) > 0" class="count">{{ lovedCount }}</span>
       </div>
 
       <div class="lib-item lists-toggle" @click="listsExpanded = !listsExpanded">
@@ -42,17 +42,44 @@
       </div>
       <template v-if="listsExpanded">
         <div
-          v-for="l in userLists"
+          v-for="l in displayLists"
           :key="l.id"
           class="lib-item lib-item-nested"
-          :class="{ active: activeView === `list-${l.id}` }"
+          :class="{ active: activeView === `list-${l.id}`, 'drop-target': dragOverListId === l.id }"
           @click="$emit('view', `list-${l.id}`)"
+          @dragover.prevent="$emit('list-dragover', $event, l.id)"
+          @dragleave="$emit('list-dragleave')"
+          @drop="$emit('list-drop', $event, l.id)"
         >
+          <Icon :name="l.list_type === 'smart' ? 'lightning' : 'bookmark'" :size="12" class="list-type-icon" />
           <span>{{ l.name }}</span>
+          <span v-if="l.item_count > 0" class="count">{{ l.item_count }}</span>
         </div>
         <div class="lib-item lib-item-nested lib-item-action" @click="createList">
           <Icon name="plus" :size="12" />
           <span>New List</span>
+        </div>
+      </template>
+
+      <!-- TMDB Collections -->
+      <div class="lib-item lists-toggle" @click="collectionsExpanded = !collectionsExpanded" style="margin-top: 4px">
+        <Icon name="film" :size="16" />
+        <span>Franchises</span>
+        <Icon :name="collectionsExpanded ? 'chevdown' : 'chevright'" :size="10" class="expand-icon" />
+      </div>
+      <template v-if="collectionsExpanded">
+        <div
+          v-for="c in tmdbCollections"
+          :key="c.id"
+          class="lib-item lib-item-nested"
+          :class="{ active: activeView === `collection-${c.id}` }"
+          @click="$emit('view', `collection-${c.id}`)"
+        >
+          <span>{{ c.name }}</span>
+          <span class="count">{{ c.movie_count }}</span>
+        </div>
+        <div v-if="!tmdbCollections.length" class="lib-item lib-item-nested lib-item-empty">
+          No franchises
         </div>
       </template>
     </div>
@@ -64,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Library } from '~~/shared/types'
+import type { Library, UserList, CollectionBrowse } from '~~/shared/types'
 
 const props = defineProps<{
   libraries: Library[]
@@ -73,15 +100,23 @@ const props = defineProps<{
   typeLabel: string
   totalCount: number
   lovedCount?: number
+  userLists?: UserList[]
+  dragOverListId?: number | null
 }>()
 
 const emit = defineEmits<{
   select: [id: number | null]
   view: [view: string]
+  'list-drop': [event: DragEvent, listId: number]
+  'list-dragover': [event: DragEvent, listId: number]
+  'list-dragleave': []
 }>()
 
 const listsExpanded = ref(false)
-const userLists = ref<{ id: number; name: string }[]>([])
+const collectionsExpanded = ref(false)
+const tmdbCollections = ref<CollectionBrowse[]>([])
+
+const displayLists = computed(() => props.userLists || [])
 
 function selectLib(id: number | null) {
   emit('select', id)
@@ -92,17 +127,16 @@ async function createList() {
   if (!name?.trim()) return
   try {
     await apiFetch('/api/lists', { method: 'POST', body: JSON.stringify({ name: name.trim() }) })
-    await loadLists()
   } catch { /* empty */ }
 }
 
-async function loadLists() {
+async function loadCollections() {
   try {
-    userLists.value = await apiFetch<{ id: number; name: string }[]>('/api/lists')
+    tmdbCollections.value = await apiFetch<CollectionBrowse[]>('/api/collections/browse')
   } catch { /* empty */ }
 }
 
-onMounted(() => { loadLists() })
+onMounted(() => { loadCollections() })
 </script>
 
 <style scoped>
@@ -132,4 +166,14 @@ onMounted(() => { loadLists() })
 .lib-item-nested { padding-left: 38px; }
 .lib-item-action { color: var(--fg-3); font-size: 12px; }
 .lib-item-action:hover { color: var(--gold); }
+.lib-item-empty { color: var(--fg-4); font-size: 11px; cursor: default; }
+.lib-item-empty:hover { background: none; }
+
+.list-type-icon { opacity: 0.4; flex-shrink: 0; }
+
+.drop-target {
+  background: rgba(212,175,55,0.1);
+  border: 1px dashed var(--gold);
+  border-radius: var(--r-sm);
+}
 </style>

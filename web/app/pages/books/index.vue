@@ -3,6 +3,7 @@
     <LibrarySidebar
       :libraries="libraries"
       :active-lib="activeLib"
+      :active-view="null"
       type-label="Books"
       :total-count="items.length"
       @select="activeLib = $event"

@@ -2,10 +2,14 @@
   <div>
     <div class="page-header">
       <div>
-        <h2 class="page-title">Background Jobs</h2>
-        <p class="page-desc">Monitor, retry, and manage queued tasks</p>
+        <h2 class="page-title">Job Queue</h2>
+        <p class="page-desc">Monitor, retry, and manage queued background jobs</p>
       </div>
       <div class="header-actions">
+        <button class="btn btn-secondary btn-sm" @click="rescueStuck" :disabled="rescuing">
+          <Icon name="lightning" :size="13" />
+          Rescue stuck
+        </button>
         <button class="btn btn-secondary btn-sm" @click="clearCompleted" :disabled="clearing">
           <Icon name="trash" :size="13" />
           Clear completed
@@ -110,35 +114,6 @@
       <span class="page-info">{{ jobOffset + 1 }}–{{ Math.min(jobOffset + 50, jobTotal) }} of {{ jobTotal }}</span>
       <button class="btn btn-secondary btn-sm" :disabled="jobOffset + 50 >= jobTotal" @click="jobOffset += 50; fetchJobs()">Next</button>
     </div>
-
-    <!-- Scheduled Tasks -->
-    <section class="section" style="margin-top: 36px">
-      <h3 class="section-heading">
-        <Icon name="clock" :size="14" />
-        Scheduled Tasks
-      </h3>
-      <div v-if="schedules.length" class="schedule-table">
-        <div class="schedule-row" v-for="s in schedules" :key="s.library_id + s.type">
-          <div class="schedule-icon" :class="s.type === 'scan' ? 'scan' : 'refresh'">
-            <Icon :name="s.type === 'scan' ? 'folder' : 'refresh'" :size="14" />
-          </div>
-          <div class="schedule-info">
-            <div class="schedule-title">
-              {{ s.type === 'scan' ? 'Library Scan' : 'Metadata Refresh' }}
-              <span class="schedule-lib">{{ s.library_name }}</span>
-            </div>
-            <div class="schedule-detail">
-              {{ s.media_type }} library — every {{ s.interval }}
-            </div>
-          </div>
-          <div class="schedule-interval">{{ s.interval }}</div>
-        </div>
-      </div>
-      <div v-else class="empty-hint">
-        <Icon name="info" :size="14" />
-        No scheduled tasks — enable file watching or metadata refresh on a library to create schedules.
-      </div>
-    </section>
   </div>
 </template>
 
@@ -158,7 +133,6 @@ interface JobRow {
 }
 
 interface JobSummary { state: string; count: number }
-interface Schedule { library_id: number; library_name: string; media_type: string; type: string; interval: string; interval_sec: number }
 
 const jobs = ref<JobRow[]>([])
 const jobTotal = ref(0)
@@ -167,8 +141,8 @@ const jobFilter = ref('')
 const jobOffset = ref(0)
 const clearing = ref(false)
 const clearingAll = ref(false)
+const rescuing = ref(false)
 const expandedJob = ref<number | null>(null)
-const schedules = ref<Schedule[]>([])
 
 function timeAgo(dateStr: string) {
   const sec = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
@@ -208,6 +182,12 @@ async function cancelJob(id: number) {
   try { await apiFetch(`/api/jobs/${id}/cancel`, { method: 'POST' }); refresh() } catch {}
 }
 
+async function rescueStuck() {
+  rescuing.value = true
+  try { await apiFetch('/api/jobs/rescue', { method: 'POST' }); refresh() } catch {}
+  rescuing.value = false
+}
+
 async function clearCompleted() {
   clearing.value = true
   try { await apiFetch('/api/jobs/completed', { method: 'DELETE' }); refresh() } catch {}
@@ -219,10 +199,6 @@ async function clearAll() {
   clearingAll.value = true
   try { await apiFetch('/api/jobs', { method: 'DELETE' }); refresh() } catch {}
   clearingAll.value = false
-}
-
-async function fetchSchedules() {
-  try { schedules.value = await apiFetch<Schedule[]>('/api/schedules') } catch {}
 }
 
 function refresh() { fetchJobs(); fetchJobSummary() }
@@ -239,7 +215,6 @@ const { on } = useEventBus()
 
 onMounted(() => {
   refresh()
-  fetchSchedules()
 
   const unsubs = [
     on('queue.status', debouncedRefresh),
@@ -260,15 +235,6 @@ onMounted(() => {
 .page-desc { font-size: 13px; color: var(--fg-3); margin: 6px 0 0; }
 .header-actions { display: flex; gap: 6px; }
 .btn-sm { height: 34px; padding: 0 14px; font-size: 12px; }
-
-.section { margin-bottom: 36px; }
-.section-heading {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 11px; font-weight: 600; color: var(--fg-3);
-  font-family: var(--font-mono); text-transform: uppercase;
-  letter-spacing: 0.1em; margin: 0 0 14px; padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
 
 /* Summary pills */
 .job-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
@@ -358,19 +324,6 @@ onMounted(() => {
 
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; }
 .page-info { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
-
-/* Schedules */
-.schedule-table { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
-.schedule-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
-.schedule-row:last-child { border-bottom: none; }
-.schedule-icon { width: 34px; height: 34px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.schedule-icon.scan { background: var(--gold-soft); color: var(--gold); }
-.schedule-icon.refresh { background: rgba(140, 160, 255, 0.1); color: rgb(140, 160, 255); }
-.schedule-info { flex: 1; min-width: 0; }
-.schedule-title { font-size: 13px; font-weight: 500; }
-.schedule-lib { font-size: 12px; color: var(--fg-2); margin-left: 6px; }
-.schedule-detail { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); margin-top: 2px; text-transform: capitalize; }
-.schedule-interval { font-size: 11px; font-family: var(--font-mono); color: var(--fg-2); white-space: nowrap; flex-shrink: 0; }
 
 .empty-hint {
   display: flex; align-items: center; gap: 8px;

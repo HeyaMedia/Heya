@@ -22,6 +22,7 @@ function handleClose() {
 
 <template>
   <VideoPlayer
+    :key="fileId"
     :file-id="fileId"
     :media-item-id="mediaItemId"
     :title="title"

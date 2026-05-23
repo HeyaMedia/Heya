@@ -14,10 +14,10 @@
     "@phosphor-icons/vue": "^2.2.1",
     "akarisub": "^0.2.0",
     "hls.js": "^1.6.16",
-    "nuxt": "^4.4.0"
+    "nuxt": "^4.4.6"
   },
   "devDependencies": {
-    "@nuxtjs/tailwindcss": "^6.13.0",
-    "typescript": "^5.8.0"
+    "@nuxtjs/tailwindcss": "^6.14.0",
+    "typescript": "^5.9.3"
   }
 }

@@ -86,8 +86,10 @@ const showA = ref(true)
 const bgA = ref<string | null>(null)
 const bgB = ref<string | null>(null)
 
-const current = computed(() => props.items[currentIdx.value] || props.items[0])
-const movie = computed(() => props.movies?.[current.value?.id])
+// Template only renders when items.length > 0 (`v-if` on the root section),
+// so we can safely treat this as defined inside that scope.
+const current = computed(() => (props.items[currentIdx.value] ?? props.items[0])!)
+const movie = computed(() => props.movies?.[current.value.id])
 const posterUrl = computed(() => current.value ? usePosterUrl(current.value.id) : null)
 
 function getBackdropUrl(idx: number) {
@@ -143,7 +145,10 @@ function jumpHero(idx: number) {
 
 onMounted(() => {
   bgA.value = getBackdropUrl(0)
-  if (props.items.length > 1) startTimer()
+  if (props.items.length > 1) {
+    bgB.value = getBackdropUrl(1)
+    startTimer()
+  }
 })
 
 onUnmounted(() => {

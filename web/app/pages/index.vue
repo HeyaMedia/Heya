@@ -71,6 +71,8 @@
         @more="navigateTo('/books')"
       />
 
+      <ActivityFeed />
+
       <div v-if="!loading && !hasContent" class="empty-home">
         <h2>Welcome to Heya</h2>
         <p>Add a library and scan it to see your media here.</p>
@@ -84,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaItem, MediaDetail, Movie } from '~~/shared/types'
+import type { MediaItem, MediaDetail, MediaType, Movie } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 
 const recentMovies = ref<MediaItem[]>([])
@@ -120,24 +122,29 @@ function onPlayContinue(item: ContinueWatchingItem) {
 }
 
 async function loadMedia() {
-  const types = ['movie', 'tv', 'music', 'book'] as const
-  const refs = [recentMovies, recentTV, recentMusic, recentBooks]
+  // Type-specific feeds first so the cross-cutting endpoints below can dedupe
+  // against them.
+  const typeRefsTuple: [MediaType, Ref<MediaItem[]>][] = [
+    ['movie', recentMovies], ['tv', recentTV], ['music', recentMusic], ['book', recentBooks],
+  ]
+  await Promise.allSettled(typeRefsTuple.map(async ([t, target]) => {
+    try {
+      target.value = await apiFetch<MediaItem[]>(`/api/media?type=${t}&limit=20`)
+    } catch (e) {
+      console.warn(`Failed to load ${t}:`, e)
+    }
+  }))
 
-  const [, , , , cwRes, rwRes, favRes, recRes] = await Promise.allSettled([
-    ...types.map(async (t, i) => {
-      try {
-        refs[i].value = await apiFetch<MediaItem[]>(`/api/media?type=${t}&limit=20`)
-      } catch (e) {
-        console.warn(`Failed to load ${t}:`, e)
-      }
-    }),
+  // Cross-cutting personal data — keep as a typed 4-tuple so each result keeps
+  // its own value shape after destructuring.
+  const [cwRes, rwRes, favRes, recRes] = await Promise.allSettled([
     apiFetch<ContinueWatchingItem[]>('/api/watch/continue'),
-    apiFetch<any[]>('/api/watch/recent'),
+    apiFetch<{ media_item_id: number }[]>('/api/watch/recent'),
     apiFetch<{ favorited: number[] }>('/api/user/state', {
       method: 'POST',
       body: JSON.stringify({ scope: 'movies' }),
     }),
-    apiFetch<any[]>('/api/recommendations?limit=20'),
+    apiFetch<{ local_media_item_id: number | null }[]>('/api/recommendations?limit=20'),
   ])
 
   if (cwRes.status === 'fulfilled') {
@@ -149,7 +156,7 @@ async function loadMedia() {
     const allMedia = [...recentMovies.value, ...recentTV.value]
     const mediaMap = new Map(allMedia.map(m => [m.id, m]))
     recentlyWatched.value = rwItems
-      .map((rw: any) => mediaMap.get(rw.media_item_id))
+      .map(rw => mediaMap.get(rw.media_item_id))
       .filter((m): m is MediaItem => !!m)
       .slice(0, 20)
   }
@@ -166,8 +173,8 @@ async function loadMedia() {
     const allMedia = [...recentMovies.value, ...recentTV.value]
     const mediaMap = new Map(allMedia.map(m => [m.id, m]))
     const localRecs = recRes.value
-      .filter((r: any) => r.local_media_item_id)
-      .map((r: any) => mediaMap.get(r.local_media_item_id))
+      .filter(r => r.local_media_item_id !== null)
+      .map(r => mediaMap.get(r.local_media_item_id as number))
       .filter((m): m is MediaItem => !!m)
     const existingIds = new Set([
       ...favoriteItems.value.map(m => m.id),
@@ -181,14 +188,15 @@ async function loadMedia() {
       const detail = await apiFetch<MediaDetail>(`/api/media/${item.id}`)
       if (detail.movie) {
         movieDetails.value[item.id] = detail.movie
-      }
-      if (detail.tv_series) {
+      } else if (detail.tv_series) {
+        // Hero only reads a small subset (genres, rating, release_date) so a
+        // minimal Movie-shaped projection is enough.
         movieDetails.value[item.id] = {
-          id: 0, media_item_id: item.id, tmdb_id: null, imdb_id: '',
+          id: 0, media_item_id: item.id,
           runtime_minutes: 0, tagline: '', genres: detail.tv_series.genres || [],
           rating: detail.tv_series.rating, release_date: detail.tv_series.first_air_date,
           original_title: '', original_language: '', budget: 0, revenue: 0,
-        } as Movie
+        }
       }
     } catch { /* empty */ }
   }
@@ -208,21 +216,25 @@ onMounted(() => {
   const unsubs = [
     on('media.added', (event) => {
       const mt = (event.payload as { media_type?: string }).media_type
-      if (!mt || !typeRefs[mt]) return
-      if (mediaRefreshTimers[mt]) clearTimeout(mediaRefreshTimers[mt])
+      const target = mt ? typeRefs[mt] : undefined
+      if (!mt || !target) return
+      const existing = mediaRefreshTimers[mt]
+      if (existing) clearTimeout(existing)
       mediaRefreshTimers[mt] = setTimeout(() => {
         apiFetch<MediaItem[]>(`/api/media?type=${mt}&limit=20`)
-          .then(items => { typeRefs[mt].value = items })
+          .then(items => { target.value = items })
           .catch(() => {})
       }, 2000)
     }),
     on('media.updated', (event) => {
       const mt = (event.payload as { media_type?: string }).media_type
-      if (!mt || !typeRefs[mt]) return
-      if (mediaRefreshTimers[mt]) clearTimeout(mediaRefreshTimers[mt])
+      const target = mt ? typeRefs[mt] : undefined
+      if (!mt || !target) return
+      const existing = mediaRefreshTimers[mt]
+      if (existing) clearTimeout(existing)
       mediaRefreshTimers[mt] = setTimeout(() => {
         apiFetch<MediaItem[]>(`/api/media?type=${mt}&limit=20`)
-          .then(items => { typeRefs[mt].value = items })
+          .then(items => { target.value = items })
           .catch(() => {})
       }, 3000)
     }),

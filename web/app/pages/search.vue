@@ -158,7 +158,7 @@ function clearSearch() {
 }
 
 // Genre browse data
-interface GenreRow { genre: unknown; count: number }
+interface GenreRow { genre: string; count: number }
 interface CollectionRow { id: number; name: string; poster_path: string; movie_count: number }
 
 const genres = ref<GenreRow[]>([])

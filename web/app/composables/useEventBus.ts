@@ -74,6 +74,15 @@ export interface StatsPayload {
   queue_running: number
 }
 
+export interface TaskProgressPayload {
+  task_id: string
+  state: string
+  total: number
+  completed: number
+  current_item: string
+  started_at?: string
+}
+
 type EventHandler = (event: WsEvent) => void
 
 const listeners = new Map<string, Set<EventHandler>>()
@@ -87,6 +96,7 @@ export function useEventBus() {
   const activeJobs = useState<ActiveJob[]>('ws_active_jobs', () => [])
   const queueStatus = useState<QueueStatusPayload>('ws_queue_status', () => ({ pending: 0, running: 0 }))
   const scanProgress = useState<Record<number, LibraryScanProgress>>('ws_scan_progress', () => ({}))
+  const taskProgress = useState<Record<string, TaskProgressPayload>>('ws_task_progress', () => ({}))
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
@@ -107,7 +117,7 @@ export function useEventBus() {
     ws.onmessage = (msg) => {
       try {
         const event = JSON.parse(msg.data) as WsEvent
-        handleEvent(event, connected, activeScans, activeJobs, queueStatus, scanProgress)
+        handleEvent(event, connected, activeScans, activeJobs, queueStatus, scanProgress, taskProgress)
       } catch {}
     }
 
@@ -152,6 +162,7 @@ export function useEventBus() {
     activeJobs: readonly(activeJobs),
     queueStatus: readonly(queueStatus),
     scanProgress: readonly(scanProgress),
+    taskProgress: readonly(taskProgress),
     connect,
     disconnect,
     on,
@@ -165,6 +176,7 @@ function handleEvent(
   activeJobs: Ref<ActiveJob[]>,
   queueStatus: Ref<QueueStatusPayload>,
   scanProgress: Ref<Record<number, LibraryScanProgress>>,
+  taskProgress: Ref<Record<string, TaskProgressPayload>>,
 ) {
   switch (event.type) {
     case 'scan.started': {
@@ -191,6 +203,17 @@ function handleEvent(
         next[lib.library_id] = lib
       }
       scanProgress.value = next
+      break
+    }
+    case 'task.progress': {
+      const p = event.payload as TaskProgressPayload
+      if (p.state === 'idle') {
+        const next = { ...taskProgress.value }
+        delete next[p.task_id]
+        taskProgress.value = next
+      } else {
+        taskProgress.value = { ...taskProgress.value, [p.task_id]: p }
+      }
       break
     }
   }

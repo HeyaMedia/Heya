@@ -82,7 +82,10 @@ const presets = [
 
 function applyPreset(p: typeof presets[0]) {
   activePreset.value = p.name
-  p.values.forEach((v, i) => { bands.value[i].value = v })
+  p.values.forEach((v, i) => {
+    const band = bands.value[i]
+    if (band) band.value = v
+  })
 }
 
 function getClickPct(e: MouseEvent) {

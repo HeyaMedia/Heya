@@ -107,7 +107,7 @@ const themes = [
   { name: 'paper', bg: '#f8f6f1', fg: '#2a2a2a', bar: 'rgba(248,246,241,0.95)', border: 'rgba(0,0,0,0.08)' },
 ]
 
-const theme = computed(() => themes.find(t => t.name === activeTheme.value) || themes[0])
+const theme = computed(() => themes.find(t => t.name === activeTheme.value) ?? themes[0]!)
 
 const widths = [
   { label: 'Narrow', value: 540 },

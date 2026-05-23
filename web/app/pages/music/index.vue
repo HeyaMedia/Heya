@@ -170,7 +170,7 @@ const mockStations = [
 onMounted(() => {
   queue.value = mockTracks
   if (!currentTrack.value && mockTracks.length) {
-    currentTrack.value = mockTracks[0]
+    currentTrack.value = mockTracks[0] ?? null
   }
 })
 </script>

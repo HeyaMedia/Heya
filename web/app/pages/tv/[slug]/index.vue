@@ -7,8 +7,8 @@
     <!-- Hero with crossfade backdrops -->
     <div class="hero-section">
       <div class="hero-bg">
-        <img v-if="backdropA" :src="backdropA" class="hero-bg-img" :class="{ visible: showA }" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-        <img v-if="backdropB" :src="backdropB" class="hero-bg-img" :class="{ visible: !showA }" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+        <img v-if="backdropA" :src="backdropA" class="hero-bg-img" :class="{ visible: showA }" />
+        <img v-if="backdropB" :src="backdropB" class="hero-bg-img" :class="{ visible: !showA }" />
         <div class="hero-bg-fade" />
       </div>
 
@@ -26,7 +26,7 @@
             <Chip v-if="detail.tv_series?.status">{{ detail.tv_series.status }}</Chip>
           </div>
 
-          <h1 class="detail-title">{{ detail.media_item.title }}</h1>
+          <h1 class="detail-title">{{ detail.preferred_title || detail.media_item.title }}</h1>
 
           <div class="hero-meta-row" v-if="rating">
             <Icon name="star" :size="14" style="color: var(--gold)" />
@@ -42,7 +42,7 @@
           </div>
 
           <div class="detail-actions">
-            <button v-if="firstEpisodeFileId" class="btn btn-primary" @click="playFirstEpisode"><Icon name="play" :size="16" /> Play {{ nextEpisodeLabel }}</button>
+            <button v-if="firstEpisodeFileId" class="btn btn-primary" @click="playFirstEpisode"><Icon name="play" :size="16" /> Play {{ nextEpisodeFull }}</button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No Files</button>
             <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
             <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
@@ -51,32 +51,40 @@
             <button class="btn-icon" :style="{ color: showFullyWatched ? 'var(--good)' : 'var(--fg-1)' }" @click="toggleShowWatched" :title="showFullyWatched ? 'Mark as unwatched' : 'Mark as watched'">
               <Icon name="check" :size="20" />
             </button>
+            <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">
+              <Icon name="settings" :size="18" />
+            </button>
           </div>
 
-          <p v-if="detail.media_item.description" class="detail-synopsis">{{ detail.media_item.description }}</p>
+          <MediaSynopsis :text="detail.preferred_overview || detail.media_item.description" />
 
-          <div class="info-grid">
-            <template v-if="detail.tv_series?.networks?.length">
-              <div class="info-label">Network</div>
-              <div class="info-value">{{ detail.tv_series.networks.join(', ') }}</div>
+          <MediaCrewSummary :crew="detail.crew">
+            <template #extra>
+              <template v-if="(detail.tv_series as any)?.networks?.length">
+                <div class="info-label">Network</div>
+                <div class="info-value">{{ (detail.tv_series as any).networks.join(', ') }}</div>
+              </template>
+              <template v-if="(detail.tv_series as any)?.created_by?.length">
+                <div class="info-label">Created By</div>
+                <div class="info-value">{{ (detail.tv_series as any).created_by.join(', ') }}</div>
+              </template>
+              <template v-if="detail.production_companies?.length">
+                <div class="info-label">Studio</div>
+                <div class="info-value">{{ detail.production_companies.map((c: any) => c.name).join(', ') }}</div>
+              </template>
+              <template v-if="detail.tv_series?.first_air_date">
+                <div class="info-label">First Aired</div>
+                <div class="info-value">{{ formatDate(detail.tv_series.first_air_date) }}</div>
+              </template>
             </template>
-            <template v-if="detail.tv_series?.created_by?.length">
-              <div class="info-label">Created By</div>
-              <div class="info-value">{{ detail.tv_series.created_by.join(', ') }}</div>
-            </template>
-            <template v-if="detail.production_companies?.length">
-              <div class="info-label">Studio</div>
-              <div class="info-value">{{ detail.production_companies.map((c: any) => c.name).join(', ') }}</div>
-            </template>
-            <template v-if="detail.tv_series?.first_air_date">
-              <div class="info-label">First Aired</div>
-              <div class="info-value">{{ formatDate(detail.tv_series.first_air_date) }}</div>
-            </template>
-          </div>
+          </MediaCrewSummary>
 
-          <div v-if="detail.keywords?.length" style="display: flex; gap: 5px; flex-wrap: wrap; margin-top: 16px">
-            <NuxtLink v-for="k in detail.keywords" :key="k.id" :to="`/keyword/${encodeURIComponent(k.name)}`" class="keyword-tag">{{ k.name }}</NuxtLink>
-          </div>
+          <MediaKeywords :keywords="detail.keywords" />
+        </div>
+
+        <!-- Right column: ratings -->
+        <div v-if="detail.external_ratings?.length" class="hero-side">
+          <MediaRatings :ratings="detail.external_ratings" />
         </div>
       </div>
 
@@ -130,7 +138,13 @@
             </div>
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ seasonLabel(s) }}</div>
-              <div class="grid-tile-sub" v-if="s.air_date">{{ formatYear(s.air_date) }}</div>
+              <div class="grid-tile-sub">
+                <span v-if="s.episodes?.length">{{ s.episodes.length }} ep{{ s.episodes.length !== 1 ? 's' : '' }}</span>
+                <span v-if="s.air_date"> &middot; {{ formatYear(s.air_date) }}</span>
+              </div>
+              <div v-if="seasonWatchInfo(s)" class="season-progress-mini">
+                <div class="season-progress-mini-fill" :style="{ width: seasonWatchPct(s) + '%' }" />
+              </div>
             </div>
           </NuxtLink>
         </div>
@@ -147,23 +161,45 @@
               Crew <span class="tab-count">{{ detail.crew?.length || 0 }}</span>
             </button>
           </div>
+          <div v-if="peopleTab === 'cast' && castOverflows" class="scroll-controls">
+            <button class="scroll-ctrl-btn" @click="scrollCast('left')"><Icon name="chevleft" :size="14" /></button>
+            <button class="scroll-ctrl-btn" @click="scrollCast('right')"><Icon name="chevright" :size="14" /></button>
+            <button v-if="detail.cast && detail.cast.length > 8" class="scroll-ctrl-btn expand" @click="castExpanded = !castExpanded">
+              <Icon name="chevdown" :size="14" :style="{ transform: castExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
+            </button>
+          </div>
         </div>
 
-        <div v-if="peopleTab === 'cast'" class="hscroll" style="margin-top: 16px">
-          <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-            <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
-              <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-              <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
-            </div>
-            <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-            <div class="cast-name">{{ c.name }}</div>
-            <div class="cast-role">{{ c.character }}</div>
-          </NuxtLink>
+        <div v-if="peopleTab === 'cast'" style="margin-top: 16px">
+          <!-- Scroll mode -->
+          <div v-if="!castExpanded" ref="castScrollEl" class="hscroll">
+            <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
+              <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
+                <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
+              </div>
+              <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
+              <div class="cast-name">{{ c.name }}</div>
+              <div class="cast-role">{{ c.character }}</div>
+            </NuxtLink>
+          </div>
+          <!-- Expanded grid mode -->
+          <div v-else class="cast-grid">
+            <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
+              <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
+                <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+                <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
+              </div>
+              <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
+              <div class="cast-name">{{ c.name }}</div>
+              <div class="cast-role">{{ c.character }}</div>
+            </NuxtLink>
+          </div>
         </div>
 
         <div v-if="peopleTab === 'crew'" style="margin-top: 16px">
-          <div v-for="dept in crewByDepartment" :key="dept.name" style="margin-bottom: 24px">
-            <div class="section-title" style="font-size: 11px; margin-bottom: 10px">{{ dept.name }}</div>
+          <div v-for="dept in crewByDepartment" :key="dept.name" class="crew-dept">
+            <div class="crew-dept-label">{{ dept.name }}</div>
             <div class="crew-dept-grid">
               <NuxtLink v-for="c in dept.members" :key="`${c.id}-${c.job}`" :to="personUrl(c)" class="crew-card">
                 <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="crew-photo-wrap">
@@ -171,7 +207,7 @@
                   <button class="zoom-btn round crew-zoom" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="8" /></button>
                 </div>
                 <div v-else class="crew-initials">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-                <div>
+                <div class="crew-text">
                   <div class="crew-name">{{ c.name }}</div>
                   <div class="crew-job">{{ c.job }}</div>
                 </div>
@@ -185,40 +221,71 @@
       <div v-if="detail.videos?.length" class="detail-section">
         <div class="section-row-head"><h3 class="section-title-lg">Videos</h3></div>
         <div class="hscroll">
-          <a v-for="v in detail.videos" :key="v.id" :href="`https://www.youtube.com/watch?v=${v.video_key}`" target="_blank" class="video-card">
+          <button v-for="v in detail.videos" :key="v.id" class="video-card" @click="openVideo(v.video_key, v.name)">
             <div class="video-thumb">
               <img :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
               <div class="video-play"><Icon name="play" :size="20" /></div>
             </div>
             <div class="video-name">{{ v.name }}</div>
             <div class="video-type">{{ v.video_type }}</div>
-          </a>
+          </button>
         </div>
       </div>
 
+      <!-- Video modal -->
+      <Teleport to="body">
+        <Transition name="modal">
+          <div v-if="videoModal" class="modal-overlay" @click.self="videoModal = null">
+            <div class="video-modal-card">
+              <div class="video-modal-header">
+                <span class="video-modal-title">{{ videoModal.title }}</span>
+                <button class="btn-icon" @click="videoModal = null"><Icon name="close" :size="16" /></button>
+              </div>
+              <div class="video-modal-body">
+                <iframe
+                  :src="`https://www.youtube-nocookie.com/embed/${videoModal.key}?autoplay=1&rel=0`"
+                  frameborder="0"
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowfullscreen
+                />
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
+
       <!-- Recommendations -->
       <div v-if="detail.recommendations?.length" class="detail-section">
-        <div class="section-row-head"><h3 class="section-title-lg">More Like This</h3></div>
-        <div class="hscroll">
-          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, year: '', media_type: r.media_type }) : ''" class="rec-card" :class="{ dimmed: !r.local_media_item_id }">
-            <Poster :idx="r.recommended_tmdb_id" :src="r.local_poster_path ? `/api/media/${r.local_media_item_id}/image/poster` : ''" aspect="2/3" :title="r.title" />
+        <div class="section-row-head">
+          <h3 class="section-title-lg">More Like This</h3>
+          <div v-if="recsOverflows" class="scroll-controls">
+            <button class="scroll-ctrl-btn" @click="scrollRecs('left')"><Icon name="chevleft" :size="14" /></button>
+            <button class="scroll-ctrl-btn" @click="scrollRecs('right')"><Icon name="chevright" :size="14" /></button>
+            <button class="scroll-ctrl-btn expand" @click="recsExpanded = !recsExpanded">
+              <Icon name="chevdown" :size="14" :style="{ transform: recsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
+            </button>
+          </div>
+        </div>
+        <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
+          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, year: '', media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+            <Poster :idx="r.id" :src="recPosterUrl(r)" aspect="2/3" :title="r.title" />
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ r.title }}</div>
+              <div v-if="r.vote_average" class="rec-rating"><Icon name="star" :size="9" /> {{ formatVote(r.vote_average) }}</div>
+            </div>
+          </NuxtLink>
+        </div>
+        <div v-else class="rec-grid">
+          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, year: '', media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+            <Poster :idx="r.id" :src="recPosterUrl(r)" aspect="2/3" :title="r.title" />
+            <div class="grid-tile-meta">
+              <div class="grid-tile-title">{{ r.title }}</div>
+              <div v-if="r.vote_average" class="rec-rating"><Icon name="star" :size="9" /> {{ formatVote(r.vote_average) }}</div>
             </div>
           </NuxtLink>
         </div>
       </div>
 
-      <!-- External ratings -->
-      <div v-if="detail.external_ratings?.length" class="detail-section">
-        <div class="section-row-head"><h3 class="section-title-lg">Ratings</h3></div>
-        <div style="display: flex; gap: 12px; flex-wrap: wrap">
-          <div v-for="r in detail.external_ratings" :key="r.source" class="rating-card">
-            <div class="rating-source">{{ formatRatingSource(r.source) }}</div>
-            <div class="rating-value">{{ r.value }}</div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- List modal -->
@@ -259,6 +326,13 @@
         </div>
       </Transition>
     </Teleport>
+
+    <MetadataEditorModal
+      v-if="detail"
+      :media-id="detail.media_item.id"
+      :show="showMetadataEditor"
+      @close="showMetadataEditor = false"
+    />
   </div>
 </template>
 
@@ -272,6 +346,63 @@ const lightbox = useLightbox()
 const detail = ref<MediaDetail | null>(null)
 const loading = ref(true)
 const peopleTab = ref<'cast' | 'crew'>('cast')
+const castExpanded = ref(false)
+const showMetadataEditor = ref(false)
+const castScrollEl = ref<HTMLElement | null>(null)
+const castOverflows = ref(false)
+const videoModal = ref<{ key: string; title: string } | null>(null)
+
+function checkCastOverflow() {
+  nextTick(() => {
+    if (castScrollEl.value) {
+      castOverflows.value = castScrollEl.value.scrollWidth > castScrollEl.value.clientWidth
+    } else {
+      castOverflows.value = (detail.value?.cast?.length || 0) > 8
+    }
+  })
+}
+
+function scrollCast(dir: 'left' | 'right') {
+  if (!castScrollEl.value) return
+  const amount = castScrollEl.value.clientWidth * 0.75
+  castScrollEl.value.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
+}
+
+const recsExpanded = ref(false)
+const recsScrollEl = ref<HTMLElement | null>(null)
+const recsOverflows = ref(false)
+
+function checkRecsOverflow() {
+  nextTick(() => {
+    if (recsScrollEl.value) {
+      recsOverflows.value = recsScrollEl.value.scrollWidth > recsScrollEl.value.clientWidth
+    } else {
+      recsOverflows.value = (detail.value?.recommendations?.length || 0) > 6
+    }
+  })
+}
+
+function scrollRecs(dir: 'left' | 'right') {
+  if (!recsScrollEl.value) return
+  const amount = recsScrollEl.value.clientWidth * 0.75
+  recsScrollEl.value.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
+}
+
+function recPosterUrl(r: any): string {
+  if (r.local_media_item_id) return usePosterUrl(r.local_media_item_id) ?? ''
+  if (!r.poster_path) return ''
+  if (r.poster_path.startsWith('http')) return r.poster_path
+  return `/api/tmdb/image${r.poster_path}?size=w342`
+}
+
+function formatVote(v: any): string {
+  const n = typeof v === 'number' ? v : parseFloat(String(v))
+  return isNaN(n) ? '' : n.toFixed(1)
+}
+
+function openVideo(key: string, title: string) {
+  videoModal.value = { key, title }
+}
 
 // Crossfade backdrops
 const showA = ref(true)
@@ -302,11 +433,12 @@ function getBackdropUrl(idx: number) {
   return detail.value ? useBackdropUrl(detail.value.media_item.id) : null
 }
 
-function advanceBackdrop() {
+async function advanceBackdrop() {
   if (backdropAssets.value.length <= 1) return
   backdropIdx.value = (backdropIdx.value + 1) % backdropAssets.value.length
   const url = getBackdropUrl(backdropIdx.value)
   if (showA.value) { backdropB.value = url } else { backdropA.value = url }
+  await nextTick()
   showA.value = !showA.value
 }
 
@@ -371,12 +503,13 @@ const displaySeasons = computed(() => {
 
 const rating = computed(() => {
   const r = detail.value?.tv_series?.rating
-  if (!r) return null
-  const n = parseFloat(r)
+  if (r == null || r === '') return null
+  const n = typeof r === 'number' ? r : parseFloat(String(r))
   return isNaN(n) || n === 0 ? null : n.toFixed(1)
 })
 
 const certification = computed(() => {
+  if (detail.value?.preferred_certification) return detail.value.preferred_certification
   const certs = detail.value?.certifications
   if (!certs?.length) return null
   const us = certs.find((c: any) => c.country === 'US')
@@ -424,8 +557,25 @@ const nextEpisodeLabel = computed(() => {
   if (!nextEpisodeKey.value) return ''
   const match = nextEpisodeKey.value.match(/^s(\d+)e(\d+)$/)
   if (!match) return ''
-  const label = `S${match[1].padStart(2, '0')}E${match[2].padStart(2, '0')}`
-  return label
+  const [, s, e] = match
+  if (!s || !e) return ''
+  return `S${s.padStart(2, '0')}E${e.padStart(2, '0')}`
+})
+
+const nextEpisodeFull = computed(() => {
+  const key = nextEpisodeKey.value
+  if (!key || !nextEpisodeLabel.value) return ''
+  const match = key.match(/^s(\d+)e(\d+)$/)
+  if (!match) return nextEpisodeLabel.value
+  const [, sStr, eStr] = match
+  if (!sStr || !eStr) return nextEpisodeLabel.value
+  const sNum = parseInt(sStr)
+  const eNum = parseInt(eStr)
+  const season = detail.value?.seasons?.find((s: any) => s.season_number === sNum)
+  const ep = season?.episodes?.find((e: any) => e.episode_number === eNum)
+  const title = ep?.preferred_title || ep?.title || upNext.value?.episode_title
+  if (title) return `${nextEpisodeLabel.value} - ${title}`
+  return nextEpisodeLabel.value
 })
 
 function playFirstEpisode() {
@@ -497,6 +647,12 @@ function seasonWatchInfo(s: any): { remaining: number } | null {
   return { remaining: info.total_episodes - info.watched_episodes }
 }
 
+function seasonWatchPct(s: any): number {
+  const info = seasonStates.value.get(s.id)
+  if (!info || info.total_episodes === 0) return 0
+  return Math.round((info.watched_episodes / info.total_episodes) * 100)
+}
+
 function seasonFullyWatched(s: any): boolean {
   const info = seasonStates.value.get(s.id)
   return !!info && info.total_episodes > 0 && info.watched_episodes >= info.total_episodes
@@ -555,8 +711,7 @@ function seasonUrl(s: any) {
 }
 
 function seasonPosterUrl(s: any) {
-  const num = String(s.season_number).padStart(2, '0')
-  return `/api/media/${detail.value?.media_item.id}/image/poster?label=season${num}-poster`
+  return `/api/media/${detail.value?.media_item.id}/image/poster?label=season-${s.season_number}`
 }
 
 function seasonLabel(s: any) {
@@ -572,21 +727,19 @@ function formatDate(d: string) {
 
 function formatYear(d: string) { return d?.slice(0, 4) || '' }
 
-function formatRatingSource(s: string) {
-  const map: Record<string, string> = { imdb: 'IMDb', rotten_tomatoes: 'Rotten Tomatoes', metacritic: 'Metacritic' }
-  return map[s] || s
-}
-
 onMounted(async () => {
   try {
     detail.value = await apiFetch<MediaDetail>(`/api/media/${slug.value}`)
     await nextTick()
     backdropA.value = getBackdropUrl(0)
+    backdropB.value = getBackdropUrl(0)
     if (backdropAssets.value.length > 1) {
       startCarouselTimer()
     }
     loadState()
     loadUpNext()
+    checkCastOverflow()
+    checkRecsOverflow()
   } catch { navigateTo('/tv') }
   loading.value = false
 })
@@ -608,23 +761,19 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 }
 .hero-content {
   position: relative; z-index: 2;
-  display: grid; grid-template-columns: 240px 1fr;
-  gap: 40px; padding: 40px 40px 48px; max-width: 1300px;
+  display: grid; grid-template-columns: 260px minmax(0, 1fr) 260px;
+  gap: 36px; padding: 40px 40px 48px;
 }
 .hero-poster { align-self: start; position: relative; }
-.hero-info { display: flex; flex-direction: column; justify-content: center; }
+.hero-info { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.hero-side { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
+
 .detail-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .detail-title { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0 0 4px; }
-.detail-synopsis { font-size: 14px; line-height: 1.65; color: var(--fg-1); max-width: 640px; margin: 12px 0 0; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .hero-meta-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-2); margin-top: 8px; }
 .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-3); }
 .detail-actions { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
 .btn-icon { background: none; border: none; cursor: pointer; padding: 4px; }
-.info-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 20px; font-size: 12px; margin-top: 16px; max-width: 500px; }
-.info-label { color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; padding-top: 2px; }
-.info-value { font-size: 13px; color: var(--fg-1); line-height: 1.5; }
-.keyword-tag { font-size: 10px; padding: 3px 10px; border-radius: 100px; background: var(--bg-3); color: var(--fg-2); font-family: var(--font-mono); transition: background 0.15s, color 0.15s; }
-.keyword-tag:hover { background: var(--gold-soft); color: var(--gold); }
 
 /* Backdrop indicators */
 .bd-indicators {
@@ -739,42 +888,95 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .season-action.watched { color: var(--good); }
 
 /* Cast / crew photo wrap */
-.cast-photo-wrap { position: relative; width: 80px; height: 80px; border-radius: 50%; overflow: hidden; margin: 0 auto; }
-.crew-photo-wrap { position: relative; width: 36px; height: 36px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+.cast-photo-wrap { position: relative; width: 90px; height: 90px; border-radius: 50%; overflow: hidden; margin: 0 auto; }
+.crew-photo-wrap { position: relative; width: 38px; height: 38px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
 
 /* Seasons grid */
-.seasons-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 18px; }
+.seasons-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 20px; }
 .season-card { text-decoration: none; color: inherit; }
 .season-card:hover .grid-tile-title { color: var(--gold); }
-.ep-count { font-size: 11px; color: var(--fg-3); font-weight: 400; }
+
+.season-progress-mini {
+  width: 100%; height: 2px; margin-top: 5px;
+  background: rgba(255,255,255,0.08); border-radius: 1px; overflow: hidden;
+}
+.season-progress-mini-fill {
+  height: 100%; background: var(--gold); border-radius: 1px;
+  transition: width 0.4s ease;
+}
 
 /* Body */
 .detail-body-below { padding: 0 48px 80px; }
 .detail-section { margin-top: 36px; }
 .section-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 
-/* Tabs + Cast + Crew + Videos + Recs */
+/* Tabs */
 .tab-bar { display: flex; gap: 4px; }
 .tab-btn { padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; color: var(--fg-2); background: none; border: none; cursor: pointer; transition: all 0.15s; }
 .tab-btn:hover { background: rgba(255,255,255,0.04); }
 .tab-btn.active { background: var(--bg-3); color: var(--fg-0); font-weight: 600; }
 .tab-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); margin-left: 4px; }
-.hscroll { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+
+/* Scroll controls (top-right of section header) */
+.scroll-controls { display: flex; gap: 4px; align-items: center; }
+.scroll-ctrl-btn {
+  width: 28px; height: 28px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  color: var(--fg-2);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s;
+}
+.scroll-ctrl-btn:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); border-color: var(--border-strong); }
+.scroll-ctrl-btn.expand { margin-left: 2px; }
+
+.hscroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
 .hscroll::-webkit-scrollbar { display: none; }
-.cast-card { width: 110px; flex-shrink: 0; text-decoration: none; color: inherit; text-align: center; }
+
+/* Cast cards */
+.cast-card { width: 120px; flex-shrink: 0; text-decoration: none; color: inherit; text-align: center; }
 .cast-card:hover .cast-name { color: var(--gold); }
-.cast-photo { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; display: block; }
-.cast-avatar { width: 80px; height: 80px; border-radius: 50%; margin: 0 auto; background: linear-gradient(135deg, var(--bg-4), var(--bg-3)); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 600; color: var(--fg-2); }
+.cast-photo { width: 90px; height: 90px; border-radius: 50%; object-fit: cover; display: block; }
+.cast-avatar { width: 90px; height: 90px; border-radius: 50%; margin: 0 auto; background: linear-gradient(135deg, var(--bg-4), var(--bg-3)); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 600; color: var(--fg-2); }
 .cast-name { font-size: 12px; font-weight: 500; margin-top: 8px; transition: color 0.15s; }
 .cast-role { font-size: 10px; color: var(--fg-3); margin-top: 2px; }
-.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
-.crew-card { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--r-md); text-decoration: none; color: inherit; transition: background 0.15s; }
+
+/* Cast expanded grid */
+.cast-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px;
+}
+.cast-grid .cast-card { width: auto; }
+
+
+/* Crew */
+.crew-dept { margin-bottom: 20px; }
+.crew-dept-label {
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3);
+  margin-bottom: 8px; padding-left: 2px;
+}
+.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
+.crew-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--r-md);
+  text-decoration: none; color: inherit;
+  transition: background 0.15s;
+}
 .crew-card:hover { background: rgba(255,255,255,0.04); }
-.crew-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; display: block; }
-.crew-initials { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; background: var(--bg-4); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--fg-2); }
+.crew-photo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; display: block; }
+.crew-initials {
+  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+  background: var(--bg-4); display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: var(--fg-2);
+}
+.crew-text { min-width: 0; }
 .crew-name { font-size: 13px; font-weight: 500; }
 .crew-job { font-size: 11px; color: var(--fg-3); }
-.video-card { width: 280px; flex-shrink: 0; text-decoration: none; color: inherit; }
+
+/* Videos */
+.video-card {
+  width: 280px; flex-shrink: 0; text-align: left;
+  background: none; border: none; cursor: pointer; color: inherit; padding: 0;
+}
 .video-card:hover .video-name { color: var(--gold); }
 .video-thumb { position: relative; aspect-ratio: 16/9; border-radius: var(--r-md); overflow: hidden; background: var(--bg-3); }
 .video-thumb img { width: 100%; height: 100%; object-fit: cover; }
@@ -782,12 +984,27 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .video-card:hover .video-play { opacity: 1; }
 .video-name { font-size: 12px; font-weight: 500; margin-top: 8px; transition: color 0.15s; }
 .video-type { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; }
-.rec-card { width: 130px; flex-shrink: 0; text-decoration: none; color: inherit; }
+
+/* Video modal */
+.video-modal-card {
+  background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+  width: 900px; max-width: 95vw; overflow: hidden;
+}
+.video-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.video-modal-title { font-size: 14px; font-weight: 500; color: var(--fg-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.video-modal-body { aspect-ratio: 16/9; }
+.video-modal-body iframe { width: 100%; height: 100%; display: block; }
+
+/* Recs */
+.rec-card { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; }
 .rec-card:hover .grid-tile-title { color: var(--gold); }
-.rec-card.dimmed { opacity: 0.4; pointer-events: none; }
-.rating-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 20px; text-align: center; min-width: 120px; }
-.rating-source { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
-.rating-value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+.rec-card.rec-external { cursor: default; }
+.rec-rating { font-size: 10px; color: var(--gold); display: inline-flex; align-items: center; gap: 2px; margin-top: 1px; }
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 18px; }
+.rec-grid .rec-card { width: auto; }
 
 
 /* Modal */
@@ -830,9 +1047,15 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 
+@media (max-width: 1200px) {
+  .hero-content { grid-template-columns: 240px minmax(0, 1fr); }
+  .hero-side { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 14px; }
+  .hero-side > * { flex: 1 1 280px; }
+}
+
 @media (max-width: 900px) {
   .hero-content { grid-template-columns: 1fr; gap: 20px; padding: 32px 20px 24px; }
-  .hero-poster { display: none; }
+  .hero-poster { max-width: 200px; }
   .detail-title { font-size: 32px; }
   .detail-body-below { padding: 0 20px 60px; }
   .seasons-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
