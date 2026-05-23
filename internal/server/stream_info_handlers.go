@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -13,11 +12,29 @@ import (
 )
 
 type playbackDecision struct {
-	Action    string `json:"action"`
-	Profile   string `json:"profile"`
-	Reason    string `json:"reason"`
-	CopyVideo bool   `json:"copy_video"`
-	CopyAudio bool   `json:"copy_audio"`
+	Action       string   `json:"action"`
+	Profile      string   `json:"profile"`
+	Reason       string   `json:"reason"`
+	Reasons      []string `json:"reasons"` // human-readable reason tags (container, hdr, codec tag, ...)
+	ReasonBits   uint32   `json:"reason_bits"`
+	CopyVideo    bool     `json:"copy_video"`
+	CopyAudio    bool     `json:"copy_audio"`
+	NeedsToneMap bool     `json:"needs_tonemap"`
+	NeedsFMP4    bool     `json:"needs_fmp4"`
+	// Surgical fixes applied on top of the action. Useful in the UI to
+	// explain WHY a "remux" or "transcode" is happening beyond the codec
+	// summary in Reason.
+	StripDoViEL     bool `json:"strip_dovi_el,omitempty"`
+	RetagHEVC       bool `json:"retag_hevc,omitempty"`
+	Deinterlace     bool `json:"deinterlace,omitempty"`
+	Rotate          int  `json:"rotate,omitempty"`
+	FixAnamorphic   bool `json:"fix_anamorphic,omitempty"`
+	DownmixToStereo bool `json:"downmix_stereo,omitempty"`
+}
+
+type qualityOption struct {
+	Label  string `json:"label"`
+	Height int    `json:"height"`
 }
 
 type streamInfoResponse struct {
@@ -25,10 +42,12 @@ type streamInfoResponse struct {
 	Duration  float64          `json:"duration"`
 	Size      int64            `json:"size"`
 	BitRate   int64            `json:"bit_rate"`
+	LibraryID int64            `json:"library_id"`
 	Playback  playbackDecision `json:"playback"`
 	Video     []videoStream    `json:"video"`
 	Audio     []audioStream    `json:"audio"`
 	Subtitle  []subStream      `json:"subtitle"`
+	Qualities []qualityOption  `json:"qualities"`
 }
 
 type videoStream struct {
@@ -78,8 +97,7 @@ func handleGetStreamInfo(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		file, err := q.GetLibraryFileByID(r.Context(), fileID)
+		file, err := app.GetLibraryFile(r.Context(), fileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -92,7 +110,7 @@ func handleGetStreamInfo(app *service.App) http.HandlerFunc {
 			json.Unmarshal(file.MediaInfo, &info)
 		}
 
-		writeJSON(w, http.StatusOK, buildStreamInfoResponse(info, caps, file.Path))
+		writeJSON(w, http.StatusOK, buildStreamInfoResponse(info, caps, file.Path, file.LibraryID))
 	}
 }
 
@@ -111,16 +129,37 @@ func parseClientCaps(r *http.Request) transcoder.ClientCapabilities {
 	if q.Get("supports_opus") == "1" {
 		caps.SupportsOpus = true
 	}
+	if q.Get("supports_ac3") == "1" {
+		caps.SupportsAC3 = true
+	}
+	if q.Get("supports_eac3") == "1" {
+		caps.SupportsEAC3 = true
+	}
 	if q.Get("supports_mkv") == "1" {
 		caps.SupportsMKV = true
 	}
 	if q.Get("supports_webm") == "1" {
 		caps.SupportsWebM = true
 	}
+	if q.Get("supports_hdr") == "1" {
+		caps.SupportsHDR = true
+	}
+	if q.Get("supports_hdr10") == "1" {
+		caps.SupportsHDR10 = true
+	}
+	if q.Get("supports_hlg") == "1" {
+		caps.SupportsHLG = true
+	}
+	if q.Get("supports_dovi") == "1" {
+		caps.SupportsDoVi = true
+	}
+	if q.Get("supports_hevc_hev1") == "1" {
+		caps.SupportsHEVCHev1 = true
+	}
 	return caps
 }
 
-func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabilities, filePath string) streamInfoResponse {
+func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabilities, filePath string, libraryID int64) streamInfoResponse {
 	tInfo := workerToTranscoderInfo(&info)
 	plan := transcoder.Decide(&tInfo, caps)
 
@@ -128,18 +167,49 @@ func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabi
 		plan = transcoder.PlaybackPlan{Action: transcoder.ActionRemux, Profile: "remux", Reason: "remote file requires HLS delivery"}
 	}
 
+	sourceHeight := 0
+	for _, s := range info.Streams {
+		if s.CodecType == "video" && s.Height > 0 {
+			sourceHeight = s.Height
+			break
+		}
+	}
+
+	var qualities []qualityOption
+	if plan.Action != transcoder.ActionDirectPlay {
+		ladder := transcoder.BuildBitrateLadder(sourceHeight)
+		for _, q := range ladder {
+			qualities = append(qualities, qualityOption{
+				Label:  q.String(),
+				Height: q.Height(),
+			})
+		}
+	}
+
 	resp := streamInfoResponse{
 		Container: info.Container,
 		Duration:  info.Duration,
 		Size:      info.Size,
 		BitRate:   info.BitRate,
+		LibraryID: libraryID,
 		Playback: playbackDecision{
-			Action:    string(plan.Action),
-			Profile:   plan.Profile,
-			Reason:    plan.Reason,
-			CopyVideo: plan.CopyVideo,
-			CopyAudio: plan.CopyAudio,
+			Action:          string(plan.Action),
+			Profile:         plan.Profile,
+			Reason:          plan.Reason,
+			Reasons:         reasonStrings(plan.Reasons),
+			ReasonBits:      uint32(plan.Reasons),
+			CopyVideo:       plan.CopyVideo,
+			CopyAudio:       plan.CopyAudio,
+			NeedsToneMap:    plan.NeedsToneMap,
+			NeedsFMP4:       plan.NeedsFMP4,
+			StripDoViEL:     plan.StripDoViEL,
+			RetagHEVC:       plan.RetagHEVC,
+			Deinterlace:     plan.Deinterlace,
+			Rotate:          plan.Rotate,
+			FixAnamorphic:   plan.FixAnamorphic,
+			DownmixToStereo: plan.DownmixToStereo,
 		},
+		Qualities: qualities,
 	}
 
 	for _, s := range info.Streams {
@@ -211,4 +281,38 @@ func isHDR(s worker.StreamInfo) bool {
 		return true
 	}
 	return false
+}
+
+// reasonStrings expands a TranscodeReason bitmask into the individual reason
+// tag names used by the UI. Order follows the bit definition order, which the
+// UI relies on for stable rendering.
+func reasonStrings(r transcoder.TranscodeReason) []string {
+	if r == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, 4)
+	type entry struct {
+		bit  transcoder.TranscodeReason
+		name string
+	}
+	for _, e := range []entry{
+		{transcoder.ReasonContainerNotSupported, "container"},
+		{transcoder.ReasonVideoCodecNotSupported, "video_codec"},
+		{transcoder.ReasonAudioCodecNotSupported, "audio_codec"},
+		{transcoder.ReasonVideoBitDepthNotSupported, "bit_depth"},
+		{transcoder.ReasonHDRNotSupported, "hdr"},
+		{transcoder.ReasonAudioChannelsNotSupported, "audio_channels"},
+		{transcoder.ReasonQualityOverride, "quality_override"},
+		{transcoder.ReasonVideoCodecTagNotSupported, "codec_tag"},
+		{transcoder.ReasonVideoRotationNotSupported, "rotation"},
+		{transcoder.ReasonInterlacedNotSupported, "interlaced"},
+		{transcoder.ReasonAnamorphicNotSupported, "anamorphic"},
+		{transcoder.ReasonAudioLosslessNotSupported, "lossless_audio"},
+		{transcoder.ReasonDolbyVisionNotSupported, "dolby_vision"},
+	} {
+		if r.Has(e.bit) {
+			out = append(out, e.name)
+		}
+	}
+	return out
 }

@@ -12,7 +12,7 @@ import (
 )
 
 const createMediaVideo = `-- name: CreateMediaVideo :exec
-INSERT INTO media_videos (media_item_id, tmdb_key, name, site, video_key, video_type, language, official, published_at)
+INSERT INTO media_videos (media_item_id, provider_key, name, site, video_key, video_type, language, official, published_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (media_item_id, video_key) DO UPDATE SET
   name = EXCLUDED.name,
@@ -22,7 +22,7 @@ ON CONFLICT (media_item_id, video_key) DO UPDATE SET
 
 type CreateMediaVideoParams struct {
 	MediaItemID int64              `json:"media_item_id"`
-	TmdbKey     string             `json:"tmdb_key"`
+	ProviderKey string             `json:"provider_key"`
 	Name        string             `json:"name"`
 	Site        string             `json:"site"`
 	VideoKey    string             `json:"video_key"`
@@ -35,7 +35,7 @@ type CreateMediaVideoParams struct {
 func (q *Queries) CreateMediaVideo(ctx context.Context, arg CreateMediaVideoParams) error {
 	_, err := q.db.Exec(ctx, createMediaVideo,
 		arg.MediaItemID,
-		arg.TmdbKey,
+		arg.ProviderKey,
 		arg.Name,
 		arg.Site,
 		arg.VideoKey,
@@ -47,8 +47,17 @@ func (q *Queries) CreateMediaVideo(ctx context.Context, arg CreateMediaVideoPara
 	return err
 }
 
+const deleteMediaVideosByItem = `-- name: DeleteMediaVideosByItem :exec
+DELETE FROM media_videos WHERE media_item_id = $1
+`
+
+func (q *Queries) DeleteMediaVideosByItem(ctx context.Context, mediaItemID int64) error {
+	_, err := q.db.Exec(ctx, deleteMediaVideosByItem, mediaItemID)
+	return err
+}
+
 const listMediaVideos = `-- name: ListMediaVideos :many
-SELECT id, media_item_id, tmdb_key, name, site, video_key, video_type, language, official, published_at FROM media_videos WHERE media_item_id = $1 ORDER BY video_type, name
+SELECT id, media_item_id, provider_key, name, site, video_key, video_type, language, official, published_at FROM media_videos WHERE media_item_id = $1 ORDER BY video_type, name
 `
 
 func (q *Queries) ListMediaVideos(ctx context.Context, mediaItemID int64) ([]MediaVideo, error) {
@@ -63,7 +72,7 @@ func (q *Queries) ListMediaVideos(ctx context.Context, mediaItemID int64) ([]Med
 		if err := rows.Scan(
 			&i.ID,
 			&i.MediaItemID,
-			&i.TmdbKey,
+			&i.ProviderKey,
 			&i.Name,
 			&i.Site,
 			&i.VideoKey,

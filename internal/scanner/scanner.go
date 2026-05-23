@@ -144,6 +144,10 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 		result.Discovered++
 		discovered[fullPath] = true
 
+		if opts.OnProgress != nil {
+			opts.OnProgress(result.Discovered, name)
+		}
+
 		info, err := d.Info()
 		if err != nil {
 			result.Errors++
@@ -166,6 +170,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 					return nil
 				}
 				if existing.Size == size && existing.Mtime.Valid && existing.Mtime.Time.Truncate(time.Microsecond).Equal(mtime.Truncate(time.Microsecond)) {
+					s.syncTrickplayFlag(ctx, existing.ID, fullPath, existing.HasTrickplay)
 					log.Debug().Str("file", relPath).Msg("unchanged, skipping")
 					result.Unchanged++
 					return nil
@@ -187,6 +192,22 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 		parseJSON, err := json.Marshal(parseData)
 		if err != nil {
 			parseJSON = []byte("{}")
+		}
+
+		moved, moveErr := s.q.GetDeletedFileBySize(ctx, sqlc.GetDeletedFileBySizeParams{
+			LibraryID: libraryID,
+			Size:      size,
+		})
+		if moveErr == nil && moved.ID > 0 {
+			s.q.RelocateLibraryFile(ctx, sqlc.RelocateLibraryFileParams{
+				ID:          moved.ID,
+				Path:        fullPath,
+				Mtime:       pgtype.Timestamptz{Time: mtime, Valid: true},
+				ParseResult: parseJSON,
+			})
+			log.Info().Str("from", moved.Path).Str("to", relPath).Int64("file_id", moved.ID).Msg("detected file move")
+			result.Updated++
+			return nil
 		}
 
 		_, upsertErr := s.q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
@@ -259,6 +280,19 @@ func (s *Scanner) detectDeletions(ctx context.Context, libraryID int64, discover
 	}
 
 	return len(toSoftDelete), nil
+}
+
+func (s *Scanner) syncTrickplayFlag(ctx context.Context, fileID int64, fullPath string, current bool) {
+	vttPath := filepath.Join(filepath.Dir(fullPath), "trickplay", "index.vtt")
+	_, err := os.Stat(vttPath)
+	hasTrickplay := err == nil
+
+	if hasTrickplay != current {
+		s.q.UpdateLibraryFileTrickplay(ctx, sqlc.UpdateLibraryFileTrickplayParams{
+			ID:           fileID,
+			HasTrickplay: hasTrickplay,
+		})
+	}
 }
 
 func findNFOForPath(cache map[string]*nfo.ParsedNFO, relPath string) *nfo.ParsedNFO {

@@ -21,7 +21,7 @@ func (q *Queries) DeleteExternalRatings(ctx context.Context, mediaItemID int64) 
 }
 
 const listExternalRatings = `-- name: ListExternalRatings :many
-SELECT id, media_item_id, source, value, score FROM external_ratings WHERE media_item_id = $1
+SELECT id, media_item_id, source, value, score, votes, raw_value FROM external_ratings WHERE media_item_id = $1
 `
 
 func (q *Queries) ListExternalRatings(ctx context.Context, mediaItemID int64) ([]ExternalRating, error) {
@@ -39,6 +39,8 @@ func (q *Queries) ListExternalRatings(ctx context.Context, mediaItemID int64) ([
 			&i.Source,
 			&i.Value,
 			&i.Score,
+			&i.Votes,
+			&i.RawValue,
 		); err != nil {
 			return nil, err
 		}
@@ -51,10 +53,10 @@ func (q *Queries) ListExternalRatings(ctx context.Context, mediaItemID int64) ([
 }
 
 const upsertExternalRating = `-- name: UpsertExternalRating :one
-INSERT INTO external_ratings (media_item_id, source, value, score)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (media_item_id, source) DO UPDATE SET value = $3, score = $4
-RETURNING id, media_item_id, source, value, score
+INSERT INTO external_ratings (media_item_id, source, value, score, votes, raw_value)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (media_item_id, source) DO UPDATE SET value = $3, score = $4, votes = $5, raw_value = $6
+RETURNING id, media_item_id, source, value, score, votes, raw_value
 `
 
 type UpsertExternalRatingParams struct {
@@ -62,6 +64,8 @@ type UpsertExternalRatingParams struct {
 	Source      string         `json:"source"`
 	Value       string         `json:"value"`
 	Score       pgtype.Numeric `json:"score"`
+	Votes       int32          `json:"votes"`
+	RawValue    string         `json:"raw_value"`
 }
 
 func (q *Queries) UpsertExternalRating(ctx context.Context, arg UpsertExternalRatingParams) (ExternalRating, error) {
@@ -70,6 +74,8 @@ func (q *Queries) UpsertExternalRating(ctx context.Context, arg UpsertExternalRa
 		arg.Source,
 		arg.Value,
 		arg.Score,
+		arg.Votes,
+		arg.RawValue,
 	)
 	var i ExternalRating
 	err := row.Scan(
@@ -78,6 +84,8 @@ func (q *Queries) UpsertExternalRating(ctx context.Context, arg UpsertExternalRa
 		&i.Source,
 		&i.Value,
 		&i.Score,
+		&i.Votes,
+		&i.RawValue,
 	)
 	return i, err
 }

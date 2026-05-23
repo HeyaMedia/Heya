@@ -3,20 +3,24 @@ package cmd
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/logbuf"
+	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/server"
 	"github.com/karbowiak/heya/internal/service"
-	"github.com/karbowiak/heya/internal/worker"
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 )
 
 var serveCmd = &cobra.Command{
@@ -24,8 +28,11 @@ var serveCmd = &cobra.Command{
 	Short: "Start the HTTP server",
 	Long:  "Start the Kura HTTP API server and background workers.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
+
+		appCtx, appCancel := context.WithCancel(context.Background())
+		defer appCancel()
 
 		logRing := logbuf.New(2000)
 
@@ -40,50 +47,90 @@ var serveCmd = &cobra.Command{
 		}
 		log.Logger = zerolog.New(baseWriter).With().Timestamp().Logger()
 
-		app, err := service.New(ctx, cfg)
+		app, err := service.New(appCtx, cfg)
 		if err != nil {
 			return err
 		}
 		defer app.Close()
 
-		if err := app.StartWorkers(ctx); err != nil {
+		if err := app.StartWorkers(appCtx); err != nil {
 			return err
 		}
 		log.Info().Msg("river workers started")
 
-		if err := app.StartWatchers(ctx); err != nil {
+		if err := app.StartWatchers(appCtx); err != nil {
 			log.Warn().Err(err).Msg("failed to start watchers")
 		}
 
-		bridgeLogToHub(ctx, logRing, app.Hub)
-		app.Hub.StartPeriodicEmitters(ctx, app.DB)
-		app.Hub.StartScheduledScans(ctx, app.DB, func(scanCtx context.Context, libraryID int64) {
-			if app.River != nil {
-				app.River.Insert(scanCtx, worker.ScanLibraryArgs{LibraryID: libraryID}, nil)
-			}
-		})
+		bridgeLogToHub(appCtx, logRing, app.EventHub())
+		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
+
+		taskRunner := scheduler.NewRunner(app.DBPool(), app.EventHub(), cfg.DataDir)
+		taskRunner.Register(&scheduler.GenerateTrickplayTask{DB: app.DBPool(), DataDir: cfg.DataDir})
+		taskRunner.Register(&scheduler.GenerateThumbnailsTask{DB: app.DBPool(), DataDir: cfg.DataDir})
+		taskRunner.Register(app.ScanLibrariesTask())
+		taskRunner.Register(&scheduler.RefreshMetadataTask{DB: app.DBPool(), River: app.RiverClient()})
+		app.SetScheduler(taskRunner)
+		taskRunner.Start(appCtx)
 
 		srv := server.New(cfg, app,
 			server.WithLogBuffer(logRing),
-			server.WithEventHub(app.Hub),
+			server.WithEventHub(app.EventHub()),
+			server.WithBaseContext(appCtx),
 		)
+
+		ln, err := reuseAddrListen(cfg.Addr())
+		if err != nil {
+			return err
+		}
 
 		go func() {
 			log.Info().Str("addr", cfg.Addr()).Msg("starting server")
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Fatal().Err(err).Msg("server error")
 			}
 		}()
 
-		<-ctx.Done()
+		<-sigCtx.Done()
 		log.Info().Msg("shutting down")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ln.Close()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		app.StopWorkers(shutdownCtx)
-		return srv.Shutdown(shutdownCtx)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			app.StopWorkers(shutdownCtx)
+		}()
+		go func() {
+			defer wg.Done()
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				log.Warn().Err(err).Msg("http shutdown error")
+			}
+		}()
+		wg.Wait()
+
+		appCancel()
+		return nil
 	},
+}
+
+func reuseAddrListen(addr string) (net.Listener, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			if err := c.Control(func(fd uintptr) {
+				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+			}); err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+	return lc.Listen(context.Background(), "tcp", addr)
 }
 
 func bridgeLogToHub(ctx context.Context, ring *logbuf.RingBuffer, hub *eventhub.Hub) {

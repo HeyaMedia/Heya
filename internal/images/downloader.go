@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -28,12 +29,12 @@ func (d *Downloader) CacheDir() string {
 	return d.dataDir
 }
 
-func (d *Downloader) Download(ctx context.Context, url, mediaType string, mediaItemID int64, filename string) (string, error) {
-	if url == "" {
+func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirName string, filename string) (string, error) {
+	if url == "" || !strings.HasPrefix(url, "http") {
 		return "", nil
 	}
 
-	dir := filepath.Join(d.dataDir, "images", mediaType, fmt.Sprintf("%d", mediaItemID))
+	dir := filepath.Join(d.dataDir, "images", mediaType, dirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("creating image dir: %w", err)
 	}

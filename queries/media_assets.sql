@@ -22,3 +22,16 @@ SELECT asset_type, count(*) as count
 FROM media_assets
 WHERE media_item_id = $1
 GROUP BY asset_type;
+
+-- name: GetMediaAssetByID :one
+SELECT * FROM media_assets WHERE id = $1;
+
+-- name: DeleteMediaAsset :exec
+DELETE FROM media_assets WHERE id = $1;
+
+-- name: SetAssetSortOrder :exec
+UPDATE media_assets SET sort_order = $2 WHERE id = $1;
+
+-- name: ShiftAssetSortOrders :exec
+UPDATE media_assets SET sort_order = sort_order + 1
+WHERE media_item_id = $1 AND asset_type = $2::asset_type AND sort_order >= 0;

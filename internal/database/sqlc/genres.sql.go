@@ -75,7 +75,7 @@ func (q *Queries) ListAllGenres(ctx context.Context) ([]ListAllGenresRow, error)
 }
 
 const listMediaByGenre = `-- name: ListMediaByGenre :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.created_at, mi.updated_at, mi.search_vector, mi.homepage, mi.wikidata_id, mi.facebook_id, mi.instagram_id, mi.twitter_id, mi.slug, mi.metadata_refreshed_at
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
 FROM media_items mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
@@ -110,16 +110,19 @@ func (q *Queries) ListMediaByGenre(ctx context.Context, arg ListMediaByGenrePara
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.ExternalIds,
+			&i.Slug,
+			&i.Homepage,
+			&i.Tagline,
+			&i.OriginalTitle,
+			&i.OriginalLanguage,
+			&i.Status,
+			&i.ProviderKind,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
+			&i.MetadataRefreshedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
-			&i.Homepage,
-			&i.WikidataID,
-			&i.FacebookID,
-			&i.InstagramID,
-			&i.TwitterID,
-			&i.Slug,
-			&i.MetadataRefreshedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -132,7 +135,7 @@ func (q *Queries) ListMediaByGenre(ctx context.Context, arg ListMediaByGenrePara
 }
 
 const listMediaByKeyword = `-- name: ListMediaByKeyword :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.created_at, mi.updated_at, mi.search_vector, mi.homepage, mi.wikidata_id, mi.facebook_id, mi.instagram_id, mi.twitter_id, mi.slug, mi.metadata_refreshed_at
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
 FROM media_items mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
@@ -167,16 +170,19 @@ func (q *Queries) ListMediaByKeyword(ctx context.Context, arg ListMediaByKeyword
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.ExternalIds,
+			&i.Slug,
+			&i.Homepage,
+			&i.Tagline,
+			&i.OriginalTitle,
+			&i.OriginalLanguage,
+			&i.Status,
+			&i.ProviderKind,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
+			&i.MetadataRefreshedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
-			&i.Homepage,
-			&i.WikidataID,
-			&i.FacebookID,
-			&i.InstagramID,
-			&i.TwitterID,
-			&i.Slug,
-			&i.MetadataRefreshedAt,
 		); err != nil {
 			return nil, err
 		}

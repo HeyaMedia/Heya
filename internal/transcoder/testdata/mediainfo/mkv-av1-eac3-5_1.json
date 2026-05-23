@@ -1,0 +1,8 @@
+{
+  "_comment": "AV1 + EAC3 5.1 in MKV (Nobody 2 / Oshi no Ko S02E13 / S03E04 case). Audio transcode to AAC stereo on Firefox.",
+  "container": "matroska,webm",
+  "streams": [
+    { "codec_name": "av1", "codec_type": "video", "profile": "Main", "pix_fmt": "yuv420p", "width": 1920, "height": 800 },
+    { "codec_name": "eac3", "codec_type": "audio" }
+  ]
+}

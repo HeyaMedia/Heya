@@ -162,13 +162,6 @@ func TestMediaTypeToKind(t *testing.T) {
 	assert.Equal(t, metadata.KindBook, MediaTypeToKind(sqlc.MediaTypeBook))
 }
 
-func TestMediaTypeFromProvider(t *testing.T) {
-	assert.Equal(t, "movie", mediaTypeFromProvider("tmdb"))
-	assert.Equal(t, "music", mediaTypeFromProvider("musicbrainz"))
-	assert.Equal(t, "book", mediaTypeFromProvider("openlibrary"))
-	assert.Equal(t, "movie", mediaTypeFromProvider("unknown"))
-}
-
 func TestTruncate(t *testing.T) {
 	assert.Equal(t, "abc", truncate("abc", 5))
 	assert.Equal(t, "ab", truncate("abcde", 2))

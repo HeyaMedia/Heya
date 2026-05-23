@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -28,20 +29,25 @@ type LibraryWatcher struct {
 	rootPath  string
 	fsw       *fsnotify.Watcher
 	cancel    context.CancelFunc
+	paused    atomic.Bool
 }
+
+type ScanFunc func(libraryID int64, force bool)
 
 type Manager struct {
 	mu       sync.Mutex
 	watchers map[int64]*LibraryWatcher
 	db       *pgxpool.Pool
 	river    *river.Client[pgx.Tx]
+	onScan   ScanFunc
 }
 
-func NewManager(db *pgxpool.Pool, riverClient *river.Client[pgx.Tx]) *Manager {
+func NewManager(db *pgxpool.Pool, riverClient *river.Client[pgx.Tx], onScan ScanFunc) *Manager {
 	return &Manager{
 		watchers: make(map[int64]*LibraryWatcher),
 		db:       db,
 		river:    riverClient,
+		onScan:   onScan,
 	}
 }
 
@@ -114,6 +120,24 @@ func (m *Manager) Unwatch(libraryID int64) {
 	}
 }
 
+func (m *Manager) Pause(libraryID int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if lw, ok := m.watchers[libraryID]; ok {
+		lw.paused.Store(true)
+		log.Debug().Int64("library_id", libraryID).Msg("watcher paused")
+	}
+}
+
+func (m *Manager) Resume(libraryID int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if lw, ok := m.watchers[libraryID]; ok {
+		lw.paused.Store(false)
+		log.Debug().Int64("library_id", libraryID).Msg("watcher resumed")
+	}
+}
+
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -154,6 +178,9 @@ func (m *Manager) eventLoop(ctx context.Context, lw *LibraryWatcher) {
 		case event, ok := <-lw.fsw.Events:
 			if !ok {
 				return
+			}
+			if lw.paused.Load() {
+				continue
 			}
 			m.handleEvent(ctx, lw, event, pending, &mu)
 
@@ -261,7 +288,7 @@ var (
 	rescanTimersMu sync.Mutex
 )
 
-func (m *Manager) enqueueRescan(ctx context.Context, libraryID int64) {
+func (m *Manager) enqueueRescan(_ context.Context, libraryID int64) {
 	rescanTimersMu.Lock()
 	defer rescanTimersMu.Unlock()
 
@@ -274,9 +301,7 @@ func (m *Manager) enqueueRescan(ctx context.Context, libraryID int64) {
 		delete(rescanTimers, libraryID)
 		rescanTimersMu.Unlock()
 
-		m.river.Insert(context.Background(), worker.ScanLibraryArgs{
-			LibraryID: libraryID,
-		}, nil)
+		m.onScan(libraryID, false)
 		log.Info().Int64("library_id", libraryID).Msg("rescan enqueued after directory change")
 	})
 }

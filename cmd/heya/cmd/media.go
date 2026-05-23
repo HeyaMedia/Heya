@@ -35,7 +35,7 @@ var mediaListCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		q := sqlc.New(app.DB)
+		q := sqlc.New(app.DBPool())
 		items, err := q.ListMediaItemsByType(ctx, sqlc.ListMediaItemsByTypeParams{
 			MediaType: sqlc.MediaType(mediaType),
 			Limit:     100,
@@ -84,7 +84,7 @@ var mediaInfoCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		q := sqlc.New(app.DB)
+		q := sqlc.New(app.DBPool())
 		item, err := q.GetMediaItemByID(ctx, id)
 		if err != nil {
 			return fmt.Errorf("media item %d not found", id)
@@ -142,11 +142,13 @@ func renderMovieDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem
 		f, _ := movie.Rating.Float64Value()
 		ui.Info("Rating", fmt.Sprintf("%.1f/10", f.Float64))
 	}
-	if movie.ImdbID != "" {
-		ui.Info("IMDB", movie.ImdbID)
+	var extIDs map[string]string
+	json.Unmarshal(item.ExternalIds, &extIDs)
+	if extIDs["imdb"] != "" {
+		ui.Info("IMDB", extIDs["imdb"])
 	}
-	if movie.TmdbID.Valid {
-		ui.Info("TMDB", strconv.FormatInt(int64(movie.TmdbID.Int32), 10))
+	if extIDs["tmdb"] != "" {
+		ui.Info("TMDB", extIDs["tmdb"])
 	}
 	if movie.Budget > 0 {
 		ui.Info("Budget", formatMoney(movie.Budget))
@@ -155,11 +157,7 @@ func renderMovieDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem
 		ui.Info("Revenue", formatMoney(movie.Revenue))
 	}
 
-	var cast []struct {
-		Name      string `json:"name"`
-		Character string `json:"character"`
-	}
-	json.Unmarshal(movie.CastData, &cast)
+	cast, _ := q.ListMediaCastSlim(ctx, item.ID)
 	if len(cast) > 0 {
 		names := make([]string, 0, 5)
 		for i, c := range cast {
@@ -171,11 +169,7 @@ func renderMovieDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem
 		ui.Info("Cast", strings.Join(names, ", "))
 	}
 
-	var crew []struct {
-		Name string `json:"name"`
-		Job  string `json:"job"`
-	}
-	json.Unmarshal(movie.CrewData, &crew)
+	crew, _ := q.ListMediaCrewSlim(ctx, item.ID)
 	for _, c := range crew {
 		if c.Job == "Director" {
 			ui.Info("Director", c.Name)
@@ -196,8 +190,13 @@ func renderTVDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem) {
 	if len(series.Genres) > 0 {
 		ui.Info("Genres", strings.Join(series.Genres, ", "))
 	}
-	if len(series.Networks) > 0 {
-		ui.Info("Networks", strings.Join(series.Networks, ", "))
+	networks, _ := q.ListNetworksForSeries(ctx, series.ID)
+	if len(networks) > 0 {
+		names := make([]string, len(networks))
+		for i, n := range networks {
+			names[i] = n.Name
+		}
+		ui.Info("Networks", strings.Join(names, ", "))
 	}
 	ui.Info("Seasons", strconv.Itoa(int(series.NumberOfSeasons)))
 	ui.Info("Episodes", strconv.Itoa(int(series.NumberOfEpisodes)))
@@ -291,7 +290,7 @@ var mediaSearchCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		q := sqlc.New(app.DB)
+		q := sqlc.New(app.DBPool())
 		results, err := q.SearchAllMedia(ctx, sqlc.SearchAllMediaParams{
 			Lower:  args[0],
 			Limit:  50,

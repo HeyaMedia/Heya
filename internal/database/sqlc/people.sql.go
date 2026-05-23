@@ -12,8 +12,8 @@ import (
 )
 
 const createMediaCast = `-- name: CreateMediaCast :exec
-INSERT INTO media_cast (media_item_id, person_id, character, display_order)
-VALUES ($1, $2, $3, $4)
+INSERT INTO media_cast (media_item_id, person_id, character, display_order, gender, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (media_item_id, person_id, character) DO NOTHING
 `
 
@@ -22,6 +22,8 @@ type CreateMediaCastParams struct {
 	PersonID     int64  `json:"person_id"`
 	Character    string `json:"character"`
 	DisplayOrder int32  `json:"display_order"`
+	Gender       int32  `json:"gender"`
+	Source       string `json:"source"`
 }
 
 func (q *Queries) CreateMediaCast(ctx context.Context, arg CreateMediaCastParams) error {
@@ -30,13 +32,15 @@ func (q *Queries) CreateMediaCast(ctx context.Context, arg CreateMediaCastParams
 		arg.PersonID,
 		arg.Character,
 		arg.DisplayOrder,
+		arg.Gender,
+		arg.Source,
 	)
 	return err
 }
 
 const createMediaCrew = `-- name: CreateMediaCrew :exec
-INSERT INTO media_crew (media_item_id, person_id, job, department)
-VALUES ($1, $2, $3, $4)
+INSERT INTO media_crew (media_item_id, person_id, job, department, gender, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (media_item_id, person_id, job) DO NOTHING
 `
 
@@ -45,6 +49,8 @@ type CreateMediaCrewParams struct {
 	PersonID    int64  `json:"person_id"`
 	Job         string `json:"job"`
 	Department  string `json:"department"`
+	Gender      int32  `json:"gender"`
+	Source      string `json:"source"`
 }
 
 func (q *Queries) CreateMediaCrew(ctx context.Context, arg CreateMediaCrewParams) error {
@@ -53,47 +59,39 @@ func (q *Queries) CreateMediaCrew(ctx context.Context, arg CreateMediaCrewParams
 		arg.PersonID,
 		arg.Job,
 		arg.Department,
+		arg.Gender,
+		arg.Source,
 	)
 	return err
 }
 
 const createPerson = `-- name: CreatePerson :one
-INSERT INTO people (tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-ON CONFLICT (tmdb_id) DO UPDATE SET
-  name = EXCLUDED.name,
-  also_known_as = EXCLUDED.also_known_as,
-  biography = EXCLUDED.biography,
-  birthday = EXCLUDED.birthday,
-  deathday = EXCLUDED.deathday,
-  place_of_birth = EXCLUDED.place_of_birth,
-  gender = EXCLUDED.gender,
-  profile_path = EXCLUDED.profile_path,
-  homepage = EXCLUDED.homepage,
-  imdb_id = EXCLUDED.imdb_id,
-  popularity = EXCLUDED.popularity,
-  updated_at = now()
-RETURNING id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector
+INSERT INTO people (external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, sort_name, known_for_department, birth_year, heya_slug)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+RETURNING id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector
 `
 
 type CreatePersonParams struct {
-	TmdbID       pgtype.Int4    `json:"tmdb_id"`
-	Name         string         `json:"name"`
-	AlsoKnownAs  []string       `json:"also_known_as"`
-	Biography    string         `json:"biography"`
-	Birthday     string         `json:"birthday"`
-	Deathday     string         `json:"deathday"`
-	PlaceOfBirth string         `json:"place_of_birth"`
-	Gender       int32          `json:"gender"`
-	ProfilePath  string         `json:"profile_path"`
-	Homepage     string         `json:"homepage"`
-	ImdbID       string         `json:"imdb_id"`
-	Popularity   pgtype.Numeric `json:"popularity"`
+	ExternalIds        []byte         `json:"external_ids"`
+	Name               string         `json:"name"`
+	AlsoKnownAs        []string       `json:"also_known_as"`
+	Biography          string         `json:"biography"`
+	Birthday           string         `json:"birthday"`
+	Deathday           string         `json:"deathday"`
+	PlaceOfBirth       string         `json:"place_of_birth"`
+	Gender             int32          `json:"gender"`
+	ProfilePath        string         `json:"profile_path"`
+	Homepage           string         `json:"homepage"`
+	Popularity         pgtype.Numeric `json:"popularity"`
+	SortName           string         `json:"sort_name"`
+	KnownForDepartment string         `json:"known_for_department"`
+	BirthYear          int32          `json:"birth_year"`
+	HeyaSlug           string         `json:"heya_slug"`
 }
 
 func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error) {
 	row := q.db.QueryRow(ctx, createPerson,
-		arg.TmdbID,
+		arg.ExternalIds,
 		arg.Name,
 		arg.AlsoKnownAs,
 		arg.Biography,
@@ -103,13 +101,16 @@ func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Per
 		arg.Gender,
 		arg.ProfilePath,
 		arg.Homepage,
-		arg.ImdbID,
 		arg.Popularity,
+		arg.SortName,
+		arg.KnownForDepartment,
+		arg.BirthYear,
+		arg.HeyaSlug,
 	)
 	var i Person
 	err := row.Scan(
 		&i.ID,
-		&i.TmdbID,
+		&i.ExternalIds,
 		&i.Name,
 		&i.AlsoKnownAs,
 		&i.Biography,
@@ -119,18 +120,139 @@ func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Per
 		&i.Gender,
 		&i.ProfilePath,
 		&i.Homepage,
-		&i.ImdbID,
 		&i.Popularity,
+		&i.Slug,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SortName,
+		&i.KnownForDepartment,
+		&i.BirthYear,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
+		&i.SearchVector,
+	)
+	return i, err
+}
+
+const deleteMediaCastByItem = `-- name: DeleteMediaCastByItem :exec
+DELETE FROM media_cast WHERE media_item_id = $1
+`
+
+func (q *Queries) DeleteMediaCastByItem(ctx context.Context, mediaItemID int64) error {
+	_, err := q.db.Exec(ctx, deleteMediaCastByItem, mediaItemID)
+	return err
+}
+
+const deleteMediaCrewByItem = `-- name: DeleteMediaCrewByItem :exec
+DELETE FROM media_crew WHERE media_item_id = $1
+`
+
+func (q *Queries) DeleteMediaCrewByItem(ctx context.Context, mediaItemID int64) error {
+	_, err := q.db.Exec(ctx, deleteMediaCrewByItem, mediaItemID)
+	return err
+}
+
+const findPersonByExternalID = `-- name: FindPersonByExternalID :one
+SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE external_ids @> $1::jsonb LIMIT 1
+`
+
+func (q *Queries) FindPersonByExternalID(ctx context.Context, dollar_1 []byte) (Person, error) {
+	row := q.db.QueryRow(ctx, findPersonByExternalID, dollar_1)
+	var i Person
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalIds,
+		&i.Name,
+		&i.AlsoKnownAs,
+		&i.Biography,
+		&i.Birthday,
+		&i.Deathday,
+		&i.PlaceOfBirth,
+		&i.Gender,
+		&i.ProfilePath,
+		&i.Homepage,
+		&i.Popularity,
 		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SortName,
+		&i.KnownForDepartment,
+		&i.BirthYear,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
+		&i.SearchVector,
+	)
+	return i, err
+}
+
+const getPersonByExternalID = `-- name: GetPersonByExternalID :one
+SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE external_ids @> $1::jsonb LIMIT 1
+`
+
+func (q *Queries) GetPersonByExternalID(ctx context.Context, dollar_1 []byte) (Person, error) {
+	row := q.db.QueryRow(ctx, getPersonByExternalID, dollar_1)
+	var i Person
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalIds,
+		&i.Name,
+		&i.AlsoKnownAs,
+		&i.Biography,
+		&i.Birthday,
+		&i.Deathday,
+		&i.PlaceOfBirth,
+		&i.Gender,
+		&i.ProfilePath,
+		&i.Homepage,
+		&i.Popularity,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SortName,
+		&i.KnownForDepartment,
+		&i.BirthYear,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
+		&i.SearchVector,
+	)
+	return i, err
+}
+
+const getPersonByHeyaSlug = `-- name: GetPersonByHeyaSlug :one
+SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE heya_slug = $1
+`
+
+func (q *Queries) GetPersonByHeyaSlug(ctx context.Context, heyaSlug string) (Person, error) {
+	row := q.db.QueryRow(ctx, getPersonByHeyaSlug, heyaSlug)
+	var i Person
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalIds,
+		&i.Name,
+		&i.AlsoKnownAs,
+		&i.Biography,
+		&i.Birthday,
+		&i.Deathday,
+		&i.PlaceOfBirth,
+		&i.Gender,
+		&i.ProfilePath,
+		&i.Homepage,
+		&i.Popularity,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SortName,
+		&i.KnownForDepartment,
+		&i.BirthYear,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
 		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getPersonByID = `-- name: GetPersonByID :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector FROM people WHERE id = $1
+SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE id = $1
 `
 
 func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
@@ -138,7 +260,7 @@ func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
 	var i Person
 	err := row.Scan(
 		&i.ID,
-		&i.TmdbID,
+		&i.ExternalIds,
 		&i.Name,
 		&i.AlsoKnownAs,
 		&i.Biography,
@@ -148,18 +270,22 @@ func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
 		&i.Gender,
 		&i.ProfilePath,
 		&i.Homepage,
-		&i.ImdbID,
 		&i.Popularity,
+		&i.Slug,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Slug,
+		&i.SortName,
+		&i.KnownForDepartment,
+		&i.BirthYear,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
 		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getPersonBySlug = `-- name: GetPersonBySlug :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector FROM people WHERE slug = $1
+SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE slug = $1
 `
 
 func (q *Queries) GetPersonBySlug(ctx context.Context, slug string) (Person, error) {
@@ -167,7 +293,7 @@ func (q *Queries) GetPersonBySlug(ctx context.Context, slug string) (Person, err
 	var i Person
 	err := row.Scan(
 		&i.ID,
-		&i.TmdbID,
+		&i.ExternalIds,
 		&i.Name,
 		&i.AlsoKnownAs,
 		&i.Biography,
@@ -177,47 +303,74 @@ func (q *Queries) GetPersonBySlug(ctx context.Context, slug string) (Person, err
 		&i.Gender,
 		&i.ProfilePath,
 		&i.Homepage,
-		&i.ImdbID,
 		&i.Popularity,
+		&i.Slug,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Slug,
+		&i.SortName,
+		&i.KnownForDepartment,
+		&i.BirthYear,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
 		&i.SearchVector,
 	)
 	return i, err
 }
 
-const getPersonByTmdbID = `-- name: GetPersonByTmdbID :one
-SELECT id, tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity, created_at, updated_at, slug, search_vector FROM people WHERE tmdb_id = $1
+const listCastMediaItemIDs = `-- name: ListCastMediaItemIDs :many
+SELECT DISTINCT mc.media_item_id
+FROM media_cast mc
+WHERE mc.person_id = ANY($1::bigint[])
 `
 
-func (q *Queries) GetPersonByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Person, error) {
-	row := q.db.QueryRow(ctx, getPersonByTmdbID, tmdbID)
-	var i Person
-	err := row.Scan(
-		&i.ID,
-		&i.TmdbID,
-		&i.Name,
-		&i.AlsoKnownAs,
-		&i.Biography,
-		&i.Birthday,
-		&i.Deathday,
-		&i.PlaceOfBirth,
-		&i.Gender,
-		&i.ProfilePath,
-		&i.Homepage,
-		&i.ImdbID,
-		&i.Popularity,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Slug,
-		&i.SearchVector,
-	)
-	return i, err
+func (q *Queries) ListCastMediaItemIDs(ctx context.Context, personIds []int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listCastMediaItemIDs, personIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var media_item_id int64
+		if err := rows.Scan(&media_item_id); err != nil {
+			return nil, err
+		}
+		items = append(items, media_item_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCrewMediaItemIDs = `-- name: ListCrewMediaItemIDs :many
+SELECT DISTINCT mc.media_item_id
+FROM media_crew mc
+WHERE mc.person_id = ANY($1::bigint[])
+`
+
+func (q *Queries) ListCrewMediaItemIDs(ctx context.Context, personIds []int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listCrewMediaItemIDs, personIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var media_item_id int64
+		if err := rows.Scan(&media_item_id); err != nil {
+			return nil, err
+		}
+		items = append(items, media_item_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMediaCast = `-- name: ListMediaCast :many
-SELECT mc.character, mc.display_order, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug, p.search_vector
+SELECT mc.character, mc.display_order, p.id, p.external_ids, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.popularity, p.slug, p.created_at, p.updated_at, p.sort_name, p.known_for_department, p.birth_year, p.heya_slug, p.heya_enriched_at, p.search_vector
 FROM media_cast mc
 JOIN people p ON p.id = mc.person_id
 WHERE mc.media_item_id = $1
@@ -225,25 +378,29 @@ ORDER BY mc.display_order
 `
 
 type ListMediaCastRow struct {
-	Character    string             `json:"character"`
-	DisplayOrder int32              `json:"display_order"`
-	ID           int64              `json:"id"`
-	TmdbID       pgtype.Int4        `json:"tmdb_id"`
-	Name         string             `json:"name"`
-	AlsoKnownAs  []string           `json:"also_known_as"`
-	Biography    string             `json:"biography"`
-	Birthday     string             `json:"birthday"`
-	Deathday     string             `json:"deathday"`
-	PlaceOfBirth string             `json:"place_of_birth"`
-	Gender       int32              `json:"gender"`
-	ProfilePath  string             `json:"profile_path"`
-	Homepage     string             `json:"homepage"`
-	ImdbID       string             `json:"imdb_id"`
-	Popularity   pgtype.Numeric     `json:"popularity"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Slug         string             `json:"slug"`
-	SearchVector interface{}        `json:"search_vector"`
+	Character          string             `json:"character"`
+	DisplayOrder       int32              `json:"display_order"`
+	ID                 int64              `json:"id"`
+	ExternalIds        []byte             `json:"external_ids"`
+	Name               string             `json:"name"`
+	AlsoKnownAs        []string           `json:"also_known_as"`
+	Biography          string             `json:"biography"`
+	Birthday           string             `json:"birthday"`
+	Deathday           string             `json:"deathday"`
+	PlaceOfBirth       string             `json:"place_of_birth"`
+	Gender             int32              `json:"gender"`
+	ProfilePath        string             `json:"profile_path"`
+	Homepage           string             `json:"homepage"`
+	Popularity         pgtype.Numeric     `json:"popularity"`
+	Slug               string             `json:"slug"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	SortName           string             `json:"sort_name"`
+	KnownForDepartment string             `json:"known_for_department"`
+	BirthYear          int32              `json:"birth_year"`
+	HeyaSlug           string             `json:"heya_slug"`
+	HeyaEnrichedAt     pgtype.Timestamptz `json:"heya_enriched_at"`
+	SearchVector       interface{}        `json:"search_vector"`
 }
 
 func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListMediaCastRow, error) {
@@ -259,7 +416,7 @@ func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.Character,
 			&i.DisplayOrder,
 			&i.ID,
-			&i.TmdbID,
+			&i.ExternalIds,
 			&i.Name,
 			&i.AlsoKnownAs,
 			&i.Biography,
@@ -269,11 +426,15 @@ func (q *Queries) ListMediaCast(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.Gender,
 			&i.ProfilePath,
 			&i.Homepage,
-			&i.ImdbID,
 			&i.Popularity,
+			&i.Slug,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Slug,
+			&i.SortName,
+			&i.KnownForDepartment,
+			&i.BirthYear,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
 			&i.SearchVector,
 		); err != nil {
 			return nil, err
@@ -331,7 +492,7 @@ func (q *Queries) ListMediaCastSlim(ctx context.Context, mediaItemID int64) ([]L
 }
 
 const listMediaCrew = `-- name: ListMediaCrew :many
-SELECT mc.job, mc.department, p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug, p.search_vector
+SELECT mc.job, mc.department, p.id, p.external_ids, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.popularity, p.slug, p.created_at, p.updated_at, p.sort_name, p.known_for_department, p.birth_year, p.heya_slug, p.heya_enriched_at, p.search_vector
 FROM media_crew mc
 JOIN people p ON p.id = mc.person_id
 WHERE mc.media_item_id = $1
@@ -339,25 +500,29 @@ ORDER BY mc.department, mc.job
 `
 
 type ListMediaCrewRow struct {
-	Job          string             `json:"job"`
-	Department   string             `json:"department"`
-	ID           int64              `json:"id"`
-	TmdbID       pgtype.Int4        `json:"tmdb_id"`
-	Name         string             `json:"name"`
-	AlsoKnownAs  []string           `json:"also_known_as"`
-	Biography    string             `json:"biography"`
-	Birthday     string             `json:"birthday"`
-	Deathday     string             `json:"deathday"`
-	PlaceOfBirth string             `json:"place_of_birth"`
-	Gender       int32              `json:"gender"`
-	ProfilePath  string             `json:"profile_path"`
-	Homepage     string             `json:"homepage"`
-	ImdbID       string             `json:"imdb_id"`
-	Popularity   pgtype.Numeric     `json:"popularity"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Slug         string             `json:"slug"`
-	SearchVector interface{}        `json:"search_vector"`
+	Job                string             `json:"job"`
+	Department         string             `json:"department"`
+	ID                 int64              `json:"id"`
+	ExternalIds        []byte             `json:"external_ids"`
+	Name               string             `json:"name"`
+	AlsoKnownAs        []string           `json:"also_known_as"`
+	Biography          string             `json:"biography"`
+	Birthday           string             `json:"birthday"`
+	Deathday           string             `json:"deathday"`
+	PlaceOfBirth       string             `json:"place_of_birth"`
+	Gender             int32              `json:"gender"`
+	ProfilePath        string             `json:"profile_path"`
+	Homepage           string             `json:"homepage"`
+	Popularity         pgtype.Numeric     `json:"popularity"`
+	Slug               string             `json:"slug"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	SortName           string             `json:"sort_name"`
+	KnownForDepartment string             `json:"known_for_department"`
+	BirthYear          int32              `json:"birth_year"`
+	HeyaSlug           string             `json:"heya_slug"`
+	HeyaEnrichedAt     pgtype.Timestamptz `json:"heya_enriched_at"`
+	SearchVector       interface{}        `json:"search_vector"`
 }
 
 func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListMediaCrewRow, error) {
@@ -373,7 +538,7 @@ func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.Job,
 			&i.Department,
 			&i.ID,
-			&i.TmdbID,
+			&i.ExternalIds,
 			&i.Name,
 			&i.AlsoKnownAs,
 			&i.Biography,
@@ -383,11 +548,15 @@ func (q *Queries) ListMediaCrew(ctx context.Context, mediaItemID int64) ([]ListM
 			&i.Gender,
 			&i.ProfilePath,
 			&i.Homepage,
-			&i.ImdbID,
 			&i.Popularity,
+			&i.Slug,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Slug,
+			&i.SortName,
+			&i.KnownForDepartment,
+			&i.BirthYear,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
 			&i.SearchVector,
 		); err != nil {
 			return nil, err
@@ -534,6 +703,15 @@ func (q *Queries) ListPersonCrewCredits(ctx context.Context, personID int64) ([]
 	return items, nil
 }
 
+const markPersonEnriched = `-- name: MarkPersonEnriched :exec
+UPDATE people SET heya_enriched_at = now() WHERE id = $1
+`
+
+func (q *Queries) MarkPersonEnriched(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markPersonEnriched, id)
+	return err
+}
+
 const personSlugExists = `-- name: PersonSlugExists :one
 SELECT EXISTS(SELECT 1 FROM people WHERE slug = $1 AND id != $2) as exists
 `
@@ -548,6 +726,120 @@ func (q *Queries) PersonSlugExists(ctx context.Context, arg PersonSlugExistsPara
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const searchPeopleByName = `-- name: SearchPeopleByName :many
+SELECT p.id, p.name, p.profile_path
+FROM people p
+WHERE lower(p.name) LIKE lower($1) || '%'
+ORDER BY p.popularity DESC NULLS LAST
+LIMIT $2
+`
+
+type SearchPeopleByNameParams struct {
+	Query      string `json:"query"`
+	MaxResults int32  `json:"max_results"`
+}
+
+type SearchPeopleByNameRow struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ProfilePath string `json:"profile_path"`
+}
+
+func (q *Queries) SearchPeopleByName(ctx context.Context, arg SearchPeopleByNameParams) ([]SearchPeopleByNameRow, error) {
+	rows, err := q.db.Query(ctx, searchPeopleByName, arg.Query, arg.MaxResults)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchPeopleByNameRow{}
+	for rows.Next() {
+		var i SearchPeopleByNameRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.ProfilePath); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updatePersonFull = `-- name: UpdatePersonFull :one
+UPDATE people SET
+  name = $2, also_known_as = $3, biography = $4, birthday = $5, deathday = $6,
+  place_of_birth = $7, gender = $8, profile_path = $9, homepage = $10,
+  popularity = $11, external_ids = $12, sort_name = $13, known_for_department = $14,
+  birth_year = $15, heya_slug = $16, updated_at = now()
+WHERE id = $1
+RETURNING id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector
+`
+
+type UpdatePersonFullParams struct {
+	ID                 int64          `json:"id"`
+	Name               string         `json:"name"`
+	AlsoKnownAs        []string       `json:"also_known_as"`
+	Biography          string         `json:"biography"`
+	Birthday           string         `json:"birthday"`
+	Deathday           string         `json:"deathday"`
+	PlaceOfBirth       string         `json:"place_of_birth"`
+	Gender             int32          `json:"gender"`
+	ProfilePath        string         `json:"profile_path"`
+	Homepage           string         `json:"homepage"`
+	Popularity         pgtype.Numeric `json:"popularity"`
+	ExternalIds        []byte         `json:"external_ids"`
+	SortName           string         `json:"sort_name"`
+	KnownForDepartment string         `json:"known_for_department"`
+	BirthYear          int32          `json:"birth_year"`
+	HeyaSlug           string         `json:"heya_slug"`
+}
+
+func (q *Queries) UpdatePersonFull(ctx context.Context, arg UpdatePersonFullParams) (Person, error) {
+	row := q.db.QueryRow(ctx, updatePersonFull,
+		arg.ID,
+		arg.Name,
+		arg.AlsoKnownAs,
+		arg.Biography,
+		arg.Birthday,
+		arg.Deathday,
+		arg.PlaceOfBirth,
+		arg.Gender,
+		arg.ProfilePath,
+		arg.Homepage,
+		arg.Popularity,
+		arg.ExternalIds,
+		arg.SortName,
+		arg.KnownForDepartment,
+		arg.BirthYear,
+		arg.HeyaSlug,
+	)
+	var i Person
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalIds,
+		&i.Name,
+		&i.AlsoKnownAs,
+		&i.Biography,
+		&i.Birthday,
+		&i.Deathday,
+		&i.PlaceOfBirth,
+		&i.Gender,
+		&i.ProfilePath,
+		&i.Homepage,
+		&i.Popularity,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SortName,
+		&i.KnownForDepartment,
+		&i.BirthYear,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
+		&i.SearchVector,
+	)
+	return i, err
 }
 
 const updatePersonProfilePath = `-- name: UpdatePersonProfilePath :exec

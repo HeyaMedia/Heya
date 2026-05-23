@@ -6,13 +6,13 @@ import (
 	"fmt"
 
 	"charm.land/huh/v2"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/karbowiak/heya/migrations"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
 )
@@ -214,8 +214,8 @@ var setupCmd = &cobra.Command{
 		if fc.HeyaMediaURL != "" {
 			ui.Success("heya.media API: %s", fc.HeyaMediaURL)
 		} else {
-			fc.HeyaMediaURL = "http://localhost:3030"
-			ui.Println(ui.Dim("  heya.media provides metadata from TMDB, OMDB, Fanart, TVDB, MusicBrainz, and more."))
+			fc.HeyaMediaURL = "https://heya.media"
+			ui.Println(ui.Dim("  heya.media provides enriched metadata aggregated from TMDB, OMDB, Fanart, TVDB, AniDB, MusicBrainz, OpenLibrary, and more."))
 			huh.NewForm(
 				huh.NewGroup(
 					huh.NewInput().

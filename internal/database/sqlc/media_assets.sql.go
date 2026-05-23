@@ -45,7 +45,7 @@ const createMediaAsset = `-- name: CreateMediaAsset :one
 INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (media_item_id, asset_type, sort_order, local_path) DO NOTHING
-RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, created_at
+RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at
 `
 
 type CreateMediaAssetParams struct {
@@ -90,9 +90,21 @@ func (q *Queries) CreateMediaAsset(ctx context.Context, arg CreateMediaAssetPara
 		&i.Width,
 		&i.Height,
 		&i.FileSize,
+		&i.Score,
+		&i.Likes,
+		&i.Aspect,
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteMediaAsset = `-- name: DeleteMediaAsset :exec
+DELETE FROM media_assets WHERE id = $1
+`
+
+func (q *Queries) DeleteMediaAsset(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteMediaAsset, id)
+	return err
 }
 
 const deleteMediaAssetsByItem = `-- name: DeleteMediaAssetsByItem :exec
@@ -104,8 +116,36 @@ func (q *Queries) DeleteMediaAssetsByItem(ctx context.Context, mediaItemID int64
 	return err
 }
 
+const getMediaAssetByID = `-- name: GetMediaAssetByID :one
+SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at FROM media_assets WHERE id = $1
+`
+
+func (q *Queries) GetMediaAssetByID(ctx context.Context, id int64) (MediaAsset, error) {
+	row := q.db.QueryRow(ctx, getMediaAssetByID, id)
+	var i MediaAsset
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.AssetType,
+		&i.Source,
+		&i.LocalPath,
+		&i.RemoteUrl,
+		&i.Language,
+		&i.Label,
+		&i.SortOrder,
+		&i.Width,
+		&i.Height,
+		&i.FileSize,
+		&i.Score,
+		&i.Likes,
+		&i.Aspect,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listMediaAssets = `-- name: ListMediaAssets :many
-SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, created_at FROM media_assets
+SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at FROM media_assets
 WHERE media_item_id = $1
 ORDER BY asset_type, sort_order
 `
@@ -132,6 +172,9 @@ func (q *Queries) ListMediaAssets(ctx context.Context, mediaItemID int64) ([]Med
 			&i.Width,
 			&i.Height,
 			&i.FileSize,
+			&i.Score,
+			&i.Likes,
+			&i.Aspect,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -145,7 +188,7 @@ func (q *Queries) ListMediaAssets(ctx context.Context, mediaItemID int64) ([]Med
 }
 
 const listMediaAssetsByType = `-- name: ListMediaAssetsByType :many
-SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, created_at FROM media_assets
+SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at FROM media_assets
 WHERE media_item_id = $1 AND asset_type = $2
 ORDER BY sort_order
 `
@@ -177,6 +220,9 @@ func (q *Queries) ListMediaAssetsByType(ctx context.Context, arg ListMediaAssets
 			&i.Width,
 			&i.Height,
 			&i.FileSize,
+			&i.Score,
+			&i.Likes,
+			&i.Aspect,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -187,4 +233,33 @@ func (q *Queries) ListMediaAssetsByType(ctx context.Context, arg ListMediaAssets
 		return nil, err
 	}
 	return items, nil
+}
+
+const setAssetSortOrder = `-- name: SetAssetSortOrder :exec
+UPDATE media_assets SET sort_order = $2 WHERE id = $1
+`
+
+type SetAssetSortOrderParams struct {
+	ID        int64 `json:"id"`
+	SortOrder int32 `json:"sort_order"`
+}
+
+func (q *Queries) SetAssetSortOrder(ctx context.Context, arg SetAssetSortOrderParams) error {
+	_, err := q.db.Exec(ctx, setAssetSortOrder, arg.ID, arg.SortOrder)
+	return err
+}
+
+const shiftAssetSortOrders = `-- name: ShiftAssetSortOrders :exec
+UPDATE media_assets SET sort_order = sort_order + 1
+WHERE media_item_id = $1 AND asset_type = $2::asset_type AND sort_order >= 0
+`
+
+type ShiftAssetSortOrdersParams struct {
+	MediaItemID int64     `json:"media_item_id"`
+	Column2     AssetType `json:"column_2"`
+}
+
+func (q *Queries) ShiftAssetSortOrders(ctx context.Context, arg ShiftAssetSortOrdersParams) error {
+	_, err := q.db.Exec(ctx, shiftAssetSortOrders, arg.MediaItemID, arg.Column2)
+	return err
 }

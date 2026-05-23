@@ -16,12 +16,12 @@ var (
 	activeTabStyle = lipgloss.NewStyle().Padding(0, 2).Bold(true).
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#7C6DD8"))
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C6DD8"))
-	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	boxStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#444444")).Padding(0, 1)
-	labelStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Width(14)
-	countStyle  = lipgloss.NewStyle().Bold(true)
-	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0636F"))
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C6DD8"))
+	dimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	boxStyle     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#444444")).Padding(0, 1)
+	labelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Width(14)
+	countStyle   = lipgloss.NewStyle().Bold(true)
+	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0636F"))
 	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#73D08A"))
 )
 

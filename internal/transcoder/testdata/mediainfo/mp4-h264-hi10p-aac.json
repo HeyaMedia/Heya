@@ -1,0 +1,8 @@
+{
+  "_comment": "H.264 High 10 (Hi10P, 10-bit). Cannot copy into MPEG-TS — must transcode for HLS over TS.",
+  "container": "mp4",
+  "streams": [
+    { "codec_name": "h264", "codec_type": "video", "profile": "High 10", "pix_fmt": "yuv420p10le", "width": 1920, "height": 1080 },
+    { "codec_name": "aac", "codec_type": "audio" }
+  ]
+}

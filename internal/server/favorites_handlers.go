@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/karbowiak/heya/internal/auth"
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -28,36 +27,14 @@ func handleToggleFavorite(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		ctx := r.Context()
-
-		favorited, _ := q.IsFavorited(ctx, sqlc.IsFavoritedParams{
-			UserID:     user.ID,
-			EntityType: req.EntityType,
-			EntityID:   req.EntityID,
-		})
-
-		if favorited {
-			if err := q.RemoveFavorite(ctx, sqlc.RemoveFavoriteParams{
-				UserID:     user.ID,
-				EntityType: req.EntityType,
-				EntityID:   req.EntityID,
-			}); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"favorited": false})
-		} else {
-			if _, err := q.ToggleFavorite(ctx, sqlc.ToggleFavoriteParams{
-				UserID:     user.ID,
-				EntityType: req.EntityType,
-				EntityID:   req.EntityID,
-			}); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"favorited": true})
+		if err := app.ToggleFavorite(r.Context(), user.ID, req.EntityID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
+
+		// Check the new state after toggle.
+		favorited, _ := app.IsFavorited(r.Context(), user.ID, req.EntityID)
+		writeJSON(w, http.StatusOK, map[string]any{"favorited": favorited})
 	}
 }
 
@@ -69,15 +46,9 @@ func handleCheckFavorite(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		entityType := r.URL.Query().Get("entity_type")
 		entityID, _ := strconv.ParseInt(r.URL.Query().Get("entity_id"), 10, 64)
 
-		q := sqlc.New(app.DB)
-		favorited, _ := q.IsFavorited(r.Context(), sqlc.IsFavoritedParams{
-			UserID:     user.ID,
-			EntityType: entityType,
-			EntityID:   entityID,
-		})
+		favorited, _ := app.IsFavorited(r.Context(), user.ID, entityID)
 
 		writeJSON(w, http.StatusOK, map[string]any{"favorited": favorited})
 	}

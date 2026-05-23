@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -16,10 +15,7 @@ func handleCancelLibraryScan(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		tag, err := app.DB.Exec(r.Context(),
-			`UPDATE river_job SET state = 'cancelled', finalized_at = now()
-			 WHERE state IN ('available', 'retryable', 'scheduled')
-			   AND (args->>'library_id')::bigint = $1`, id)
+		cancelled, err := app.CancelLibraryJobs(r.Context(), id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -27,17 +23,14 @@ func handleCancelLibraryScan(app *service.App) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":    "cancelled",
-			"cancelled": tag.RowsAffected(),
-			"message":   fmt.Sprintf("cancelled %d jobs for library %d", tag.RowsAffected(), id),
+			"cancelled": cancelled,
 		})
 	}
 }
 
 func handleCancelAllScans(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tag, err := app.DB.Exec(r.Context(),
-			`UPDATE river_job SET state = 'cancelled', finalized_at = now()
-			 WHERE state IN ('available', 'retryable', 'scheduled')`)
+		cancelled, err := app.CancelAllPendingJobs(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -45,8 +38,47 @@ func handleCancelAllScans(app *service.App) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":    "cancelled",
-			"cancelled": tag.RowsAffected(),
-			"message":   fmt.Sprintf("cancelled %d jobs", tag.RowsAffected()),
+			"cancelled": cancelled,
+		})
+	}
+}
+
+func handleForceRefreshMetadata(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid library id")
+			return
+		}
+
+		if err := app.EnqueueForceRefreshMetadata(r.Context(), id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status":  "queued",
+			"message": "metadata refresh enqueued for all items",
+		})
+	}
+}
+
+func handleForceRefreshImages(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid library id")
+			return
+		}
+
+		if err := app.EnqueueForceRefreshImages(r.Context(), id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status":  "queued",
+			"message": "image refresh enqueued for all items",
 		})
 	}
 }
@@ -61,10 +93,7 @@ func handleScanLibrary(app *service.App) http.HandlerFunc {
 
 		force := r.URL.Query().Get("force") == "true"
 
-		if err := app.EnqueueScanLibrary(r.Context(), id, force); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		app.EnqueueScanLibrary(id, force)
 
 		writeJSON(w, http.StatusAccepted, map[string]string{
 			"status":  "queued",

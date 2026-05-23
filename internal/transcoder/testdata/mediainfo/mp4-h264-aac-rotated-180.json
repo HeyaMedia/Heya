@@ -1,0 +1,12 @@
+{
+  "_comment": "Phone clip recorded upside-down. 180° rotation in Display Matrix; need transpose=2,transpose=2.",
+  "container": "mp4",
+  "streams": [
+    {
+      "codec_name": "h264", "codec_type": "video", "profile": "Main",
+      "pix_fmt": "yuv420p", "width": 1920, "height": 1080, "bit_depth": 8,
+      "rotation": 180
+    },
+    { "codec_name": "aac", "codec_type": "audio", "channels": 2, "channel_layout": "stereo" }
+  ]
+}

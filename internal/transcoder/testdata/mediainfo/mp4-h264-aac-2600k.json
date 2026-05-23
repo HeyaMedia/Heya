@@ -1,0 +1,8 @@
+{
+  "_comment": "Canonical direct-play file: H.264 + AAC in MP4, 1080p.",
+  "container": "mp4",
+  "streams": [
+    { "codec_name": "h264", "codec_type": "video", "profile": "High", "pix_fmt": "yuv420p", "width": 1920, "height": 1080 },
+    { "codec_name": "aac", "codec_type": "audio" }
+  ]
+}

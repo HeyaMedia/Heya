@@ -83,7 +83,7 @@ func applyDefaults(cfg *Config) {
 		cfg.LogFormat = "console"
 	}
 	if cfg.HeyaMediaURL == "" {
-		cfg.HeyaMediaURL = "http://localhost:3030"
+		cfg.HeyaMediaURL = "https://heya.media"
 	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./data"

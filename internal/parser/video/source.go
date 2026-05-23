@@ -41,25 +41,25 @@ var (
 )
 
 type SourceGroups struct {
-	Bluray   bool
-	Webdl    bool
-	Webrip   bool
-	Hdtv     bool
-	Bdrip    bool
-	Brrip    bool
-	Scr      bool
-	Dvdr     bool
-	Dvd      bool
-	Dsr      bool
-	Regional bool
-	Ppv      bool
-	Ts       bool
-	Tc       bool
-	Cam      bool
+	Bluray    bool
+	Webdl     bool
+	Webrip    bool
+	Hdtv      bool
+	Bdrip     bool
+	Brrip     bool
+	Scr       bool
+	Dvdr      bool
+	Dvd       bool
+	Dsr       bool
+	Regional  bool
+	Ppv       bool
+	Ts        bool
+	Tc        bool
+	Cam       bool
 	Workprint bool
-	Pdtv     bool
-	Sdtv     bool
-	Tvrip    bool
+	Pdtv      bool
+	Sdtv      bool
+	Tvrip     bool
 }
 
 func ParseSourceGroups(title string) SourceGroups {

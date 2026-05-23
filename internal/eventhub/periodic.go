@@ -7,62 +7,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type ScanEnqueuer func(ctx context.Context, libraryID int64)
-
 func (h *Hub) StartPeriodicEmitters(ctx context.Context, db *pgxpool.Pool) {
 	go h.activityTicker(ctx, db)
 	go h.statsTicker(ctx, db)
-}
-
-func (h *Hub) StartScheduledScans(ctx context.Context, db *pgxpool.Pool, enqueue ScanEnqueuer) {
-	go h.scheduledScanTicker(ctx, db, enqueue)
-}
-
-func (h *Hub) scheduledScanTicker(ctx context.Context, db *pgxpool.Pool, enqueue ScanEnqueuer) {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	check := func() {
-		rows, err := db.Query(ctx, `
-			SELECT id, scan_interval, updated_at FROM libraries
-			WHERE scan_interval IS NOT NULL AND scan_interval > '0'::interval
-		`)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var id int64
-			var interval time.Duration
-			var updatedAt time.Time
-			var pgInterval struct {
-				Microseconds int64
-				Valid        bool
-			}
-			if err := rows.Scan(&id, &pgInterval, &updatedAt); err != nil {
-				continue
-			}
-			if !pgInterval.Valid || pgInterval.Microseconds <= 0 {
-				continue
-			}
-			interval = time.Duration(pgInterval.Microseconds) * time.Microsecond
-
-			if time.Since(updatedAt) >= interval {
-				enqueue(ctx, id)
-			}
-		}
-	}
-
-	check()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			check()
-		}
-	}
 }
 
 func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {

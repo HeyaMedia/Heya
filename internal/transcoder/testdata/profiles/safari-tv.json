@@ -1,0 +1,17 @@
+{
+  "_comment": "Apple TV / Safari on Apple Silicon: HEVC (hvc1 only — no hev1), Dolby Vision (profile 5/8), HDR10, HLG, AC3/EAC3, AAC. No AV1 (until A17 Pro), no VP9/WebM, no Opus in MP4, no MKV.",
+  "SupportsHEVC": true,
+  "SupportsHEVCHev1": false,
+  "SupportsAV1": false,
+  "SupportsFLAC": true,
+  "SupportsOpus": false,
+  "SupportsAC3": true,
+  "SupportsEAC3": true,
+  "SupportsMP4": true,
+  "SupportsMKV": false,
+  "SupportsWebM": false,
+  "SupportsHDR": true,
+  "SupportsHDR10": true,
+  "SupportsHLG": true,
+  "SupportsDoVi": true
+}

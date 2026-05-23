@@ -7,26 +7,41 @@ package sqlc
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createKeyword = `-- name: CreateKeyword :one
-INSERT INTO keywords (tmdb_id, name)
-VALUES ($1, $2)
-ON CONFLICT (tmdb_id) DO UPDATE SET name = EXCLUDED.name
-RETURNING id, tmdb_id, name
+INSERT INTO keywords (external_ids, name) VALUES ($1, $2) RETURNING id, external_ids, name
 `
 
 type CreateKeywordParams struct {
-	TmdbID pgtype.Int4 `json:"tmdb_id"`
-	Name   string      `json:"name"`
+	ExternalIds []byte `json:"external_ids"`
+	Name        string `json:"name"`
 }
 
 func (q *Queries) CreateKeyword(ctx context.Context, arg CreateKeywordParams) (Keyword, error) {
-	row := q.db.QueryRow(ctx, createKeyword, arg.TmdbID, arg.Name)
+	row := q.db.QueryRow(ctx, createKeyword, arg.ExternalIds, arg.Name)
 	var i Keyword
-	err := row.Scan(&i.ID, &i.TmdbID, &i.Name)
+	err := row.Scan(&i.ID, &i.ExternalIds, &i.Name)
+	return i, err
+}
+
+const deleteMediaKeywordsByItem = `-- name: DeleteMediaKeywordsByItem :exec
+DELETE FROM media_keywords WHERE media_item_id = $1
+`
+
+func (q *Queries) DeleteMediaKeywordsByItem(ctx context.Context, mediaItemID int64) error {
+	_, err := q.db.Exec(ctx, deleteMediaKeywordsByItem, mediaItemID)
+	return err
+}
+
+const findKeywordByName = `-- name: FindKeywordByName :one
+SELECT id, external_ids, name FROM keywords WHERE name = $1
+`
+
+func (q *Queries) FindKeywordByName(ctx context.Context, name string) (Keyword, error) {
+	row := q.db.QueryRow(ctx, findKeywordByName, name)
+	var i Keyword
+	err := row.Scan(&i.ID, &i.ExternalIds, &i.Name)
 	return i, err
 }
 
@@ -47,7 +62,7 @@ func (q *Queries) LinkMediaKeyword(ctx context.Context, arg LinkMediaKeywordPara
 }
 
 const listMediaKeywords = `-- name: ListMediaKeywords :many
-SELECT k.id, k.tmdb_id, k.name FROM keywords k
+SELECT k.id, k.external_ids, k.name FROM keywords k
 JOIN media_keywords mk ON mk.keyword_id = k.id
 WHERE mk.media_item_id = $1
 ORDER BY k.name
@@ -62,7 +77,7 @@ func (q *Queries) ListMediaKeywords(ctx context.Context, mediaItemID int64) ([]K
 	items := []Keyword{}
 	for rows.Next() {
 		var i Keyword
-		if err := rows.Scan(&i.ID, &i.TmdbID, &i.Name); err != nil {
+		if err := rows.Scan(&i.ID, &i.ExternalIds, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

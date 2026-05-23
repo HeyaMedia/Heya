@@ -131,17 +131,17 @@ type Profile struct {
 }
 
 var Profiles = map[string]Profile{
-	"direct":   {Name: "direct", VideoCodec: "copy", AudioCodec: "copy"},
-	"remux":    {Name: "remux", VideoCodec: "copy", AudioCodec: "copy"},
-	"4320p":    {Name: "4320p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 18, MaxBitrate: "60M", Preset: "medium", MaxHeight: 4320},
-	"2160p":    {Name: "2160p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 20, MaxBitrate: "20M", Preset: "medium", MaxHeight: 2160},
-	"1440p":    {Name: "1440p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 21, MaxBitrate: "14M", Preset: "medium", MaxHeight: 1440},
-	"1080p":    {Name: "1080p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 22, MaxBitrate: "8M", Preset: "medium", MaxHeight: 1080},
-	"720p":     {Name: "720p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 23, MaxBitrate: "4M", Preset: "fast", MaxHeight: 720},
-	"480p":     {Name: "480p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 24, MaxBitrate: "2.5M", Preset: "fast", MaxHeight: 480},
-	"360p":     {Name: "360p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 25, MaxBitrate: "1.4M", Preset: "fast", MaxHeight: 360},
-	"240p":     {Name: "240p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 26, MaxBitrate: "700k", Preset: "fast", MaxHeight: 240},
-	"audio":    {Name: "audio", VideoCodec: "", AudioCodec: "aac", MaxBitrate: "320k"},
+	"direct": {Name: "direct", VideoCodec: "copy", AudioCodec: "copy"},
+	"remux":  {Name: "remux", VideoCodec: "copy", AudioCodec: "copy"},
+	"4320p":  {Name: "4320p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 18, MaxBitrate: "60M", Preset: "medium", MaxHeight: 4320},
+	"2160p":  {Name: "2160p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 20, MaxBitrate: "20M", Preset: "medium", MaxHeight: 2160},
+	"1440p":  {Name: "1440p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 21, MaxBitrate: "14M", Preset: "medium", MaxHeight: 1440},
+	"1080p":  {Name: "1080p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 22, MaxBitrate: "8M", Preset: "medium", MaxHeight: 1080},
+	"720p":   {Name: "720p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 23, MaxBitrate: "4M", Preset: "fast", MaxHeight: 720},
+	"480p":   {Name: "480p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 24, MaxBitrate: "2.5M", Preset: "fast", MaxHeight: 480},
+	"360p":   {Name: "360p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 25, MaxBitrate: "1.4M", Preset: "fast", MaxHeight: 360},
+	"240p":   {Name: "240p", VideoCodec: "libx264", AudioCodec: "aac", CRF: 26, MaxBitrate: "700k", Preset: "fast", MaxHeight: 240},
+	"audio":  {Name: "audio", VideoCodec: "", AudioCodec: "aac", MaxBitrate: "320k"},
 }
 
 func GetProfile(name string) (Profile, bool) {

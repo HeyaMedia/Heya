@@ -13,7 +13,7 @@ const createMediaExtra = `-- name: CreateMediaExtra :one
 INSERT INTO media_extras (media_item_id, extra_type, title, file_path, duration_ms, file_size)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (media_item_id, extra_type, title) DO NOTHING
-RETURNING id, media_item_id, extra_type, title, file_path, duration_ms, file_size, created_at
+RETURNING id, media_item_id, extra_type, title, file_path, duration_ms, file_size, thumbnail_path, created_at
 `
 
 type CreateMediaExtraParams struct {
@@ -43,6 +43,7 @@ func (q *Queries) CreateMediaExtra(ctx context.Context, arg CreateMediaExtraPara
 		&i.FilePath,
 		&i.DurationMs,
 		&i.FileSize,
+		&i.ThumbnailPath,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -57,8 +58,29 @@ func (q *Queries) DeleteMediaExtrasByItem(ctx context.Context, mediaItemID int64
 	return err
 }
 
+const getMediaExtraByID = `-- name: GetMediaExtraByID :one
+SELECT id, media_item_id, extra_type, title, file_path, duration_ms, file_size, thumbnail_path, created_at FROM media_extras WHERE id = $1
+`
+
+func (q *Queries) GetMediaExtraByID(ctx context.Context, id int64) (MediaExtra, error) {
+	row := q.db.QueryRow(ctx, getMediaExtraByID, id)
+	var i MediaExtra
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.ExtraType,
+		&i.Title,
+		&i.FilePath,
+		&i.DurationMs,
+		&i.FileSize,
+		&i.ThumbnailPath,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listMediaExtras = `-- name: ListMediaExtras :many
-SELECT id, media_item_id, extra_type, title, file_path, duration_ms, file_size, created_at FROM media_extras
+SELECT id, media_item_id, extra_type, title, file_path, duration_ms, file_size, thumbnail_path, created_at FROM media_extras
 WHERE media_item_id = $1
 ORDER BY extra_type, title
 `
@@ -80,6 +102,7 @@ func (q *Queries) ListMediaExtras(ctx context.Context, mediaItemID int64) ([]Med
 			&i.FilePath,
 			&i.DurationMs,
 			&i.FileSize,
+			&i.ThumbnailPath,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -93,7 +116,7 @@ func (q *Queries) ListMediaExtras(ctx context.Context, mediaItemID int64) ([]Med
 }
 
 const listMediaExtrasByType = `-- name: ListMediaExtrasByType :many
-SELECT id, media_item_id, extra_type, title, file_path, duration_ms, file_size, created_at FROM media_extras
+SELECT id, media_item_id, extra_type, title, file_path, duration_ms, file_size, thumbnail_path, created_at FROM media_extras
 WHERE media_item_id = $1 AND extra_type = $2
 ORDER BY title
 `
@@ -120,6 +143,7 @@ func (q *Queries) ListMediaExtrasByType(ctx context.Context, arg ListMediaExtras
 			&i.FilePath,
 			&i.DurationMs,
 			&i.FileSize,
+			&i.ThumbnailPath,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -130,4 +154,18 @@ func (q *Queries) ListMediaExtrasByType(ctx context.Context, arg ListMediaExtras
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateExtraThumbnail = `-- name: UpdateExtraThumbnail :exec
+UPDATE media_extras SET thumbnail_path = $2 WHERE id = $1
+`
+
+type UpdateExtraThumbnailParams struct {
+	ID            int64  `json:"id"`
+	ThumbnailPath string `json:"thumbnail_path"`
+}
+
+func (q *Queries) UpdateExtraThumbnail(ctx context.Context, arg UpdateExtraThumbnailParams) error {
+	_, err := q.db.Exec(ctx, updateExtraThumbnail, arg.ID, arg.ThumbnailPath)
+	return err
 }

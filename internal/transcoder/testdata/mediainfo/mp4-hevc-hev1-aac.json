@@ -1,0 +1,12 @@
+{
+  "_comment": "HEVC tagged as `hev1` in MP4. Plays in most browsers/Android but Safari rejects it — needs an `hvc1` retag remux. Otherwise fully compatible.",
+  "container": "mp4",
+  "streams": [
+    {
+      "codec_name": "hevc", "codec_type": "video", "profile": "Main",
+      "codec_tag": "hev1", "bit_depth": 8,
+      "pix_fmt": "yuv420p", "width": 1920, "height": 1080
+    },
+    { "codec_name": "aac", "codec_type": "audio", "channels": 2, "channel_layout": "stereo" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "_comment": "Multi-audio: AV1 + EAC3 (track 0, default) + Opus (track 1). Oshi no Ko S02E13 case where user switches audio track.",
+  "container": "matroska,webm",
+  "streams": [
+    { "codec_name": "av1", "codec_type": "video", "profile": "Main", "pix_fmt": "yuv420p10le", "width": 1920, "height": 1080 },
+    { "codec_name": "eac3", "codec_type": "audio" },
+    { "codec_name": "opus", "codec_type": "audio" }
+  ]
+}

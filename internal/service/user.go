@@ -15,7 +15,7 @@ func (a *App) CreateUser(ctx context.Context, username, email, password string, 
 		return sqlc.User{}, fmt.Errorf("hashing password: %w", err)
 	}
 
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 
 	count, err := q.CountUsers(ctx)
 	if err != nil {
@@ -39,7 +39,7 @@ func (a *App) CreateUser(ctx context.Context, username, email, password string, 
 }
 
 func (a *App) Authenticate(ctx context.Context, username, password string) (sqlc.User, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 
 	user, err := q.GetUserByUsername(ctx, username)
 	if err != nil {
@@ -59,7 +59,7 @@ func (a *App) CreateSession(ctx context.Context, userID int64) (string, error) {
 		return "", fmt.Errorf("generating token: %w", err)
 	}
 
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	_, err = q.CreateSession(ctx, sqlc.CreateSessionParams{
 		UserID:    userID,
 		Token:     token,
@@ -73,17 +73,17 @@ func (a *App) CreateSession(ctx context.Context, userID int64) (string, error) {
 }
 
 func (a *App) DeleteSession(ctx context.Context, token string) error {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.DeleteSession(ctx, token)
 }
 
 func (a *App) ListUsers(ctx context.Context) ([]sqlc.User, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.ListUsers(ctx)
 }
 
 func (a *App) DeleteUser(ctx context.Context, username string) error {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 
 	user, err := q.GetUserByUsername(ctx, username)
 	if err != nil {
@@ -94,7 +94,7 @@ func (a *App) DeleteUser(ctx context.Context, username string) error {
 }
 
 func (a *App) ResetPassword(ctx context.Context, username, newPassword string) error {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 
 	user, err := q.GetUserByUsername(ctx, username)
 	if err != nil {
@@ -110,8 +110,4 @@ func (a *App) ResetPassword(ctx context.Context, username, newPassword string) e
 		ID:           user.ID,
 		PasswordHash: hash,
 	})
-}
-
-func (a *App) Queries() *sqlc.Queries {
-	return sqlc.New(a.DB)
 }

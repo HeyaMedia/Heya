@@ -1,0 +1,12 @@
+{
+  "_comment": "1080i broadcast rip: field_order=tt (top field first). Browsers can't deinterlace in MSE — must transcode with yadif.",
+  "container": "mp4",
+  "streams": [
+    {
+      "codec_name": "h264", "codec_type": "video", "profile": "High",
+      "pix_fmt": "yuv420p", "width": 1920, "height": 1080, "bit_depth": 8,
+      "field_order": "tt"
+    },
+    { "codec_name": "aac", "codec_type": "audio", "channels": 2, "channel_layout": "stereo" }
+  ]
+}

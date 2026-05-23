@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/rs/zerolog/log"
 )
@@ -21,35 +21,19 @@ type MatchInfo struct {
 }
 
 type Matcher struct {
-	db              *pgxpool.Pool
-	q               *sqlc.Queries
-	registry        *metadata.Registry
-	downloader      *images.Downloader
-	opts            MatchOptions
-	lastMatchResult MatchInfo
+	db   *pgxpool.Pool
+	q    *sqlc.Queries
+	heya *heyamedia.HeyaProvider
+	opts MatchOptions
 }
 
-func (m *Matcher) LastMatchResult() MatchInfo {
-	return m.lastMatchResult
-}
-
-func New(db *pgxpool.Pool, dl *images.Downloader, opts MatchOptions, registry *metadata.Registry) *Matcher {
+func New(db *pgxpool.Pool, opts MatchOptions, heya *heyamedia.HeyaProvider) *Matcher {
 	return &Matcher{
-		db:         db,
-		q:          sqlc.New(db),
-		registry:   registry,
-		downloader: dl,
-		opts:       opts,
+		db:   db,
+		q:    sqlc.New(db),
+		heya: heya,
+		opts: opts,
 	}
-}
-
-func (m *Matcher) providersForLibrary(ctx context.Context, libraryID int64, kind metadata.MediaKind) []metadata.Provider {
-	lib, err := m.q.GetLibraryByID(ctx, libraryID)
-	if err != nil {
-		return m.registry.AllProviders()
-	}
-	settings := metadata.ParseSettings(lib.Settings)
-	return m.registry.Providers(settings.MetadataProviders, kind)
 }
 
 func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType sqlc.MediaType) (MatchResult, error) {
@@ -66,7 +50,7 @@ func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType s
 	}
 
 	for _, file := range files {
-		err := m.matchFile(ctx, file, mediaType, libraryID)
+		_, err := m.matchFile(ctx, file, mediaType, libraryID)
 		if err != nil {
 			log.Error().Err(err).Str("path", file.Path).Msg("match error")
 			m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
@@ -89,18 +73,18 @@ func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType s
 	return result, nil
 }
 
-func (m *Matcher) MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) error {
+func (m *Matcher) MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) (MatchInfo, error) {
 	return m.matchFile(ctx, file, mediaType, libraryID)
 }
 
-func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) error {
+func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) (MatchInfo, error) {
 	parsed, nfoIDs := parseFileResult(file.ParseResult)
 
 	kind := MediaTypeToKind(mediaType)
 
 	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.MBID != "") {
-		if matched := m.tryNFOLookup(ctx, file, kind, libraryID, nfoIDs); matched {
-			return nil
+		if info, matched := m.tryNFOLookup(ctx, file, kind, libraryID, nfoIDs); matched {
+			return info, nil
 		}
 		log.Debug().Int64("file_id", file.ID).Msg("NFO lookup failed, falling back to title search")
 	}
@@ -118,24 +102,16 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 			Status:       sqlc.FileStatusUnmatched,
 			ErrorMessage: "no parseable title",
 		})
-		return nil
+		return MatchInfo{}, nil
 	}
 
-	providers := m.providersForLibrary(ctx, libraryID, kind)
-
-	var allResults []metadata.SearchResult
-	for _, p := range providers {
-
-		results, err := p.Search(ctx, kind, query)
-		if err != nil {
-			log.Warn().Err(err).Str("provider", p.Name()).Msg("search failed")
-			continue
-		}
-
-		for i := range results {
-			results[i].Confidence = ScoreConfidence(query.Title, results[i].Title, query.Year, results[i].Year)
-		}
-		allResults = append(allResults, results...)
+	allResults, err := m.heya.Search(ctx, kind, query)
+	if err != nil {
+		log.Warn().Err(err).Msg("search failed")
+		allResults = nil
+	}
+	for i := range allResults {
+		allResults[i].Confidence = ScoreConfidence(query.Title, allResults[i].Title, query.Year, allResults[i].Year)
 	}
 
 	if len(allResults) == 0 {
@@ -144,7 +120,7 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 			Status:       sqlc.FileStatusUnmatched,
 			ErrorMessage: "no provider results",
 		})
-		return nil
+		return MatchInfo{}, nil
 	}
 
 	sortByConfidence(allResults)
@@ -176,7 +152,7 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		Status:       sqlc.FileStatusUnmatched,
 		ErrorMessage: fmt.Sprintf("%d candidates, top confidence %.2f", len(allResults), top.Confidence),
 	})
-	return nil
+	return MatchInfo{}, nil
 }
 
 func (m *Matcher) fetchOptsForLibrary(ctx context.Context, libraryID int64) *metadata.FetchOptions {
@@ -191,24 +167,19 @@ func (m *Matcher) fetchOptsForLibrary(ctx context.Context, libraryID int64) *met
 	return &metadata.FetchOptions{Language: s.PreferredLanguage, Country: s.PreferredCountry}
 }
 
-func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result metadata.SearchResult, kind metadata.MediaKind, libraryID int64) error {
-	provider := m.findProvider(result.ProviderName)
-	if provider == nil {
-		return fmt.Errorf("provider %q not found", result.ProviderName)
-	}
-
+func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result metadata.SearchResult, kind metadata.MediaKind, libraryID int64) (MatchInfo, error) {
 	opts := m.fetchOptsForLibrary(ctx, libraryID)
-	detail, err := provider.GetDetail(ctx, result.ProviderID, opts)
+	detail, err := m.heya.GetDetail(ctx, result.ProviderID, opts)
 	if err != nil {
-		return fmt.Errorf("getting detail: %w", err)
+		return MatchInfo{}, fmt.Errorf("getting detail: %w", err)
 	}
 
 	mediaItemID, isNew, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
 	if err != nil {
-		return fmt.Errorf("creating media item: %w", err)
+		return MatchInfo{}, fmt.Errorf("creating media item: %w", err)
 	}
 
-	m.lastMatchResult = MatchInfo{
+	info := MatchInfo{
 		ProviderName: result.ProviderName,
 		ProviderID:   result.ProviderID,
 		IsNew:        isNew,
@@ -220,7 +191,7 @@ func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result m
 		MediaItemID: pgInt8(mediaItemID),
 	})
 
-	return nil
+	return info, nil
 }
 
 func (m *Matcher) ResolveMatch(ctx context.Context, libraryFileID int64, candidateID int64) error {
@@ -229,23 +200,22 @@ func (m *Matcher) ResolveMatch(ctx context.Context, libraryFileID int64, candida
 		return fmt.Errorf("getting candidate: %w", err)
 	}
 
-	provider := m.findProvider(candidate.ProviderName)
-	if provider == nil {
-		return fmt.Errorf("provider %q not found", candidate.ProviderName)
-	}
-
 	file, err := m.q.GetLibraryFileByID(ctx, libraryFileID)
 	if err != nil {
 		return fmt.Errorf("getting library file: %w", err)
 	}
 
 	opts := m.fetchOptsForLibrary(ctx, file.LibraryID)
-	detail, err := provider.GetDetail(ctx, candidate.ProviderID, opts)
+	detail, err := m.heya.GetDetail(ctx, candidate.ProviderID, opts)
 	if err != nil {
 		return fmt.Errorf("getting detail: %w", err)
 	}
 
-	kind := metadata.MediaKind(mediaTypeFromProvider(candidate.ProviderName))
+	lib, err := m.q.GetLibraryByID(ctx, file.LibraryID)
+	if err != nil {
+		return fmt.Errorf("getting library: %w", err)
+	}
+	kind := MediaTypeToKind(lib.MediaType)
 	mediaItemID, _, err := m.createOrLinkMediaItem(ctx, detail, kind, file.LibraryID, file.Path)
 	if err != nil {
 		return fmt.Errorf("creating media item: %w", err)
@@ -299,56 +269,45 @@ func parseFileResult(data []byte) (parser.ParsedStorageEntry, *metadata.NFOIDs) 
 	return parsed, nil
 }
 
-func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind metadata.MediaKind, libraryID int64, ids *metadata.NFOIDs) bool {
-	if linked := m.tryLinkExistingByNFO(ctx, file, libraryID, ids); linked {
-		return true
+func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind metadata.MediaKind, libraryID int64, ids *metadata.NFOIDs) (MatchInfo, bool) {
+	if info, linked := m.tryLinkExistingByNFO(ctx, file, libraryID, ids); linked {
+		return info, true
 	}
 
-	providers := m.providersForLibrary(ctx, libraryID, kind)
 	opts := m.fetchOptsForLibrary(ctx, libraryID)
-
-	for _, p := range providers {
-		dlp, ok := p.(metadata.DirectLookupProvider)
-		if !ok {
-			continue
-		}
-
-		detail, providerID, err := dlp.LookupByNFO(ctx, kind, *ids, opts)
-		if err != nil {
-			log.Debug().Err(err).Str("provider", p.Name()).Msg("NFO lookup failed")
-			continue
-		}
-
-		log.Info().
-			Str("provider", p.Name()).
-			Str("provider_id", providerID).
-			Str("title", detail.Title).
-			Int64("file_id", file.ID).
-			Msg("matched via NFO provider lookup")
-
-		mediaItemID, isNew, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to create media item from NFO lookup")
-			continue
-		}
-
-		m.lastMatchResult = MatchInfo{
-			ProviderName: p.Name(),
-			ProviderID:   providerID,
-			IsNew:        isNew,
-		}
-
-		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
-			ID:          file.ID,
-			Status:      sqlc.FileStatusMatched,
-			MediaItemID: pgInt8(mediaItemID),
-		})
-		return true
+	detail, providerID, err := m.heya.LookupByNFO(ctx, kind, *ids, opts)
+	if err != nil {
+		log.Debug().Err(err).Msg("NFO lookup failed")
+		return MatchInfo{}, false
 	}
-	return false
+
+	log.Info().
+		Str("provider_id", providerID).
+		Str("title", detail.Title).
+		Int64("file_id", file.ID).
+		Msg("matched via NFO provider lookup")
+
+	mediaItemID, isNew, err := m.createOrLinkMediaItem(ctx, detail, kind, libraryID, file.Path)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create media item from NFO lookup")
+		return MatchInfo{}, false
+	}
+
+	info := MatchInfo{
+		ProviderName: m.heya.Name(),
+		ProviderID:   providerID,
+		IsNew:        isNew,
+	}
+
+	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+		ID:          file.ID,
+		Status:      sqlc.FileStatusMatched,
+		MediaItemID: pgInt8(mediaItemID),
+	})
+	return info, true
 }
 
-func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFile, libraryID int64, ids *metadata.NFOIDs) bool {
+func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFile, libraryID int64, ids *metadata.NFOIDs) (MatchInfo, bool) {
 	candidates := []map[string]string{}
 
 	if ids.TMDBID != "" {
@@ -371,8 +330,6 @@ func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFil
 			continue
 		}
 
-		m.lastMatchResult = MatchInfo{IsNew: false}
-
 		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:          file.ID,
 			Status:      sqlc.FileStatusMatched,
@@ -380,10 +337,10 @@ func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFil
 		})
 
 		log.Debug().Int64("file_id", file.ID).Int64("media_id", existing.ID).Str("title", existing.Title).Msg("linked to existing item via NFO IDs")
-		return true
+		return MatchInfo{IsNew: false}, true
 	}
 
-	return false
+	return MatchInfo{}, false
 }
 
 func (m *Matcher) storeCandidates(ctx context.Context, fileID int64, results []metadata.SearchResult) {
@@ -405,11 +362,6 @@ func (m *Matcher) storeCandidates(ctx context.Context, fileID int64, results []m
 			RawData:       rawJSON,
 		})
 	}
-}
-
-func (m *Matcher) findProvider(name string) metadata.Provider {
-	p, _ := m.registry.Provider(name)
-	return p
 }
 
 func buildSearchQuery(parsed parser.ParsedStorageEntry, kind metadata.MediaKind) metadata.SearchQuery {
@@ -456,19 +408,6 @@ func MediaTypeToKind(mt sqlc.MediaType) metadata.MediaKind {
 		return metadata.KindBook
 	default:
 		return metadata.KindMovie
-	}
-}
-
-func mediaTypeFromProvider(providerName string) string {
-	switch providerName {
-	case "tmdb":
-		return "movie"
-	case "musicbrainz":
-		return "music"
-	case "openlibrary":
-		return "book"
-	default:
-		return "movie"
 	}
 }
 

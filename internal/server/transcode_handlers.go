@@ -27,13 +27,13 @@ func handleGetTranscodeStatus(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		resp := transcodeStatusResponse{
 			Available:  transcoder.IsFFmpegAvailable(),
-			ConfigMode: app.Config.HWAccel,
-			CacheDir:   app.Config.TranscodeCacheDir,
-			CacheMaxGB: app.Config.TranscodeCacheMaxGB,
+			ConfigMode: app.ConfigSnapshot().HWAccel,
+			CacheDir:   app.ConfigSnapshot().TranscodeCacheDir,
+			CacheMaxGB: app.ConfigSnapshot().TranscodeCacheMaxGB,
 		}
 
-		if app.Transcoder != nil {
-			hw := app.Transcoder.HWAccel()
+		if app.TranscoderSessions() != nil {
+			hw := app.TranscoderSessions().HWAccel()
 			resp.HWAccel = string(hw.Type)
 			resp.HWAccelLabel = hwAccelLabel(hw.Type)
 			resp.EncoderH264 = hw.EncoderH264
@@ -43,8 +43,8 @@ func handleGetTranscodeStatus(app *service.App) http.HandlerFunc {
 			resp.HWAccelLabel = "Disabled"
 		}
 
-		if app.TranscodeCache != nil {
-			stats := app.TranscodeCache.Stats()
+		if app.TranscoderCache() != nil {
+			stats := app.TranscoderCache().Stats()
 			resp.CacheSizeMB = stats.TotalSize / (1024 * 1024)
 			resp.CacheItems = stats.ItemCount
 		}
@@ -76,14 +76,14 @@ func handleUpdateTranscodeSettings(app *service.App) http.HandlerFunc {
 		}
 
 		if req.HWAccel != "" {
-			app.Config.HWAccel = req.HWAccel
+			app.ConfigSnapshot().HWAccel = req.HWAccel
 		}
 		if req.CacheMaxGB > 0 {
-			app.Config.TranscodeCacheMaxGB = req.CacheMaxGB
+			app.ConfigSnapshot().TranscodeCacheMaxGB = req.CacheMaxGB
 		}
 
 		if path := config.FindConfigFile(); path != "" {
-			fc := app.Config.ToFileConfig()
+			fc := app.ConfigSnapshot().ToFileConfig()
 			config.SaveFile(path, fc)
 		}
 
@@ -93,11 +93,11 @@ func handleUpdateTranscodeSettings(app *service.App) http.HandlerFunc {
 
 func handleClearTranscodeCache(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if app.TranscodeCache == nil {
+		if app.TranscoderCache() == nil {
 			writeError(w, http.StatusServiceUnavailable, "transcoding not available")
 			return
 		}
-		if err := app.TranscodeCache.Clear(); err != nil {
+		if err := app.TranscoderCache().Clear(); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

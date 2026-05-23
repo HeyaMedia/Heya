@@ -42,6 +42,8 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 		ch := hub.Subscribe()
 		defer hub.Unsubscribe(ch)
 
+		ctx := r.Context()
+
 		done := make(chan struct{})
 
 		go func() {
@@ -55,6 +57,13 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 
 		for {
 			select {
+			case <-ctx.Done():
+				conn.WriteControl(
+					websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+					time.Now().Add(time.Second),
+				)
+				return
 			case <-done:
 				return
 			case event, ok := <-ch:

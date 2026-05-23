@@ -15,42 +15,47 @@ type Keyframes struct {
 }
 
 func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "quiet",
 		"-select_streams", "v:0",
-		"-show_entries", "frame=pts_time,pict_type",
+		"-show_entries", "packet=pts_time,flags",
 		"-of", "csv=p=0",
 		filePath,
 	)
 
-	out, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 
 	var iframes []float64
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		line := scanner.Text()
 		if line == "" {
 			continue
 		}
-		parts := strings.Split(line, ",")
+		parts := strings.SplitN(line, ",", 2)
 		if len(parts) < 2 {
 			continue
 		}
-		if strings.TrimSpace(parts[1]) != "I" {
+		if !strings.HasPrefix(parts[1], "K") {
 			continue
 		}
-		ts, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		ts, err := strconv.ParseFloat(parts[0], 64)
 		if err != nil {
 			continue
 		}
 		iframes = append(iframes, ts)
 	}
+
+	cmd.Wait()
 
 	var duration float64
 	if len(iframes) > 0 {

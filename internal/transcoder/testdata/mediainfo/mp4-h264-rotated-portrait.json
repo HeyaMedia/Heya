@@ -1,0 +1,12 @@
+{
+  "_comment": "Phone-recorded H.264 with 90° rotation in Display Matrix. Source is landscape pixels (1920x1080) but should display as portrait. Browsers ignore the rotation in MSE — must transcode with transpose=1.",
+  "container": "mp4",
+  "streams": [
+    {
+      "codec_name": "h264", "codec_type": "video", "profile": "High",
+      "pix_fmt": "yuv420p", "width": 1920, "height": 1080, "bit_depth": 8,
+      "rotation": 90
+    },
+    { "codec_name": "aac", "codec_type": "audio", "channels": 2, "channel_layout": "stereo" }
+  ]
+}

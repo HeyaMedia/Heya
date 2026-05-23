@@ -5,19 +5,19 @@ import "regexp"
 type AudioCodec string
 
 const (
-	AudioMP3     AudioCodec = "MP3"
-	AudioMP2     AudioCodec = "MP2"
-	AudioDOLBY   AudioCodec = "Dolby Digital"
-	AudioEAC3    AudioCodec = "Dolby Digital Plus"
-	AudioAAC     AudioCodec = "AAC"
-	AudioFLAC    AudioCodec = "FLAC"
-	AudioDTS     AudioCodec = "DTS"
-	AudioDTSHD   AudioCodec = "DTS-HD"
-	AudioTRUEHD  AudioCodec = "Dolby TrueHD"
-	AudioOPUS    AudioCodec = "Opus"
-	AudioVORBIS  AudioCodec = "Vorbis"
-	AudioPCM     AudioCodec = "PCM"
-	AudioLPCM    AudioCodec = "LPCM"
+	AudioMP3    AudioCodec = "MP3"
+	AudioMP2    AudioCodec = "MP2"
+	AudioDOLBY  AudioCodec = "Dolby Digital"
+	AudioEAC3   AudioCodec = "Dolby Digital Plus"
+	AudioAAC    AudioCodec = "AAC"
+	AudioFLAC   AudioCodec = "FLAC"
+	AudioDTS    AudioCodec = "DTS"
+	AudioDTSHD  AudioCodec = "DTS-HD"
+	AudioTRUEHD AudioCodec = "Dolby TrueHD"
+	AudioOPUS   AudioCodec = "Opus"
+	AudioVORBIS AudioCodec = "Vorbis"
+	AudioPCM    AudioCodec = "PCM"
+	AudioLPCM   AudioCodec = "LPCM"
 )
 
 var audioCodecExp = regexp.MustCompile(`(?i)\b(?P<mp3>(?:LAME\d+-?\d+)|(?:mp3))\b|\b(?P<mp2>mp2)\b|\b(?P<dolby>(?:Dolby)|(?:Dolby-?Digital)|(?:DD)|(?:AC3D?))\b|\b(?P<dolbyatmos>Dolby-?Atmos)\b|\b(?P<aac>AAC)(?:\d?.?\d?)(?:ch)?\b|\b(?P<eac3>(?:EAC3|DDP|DD\+))\b|\b(?P<flac>FLAC)\b|\b(?P<dtshd>DTS-?HD|DTS-?MA|DTS-X)\b|\b(?P<dts>DTS)\b|\b(?P<truehd>True-?HD)\b|\b(?P<opus>Opus)\b|\b(?P<vorbis>Vorbis)\b|\b(?P<pcm>PCM)\b|\b(?P<lpcm>LPCM)\b`)

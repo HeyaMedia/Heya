@@ -2,14 +2,14 @@ package worker
 
 import "github.com/riverqueue/river"
 
-type ScanLibraryArgs struct {
-	LibraryID int64 `json:"library_id"`
-	Force     bool  `json:"force"`
-}
-
-func (ScanLibraryArgs) Kind() string { return "scan_library" }
-func (ScanLibraryArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "scan", MaxAttempts: 3}
+var SingleAssetTypes = map[string]bool{
+	"poster":   true,
+	"logo":     true,
+	"art":      true,
+	"banner":   true,
+	"thumb":    true,
+	"disc":     true,
+	"clearart": true,
 }
 
 type ProcessFileArgs struct {
@@ -31,17 +31,17 @@ type MetadataMatchArgs struct {
 
 func (MetadataMatchArgs) Kind() string { return "metadata_match" }
 func (MetadataMatchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3}
+	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 type MetadataFetchArgs struct {
-	MediaItemID  int64  `json:"media_item_id"`
-	LibraryID    int64  `json:"library_id"`
-	LibraryFileID int64 `json:"library_file_id"`
-	FilePath     string `json:"file_path"`
-	MediaType    string `json:"media_type"`
-	ProviderName string `json:"provider_name"`
-	ProviderID   string `json:"provider_id"`
+	MediaItemID   int64  `json:"media_item_id"`
+	LibraryID     int64  `json:"library_id"`
+	LibraryFileID int64  `json:"library_file_id"`
+	FilePath      string `json:"file_path"`
+	MediaType     string `json:"media_type"`
+	ProviderName  string `json:"provider_name"`
+	ProviderID    string `json:"provider_id"`
 }
 
 func (MetadataFetchArgs) Kind() string { return "metadata_fetch" }
@@ -50,8 +50,9 @@ func (MetadataFetchArgs) InsertOpts() river.InsertOpts {
 }
 
 type PersonFetchArgs struct {
-	PersonID int64 `json:"person_id"`
-	TmdbID   int32 `json:"tmdb_id"`
+	PersonID int64  `json:"person_id"`
+	TmdbID   int32  `json:"tmdb_id"`
+	Language string `json:"language,omitempty"`
 }
 
 func (PersonFetchArgs) Kind() string { return "person_fetch" }
@@ -89,11 +90,22 @@ func (FFProbeArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "process", MaxAttempts: 3}
 }
 
+type PendingImage struct {
+	URL       string `json:"url"`
+	AssetType string `json:"asset_type"`
+	Label     string `json:"label,omitempty"`
+	SortOrder int    `json:"sort_order"`
+	Priority  int    `json:"priority"`
+}
+
 type DetectLocalAssetsArgs struct {
-	MediaItemID   int64  `json:"media_item_id"`
-	LibraryFileID int64  `json:"library_file_id"`
-	FilePath      string `json:"file_path"`
-	MediaType     string `json:"media_type"`
+	MediaItemID   int64          `json:"media_item_id"`
+	LibraryFileID int64          `json:"library_file_id"`
+	FilePath      string         `json:"file_path"`
+	MediaType     string         `json:"media_type"`
+	PendingImages []PendingImage `json:"pending_images,omitempty"`
+	QueueEnrich   bool           `json:"queue_enrich,omitempty"`
+	LibraryID     int64          `json:"library_id,omitempty"`
 }
 
 func (DetectLocalAssetsArgs) Kind() string { return "detect_local_assets" }
@@ -135,15 +147,6 @@ func (SaveImagesArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "saver", MaxAttempts: 2}
 }
 
-type MetadataRefreshArgs struct {
-	LibraryID int64 `json:"library_id"`
-}
-
-func (MetadataRefreshArgs) Kind() string { return "metadata_refresh" }
-func (MetadataRefreshArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 1}
-}
-
 type RatingsFetchArgs struct {
 	MediaItemID int64 `json:"media_item_id"`
 	LibraryID   int64 `json:"library_id"`
@@ -171,5 +174,23 @@ type SoftDeleteArgs struct {
 
 func (SoftDeleteArgs) Kind() string { return "soft_delete" }
 func (SoftDeleteArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "scan", MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3}
+}
+
+type ForceRefreshMetadataArgs struct {
+	LibraryID int64 `json:"library_id"`
+}
+
+func (ForceRefreshMetadataArgs) Kind() string { return "force_refresh_metadata" }
+func (ForceRefreshMetadataArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "metadata", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+}
+
+type ForceRefreshImagesArgs struct {
+	LibraryID int64 `json:"library_id"`
+}
+
+func (ForceRefreshImagesArgs) Kind() string { return "force_refresh_images" }
+func (ForceRefreshImagesArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "images", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }

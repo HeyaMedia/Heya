@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -26,6 +25,9 @@ type subtitleTrack struct {
 	IsDefault         bool   `json:"is_default"`
 	IsForced          bool   `json:"is_forced"`
 	IsHearingImpaired bool   `json:"is_hearing_impaired"`
+	// Delivery: "external" (download as VTT/ASS), "burn-in" (must transcode
+	// the video with -vf subtitles=...), or "unsupported".
+	Delivery string `json:"delivery"`
 }
 
 func handleListSubtitles(app *service.App) http.HandlerFunc {
@@ -36,8 +38,7 @@ func handleListSubtitles(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		file, err := q.GetLibraryFileByID(r.Context(), fileID)
+		file, err := app.GetLibraryFile(r.Context(), fileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -58,6 +59,7 @@ func handleListSubtitles(app *service.App) http.HandlerFunc {
 				Language: s.Tags["language"],
 				Codec:    s.CodecName,
 				Title:    s.Tags["title"],
+				Delivery: subtitleDeliveryString(transcoder.SubtitleDeliveryFor(s.CodecName)),
 			}
 			if s.Disposition != nil {
 				track.IsDefault = s.Disposition.Default == 1
@@ -84,13 +86,12 @@ func handleGetSubtitle(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		if app.TranscodeCache == nil {
+		if app.TranscoderCache() == nil {
 			writeError(w, http.StatusServiceUnavailable, "transcoding not available")
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		file, err := q.GetLibraryFileByID(r.Context(), fileID)
+		file, err := app.GetLibraryFile(r.Context(), fileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -109,6 +110,20 @@ func handleGetSubtitle(app *service.App) http.HandlerFunc {
 			}
 		}
 
+		// Bitmap subtitles (PGS / dvb / dvd_subtitle) cannot be served as
+		// text — they have to be burned into the video by the transcoder.
+		// Tell the client so it can re-request playback with burn_sub set.
+		switch transcoder.SubtitleDeliveryFor(subCodec) {
+		case transcoder.SubDeliveryBurnIn:
+			w.Header().Set("X-Heya-Subtitle-Delivery", "burn-in")
+			writeError(w, http.StatusUnsupportedMediaType, "subtitle codec requires burn-in: "+subCodec)
+			return
+		case transcoder.SubDeliveryUnsupported:
+			w.Header().Set("X-Heya-Subtitle-Delivery", "unsupported")
+			writeError(w, http.StatusUnsupportedMediaType, "subtitle codec not supported: "+subCodec)
+			return
+		}
+
 		isASS := subCodec == "ass" || subCodec == "ssa"
 		ext := ".vtt"
 		outputCodec := "webvtt"
@@ -120,7 +135,7 @@ func handleGetSubtitle(app *service.App) http.HandlerFunc {
 		}
 
 		cacheKey := fmt.Sprintf("sub_%d_%d", fileID, index)
-		subPath := filepath.Join(app.TranscodeCache.SegmentDir(cacheKey), "subtitle"+ext)
+		subPath := filepath.Join(app.TranscoderCache().SegmentDir(cacheKey), "subtitle"+ext)
 
 		if _, err := os.Stat(subPath); err != nil {
 			var extractErr error
@@ -138,6 +153,17 @@ func handleGetSubtitle(app *service.App) http.HandlerFunc {
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		http.ServeFile(w, r, subPath)
+	}
+}
+
+func subtitleDeliveryString(d transcoder.SubtitleDelivery) string {
+	switch d {
+	case transcoder.SubDeliveryExternal:
+		return "external"
+	case transcoder.SubDeliveryBurnIn:
+		return "burn-in"
+	default:
+		return "unsupported"
 	}
 }
 

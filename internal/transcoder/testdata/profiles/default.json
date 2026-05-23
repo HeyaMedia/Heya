@@ -1,0 +1,13 @@
+{
+  "_comment": "Baseline conservative client: H.264/AAC in MP4 only. Matches DefaultClientCaps.",
+  "SupportsHEVC": false,
+  "SupportsAV1": false,
+  "SupportsFLAC": false,
+  "SupportsOpus": false,
+  "SupportsAC3": false,
+  "SupportsEAC3": false,
+  "SupportsMP4": true,
+  "SupportsMKV": false,
+  "SupportsWebM": false,
+  "SupportsHDR": false
+}

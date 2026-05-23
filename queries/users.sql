@@ -29,3 +29,9 @@ DELETE FROM users WHERE id = $1;
 
 -- name: CountUsers :one
 SELECT count(*) FROM users;
+
+-- name: GetUserSettings :one
+SELECT settings FROM users WHERE id = $1;
+
+-- name: UpdateUserSettings :exec
+UPDATE users SET settings = $1, updated_at = now() WHERE id = $2;

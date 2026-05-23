@@ -11,6 +11,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
 )
@@ -55,7 +56,7 @@ func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.Med
 		settingsJSON, _ = json.Marshal(defaults)
 	}
 
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
 		Name:         name,
 		MediaType:    mediaType,
@@ -72,12 +73,12 @@ func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.Med
 }
 
 func (a *App) ListLibraries(ctx context.Context) ([]sqlc.Library, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.ListLibraries(ctx)
 }
 
 func (a *App) GetLibrary(ctx context.Context, id int64) (sqlc.Library, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.GetLibraryByID(ctx, id)
 }
 
@@ -95,7 +96,7 @@ func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []
 		}
 	}
 
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.UpdateLibrary(ctx, sqlc.UpdateLibraryParams{
 		ID:           id,
 		Name:         name,
@@ -106,7 +107,7 @@ func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []
 
 func (a *App) UpdateLibrarySettings(ctx context.Context, id int64, settings metadata.LibrarySettings) (sqlc.Library, error) {
 	settingsJSON, _ := json.Marshal(settings)
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.UpdateLibrarySettings(ctx, sqlc.UpdateLibrarySettingsParams{
 		ID:       id,
 		Settings: settingsJSON,
@@ -122,7 +123,7 @@ func (a *App) GetLibrarySettings(ctx context.Context, id int64) (metadata.Librar
 }
 
 func (a *App) DeleteLibrary(ctx context.Context, id int64) error {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.DeleteLibrary(ctx, id)
 }
 
@@ -131,15 +132,15 @@ func (a *App) MatchLibrary(ctx context.Context, id int64) (matcher.MatchResult, 
 	if err != nil {
 		return matcher.MatchResult{}, fmt.Errorf("library %d: %w", id, err)
 	}
-	return a.Matcher.MatchLibrary(ctx, id, lib.MediaType)
+	return a.matcher.MatchLibrary(ctx, id, lib.MediaType)
 }
 
 func (a *App) ResolveMatch(ctx context.Context, fileID, candidateID int64) error {
-	return a.Matcher.ResolveMatch(ctx, fileID, candidateID)
+	return a.matcher.ResolveMatch(ctx, fileID, candidateID)
 }
 
 func (a *App) ListLibraryFiles(ctx context.Context, libraryID int64, limit, offset int32) ([]sqlc.LibraryFile, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.ListLibraryFiles(ctx, sqlc.ListLibraryFilesParams{
 		LibraryID: libraryID,
 		Limit:     limit,
@@ -148,25 +149,32 @@ func (a *App) ListLibraryFiles(ctx context.Context, libraryID int64, limit, offs
 }
 
 func (a *App) LibraryFileStats(ctx context.Context, libraryID int64) ([]sqlc.CountLibraryFilesByStatusRow, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.CountLibraryFilesByStatus(ctx, libraryID)
 }
 
 func (a *App) ListMatchCandidates(ctx context.Context, fileID int64) ([]sqlc.MatchCandidate, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.ListMatchCandidatesByFile(ctx, fileID)
 }
 
-func (a *App) EnqueueScanLibrary(ctx context.Context, id int64, force bool) error {
-	_, err := a.River.Insert(ctx, worker.ScanLibraryArgs{
-		LibraryID: id,
-		Force:     force,
-	}, nil)
+func (a *App) EnqueueScanLibrary(id int64, force bool) {
+	a.scanTask.Enqueue(id, force)
+	a.scheduler.TriggerNow(scheduler.TaskScanLibraries)
+}
+
+func (a *App) EnqueueForceRefreshMetadata(ctx context.Context, libraryID int64) error {
+	_, err := a.river.Insert(ctx, worker.ForceRefreshMetadataArgs{LibraryID: libraryID}, nil)
+	return err
+}
+
+func (a *App) EnqueueForceRefreshImages(ctx context.Context, libraryID int64) error {
+	_, err := a.river.Insert(ctx, worker.ForceRefreshImagesArgs{LibraryID: libraryID}, nil)
 	return err
 }
 
 func (a *App) ListDeletedFiles(ctx context.Context, libraryID int64, limit, offset int32) ([]sqlc.LibraryFile, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.ListDeletedLibraryFiles(ctx, sqlc.ListDeletedLibraryFilesParams{
 		LibraryID: libraryID,
 		Limit:     limit,
@@ -175,7 +183,7 @@ func (a *App) ListDeletedFiles(ctx context.Context, libraryID int64, limit, offs
 }
 
 func (a *App) PurgeDeletedFiles(ctx context.Context, libraryID int64) error {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	return q.PurgeDeletedLibraryFiles(ctx, sqlc.PurgeDeletedLibraryFilesParams{
 		LibraryID: libraryID,
 		DeletedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},

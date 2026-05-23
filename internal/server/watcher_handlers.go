@@ -8,7 +8,7 @@ import (
 
 func handleWatcherStatus(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		status := app.Watcher.Status()
+		status := app.WatcherManager().Status()
 
 		type entry struct {
 			LibraryID int64  `json:"library_id"`

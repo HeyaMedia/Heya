@@ -47,7 +47,7 @@ var libraryAddCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		q := sqlc.New(app.DB)
+		q := sqlc.New(app.DBPool())
 		users, err := q.ListUsers(ctx)
 		if err != nil || len(users) == 0 {
 			return fmt.Errorf("no users exist — create a user first with `kura user create`")
@@ -146,10 +146,7 @@ var libraryScanCmd = &cobra.Command{
 			ui.Info("Library", fmt.Sprintf("%s (id=%d)", lib.Name, lib.ID))
 			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
 
-			if err := app.EnqueueScanLibrary(ctx, lib.ID, force); err != nil {
-				ui.Error("enqueue failed: %v", err)
-				continue
-			}
+			app.EnqueueScanLibrary(lib.ID, force)
 			ui.Success("Scan enqueued")
 		}
 
@@ -281,7 +278,7 @@ var libraryWatchCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		status := app.Watcher.Status()
+		status := app.WatcherManager().Status()
 		if len(status) == 0 {
 			ui.Warn("No active watchers. Start the server with 'heya serve' to enable file watching.")
 			return nil
@@ -374,18 +371,6 @@ func applySettingsFlags(cmd *cobra.Command, s metadata.LibrarySettings) metadata
 	if cmd.Flags().Changed("country") {
 		s.PreferredCountry, _ = cmd.Flags().GetString("country")
 	}
-	if cmd.Flags().Changed("metadata-providers") {
-		v, _ := cmd.Flags().GetString("metadata-providers")
-		s.MetadataProviders = splitComma(v)
-	}
-	if cmd.Flags().Changed("artwork-providers") {
-		v, _ := cmd.Flags().GetString("artwork-providers")
-		s.ArtworkProviders = splitComma(v)
-	}
-	if cmd.Flags().Changed("ratings-providers") {
-		v, _ := cmd.Flags().GetString("ratings-providers")
-		s.RatingsProviders = splitComma(v)
-	}
 	if cmd.Flags().Changed("watch") {
 		s.Watch, _ = cmd.Flags().GetBool("watch")
 	}
@@ -394,6 +379,9 @@ func applySettingsFlags(cmd *cobra.Command, s metadata.LibrarySettings) metadata
 	}
 	if cmd.Flags().Changed("metadata-refresh") {
 		s.MetadataRefreshDays, _ = cmd.Flags().GetInt("metadata-refresh")
+	}
+	if cmd.Flags().Changed("fetch-ratings") {
+		s.FetchRatings, _ = cmd.Flags().GetBool("fetch-ratings")
 	}
 	if cmd.Flags().Changed("save-nfo") {
 		s.SaveNFO, _ = cmd.Flags().GetBool("save-nfo")
@@ -404,34 +392,10 @@ func applySettingsFlags(cmd *cobra.Command, s metadata.LibrarySettings) metadata
 	return s
 }
 
-func splitComma(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
-}
-
 func printLibrarySettings(lib sqlc.Library) {
 	s := metadata.ParseSettings(lib.Settings)
 	fmt.Println()
 	ui.Info("Settings", "")
-	if len(s.MetadataProviders) > 0 {
-		ui.Info("  Metadata providers", strings.Join(s.MetadataProviders, ", "))
-	}
-	if len(s.ArtworkProviders) > 0 {
-		ui.Info("  Artwork providers", strings.Join(s.ArtworkProviders, ", "))
-	}
-	if len(s.RatingsProviders) > 0 {
-		ui.Info("  Ratings providers", strings.Join(s.RatingsProviders, ", "))
-	}
 	if s.PreferredLanguage != "" {
 		ui.Info("  Language", s.PreferredLanguage)
 	}
@@ -440,6 +404,7 @@ func printLibrarySettings(lib sqlc.Library) {
 	}
 	ui.Info("  Watch", strconv.FormatBool(s.Watch))
 	ui.Info("  Auto collections", strconv.FormatBool(s.AutoCollections))
+	ui.Info("  Fetch ratings", strconv.FormatBool(s.FetchRatings))
 	if s.MetadataRefreshDays > 0 {
 		ui.Info("  Metadata refresh", fmt.Sprintf("every %d days", s.MetadataRefreshDays))
 	} else {
@@ -450,7 +415,7 @@ func printLibrarySettings(lib sqlc.Library) {
 }
 
 func runInteractiveResolve(ctx context.Context, app *service.App, libraryID int64) {
-	q := sqlc.New(app.DB)
+	q := sqlc.New(app.DBPool())
 	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
 		LibraryID: libraryID,
 		Status:    sqlc.FileStatusUnmatched,
@@ -555,12 +520,10 @@ func init() {
 func addSettingsFlags(cmd *cobra.Command) {
 	cmd.Flags().String("language", "", "Preferred metadata language (e.g. en)")
 	cmd.Flags().String("country", "", "Preferred country/region (e.g. US)")
-	cmd.Flags().String("metadata-providers", "", "Comma-separated metadata providers (e.g. tmdb,tvdb,anidb)")
-	cmd.Flags().String("artwork-providers", "", "Comma-separated artwork providers (e.g. tmdb,fanart.tv)")
-	cmd.Flags().String("ratings-providers", "", "Comma-separated ratings providers (e.g. omdb)")
 	cmd.Flags().Bool("watch", false, "Enable filesystem watching")
 	cmd.Flags().Bool("auto-collections", false, "Automatically add to collections (movies)")
 	cmd.Flags().Int("metadata-refresh", 0, "Auto-refresh metadata every N days (0=never)")
+	cmd.Flags().Bool("fetch-ratings", true, "Fetch external ratings (IMDb, TMDB, etc.) from heya.media")
 	cmd.Flags().Bool("save-nfo", false, "Write NFO files to media directory")
 	cmd.Flags().Bool("save-images", false, "Write images to media directory")
 }

@@ -9,6 +9,9 @@ type ScanResult struct {
 	Errors     int `json:"errors"`
 }
 
+type ProgressFunc func(discovered int, current string)
+
 type ScanOptions struct {
 	ForceRescan bool
+	OnProgress  ProgressFunc
 }

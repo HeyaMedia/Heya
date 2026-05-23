@@ -1,15 +1,9 @@
 -- name: CreateCollection :one
-INSERT INTO collections (tmdb_id, name, overview, poster_path, backdrop_path)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (tmdb_id) DO UPDATE SET
-  name = EXCLUDED.name,
-  overview = EXCLUDED.overview,
-  poster_path = EXCLUDED.poster_path,
-  backdrop_path = EXCLUDED.backdrop_path
-RETURNING *;
+INSERT INTO collections (external_ids, name, overview, poster_path, backdrop_path)
+VALUES ($1, $2, $3, $4, $5) RETURNING *;
 
--- name: GetCollectionByTmdbID :one
-SELECT * FROM collections WHERE tmdb_id = $1;
+-- name: FindCollectionByName :one
+SELECT * FROM collections WHERE name = $1 LIMIT 1;
 
 -- name: GetCollectionByID :one
 SELECT * FROM collections WHERE id = $1;
@@ -30,3 +24,12 @@ LIMIT $1 OFFSET $2;
 
 -- name: CountAllCollections :one
 SELECT count(*) FROM collections;
+
+-- name: ListCollectionsWithLocalMedia :many
+SELECT c.id, c.name, c.poster_path,
+       count(m.id)::int AS movie_count
+FROM collections c
+JOIN movies m ON m.collection_id = c.id
+GROUP BY c.id, c.name, c.poster_path
+HAVING count(m.id) > 0
+ORDER BY c.name;

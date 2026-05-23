@@ -7,27 +7,23 @@ package sqlc
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createProductionCompany = `-- name: CreateProductionCompany :one
-INSERT INTO production_companies (tmdb_id, name, logo_path, origin_country)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (tmdb_id) DO UPDATE SET name = EXCLUDED.name, logo_path = EXCLUDED.logo_path, origin_country = EXCLUDED.origin_country
-RETURNING id, tmdb_id, name, logo_path, origin_country
+INSERT INTO production_companies (external_ids, name, logo_path, origin_country)
+VALUES ($1, $2, $3, $4) RETURNING id, external_ids, name, logo_path, origin_country
 `
 
 type CreateProductionCompanyParams struct {
-	TmdbID        pgtype.Int4 `json:"tmdb_id"`
-	Name          string      `json:"name"`
-	LogoPath      string      `json:"logo_path"`
-	OriginCountry string      `json:"origin_country"`
+	ExternalIds   []byte `json:"external_ids"`
+	Name          string `json:"name"`
+	LogoPath      string `json:"logo_path"`
+	OriginCountry string `json:"origin_country"`
 }
 
 func (q *Queries) CreateProductionCompany(ctx context.Context, arg CreateProductionCompanyParams) (ProductionCompany, error) {
 	row := q.db.QueryRow(ctx, createProductionCompany,
-		arg.TmdbID,
+		arg.ExternalIds,
 		arg.Name,
 		arg.LogoPath,
 		arg.OriginCountry,
@@ -35,7 +31,50 @@ func (q *Queries) CreateProductionCompany(ctx context.Context, arg CreateProduct
 	var i ProductionCompany
 	err := row.Scan(
 		&i.ID,
-		&i.TmdbID,
+		&i.ExternalIds,
+		&i.Name,
+		&i.LogoPath,
+		&i.OriginCountry,
+	)
+	return i, err
+}
+
+const deleteMediaProductionCompaniesByItem = `-- name: DeleteMediaProductionCompaniesByItem :exec
+DELETE FROM media_production_companies WHERE media_item_id = $1
+`
+
+func (q *Queries) DeleteMediaProductionCompaniesByItem(ctx context.Context, mediaItemID int64) error {
+	_, err := q.db.Exec(ctx, deleteMediaProductionCompaniesByItem, mediaItemID)
+	return err
+}
+
+const findProductionCompanyByExternalID = `-- name: FindProductionCompanyByExternalID :one
+SELECT id, external_ids, name, logo_path, origin_country FROM production_companies WHERE external_ids @> $1::jsonb LIMIT 1
+`
+
+func (q *Queries) FindProductionCompanyByExternalID(ctx context.Context, dollar_1 []byte) (ProductionCompany, error) {
+	row := q.db.QueryRow(ctx, findProductionCompanyByExternalID, dollar_1)
+	var i ProductionCompany
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalIds,
+		&i.Name,
+		&i.LogoPath,
+		&i.OriginCountry,
+	)
+	return i, err
+}
+
+const findProductionCompanyByName = `-- name: FindProductionCompanyByName :one
+SELECT id, external_ids, name, logo_path, origin_country FROM production_companies WHERE name = $1
+`
+
+func (q *Queries) FindProductionCompanyByName(ctx context.Context, name string) (ProductionCompany, error) {
+	row := q.db.QueryRow(ctx, findProductionCompanyByName, name)
+	var i ProductionCompany
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalIds,
 		&i.Name,
 		&i.LogoPath,
 		&i.OriginCountry,
@@ -44,7 +83,7 @@ func (q *Queries) CreateProductionCompany(ctx context.Context, arg CreateProduct
 }
 
 const getProductionCompanyByID = `-- name: GetProductionCompanyByID :one
-SELECT id, tmdb_id, name, logo_path, origin_country FROM production_companies WHERE id = $1
+SELECT id, external_ids, name, logo_path, origin_country FROM production_companies WHERE id = $1
 `
 
 func (q *Queries) GetProductionCompanyByID(ctx context.Context, id int64) (ProductionCompany, error) {
@@ -52,7 +91,7 @@ func (q *Queries) GetProductionCompanyByID(ctx context.Context, id int64) (Produ
 	var i ProductionCompany
 	err := row.Scan(
 		&i.ID,
-		&i.TmdbID,
+		&i.ExternalIds,
 		&i.Name,
 		&i.LogoPath,
 		&i.OriginCountry,
@@ -77,7 +116,7 @@ func (q *Queries) LinkMediaProductionCompany(ctx context.Context, arg LinkMediaP
 }
 
 const listAllProductionCompanies = `-- name: ListAllProductionCompanies :many
-SELECT id, tmdb_id, name, logo_path, origin_country FROM production_companies ORDER BY name
+SELECT id, external_ids, name, logo_path, origin_country FROM production_companies ORDER BY name
 `
 
 func (q *Queries) ListAllProductionCompanies(ctx context.Context) ([]ProductionCompany, error) {
@@ -91,7 +130,7 @@ func (q *Queries) ListAllProductionCompanies(ctx context.Context) ([]ProductionC
 		var i ProductionCompany
 		if err := rows.Scan(
 			&i.ID,
-			&i.TmdbID,
+			&i.ExternalIds,
 			&i.Name,
 			&i.LogoPath,
 			&i.OriginCountry,
@@ -107,7 +146,7 @@ func (q *Queries) ListAllProductionCompanies(ctx context.Context) ([]ProductionC
 }
 
 const listMediaProductionCompanies = `-- name: ListMediaProductionCompanies :many
-SELECT pc.id, pc.tmdb_id, pc.name, pc.logo_path, pc.origin_country FROM production_companies pc
+SELECT pc.id, pc.external_ids, pc.name, pc.logo_path, pc.origin_country FROM production_companies pc
 JOIN media_production_companies mpc ON mpc.company_id = pc.id
 WHERE mpc.media_item_id = $1
 ORDER BY pc.name
@@ -124,11 +163,76 @@ func (q *Queries) ListMediaProductionCompanies(ctx context.Context, mediaItemID 
 		var i ProductionCompany
 		if err := rows.Scan(
 			&i.ID,
-			&i.TmdbID,
+			&i.ExternalIds,
 			&i.Name,
 			&i.LogoPath,
 			&i.OriginCountry,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStudioMediaItemIDs = `-- name: ListStudioMediaItemIDs :many
+SELECT DISTINCT mpc.media_item_id
+FROM media_production_companies mpc
+WHERE mpc.company_id = ANY($1::bigint[])
+`
+
+func (q *Queries) ListStudioMediaItemIDs(ctx context.Context, companyIds []int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listStudioMediaItemIDs, companyIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var media_item_id int64
+		if err := rows.Scan(&media_item_id); err != nil {
+			return nil, err
+		}
+		items = append(items, media_item_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchProductionCompaniesByName = `-- name: SearchProductionCompaniesByName :many
+SELECT pc.id, pc.name, pc.logo_path
+FROM production_companies pc
+WHERE lower(pc.name) LIKE lower($1) || '%'
+ORDER BY pc.name
+LIMIT $2
+`
+
+type SearchProductionCompaniesByNameParams struct {
+	Query      string `json:"query"`
+	MaxResults int32  `json:"max_results"`
+}
+
+type SearchProductionCompaniesByNameRow struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	LogoPath string `json:"logo_path"`
+}
+
+func (q *Queries) SearchProductionCompaniesByName(ctx context.Context, arg SearchProductionCompaniesByNameParams) ([]SearchProductionCompaniesByNameRow, error) {
+	rows, err := q.db.Query(ctx, searchProductionCompaniesByName, arg.Query, arg.MaxResults)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchProductionCompaniesByNameRow{}
+	for rows.Next() {
+		var i SearchProductionCompaniesByNameRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.LogoPath); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

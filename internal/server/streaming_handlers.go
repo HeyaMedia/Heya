@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -26,8 +26,7 @@ func handleDirectStream(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		file, err := q.GetLibraryFileByID(r.Context(), fileID)
+		file, err := app.GetLibraryFile(r.Context(), fileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -62,8 +61,7 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		file, err := q.GetLibraryFileByID(r.Context(), fileID)
+		file, err := app.GetLibraryFile(r.Context(), fileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -76,17 +74,42 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 
 		caps := parseClientCaps(r)
 		tInfo := workerToTranscoderInfo(&info)
-		_ = transcoder.Decide(&tInfo, caps)
+		audioTrack := 0
+		if a := r.URL.Query().Get("audio"); a != "" {
+			if v, err := strconv.Atoi(a); err == nil && v >= 0 {
+				audioTrack = v
+			}
+		}
+		plan := transcoder.DecideForHLS(&tInfo, audioTrack, caps)
 
 		bw := estimateBandwidth(&info)
 		res := extractResolution(&info)
+
+		srcVideo := extractVideoCodec(&info)
+		srcAudio := extractAudioCodecAt(&info, audioTrack)
+		var videoCodec, audioCodec string
+		if plan.CopyVideo {
+			videoCodec = srcVideo
+		} else {
+			videoCodec = "h264"
+		}
+		if plan.CopyAudio {
+			audioCodec = srcAudio
+		} else {
+			audioCodec = "aac"
+		}
+		codecStr := transcoder.FormatCodecString(videoCodec, audioCodec)
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "no-cache")
 
 		fmt.Fprintf(w, "#EXTM3U\n")
 		fmt.Fprintf(w, "#EXT-X-VERSION:6\n")
-		fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", bw, res)
+		if codecStr != "" {
+			fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=\"%s\",RESOLUTION=%s\n", bw, codecStr, res)
+		} else {
+			fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", bw, res)
+		}
 		fmt.Fprintf(w, "/api/stream/%d/hls/index.m3u8%s\n", fileID, queryPassthrough(r))
 	}
 }
@@ -99,13 +122,12 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		if app.Transcoder == nil {
+		if app.TranscoderSessions() == nil {
 			writeError(w, http.StatusServiceUnavailable, "transcoding not available")
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		file, err := q.GetLibraryFileByID(r.Context(), fileID)
+		file, err := app.GetLibraryFile(r.Context(), fileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -116,7 +138,7 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 			json.Unmarshal(file.MediaInfo, &info)
 		}
 
-		session := getOrCreateSession(app, r, fileID)
+		session := getOrCreateSession(app, r, fileID, info.Duration)
 		if session == nil {
 			writeError(w, http.StatusInternalServerError, "failed to start transcode")
 			return
@@ -124,7 +146,7 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 		session.Touch()
 
 		tok := r.URL.Query().Get("token")
-		playlist := transcoder.GeneratePlaylist(info.Duration, "seg_%04d.ts", tok)
+		playlist := transcoder.GenerateDynamicPlaylist(session, tok)
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -141,39 +163,57 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 		}
 		segmentName := r.PathValue("segment")
 
-		if app.Transcoder == nil {
+		if app.TranscoderSessions() == nil {
 			writeError(w, http.StatusServiceUnavailable, "transcoding not available")
 			return
 		}
 
-		session := app.Transcoder.GetExisting(fileID)
+		session := app.TranscoderSessions().GetExisting(fileID)
 		if session == nil {
-			session = getOrCreateSession(app, r, fileID)
-			if session == nil {
-				writeError(w, http.StatusNotFound, "no active transcode")
+			writeError(w, http.StatusNotFound, "no active transcode")
+			return
+		}
+
+		session.Touch()
+
+		if segmentName == "init.mp4" {
+			if !session.IsFMP4() {
+				writeError(w, http.StatusNotFound, "not an fMP4 session")
 				return
 			}
+			if !session.HasInitSegment() {
+				if !session.RequestSegment(r.Context(), 0) {
+					writeError(w, http.StatusServiceUnavailable, "init segment not ready")
+					return
+				}
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+			http.ServeFile(w, r, session.InitSegmentPath())
+			return
 		}
-		session.Touch()
-		session.Resume()
 
 		segIdx := parseSegmentIndex(segmentName)
 
-		if !session.WaitForSegment(r.Context(), segIdx) {
-			writeError(w, http.StatusNotFound, "segment not available")
+		if !session.RequestSegment(r.Context(), segIdx) {
+			w.Header().Set("Retry-After", "2")
+			writeError(w, http.StatusServiceUnavailable, "segment not ready")
 			return
 		}
 
 		segPath := session.SegmentPath(segIdx)
-		w.Header().Set("Content-Type", "video/mp2t")
+		if session.IsFMP4() {
+			w.Header().Set("Content-Type", "video/mp4")
+		} else {
+			w.Header().Set("Content-Type", "video/mp2t")
+		}
 		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, segPath)
 	}
 }
 
-func getOrCreateSession(app *service.App, r *http.Request, fileID int64) *transcoder.TranscodeSession {
-	q := sqlc.New(app.DB)
-	file, err := q.GetLibraryFileByID(r.Context(), fileID)
+func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duration float64) *transcoder.TranscodeSession {
+	file, err := app.GetLibraryFile(r.Context(), fileID)
 	if err != nil {
 		return nil
 	}
@@ -183,8 +223,25 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64) *transc
 		json.Unmarshal(file.MediaInfo, &info)
 	}
 
+	var kf *transcoder.Keyframes
+	if len(file.Keyframes) > 0 {
+		var k transcoder.Keyframes
+		if err := json.Unmarshal(file.Keyframes, &k); err == nil && len(k.IFrames) > 0 {
+			kf = &k
+		}
+	}
+
 	tInfo := workerToTranscoderInfo(&info)
-	plan := transcoder.Decide(&tInfo, transcoder.DefaultClientCaps)
+
+	audioTrack := 0
+	if a := r.URL.Query().Get("audio"); a != "" {
+		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
+			audioTrack = v
+		}
+	}
+
+	caps := parseClientCaps(r)
+	plan := transcoder.DecideForHLS(&tInfo, audioTrack, caps)
 
 	profile, ok := transcoder.GetProfile(plan.Profile)
 	if !ok {
@@ -192,26 +249,17 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64) *transc
 	}
 	if plan.CopyVideo {
 		profile.VideoCodec = "copy"
+		profile.CRF = 0
+		profile.MaxHeight = 0
 	}
 	if plan.CopyAudio {
 		profile.AudioCodec = "copy"
 	}
 
-	isPiped := vfs.IsSMBPath(file.Path)
-
-	startTime := 0.0
-	if !isPiped {
-		if s := r.URL.Query().Get("start"); s != "" {
-			if v, err := strconv.ParseFloat(s, 64); err == nil && v > 0 {
-				startTime = v
-			}
-		}
-	}
-
-	audioTrack := 0
-	if a := r.URL.Query().Get("audio"); a != "" {
-		if v, err := strconv.Atoi(a); err == nil && v >= 0 {
-			audioTrack = v
+	if q := r.URL.Query().Get("quality"); q != "" && q != "auto" {
+		if qProfile, qOk := transcoder.GetProfile(q); qOk {
+			profile = qProfile
+			plan.NeedsFMP4 = false
 		}
 	}
 
@@ -223,13 +271,33 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64) *transc
 	opts := transcoder.TranscodeOpts{
 		Input:      input,
 		Profile:    profile,
-		HWAccel:    app.Transcoder.HWAccel(),
-		StartTime:  startTime,
+		HWAccel:    app.TranscoderSessions().HWAccel(),
 		AudioTrack: audioTrack,
+		ToneMap:    plan.NeedsToneMap,
+		UseFMP4:    plan.NeedsFMP4,
+		Plan:       &plan,
+	}
+
+	if duration <= 0 {
+		duration = info.Duration
+	}
+	if duration <= 0 {
+		duration = 1
+	}
+
+	// Best-effort live keyframe extraction for fMP4 copy-video when scan-time
+	// keyframes are missing (typically SMB inputs, or freshly added files).
+	if kf == nil && opts.UseFMP4 && opts.Profile.VideoCodec == "copy" && input != "pipe:0" {
+		extractCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		k, err := transcoder.ExtractKeyframes(extractCtx, input)
+		cancel()
+		if err == nil && len(k.IFrames) > 0 {
+			kf = k
+		}
 	}
 
 	sessionID := r.URL.Query().Get("sid")
-	return app.Transcoder.GetOrCreate(fileID, file.Path, opts, sessionID)
+	return app.TranscoderSessions().GetOrCreate(fileID, file.Path, opts, sessionID, duration, kf)
 }
 
 func parseSegmentIndex(name string) int {
@@ -252,18 +320,29 @@ func queryPassthrough(r *http.Request) string {
 	return "?" + q.Encode() + "&token=" + r.URL.Query().Get("token")
 }
 
-func waitMs(ms int) <-chan time.Time {
-	return time.After(time.Duration(ms) * time.Millisecond)
-}
-
 func workerToTranscoderInfo(info *worker.MediaInfo) transcoder.MediaInfo {
 	var streams []transcoder.StreamInfo
 	for _, s := range info.Streams {
+		dvProfile, dvCompat, rotation := deriveSideDataFields(s.SideDataList)
 		streams = append(streams, transcoder.StreamInfo{
-			CodecName: s.CodecName,
-			CodecType: s.CodecType,
-			Width:     s.Width,
-			Height:    s.Height,
+			CodecName:         s.CodecName,
+			CodecType:         s.CodecType,
+			Profile:           s.Profile,
+			PixFmt:            s.PixFmt,
+			Width:             s.Width,
+			Height:            s.Height,
+			ColorTransfer:     s.ColorTransfer,
+			ColorPrimaries:    s.ColorPrimaries,
+			ColorSpace:        s.ColorSpace,
+			CodecTag:          s.CodecTagString,
+			BitDepth:          deriveBitDepth(s.BitsPerRawSample, s.PixFmt),
+			SampleAspectRatio: s.SampleAspectRatio,
+			FieldOrder:        s.FieldOrder,
+			Rotation:          rotation,
+			DvProfile:         dvProfile,
+			DvBlCompatID:      dvCompat,
+			Channels:          s.Channels,
+			ChannelLayout:     s.ChannelLayout,
 		})
 	}
 	return transcoder.MediaInfo{
@@ -272,16 +351,91 @@ func workerToTranscoderInfo(info *worker.MediaInfo) transcoder.MediaInfo {
 	}
 }
 
-func extractCodecs(info *worker.MediaInfo) (video, audio string) {
-	for _, s := range info.Streams {
-		if s.CodecType == "video" && video == "" {
-			video = s.CodecName
-		}
-		if s.CodecType == "audio" && audio == "" {
-			audio = s.CodecName
+// deriveSideDataFields walks ffprobe side_data_list entries and pulls out
+// DV profile/compat and rotation. ffprobe reports Display Matrix rotation as
+// a signed value where -90 means 90° clockwise; we normalise to 0/90/180/270
+// (positive CW) so downstream consumers don't have to worry about sign.
+func deriveSideDataFields(side []worker.SideData) (dvProfile, dvCompat, rotation int) {
+	for _, sd := range side {
+		switch sd.Type {
+		case "DOVI configuration record", "Dolby Vision configuration record", "Dolby Vision Configuration":
+			if sd.DvProfile > 0 {
+				dvProfile = sd.DvProfile
+				dvCompat = sd.DvBlSignalCompatibilityID
+			}
+		case "Display Matrix":
+			rotation = normalizeRotation(sd.Rotation)
 		}
 	}
 	return
+}
+
+func normalizeRotation(raw int) int {
+	// ffprobe Display Matrix rotation: signed value, negative = CW.
+	// Map to canonical 0/90/180/270 CW.
+	r := -raw % 360
+	if r < 0 {
+		r += 360
+	}
+	switch r {
+	case 0, 90, 180, 270:
+		return r
+	}
+	return 0
+}
+
+// deriveBitDepth returns the sample bit depth from ffprobe's
+// bits_per_raw_sample (preferred) or from the pix_fmt string as a fallback.
+func deriveBitDepth(bitsStr, pixFmt string) int {
+	if bitsStr != "" {
+		if n, err := strconv.Atoi(bitsStr); err == nil && n > 0 {
+			return n
+		}
+	}
+	pix := strings.ToLower(pixFmt)
+	switch {
+	case strings.Contains(pix, "12le"), strings.Contains(pix, "12be"):
+		return 12
+	case strings.Contains(pix, "10le"), strings.Contains(pix, "10be"):
+		return 10
+	case pix == "":
+		return 0
+	default:
+		return 8
+	}
+}
+
+func extractVideoCodec(info *worker.MediaInfo) string {
+	for _, s := range info.Streams {
+		if s.CodecType == "video" {
+			return s.CodecName
+		}
+	}
+	return ""
+}
+
+// extractAudioCodecAt returns the codec of the Nth audio stream (0-indexed
+// across audio streams only, not file stream indices). Falls back to the first
+// audio codec if the requested index is out of range.
+func extractAudioCodecAt(info *worker.MediaInfo, audioIdx int) string {
+	if audioIdx < 0 {
+		audioIdx = 0
+	}
+	n := 0
+	first := ""
+	for _, s := range info.Streams {
+		if s.CodecType != "audio" {
+			continue
+		}
+		if first == "" {
+			first = s.CodecName
+		}
+		if n == audioIdx {
+			return s.CodecName
+		}
+		n++
+	}
+	return first
 }
 
 func extractResolution(info *worker.MediaInfo) string {

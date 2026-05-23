@@ -1,0 +1,5 @@
+{
+  "_comment": "Empty media — no streams. Decision logic should fall back to safe transcode.",
+  "container": "mp4",
+  "streams": []
+}

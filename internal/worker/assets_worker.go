@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -25,14 +26,16 @@ var (
 
 	imageAssetMap = map[string]sqlc.AssetType{
 		"poster":    sqlc.AssetTypePoster,
-		"fanart":    sqlc.AssetTypeFanart,
-		"banner":    sqlc.AssetTypeBanner,
-		"clearart":  sqlc.AssetTypeClearart,
-		"clearlogo": sqlc.AssetTypeClearlogo,
-		"landscape": sqlc.AssetTypeLandscape,
-		"logo":      sqlc.AssetTypeLogo,
-		"folder":    sqlc.AssetTypeFolder,
+		"primary":   sqlc.AssetTypePoster,
+		"fanart":    sqlc.AssetTypeBackdrop,
 		"backdrop":  sqlc.AssetTypeBackdrop,
+		"banner":    sqlc.AssetTypeBanner,
+		"clearart":  sqlc.AssetTypeArt,
+		"art":       sqlc.AssetTypeArt,
+		"clearlogo": sqlc.AssetTypeLogo,
+		"logo":      sqlc.AssetTypeLogo,
+		"landscape": sqlc.AssetTypeThumb,
+		"thumb":     sqlc.AssetTypeThumb,
 		"disc":      sqlc.AssetTypeDisc,
 		"discart":   sqlc.AssetTypeDisc,
 		"cdart":     sqlc.AssetTypeDisc,
@@ -87,7 +90,11 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		showDir = vfs.Dir(dir)
 	}
 
-	cacheDir := filepath.Join(w.DataDir, "images", mediaType, fmt.Sprintf("%d", mediaItemID))
+	dirName := fmt.Sprintf("%d", mediaItemID)
+	if item, err := q.GetMediaItemByID(ctx, mediaItemID); err == nil && item.Slug != "" {
+		dirName = item.Slug
+	}
+	cacheDir := filepath.Join(w.DataDir, "images", mediaType, dirName)
 	os.MkdirAll(cacheDir, 0o755)
 
 	source, err := vfs.Open(showDir)
@@ -116,10 +123,10 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	posterPath := filepath.Join(cacheDir, "poster.jpg")
 	backdropPath := filepath.Join(cacheDir, "backdrop.jpg")
 
-	hasPoster := fileExists(posterPath)
-	hasBackdrop := fileExists(backdropPath)
+	hasPoster := false
+	hasBackdrop := false
 
-	if !hasPoster && source != nil {
+	if source != nil {
 		for _, name := range []string{"poster.jpg", "poster.png", "folder.jpg", "folder.png"} {
 			if findAndCopyFS(source.FS, name, posterPath) != "" {
 				hasPoster = true
@@ -127,7 +134,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 			}
 		}
 	}
-	if !hasBackdrop && source != nil {
+	if source != nil {
 		for _, name := range []string{"backdrop.jpg", "backdrop.png", "fanart.jpg", "fanart.png"} {
 			if findAndCopyFS(source.FS, name, backdropPath) != "" {
 				hasBackdrop = true
@@ -152,16 +159,65 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 
 	if newPoster != item.PosterPath || newBackdrop != item.BackdropPath {
 		q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-			ID:           item.ID,
-			Title:        item.Title,
-			SortTitle:    item.SortTitle,
-			Year:         item.Year,
-			Description:  item.Description,
-			PosterPath:   newPoster,
-			BackdropPath: newBackdrop,
-			ExternalIds:  item.ExternalIds,
+			ID:               item.ID,
+			Title:            item.Title,
+			SortTitle:        item.SortTitle,
+			Year:             item.Year,
+			Description:      item.Description,
+			PosterPath:       newPoster,
+			BackdropPath:     newBackdrop,
+			ExternalIds:      item.ExternalIds,
+			Tagline:          item.Tagline,
+			OriginalTitle:    item.OriginalTitle,
+			OriginalLanguage: item.OriginalLanguage,
+			Status:           item.Status,
+			ProviderKind:     item.ProviderKind,
+			HeyaSlug:         item.HeyaSlug,
 		})
 		log.Info().Str("poster", newPoster).Str("backdrop", newBackdrop).Int64("media_id", mediaItemID).Msg("local images copied to cache")
+	}
+
+	existingAssets, _ := q.ListMediaAssets(ctx, mediaItemID)
+	hasAsset := map[string]bool{}
+	for _, a := range existingAssets {
+		key := string(a.AssetType)
+		if a.Label != "" {
+			key = a.Label
+		}
+		hasAsset[key] = true
+	}
+
+	client := river.ClientFromContext[pgx.Tx](ctx)
+	for _, img := range job.Args.PendingImages {
+		key := img.AssetType
+		if img.Label != "" {
+			key = img.Label
+		}
+		if img.AssetType == "poster" && img.SortOrder == 0 && hasPoster {
+			continue
+		}
+		if img.AssetType == "backdrop" && img.SortOrder == 0 && hasBackdrop {
+			continue
+		}
+		if hasAsset[key] {
+			continue
+		}
+		client.Insert(ctx, DownloadImageArgs{
+			MediaItemID: mediaItemID,
+			EntityType:  "media",
+			URL:         img.URL,
+			AssetType:   img.AssetType,
+			MediaType:   mediaType,
+			Label:       img.Label,
+			SortOrder:   img.SortOrder,
+		}, &river.InsertOpts{Priority: img.Priority})
+	}
+
+	if job.Args.QueueEnrich {
+		client.Insert(ctx, EnrichmentArgs{
+			MediaItemID: mediaItemID,
+			MediaType:   mediaType,
+		}, &river.InsertOpts{Priority: 3})
 	}
 
 	return nil
@@ -171,6 +227,14 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return
+	}
+
+	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
+	seen := map[string]bool{}
+	for _, a := range existing {
+		if a.Label == "" && SingleAssetTypes[string(a.AssetType)] {
+			seen[string(a.AssetType)] = true
+		}
 	}
 
 	for _, e := range entries {
@@ -186,6 +250,11 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 		nameNoExt := strings.TrimSuffix(strings.ToLower(name), ext)
 
 		if at, ok := imageAssetMap[nameNoExt]; ok {
+			key := string(at)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			cacheName := nameNoExt + ext
 			destPath := filepath.Join(cacheDir, cacheName)
 			copyFileFromFS(fsys, name, destPath)
@@ -225,16 +294,31 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			continue
 		}
 
-		if seasonPosterRE.MatchString(strings.ToLower(name)) {
+		if m := seasonPosterRE.FindStringSubmatch(strings.ToLower(name)); m != nil {
+			seasonLabel := "season-0"
+			if m[1] != "specials" && m[1] != "all" {
+				num := 0
+				for _, c := range m[1] {
+					num = num*10 + int(c-'0')
+				}
+				seasonLabel = fmt.Sprintf("season-%d", num)
+			}
+
+			key := "poster:" + seasonLabel
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
 			destPath := filepath.Join(cacheDir, name)
 			copyFileFromFS(fsys, name, destPath)
 
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
-				AssetType:   sqlc.AssetTypeSeasonPoster,
+				AssetType:   sqlc.AssetTypePoster,
 				Source:      "local",
 				LocalPath:   destPath,
-				Label:       nameNoExt,
+				Label:       seasonLabel,
 			})
 		}
 	}
@@ -244,6 +328,14 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
+	}
+
+	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
+	hasThumb := false
+	for _, a := range existing {
+		if a.AssetType == sqlc.AssetTypeThumb && a.Label == "" {
+			hasThumb = true
+		}
 	}
 
 	for _, e := range entries {
@@ -282,6 +374,10 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 		}
 
 		if imageExts[ext] && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
+			if hasThumb {
+				continue
+			}
+			hasThumb = true
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeThumb,
@@ -370,6 +466,14 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 		return
 	}
 
+	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
+	hasThumb := false
+	for _, a := range existing {
+		if a.AssetType == sqlc.AssetTypeThumb && a.Label == "" {
+			hasThumb = true
+		}
+	}
+
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -406,6 +510,10 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 		}
 
 		if imageExts[ext] && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
+			if hasThumb {
+				continue
+			}
+			hasThumb = true
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeThumb,

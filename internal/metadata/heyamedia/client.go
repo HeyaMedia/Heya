@@ -53,22 +53,3 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, result
 func (c *Client) getJSON(ctx context.Context, path string, result any) error {
 	return c.get(ctx, path, nil, result)
 }
-
-type imageProxyResponse struct {
-	PublicURL string `json:"public_url"`
-	FromCache bool   `json:"from_cache"`
-}
-
-// ProxyImageURL sends an upstream image URL through HeyaMedia's image proxy,
-// which caches it to B2 and returns a CDN URL.
-func (c *Client) ProxyImageURL(ctx context.Context, upstreamURL string) string {
-	if upstreamURL == "" {
-		return ""
-	}
-	var resp imageProxyResponse
-	params := url.Values{"url": {upstreamURL}}
-	if err := c.get(ctx, "/api/v1/image", params, &resp); err != nil {
-		return upstreamURL
-	}
-	return resp.PublicURL
-}

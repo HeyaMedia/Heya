@@ -120,7 +120,7 @@ func (q *Queries) SearchAlbumsCount(ctx context.Context, lower string) (int64, e
 }
 
 const searchAllMedia = `-- name: SearchAllMedia :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.created_at, mi.updated_at, mi.search_vector, mi.homepage, mi.wikidata_id, mi.facebook_id, mi.instagram_id, mi.twitter_id, mi.slug, mi.metadata_refreshed_at
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
 FROM media_items mi
 WHERE (
     lower(mi.title) % lower($1)
@@ -163,16 +163,19 @@ func (q *Queries) SearchAllMedia(ctx context.Context, arg SearchAllMediaParams) 
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.ExternalIds,
+			&i.Slug,
+			&i.Homepage,
+			&i.Tagline,
+			&i.OriginalTitle,
+			&i.OriginalLanguage,
+			&i.Status,
+			&i.ProviderKind,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
+			&i.MetadataRefreshedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
-			&i.Homepage,
-			&i.WikidataID,
-			&i.FacebookID,
-			&i.InstagramID,
-			&i.TwitterID,
-			&i.Slug,
-			&i.MetadataRefreshedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -185,7 +188,7 @@ func (q *Queries) SearchAllMedia(ctx context.Context, arg SearchAllMediaParams) 
 }
 
 const searchCollections = `-- name: SearchCollections :many
-SELECT c.id, c.tmdb_id, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector
+SELECT c.id, c.external_ids, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector
 FROM collections c
 WHERE (
     lower(c.name) % lower($1)
@@ -219,7 +222,7 @@ func (q *Queries) SearchCollections(ctx context.Context, arg SearchCollectionsPa
 		var i Collection
 		if err := rows.Scan(
 			&i.ID,
-			&i.TmdbID,
+			&i.ExternalIds,
 			&i.Name,
 			&i.Overview,
 			&i.PosterPath,
@@ -255,7 +258,7 @@ func (q *Queries) SearchCollectionsCount(ctx context.Context, lower string) (int
 
 const searchMediaByType = `-- name: SearchMediaByType :many
 
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.created_at, mi.updated_at, mi.search_vector, mi.homepage, mi.wikidata_id, mi.facebook_id, mi.instagram_id, mi.twitter_id, mi.slug, mi.metadata_refreshed_at
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
 FROM media_items mi
 WHERE mi.media_type = $2
   AND (
@@ -309,16 +312,19 @@ func (q *Queries) SearchMediaByType(ctx context.Context, arg SearchMediaByTypePa
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.ExternalIds,
+			&i.Slug,
+			&i.Homepage,
+			&i.Tagline,
+			&i.OriginalTitle,
+			&i.OriginalLanguage,
+			&i.Status,
+			&i.ProviderKind,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
+			&i.MetadataRefreshedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
-			&i.Homepage,
-			&i.WikidataID,
-			&i.FacebookID,
-			&i.InstagramID,
-			&i.TwitterID,
-			&i.Slug,
-			&i.MetadataRefreshedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -354,7 +360,7 @@ func (q *Queries) SearchMediaByTypeCount(ctx context.Context, arg SearchMediaByT
 }
 
 const searchPeople = `-- name: SearchPeople :many
-SELECT p.id, p.tmdb_id, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.imdb_id, p.popularity, p.created_at, p.updated_at, p.slug, p.search_vector,
+SELECT p.id, p.external_ids, p.name, p.also_known_as, p.biography, p.birthday, p.deathday, p.place_of_birth, p.gender, p.profile_path, p.homepage, p.popularity, p.slug, p.created_at, p.updated_at, p.sort_name, p.known_for_department, p.birth_year, p.heya_slug, p.heya_enriched_at, p.search_vector,
        (SELECT count(*) FROM media_cast WHERE person_id = p.id)::int AS cast_count,
        (SELECT count(*) FROM media_crew WHERE person_id = p.id)::int AS crew_count
 FROM people p
@@ -381,25 +387,29 @@ type SearchPeopleParams struct {
 }
 
 type SearchPeopleRow struct {
-	ID           int64              `json:"id"`
-	TmdbID       pgtype.Int4        `json:"tmdb_id"`
-	Name         string             `json:"name"`
-	AlsoKnownAs  []string           `json:"also_known_as"`
-	Biography    string             `json:"biography"`
-	Birthday     string             `json:"birthday"`
-	Deathday     string             `json:"deathday"`
-	PlaceOfBirth string             `json:"place_of_birth"`
-	Gender       int32              `json:"gender"`
-	ProfilePath  string             `json:"profile_path"`
-	Homepage     string             `json:"homepage"`
-	ImdbID       string             `json:"imdb_id"`
-	Popularity   pgtype.Numeric     `json:"popularity"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Slug         string             `json:"slug"`
-	SearchVector interface{}        `json:"search_vector"`
-	CastCount    int32              `json:"cast_count"`
-	CrewCount    int32              `json:"crew_count"`
+	ID                 int64              `json:"id"`
+	ExternalIds        []byte             `json:"external_ids"`
+	Name               string             `json:"name"`
+	AlsoKnownAs        []string           `json:"also_known_as"`
+	Biography          string             `json:"biography"`
+	Birthday           string             `json:"birthday"`
+	Deathday           string             `json:"deathday"`
+	PlaceOfBirth       string             `json:"place_of_birth"`
+	Gender             int32              `json:"gender"`
+	ProfilePath        string             `json:"profile_path"`
+	Homepage           string             `json:"homepage"`
+	Popularity         pgtype.Numeric     `json:"popularity"`
+	Slug               string             `json:"slug"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	SortName           string             `json:"sort_name"`
+	KnownForDepartment string             `json:"known_for_department"`
+	BirthYear          int32              `json:"birth_year"`
+	HeyaSlug           string             `json:"heya_slug"`
+	HeyaEnrichedAt     pgtype.Timestamptz `json:"heya_enriched_at"`
+	SearchVector       interface{}        `json:"search_vector"`
+	CastCount          int32              `json:"cast_count"`
+	CrewCount          int32              `json:"crew_count"`
 }
 
 func (q *Queries) SearchPeople(ctx context.Context, arg SearchPeopleParams) ([]SearchPeopleRow, error) {
@@ -413,7 +423,7 @@ func (q *Queries) SearchPeople(ctx context.Context, arg SearchPeopleParams) ([]S
 		var i SearchPeopleRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TmdbID,
+			&i.ExternalIds,
 			&i.Name,
 			&i.AlsoKnownAs,
 			&i.Biography,
@@ -423,11 +433,15 @@ func (q *Queries) SearchPeople(ctx context.Context, arg SearchPeopleParams) ([]S
 			&i.Gender,
 			&i.ProfilePath,
 			&i.Homepage,
-			&i.ImdbID,
 			&i.Popularity,
+			&i.Slug,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Slug,
+			&i.SortName,
+			&i.KnownForDepartment,
+			&i.BirthYear,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
 			&i.SearchVector,
 			&i.CastCount,
 			&i.CrewCount,

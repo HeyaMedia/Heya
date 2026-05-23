@@ -12,11 +12,12 @@ import (
 )
 
 const createMediaCertification = `-- name: CreateMediaCertification :exec
-INSERT INTO media_certifications (media_item_id, country, certification, release_date, release_type)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO media_certifications (media_item_id, country, certification, release_date, release_type, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (media_item_id, country, release_type) DO UPDATE SET
   certification = EXCLUDED.certification,
-  release_date = EXCLUDED.release_date
+  release_date = EXCLUDED.release_date,
+  source = EXCLUDED.source
 `
 
 type CreateMediaCertificationParams struct {
@@ -25,6 +26,7 @@ type CreateMediaCertificationParams struct {
 	Certification string      `json:"certification"`
 	ReleaseDate   pgtype.Date `json:"release_date"`
 	ReleaseType   int32       `json:"release_type"`
+	Source        string      `json:"source"`
 }
 
 func (q *Queries) CreateMediaCertification(ctx context.Context, arg CreateMediaCertificationParams) error {
@@ -34,12 +36,22 @@ func (q *Queries) CreateMediaCertification(ctx context.Context, arg CreateMediaC
 		arg.Certification,
 		arg.ReleaseDate,
 		arg.ReleaseType,
+		arg.Source,
 	)
 	return err
 }
 
+const deleteMediaCertificationsByItem = `-- name: DeleteMediaCertificationsByItem :exec
+DELETE FROM media_certifications WHERE media_item_id = $1
+`
+
+func (q *Queries) DeleteMediaCertificationsByItem(ctx context.Context, mediaItemID int64) error {
+	_, err := q.db.Exec(ctx, deleteMediaCertificationsByItem, mediaItemID)
+	return err
+}
+
 const getMediaCertification = `-- name: GetMediaCertification :one
-SELECT id, media_item_id, country, certification, release_date, release_type FROM media_certifications WHERE media_item_id = $1 AND country = $2 LIMIT 1
+SELECT id, media_item_id, country, certification, release_date, release_type, source FROM media_certifications WHERE media_item_id = $1 AND country = $2 LIMIT 1
 `
 
 type GetMediaCertificationParams struct {
@@ -57,12 +69,13 @@ func (q *Queries) GetMediaCertification(ctx context.Context, arg GetMediaCertifi
 		&i.Certification,
 		&i.ReleaseDate,
 		&i.ReleaseType,
+		&i.Source,
 	)
 	return i, err
 }
 
 const listMediaCertifications = `-- name: ListMediaCertifications :many
-SELECT id, media_item_id, country, certification, release_date, release_type FROM media_certifications WHERE media_item_id = $1 ORDER BY country
+SELECT id, media_item_id, country, certification, release_date, release_type, source FROM media_certifications WHERE media_item_id = $1 ORDER BY country
 `
 
 func (q *Queries) ListMediaCertifications(ctx context.Context, mediaItemID int64) ([]MediaCertification, error) {
@@ -81,6 +94,7 @@ func (q *Queries) ListMediaCertifications(ctx context.Context, mediaItemID int64
 			&i.Certification,
 			&i.ReleaseDate,
 			&i.ReleaseType,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}

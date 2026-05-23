@@ -7,11 +7,12 @@ import (
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/worker"
 )
 
 func (a *App) RefreshMediaItem(ctx context.Context, mediaItemID int64) error {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	item, err := q.GetMediaItemByID(ctx, mediaItemID)
 	if err != nil {
 		return fmt.Errorf("media item %d not found: %w", mediaItemID, err)
@@ -29,46 +30,47 @@ func (a *App) RefreshMediaItem(ctx context.Context, mediaItemID int64) error {
 		return fmt.Errorf("library not found: %w", err)
 	}
 	settings := metadata.ParseSettings(lib.Settings)
-	providers := a.Registry.Providers(settings.MetadataProviders, kind)
+	_ = kind
 
 	var fetchOpts *metadata.FetchOptions
 	if settings.PreferredLanguage != "" || settings.PreferredCountry != "" {
 		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
 	}
 
-	for _, p := range providers {
-
-		providerID := buildProviderID(p.Name(), kind, externalIDs)
-		if providerID == "" {
-			continue
-		}
-
-		detail, err := p.GetDetail(ctx, providerID, fetchOpts)
-		if err != nil {
-			continue
-		}
-
-		detailJSON, _ := json.Marshal(detail.ExternalIDs)
-		q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-			ID:           mediaItemID,
-			Title:        detail.Title,
-			SortTitle:    detail.SortTitle,
-			Year:         detail.Year,
-			Description:  detail.Description,
-			PosterPath:   item.PosterPath,
-			BackdropPath: item.BackdropPath,
-			ExternalIds:  detailJSON,
-		})
-
-		a.River.Insert(ctx, worker.EnrichmentArgs{
-			MediaItemID: mediaItemID,
-			MediaType:   string(item.MediaType),
-		}, nil)
-
-		return nil
+	providerID := heyamedia.BuildLookupID(item.HeyaSlug, externalIDs)
+	if providerID == "" {
+		return fmt.Errorf("media item %d has no lookup identifier", mediaItemID)
 	}
 
-	return fmt.Errorf("no provider could refresh media item %d", mediaItemID)
+	detail, err := a.heya.GetDetail(ctx, providerID, fetchOpts)
+	if err != nil {
+		return fmt.Errorf("metadata fetch failed: %w", err)
+	}
+
+	detailJSON, _ := json.Marshal(detail.ExternalIDs)
+	q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+		ID:               mediaItemID,
+		Title:            detail.Title,
+		SortTitle:        detail.SortTitle,
+		Year:             detail.Year,
+		Description:      detail.Description,
+		PosterPath:       item.PosterPath,
+		BackdropPath:     item.BackdropPath,
+		ExternalIds:      detailJSON,
+		Tagline:          item.Tagline,
+		OriginalTitle:    item.OriginalTitle,
+		OriginalLanguage: item.OriginalLanguage,
+		Status:           item.Status,
+		ProviderKind:     item.ProviderKind,
+		HeyaSlug:         item.HeyaSlug,
+	})
+
+	a.river.Insert(ctx, worker.EnrichmentArgs{
+		MediaItemID: mediaItemID,
+		MediaType:   string(item.MediaType),
+	}, nil)
+
+	return nil
 }
 
 func mediaTypeToKind(mt sqlc.MediaType) metadata.MediaKind {
@@ -84,22 +86,4 @@ func mediaTypeToKind(mt sqlc.MediaType) metadata.MediaKind {
 	default:
 		return metadata.KindMovie
 	}
-}
-
-func buildProviderID(providerName string, kind metadata.MediaKind, externalIDs map[string]string) string {
-	switch providerName {
-	case "tmdb":
-		if id := externalIDs["tmdb"]; id != "" {
-			return string(kind) + ":" + id
-		}
-	case "musicbrainz":
-		if id := externalIDs["musicbrainz"]; id != "" {
-			return "musicbrainz:" + id
-		}
-	case "openlibrary":
-		if id := externalIDs["openlibrary"]; id != "" {
-			return "openlibrary:" + id
-		}
-	}
-	return ""
 }

@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/karbowiak/heya/internal/auth"
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -23,25 +22,25 @@ func handleGetUpNext(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		ep, err := q.GetNextUnwatchedEpisode(r.Context(), sqlc.GetNextUnwatchedEpisodeParams{
-			UserID:      user.ID,
-			MediaItemID: mediaItemID,
-		})
-		if err != nil {
+		result, _ := app.GetUpNext(r.Context(), user.ID, mediaItemID)
+		if !result.HasNext {
 			writeJSON(w, http.StatusOK, map[string]any{"has_next": false})
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
+		resp := map[string]any{
 			"has_next":       true,
-			"episode_id":     ep.EpisodeID,
-			"episode_number": ep.EpisodeNumber,
-			"episode_title":  ep.Title,
-			"season_number":  ep.SeasonNumber,
-			"season_id":      ep.SeasonID,
-			"media_item_id":  ep.MediaItemID,
-			"runtime":        ep.RuntimeMinutes,
-		})
+			"episode_id":     result.EpisodeID,
+			"episode_number": result.EpisodeNumber,
+			"episode_title":  result.EpisodeTitle,
+			"season_number":  result.SeasonNumber,
+			"season_id":      result.SeasonID,
+			"media_item_id":  result.MediaItemID,
+			"runtime":        result.Runtime,
+		}
+		if result.FileID > 0 {
+			resp["file_id"] = result.FileID
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }

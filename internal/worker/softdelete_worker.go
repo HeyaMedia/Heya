@@ -13,7 +13,7 @@ import (
 type SoftDeleteWorker struct {
 	river.WorkerDefaults[SoftDeleteArgs]
 	DB  *pgxpool.Pool
-	Hub *eventhub.Hub
+	Hub EventPublisher
 }
 
 func (w *SoftDeleteWorker) Work(ctx context.Context, job *river.Job[SoftDeleteArgs]) error {

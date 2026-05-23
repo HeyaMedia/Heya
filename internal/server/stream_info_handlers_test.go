@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/worker"
 )
 
@@ -26,7 +27,7 @@ func loadWorkerFixture(t *testing.T, name string) worker.MediaInfo {
 
 func TestBuildStreamInfoResponse_Predator(t *testing.T) {
 	info := loadWorkerFixture(t, "movie_predator_1987.json")
-	resp := buildStreamInfoResponse(info)
+	resp := buildStreamInfoResponse(info, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	if resp.Container != "matroska,webm" {
 		t.Errorf("container = %q, want matroska,webm", resp.Container)
@@ -69,7 +70,7 @@ func TestBuildStreamInfoResponse_Predator(t *testing.T) {
 
 func TestBuildStreamInfoResponse_Horimiya(t *testing.T) {
 	info := loadWorkerFixture(t, "anime_horimiya_s01e03.json")
-	resp := buildStreamInfoResponse(info)
+	resp := buildStreamInfoResponse(info, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	if len(resp.Video) != 1 {
 		t.Fatalf("video streams = %d, want 1", len(resp.Video))
@@ -109,7 +110,7 @@ func TestBuildStreamInfoResponse_Horimiya(t *testing.T) {
 
 func TestBuildStreamInfoResponse_Extant(t *testing.T) {
 	info := loadWorkerFixture(t, "tv_extant_s01e13.json")
-	resp := buildStreamInfoResponse(info)
+	resp := buildStreamInfoResponse(info, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	if len(resp.Video) != 1 || len(resp.Audio) != 1 || len(resp.Subtitle) != 1 {
 		t.Errorf("streams = %d/%d/%d, want 1/1/1", len(resp.Video), len(resp.Audio), len(resp.Subtitle))
@@ -120,7 +121,7 @@ func TestBuildStreamInfoResponse_Extant(t *testing.T) {
 }
 
 func TestBuildStreamInfoResponse_EmptyMediaInfo(t *testing.T) {
-	resp := buildStreamInfoResponse(worker.MediaInfo{})
+	resp := buildStreamInfoResponse(worker.MediaInfo{}, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	out, _ := json.Marshal(resp)
 	s := string(out)
@@ -144,5 +145,150 @@ func TestIsHDR(t *testing.T) {
 		if got := isHDR(s); got != tt.want {
 			t.Errorf("isHDR(%q) = %v, want %v", tt.transfer, got, tt.want)
 		}
+	}
+}
+
+func TestReasonStrings(t *testing.T) {
+	cases := []struct {
+		name string
+		bits transcoder.TranscodeReason
+		want []string
+	}{
+		{"none", 0, []string{}},
+		{"container only", transcoder.ReasonContainerNotSupported, []string{"container"}},
+		{
+			"container + hdr",
+			transcoder.ReasonContainerNotSupported | transcoder.ReasonHDRNotSupported,
+			[]string{"container", "hdr"},
+		},
+		{
+			"dolby vision + lossless audio",
+			transcoder.ReasonDolbyVisionNotSupported | transcoder.ReasonAudioLosslessNotSupported,
+			[]string{"lossless_audio", "dolby_vision"},
+		},
+		{
+			"rotation only",
+			transcoder.ReasonVideoRotationNotSupported,
+			[]string{"rotation"},
+		},
+	}
+	for _, tc := range cases {
+		got := reasonStrings(tc.bits)
+		if len(got) != len(tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("%s: index %d: got %q want %q", tc.name, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestDeriveBitDepth(t *testing.T) {
+	cases := []struct {
+		bits, pix string
+		want      int
+	}{
+		{"10", "yuv420p10le", 10},
+		{"", "yuv420p10le", 10},
+		{"", "yuv420p12be", 12},
+		{"", "yuv420p", 8},
+		{"", "yuvj420p", 8},
+		{"", "", 0},
+		{"bogus", "yuv420p", 8}, // unparseable falls back to pix_fmt
+	}
+	for _, tc := range cases {
+		got := deriveBitDepth(tc.bits, tc.pix)
+		if got != tc.want {
+			t.Errorf("deriveBitDepth(%q,%q) = %d, want %d", tc.bits, tc.pix, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeRotation(t *testing.T) {
+	// ffprobe Display Matrix: -90 means 90° CW. We normalise to positive CW.
+	cases := map[int]int{
+		0:    0,
+		-90:  90,
+		90:   270, // ffprobe "90" = 90° CCW = 270° CW
+		-180: 180,
+		180:  180,
+		-270: 270,
+		270:  90,
+		360:  0, // wraps
+		-360: 0,
+		45:   0, // not a canonical step → ignored
+	}
+	for in, want := range cases {
+		if got := normalizeRotation(in); got != want {
+			t.Errorf("normalizeRotation(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func TestDeriveSideDataFields(t *testing.T) {
+	t.Run("dovi profile 8 + display matrix", func(t *testing.T) {
+		side := []worker.SideData{
+			{Type: "Display Matrix", Rotation: -90},
+			{Type: "DOVI configuration record", DvProfile: 8, DvBlSignalCompatibilityID: 1},
+		}
+		dv, compat, rot := deriveSideDataFields(side)
+		if dv != 8 || compat != 1 || rot != 90 {
+			t.Errorf("got dv=%d compat=%d rot=%d", dv, compat, rot)
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		dv, compat, rot := deriveSideDataFields(nil)
+		if dv != 0 || compat != 0 || rot != 0 {
+			t.Errorf("expected zeros, got dv=%d compat=%d rot=%d", dv, compat, rot)
+		}
+	})
+	t.Run("unknown side data type ignored", func(t *testing.T) {
+		side := []worker.SideData{
+			{Type: "Mastering display metadata"},
+			{Type: "Content light level metadata"},
+		}
+		dv, compat, rot := deriveSideDataFields(side)
+		if dv != 0 || compat != 0 || rot != 0 {
+			t.Errorf("expected zeros, got dv=%d compat=%d rot=%d", dv, compat, rot)
+		}
+	})
+}
+
+func TestWorkerToTranscoderInfo_FullDerivation(t *testing.T) {
+	info := &worker.MediaInfo{
+		Container: "mp4",
+		Streams: []worker.StreamInfo{
+			{
+				CodecName:         "hevc",
+				CodecType:         "video",
+				CodecTagString:    "hev1",
+				BitsPerRawSample:  "10",
+				PixFmt:            "yuv420p10le",
+				SampleAspectRatio: "32:27",
+				FieldOrder:        "tt",
+				SideDataList: []worker.SideData{
+					{Type: "Display Matrix", Rotation: -90},
+					{Type: "DOVI configuration record", DvProfile: 8, DvBlSignalCompatibilityID: 1},
+				},
+			},
+			{CodecName: "truehd", CodecType: "audio", Channels: 8, ChannelLayout: "7.1"},
+		},
+	}
+	t.Helper()
+	out := workerToTranscoderInfo(info)
+	if len(out.Streams) != 2 {
+		t.Fatalf("expected 2 streams, got %d", len(out.Streams))
+	}
+	v := out.Streams[0]
+	if v.CodecTag != "hev1" || v.BitDepth != 10 || v.SampleAspectRatio != "32:27" ||
+		v.FieldOrder != "tt" || v.Rotation != 90 || v.DvProfile != 8 || v.DvBlCompatID != 1 {
+		t.Errorf("video derivation incomplete: %+v", v)
+	}
+	a := out.Streams[1]
+	if a.Channels != 8 || a.ChannelLayout != "7.1" {
+		t.Errorf("audio channel info missing: %+v", a)
 	}
 }

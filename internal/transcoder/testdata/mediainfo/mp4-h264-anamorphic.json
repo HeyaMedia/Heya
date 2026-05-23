@@ -1,0 +1,12 @@
+{
+  "_comment": "Anamorphic widescreen DVD rip: encoded at 720x480 but with SAR 32:27 to display 16:9. Browsers ignore SAR in MSE — must transcode with setsar=1:1 and rescale.",
+  "container": "mp4",
+  "streams": [
+    {
+      "codec_name": "h264", "codec_type": "video", "profile": "Main",
+      "pix_fmt": "yuv420p", "width": 720, "height": 480, "bit_depth": 8,
+      "sar": "32:27"
+    },
+    { "codec_name": "aac", "codec_type": "audio", "channels": 2, "channel_layout": "stereo" }
+  ]
+}

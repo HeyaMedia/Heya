@@ -16,3 +16,9 @@ ORDER BY title;
 
 -- name: DeleteMediaExtrasByItem :exec
 DELETE FROM media_extras WHERE media_item_id = $1;
+
+-- name: GetMediaExtraByID :one
+SELECT * FROM media_extras WHERE id = $1;
+
+-- name: UpdateExtraThumbnail :exec
+UPDATE media_extras SET thumbnail_path = $2 WHERE id = $1;

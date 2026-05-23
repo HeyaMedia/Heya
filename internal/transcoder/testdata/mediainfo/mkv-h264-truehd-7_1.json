@@ -1,0 +1,11 @@
+{
+  "_comment": "MKV remux of a Blu-ray with H.264 video and TrueHD 7.1 audio. TrueHD is lossless — never copyable to browser MSE.",
+  "container": "matroska,webm",
+  "streams": [
+    {
+      "codec_name": "h264", "codec_type": "video", "profile": "High",
+      "pix_fmt": "yuv420p", "width": 1920, "height": 1080, "bit_depth": 8
+    },
+    { "codec_name": "truehd", "codec_type": "audio", "channels": 8, "channel_layout": "7.1" }
+  ]
+}

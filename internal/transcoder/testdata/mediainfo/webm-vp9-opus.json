@@ -1,0 +1,8 @@
+{
+  "_comment": "VP9 + Opus in WebM. Native direct play in Chrome/Firefox.",
+  "container": "webm",
+  "streams": [
+    { "codec_name": "vp9", "codec_type": "video", "profile": "Profile 0", "pix_fmt": "yuv420p", "width": 1920, "height": 1080 },
+    { "codec_name": "opus", "codec_type": "audio" }
+  ]
+}

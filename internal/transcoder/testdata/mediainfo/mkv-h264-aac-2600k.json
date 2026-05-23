@@ -1,0 +1,8 @@
+{
+  "_comment": "H.264 + AAC but in MKV — needs remux to MP4 container for browsers.",
+  "container": "matroska,webm",
+  "streams": [
+    { "codec_name": "h264", "codec_type": "video", "profile": "High", "pix_fmt": "yuv420p", "width": 1920, "height": 1080 },
+    { "codec_name": "aac", "codec_type": "audio" }
+  ]
+}

@@ -27,7 +27,7 @@ var studiosSyncCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		q := sqlc.New(app.DB)
+		q := sqlc.New(app.DBPool())
 		companies, err := q.ListAllProductionCompanies(ctx)
 		if err != nil {
 			return err

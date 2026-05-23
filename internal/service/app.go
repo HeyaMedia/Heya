@@ -5,33 +5,52 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
-	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/watcher"
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
 
 type App struct {
-	Config         *config.Config
-	DB             *pgxpool.Pool
-	Matcher        *matcher.Matcher
-	Downloader     *images.Downloader
-	River          *river.Client[pgx.Tx]
-	Watcher        *watcher.Manager
-	Registry       *metadata.Registry
-	Transcoder     *transcoder.SessionManager
-	TranscodeCache *transcoder.CacheManager
-	Hub            *eventhub.Hub
+	config         *config.Config
+	db             *pgxpool.Pool
+	matcher        *matcher.Matcher
+	downloader     *images.Downloader
+	river          *river.Client[pgx.Tx]
+	watcher        *watcher.Manager
+	heya           *heyamedia.HeyaProvider
+	transcoder     *transcoder.SessionManager
+	transcodeCache *transcoder.CacheManager
+	hub            *eventhub.Hub
+	scheduler      *scheduler.Runner
+	scanTask       *scheduler.ScanLibrariesTask
 }
+
+// Accessor methods for handler packages that need App internals.
+
+func (a *App) SessionLookup() auth.SessionLookup               { return sqlc.New(a.db) }
+func (a *App) TranscoderSessions() *transcoder.SessionManager  { return a.transcoder }
+func (a *App) TranscoderCache() *transcoder.CacheManager       { return a.transcodeCache }
+func (a *App) EventHub() *eventhub.Hub                         { return a.hub }
+func (a *App) ConfigSnapshot() *config.Config                  { return a.config }
+func (a *App) WatcherManager() *watcher.Manager                { return a.watcher }
+func (a *App) TaskScheduler() *scheduler.Runner                { return a.scheduler }
+func (a *App) Metadata() *heyamedia.HeyaProvider               { return a.heya }
+func (a *App) DBPool() *pgxpool.Pool                           { return a.db }
+func (a *App) RiverClient() *river.Client[pgx.Tx]              { return a.river }
+func (a *App) ScanLibrariesTask() *scheduler.ScanLibrariesTask { return a.scanTask }
+
+func (a *App) SetScheduler(r *scheduler.Runner) { a.scheduler = r }
 
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err := AutoMigrate(cfg.DatabaseURL); err != nil {
@@ -46,29 +65,13 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	dl := images.NewDownloader(cfg.DataDir)
 
 	hm := heyamedia.NewClient(cfg.HeyaMediaURL)
+	heya := heyamedia.NewHeyaProvider(hm)
 
-	registry := metadata.NewRegistry()
-
-	tmdbProvider := heyamedia.NewTMDBProvider(hm)
-	registry.Register(tmdbProvider)
-	registry.RegisterArtwork(heyamedia.NewTMDBArtworkProvider(hm))
-
-	registry.Register(heyamedia.NewTVDBProvider(hm))
-
-	omdbProvider := heyamedia.NewOMDBProvider(hm)
-	registry.Register(omdbProvider)
-	registry.RegisterRatings(omdbProvider)
-
-	registry.RegisterArtwork(heyamedia.NewFanartProvider(hm))
-
-	registry.Register(heyamedia.NewMusicBrainzProvider(hm))
-	registry.Register(heyamedia.NewOpenLibraryProvider(hm))
-
-	log.Info().Str("url", cfg.HeyaMediaURL).Msg("metadata providers registered via heya.media")
+	log.Info().Str("url", cfg.HeyaMediaURL).Msg("metadata provider registered via heya.media")
 
 	hub := eventhub.New()
 
-	m := matcher.New(db, dl, matcher.DefaultOptions(), registry)
+	m := matcher.New(db, matcher.DefaultOptions(), heya)
 
 	var tc *transcoder.SessionManager
 	var tcCache *transcoder.CacheManager
@@ -88,16 +91,16 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 			log.Info().Str("hwaccel", cfg.HWAccel).Msg("hardware acceleration forced")
 		}
 
-		tc = transcoder.NewSessionManager(tcCache, hwAccel)
+		tc = transcoder.NewSessionManager(tcCache, hwAccel, transcoder.NewFFmpegBuilder())
 	}
 
 	riverClient, err := worker.Setup(ctx, worker.Config{
 		DB:             db,
 		DataDir:        cfg.DataDir,
 		HeyaMedia:      hm,
+		Heya:           heya,
 		Matcher:        m,
 		Downloader:     dl,
-		Registry:       registry,
 		TranscodeCache: tcCache,
 		HWAccel:        hwAccel,
 		Hub:            hub,
@@ -107,34 +110,41 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 
-	wm := watcher.NewManager(db, riverClient)
+	scanTask := &scheduler.ScanLibrariesTask{DB: db, River: riverClient, Hub: hub}
+
+	wm := watcher.NewManager(db, riverClient, func(libraryID int64, force bool) {
+		scanTask.Enqueue(libraryID, force)
+	})
+
+	scanTask.Watcher = wm
 
 	return &App{
-		Config:         cfg,
-		DB:             db,
-		Matcher:        m,
-		Downloader:     dl,
-		River:          riverClient,
-		Watcher:        wm,
-		Registry:       registry,
-		Transcoder:     tc,
-		TranscodeCache: tcCache,
-		Hub:            hub,
+		config:         cfg,
+		db:             db,
+		matcher:        m,
+		downloader:     dl,
+		river:          riverClient,
+		watcher:        wm,
+		heya:           heya,
+		transcoder:     tc,
+		transcodeCache: tcCache,
+		hub:            hub,
+		scanTask:       scanTask,
 	}, nil
 }
 
 func (a *App) StartWorkers(ctx context.Context) error {
-	return a.River.Start(ctx)
+	return a.river.Start(ctx)
 }
 
 func (a *App) QueueCounts(ctx context.Context) (pending, running int) {
-	row := a.DB.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'available' OR state = 'retryable'), count(*) FILTER (WHERE state = 'running') FROM river_job")
+	row := a.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'available' OR state = 'retryable'), count(*) FILTER (WHERE state = 'running') FROM river_job")
 	row.Scan(&pending, &running)
 	return
 }
 
 func (a *App) EnqueuePendingFiles(ctx context.Context, libraryID int64) (int, error) {
-	q := sqlc.New(a.DB)
+	q := sqlc.New(a.db)
 	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
 		LibraryID: libraryID,
 		Limit:     10000,
@@ -146,7 +156,7 @@ func (a *App) EnqueuePendingFiles(ctx context.Context, libraryID int64) (int, er
 	}
 
 	for _, f := range files {
-		a.River.Insert(ctx, worker.ProcessFileArgs{
+		a.river.Insert(ctx, worker.ProcessFileArgs{
 			LibraryFileID: f.ID,
 			LibraryID:     libraryID,
 			FilePath:      f.Path,
@@ -157,26 +167,24 @@ func (a *App) EnqueuePendingFiles(ctx context.Context, libraryID int64) (int, er
 }
 
 func (a *App) StartWatchers(ctx context.Context) error {
-	if err := a.Watcher.StartAll(ctx); err != nil {
+	if err := a.watcher.StartAll(ctx); err != nil {
 		return err
 	}
-	watcher.SetupPeriodicScans(ctx, a.DB, a.River)
 	return nil
 }
 
 func (a *App) StopWorkers(ctx context.Context) error {
-	if a.River != nil {
-		return a.River.Stop(ctx)
+	if a.river != nil {
+		return a.river.Stop(ctx)
 	}
 	return nil
 }
 
 func (a *App) Close() {
-	if a.Watcher != nil {
-		a.Watcher.StopAll()
+	if a.watcher != nil {
+		a.watcher.StopAll()
 	}
-	if a.DB != nil {
-		a.DB.Close()
+	if a.db != nil {
+		a.db.Close()
 	}
 }
-

@@ -1,0 +1,14 @@
+{
+  "_comment": "Dolby Vision profile 7 with TrueHD audio (typical UHD Blu-ray rip). DV7 has a separate enhancement layer track; we can't strip it from the BL like DV8. Non-DoVi clients must transcode the video, and TrueHD is always transcoded to AAC.",
+  "container": "mp4",
+  "streams": [
+    {
+      "codec_name": "hevc", "codec_type": "video", "profile": "Main 10",
+      "codec_tag": "dvhe", "bit_depth": 10,
+      "pix_fmt": "yuv420p10le", "width": 3840, "height": 2160,
+      "color_transfer": "smpte2084", "color_primaries": "bt2020", "color_space": "bt2020nc",
+      "dv_profile": 7, "dv_bl_compat": 0
+    },
+    { "codec_name": "truehd", "codec_type": "audio", "channels": 8, "channel_layout": "7.1" }
+  ]
+}

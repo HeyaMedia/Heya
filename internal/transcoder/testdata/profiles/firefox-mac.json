@@ -1,0 +1,13 @@
+{
+  "_comment": "Firefox on macOS: as Firefox plus HEVC via VideoToolbox. Still no AC3/EAC3 in MSE.",
+  "SupportsHEVC": true,
+  "SupportsAV1": true,
+  "SupportsFLAC": true,
+  "SupportsOpus": true,
+  "SupportsAC3": false,
+  "SupportsEAC3": false,
+  "SupportsMP4": true,
+  "SupportsMKV": false,
+  "SupportsWebM": true,
+  "SupportsHDR": false
+}

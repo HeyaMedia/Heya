@@ -10,16 +10,13 @@ import (
 )
 
 var assetTypeToFilename = map[string]string{
-	"poster":    "poster",
-	"backdrop":  "fanart",
-	"fanart":    "fanart",
-	"banner":    "banner",
-	"clearart":  "clearart",
-	"clearlogo": "clearlogo",
-	"logo":      "logo",
-	"landscape": "landscape",
-	"disc":      "disc",
-	"folder":    "folder",
+	"poster":   "poster",
+	"backdrop": "fanart",
+	"banner":   "banner",
+	"art":      "clearart",
+	"logo":     "logo",
+	"thumb":    "landscape",
+	"disc":     "disc",
 }
 
 func SaveImageToMediaDir(mediaDir, cachedPath, assetType string) error {

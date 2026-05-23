@@ -37,25 +37,39 @@ func (q *Queries) AddToList(ctx context.Context, arg AddToListParams) (UserListI
 }
 
 const createUserList = `-- name: CreateUserList :one
-INSERT INTO user_lists (user_id, name, description)
-VALUES ($1, $2, $3)
-RETURNING id, user_id, name, description, created_at, updated_at
+INSERT INTO user_lists (user_id, name, description, list_type, filter_json, media_type)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, name, description, list_type, filter_json, media_type, icon, created_at, updated_at
 `
 
 type CreateUserListParams struct {
 	UserID      int64  `json:"user_id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	ListType    string `json:"list_type"`
+	FilterJson  []byte `json:"filter_json"`
+	MediaType   string `json:"media_type"`
 }
 
 func (q *Queries) CreateUserList(ctx context.Context, arg CreateUserListParams) (UserList, error) {
-	row := q.db.QueryRow(ctx, createUserList, arg.UserID, arg.Name, arg.Description)
+	row := q.db.QueryRow(ctx, createUserList,
+		arg.UserID,
+		arg.Name,
+		arg.Description,
+		arg.ListType,
+		arg.FilterJson,
+		arg.MediaType,
+	)
 	var i UserList
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
 		&i.Name,
 		&i.Description,
+		&i.ListType,
+		&i.FilterJson,
+		&i.MediaType,
+		&i.Icon,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -72,7 +86,7 @@ func (q *Queries) DeleteUserList(ctx context.Context, id int64) error {
 }
 
 const getUserListByID = `-- name: GetUserListByID :one
-SELECT id, user_id, name, description, created_at, updated_at FROM user_lists WHERE id = $1
+SELECT id, user_id, name, description, list_type, filter_json, media_type, icon, created_at, updated_at FROM user_lists WHERE id = $1
 `
 
 func (q *Queries) GetUserListByID(ctx context.Context, id int64) (UserList, error) {
@@ -83,6 +97,10 @@ func (q *Queries) GetUserListByID(ctx context.Context, id int64) (UserList, erro
 		&i.UserID,
 		&i.Name,
 		&i.Description,
+		&i.ListType,
+		&i.FilterJson,
+		&i.MediaType,
+		&i.Icon,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -108,7 +126,7 @@ func (q *Queries) IsInList(ctx context.Context, arg IsInListParams) (bool, error
 }
 
 const listItemsInList = `-- name: ListItemsInList :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.created_at, mi.updated_at, mi.search_vector, mi.homepage, mi.wikidata_id, mi.facebook_id, mi.instagram_id, mi.twitter_id, mi.slug, mi.metadata_refreshed_at
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
 FROM media_items mi
 JOIN user_list_items li ON li.media_item_id = mi.id
 WHERE li.list_id = $1
@@ -135,16 +153,19 @@ func (q *Queries) ListItemsInList(ctx context.Context, listID int64) ([]MediaIte
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.ExternalIds,
+			&i.Slug,
+			&i.Homepage,
+			&i.Tagline,
+			&i.OriginalTitle,
+			&i.OriginalLanguage,
+			&i.Status,
+			&i.ProviderKind,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
+			&i.MetadataRefreshedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
-			&i.Homepage,
-			&i.WikidataID,
-			&i.FacebookID,
-			&i.InstagramID,
-			&i.TwitterID,
-			&i.Slug,
-			&i.MetadataRefreshedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -157,7 +178,7 @@ func (q *Queries) ListItemsInList(ctx context.Context, listID int64) ([]MediaIte
 }
 
 const listUserLists = `-- name: ListUserLists :many
-SELECT ul.id, ul.user_id, ul.name, ul.description, ul.created_at, ul.updated_at,
+SELECT ul.id, ul.user_id, ul.name, ul.description, ul.list_type, ul.filter_json, ul.media_type, ul.icon, ul.created_at, ul.updated_at,
        (SELECT count(*) FROM user_list_items li WHERE li.list_id = ul.id)::int AS item_count
 FROM user_lists ul
 WHERE ul.user_id = $1
@@ -169,6 +190,10 @@ type ListUserListsRow struct {
 	UserID      int64              `json:"user_id"`
 	Name        string             `json:"name"`
 	Description string             `json:"description"`
+	ListType    string             `json:"list_type"`
+	FilterJson  []byte             `json:"filter_json"`
+	MediaType   string             `json:"media_type"`
+	Icon        string             `json:"icon"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ItemCount   int32              `json:"item_count"`
@@ -188,6 +213,10 @@ func (q *Queries) ListUserLists(ctx context.Context, userID int64) ([]ListUserLi
 			&i.UserID,
 			&i.Name,
 			&i.Description,
+			&i.ListType,
+			&i.FilterJson,
+			&i.MediaType,
+			&i.Icon,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ItemCount,
@@ -253,26 +282,54 @@ func (q *Queries) RemoveFromList(ctx context.Context, arg RemoveFromListParams) 
 	return err
 }
 
+const reorderListItem = `-- name: ReorderListItem :exec
+UPDATE user_list_items SET sort_order = $3
+WHERE list_id = $1 AND media_item_id = $2
+`
+
+type ReorderListItemParams struct {
+	ListID      int64 `json:"list_id"`
+	MediaItemID int64 `json:"media_item_id"`
+	SortOrder   int32 `json:"sort_order"`
+}
+
+func (q *Queries) ReorderListItem(ctx context.Context, arg ReorderListItemParams) error {
+	_, err := q.db.Exec(ctx, reorderListItem, arg.ListID, arg.MediaItemID, arg.SortOrder)
+	return err
+}
+
 const updateUserList = `-- name: UpdateUserList :one
-UPDATE user_lists SET name = $2, description = $3, updated_at = now()
+UPDATE user_lists SET name = $2, description = $3, filter_json = $4, icon = $5, updated_at = now()
 WHERE id = $1
-RETURNING id, user_id, name, description, created_at, updated_at
+RETURNING id, user_id, name, description, list_type, filter_json, media_type, icon, created_at, updated_at
 `
 
 type UpdateUserListParams struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	FilterJson  []byte `json:"filter_json"`
+	Icon        string `json:"icon"`
 }
 
 func (q *Queries) UpdateUserList(ctx context.Context, arg UpdateUserListParams) (UserList, error) {
-	row := q.db.QueryRow(ctx, updateUserList, arg.ID, arg.Name, arg.Description)
+	row := q.db.QueryRow(ctx, updateUserList,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.FilterJson,
+		arg.Icon,
+	)
 	var i UserList
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
 		&i.Name,
 		&i.Description,
+		&i.ListType,
+		&i.FilterJson,
+		&i.MediaType,
+		&i.Icon,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

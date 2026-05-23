@@ -77,7 +77,7 @@ func (q *Queries) CreateAlbum(ctx context.Context, arg CreateAlbumParams) (Album
 const createArtist = `-- name: CreateArtist :one
 INSERT INTO artists (media_item_id, musicbrainz_id, sort_name, biography)
 VALUES ($1, $2, $3, $4)
-RETURNING id, media_item_id, musicbrainz_id, sort_name, biography
+RETURNING id, media_item_id, musicbrainz_id, sort_name, biography, search_vector
 `
 
 type CreateArtistParams struct {
@@ -101,6 +101,7 @@ func (q *Queries) CreateArtist(ctx context.Context, arg CreateArtistParams) (Art
 		&i.MusicbrainzID,
 		&i.SortName,
 		&i.Biography,
+		&i.SearchVector,
 	)
 	return i, err
 }
@@ -200,7 +201,7 @@ func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID str
 }
 
 const getArtistByMediaItemID = `-- name: GetArtistByMediaItemID :one
-SELECT id, media_item_id, musicbrainz_id, sort_name, biography FROM artists WHERE media_item_id = $1
+SELECT id, media_item_id, musicbrainz_id, sort_name, biography, search_vector FROM artists WHERE media_item_id = $1
 `
 
 func (q *Queries) GetArtistByMediaItemID(ctx context.Context, mediaItemID int64) (Artist, error) {
@@ -212,12 +213,13 @@ func (q *Queries) GetArtistByMediaItemID(ctx context.Context, mediaItemID int64)
 		&i.MusicbrainzID,
 		&i.SortName,
 		&i.Biography,
+		&i.SearchVector,
 	)
 	return i, err
 }
 
 const getArtistByMusicBrainzID = `-- name: GetArtistByMusicBrainzID :one
-SELECT id, media_item_id, musicbrainz_id, sort_name, biography FROM artists WHERE musicbrainz_id = $1
+SELECT id, media_item_id, musicbrainz_id, sort_name, biography, search_vector FROM artists WHERE musicbrainz_id = $1
 `
 
 func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID string) (Artist, error) {
@@ -229,6 +231,7 @@ func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID st
 		&i.MusicbrainzID,
 		&i.SortName,
 		&i.Biography,
+		&i.SearchVector,
 	)
 	return i, err
 }
@@ -396,7 +399,7 @@ const updateArtist = `-- name: UpdateArtist :one
 UPDATE artists
 SET musicbrainz_id = $2, sort_name = $3, biography = $4
 WHERE id = $1
-RETURNING id, media_item_id, musicbrainz_id, sort_name, biography
+RETURNING id, media_item_id, musicbrainz_id, sort_name, biography, search_vector
 `
 
 type UpdateArtistParams struct {
@@ -420,6 +423,7 @@ func (q *Queries) UpdateArtist(ctx context.Context, arg UpdateArtistParams) (Art
 		&i.MusicbrainzID,
 		&i.SortName,
 		&i.Biography,
+		&i.SearchVector,
 	)
 	return i, err
 }

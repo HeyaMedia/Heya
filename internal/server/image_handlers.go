@@ -5,9 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata/studios"
 	"github.com/karbowiak/heya/internal/service"
 )
@@ -21,64 +19,19 @@ func handleMediaImage(app *service.App) http.HandlerFunc {
 		}
 
 		imageType := r.PathValue("type")
-		q := sqlc.New(app.DB)
 
 		sortOrder := -1
 		if s := r.URL.Query().Get("sort"); s != "" {
 			sortOrder, _ = strconv.Atoi(s)
 		}
-
 		label := r.URL.Query().Get("label")
 
-		if sortOrder >= 0 || label != "" {
-			assets, err := q.ListMediaAssets(r.Context(), id)
-			if err == nil {
-				for _, a := range assets {
-					if label != "" && a.Label == label && a.LocalPath != "" {
-						serveFile(w, r, a.LocalPath)
-						return
-					}
-					if sortOrder >= 0 && string(a.AssetType) == imageType && int(a.SortOrder) == sortOrder && a.LocalPath != "" {
-						serveFile(w, r, a.LocalPath)
-						return
-					}
-				}
-			}
-		}
-
-		if imageType == "poster" || imageType == "backdrop" {
-			item, err := q.GetMediaItemByID(r.Context(), id)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			var imgPath string
-			if imageType == "poster" {
-				imgPath = item.PosterPath
-			} else {
-				imgPath = item.BackdropPath
-			}
-			if imgPath == "" || strings.HasPrefix(imgPath, "http") {
-				http.NotFound(w, r)
-				return
-			}
-			serveFile(w, r, imgPath)
-			return
-		}
-
-		assets, err := q.ListMediaAssets(r.Context(), id)
-		if err != nil {
+		path, ok := app.GetMediaImagePath(r.Context(), id, imageType, sortOrder, label)
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		for _, a := range assets {
-			if string(a.AssetType) == imageType && a.LocalPath != "" {
-				serveFile(w, r, a.LocalPath)
-				return
-			}
-		}
-
-		http.NotFound(w, r)
+		serveFile(w, r, path)
 	}
 }
 
@@ -90,14 +43,12 @@ func handlePersonImage(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		person, err := q.GetPersonByID(r.Context(), id)
-		if err != nil || person.ProfilePath == "" || strings.HasPrefix(person.ProfilePath, "http") {
+		path, ok := app.GetPersonImagePath(r.Context(), id)
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-
-		serveFile(w, r, person.ProfilePath)
+		serveFile(w, r, path)
 	}
 }
 
@@ -109,20 +60,18 @@ func handleStudioImage(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		q := sqlc.New(app.DB)
-		company, err := q.GetProductionCompanyByID(r.Context(), id)
-		if err != nil {
+		name, ok := app.GetStudioLogoName(r.Context(), id)
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 
-		resolver := studios.NewResolver(app.Config.DataDir)
-		logoPath := resolver.LogoPath(company.Name)
+		resolver := studios.NewResolver(app.ConfigSnapshot().DataDir)
+		logoPath := resolver.LogoPath(name)
 		if logoPath == "" {
 			http.NotFound(w, r)
 			return
 		}
-
 		serveFile(w, r, logoPath)
 	}
 }

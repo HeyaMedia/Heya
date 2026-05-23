@@ -56,17 +56,17 @@ type SceneReleaseParse struct {
 }
 
 type ParsedStorageEntry struct {
-	InputPath      string              `json:"inputPath"`
-	NormalizedPath string              `json:"normalizedPath"`
-	Basename       string              `json:"basename"`
-	StorageRoot    string              `json:"storageRoot,omitempty"`
-	Collection     string              `json:"collection,omitempty"`
-	EntryType      StorageEntryType    `json:"entryType"`
-	Extension      string              `json:"extension,omitempty"`
-	Status         StorageParseStatus  `json:"status"`
-	Media          SceneMediaKind      `json:"media"`
-	Release        *SceneReleaseParse  `json:"release,omitempty"`
-	ReleaseSegment string              `json:"releaseSegment,omitempty"`
+	InputPath      string             `json:"inputPath"`
+	NormalizedPath string             `json:"normalizedPath"`
+	Basename       string             `json:"basename"`
+	StorageRoot    string             `json:"storageRoot,omitempty"`
+	Collection     string             `json:"collection,omitempty"`
+	EntryType      StorageEntryType   `json:"entryType"`
+	Extension      string             `json:"extension,omitempty"`
+	Status         StorageParseStatus `json:"status"`
+	Media          SceneMediaKind     `json:"media"`
+	Release        *SceneReleaseParse `json:"release,omitempty"`
+	ReleaseSegment string             `json:"releaseSegment,omitempty"`
 }
 
 type PreparedSegment struct {

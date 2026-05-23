@@ -1,32 +1,22 @@
--- name: GetPersonByTmdbID :one
-SELECT * FROM people WHERE tmdb_id = $1;
+-- name: GetPersonByExternalID :one
+SELECT * FROM people WHERE external_ids @> $1::jsonb LIMIT 1;
+
+-- name: FindPersonByExternalID :one
+SELECT * FROM people WHERE external_ids @> $1::jsonb LIMIT 1;
 
 -- name: CreatePerson :one
-INSERT INTO people (tmdb_id, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, imdb_id, popularity)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-ON CONFLICT (tmdb_id) DO UPDATE SET
-  name = EXCLUDED.name,
-  also_known_as = EXCLUDED.also_known_as,
-  biography = EXCLUDED.biography,
-  birthday = EXCLUDED.birthday,
-  deathday = EXCLUDED.deathday,
-  place_of_birth = EXCLUDED.place_of_birth,
-  gender = EXCLUDED.gender,
-  profile_path = EXCLUDED.profile_path,
-  homepage = EXCLUDED.homepage,
-  imdb_id = EXCLUDED.imdb_id,
-  popularity = EXCLUDED.popularity,
-  updated_at = now()
+INSERT INTO people (external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, sort_name, known_for_department, birth_year, heya_slug)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING *;
 
 -- name: CreateMediaCast :exec
-INSERT INTO media_cast (media_item_id, person_id, character, display_order)
-VALUES ($1, $2, $3, $4)
+INSERT INTO media_cast (media_item_id, person_id, character, display_order, gender, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (media_item_id, person_id, character) DO NOTHING;
 
 -- name: CreateMediaCrew :exec
-INSERT INTO media_crew (media_item_id, person_id, job, department)
-VALUES ($1, $2, $3, $4)
+INSERT INTO media_crew (media_item_id, person_id, job, department, gender, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (media_item_id, person_id, job) DO NOTHING;
 
 -- name: ListMediaCast :many
@@ -85,3 +75,41 @@ FROM media_crew mc
 JOIN media_items mi ON mi.id = mc.media_item_id
 WHERE mc.person_id = $1
 ORDER BY mi.year DESC, mi.title;
+
+-- name: SearchPeopleByName :many
+SELECT p.id, p.name, p.profile_path
+FROM people p
+WHERE lower(p.name) LIKE lower(@query) || '%'
+ORDER BY p.popularity DESC NULLS LAST
+LIMIT @max_results;
+
+-- name: DeleteMediaCastByItem :exec
+DELETE FROM media_cast WHERE media_item_id = $1;
+
+-- name: DeleteMediaCrewByItem :exec
+DELETE FROM media_crew WHERE media_item_id = $1;
+
+-- name: ListCastMediaItemIDs :many
+SELECT DISTINCT mc.media_item_id
+FROM media_cast mc
+WHERE mc.person_id = ANY(@person_ids::bigint[]);
+
+-- name: ListCrewMediaItemIDs :many
+SELECT DISTINCT mc.media_item_id
+FROM media_crew mc
+WHERE mc.person_id = ANY(@person_ids::bigint[]);
+
+-- name: GetPersonByHeyaSlug :one
+SELECT * FROM people WHERE heya_slug = $1;
+
+-- name: UpdatePersonFull :one
+UPDATE people SET
+  name = $2, also_known_as = $3, biography = $4, birthday = $5, deathday = $6,
+  place_of_birth = $7, gender = $8, profile_path = $9, homepage = $10,
+  popularity = $11, external_ids = $12, sort_name = $13, known_for_department = $14,
+  birth_year = $15, heya_slug = $16, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkPersonEnriched :exec
+UPDATE people SET heya_enriched_at = now() WHERE id = $1;

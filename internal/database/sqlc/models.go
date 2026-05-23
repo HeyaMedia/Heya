@@ -14,21 +14,17 @@ import (
 type AssetType string
 
 const (
-	AssetTypePoster       AssetType = "poster"
-	AssetTypeBackdrop     AssetType = "backdrop"
-	AssetTypeBanner       AssetType = "banner"
-	AssetTypeClearart     AssetType = "clearart"
-	AssetTypeClearlogo    AssetType = "clearlogo"
-	AssetTypeFanart       AssetType = "fanart"
-	AssetTypeLandscape    AssetType = "landscape"
-	AssetTypeLogo         AssetType = "logo"
-	AssetTypeFolder       AssetType = "folder"
-	AssetTypeThumb        AssetType = "thumb"
-	AssetTypeSeasonPoster AssetType = "season_poster"
-	AssetTypeSubtitle     AssetType = "subtitle"
-	AssetTypeLyrics       AssetType = "lyrics"
-	AssetTypeNfo          AssetType = "nfo"
-	AssetTypeDisc         AssetType = "disc"
+	AssetTypePoster   AssetType = "poster"
+	AssetTypeBackdrop AssetType = "backdrop"
+	AssetTypeLogo     AssetType = "logo"
+	AssetTypeArt      AssetType = "art"
+	AssetTypeBanner   AssetType = "banner"
+	AssetTypeThumb    AssetType = "thumb"
+	AssetTypeDisc     AssetType = "disc"
+	AssetTypeClearart AssetType = "clearart"
+	AssetTypeSubtitle AssetType = "subtitle"
+	AssetTypeLyrics   AssetType = "lyrics"
+	AssetTypeNfo      AssetType = "nfo"
 )
 
 func (e *AssetType) Scan(src interface{}) error {
@@ -227,11 +223,12 @@ type Album struct {
 }
 
 type Artist struct {
-	ID            int64  `json:"id"`
-	MediaItemID   int64  `json:"media_item_id"`
-	MusicbrainzID string `json:"musicbrainz_id"`
-	SortName      string `json:"sort_name"`
-	Biography     string `json:"biography"`
+	ID            int64       `json:"id"`
+	MediaItemID   int64       `json:"media_item_id"`
+	MusicbrainzID string      `json:"musicbrainz_id"`
+	SortName      string      `json:"sort_name"`
+	Biography     string      `json:"biography"`
+	SearchVector  interface{} `json:"search_vector"`
 }
 
 type Author struct {
@@ -264,12 +261,33 @@ type Book struct {
 
 type Collection struct {
 	ID           int64       `json:"id"`
-	TmdbID       pgtype.Int4 `json:"tmdb_id"`
+	ExternalIds  []byte      `json:"external_ids"`
 	Name         string      `json:"name"`
 	Overview     string      `json:"overview"`
 	PosterPath   string      `json:"poster_path"`
 	BackdropPath string      `json:"backdrop_path"`
 	SearchVector interface{} `json:"search_vector"`
+}
+
+type Creator struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ExternalIds []byte `json:"external_ids"`
+}
+
+type EpisodeOverview struct {
+	ID        int64  `json:"id"`
+	EpisodeID int64  `json:"episode_id"`
+	Language  string `json:"language"`
+	Overview  string `json:"overview"`
+}
+
+type EpisodeTitle struct {
+	ID        int64  `json:"id"`
+	EpisodeID int64  `json:"episode_id"`
+	Title     string `json:"title"`
+	Language  string `json:"language"`
+	Source    string `json:"source"`
 }
 
 type ExternalRating struct {
@@ -278,12 +296,14 @@ type ExternalRating struct {
 	Source      string         `json:"source"`
 	Value       string         `json:"value"`
 	Score       pgtype.Numeric `json:"score"`
+	Votes       int32          `json:"votes"`
+	RawValue    string         `json:"raw_value"`
 }
 
 type Keyword struct {
-	ID     int64       `json:"id"`
-	TmdbID pgtype.Int4 `json:"tmdb_id"`
-	Name   string      `json:"name"`
+	ID          int64  `json:"id"`
+	ExternalIds []byte `json:"external_ids"`
+	Name        string `json:"name"`
 }
 
 type Library struct {
@@ -292,10 +312,10 @@ type Library struct {
 	MediaType    MediaType          `json:"media_type"`
 	Paths        []string           `json:"paths"`
 	ScanInterval pgtype.Interval    `json:"scan_interval"`
+	Settings     []byte             `json:"settings"`
 	CreatedBy    int64              `json:"created_by"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Settings     []byte             `json:"settings"`
 }
 
 type LibraryFile struct {
@@ -308,11 +328,13 @@ type LibraryFile struct {
 	ParseResult  []byte             `json:"parse_result"`
 	Status       FileStatus         `json:"status"`
 	ErrorMessage string             `json:"error_message"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 	MediaInfo    []byte             `json:"media_info"`
 	Keyframes    []byte             `json:"keyframes"`
+	HasTrickplay bool               `json:"has_trickplay"`
+	ContentHash  string             `json:"content_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MatchCandidate struct {
@@ -343,6 +365,9 @@ type MediaAsset struct {
 	Width       int32              `json:"width"`
 	Height      int32              `json:"height"`
 	FileSize    int64              `json:"file_size"`
+	Score       pgtype.Numeric     `json:"score"`
+	Likes       int32              `json:"likes"`
+	Aspect      string             `json:"aspect"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -352,6 +377,8 @@ type MediaCast struct {
 	PersonID     int64  `json:"person_id"`
 	Character    string `json:"character"`
 	DisplayOrder int32  `json:"display_order"`
+	Gender       int32  `json:"gender"`
+	Source       string `json:"source"`
 }
 
 type MediaCertification struct {
@@ -361,6 +388,7 @@ type MediaCertification struct {
 	Certification string      `json:"certification"`
 	ReleaseDate   pgtype.Date `json:"release_date"`
 	ReleaseType   int32       `json:"release_type"`
+	Source        string      `json:"source"`
 }
 
 type MediaCrew struct {
@@ -369,17 +397,20 @@ type MediaCrew struct {
 	PersonID    int64  `json:"person_id"`
 	Job         string `json:"job"`
 	Department  string `json:"department"`
+	Gender      int32  `json:"gender"`
+	Source      string `json:"source"`
 }
 
 type MediaExtra struct {
-	ID          int64              `json:"id"`
-	MediaItemID int64              `json:"media_item_id"`
-	ExtraType   ExtraType          `json:"extra_type"`
-	Title       string             `json:"title"`
-	FilePath    string             `json:"file_path"`
-	DurationMs  int32              `json:"duration_ms"`
-	FileSize    int64              `json:"file_size"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID            int64              `json:"id"`
+	MediaItemID   int64              `json:"media_item_id"`
+	ExtraType     ExtraType          `json:"extra_type"`
+	Title         string             `json:"title"`
+	FilePath      string             `json:"file_path"`
+	DurationMs    int32              `json:"duration_ms"`
+	FileSize      int64              `json:"file_size"`
+	ThumbnailPath string             `json:"thumbnail_path"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type MediaItem struct {
@@ -393,21 +424,31 @@ type MediaItem struct {
 	PosterPath          string             `json:"poster_path"`
 	BackdropPath        string             `json:"backdrop_path"`
 	ExternalIds         []byte             `json:"external_ids"`
+	Slug                string             `json:"slug"`
+	Homepage            string             `json:"homepage"`
+	Tagline             string             `json:"tagline"`
+	OriginalTitle       string             `json:"original_title"`
+	OriginalLanguage    string             `json:"original_language"`
+	Status              string             `json:"status"`
+	ProviderKind        string             `json:"provider_kind"`
+	HeyaSlug            string             `json:"heya_slug"`
+	HeyaEnrichedAt      pgtype.Timestamptz `json:"heya_enriched_at"`
+	MetadataRefreshedAt pgtype.Timestamptz `json:"metadata_refreshed_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	SearchVector        interface{}        `json:"search_vector"`
-	Homepage            string             `json:"homepage"`
-	WikidataID          string             `json:"wikidata_id"`
-	FacebookID          string             `json:"facebook_id"`
-	InstagramID         string             `json:"instagram_id"`
-	TwitterID           string             `json:"twitter_id"`
-	Slug                string             `json:"slug"`
-	MetadataRefreshedAt pgtype.Timestamptz `json:"metadata_refreshed_at"`
 }
 
 type MediaKeyword struct {
 	MediaItemID int64 `json:"media_item_id"`
 	KeywordID   int64 `json:"keyword_id"`
+}
+
+type MediaOverview struct {
+	ID          int64  `json:"id"`
+	MediaItemID int64  `json:"media_item_id"`
+	Language    string `json:"language"`
+	Overview    string `json:"overview"`
 }
 
 type MediaProductionCompany struct {
@@ -416,20 +457,30 @@ type MediaProductionCompany struct {
 }
 
 type MediaRecommendation struct {
-	ID                int64          `json:"id"`
-	MediaItemID       int64          `json:"media_item_id"`
-	RecommendedTmdbID int32          `json:"recommended_tmdb_id"`
-	Title             string         `json:"title"`
-	PosterPath        string         `json:"poster_path"`
-	MediaType         string         `json:"media_type"`
-	VoteAverage       pgtype.Numeric `json:"vote_average"`
-	ReleaseDate       string         `json:"release_date"`
+	ID          int64          `json:"id"`
+	MediaItemID int64          `json:"media_item_id"`
+	ExternalIds []byte         `json:"external_ids"`
+	Title       string         `json:"title"`
+	PosterPath  string         `json:"poster_path"`
+	MediaType   string         `json:"media_type"`
+	VoteAverage pgtype.Numeric `json:"vote_average"`
+	ReleaseDate string         `json:"release_date"`
+}
+
+type MediaTitle struct {
+	ID          int64  `json:"id"`
+	MediaItemID int64  `json:"media_item_id"`
+	Title       string `json:"title"`
+	Language    string `json:"language"`
+	Country     string `json:"country"`
+	TitleType   string `json:"title_type"`
+	Source      string `json:"source"`
 }
 
 type MediaVideo struct {
 	ID          int64              `json:"id"`
 	MediaItemID int64              `json:"media_item_id"`
-	TmdbKey     string             `json:"tmdb_key"`
+	ProviderKey string             `json:"provider_key"`
 	Name        string             `json:"name"`
 	Site        string             `json:"site"`
 	VideoKey    string             `json:"video_key"`
@@ -440,57 +491,102 @@ type MediaVideo struct {
 }
 
 type Movie struct {
-	ID                  int64          `json:"id"`
-	MediaItemID         int64          `json:"media_item_id"`
-	TmdbID              pgtype.Int4    `json:"tmdb_id"`
-	ImdbID              string         `json:"imdb_id"`
-	RuntimeMinutes      int32          `json:"runtime_minutes"`
-	Tagline             string         `json:"tagline"`
-	Genres              []string       `json:"genres"`
-	Rating              pgtype.Numeric `json:"rating"`
-	ReleaseDate         pgtype.Date    `json:"release_date"`
-	OriginalTitle       string         `json:"original_title"`
-	OriginalLanguage    string         `json:"original_language"`
-	Budget              int64          `json:"budget"`
-	Revenue             int64          `json:"revenue"`
-	Popularity          pgtype.Numeric `json:"popularity"`
-	VoteCount           int32          `json:"vote_count"`
-	ProductionCompanies []string       `json:"production_companies"`
-	CastData            []byte         `json:"cast_data"`
-	CrewData            []byte         `json:"crew_data"`
-	CollectionID        pgtype.Int8    `json:"collection_id"`
-	Status              string         `json:"status"`
-	Homepage            string         `json:"homepage"`
-	SpokenLanguages     []string       `json:"spoken_languages"`
-	OriginCountry       []string       `json:"origin_country"`
+	ID               int64          `json:"id"`
+	MediaItemID      int64          `json:"media_item_id"`
+	RuntimeMinutes   int32          `json:"runtime_minutes"`
+	Tagline          string         `json:"tagline"`
+	Genres           []string       `json:"genres"`
+	Rating           pgtype.Numeric `json:"rating"`
+	ReleaseDate      pgtype.Date    `json:"release_date"`
+	OriginalTitle    string         `json:"original_title"`
+	OriginalLanguage string         `json:"original_language"`
+	Budget           int64          `json:"budget"`
+	Revenue          int64          `json:"revenue"`
+	Popularity       pgtype.Numeric `json:"popularity"`
+	CollectionID     pgtype.Int8    `json:"collection_id"`
+	Status           string         `json:"status"`
+	Homepage         string         `json:"homepage"`
+	SpokenLanguages  []string       `json:"spoken_languages"`
+	OriginCountry    []string       `json:"origin_country"`
+}
+
+type Network struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ExternalIds []byte `json:"external_ids"`
+	LogoPath    string `json:"logo_path"`
+	Country     string `json:"country"`
 }
 
 type Person struct {
-	ID           int64              `json:"id"`
-	TmdbID       pgtype.Int4        `json:"tmdb_id"`
-	Name         string             `json:"name"`
-	AlsoKnownAs  []string           `json:"also_known_as"`
-	Biography    string             `json:"biography"`
-	Birthday     string             `json:"birthday"`
-	Deathday     string             `json:"deathday"`
-	PlaceOfBirth string             `json:"place_of_birth"`
-	Gender       int32              `json:"gender"`
-	ProfilePath  string             `json:"profile_path"`
-	Homepage     string             `json:"homepage"`
-	ImdbID       string             `json:"imdb_id"`
-	Popularity   pgtype.Numeric     `json:"popularity"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Slug         string             `json:"slug"`
-	SearchVector interface{}        `json:"search_vector"`
+	ID                 int64              `json:"id"`
+	ExternalIds        []byte             `json:"external_ids"`
+	Name               string             `json:"name"`
+	AlsoKnownAs        []string           `json:"also_known_as"`
+	Biography          string             `json:"biography"`
+	Birthday           string             `json:"birthday"`
+	Deathday           string             `json:"deathday"`
+	PlaceOfBirth       string             `json:"place_of_birth"`
+	Gender             int32              `json:"gender"`
+	ProfilePath        string             `json:"profile_path"`
+	Homepage           string             `json:"homepage"`
+	Popularity         pgtype.Numeric     `json:"popularity"`
+	Slug               string             `json:"slug"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	SortName           string             `json:"sort_name"`
+	KnownForDepartment string             `json:"known_for_department"`
+	BirthYear          int32              `json:"birth_year"`
+	HeyaSlug           string             `json:"heya_slug"`
+	HeyaEnrichedAt     pgtype.Timestamptz `json:"heya_enriched_at"`
+	SearchVector       interface{}        `json:"search_vector"`
+}
+
+type PersonBiography struct {
+	ID        int64  `json:"id"`
+	PersonID  int64  `json:"person_id"`
+	Language  string `json:"language"`
+	Biography string `json:"biography"`
+}
+
+type PersonProfile struct {
+	ID        int64          `json:"id"`
+	PersonID  int64          `json:"person_id"`
+	Url       string         `json:"url"`
+	Source    string         `json:"source"`
+	Aspect    string         `json:"aspect"`
+	Width     int32          `json:"width"`
+	Height    int32          `json:"height"`
+	Score     pgtype.Numeric `json:"score"`
+	SortOrder int32          `json:"sort_order"`
 }
 
 type ProductionCompany struct {
-	ID            int64       `json:"id"`
-	TmdbID        pgtype.Int4 `json:"tmdb_id"`
-	Name          string      `json:"name"`
-	LogoPath      string      `json:"logo_path"`
-	OriginCountry string      `json:"origin_country"`
+	ID            int64  `json:"id"`
+	ExternalIds   []byte `json:"external_ids"`
+	Name          string `json:"name"`
+	LogoPath      string `json:"logo_path"`
+	OriginCountry string `json:"origin_country"`
+}
+
+type ScheduledTask struct {
+	ID                    string             `json:"id"`
+	DisplayName           string             `json:"display_name"`
+	Description           string             `json:"description"`
+	Category              string             `json:"category"`
+	Enabled               bool               `json:"enabled"`
+	IntervalHours         int32              `json:"interval_hours"`
+	DailyStartTime        string             `json:"daily_start_time"`
+	DailyEndTime          string             `json:"daily_end_time"`
+	MaxRuntimeMinutes     int32              `json:"max_runtime_minutes"`
+	LastRunAt             pgtype.Timestamptz `json:"last_run_at"`
+	LastRunResult         string             `json:"last_run_result"`
+	LastRunDurationSec    int32              `json:"last_run_duration_sec"`
+	LastRunItemsProcessed int32              `json:"last_run_items_processed"`
+	LastRunItemsTotal     int32              `json:"last_run_items_total"`
+	NextRunAt             pgtype.Timestamptz `json:"next_run_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Session struct {
@@ -522,24 +618,30 @@ type TvEpisode struct {
 	RuntimeMinutes int32          `json:"runtime_minutes"`
 	AirDate        pgtype.Date    `json:"air_date"`
 	Rating         pgtype.Numeric `json:"rating"`
-	VoteCount      int32          `json:"vote_count"`
+	AbsoluteNumber int32          `json:"absolute_number"`
+	IsSpecial      bool           `json:"is_special"`
+	EpisodeType    int32          `json:"episode_type"`
+	ExternalIds    []byte         `json:"external_ids"`
+	Source         string         `json:"source"`
 }
 
 type TvSeason struct {
-	ID           int64       `json:"id"`
-	SeriesID     int64       `json:"series_id"`
-	SeasonNumber int32       `json:"season_number"`
-	Title        string      `json:"title"`
-	Overview     string      `json:"overview"`
-	PosterPath   string      `json:"poster_path"`
-	AirDate      pgtype.Date `json:"air_date"`
+	ID            int64       `json:"id"`
+	SeriesID      int64       `json:"series_id"`
+	SeasonNumber  int32       `json:"season_number"`
+	Title         string      `json:"title"`
+	Overview      string      `json:"overview"`
+	PosterPath    string      `json:"poster_path"`
+	AirDate       pgtype.Date `json:"air_date"`
+	EndDate       pgtype.Date `json:"end_date"`
+	Status        string      `json:"status"`
+	AiredEpisodes int32       `json:"aired_episodes"`
+	ExternalIds   []byte      `json:"external_ids"`
 }
 
 type TvSeries struct {
 	ID               int64          `json:"id"`
 	MediaItemID      int64          `json:"media_item_id"`
-	TmdbID           pgtype.Int4    `json:"tmdb_id"`
-	ImdbID           string         `json:"imdb_id"`
 	Status           string         `json:"status"`
 	Genres           []string       `json:"genres"`
 	Rating           pgtype.Numeric `json:"rating"`
@@ -547,13 +649,23 @@ type TvSeries struct {
 	LastAirDate      pgtype.Date    `json:"last_air_date"`
 	OriginalName     string         `json:"original_name"`
 	OriginalLanguage string         `json:"original_language"`
-	Networks         []string       `json:"networks"`
-	CreatedBy        []string       `json:"created_by"`
 	NumberOfSeasons  int32          `json:"number_of_seasons"`
 	NumberOfEpisodes int32          `json:"number_of_episodes"`
 	Popularity       pgtype.Numeric `json:"popularity"`
-	VoteCount        int32          `json:"vote_count"`
-	CastData         []byte         `json:"cast_data"`
+	SpokenLanguages  []string       `json:"spoken_languages"`
+	OriginCountry    []string       `json:"origin_country"`
+}
+
+type TvSeriesCreator struct {
+	SeriesID  int64 `json:"series_id"`
+	CreatorID int64 `json:"creator_id"`
+	SortOrder int32 `json:"sort_order"`
+}
+
+type TvSeriesNetwork struct {
+	SeriesID  int64 `json:"series_id"`
+	NetworkID int64 `json:"network_id"`
+	SortOrder int32 `json:"sort_order"`
 }
 
 type User struct {
@@ -562,6 +674,7 @@ type User struct {
 	Email        string             `json:"email"`
 	PasswordHash string             `json:"password_hash"`
 	IsAdmin      bool               `json:"is_admin"`
+	Settings     []byte             `json:"settings"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
@@ -579,6 +692,10 @@ type UserList struct {
 	UserID      int64              `json:"user_id"`
 	Name        string             `json:"name"`
 	Description string             `json:"description"`
+	ListType    string             `json:"list_type"`
+	FilterJson  []byte             `json:"filter_json"`
+	MediaType   string             `json:"media_type"`
+	Icon        string             `json:"icon"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
@@ -589,6 +706,16 @@ type UserListItem struct {
 	MediaItemID int64              `json:"media_item_id"`
 	SortOrder   int32              `json:"sort_order"`
 	AddedAt     pgtype.Timestamptz `json:"added_at"`
+}
+
+type UserPlaybackPreference struct {
+	ID               int64              `json:"id"`
+	UserID           int64              `json:"user_id"`
+	MediaItemID      int64              `json:"media_item_id"`
+	AudioLanguage    string             `json:"audio_language"`
+	SubtitleLanguage string             `json:"subtitle_language"`
+	SubtitleMode     string             `json:"subtitle_mode"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserWatchProgress struct {

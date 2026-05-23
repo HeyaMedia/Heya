@@ -1,7 +1,5 @@
 package metadata
 
-import "context"
-
 type MediaKind string
 
 const (
@@ -39,51 +37,59 @@ type SearchResult struct {
 	RawData      any     `json:"-"`
 }
 
+type TitleEntry struct {
+	Title     string `json:"title"`
+	Language  string `json:"language"`
+	Country   string `json:"country,omitempty"`
+	TitleType string `json:"type"`
+	Source    string `json:"source,omitempty"`
+}
+
 type MediaDetail struct {
-	Title       string            `json:"title"`
-	SortTitle   string            `json:"sort_title"`
-	Year        string            `json:"year"`
-	Description string            `json:"description"`
-	PosterURL   string            `json:"poster_url"`
-	BackdropURL string            `json:"backdrop_url"`
-	ExternalIDs map[string]string `json:"external_ids"`
-	Genres      []string          `json:"genres"`
-	Rating      float64           `json:"rating"`
+	Title        string            `json:"title"`
+	SortTitle    string            `json:"sort_title"`
+	Year         string            `json:"year"`
+	Description  string            `json:"description"`
+	Titles       []TitleEntry      `json:"titles,omitempty"`
+	Overviews    map[string]string `json:"overviews,omitempty"`
+	PosterURL    string            `json:"poster_url"`
+	BackdropURL  string            `json:"backdrop_url"`
+	ExternalIDs  map[string]string `json:"external_ids"`
+	Genres       []string          `json:"genres"`
+	Rating       float64           `json:"rating"`
+	ProviderKind string            `json:"provider_kind,omitempty"`
+	HeyaSlug     string            `json:"heya_slug,omitempty"`
 
 	// Movie
-	RuntimeMinutes      int      `json:"runtime_minutes,omitempty"`
-	Tagline             string   `json:"tagline,omitempty"`
-	ReleaseDate         string   `json:"release_date,omitempty"`
-	OriginalTitle       string   `json:"original_title,omitempty"`
-	OriginalLanguage    string   `json:"original_language,omitempty"`
-	Budget              int64    `json:"budget,omitempty"`
-	Revenue             int64    `json:"revenue,omitempty"`
-	Popularity          float64  `json:"popularity,omitempty"`
-	VoteCount           int      `json:"vote_count,omitempty"`
+	RuntimeMinutes      int                       `json:"runtime_minutes,omitempty"`
+	Tagline             string                    `json:"tagline,omitempty"`
+	ReleaseDate         string                    `json:"release_date,omitempty"`
+	OriginalTitle       string                    `json:"original_title,omitempty"`
+	OriginalLanguage    string                    `json:"original_language,omitempty"`
+	Budget              int64                     `json:"budget,omitempty"`
+	Revenue             int64                     `json:"revenue,omitempty"`
+	Popularity          float64                   `json:"popularity,omitempty"`
+	VoteCount           int                       `json:"vote_count,omitempty"`
 	ProductionCompanies []ProductionCompanyDetail `json:"production_companies,omitempty"`
 	Cast                []CastMember              `json:"cast,omitempty"`
 	Crew                []CrewMember              `json:"crew,omitempty"`
-	Keywords            []KeywordDetail            `json:"keywords,omitempty"`
-	Videos              []VideoDetail              `json:"videos,omitempty"`
-	Certifications      []CertificationDetail      `json:"certifications,omitempty"`
-	Recommendations     []RecommendationDetail     `json:"recommendations,omitempty"`
-	Collection          *CollectionDetail           `json:"collection,omitempty"`
-	Homepage            string                     `json:"homepage,omitempty"`
-	SpokenLanguages     []string                   `json:"spoken_languages,omitempty"`
-	OriginCountry       []string                   `json:"origin_country,omitempty"`
-	MovieStatus         string                     `json:"movie_status,omitempty"`
-	WikidataID          string                     `json:"wikidata_id,omitempty"`
-	FacebookID          string                     `json:"facebook_id,omitempty"`
-	InstagramID         string                     `json:"instagram_id,omitempty"`
-	TwitterID           string                     `json:"twitter_id,omitempty"`
+	Keywords            []KeywordDetail           `json:"keywords,omitempty"`
+	Videos              []VideoDetail             `json:"videos,omitempty"`
+	Certifications      []CertificationDetail     `json:"certifications,omitempty"`
+	Recommendations     []RecommendationDetail    `json:"recommendations,omitempty"`
+	Collection          *CollectionDetail         `json:"collection,omitempty"`
+	Homepage            string                    `json:"homepage,omitempty"`
+	SpokenLanguages     []string                  `json:"spoken_languages,omitempty"`
+	OriginCountry       []string                  `json:"origin_country,omitempty"`
+	MovieStatus         string                    `json:"movie_status,omitempty"`
 
 	// TV
 	Status           string          `json:"status,omitempty"`
 	FirstAirDate     string          `json:"first_air_date,omitempty"`
 	LastAirDate      string          `json:"last_air_date,omitempty"`
 	OriginalName     string          `json:"original_name,omitempty"`
-	Networks         []string        `json:"networks,omitempty"`
-	CreatedBy        []string        `json:"created_by,omitempty"`
+	Networks         []NetworkDetail `json:"networks,omitempty"`
+	CreatedBy        []CreatorDetail `json:"created_by,omitempty"`
 	NumberOfSeasons  int             `json:"number_of_seasons,omitempty"`
 	NumberOfEpisodes int             `json:"number_of_episodes,omitempty"`
 	Seasons          []SeasonDetail  `json:"seasons,omitempty"`
@@ -118,44 +124,73 @@ type MediaDetail struct {
 	ArtistBio string `json:"artist_bio,omitempty"`
 }
 
-type ArtworkProvider interface {
-	Name() string
-	FetchArtwork(ctx context.Context, kind MediaKind, externalIDs map[string]string) ([]ArtworkResult, error)
+type ArtworkResult struct {
+	URL       string  `json:"url"`
+	AssetType string  `json:"asset_type"`
+	Language  string  `json:"language,omitempty"`
+	Source    string  `json:"source,omitempty"`
+	Likes     int     `json:"likes,omitempty"`
+	Score     float64 `json:"score,omitempty"`
+	Width     int     `json:"width,omitempty"`
+	Height    int     `json:"height,omitempty"`
+	Aspect    string  `json:"aspect,omitempty"`
 }
 
-type ArtworkResult struct {
-	URL       string `json:"url"`
-	AssetType string `json:"asset_type"`
-	Language  string `json:"language,omitempty"`
-	Likes     int    `json:"likes,omitempty"`
+type NetworkDetail struct {
+	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	Name        string            `json:"name"`
+	LogoPath    string            `json:"logo_path,omitempty"`
+	Country     string            `json:"country,omitempty"`
+}
+
+type CreatorDetail struct {
+	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	Name        string            `json:"name"`
+}
+
+// ProfileImage is a single profile / headshot image for a person, carrying
+// the full set of attributes the upstream payload provides (source, size,
+// score, etc.) so we can persist all of them per-person.
+type ProfileImage struct {
+	URL    string  `json:"url"`
+	Source string  `json:"source,omitempty"`
+	Aspect string  `json:"aspect,omitempty"`
+	Width  int     `json:"width,omitempty"`
+	Height int     `json:"height,omitempty"`
+	Score  float64 `json:"score,omitempty"`
+	Likes  int     `json:"likes,omitempty"`
 }
 
 type CastMember struct {
-	TmdbID      int    `json:"tmdb_id"`
-	Name        string `json:"name"`
-	Character   string `json:"character"`
-	Order       int    `json:"order"`
-	Gender      int    `json:"gender"`
-	ProfilePath string `json:"profile_path"`
-	Popularity  float64 `json:"popularity"`
+	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	Name        string            `json:"name"`
+	Character   string            `json:"character"`
+	Order       int               `json:"order"`
+	Gender      int               `json:"gender"`
+	ProfilePath string            `json:"profile_path"`
+	Profiles    []ProfileImage    `json:"profiles,omitempty"`
+	Popularity  float64           `json:"popularity"`
+	Source      string            `json:"source,omitempty"`
 }
 
 type CrewMember struct {
-	TmdbID      int    `json:"tmdb_id"`
-	Name        string `json:"name"`
-	Job         string `json:"job"`
-	Department  string `json:"department"`
-	Gender      int    `json:"gender"`
-	ProfilePath string `json:"profile_path"`
+	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	Name        string            `json:"name"`
+	Job         string            `json:"job"`
+	Department  string            `json:"department"`
+	Gender      int               `json:"gender"`
+	ProfilePath string            `json:"profile_path"`
+	Profiles    []ProfileImage    `json:"profiles,omitempty"`
+	Source      string            `json:"source,omitempty"`
 }
 
 type KeywordDetail struct {
-	TmdbID int    `json:"tmdb_id"`
-	Name   string `json:"name"`
+	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	Name        string            `json:"name"`
 }
 
 type VideoDetail struct {
-	TmdbKey     string `json:"tmdb_key"`
+	ProviderKey string `json:"provider_key"`
 	Name        string `json:"name"`
 	Site        string `json:"site"`
 	Key         string `json:"key"`
@@ -170,50 +205,65 @@ type CertificationDetail struct {
 	Certification string `json:"certification"`
 	ReleaseDate   string `json:"release_date,omitempty"`
 	ReleaseType   int    `json:"release_type"`
+	Source        string `json:"source,omitempty"`
 }
 
 type RecommendationDetail struct {
-	TmdbID      int     `json:"tmdb_id"`
-	Title       string  `json:"title"`
-	PosterPath  string  `json:"poster_path"`
-	MediaType   string  `json:"media_type"`
-	VoteAverage float64 `json:"vote_average"`
-	ReleaseDate string  `json:"release_date,omitempty"`
+	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	Title       string            `json:"title"`
+	PosterPath  string            `json:"poster_path"`
+	MediaType   string            `json:"media_type"`
+	VoteAverage float64           `json:"vote_average"`
+	ReleaseDate string            `json:"release_date,omitempty"`
 }
 
 type CollectionDetail struct {
-	TmdbID       int    `json:"tmdb_id"`
-	Name         string `json:"name"`
-	Overview     string `json:"overview"`
-	PosterPath   string `json:"poster_path"`
-	BackdropPath string `json:"backdrop_path"`
+	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
+	Name         string            `json:"name"`
+	Overview     string            `json:"overview"`
+	PosterPath   string            `json:"poster_path"`
+	BackdropPath string            `json:"backdrop_path"`
 }
 
 type ProductionCompanyDetail struct {
-	TmdbID        int    `json:"tmdb_id"`
-	Name          string `json:"name"`
-	LogoPath      string `json:"logo_path"`
-	OriginCountry string `json:"origin_country"`
+	ExternalIDs   map[string]string `json:"external_ids,omitempty"`
+	Name          string            `json:"name"`
+	LogoPath      string            `json:"logo_path"`
+	OriginCountry string            `json:"origin_country"`
 }
 
 type SeasonDetail struct {
-	Number    int             `json:"number"`
-	Title     string          `json:"title"`
-	Overview  string          `json:"overview"`
-	PosterURL string          `json:"poster_url"`
-	AirDate   string          `json:"air_date"`
-	Episodes  []EpisodeDetail `json:"episodes"`
+	Number        int             `json:"number"`
+	Title         string          `json:"title"`
+	Overview      string          `json:"overview"`
+	PosterURL     string          `json:"poster_url"`
+	AirDate       string          `json:"air_date"`
+	EndDate       string          `json:"end_date,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	AiredEpisodes int             `json:"aired_episodes,omitempty"`
+	TmdbSeasonID  int             `json:"tmdb_season_id,omitempty"`
+	TvdbSeasonID  int             `json:"tvdb_season_id,omitempty"`
+	AnidbID       int             `json:"anidb_id,omitempty"`
+	Episodes      []EpisodeDetail `json:"episodes"`
 }
 
 type EpisodeDetail struct {
-	Number         int     `json:"number"`
-	Title          string  `json:"title"`
-	Overview       string  `json:"overview"`
-	StillURL       string  `json:"still_url"`
-	RuntimeMinutes int     `json:"runtime_minutes"`
-	AirDate        string  `json:"air_date"`
-	Rating         float64 `json:"rating,omitempty"`
-	VoteCount      int     `json:"vote_count,omitempty"`
+	Number         int               `json:"number"`
+	Title          string            `json:"title"`
+	Titles         []TitleEntry      `json:"titles,omitempty"`
+	Overview       string            `json:"overview"`
+	Overviews      map[string]string `json:"overviews,omitempty"`
+	StillURL       string            `json:"still_url"`
+	RuntimeMinutes int               `json:"runtime_minutes"`
+	AirDate        string            `json:"air_date"`
+	Rating         float64           `json:"rating,omitempty"`
+	VoteCount      int               `json:"vote_count,omitempty"`
+	AbsoluteNumber int               `json:"absolute_number,omitempty"`
+	IsSpecial      bool              `json:"is_special,omitempty"`
+	EpisodeType    int               `json:"episode_type,omitempty"`
+	TmdbID         int               `json:"tmdb_id,omitempty"`
+	TvdbID         int               `json:"tvdb_id,omitempty"`
+	Source         string            `json:"source,omitempty"`
 }
 
 type TrackDetail struct {
@@ -223,29 +273,11 @@ type TrackDetail struct {
 	DurationMs  int    `json:"duration_ms"`
 }
 
-type Provider interface {
-	Name() string
-	Supports(kind MediaKind) bool
-	Search(ctx context.Context, kind MediaKind, query SearchQuery) ([]SearchResult, error)
-	GetDetail(ctx context.Context, providerID string, opts *FetchOptions) (*MediaDetail, error)
-}
-
 type NFOIDs struct {
 	TMDBID string
 	IMDBID string
 	TVDBID string
 	MBID   string
-}
-
-type DirectLookupProvider interface {
-	Provider
-	LookupByNFO(ctx context.Context, kind MediaKind, ids NFOIDs, opts *FetchOptions) (*MediaDetail, string, error)
-}
-
-type RatingsProvider interface {
-	Name() string
-	Supports(kind MediaKind) bool
-	FetchRatings(ctx context.Context, externalIDs map[string]string) (*RatingsData, error)
 }
 
 type RatingsData struct {
@@ -255,7 +287,9 @@ type RatingsData struct {
 }
 
 type ExternalRating struct {
-	Source string  `json:"source"`
-	Value  string  `json:"value"`
-	Score  float64 `json:"score"`
+	Source   string  `json:"source"`
+	Value    string  `json:"value"`
+	Score    float64 `json:"score"`
+	Votes    int     `json:"votes,omitempty"`
+	RawValue string  `json:"raw_value,omitempty"`
 }

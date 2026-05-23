@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
@@ -46,26 +47,48 @@ type FormatInfo struct {
 }
 
 type StreamInfo struct {
-	Index          int               `json:"index"`
-	CodecName      string            `json:"codec_name"`
-	CodecLongName  string            `json:"codec_long_name"`
-	CodecType      string            `json:"codec_type"`
-	Profile        string            `json:"profile,omitempty"`
-	Width          int               `json:"width,omitempty"`
-	Height         int               `json:"height,omitempty"`
-	PixFmt         string            `json:"pix_fmt,omitempty"`
-	ColorRange     string            `json:"color_range,omitempty"`
-	ColorSpace     string            `json:"color_space,omitempty"`
-	ColorTransfer  string            `json:"color_transfer,omitempty"`
-	ColorPrimaries string            `json:"color_primaries,omitempty"`
-	FieldOrder     string            `json:"field_order,omitempty"`
-	SampleRate     string            `json:"sample_rate,omitempty"`
-	Channels       int               `json:"channels,omitempty"`
-	ChannelLayout  string            `json:"channel_layout,omitempty"`
-	BitRate        string            `json:"bit_rate,omitempty"`
-	Duration       string            `json:"duration,omitempty"`
-	Disposition    *Disposition      `json:"disposition,omitempty"`
-	Tags           map[string]string `json:"tags"`
+	Index              int               `json:"index"`
+	CodecName          string            `json:"codec_name"`
+	CodecLongName      string            `json:"codec_long_name"`
+	CodecType          string            `json:"codec_type"`
+	CodecTagString     string            `json:"codec_tag_string,omitempty"` // hvc1 / hev1 / av01 / etc.
+	Profile            string            `json:"profile,omitempty"`
+	Width              int               `json:"width,omitempty"`
+	Height             int               `json:"height,omitempty"`
+	PixFmt             string            `json:"pix_fmt,omitempty"`
+	BitsPerRawSample   string            `json:"bits_per_raw_sample,omitempty"` // ffprobe reports as string
+	ColorRange         string            `json:"color_range,omitempty"`
+	ColorSpace         string            `json:"color_space,omitempty"`
+	ColorTransfer      string            `json:"color_transfer,omitempty"`
+	ColorPrimaries     string            `json:"color_primaries,omitempty"`
+	FieldOrder         string            `json:"field_order,omitempty"`
+	SampleAspectRatio  string            `json:"sample_aspect_ratio,omitempty"`  // "1:1", "8:9"
+	DisplayAspectRatio string            `json:"display_aspect_ratio,omitempty"` // "16:9"
+	SampleRate         string            `json:"sample_rate,omitempty"`
+	Channels           int               `json:"channels,omitempty"`
+	ChannelLayout      string            `json:"channel_layout,omitempty"`
+	BitRate            string            `json:"bit_rate,omitempty"`
+	Duration           string            `json:"duration,omitempty"`
+	Disposition        *Disposition      `json:"disposition,omitempty"`
+	Tags               map[string]string `json:"tags"`
+	SideDataList       []SideData        `json:"side_data_list,omitempty"`
+}
+
+// SideData captures ffprobe's "side_data_list" entries — Display Matrix
+// (rotation), DOVI configuration record (Dolby Vision profile/level/BL compat),
+// and mastering display metadata. Many fields are union-style: only the fields
+// matching the type's "side_data_type" string are populated.
+type SideData struct {
+	Type                      string `json:"side_data_type"`
+	Rotation                  int    `json:"rotation,omitempty"` // signed degrees (-90 = 90° CW)
+	DvVersionMajor            int    `json:"dv_version_major,omitempty"`
+	DvVersionMinor            int    `json:"dv_version_minor,omitempty"`
+	DvProfile                 int    `json:"dv_profile,omitempty"`
+	DvLevel                   int    `json:"dv_level,omitempty"`
+	DvBlSignalCompatibilityID int    `json:"dv_bl_signal_compatibility_id,omitempty"`
+	RpuPresentFlag            int    `json:"rpu_present_flag,omitempty"`
+	ElPresentFlag             int    `json:"el_present_flag,omitempty"`
+	BlPresentFlag             int    `json:"bl_present_flag,omitempty"`
 }
 
 type ffprobeOutput struct {
@@ -157,6 +180,15 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 		return fmt.Errorf("ffprobe db write: %w", err)
 	}
 
+	file, _ := q.GetLibraryFileByID(ctx, job.Args.LibraryFileID)
+	contentHash := scanner.ComputeContentHash(file.Size, infoJSON)
+	if contentHash != "" {
+		q.UpdateLibraryFileContentHash(ctx, sqlc.UpdateLibraryFileContentHashParams{
+			ID:          job.Args.LibraryFileID,
+			ContentHash: contentHash,
+		})
+	}
+
 	log.Debug().
 		Int64("file_id", job.Args.LibraryFileID).
 		Str("container", info.Container).
@@ -190,6 +222,7 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 					Msg("keyframes extracted")
 			}
 		}
+
 	}
 
 	return nil

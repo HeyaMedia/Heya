@@ -1,10 +1,10 @@
 -- name: CreateUserList :one
-INSERT INTO user_lists (user_id, name, description)
-VALUES ($1, $2, $3)
+INSERT INTO user_lists (user_id, name, description, list_type, filter_json, media_type)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: UpdateUserList :one
-UPDATE user_lists SET name = $2, description = $3, updated_at = now()
+UPDATE user_lists SET name = $2, description = $3, filter_json = $4, icon = $5, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -47,3 +47,7 @@ SELECT ul.id, ul.name
 FROM user_lists ul
 JOIN user_list_items li ON li.list_id = ul.id
 WHERE ul.user_id = $1 AND li.media_item_id = $2;
+
+-- name: ReorderListItem :exec
+UPDATE user_list_items SET sort_order = $3
+WHERE list_id = $1 AND media_item_id = $2;

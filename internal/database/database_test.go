@@ -97,17 +97,14 @@ func TestIntegration(t *testing.T) {
 	}
 
 	movie, err := qtx.CreateMovie(ctx, sqlc.CreateMovieParams{
-		MediaItemID:         item.ID,
-		TmdbID:              pgtype.Int4{Int32: 693134, Valid: true},
-		ImdbID:              "tt15239678",
-		RuntimeMinutes:      166,
-		Tagline:             "Long live the fighters.",
-		Genres:              []string{"Science Fiction", "Adventure"},
-		Rating:              pgtype.Numeric{Valid: true},
-		Popularity:          pgtype.Numeric{Valid: true},
-		ProductionCompanies: []string{},
-		CastData:            []byte("[]"),
-		CrewData:            []byte("[]"),
+		MediaItemID:     item.ID,
+		RuntimeMinutes:  166,
+		Tagline:         "Long live the fighters.",
+		Genres:          []string{"Science Fiction", "Adventure"},
+		Rating:          pgtype.Numeric{Valid: true},
+		Popularity:      pgtype.Numeric{Valid: true},
+		SpokenLanguages: []string{},
+		OriginCountry:   []string{},
 	})
 	if err != nil {
 		t.Fatalf("creating movie: %v", err)
@@ -116,12 +113,12 @@ func TestIntegration(t *testing.T) {
 		t.Errorf("expected runtime 166, got %d", movie.RuntimeMinutes)
 	}
 
-	gotMovie, err := qtx.GetMovieByTmdbID(ctx, pgtype.Int4{Int32: 693134, Valid: true})
+	gotMovie, err := qtx.GetMovieByMediaItemID(ctx, item.ID)
 	if err != nil {
-		t.Fatalf("getting movie by tmdb id: %v", err)
+		t.Fatalf("getting movie by media item id: %v", err)
 	}
-	if gotMovie.ImdbID != "tt15239678" {
-		t.Errorf("expected imdb tt15239678, got %s", gotMovie.ImdbID)
+	if gotMovie.RuntimeMinutes != 166 {
+		t.Errorf("expected runtime 166, got %d", gotMovie.RuntimeMinutes)
 	}
 
 	results, err := qtx.SearchAllMedia(ctx, sqlc.SearchAllMediaParams{

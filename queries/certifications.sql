@@ -1,9 +1,13 @@
 -- name: CreateMediaCertification :exec
-INSERT INTO media_certifications (media_item_id, country, certification, release_date, release_type)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO media_certifications (media_item_id, country, certification, release_date, release_type, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (media_item_id, country, release_type) DO UPDATE SET
   certification = EXCLUDED.certification,
-  release_date = EXCLUDED.release_date;
+  release_date = EXCLUDED.release_date,
+  source = EXCLUDED.source;
+
+-- name: DeleteMediaCertificationsByItem :exec
+DELETE FROM media_certifications WHERE media_item_id = $1;
 
 -- name: ListMediaCertifications :many
 SELECT * FROM media_certifications WHERE media_item_id = $1 ORDER BY country;

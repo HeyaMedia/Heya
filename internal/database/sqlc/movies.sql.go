@@ -12,38 +12,32 @@ import (
 )
 
 const createMovie = `-- name: CreateMovie :one
-INSERT INTO movies (media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date,
-    original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+INSERT INTO movies (media_item_id, runtime_minutes, tagline, genres, rating, release_date,
+    original_title, original_language, budget, revenue, popularity, spoken_languages, origin_country)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (media_item_id) DO NOTHING
-RETURNING id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country
+RETURNING id, media_item_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, collection_id, status, homepage, spoken_languages, origin_country
 `
 
 type CreateMovieParams struct {
-	MediaItemID         int64          `json:"media_item_id"`
-	TmdbID              pgtype.Int4    `json:"tmdb_id"`
-	ImdbID              string         `json:"imdb_id"`
-	RuntimeMinutes      int32          `json:"runtime_minutes"`
-	Tagline             string         `json:"tagline"`
-	Genres              []string       `json:"genres"`
-	Rating              pgtype.Numeric `json:"rating"`
-	ReleaseDate         pgtype.Date    `json:"release_date"`
-	OriginalTitle       string         `json:"original_title"`
-	OriginalLanguage    string         `json:"original_language"`
-	Budget              int64          `json:"budget"`
-	Revenue             int64          `json:"revenue"`
-	Popularity          pgtype.Numeric `json:"popularity"`
-	VoteCount           int32          `json:"vote_count"`
-	ProductionCompanies []string       `json:"production_companies"`
-	CastData            []byte         `json:"cast_data"`
-	CrewData            []byte         `json:"crew_data"`
+	MediaItemID      int64          `json:"media_item_id"`
+	RuntimeMinutes   int32          `json:"runtime_minutes"`
+	Tagline          string         `json:"tagline"`
+	Genres           []string       `json:"genres"`
+	Rating           pgtype.Numeric `json:"rating"`
+	ReleaseDate      pgtype.Date    `json:"release_date"`
+	OriginalTitle    string         `json:"original_title"`
+	OriginalLanguage string         `json:"original_language"`
+	Budget           int64          `json:"budget"`
+	Revenue          int64          `json:"revenue"`
+	Popularity       pgtype.Numeric `json:"popularity"`
+	SpokenLanguages  []string       `json:"spoken_languages"`
+	OriginCountry    []string       `json:"origin_country"`
 }
 
 func (q *Queries) CreateMovie(ctx context.Context, arg CreateMovieParams) (Movie, error) {
 	row := q.db.QueryRow(ctx, createMovie,
 		arg.MediaItemID,
-		arg.TmdbID,
-		arg.ImdbID,
 		arg.RuntimeMinutes,
 		arg.Tagline,
 		arg.Genres,
@@ -54,17 +48,13 @@ func (q *Queries) CreateMovie(ctx context.Context, arg CreateMovieParams) (Movie
 		arg.Budget,
 		arg.Revenue,
 		arg.Popularity,
-		arg.VoteCount,
-		arg.ProductionCompanies,
-		arg.CastData,
-		arg.CrewData,
+		arg.SpokenLanguages,
+		arg.OriginCountry,
 	)
 	var i Movie
 	err := row.Scan(
 		&i.ID,
 		&i.MediaItemID,
-		&i.TmdbID,
-		&i.ImdbID,
 		&i.RuntimeMinutes,
 		&i.Tagline,
 		&i.Genres,
@@ -75,10 +65,6 @@ func (q *Queries) CreateMovie(ctx context.Context, arg CreateMovieParams) (Movie
 		&i.Budget,
 		&i.Revenue,
 		&i.Popularity,
-		&i.VoteCount,
-		&i.ProductionCompanies,
-		&i.CastData,
-		&i.CrewData,
 		&i.CollectionID,
 		&i.Status,
 		&i.Homepage,
@@ -98,7 +84,7 @@ func (q *Queries) DeleteMovie(ctx context.Context, id int64) error {
 }
 
 const getMovieByMediaItemID = `-- name: GetMovieByMediaItemID :one
-SELECT id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country FROM movies WHERE media_item_id = $1
+SELECT id, media_item_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, collection_id, status, homepage, spoken_languages, origin_country FROM movies WHERE media_item_id = $1
 `
 
 func (q *Queries) GetMovieByMediaItemID(ctx context.Context, mediaItemID int64) (Movie, error) {
@@ -107,8 +93,6 @@ func (q *Queries) GetMovieByMediaItemID(ctx context.Context, mediaItemID int64) 
 	err := row.Scan(
 		&i.ID,
 		&i.MediaItemID,
-		&i.TmdbID,
-		&i.ImdbID,
 		&i.RuntimeMinutes,
 		&i.Tagline,
 		&i.Genres,
@@ -119,45 +103,6 @@ func (q *Queries) GetMovieByMediaItemID(ctx context.Context, mediaItemID int64) 
 		&i.Budget,
 		&i.Revenue,
 		&i.Popularity,
-		&i.VoteCount,
-		&i.ProductionCompanies,
-		&i.CastData,
-		&i.CrewData,
-		&i.CollectionID,
-		&i.Status,
-		&i.Homepage,
-		&i.SpokenLanguages,
-		&i.OriginCountry,
-	)
-	return i, err
-}
-
-const getMovieByTmdbID = `-- name: GetMovieByTmdbID :one
-SELECT id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country FROM movies WHERE tmdb_id = $1
-`
-
-func (q *Queries) GetMovieByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Movie, error) {
-	row := q.db.QueryRow(ctx, getMovieByTmdbID, tmdbID)
-	var i Movie
-	err := row.Scan(
-		&i.ID,
-		&i.MediaItemID,
-		&i.TmdbID,
-		&i.ImdbID,
-		&i.RuntimeMinutes,
-		&i.Tagline,
-		&i.Genres,
-		&i.Rating,
-		&i.ReleaseDate,
-		&i.OriginalTitle,
-		&i.OriginalLanguage,
-		&i.Budget,
-		&i.Revenue,
-		&i.Popularity,
-		&i.VoteCount,
-		&i.ProductionCompanies,
-		&i.CastData,
-		&i.CrewData,
 		&i.CollectionID,
 		&i.Status,
 		&i.Homepage,
@@ -169,39 +114,33 @@ func (q *Queries) GetMovieByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Mov
 
 const updateMovie = `-- name: UpdateMovie :one
 UPDATE movies
-SET tmdb_id = $2, imdb_id = $3, runtime_minutes = $4, tagline = $5,
-    genres = $6, rating = $7, release_date = $8,
-    original_title = $9, original_language = $10, budget = $11, revenue = $12,
-    popularity = $13, vote_count = $14, production_companies = $15, cast_data = $16, crew_data = $17
+SET runtime_minutes = $2, tagline = $3,
+    genres = $4, rating = $5, release_date = $6,
+    original_title = $7, original_language = $8, budget = $9, revenue = $10,
+    popularity = $11, spoken_languages = $12, origin_country = $13
 WHERE id = $1
-RETURNING id, media_item_id, tmdb_id, imdb_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, vote_count, production_companies, cast_data, crew_data, collection_id, status, homepage, spoken_languages, origin_country
+RETURNING id, media_item_id, runtime_minutes, tagline, genres, rating, release_date, original_title, original_language, budget, revenue, popularity, collection_id, status, homepage, spoken_languages, origin_country
 `
 
 type UpdateMovieParams struct {
-	ID                  int64          `json:"id"`
-	TmdbID              pgtype.Int4    `json:"tmdb_id"`
-	ImdbID              string         `json:"imdb_id"`
-	RuntimeMinutes      int32          `json:"runtime_minutes"`
-	Tagline             string         `json:"tagline"`
-	Genres              []string       `json:"genres"`
-	Rating              pgtype.Numeric `json:"rating"`
-	ReleaseDate         pgtype.Date    `json:"release_date"`
-	OriginalTitle       string         `json:"original_title"`
-	OriginalLanguage    string         `json:"original_language"`
-	Budget              int64          `json:"budget"`
-	Revenue             int64          `json:"revenue"`
-	Popularity          pgtype.Numeric `json:"popularity"`
-	VoteCount           int32          `json:"vote_count"`
-	ProductionCompanies []string       `json:"production_companies"`
-	CastData            []byte         `json:"cast_data"`
-	CrewData            []byte         `json:"crew_data"`
+	ID               int64          `json:"id"`
+	RuntimeMinutes   int32          `json:"runtime_minutes"`
+	Tagline          string         `json:"tagline"`
+	Genres           []string       `json:"genres"`
+	Rating           pgtype.Numeric `json:"rating"`
+	ReleaseDate      pgtype.Date    `json:"release_date"`
+	OriginalTitle    string         `json:"original_title"`
+	OriginalLanguage string         `json:"original_language"`
+	Budget           int64          `json:"budget"`
+	Revenue          int64          `json:"revenue"`
+	Popularity       pgtype.Numeric `json:"popularity"`
+	SpokenLanguages  []string       `json:"spoken_languages"`
+	OriginCountry    []string       `json:"origin_country"`
 }
 
 func (q *Queries) UpdateMovie(ctx context.Context, arg UpdateMovieParams) (Movie, error) {
 	row := q.db.QueryRow(ctx, updateMovie,
 		arg.ID,
-		arg.TmdbID,
-		arg.ImdbID,
 		arg.RuntimeMinutes,
 		arg.Tagline,
 		arg.Genres,
@@ -212,17 +151,13 @@ func (q *Queries) UpdateMovie(ctx context.Context, arg UpdateMovieParams) (Movie
 		arg.Budget,
 		arg.Revenue,
 		arg.Popularity,
-		arg.VoteCount,
-		arg.ProductionCompanies,
-		arg.CastData,
-		arg.CrewData,
+		arg.SpokenLanguages,
+		arg.OriginCountry,
 	)
 	var i Movie
 	err := row.Scan(
 		&i.ID,
 		&i.MediaItemID,
-		&i.TmdbID,
-		&i.ImdbID,
 		&i.RuntimeMinutes,
 		&i.Tagline,
 		&i.Genres,
@@ -233,10 +168,6 @@ func (q *Queries) UpdateMovie(ctx context.Context, arg UpdateMovieParams) (Movie
 		&i.Budget,
 		&i.Revenue,
 		&i.Popularity,
-		&i.VoteCount,
-		&i.ProductionCompanies,
-		&i.CastData,
-		&i.CrewData,
 		&i.CollectionID,
 		&i.Status,
 		&i.Homepage,

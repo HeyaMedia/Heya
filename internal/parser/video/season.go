@@ -277,17 +277,17 @@ func CompleteRange(arr []int) []int {
 }
 
 type matchResult struct {
-	seriesName     string
-	seasonNumbers  []int
-	episodeNumbers []int
-	airDate        *time.Time
-	FullSeason     bool
+	seriesName      string
+	seasonNumbers   []int
+	episodeNumbers  []int
+	airDate         *time.Time
+	FullSeason      bool
 	IsPartialSeason bool
-	IsMultiSeason  bool
-	IsSeasonExtra  bool
-	IsSpecial      bool
-	seasonPart     int
-	releaseTokens  string
+	IsMultiSeason   bool
+	IsSeasonExtra   bool
+	IsSpecial       bool
+	seasonPart      int
+	releaseTokens   string
 }
 
 func getGroup(match *regexp2.Match, name string) string {

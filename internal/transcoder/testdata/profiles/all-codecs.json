@@ -1,0 +1,17 @@
+{
+  "_comment": "Hypothetical client that supports every codec, every container, every HDR variant, and every codec tag. Used to exercise the direct-play path.",
+  "SupportsHEVC": true,
+  "SupportsHEVCHev1": true,
+  "SupportsAV1": true,
+  "SupportsFLAC": true,
+  "SupportsOpus": true,
+  "SupportsAC3": true,
+  "SupportsEAC3": true,
+  "SupportsMP4": true,
+  "SupportsMKV": true,
+  "SupportsWebM": true,
+  "SupportsHDR": true,
+  "SupportsHDR10": true,
+  "SupportsHLG": true,
+  "SupportsDoVi": true
+}

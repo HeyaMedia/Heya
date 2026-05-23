@@ -23,27 +23,21 @@ func (q *Queries) CountAllCollections(ctx context.Context) (int64, error) {
 }
 
 const createCollection = `-- name: CreateCollection :one
-INSERT INTO collections (tmdb_id, name, overview, poster_path, backdrop_path)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (tmdb_id) DO UPDATE SET
-  name = EXCLUDED.name,
-  overview = EXCLUDED.overview,
-  poster_path = EXCLUDED.poster_path,
-  backdrop_path = EXCLUDED.backdrop_path
-RETURNING id, tmdb_id, name, overview, poster_path, backdrop_path, search_vector
+INSERT INTO collections (external_ids, name, overview, poster_path, backdrop_path)
+VALUES ($1, $2, $3, $4, $5) RETURNING id, external_ids, name, overview, poster_path, backdrop_path, search_vector
 `
 
 type CreateCollectionParams struct {
-	TmdbID       pgtype.Int4 `json:"tmdb_id"`
-	Name         string      `json:"name"`
-	Overview     string      `json:"overview"`
-	PosterPath   string      `json:"poster_path"`
-	BackdropPath string      `json:"backdrop_path"`
+	ExternalIds  []byte `json:"external_ids"`
+	Name         string `json:"name"`
+	Overview     string `json:"overview"`
+	PosterPath   string `json:"poster_path"`
+	BackdropPath string `json:"backdrop_path"`
 }
 
 func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionParams) (Collection, error) {
 	row := q.db.QueryRow(ctx, createCollection,
-		arg.TmdbID,
+		arg.ExternalIds,
 		arg.Name,
 		arg.Overview,
 		arg.PosterPath,
@@ -52,7 +46,26 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 	var i Collection
 	err := row.Scan(
 		&i.ID,
-		&i.TmdbID,
+		&i.ExternalIds,
+		&i.Name,
+		&i.Overview,
+		&i.PosterPath,
+		&i.BackdropPath,
+		&i.SearchVector,
+	)
+	return i, err
+}
+
+const findCollectionByName = `-- name: FindCollectionByName :one
+SELECT id, external_ids, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE name = $1 LIMIT 1
+`
+
+func (q *Queries) FindCollectionByName(ctx context.Context, name string) (Collection, error) {
+	row := q.db.QueryRow(ctx, findCollectionByName, name)
+	var i Collection
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalIds,
 		&i.Name,
 		&i.Overview,
 		&i.PosterPath,
@@ -63,7 +76,7 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 }
 
 const getCollectionByID = `-- name: GetCollectionByID :one
-SELECT id, tmdb_id, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE id = $1
+SELECT id, external_ids, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE id = $1
 `
 
 func (q *Queries) GetCollectionByID(ctx context.Context, id int64) (Collection, error) {
@@ -71,26 +84,7 @@ func (q *Queries) GetCollectionByID(ctx context.Context, id int64) (Collection, 
 	var i Collection
 	err := row.Scan(
 		&i.ID,
-		&i.TmdbID,
-		&i.Name,
-		&i.Overview,
-		&i.PosterPath,
-		&i.BackdropPath,
-		&i.SearchVector,
-	)
-	return i, err
-}
-
-const getCollectionByTmdbID = `-- name: GetCollectionByTmdbID :one
-SELECT id, tmdb_id, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE tmdb_id = $1
-`
-
-func (q *Queries) GetCollectionByTmdbID(ctx context.Context, tmdbID pgtype.Int4) (Collection, error) {
-	row := q.db.QueryRow(ctx, getCollectionByTmdbID, tmdbID)
-	var i Collection
-	err := row.Scan(
-		&i.ID,
-		&i.TmdbID,
+		&i.ExternalIds,
 		&i.Name,
 		&i.Overview,
 		&i.PosterPath,
@@ -101,7 +95,7 @@ func (q *Queries) GetCollectionByTmdbID(ctx context.Context, tmdbID pgtype.Int4)
 }
 
 const listAllCollections = `-- name: ListAllCollections :many
-SELECT c.id, c.tmdb_id, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector,
+SELECT c.id, c.external_ids, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector,
        (SELECT count(*) FROM movies m WHERE m.collection_id = c.id)::int AS movie_count
 FROM collections c
 ORDER BY c.name
@@ -115,7 +109,7 @@ type ListAllCollectionsParams struct {
 
 type ListAllCollectionsRow struct {
 	ID           int64       `json:"id"`
-	TmdbID       pgtype.Int4 `json:"tmdb_id"`
+	ExternalIds  []byte      `json:"external_ids"`
 	Name         string      `json:"name"`
 	Overview     string      `json:"overview"`
 	PosterPath   string      `json:"poster_path"`
@@ -135,7 +129,7 @@ func (q *Queries) ListAllCollections(ctx context.Context, arg ListAllCollections
 		var i ListAllCollectionsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.TmdbID,
+			&i.ExternalIds,
 			&i.Name,
 			&i.Overview,
 			&i.PosterPath,
@@ -154,7 +148,7 @@ func (q *Queries) ListAllCollections(ctx context.Context, arg ListAllCollections
 }
 
 const listCollectionMovies = `-- name: ListCollectionMovies :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.created_at, mi.updated_at, mi.search_vector, mi.homepage, mi.wikidata_id, mi.facebook_id, mi.instagram_id, mi.twitter_id, mi.slug, mi.metadata_refreshed_at
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
 FROM media_items mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE m.collection_id = $1
@@ -181,16 +175,61 @@ func (q *Queries) ListCollectionMovies(ctx context.Context, collectionID pgtype.
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.ExternalIds,
+			&i.Slug,
+			&i.Homepage,
+			&i.Tagline,
+			&i.OriginalTitle,
+			&i.OriginalLanguage,
+			&i.Status,
+			&i.ProviderKind,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
+			&i.MetadataRefreshedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
-			&i.Homepage,
-			&i.WikidataID,
-			&i.FacebookID,
-			&i.InstagramID,
-			&i.TwitterID,
-			&i.Slug,
-			&i.MetadataRefreshedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCollectionsWithLocalMedia = `-- name: ListCollectionsWithLocalMedia :many
+SELECT c.id, c.name, c.poster_path,
+       count(m.id)::int AS movie_count
+FROM collections c
+JOIN movies m ON m.collection_id = c.id
+GROUP BY c.id, c.name, c.poster_path
+HAVING count(m.id) > 0
+ORDER BY c.name
+`
+
+type ListCollectionsWithLocalMediaRow struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	PosterPath string `json:"poster_path"`
+	MovieCount int32  `json:"movie_count"`
+}
+
+func (q *Queries) ListCollectionsWithLocalMedia(ctx context.Context) ([]ListCollectionsWithLocalMediaRow, error) {
+	rows, err := q.db.Query(ctx, listCollectionsWithLocalMedia)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionsWithLocalMediaRow{}
+	for rows.Next() {
+		var i ListCollectionsWithLocalMediaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.PosterPath,
+			&i.MovieCount,
 		); err != nil {
 			return nil, err
 		}

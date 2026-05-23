@@ -12,17 +12,17 @@ import (
 )
 
 type MovieNFO struct {
-	XMLName          xml.Name   `xml:"movie"`
-	Title            string     `xml:"title"`
-	OriginalTitle    string     `xml:"originaltitle,omitempty"`
-	SortTitle        string     `xml:"sorttitle,omitempty"`
-	Year             string     `xml:"year,omitempty"`
-	Plot             string     `xml:"plot,omitempty"`
-	Tagline          string     `xml:"tagline,omitempty"`
-	Runtime          int32      `xml:"runtime,omitempty"`
-	Rating           string     `xml:"rating,omitempty"`
-	UniqueIDs        []UniqueID `xml:"uniqueid"`
-	Genres           []string   `xml:"genre"`
+	XMLName       xml.Name   `xml:"movie"`
+	Title         string     `xml:"title"`
+	OriginalTitle string     `xml:"originaltitle,omitempty"`
+	SortTitle     string     `xml:"sorttitle,omitempty"`
+	Year          string     `xml:"year,omitempty"`
+	Plot          string     `xml:"plot,omitempty"`
+	Tagline       string     `xml:"tagline,omitempty"`
+	Runtime       int32      `xml:"runtime,omitempty"`
+	Rating        string     `xml:"rating,omitempty"`
+	UniqueIDs     []UniqueID `xml:"uniqueid"`
+	Genres        []string   `xml:"genre"`
 }
 
 type TVShowNFO struct {

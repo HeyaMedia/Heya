@@ -143,5 +143,5 @@ JOIN tv_seasons s ON s.id = e.season_id
 JOIN tv_series ts ON ts.id = s.series_id
 LEFT JOIN user_watch_progress wp ON wp.entity_id = e.id AND wp.entity_type = 'episode' AND wp.completed = true AND wp.user_id = $1
 WHERE ts.media_item_id = $2 AND wp.entity_id IS NULL
-ORDER BY s.season_number ASC, e.episode_number ASC
+ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC, e.episode_number ASC
 LIMIT 1;

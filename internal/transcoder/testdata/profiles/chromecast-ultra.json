@@ -1,0 +1,17 @@
+{
+  "_comment": "Chromecast Ultra (and most 4K Android TV devices): HEVC, HDR10, HLG, AV1 (newer models), AC3/EAC3 passthrough, AAC. Some accept HEVC hev1 tag (e.g. Android TV decoders). No Dolby Vision.",
+  "SupportsHEVC": true,
+  "SupportsHEVCHev1": true,
+  "SupportsAV1": true,
+  "SupportsFLAC": true,
+  "SupportsOpus": true,
+  "SupportsAC3": true,
+  "SupportsEAC3": true,
+  "SupportsMP4": true,
+  "SupportsMKV": true,
+  "SupportsWebM": true,
+  "SupportsHDR": true,
+  "SupportsHDR10": true,
+  "SupportsHLG": true,
+  "SupportsDoVi": false
+}

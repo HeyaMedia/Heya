@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -56,6 +57,17 @@ func handleCreateLibrary(app *service.App) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+
+		settings := metadata.ParseSettings(lib.Settings)
+		if settings.Watch {
+			for _, p := range lib.Paths {
+				if !strings.HasPrefix(p, "smb://") {
+					app.WatcherManager().Watch(r.Context(), lib.ID, p)
+				}
+			}
+		}
+
+		app.EnqueueScanLibrary(lib.ID, false)
 
 		writeJSON(w, http.StatusCreated, toLibraryView(lib))
 	}
@@ -128,6 +140,8 @@ func handleDeleteLibrary(app *service.App) http.HandlerFunc {
 			return
 		}
 
+		app.WatcherManager().Unwatch(id)
+
 		if err := app.DeleteLibrary(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to delete library")
 			return
@@ -145,6 +159,8 @@ func handleUpdateLibrarySettings(app *service.App) http.HandlerFunc {
 			return
 		}
 
+		oldSettings, _ := app.GetLibrarySettings(r.Context(), id)
+
 		var settings metadata.LibrarySettings
 		if err := readJSON(r, &settings); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
@@ -157,14 +173,17 @@ func handleUpdateLibrarySettings(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, toLibraryView(lib))
-	}
-}
+		if settings.Watch && !oldSettings.Watch {
+			for _, p := range lib.Paths {
+				if !strings.HasPrefix(p, "smb://") {
+					app.WatcherManager().Watch(r.Context(), lib.ID, p)
+				}
+			}
+		} else if !settings.Watch && oldSettings.Watch {
+			app.WatcherManager().Unwatch(lib.ID)
+		}
 
-func handleListProviders(app *service.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		infos := app.Registry.Available()
-		writeJSON(w, http.StatusOK, infos)
+		writeJSON(w, http.StatusOK, toLibraryView(lib))
 	}
 }
 

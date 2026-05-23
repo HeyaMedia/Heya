@@ -1,0 +1,8 @@
+{
+  "_comment": "AV1 + AAC in MKV. Remux to fMP4 for AV1-capable clients.",
+  "container": "matroska,webm",
+  "streams": [
+    { "codec_name": "av1", "codec_type": "video", "profile": "Main", "pix_fmt": "yuv420p", "width": 1920, "height": 1080 },
+    { "codec_name": "aac", "codec_type": "audio" }
+  ]
+}

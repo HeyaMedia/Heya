@@ -5,17 +5,18 @@ import "time"
 type EventType string
 
 const (
-	EventLog          EventType = "log"
-	EventScanStarted  EventType = "scan.started"
+	EventLog           EventType = "log"
+	EventScanStarted   EventType = "scan.started"
 	EventScanCompleted EventType = "scan.completed"
-	EventMediaAdded   EventType = "media.added"
-	EventMediaUpdated EventType = "media.updated"
-	EventMediaRemoved EventType = "media.removed"
-	EventMediaWatched EventType = "media.watched"
+	EventMediaAdded    EventType = "media.added"
+	EventMediaUpdated  EventType = "media.updated"
+	EventMediaRemoved  EventType = "media.removed"
+	EventMediaWatched  EventType = "media.watched"
 	EventQueueStatus   EventType = "queue.status"
 	EventActiveJobs    EventType = "active_jobs"
 	EventStatsUpdated  EventType = "stats.updated"
 	EventScanProgress  EventType = "scan.progress"
+	EventTaskProgress  EventType = "task.progress"
 )
 
 type Event struct {
@@ -75,13 +76,13 @@ type ScanProgressPayload struct {
 }
 
 type LibraryScanProgress struct {
-	LibraryID  int64  `json:"library_id"`
-	Name       string `json:"name"`
-	Total      int    `json:"total"`
-	Processed  int    `json:"processed"`
-	Matched    int    `json:"matched"`
-	Unmatched  int    `json:"unmatched"`
-	Errors     int    `json:"errors"`
+	LibraryID int64  `json:"library_id"`
+	Name      string `json:"name"`
+	Total     int    `json:"total"`
+	Processed int    `json:"processed"`
+	Matched   int    `json:"matched"`
+	Unmatched int    `json:"unmatched"`
+	Errors    int    `json:"errors"`
 }
 
 type StatsPayload struct {

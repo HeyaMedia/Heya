@@ -16,11 +16,11 @@ func Generate(title, year string) string {
 	s := strings.ToLower(title)
 	s = nonAlphaNum.ReplaceAllString(s, "-")
 	s = leadTrail.ReplaceAllString(s, "")
-	if year != "" && len(year) == 4 {
-		s = s + "-" + year
-	}
 	if s == "" {
 		s = "untitled"
+	}
+	if year != "" && len(year) == 4 {
+		s = s + "-" + year
 	}
 	return s
 }

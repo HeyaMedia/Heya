@@ -8,8 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
-	"github.com/karbowiak/heya/internal/matcher"
-	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -17,10 +16,10 @@ import (
 
 type MetadataMatchWorker struct {
 	river.WorkerDefaults[MetadataMatchArgs]
-	DB       *pgxpool.Pool
-	Matcher  *matcher.Matcher
-	Registry *metadata.Registry
-	Hub      *eventhub.Hub
+	DB      *pgxpool.Pool
+	Matcher MatchService
+	Heya    *heyamedia.HeyaProvider
+	Hub     EventPublisher
 }
 
 func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataMatchArgs]) error {
@@ -46,7 +45,7 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 	}
 
 	mediaType := sqlc.MediaType(job.Args.MediaType)
-	err = w.Matcher.MatchSingleFile(ctx, file, mediaType, job.Args.LibraryID)
+	matchResult, err := w.Matcher.MatchSingleFile(ctx, file, mediaType, job.Args.LibraryID)
 	if err != nil {
 		log.Warn().Err(err).Int64("file_id", file.ID).Msg("match error")
 		return nil
@@ -65,8 +64,6 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 				MediaType:   job.Args.MediaType,
 			})
 		}
-
-		matchResult := w.Matcher.LastMatchResult()
 
 		if matchResult.IsNew {
 			client := river.ClientFromContext[pgx.Tx](ctx)

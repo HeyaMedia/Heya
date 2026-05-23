@@ -1,0 +1,13 @@
+{
+  "_comment": "Firefox on Linux/Windows: AV1, VP9, FLAC, Opus, no HEVC, no AC3/EAC3 in MSE.",
+  "SupportsHEVC": false,
+  "SupportsAV1": true,
+  "SupportsFLAC": true,
+  "SupportsOpus": true,
+  "SupportsAC3": false,
+  "SupportsEAC3": false,
+  "SupportsMP4": true,
+  "SupportsMKV": false,
+  "SupportsWebM": true,
+  "SupportsHDR": false
+}

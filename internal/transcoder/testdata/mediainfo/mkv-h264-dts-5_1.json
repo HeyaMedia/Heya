@@ -1,0 +1,11 @@
+{
+  "_comment": "MKV with H.264 + DTS 5.1. DTS is lossless/proprietary — must transcode to AAC for browsers.",
+  "container": "matroska,webm",
+  "streams": [
+    {
+      "codec_name": "h264", "codec_type": "video", "profile": "High",
+      "pix_fmt": "yuv420p", "width": 1920, "height": 1080, "bit_depth": 8
+    },
+    { "codec_name": "dts", "codec_type": "audio", "channels": 6, "channel_layout": "5.1" }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "_comment": "Safari (macOS/iOS): HEVC, AC3/EAC3, HDR. No AV1 (depends on device), no VP9/WebM, no Opus in MP4.",
+  "SupportsHEVC": true,
+  "SupportsAV1": false,
+  "SupportsFLAC": true,
+  "SupportsOpus": false,
+  "SupportsAC3": true,
+  "SupportsEAC3": true,
+  "SupportsMP4": true,
+  "SupportsMKV": false,
+  "SupportsWebM": false,
+  "SupportsHDR": true
+}

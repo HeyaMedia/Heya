@@ -95,3 +95,52 @@ ORDER BY path ASC;
 -- name: GetMediaItemByExternalID :one
 SELECT * FROM media_items
 WHERE library_id = $1 AND external_ids @> $2::jsonb;
+
+-- name: UpdateLibraryFileTrickplay :exec
+UPDATE library_files
+SET has_trickplay = $2, updated_at = now()
+WHERE id = $1;
+
+-- name: SetTrickplayByPath :exec
+UPDATE library_files
+SET has_trickplay = $2, updated_at = now()
+WHERE library_id = $1 AND path = $3 AND deleted_at IS NULL;
+
+-- name: UpdateLibraryFileContentHash :exec
+UPDATE library_files
+SET content_hash = $2, updated_at = now()
+WHERE id = $1;
+
+-- name: GetDeletedFileBySize :one
+SELECT * FROM library_files
+WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
+  AND deleted_at > now() - interval '7 days'
+LIMIT 1;
+
+-- name: GetDeletedFileByContentHash :one
+SELECT * FROM library_files
+WHERE library_id = $1 AND content_hash = $2 AND content_hash != ''
+  AND deleted_at IS NOT NULL AND deleted_at > now() - interval '7 days'
+LIMIT 1;
+
+-- name: RelocateLibraryFile :exec
+UPDATE library_files
+SET path = $2, mtime = $3, parse_result = $4, deleted_at = NULL, updated_at = now()
+WHERE id = $1;
+
+-- name: ListMediaResolutions :many
+SELECT lf.media_item_id,
+       max(
+         COALESCE(
+           (SELECT (s->>'height')::int
+            FROM jsonb_array_elements(lf.media_info->'streams') AS s
+            WHERE s->>'codec_type' = 'video'
+            LIMIT 1),
+           0
+         )
+       )::int AS max_height
+FROM library_files lf
+WHERE lf.media_item_id = ANY(@media_item_ids::bigint[])
+  AND lf.deleted_at IS NULL
+  AND lf.media_info IS NOT NULL
+GROUP BY lf.media_item_id;

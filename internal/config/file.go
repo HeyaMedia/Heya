@@ -102,18 +102,18 @@ func (c *Config) Sources() map[string]string {
 	}
 
 	fields := []struct {
-		key    string
-		envKey string
-		val    string
+		key     string
+		envKey  string
+		val     string
 		fileVal string
-		defVal string
+		defVal  string
 	}{
 		{"database_url", "DATABASE_URL", c.DatabaseURL, fileStr(fc, "database_url"), "postgres://kura:kura@localhost:5440/kura?sslmode=disable"},
 		{"host", "HOST", c.Host, fileStr(fc, "host"), "0.0.0.0"},
 		{"port", "PORT", c.Port, fileStr(fc, "port"), "8080"},
 		{"log_level", "LOG_LEVEL", c.LogLevel, fileStr(fc, "log_level"), "info"},
 		{"log_format", "LOG_FORMAT", c.LogFormat, fileStr(fc, "log_format"), "console"},
-		{"heya_media_url", "HEYA_MEDIA_URL", c.HeyaMediaURL, fileStr(fc, "heya_media_url"), "http://localhost:3030"},
+		{"heya_media_url", "HEYA_MEDIA_URL", c.HeyaMediaURL, fileStr(fc, "heya_media_url"), "https://heya.media"},
 		{"data_dir", "DATA_DIR", c.DataDir, fileStr(fc, "data_dir"), "./data"},
 		{"hw_accel", "HEYA_HWACCEL", c.HWAccel, fileStr(fc, "hw_accel"), "auto"},
 	}

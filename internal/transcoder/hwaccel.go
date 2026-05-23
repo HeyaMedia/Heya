@@ -58,14 +58,14 @@ func probeHardwareAccel() HwAccelType {
 		return HwAccelNVENC
 	}
 
+	if probeEncoderWithFlags("h264_qsv", "-init_hw_device", "qsv=hw", "-filter_hw_device", "hw") {
+		log.Info().Msg("detected Intel QSV hardware acceleration")
+		return HwAccelQSV
+	}
+
 	if probeEncoderWithFlags("h264_vaapi", "-vaapi_device", "/dev/dri/renderD128") {
 		log.Info().Msg("detected VAAPI hardware acceleration")
 		return HwAccelVAAPI
-	}
-
-	if probeEncoder("h264_qsv") {
-		log.Info().Msg("detected Intel QSV hardware acceleration")
-		return HwAccelQSV
 	}
 
 	return HwAccelNone
@@ -119,7 +119,12 @@ func BuildHwAccelConfig(accelType HwAccelType) HwAccelConfig {
 			Type:        HwAccelQSV,
 			EncoderH264: "h264_qsv",
 			EncoderHEVC: "hevc_qsv",
-			InputFlags:  []string{"-hwaccel", "qsv"},
+			InputFlags: []string{
+				"-init_hw_device", "qsv=hw",
+				"-filter_hw_device", "hw",
+				"-hwaccel", "qsv",
+				"-hwaccel_output_format", "qsv",
+			},
 			ScaleFilter: "scale_qsv",
 		}
 	case HwAccelVideoToolbox:

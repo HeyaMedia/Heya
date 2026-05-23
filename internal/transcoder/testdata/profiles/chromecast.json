@@ -1,0 +1,13 @@
+{
+  "_comment": "Chromecast Ultra / Google TV: HEVC, AV1, VP9, AC3/EAC3 passthrough, HDR.",
+  "SupportsHEVC": true,
+  "SupportsAV1": true,
+  "SupportsFLAC": false,
+  "SupportsOpus": true,
+  "SupportsAC3": true,
+  "SupportsEAC3": true,
+  "SupportsMP4": true,
+  "SupportsMKV": false,
+  "SupportsWebM": true,
+  "SupportsHDR": true
+}

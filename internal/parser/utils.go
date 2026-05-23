@@ -3,8 +3,8 @@ package parser
 import (
 	"path"
 	"regexp"
-	"strings"
 	"strconv"
+	"strings"
 )
 
 var knownFileSuffixes = []string{

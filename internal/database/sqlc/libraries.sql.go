@@ -14,7 +14,7 @@ import (
 const createLibrary = `-- name: CreateLibrary :one
 INSERT INTO libraries (name, media_type, paths, scan_interval, created_by, settings)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, name, media_type, paths, scan_interval, created_by, created_at, updated_at, settings
+RETURNING id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at
 `
 
 type CreateLibraryParams struct {
@@ -42,10 +42,10 @@ func (q *Queries) CreateLibrary(ctx context.Context, arg CreateLibraryParams) (L
 		&i.MediaType,
 		&i.Paths,
 		&i.ScanInterval,
+		&i.Settings,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Settings,
 	)
 	return i, err
 }
@@ -60,7 +60,7 @@ func (q *Queries) DeleteLibrary(ctx context.Context, id int64) error {
 }
 
 const getLibraryByID = `-- name: GetLibraryByID :one
-SELECT id, name, media_type, paths, scan_interval, created_by, created_at, updated_at, settings FROM libraries WHERE id = $1
+SELECT id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at FROM libraries WHERE id = $1
 `
 
 func (q *Queries) GetLibraryByID(ctx context.Context, id int64) (Library, error) {
@@ -72,16 +72,16 @@ func (q *Queries) GetLibraryByID(ctx context.Context, id int64) (Library, error)
 		&i.MediaType,
 		&i.Paths,
 		&i.ScanInterval,
+		&i.Settings,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Settings,
 	)
 	return i, err
 }
 
 const listLibraries = `-- name: ListLibraries :many
-SELECT id, name, media_type, paths, scan_interval, created_by, created_at, updated_at, settings FROM libraries ORDER BY created_at ASC
+SELECT id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at FROM libraries ORDER BY created_at ASC
 `
 
 func (q *Queries) ListLibraries(ctx context.Context) ([]Library, error) {
@@ -99,10 +99,10 @@ func (q *Queries) ListLibraries(ctx context.Context) ([]Library, error) {
 			&i.MediaType,
 			&i.Paths,
 			&i.ScanInterval,
+			&i.Settings,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Settings,
 		); err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ const updateLibrary = `-- name: UpdateLibrary :one
 UPDATE libraries
 SET name = $2, paths = $3, scan_interval = $4, updated_at = now()
 WHERE id = $1
-RETURNING id, name, media_type, paths, scan_interval, created_by, created_at, updated_at, settings
+RETURNING id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at
 `
 
 type UpdateLibraryParams struct {
@@ -142,10 +142,10 @@ func (q *Queries) UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (L
 		&i.MediaType,
 		&i.Paths,
 		&i.ScanInterval,
+		&i.Settings,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Settings,
 	)
 	return i, err
 }
@@ -154,7 +154,7 @@ const updateLibrarySettings = `-- name: UpdateLibrarySettings :one
 UPDATE libraries
 SET settings = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, name, media_type, paths, scan_interval, created_by, created_at, updated_at, settings
+RETURNING id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at
 `
 
 type UpdateLibrarySettingsParams struct {
@@ -171,10 +171,10 @@ func (q *Queries) UpdateLibrarySettings(ctx context.Context, arg UpdateLibrarySe
 		&i.MediaType,
 		&i.Paths,
 		&i.ScanInterval,
+		&i.Settings,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Settings,
 	)
 	return i, err
 }

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"net"
 	"net/http"
 
 	"github.com/karbowiak/heya/internal/config"
@@ -24,7 +26,7 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 	}
 
 	if o.hub != nil {
-		mux.HandleFunc("GET /api/ws", handleWebSocket(o.hub, app.Queries()))
+		mux.HandleFunc("GET /api/ws", handleWebSocket(o.hub, app.SessionLookup()))
 	}
 
 	docsMux := http.NewServeMux()
@@ -38,15 +40,20 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 
 	handler := withMiddleware(mux)
 
-	return &http.Server{
+	srv := &http.Server{
 		Addr:    cfg.Addr(),
 		Handler: handler,
 	}
+	if o.baseCtx != nil {
+		srv.BaseContext = func(_ net.Listener) context.Context { return o.baseCtx }
+	}
+	return srv
 }
 
 type options struct {
-	logBuf *logbuf.RingBuffer
-	hub    *eventhub.Hub
+	logBuf  *logbuf.RingBuffer
+	hub     *eventhub.Hub
+	baseCtx context.Context
 }
 
 type Option func(*options)
@@ -60,5 +67,11 @@ func WithLogBuffer(buf *logbuf.RingBuffer) Option {
 func WithEventHub(hub *eventhub.Hub) Option {
 	return func(o *options) {
 		o.hub = hub
+	}
+}
+
+func WithBaseContext(ctx context.Context) Option {
+	return func(o *options) {
+		o.baseCtx = ctx
 	}
 }
