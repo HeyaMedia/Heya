@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -186,10 +187,23 @@ func (a *App) StartWatchers(ctx context.Context) error {
 }
 
 func (a *App) StopWorkers(ctx context.Context) error {
-	if a.river != nil {
-		return a.river.Stop(ctx)
+	if a.river == nil {
+		return nil
 	}
-	return nil
+	// Graceful first: try to let in-flight jobs finish. If the context
+	// times out, escalate to StopAndCancel which interrupts running
+	// jobs so we don't leak River goroutines holding pool connections
+	// (the cause of pgxpool.Close hangs we've seen under air reloads).
+	stopErr := make(chan error, 1)
+	go func() { stopErr <- a.river.Stop(ctx) }()
+	select {
+	case err := <-stopErr:
+		return err
+	case <-ctx.Done():
+		hardCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return a.river.StopAndCancel(hardCtx)
+	}
 }
 
 func (a *App) Close() {

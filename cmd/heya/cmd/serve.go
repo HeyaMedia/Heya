@@ -110,7 +110,7 @@ var serveCmd = &cobra.Command{
 
 		go func() {
 			log.Info().Str("addr", cfg.Addr()).Msg("starting server")
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 				log.Fatal().Err(err).Msg("server error")
 			}
 		}()
@@ -118,9 +118,25 @@ var serveCmd = &cobra.Command{
 		<-sigCtx.Done()
 		log.Info().Msg("shutting down")
 
+		// Dead-man's switch: if any shutdown step hangs (River with
+		// checked-out connections blocking pgxpool.Close was the original
+		// offender — orphaned heya processes accumulated under air,
+		// holding :8080 and breaking the next reload), terminate the
+		// process forcefully so the next dev cycle can rebind.
+		go func() {
+			<-time.After(10 * time.Second)
+			log.Warn().Msg("shutdown took >10s, forcing exit")
+			os.Exit(1)
+		}()
+
 		_ = ln.Close()
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// Cancel appCtx first so all derived contexts (workers, watchers,
+		// periodic emitters, task scheduler, bridgeLogToHub) get the
+		// stop signal before we try to close their resources.
+		appCancel()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		var wg sync.WaitGroup
@@ -143,7 +159,6 @@ var serveCmd = &cobra.Command{
 			}
 		}
 
-		appCancel()
 		return nil
 	},
 }
