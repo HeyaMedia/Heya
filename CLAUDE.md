@@ -12,7 +12,7 @@ Self-hosted media server for movies, TV, music, and books. Go API + Postgres + e
 - **Docker** + `docker compose` for Postgres (port `5440`, no host conflict with the default 5432).
 - **Optional**: `air` for Go hot reload (used by `heya dev`), `goose` if invoking migrations outside the CLI.
 
-Stale `package.json` / `package-lock.json` files exist at repo root and inside `web/`. They predate the bun switch and aren't read by anything; safe to ignore (and probably worth deleting on the next cleanup pass). The lockfile of record is `web/bun.lock`.
+The lockfile of record is `web/bun.lock`. There is no `package-lock.json` anywhere in the tree — bun is the only resolver.
 
 ## Layout
 

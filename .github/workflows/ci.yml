@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel in-flight runs of the same PR/branch when a new push lands.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -22,12 +21,20 @@ jobs:
     name: Frontend (vue-tsc + audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
 
       - name: Guard against trustedDependencies escape hatch
         run: |
@@ -57,16 +64,25 @@ jobs:
     name: Go (lint + build + sqlc drift)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
-          # Full history so --new-from-rev can compare against origin/main.
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-
 
       - name: Verify gofmt
         run: |
@@ -78,11 +94,9 @@ jobs:
           fi
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
-          # Only fail on issues introduced in this PR. Drop --new-from-rev
-          # once the existing baseline (~104 issues) is at 0.
+          version: v2.12.2
           args: --new-from-rev=origin/${{ github.base_ref || 'main' }} --timeout=5m
 
       - name: Compile
@@ -124,18 +138,37 @@ jobs:
     env:
       DATABASE_URL: postgres://heya:heya@localhost:5440/heya?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
+      - name: Cache Go build + test
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-test-${{ runner.os }}-
+            go-build-${{ runner.os }}-
+
+      - name: Cache goose binary
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/goose
+          key: goose-${{ runner.os }}-v3
+
       - name: Apply migrations
         run: |
-          go install github.com/pressly/goose/v3/cmd/goose@latest
-          goose -dir migrations postgres "$DATABASE_URL" up
+          if [ ! -x "$HOME/go/bin/goose" ]; then
+            go install github.com/pressly/goose/v3/cmd/goose@latest
+          fi
+          $HOME/go/bin/goose -dir migrations postgres "$DATABASE_URL" up
 
       - name: Run tests with race detector
         run: go test -race -count=1 ./...
@@ -147,17 +180,26 @@ jobs:
     name: Security (govulncheck + OSV)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
+
+      - name: Cache govulncheck binary
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-${{ runner.os }}-v1
 
       - name: govulncheck (Go vuln DB vs import graph)
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          if [ ! -x "$HOME/go/bin/govulncheck" ]; then
+            go install golang.org/x/vuln/cmd/govulncheck@latest
+          fi
+          $HOME/go/bin/govulncheck ./...
 
       - name: OSV-Scanner (npm + Go via OSV.dev)
         uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
