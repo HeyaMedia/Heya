@@ -99,4 +99,4 @@ runs automatically once you `lefthook install` — see CLAUDE.md for setup.
 
 ## License
 
-TBD.
+MIT — see [`LICENSE`](LICENSE).

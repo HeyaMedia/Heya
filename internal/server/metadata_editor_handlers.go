@@ -283,23 +283,23 @@ func handleMediaFiles(app *service.App) http.HandlerFunc {
 		}
 
 		type streamInfo struct {
-			Index        int    `json:"index"`
-			CodecName    string `json:"codec_name"`
-			CodecType    string `json:"codec_type"`
-			CodecLong    string `json:"codec_long_name,omitempty"`
-			Language     string `json:"language,omitempty"`
-			Title        string `json:"title,omitempty"`
-			Width        int    `json:"width,omitempty"`
-			Height       int    `json:"height,omitempty"`
-			PixFmt       string `json:"pix_fmt,omitempty"`
-			Profile      string `json:"profile,omitempty"`
-			ColorSpace   string `json:"color_space,omitempty"`
-			Channels     int    `json:"channels,omitempty"`
+			Index         int    `json:"index"`
+			CodecName     string `json:"codec_name"`
+			CodecType     string `json:"codec_type"`
+			CodecLong     string `json:"codec_long_name,omitempty"`
+			Language      string `json:"language,omitempty"`
+			Title         string `json:"title,omitempty"`
+			Width         int    `json:"width,omitempty"`
+			Height        int    `json:"height,omitempty"`
+			PixFmt        string `json:"pix_fmt,omitempty"`
+			Profile       string `json:"profile,omitempty"`
+			ColorSpace    string `json:"color_space,omitempty"`
+			Channels      int    `json:"channels,omitempty"`
 			ChannelLayout string `json:"channel_layout,omitempty"`
-			SampleRate   string `json:"sample_rate,omitempty"`
-			BitRate      string `json:"bit_rate,omitempty"`
-			Default      bool   `json:"default"`
-			Forced       bool   `json:"forced"`
+			SampleRate    string `json:"sample_rate,omitempty"`
+			BitRate       string `json:"bit_rate,omitempty"`
+			Default       bool   `json:"default"`
+			Forced        bool   `json:"forced"`
 		}
 
 		type fileInfo struct {
@@ -328,19 +328,19 @@ func handleMediaFiles(app *service.App) http.HandlerFunc {
 					Duration  float64 `json:"duration"`
 					BitRate   int64   `json:"bit_rate"`
 					Streams   []struct {
-						Index        int    `json:"index"`
-						CodecName    string `json:"codec_name"`
-						CodecType    string `json:"codec_type"`
-						CodecLong    string `json:"codec_long_name"`
-						Width        int    `json:"width"`
-						Height       int    `json:"height"`
-						PixFmt       string `json:"pix_fmt"`
-						Profile      string `json:"profile"`
-						ColorSpace   string `json:"color_space"`
-						Channels     int    `json:"channels"`
+						Index         int    `json:"index"`
+						CodecName     string `json:"codec_name"`
+						CodecType     string `json:"codec_type"`
+						CodecLong     string `json:"codec_long_name"`
+						Width         int    `json:"width"`
+						Height        int    `json:"height"`
+						PixFmt        string `json:"pix_fmt"`
+						Profile       string `json:"profile"`
+						ColorSpace    string `json:"color_space"`
+						Channels      int    `json:"channels"`
 						ChannelLayout string `json:"channel_layout"`
-						SampleRate   string `json:"sample_rate"`
-						Tags         struct {
+						SampleRate    string `json:"sample_rate"`
+						Tags          struct {
 							Language string `json:"language"`
 							Title    string `json:"title"`
 							BPS      string `json:"BPS"`
@@ -357,23 +357,23 @@ func handleMediaFiles(app *service.App) http.HandlerFunc {
 					fi.BitRate = mi.BitRate
 					for _, s := range mi.Streams {
 						si := streamInfo{
-							Index:        s.Index,
-							CodecName:    s.CodecName,
-							CodecType:    s.CodecType,
-							CodecLong:    s.CodecLong,
-							Language:     s.Tags.Language,
-							Title:        s.Tags.Title,
-							Width:        s.Width,
-							Height:       s.Height,
-							PixFmt:       s.PixFmt,
-							Profile:      s.Profile,
-							ColorSpace:   s.ColorSpace,
-							Channels:     s.Channels,
+							Index:         s.Index,
+							CodecName:     s.CodecName,
+							CodecType:     s.CodecType,
+							CodecLong:     s.CodecLong,
+							Language:      s.Tags.Language,
+							Title:         s.Tags.Title,
+							Width:         s.Width,
+							Height:        s.Height,
+							PixFmt:        s.PixFmt,
+							Profile:       s.Profile,
+							ColorSpace:    s.ColorSpace,
+							Channels:      s.Channels,
 							ChannelLayout: s.ChannelLayout,
-							SampleRate:   s.SampleRate,
-							BitRate:      s.Tags.BPS,
-							Default:      s.Disposition.Default == 1,
-							Forced:       s.Disposition.Forced == 1,
+							SampleRate:    s.SampleRate,
+							BitRate:       s.Tags.BPS,
+							Default:       s.Disposition.Default == 1,
+							Forced:        s.Disposition.Forced == 1,
 						}
 						fi.Streams = append(fi.Streams, si)
 					}

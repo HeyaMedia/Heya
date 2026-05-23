@@ -160,7 +160,7 @@ jobs:
           govulncheck ./...
 
       - name: OSV-Scanner (npm + Go via OSV.dev)
-        uses: google/osv-scanner-action/osv-scanner-action@v1
+        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
         with:
           scan-args: |-
             --recursive
