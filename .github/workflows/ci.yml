@@ -74,12 +74,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Cache Go build
+      - name: Cache Go build outputs
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
+          path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-build-${{ runner.os }}-
@@ -146,12 +144,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Cache Go build + test
+      - name: Cache Go build outputs
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
+          path: ~/.cache/go-build
           key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-test-${{ runner.os }}-
