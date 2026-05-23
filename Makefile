@@ -1,4 +1,6 @@
-.PHONY: build run test lint clean db-up db-down migrate build-frontend dev
+GOBIN := $(shell go env GOPATH)/bin
+
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev
 
 build-frontend:
 	cd web && bun install && bun run build
@@ -42,6 +44,22 @@ db-up:
 
 db-down:
 	docker compose down
+
+db-reset: build-go
+	docker compose down
+	rm -rf data/postgres
+	docker compose up -d postgres
+	@echo "Waiting for postgres..."
+	@sleep 2
+	./bin/heya user create --username admin --email admin@localhost --password admin --admin
+
+reset: build-go
+	docker compose down
+	rm -rf data/*
+	docker compose up -d postgres
+	@echo "Waiting for postgres..."
+	@sleep 2
+	./bin/heya user create --username admin --email admin@localhost --password admin --admin
 
 migrate:
 	goose -dir migrations postgres "$(DATABASE_URL)" up

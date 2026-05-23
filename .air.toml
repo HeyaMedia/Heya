@@ -5,7 +5,8 @@
   exclude_dir = ["tmp", "web", "node_modules", "testdata", "fulldata", "data", "bin", ".git"]
   exclude_regex = ["_test\\.go$"]
   include_ext = ["go", "sql", "yaml"]
-  kill_delay = 500
+  kill_delay = 5000
+  send_interrupt = true
 
 [log]
   time = false
