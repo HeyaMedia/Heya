@@ -12,7 +12,7 @@ import (
 )
 
 const searchAlbums = `-- name: SearchAlbums :many
-SELECT a.id, a.artist_id, a.title, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.search_vector,
+SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector,
        mi.id AS artist_media_item_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug
@@ -41,25 +41,30 @@ type SearchAlbumsParams struct {
 }
 
 type SearchAlbumsRow struct {
-	ID                int64       `json:"id"`
-	ArtistID          int64       `json:"artist_id"`
-	Title             string      `json:"title"`
-	Year              string      `json:"year"`
-	MusicbrainzID     string      `json:"musicbrainz_id"`
-	AlbumType         string      `json:"album_type"`
-	Genres            []string    `json:"genres"`
-	CoverPath         string      `json:"cover_path"`
-	ReleaseDate       pgtype.Date `json:"release_date"`
-	Label             string      `json:"label"`
-	Country           string      `json:"country"`
-	Barcode           string      `json:"barcode"`
-	TotalTracks       int32       `json:"total_tracks"`
-	TotalDiscs        int32       `json:"total_discs"`
-	Tags              []string    `json:"tags"`
-	SearchVector      interface{} `json:"search_vector"`
-	ArtistMediaItemID int64       `json:"artist_media_item_id"`
-	ArtistName        string      `json:"artist_name"`
-	ArtistSlug        string      `json:"artist_slug"`
+	ID                 int64              `json:"id"`
+	ArtistID           int64              `json:"artist_id"`
+	Title              string             `json:"title"`
+	Slug               string             `json:"slug"`
+	Year               string             `json:"year"`
+	MusicbrainzID      string             `json:"musicbrainz_id"`
+	AlbumType          string             `json:"album_type"`
+	Genres             []string           `json:"genres"`
+	CoverPath          string             `json:"cover_path"`
+	ReleaseDate        pgtype.Date        `json:"release_date"`
+	Label              string             `json:"label"`
+	Country            string             `json:"country"`
+	Barcode            string             `json:"barcode"`
+	TotalTracks        int32              `json:"total_tracks"`
+	TotalDiscs         int32              `json:"total_discs"`
+	Tags               []string           `json:"tags"`
+	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector       interface{}        `json:"search_vector"`
+	ArtistMediaItemID  int64              `json:"artist_media_item_id"`
+	ArtistName         string             `json:"artist_name"`
+	ArtistSlug         string             `json:"artist_slug"`
 }
 
 func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]SearchAlbumsRow, error) {
@@ -75,6 +80,7 @@ func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]S
 			&i.ID,
 			&i.ArtistID,
 			&i.Title,
+			&i.Slug,
 			&i.Year,
 			&i.MusicbrainzID,
 			&i.AlbumType,
@@ -87,6 +93,10 @@ func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]S
 			&i.TotalTracks,
 			&i.TotalDiscs,
 			&i.Tags,
+			&i.IntegratedLufs,
+			&i.TruePeakDb,
+			&i.LoudnessRangeDb,
+			&i.LoudnessAnalyzedAt,
 			&i.SearchVector,
 			&i.ArtistMediaItemID,
 			&i.ArtistName,
@@ -120,7 +130,7 @@ func (q *Queries) SearchAlbumsCount(ctx context.Context, lower string) (int64, e
 }
 
 const searchAllMedia = `-- name: SearchAllMedia :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error
 FROM media_items mi
 WHERE (
     lower(mi.title) % lower($1)
@@ -176,6 +186,15 @@ func (q *Queries) SearchAllMedia(ctx context.Context, arg SearchAllMediaParams) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.MatchedAt,
+			&i.EnrichmentStatus,
+			&i.BaseEnrichedAt,
+			&i.PeopleEnrichedAt,
+			&i.ExtrasEnrichedAt,
+			&i.ImagesEnrichedAt,
+			&i.StructureEnrichedAt,
+			&i.LastEnrichAttemptAt,
+			&i.LastEnrichError,
 		); err != nil {
 			return nil, err
 		}
@@ -258,7 +277,7 @@ func (q *Queries) SearchCollectionsCount(ctx context.Context, lower string) (int
 
 const searchMediaByType = `-- name: SearchMediaByType :many
 
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error
 FROM media_items mi
 WHERE mi.media_type = $2
   AND (
@@ -325,6 +344,15 @@ func (q *Queries) SearchMediaByType(ctx context.Context, arg SearchMediaByTypePa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.MatchedAt,
+			&i.EnrichmentStatus,
+			&i.BaseEnrichedAt,
+			&i.PeopleEnrichedAt,
+			&i.ExtrasEnrichedAt,
+			&i.ImagesEnrichedAt,
+			&i.StructureEnrichedAt,
+			&i.LastEnrichAttemptAt,
+			&i.LastEnrichError,
 		); err != nil {
 			return nil, err
 		}

@@ -16,15 +16,18 @@ WHERE mi.library_id = $1
 ORDER BY a.name;
 
 -- name: ListStaleArtistsByLibrary :many
--- Artists in the library whose enrichment is older than $2 (or never enriched).
+-- Artists in the library whose discography enrichment is older than $2 (or never enriched).
 SELECT a.* FROM artists a
 JOIN media_items mi ON mi.id = a.media_item_id
 WHERE mi.library_id = $1
-  AND (a.enriched_at IS NULL OR a.enriched_at < $2)
+  AND (a.discography_enriched_at IS NULL OR a.discography_enriched_at < $2)
 ORDER BY a.name;
 
--- name: MarkArtistEnriched :exec
-UPDATE artists SET enriched_at = now() WHERE id = $1;
+-- name: MarkArtistDiscographyEnriched :exec
+UPDATE artists SET discography_enriched_at = now() WHERE id = $1;
+
+-- name: MarkArtistCoverArtEnriched :exec
+UPDATE artists SET cover_art_enriched_at = now() WHERE id = $1;
 
 -- name: UpdateArtistEnrichedFields :exec
 -- Used by RefreshMusicArtistWorker to write the canonical metadata after a
@@ -36,7 +39,7 @@ UPDATE artists
        sort_name       = CASE WHEN $4::text  != '' THEN $4 ELSE sort_name       END,
        disambiguation  = CASE WHEN $5::text  != '' THEN $5 ELSE disambiguation  END,
        biography       = CASE WHEN $6::text  != '' THEN $6 ELSE biography       END,
-       enriched_at     = now()
+       discography_enriched_at = now()
  WHERE id = $1;
 
 -- name: UpdateAlbumEnrichedFields :exec
@@ -79,10 +82,26 @@ WHERE id = $1
 RETURNING *;
 
 -- name: CreateAlbum :one
-INSERT INTO albums (artist_id, title, year, musicbrainz_id, album_type, genres, cover_path, release_date,
+INSERT INTO albums (artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date,
     label, country, barcode, total_tracks, total_discs, tags)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING *;
+
+-- name: SetAlbumSlug :exec
+UPDATE albums SET slug = $2 WHERE id = $1;
+
+-- name: AlbumSlugExists :one
+SELECT EXISTS (
+    SELECT 1 FROM albums WHERE artist_id = $1 AND slug = $2 AND id <> $3
+);
+
+-- name: GetAlbumByArtistAndSlug :one
+SELECT al.*
+FROM albums al
+JOIN artists a ON a.id = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1 AND al.slug = $2
+LIMIT 1;
 
 -- name: ListAlbumsByArtist :many
 SELECT * FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC;
@@ -100,9 +119,9 @@ LIMIT 1;
 
 -- name: UpdateAlbum :one
 UPDATE albums
-SET title = $2, year = $3, musicbrainz_id = $4, album_type = $5,
-    genres = $6, cover_path = $7, release_date = $8,
-    label = $9, country = $10, barcode = $11, total_tracks = $12, total_discs = $13, tags = $14
+SET title = $2, slug = $3, year = $4, musicbrainz_id = $5, album_type = $6,
+    genres = $7, cover_path = $8, release_date = $9,
+    label = $10, country = $11, barcode = $12, total_tracks = $13, total_discs = $14, tags = $15
 WHERE id = $1
 RETURNING *;
 
@@ -189,3 +208,224 @@ UPDATE track_files
        duration       = $6,
        quality_score  = $7
  WHERE id = $1;
+
+-- name: ListMusicArtists :many
+-- Merged listing across every music library, with album + track counts so
+-- the Artists grid can show density at a glance. Sorted by sort_name when
+-- present, falling back to name.
+SELECT a.*,
+       mi.slug         AS slug,
+       mi.poster_path  AS poster_path,
+       (SELECT count(*) FROM albums  al WHERE al.artist_id = a.id)                              AS album_count,
+       (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+ORDER BY lower(coalesce(NULLIF(a.sort_name, ''), a.name)) ASC
+LIMIT $1 OFFSET $2;
+
+-- name: CountMusicArtists :one
+SELECT count(*) FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music';
+
+-- name: ListMusicAlbums :many
+-- Merged listing of every album across every music library. Joins the artist
+-- so the Albums grid can render "Title — Artist" without a second round-trip.
+-- album_slug is unique within the artist; artist_slug routes to the artist
+-- detail page.
+SELECT al.*,
+       a.name           AS artist_name,
+       mi.slug          AS artist_slug,
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
+FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC
+LIMIT $1 OFFSET $2;
+
+-- name: CountMusicAlbums :one
+SELECT count(*) FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music';
+
+-- name: ListMusicTracks :many
+-- Flat listing for the Songs tab. Carries everything the row needs:
+-- title, duration, album title, artist name, slugs for navigation, and the
+-- album cover for the thumbnail.
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC,
+         t.disc_number ASC, t.track_number ASC
+LIMIT $1 OFFSET $2;
+
+-- name: CountMusicTracks :one
+SELECT count(*) FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music';
+
+-- name: GetPrimaryTrackFile :one
+-- The single best file for a track: highest quality_score, smallest id as
+-- tiebreak. NULL when the track has no playable file (shouldn't happen for
+-- matched tracks but guard anyway).
+SELECT tf.*
+FROM track_files tf
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
+ORDER BY tf.quality_score DESC, tf.id ASC
+LIMIT 1;
+
+-- name: GetTrackFileByID :one
+SELECT * FROM track_files WHERE id = $1;
+
+-- name: ListRecentlyAddedAlbums :many
+-- Newest albums across every music library, paginated. Newest = highest
+-- album id since albums get IDENTITY-generated IDs in insert order.
+SELECT al.*,
+       a.name           AS artist_name,
+       mi.slug          AS artist_slug,
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
+FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+ORDER BY al.id DESC
+LIMIT $1;
+
+-- name: ListRecentlyAddedArtists :many
+-- Newest artists across every music library — uses discography_enriched_at
+-- when present (signals the artist actually exists with metadata) else falls
+-- back to the artist id. Nulls-last keeps fresh additions out of pole position
+-- before their enrichment completes.
+SELECT a.*,
+       mi.slug         AS slug,
+       mi.poster_path  AS poster_path,
+       (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
+       (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+ORDER BY a.discography_enriched_at DESC NULLS LAST, a.id DESC
+LIMIT $1;
+
+-- name: UpdateTrackFileLoudness :exec
+-- Called by ScanTrackLoudnessWorker once ebur128 finishes.
+UPDATE track_files
+   SET integrated_lufs      = $2,
+       true_peak_db         = $3,
+       loudness_range_db    = $4,
+       sample_peak_db       = $5,
+       loudness_analyzed_at = now()
+ WHERE id = $1;
+
+-- name: ListTrackFilesPendingLoudness :many
+-- Files in music libraries that don't yet have loudness data and aren't
+-- soft-deleted. The track-loudness worker pulls from here as a backstop in
+-- case the FFProbeWorker hand-off missed something.
+SELECT tf.id, tf.library_file_id, tf.track_id, lf.path
+FROM track_files tf
+JOIN library_files lf ON lf.id = tf.library_file_id
+JOIN tracks t  ON t.id  = tf.track_id
+JOIN albums al ON al.id = t.album_id
+JOIN artists a ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+  AND lf.deleted_at IS NULL
+  AND tf.integrated_lufs IS NULL
+ORDER BY tf.id
+LIMIT $1;
+
+-- name: UpdateAlbumLoudness :exec
+UPDATE albums
+   SET integrated_lufs      = $2,
+       true_peak_db         = $3,
+       loudness_range_db    = $4,
+       loudness_analyzed_at = now()
+ WHERE id = $1;
+
+-- name: ListAlbumsPendingLoudness :many
+-- Albums whose track loudness is fully populated but their own album-level
+-- loudness has not yet been measured. The album worker picks these up.
+SELECT al.id, al.title
+FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+  AND al.loudness_analyzed_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM tracks t
+    JOIN track_files tf ON tf.track_id = t.id
+    JOIN library_files lf ON lf.id = tf.library_file_id
+    WHERE t.album_id = al.id
+      AND lf.deleted_at IS NULL
+      AND tf.integrated_lufs IS NULL
+  )
+  AND EXISTS (
+    SELECT 1 FROM tracks t WHERE t.album_id = al.id
+  )
+ORDER BY al.id
+LIMIT $1;
+
+-- name: ListAlbumTrackFilesForLoudness :many
+-- Returns one file path per track in disc/track order. Album worker concats
+-- these and runs ebur128 once. Picks the primary (highest quality) file per
+-- track for the album measurement so a present-day MP3 fallback doesn't
+-- skew an album whose other tracks are FLAC.
+SELECT t.id AS track_id,
+       t.disc_number,
+       t.track_number,
+       lf.path
+FROM tracks t
+JOIN LATERAL (
+    SELECT tf.id, tf.library_file_id
+    FROM track_files tf
+    JOIN library_files lf2 ON lf2.id = tf.library_file_id
+    WHERE tf.track_id = t.id AND lf2.deleted_at IS NULL
+    ORDER BY tf.quality_score DESC, tf.id ASC
+    LIMIT 1
+) primary_file ON true
+JOIN library_files lf ON lf.id = primary_file.library_file_id
+WHERE t.album_id = $1
+ORDER BY t.disc_number, t.track_number;
+
+-- name: AllAlbumTracksHaveLoudness :one
+-- Used by ScanTrackLoudnessWorker to decide whether to enqueue the
+-- album-level worker after each track finishes. True only when every
+-- track in the album has loudness data.
+SELECT NOT EXISTS (
+    SELECT 1 FROM tracks t
+    JOIN track_files tf ON tf.track_id = t.id
+    JOIN library_files lf ON lf.id = tf.library_file_id
+    WHERE t.album_id = $1
+      AND lf.deleted_at IS NULL
+      AND tf.integrated_lufs IS NULL
+) AS done;

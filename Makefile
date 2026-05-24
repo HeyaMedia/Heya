@@ -1,6 +1,6 @@
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev gen-api-client
 
 build-frontend:
 	cd web && bun install && bun run build
@@ -66,3 +66,10 @@ migrate:
 
 migrate-down:
 	goose -dir migrations postgres "$(DATABASE_URL)" down
+
+# Regenerate the committed OpenAPI spec + typed TS client. Run any time you
+# add or change a `*_huma.go` handler. CI also runs this and fails on drift,
+# so a forgotten regen turns into a red build, not a silent skew.
+gen-api-client:
+	go run ./cmd/heya openapi-spec --format json -o web/shared/api.openapi.json
+	cd web && bunx --bun openapi-typescript shared/api.openapi.json -o shared/types/api.gen.ts

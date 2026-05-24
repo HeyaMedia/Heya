@@ -138,9 +138,9 @@ async function loadMedia() {
   // Cross-cutting personal data — keep as a typed 4-tuple so each result keeps
   // its own value shape after destructuring.
   const [cwRes, rwRes, favRes, recRes] = await Promise.allSettled([
-    apiFetch<ContinueWatchingItem[]>('/api/watch/continue'),
-    apiFetch<{ media_item_id: number }[]>('/api/watch/recent'),
-    apiFetch<{ favorited: number[] }>('/api/user/state', {
+    apiFetch<ContinueWatchingItem[]>('/api/me/watch/continue'),
+    apiFetch<{ media_item_id: number }[]>('/api/me/watch/recent'),
+    apiFetch<{ favorited: number[] }>('/api/me/state', {
       method: 'POST',
       body: JSON.stringify({ scope: 'movies' }),
     }),

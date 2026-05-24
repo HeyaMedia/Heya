@@ -25,6 +25,7 @@ CREATE TABLE albums (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     artist_id      BIGINT  NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
     title          TEXT    NOT NULL,
+    slug           TEXT    NOT NULL DEFAULT '',
     year           TEXT    NOT NULL DEFAULT '',
     musicbrainz_id TEXT    NOT NULL DEFAULT '',
     album_type     TEXT    NOT NULL DEFAULT 'album',
@@ -37,6 +38,16 @@ CREATE TABLE albums (
     total_tracks   INTEGER NOT NULL DEFAULT 0,
     total_discs    INTEGER NOT NULL DEFAULT 0,
     tags           TEXT[]  NOT NULL DEFAULT '{}',
+    -- Album-level EBU R128 measured by ScanAlbumLoudnessWorker once every
+    -- track in the album has its own integrated_lufs. NOT averaged — the
+    -- worker concat-demuxes all tracks and runs ebur128 over the union
+    -- (loudgain / r128gain method). Required for proper "album mode"
+    -- replay gain so an album reads as one continuous work, not as
+    -- N independent tracks the engine normalizes apart.
+    integrated_lufs     NUMERIC(6, 2),
+    true_peak_db        NUMERIC(6, 2),
+    loudness_range_db   NUMERIC(6, 2),
+    loudness_analyzed_at TIMESTAMPTZ,
     search_vector  tsvector GENERATED ALWAYS AS (
                        setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
                        setweight(to_tsvector('simple', immutable_array_to_string(coalesce(tags, '{}'::text[]), ' ')), 'C')
@@ -48,6 +59,9 @@ CREATE INDEX idx_albums_musicbrainz_id ON albums (musicbrainz_id) WHERE musicbra
 CREATE INDEX idx_albums_search ON albums USING GIN (search_vector);
 CREATE INDEX idx_albums_title_trgm ON albums USING GIN (lower(title) gin_trgm_ops);
 CREATE UNIQUE INDEX uq_albums_artist_title_year ON albums (artist_id, lower(title), year);
+-- Album slugs are unique within an artist (same album title may exist on
+-- different artists — we don't want a global collision space).
+CREATE UNIQUE INDEX uq_albums_artist_slug ON albums (artist_id, slug) WHERE slug != '';
 
 CREATE TABLE tracks (
     id            BIGINT  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

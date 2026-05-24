@@ -30,49 +30,6 @@ type subtitleTrack struct {
 	Delivery string `json:"delivery"`
 }
 
-func handleListSubtitles(app *service.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
-			return
-		}
-
-		file, err := app.GetLibraryFile(r.Context(), fileID)
-		if err != nil {
-			writeError(w, http.StatusNotFound, "file not found")
-			return
-		}
-
-		var info worker.MediaInfo
-		if len(file.MediaInfo) > 0 {
-			json.Unmarshal(file.MediaInfo, &info)
-		}
-
-		var tracks []subtitleTrack
-		for _, s := range info.Streams {
-			if s.CodecType != "subtitle" {
-				continue
-			}
-			track := subtitleTrack{
-				Index:    s.Index,
-				Language: s.Tags["language"],
-				Codec:    s.CodecName,
-				Title:    s.Tags["title"],
-				Delivery: subtitleDeliveryString(transcoder.SubtitleDeliveryFor(s.CodecName)),
-			}
-			if s.Disposition != nil {
-				track.IsDefault = s.Disposition.Default == 1
-				track.IsForced = s.Disposition.Forced == 1
-				track.IsHearingImpaired = s.Disposition.HearingImpaired == 1
-			}
-			tracks = append(tracks, track)
-		}
-
-		writeJSON(w, http.StatusOK, tracks)
-	}
-}
-
 func handleGetSubtitle(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)

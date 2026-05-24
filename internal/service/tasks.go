@@ -13,6 +13,7 @@ import (
 type TaskStats struct {
 	Complete int `json:"complete"`
 	Pending  int `json:"pending"`
+	Failed   int `json:"failed,omitempty"`
 	Total    int `json:"total"`
 }
 
@@ -23,6 +24,11 @@ type TaskItem struct {
 	Path   string `json:"path"`
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
+	// Error carries the last failure message for items in "failed" status.
+	// Empty for complete/pending items. Surfaced in the tasks-page items
+	// modal so the user can see why an enrich failed without diving into
+	// the logs.
+	Error string `json:"error,omitempty"`
 }
 
 // TaskItemsResult holds a page of task items together with counts.
@@ -31,6 +37,7 @@ type TaskItemsResult struct {
 	Total    int        `json:"total"`
 	Complete int        `json:"complete"`
 	Pending  int        `json:"pending"`
+	Failed   int        `json:"failed"`
 }
 
 // ListScheduledTasks returns all scheduled tasks from the database.
@@ -106,22 +113,58 @@ func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 		}
 	}
 
-	var metaTracked, metaStale int
+	// refresh_stale_items: derive counts from enrichment_status so the
+	// tasks page shows three real buckets (complete / pending / failed)
+	// instead of a single "stale" number that hid failures.
+	var metaTotal, metaComplete, metaFailed int
 	row = a.db.QueryRow(ctx, `
 		SELECT
 			count(*),
-			count(*) FILTER (WHERE mi.metadata_refreshed_at < now() - make_interval(days => COALESCE(
-				NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 30)))
+			count(*) FILTER (WHERE mi.enrichment_status = 'complete'),
+			count(*) FILTER (WHERE mi.enrichment_status = 'failed')
 		FROM media_items mi
 		JOIN libraries l ON l.id = mi.library_id
-		WHERE mi.external_ids != '{}'
-		  AND mi.metadata_refreshed_at IS NOT NULL
+		WHERE (mi.media_type = 'music' OR mi.external_ids != '{}')
 		  AND COALESCE(NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 0) > 0
 	`)
-	if row.Scan(&metaTracked, &metaStale) == nil {
-		stats["refresh_metadata"] = TaskStats{
-			Complete: 0,
-			Total:    metaStale,
+	if row.Scan(&metaTotal, &metaComplete, &metaFailed) == nil {
+		stats["refresh_stale_items"] = TaskStats{
+			Complete: metaComplete,
+			Failed:   metaFailed,
+			Pending:  metaTotal - metaComplete - metaFailed,
+			Total:    metaTotal,
+		}
+	}
+
+	var loudTotal, loudDone int
+	row = a.db.QueryRow(ctx, `
+		SELECT
+			count(*),
+			count(*) FILTER (WHERE tf.integrated_lufs IS NOT NULL)
+		FROM track_files tf
+		JOIN library_files lf ON lf.id = tf.library_file_id
+		WHERE lf.deleted_at IS NULL
+	`)
+	if row.Scan(&loudTotal, &loudDone) == nil {
+		stats["scan_music_loudness"] = TaskStats{
+			Complete: loudDone,
+			Pending:  loudTotal - loudDone,
+			Total:    loudTotal,
+		}
+	}
+
+	var facetsTotal, facetsDone int
+	row = a.db.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM tracks t
+			 JOIN track_files tf ON tf.track_id = t.id),
+			(SELECT count(*) FROM track_facets)
+	`)
+	if row.Scan(&facetsTotal, &facetsDone) == nil {
+		stats["analyze_music_facets"] = TaskStats{
+			Complete: facetsDone,
+			Pending:  facetsTotal - facetsDone,
+			Total:    facetsTotal,
 		}
 	}
 
@@ -389,19 +432,21 @@ func (a *App) QueryScanItems(ctx context.Context, status string, limit, offset i
 }
 
 // QueryRefreshMetadataItems returns metadata refresh items with pagination.
+// Drives the tasks-page items modal for the refresh_stale_items task —
+// shows every matched item with its current enrichment_status (complete /
+// pending / failed) plus the last error for failed ones.
 func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
-	var total, stale int
+	var total, complete, failed int
 	err := a.db.QueryRow(ctx, `
 		SELECT
 			count(*),
-			count(*) FILTER (WHERE mi.metadata_refreshed_at < now() - make_interval(days => COALESCE(
-				NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 30)))
+			count(*) FILTER (WHERE mi.enrichment_status = 'complete'),
+			count(*) FILTER (WHERE mi.enrichment_status = 'failed')
 		FROM media_items mi
 		JOIN libraries l ON l.id = mi.library_id
-		WHERE mi.external_ids != '{}'
-		  AND mi.metadata_refreshed_at IS NOT NULL
+		WHERE (mi.media_type = 'music' OR mi.external_ids != '{}')
 		  AND COALESCE(NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 0) > 0
-	`).Scan(&total, &stale)
+	`).Scan(&total, &complete, &failed)
 	if err != nil {
 		return nil, err
 	}
@@ -409,22 +454,31 @@ func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limi
 	statusFilter := ""
 	switch status {
 	case "complete":
-		statusFilter = `AND mi.metadata_refreshed_at >= now() - make_interval(days => COALESCE(
-			NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 30))`
+		statusFilter = `AND mi.enrichment_status = 'complete'`
+	case "failed":
+		statusFilter = `AND mi.enrichment_status = 'failed'`
 	case "pending":
-		statusFilter = `AND mi.metadata_refreshed_at < now() - make_interval(days => COALESCE(
-			NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 30))`
+		statusFilter = `AND mi.enrichment_status NOT IN ('complete', 'failed')`
 	}
 
+	// Order: failed first (most urgent), then pending (oldest never-refreshed
+	// surfaces at the top via NULLS FIRST), then completes by refresh time.
 	rows, err := a.db.Query(ctx, `
-		SELECT mi.id, mi.title, mi.media_type, mi.metadata_refreshed_at
+		SELECT mi.id, mi.title, mi.media_type, mi.enrichment_status,
+		       mi.last_enrich_error, mi.metadata_refreshed_at
 		FROM media_items mi
 		JOIN libraries l ON l.id = mi.library_id
-		WHERE mi.external_ids != '{}'
-		  AND mi.metadata_refreshed_at IS NOT NULL
+		WHERE (mi.media_type = 'music' OR mi.external_ids != '{}')
 		  AND COALESCE(NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 0) > 0
 		  `+statusFilter+`
-		ORDER BY mi.metadata_refreshed_at ASC, mi.title ASC
+		ORDER BY
+		  CASE mi.enrichment_status
+		    WHEN 'failed'   THEN 0
+		    WHEN 'complete' THEN 2
+		    ELSE 1
+		  END,
+		  mi.metadata_refreshed_at ASC NULLS FIRST,
+		  mi.title ASC
 		LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -435,20 +489,101 @@ func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limi
 	var items []TaskItem
 	for rows.Next() {
 		var id int64
-		var title, mediaType string
+		var title, mediaType, enrichStatus, lastError string
 		var refreshedAt *string
-		if err := rows.Scan(&id, &title, &mediaType, &refreshedAt); err != nil {
+		if err := rows.Scan(&id, &title, &mediaType, &enrichStatus, &lastError, &refreshedAt); err != nil {
 			continue
 		}
-		s := "pending"
-		detail := mediaType + " · never refreshed"
+		s := enrichStatus
+		if s == "" || s == "partial" {
+			s = "pending"
+		}
+		detail := mediaType
 		if refreshedAt != nil {
-			detail = mediaType + " · refreshed: " + *refreshedAt
-			s = "complete"
+			detail += " · refreshed: " + *refreshedAt
+		} else {
+			detail += " · never refreshed"
 		}
 		items = append(items, TaskItem{
 			ID:     id,
 			Name:   title,
+			Status: s,
+			Detail: detail,
+			Error:  lastError,
+		})
+	}
+
+	if items == nil {
+		items = []TaskItem{}
+	}
+
+	return &TaskItemsResult{
+		Items:    items,
+		Total:    total,
+		Complete: complete,
+		Failed:   failed,
+		Pending:  total - complete - failed,
+	}, nil
+}
+
+// QueryLoudnessItems returns track_files paginated by loudness analysis state.
+// "complete" rows have integrated_lufs populated; "pending" rows are still
+// waiting on the loudness queue.
+func (a *App) QueryLoudnessItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
+	var total, complete int
+	err := a.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE tf.integrated_lufs IS NOT NULL)
+		FROM track_files tf
+		JOIN library_files lf ON lf.id = tf.library_file_id
+		WHERE lf.deleted_at IS NULL
+	`).Scan(&total, &complete)
+	if err != nil {
+		return nil, err
+	}
+
+	statusFilter := ""
+	switch status {
+	case "complete":
+		statusFilter = "AND tf.integrated_lufs IS NOT NULL"
+	case "pending":
+		statusFilter = "AND tf.integrated_lufs IS NULL"
+	}
+
+	rows, err := a.db.Query(ctx, `
+		SELECT tf.id, lf.path, tf.integrated_lufs, tf.loudness_analyzed_at
+		FROM track_files tf
+		JOIN library_files lf ON lf.id = tf.library_file_id
+		WHERE lf.deleted_at IS NULL
+		  `+statusFilter+`
+		ORDER BY tf.integrated_lufs IS NOT NULL, lf.path ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TaskItem
+	for rows.Next() {
+		var id int64
+		var path string
+		var lufs *float64
+		var analyzedAt *string // pgx will scan timestamptz into *time.Time but a *string also works via the text format; using interface here keeps the column flexible
+		_ = analyzedAt
+		if err := rows.Scan(&id, &path, &lufs, &analyzedAt); err != nil {
+			continue
+		}
+		s := "pending"
+		detail := ""
+		if lufs != nil {
+			s = "complete"
+			detail = strconv.FormatFloat(*lufs, 'f', 1, 64) + " LUFS"
+		}
+		items = append(items, TaskItem{
+			ID:     id,
+			Name:   filepath.Base(path),
+			Path:   path,
 			Status: s,
 			Detail: detail,
 		})
@@ -461,7 +596,73 @@ func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limi
 	return &TaskItemsResult{
 		Items:    items,
 		Total:    total,
-		Complete: total - stale,
-		Pending:  stale,
+		Complete: complete,
+		Pending:  total - complete,
+	}, nil
+}
+
+// QueryFacetsItems returns tracks paginated by sonic-analysis state. A track
+// is "complete" when its track_facets row exists.
+func (a *App) QueryFacetsItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
+	var total, complete int
+	err := a.db.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM tracks t JOIN track_files tf ON tf.track_id = t.id),
+			(SELECT count(*) FROM track_facets)
+	`).Scan(&total, &complete)
+	if err != nil {
+		return nil, err
+	}
+
+	statusFilter := ""
+	switch status {
+	case "complete":
+		statusFilter = "WHERE tfa.track_id IS NOT NULL"
+	case "pending":
+		statusFilter = "WHERE tfa.track_id IS NULL"
+	}
+
+	rows, err := a.db.Query(ctx, `
+		SELECT t.id, t.title, tfa.track_id IS NOT NULL AS analyzed
+		FROM tracks t
+		JOIN track_files tf ON tf.track_id = t.id
+		LEFT JOIN track_facets tfa ON tfa.track_id = t.id
+		`+statusFilter+`
+		ORDER BY (tfa.track_id IS NULL) DESC, t.title ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TaskItem
+	for rows.Next() {
+		var id int64
+		var title string
+		var analyzed bool
+		if err := rows.Scan(&id, &title, &analyzed); err != nil {
+			continue
+		}
+		s := "pending"
+		if analyzed {
+			s = "complete"
+		}
+		items = append(items, TaskItem{
+			ID:     id,
+			Name:   title,
+			Status: s,
+		})
+	}
+
+	if items == nil {
+		items = []TaskItem{}
+	}
+
+	return &TaskItemsResult{
+		Items:    items,
+		Total:    total,
+		Complete: complete,
+		Pending:  total - complete,
 	}, nil
 }

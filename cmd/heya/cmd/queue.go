@@ -73,7 +73,7 @@ var queueStatusCmd = &cobra.Command{
 	Short: "Show job queue status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+		db, err := pgxpool.New(ctx, cfg.DatabaseURL.Value)
 		if err != nil {
 			return err
 		}
@@ -113,7 +113,7 @@ var queueClearCmd = &cobra.Command{
 		allFlag, _ := cmd.Flags().GetBool("all")
 
 		ctx := context.Background()
-		db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+		db, err := pgxpool.New(ctx, cfg.DatabaseURL.Value)
 		if err != nil {
 			return err
 		}

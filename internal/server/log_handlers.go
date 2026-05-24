@@ -4,32 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/karbowiak/heya/internal/logbuf"
 )
-
-func handleGetLogs(buf *logbuf.RingBuffer) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
-		if n <= 0 || n > 1000 {
-			n = 200
-		}
-		level := r.URL.Query().Get("level")
-
-		entries := buf.Recent(n)
-		if level != "" {
-			filtered := make([]logbuf.Entry, 0, len(entries))
-			for _, e := range entries {
-				if e.Level == level {
-					filtered = append(filtered, e)
-				}
-			}
-			entries = filtered
-		}
-		writeJSON(w, http.StatusOK, entries)
-	}
-}
 
 func handleLogStream(buf *logbuf.RingBuffer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

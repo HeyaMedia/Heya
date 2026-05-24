@@ -1,0 +1,385 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/service"
+)
+
+// registerMeRoutes mounts the per-user state surface under /api/me/*. This
+// covers everything that used to be scattered across /api/watch, /api/favorites,
+// /api/lists, /api/user, plus the watched-marking endpoints under /api/me/watched.
+//
+// /api/me/loved + /api/me/playlists live in music_huma.go (also consolidated).
+func registerMeRoutes(api huma.API, app *service.App) {
+	// --- Watch progress + continue/recent ---
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/watch/{media_item_id}/progress", "update-watch-progress", "Update playback progress for a media item", "Me")),
+		func(ctx context.Context, in *struct {
+			MediaItemID int64 `path:"media_item_id" minimum:"1"`
+			Body        struct {
+				EntityType string `json:"entity_type" maxLength:"32" doc:"What kind of item is being scrubbed (defaults to 'movie')"`
+				Progress   int32  `json:"progress_seconds" minimum:"0"`
+				Total      int32  `json:"total_seconds" minimum:"0"`
+			}
+		}) (*JSONOutput[sqlc.UserWatchProgress], error) {
+			entry, err := app.UpdateWatchProgress(ctx, userFrom(ctx).ID, in.Body.EntityType, in.MediaItemID, in.Body.Progress, in.Body.Total)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[sqlc.UserWatchProgress]{Body: entry}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/watch/continue", "continue-watching", "Items the user can resume", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListContinueWatchingRow], error) {
+			items, err := app.ListContinueWatching(ctx, userFrom(ctx).ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(items), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/watch/recent", "recently-watched", "Recently-watched activity", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListRecentlyWatchedRow], error) {
+			items, err := app.ListRecentlyWatched(ctx, userFrom(ctx).ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(items), nil
+		})
+
+	// --- Favorites ---
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/favorites", "toggle-favorite", "Toggle a favorite flag", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				EntityType string `json:"entity_type" enum:"media_item,episode,season,track,artist,album" doc:"Entity kind"`
+				EntityID   int64  `json:"entity_id" minimum:"1"`
+			}
+		}) (*JSONOutput[favoritedBody], error) {
+			user := userFrom(ctx)
+			if err := app.ToggleFavorite(ctx, user.ID, in.Body.EntityID); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			fav, _ := app.IsFavorited(ctx, user.ID, in.Body.EntityID)
+			return &JSONOutput[favoritedBody]{Body: favoritedBody{Favorited: fav}}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/favorites/check", "check-favorite", "Check whether an entity is favorited", "Me")),
+		func(ctx context.Context, in *struct {
+			EntityType string `query:"entity_type" enum:"media_item,episode,season,track,artist,album"`
+			EntityID   int64  `query:"entity_id" minimum:"1"`
+		}) (*JSONOutput[favoritedBody], error) {
+			fav, _ := app.IsFavorited(ctx, userFrom(ctx).ID, in.EntityID)
+			return noStoreJSON(favoritedBody{Favorited: fav}), nil
+		})
+
+	// --- User lists ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/lists", "list-user-lists", "User's saved lists", "Me")),
+		func(ctx context.Context, in *struct {
+			MediaItemID int64 `query:"media_item_id" doc:"When set, returns lists with a contains flag for this item"`
+		}) (*JSONOutput[[]userListView], error) {
+			user := userFrom(ctx)
+			if in.MediaItemID > 0 {
+				lists, containingIDs, err := app.ListUserListsWithContaining(ctx, user.ID, in.MediaItemID)
+				if err != nil {
+					return nil, huma.Error500InternalServerError(err.Error())
+				}
+				containing := make(map[int64]bool, len(containingIDs))
+				for _, id := range containingIDs {
+					containing[id] = true
+				}
+				views := make([]userListView, len(lists))
+				for i, l := range lists {
+					views[i] = listRowToView(l)
+					c := containing[views[i].ID]
+					views[i].Contains = &c
+				}
+				return noStoreJSON(views), nil
+			}
+			lists, err := app.ListUserLists(ctx, user.ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			views := make([]userListView, len(lists))
+			for i, l := range lists {
+				views[i] = listRowToView(l)
+			}
+			return noStoreJSON(views), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/lists", "create-user-list", "Create a new list", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Name        string          `json:"name" minLength:"1" maxLength:"128" example:"Saturday night watchlist"`
+				Description string          `json:"description" maxLength:"2000" example:"Slow burns + couch comfort"`
+				ListType    string          `json:"list_type" enum:"manual,smart" example:"manual" doc:"manual (user-curated) or smart (filter-backed)"`
+				FilterJSON  json.RawMessage `json:"filter_json" doc:"Smart-list filter spec, ignored for manual"`
+				MediaType   string          `json:"media_type" enum:"movie,tv,music,book,comic,podcast,radio" example:"movie"`
+			}
+		}) (*JSONOutput[userListView], error) {
+			user := userFrom(ctx)
+			if in.Body.Name == "" {
+				return nil, huma.Error400BadRequest("name is required")
+			}
+			list, err := app.CreateUserList(ctx, user.ID, in.Body.Name, in.Body.Description, in.Body.ListType, in.Body.MediaType, in.Body.FilterJSON)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[userListView]{Body: userListToView(list)}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/lists/{id}", "get-user-list", "List detail with items", "Me")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[userListDetailBody], error) {
+			list, items, err := app.GetUserList(ctx, in.ID)
+			if err != nil {
+				return nil, huma.Error404NotFound("list not found")
+			}
+			return noStoreJSON(userListDetailBody{List: list, Items: items}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/lists/{id}", "update-user-list", "Update list metadata", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				Name        string          `json:"name" maxLength:"128"`
+				Description string          `json:"description" maxLength:"2000"`
+				FilterJSON  json.RawMessage `json:"filter_json"`
+				Icon        string          `json:"icon" maxLength:"64"`
+			}
+		}) (*JSONOutput[userListView], error) {
+			list, err := app.UpdateUserList(ctx, in.ID, in.Body.Name, in.Body.Description, in.Body.Icon, in.Body.FilterJSON)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[userListView]{Body: userListToView(list)}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/me/lists/{id}", "delete-user-list", "Delete a list", "Me")),
+		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
+			_ = app.DeleteUserList(ctx, in.ID)
+			return statusOK("deleted"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/lists/{id}/items", "add-list-item", "Append a media item to a list", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				MediaItemID int64 `json:"media_item_id" minimum:"1"`
+			}
+		}) (*JSONOutput[sqlc.UserListItem], error) {
+			item, err := app.AddToList(ctx, in.ID, in.Body.MediaItemID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[sqlc.UserListItem]{Body: item}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/me/lists/{id}/items/{media_id}", "remove-list-item", "Remove a media item from a list", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			MediaID int64 `path:"media_id" minimum:"1"`
+		}) (*StatusOutput, error) {
+			_ = app.RemoveFromList(ctx, in.ID, in.MediaID)
+			return statusOK("removed"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/lists/{id}/reorder", "reorder-list", "Reorder items within a list", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				Items []service.ReorderItem `json:"items"`
+			}
+		}) (*StatusOutput, error) {
+			if err := app.ReorderList(ctx, in.ID, in.Body.Items); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("reordered"), nil
+		})
+
+	// --- Settings / state / playback prefs ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/settings", "get-user-settings", "User-level preferences", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.UserSettings], error) {
+			settings, err := app.GetUserSettings(ctx, userFrom(ctx).ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to load settings")
+			}
+			return noStoreJSON(settings), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/settings", "update-user-settings", "Update user preferences", "Me")),
+		func(ctx context.Context, in *struct {
+			Body service.UserSettings
+		}) (*JSONOutput[service.UserSettings], error) {
+			if err := app.UpdateUserSettings(ctx, userFrom(ctx).ID, in.Body); err != nil {
+				return nil, huma.Error500InternalServerError("failed to save settings")
+			}
+			return &JSONOutput[service.UserSettings]{Body: in.Body}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/media-state", "get-media-state", "Watched + favorited IDs snapshot", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[mediaStateBody], error) {
+			state, _ := app.GetUserMediaState(ctx, userFrom(ctx).ID)
+			return noStoreJSON(mediaStateBody{
+				Watched:   state.WatchedIDs,
+				Favorited: state.FavoritedIDs,
+			}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/state", "get-user-state", "Watched/favorited/etc. for a specific scope", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Scope    string `json:"scope" enum:"movies,series,seasons,episodes"`
+				SeriesID int64  `json:"series_id,omitempty"`
+			}
+		}) (*JSONOutput[map[string]any], error) {
+			result, err := app.GetUserState(ctx, userFrom(ctx).ID, in.Body.Scope, in.Body.SeriesID)
+			if err != nil {
+				msg := err.Error()
+				switch msg {
+				case "scope must be one of: movies, series, seasons, episodes",
+					"series_id required for scope=seasons",
+					"series_id required for scope=episodes":
+					return nil, huma.Error400BadRequest(msg)
+				}
+				return nil, huma.Error404NotFound(msg)
+			}
+			return noStoreJSON(result), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/playback/{media_id}", "get-playback-preference", "Per-item playback preferences", "Me")),
+		func(ctx context.Context, in *struct {
+			MediaID int64 `path:"media_id" minimum:"1"`
+		}) (*JSONOutput[playbackPrefBody], error) {
+			pref, found, err := app.GetPlaybackPreference(ctx, userFrom(ctx).ID, in.MediaID)
+			if err != nil || !found {
+				return noStoreJSON(playbackPrefBody{MediaItemID: in.MediaID}), nil
+			}
+			return noStoreJSON(playbackPrefBody{
+				MediaItemID:      pref.MediaItemID,
+				AudioLanguage:    pref.AudioLanguage,
+				SubtitleLanguage: pref.SubtitleLanguage,
+				SubtitleMode:     pref.SubtitleMode,
+			}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/playback/{media_id}", "set-playback-preference", "Save per-item playback preferences", "Me")),
+		func(ctx context.Context, in *struct {
+			MediaID int64 `path:"media_id" minimum:"1"`
+			Body    struct {
+				AudioLanguage    string `json:"audio_language" maxLength:"16" doc:"ISO 639-1/-2/-3 code or empty to clear"`
+				SubtitleLanguage string `json:"subtitle_language" maxLength:"16" doc:"ISO 639-1/-2/-3 code or empty to clear"`
+				SubtitleMode     string `json:"subtitle_mode" maxLength:"16" doc:"'off' | 'forced' | 'full' | empty to clear"`
+			}
+		}) (*JSONOutput[playbackPrefBody], error) {
+			user := userFrom(ctx)
+			if in.Body.AudioLanguage == "" && in.Body.SubtitleLanguage == "" && in.Body.SubtitleMode == "" {
+				_ = app.DeletePlaybackPreference(ctx, user.ID, in.MediaID)
+				return &JSONOutput[playbackPrefBody]{Body: playbackPrefBody{MediaItemID: in.MediaID}}, nil
+			}
+			pref, err := app.SetPlaybackPreference(ctx, user.ID, in.MediaID, in.Body.AudioLanguage, in.Body.SubtitleLanguage, in.Body.SubtitleMode)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to save preference")
+			}
+			return &JSONOutput[playbackPrefBody]{Body: playbackPrefBody{
+				MediaItemID:      pref.MediaItemID,
+				AudioLanguage:    pref.AudioLanguage,
+				SubtitleLanguage: pref.SubtitleLanguage,
+				SubtitleMode:     pref.SubtitleMode,
+			}}, nil
+		})
+
+	// --- Watched marking (consolidated) ---
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/watched/episode/{id}", "mark-episode-watched", "Mark an episode as watched", "Me")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[watchedBody], error) {
+			_ = app.MarkEpisodeWatched(ctx, userFrom(ctx).ID, in.ID)
+			return &JSONOutput[watchedBody]{Body: watchedBody{Watched: true}}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/me/watched/episode/{id}", "unmark-episode-watched", "Remove the watched mark from an episode", "Me")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[watchedBody], error) {
+			_ = app.UnmarkEpisodeWatched(ctx, userFrom(ctx).ID, in.ID)
+			return &JSONOutput[watchedBody]{Body: watchedBody{Watched: false}}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/watched/season/{id}", "mark-season-watched", "Mark all episodes in a season", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				Watched bool `json:"watched"`
+			}
+		}) (*JSONOutput[watchedBody], error) {
+			user := userFrom(ctx)
+			if in.Body.Watched {
+				_ = app.MarkSeasonWatched(ctx, user.ID, in.ID)
+			} else {
+				_ = app.UnmarkSeasonWatched(ctx, user.ID, in.ID)
+			}
+			return &JSONOutput[watchedBody]{Body: watchedBody{Watched: in.Body.Watched}}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/watched/media/{id}", "mark-media-watched", "Mark a movie or TV show as watched (dispatches by type)", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				Watched bool `json:"watched"`
+			}
+		}) (*JSONOutput[watchedBody], error) {
+			if err := app.MarkMediaWatched(ctx, userFrom(ctx).ID, in.ID, in.Body.Watched); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[watchedBody]{Body: watchedBody{Watched: in.Body.Watched}}, nil
+		})
+
+	// --- Read-side accessors that hang off /api/media but are user-scoped ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/watched-episodes", "get-watched-episodes", "Per-season watched-episode counts and IDs", "Me")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[[]service.SeasonWatchInfo], error) {
+			result, err := app.GetWatchedEpisodes(ctx, userFrom(ctx).ID, in.ID)
+			if err != nil {
+				return nil, huma.Error404NotFound("series not found")
+			}
+			return noStoreJSON(result), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/up-next", "get-up-next", "Next episode for a series", "Me")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[service.UpNextResult], error) {
+			result, _ := app.GetUpNext(ctx, userFrom(ctx).ID, in.ID)
+			return noStoreJSON(result), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/languages", "get-media-languages", "Available audio/subtitle languages", "Me")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[service.MediaLanguages], error) {
+			langs, _ := app.GetMediaLanguages(ctx, in.ID)
+			return cachedJSON(langs, 60), nil
+		})
+}
+
+type favoritedBody struct {
+	Favorited bool `json:"favorited"`
+}
+
+type watchedBody struct {
+	Watched bool `json:"watched"`
+}
+
+type userListDetailBody struct {
+	List  sqlc.UserList    `json:"list"`
+	Items []sqlc.MediaItem `json:"items"`
+}
+
+type mediaStateBody struct {
+	Watched   []int64 `json:"watched"`
+	Favorited []int64 `json:"favorited"`
+}
+
+type playbackPrefBody struct {
+	MediaItemID      int64  `json:"media_item_id"`
+	AudioLanguage    string `json:"audio_language"`
+	SubtitleLanguage string `json:"subtitle_language"`
+	SubtitleMode     string `json:"subtitle_mode"`
+}
+
+// Reuse the existing helpers from list_handlers.go: userListView, listRowToView,
+// userListToView.

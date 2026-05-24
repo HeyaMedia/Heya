@@ -36,7 +36,7 @@ func (q *Queries) CountMediaItemsByType(ctx context.Context, mediaType MediaType
 const createMediaItem = `-- name: CreateMediaItem :one
 INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector
+RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error
 `
 
 type CreateMediaItemParams struct {
@@ -100,6 +100,15 @@ func (q *Queries) CreateMediaItem(ctx context.Context, arg CreateMediaItemParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.MatchedAt,
+		&i.EnrichmentStatus,
+		&i.BaseEnrichedAt,
+		&i.PeopleEnrichedAt,
+		&i.ExtrasEnrichedAt,
+		&i.ImagesEnrichedAt,
+		&i.StructureEnrichedAt,
+		&i.LastEnrichAttemptAt,
+		&i.LastEnrichError,
 	)
 	return i, err
 }
@@ -114,7 +123,7 @@ func (q *Queries) DeleteMediaItem(ctx context.Context, id int64) error {
 }
 
 const getMediaItemByID = `-- name: GetMediaItemByID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector FROM media_items WHERE id = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error FROM media_items WHERE id = $1
 `
 
 func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, error) {
@@ -144,12 +153,21 @@ func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.MatchedAt,
+		&i.EnrichmentStatus,
+		&i.BaseEnrichedAt,
+		&i.PeopleEnrichedAt,
+		&i.ExtrasEnrichedAt,
+		&i.ImagesEnrichedAt,
+		&i.StructureEnrichedAt,
+		&i.LastEnrichAttemptAt,
+		&i.LastEnrichError,
 	)
 	return i, err
 }
 
 const getMediaItemBySlug = `-- name: GetMediaItemBySlug :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector FROM media_items WHERE slug = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error FROM media_items WHERE slug = $1
 `
 
 func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaItem, error) {
@@ -179,6 +197,15 @@ func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaIte
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.MatchedAt,
+		&i.EnrichmentStatus,
+		&i.BaseEnrichedAt,
+		&i.PeopleEnrichedAt,
+		&i.ExtrasEnrichedAt,
+		&i.ImagesEnrichedAt,
+		&i.StructureEnrichedAt,
+		&i.LastEnrichAttemptAt,
+		&i.LastEnrichError,
 	)
 	return i, err
 }
@@ -346,7 +373,7 @@ func (q *Queries) ListEnrichedTVSeries(ctx context.Context, arg ListEnrichedTVSe
 }
 
 const listMediaItemsByLibrary = `-- name: ListMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error FROM media_items
 WHERE library_id = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -391,6 +418,15 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.MatchedAt,
+			&i.EnrichmentStatus,
+			&i.BaseEnrichedAt,
+			&i.PeopleEnrichedAt,
+			&i.ExtrasEnrichedAt,
+			&i.ImagesEnrichedAt,
+			&i.StructureEnrichedAt,
+			&i.LastEnrichAttemptAt,
+			&i.LastEnrichError,
 		); err != nil {
 			return nil, err
 		}
@@ -403,7 +439,7 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 }
 
 const listMediaItemsByType = `-- name: ListMediaItemsByType :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error FROM media_items
 WHERE media_type = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -448,6 +484,15 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.MatchedAt,
+			&i.EnrichmentStatus,
+			&i.BaseEnrichedAt,
+			&i.PeopleEnrichedAt,
+			&i.ExtrasEnrichedAt,
+			&i.ImagesEnrichedAt,
+			&i.StructureEnrichedAt,
+			&i.LastEnrichAttemptAt,
+			&i.LastEnrichError,
 		); err != nil {
 			return nil, err
 		}
@@ -489,6 +534,132 @@ func (q *Queries) ListUnavailableMediaItemIDs(ctx context.Context, mediaType Med
 	return items, nil
 }
 
+const markEnrichAttempted = `-- name: MarkEnrichAttempted :exec
+UPDATE media_items
+   SET last_enrich_attempt_at = now(),
+       last_enrich_error      = ''
+ WHERE id = $1
+`
+
+// Called at the start of an enrich attempt. Clears any prior error so a
+// successful run leaves last_enrich_error empty.
+func (q *Queries) MarkEnrichAttempted(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichAttempted, id)
+	return err
+}
+
+const markEnrichBaseDone = `-- name: MarkEnrichBaseDone :exec
+UPDATE media_items SET base_enriched_at = now() WHERE id = $1
+`
+
+// Type-specific row + base fields populated.
+func (q *Queries) MarkEnrichBaseDone(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichBaseDone, id)
+	return err
+}
+
+const markEnrichComplete = `-- name: MarkEnrichComplete :exec
+UPDATE media_items
+   SET enrichment_status      = 'complete',
+       metadata_refreshed_at  = now()
+ WHERE id = $1
+`
+
+// Final stamp at the end of a successful enrich. Flips status to 'complete'
+// and updates metadata_refreshed_at (the legacy stale-detection timestamp).
+func (q *Queries) MarkEnrichComplete(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichComplete, id)
+	return err
+}
+
+const markEnrichExtrasDone = `-- name: MarkEnrichExtrasDone :exec
+UPDATE media_items SET extras_enriched_at = now() WHERE id = $1
+`
+
+// Keywords + videos + recommendations + certifications + alt-titles populated.
+func (q *Queries) MarkEnrichExtrasDone(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichExtrasDone, id)
+	return err
+}
+
+const markEnrichFailed = `-- name: MarkEnrichFailed :exec
+UPDATE media_items
+   SET enrichment_status      = 'failed',
+       last_enrich_error      = $2,
+       last_enrich_attempt_at = now()
+ WHERE id = $1
+`
+
+type MarkEnrichFailedParams struct {
+	ID              int64  `json:"id"`
+	LastEnrichError string `json:"last_enrich_error"`
+}
+
+// Called when an enrich attempt errors. The status flips to 'failed' so the
+// UI surfaces it; the worker is free to retry on a subsequent run.
+func (q *Queries) MarkEnrichFailed(ctx context.Context, arg MarkEnrichFailedParams) error {
+	_, err := q.db.Exec(ctx, markEnrichFailed, arg.ID, arg.LastEnrichError)
+	return err
+}
+
+const markEnrichImagesDone = `-- name: MarkEnrichImagesDone :exec
+UPDATE media_items SET images_enriched_at = now() WHERE id = $1
+`
+
+// Image downloads have been enqueued (URLs known, local cache pending).
+func (q *Queries) MarkEnrichImagesDone(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichImagesDone, id)
+	return err
+}
+
+const markEnrichPartial = `-- name: MarkEnrichPartial :exec
+UPDATE media_items
+   SET enrichment_status = 'partial'
+ WHERE id = $1
+`
+
+// Used when at least one component has landed but more remain. The worker
+// only calls this if MarkEnrichComplete won't fire on this run.
+func (q *Queries) MarkEnrichPartial(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichPartial, id)
+	return err
+}
+
+const markEnrichPeopleDone = `-- name: MarkEnrichPeopleDone :exec
+UPDATE media_items SET people_enriched_at = now() WHERE id = $1
+`
+
+// Cast + crew rows populated.
+func (q *Queries) MarkEnrichPeopleDone(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichPeopleDone, id)
+	return err
+}
+
+const markEnrichStructureDone = `-- name: MarkEnrichStructureDone :exec
+UPDATE media_items SET structure_enriched_at = now() WHERE id = $1
+`
+
+// TV seasons + episodes tree built. No-op for movies / books / music.
+func (q *Queries) MarkEnrichStructureDone(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEnrichStructureDone, id)
+	return err
+}
+
+const markMatched = `-- name: MarkMatched :exec
+UPDATE media_items
+   SET matched_at        = now(),
+       enrichment_status = CASE WHEN enrichment_status = '' THEN 'pending' ELSE enrichment_status END
+ WHERE id = $1
+`
+
+// Stamped by the match step after writing a search-only stub. Sets the
+// enrichment_status floor to 'pending' (it's the default for new rows, but
+// this also covers re-match flows that may have advanced it).
+func (q *Queries) MarkMatched(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markMatched, id)
+	return err
+}
+
 const markMetadataRefreshed = `-- name: MarkMetadataRefreshed :exec
 UPDATE media_items SET metadata_refreshed_at = now() WHERE id = $1
 `
@@ -515,7 +686,7 @@ func (q *Queries) MediaItemSlugExists(ctx context.Context, arg MediaItemSlugExis
 }
 
 const searchMediaItemsByLibrary = `-- name: SearchMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error FROM media_items
 WHERE library_id = $1
   AND ($4::text = '' OR title ILIKE '%' || $4 || '%')
 ORDER BY sort_title ASC, title ASC
@@ -567,6 +738,15 @@ func (q *Queries) SearchMediaItemsByLibrary(ctx context.Context, arg SearchMedia
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.MatchedAt,
+			&i.EnrichmentStatus,
+			&i.BaseEnrichedAt,
+			&i.PeopleEnrichedAt,
+			&i.ExtrasEnrichedAt,
+			&i.ImagesEnrichedAt,
+			&i.StructureEnrichedAt,
+			&i.LastEnrichAttemptAt,
+			&i.LastEnrichError,
 		); err != nil {
 			return nil, err
 		}
@@ -585,7 +765,7 @@ SET title = $2, sort_title = $3, year = $4, description = $5,
     tagline = $9, original_title = $10, original_language = $11,
     status = $12, provider_kind = $13, heya_slug = $14, updated_at = now()
 WHERE id = $1
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector
+RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error
 `
 
 type UpdateMediaItemParams struct {
@@ -647,6 +827,15 @@ func (q *Queries) UpdateMediaItem(ctx context.Context, arg UpdateMediaItemParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.MatchedAt,
+		&i.EnrichmentStatus,
+		&i.BaseEnrichedAt,
+		&i.PeopleEnrichedAt,
+		&i.ExtrasEnrichedAt,
+		&i.ImagesEnrichedAt,
+		&i.StructureEnrichedAt,
+		&i.LastEnrichAttemptAt,
+		&i.LastEnrichError,
 	)
 	return i, err
 }

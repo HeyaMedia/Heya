@@ -2,138 +2,93 @@ package config
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestDefaults(t *testing.T) {
-	for _, key := range []string{"DATABASE_URL", "HOST", "PORT", "LOG_LEVEL", "LOG_FORMAT", "TMDB_API_TOKEN", "DATA_DIR"} {
-		t.Setenv(key, "")
+// allHeyaEnvKeys is the canonical list every test starts from a known state on.
+var allHeyaEnvKeys = []string{
+	"HEYA_DATABASE_URL", "HEYA_HOST", "HEYA_PORT", "HEYA_LOG_LEVEL",
+	"HEYA_LOG_FORMAT", "HEYA_DATA_DIR", "HEYA_MEDIA_URL", "HEYA_HWACCEL",
+	"HEYA_TRANSCODE_CACHE_DIR", "HEYA_TRANSCODE_CACHE_MAX_GB",
+	"HEYA_TAILSCALE_ENABLED", "HEYA_TAILSCALE_HOSTNAME",
+	"HEYA_TAILSCALE_STATE_DIR", "HEYA_TAILSCALE_HTTPS",
+	"HEYA_TAILSCALE_FUNNEL", "HEYA_TAILSCALE_AUTHKEY",
+}
+
+// clearHeyaEnv unsets every HEYA_ env var for the duration of the test.
+// t.Setenv("") would set the var to empty but still present, which LookupEnv
+// reports as ok=true — not what we want when asserting default fallbacks.
+func clearHeyaEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range allHeyaEnvKeys {
+		old, had := os.LookupEnv(k)
+		os.Unsetenv(k)
+		if had {
+			t.Cleanup(func() { os.Setenv(k, old) })
+		}
 	}
+}
 
-	cfg := &Config{}
-	applyDefaults(cfg)
+func TestLoadDefaults(t *testing.T) {
+	clearHeyaEnv(t)
 
-	assert.Equal(t, "postgres://heya:heya@localhost:5440/heya?sslmode=disable", cfg.DatabaseURL)
-	assert.Equal(t, "0.0.0.0", cfg.Host)
-	assert.Equal(t, "8080", cfg.Port)
-	assert.Equal(t, "info", cfg.LogLevel)
-	assert.Equal(t, "console", cfg.LogFormat)
-	assert.Equal(t, "./data", cfg.DataDir)
+	cfg := Load()
+
+	assert.Equal(t, "0.0.0.0", cfg.Host.Value)
+	assert.Equal(t, SourceDefault, cfg.Host.Source)
+	assert.Equal(t, "info", cfg.LogLevel.Value)
+	assert.Equal(t, "console", cfg.LogFormat.Value)
+	assert.Equal(t, "./data", cfg.DataDir.Value)
+	assert.Equal(t, "auto", cfg.HWAccel.Value)
+	assert.Equal(t, 50, cfg.TranscodeCacheMaxGB.Value)
+	assert.False(t, cfg.Tailscale.Enabled.Value)
+	assert.False(t, cfg.Tailscale.HTTPS.Value)
+	assert.False(t, cfg.Tailscale.Funnel.Value)
+	assert.Equal(t, "heya", cfg.Tailscale.Hostname.Value)
+}
+
+func TestLoadEnvOverrides(t *testing.T) {
+	clearHeyaEnv(t)
+	t.Setenv("HEYA_HOST", "127.0.0.1")
+	t.Setenv("HEYA_PORT", "9090")
+	t.Setenv("HEYA_TAILSCALE_ENABLED", "true")
+	t.Setenv("HEYA_TAILSCALE_HTTPS", "true")
+	t.Setenv("HEYA_TRANSCODE_CACHE_MAX_GB", "200")
+
+	cfg := Load()
+
+	assert.Equal(t, "127.0.0.1", cfg.Host.Value)
+	assert.Equal(t, SourceEnv, cfg.Host.Source)
+	assert.Equal(t, "HEYA_HOST", cfg.Host.EnvVar)
+
+	assert.Equal(t, "9090", cfg.Port.Value)
+	assert.Equal(t, SourceEnv, cfg.Port.Source)
+
+	assert.True(t, cfg.Tailscale.Enabled.Value)
+	assert.Equal(t, SourceEnv, cfg.Tailscale.Enabled.Source)
+	assert.True(t, cfg.Tailscale.HTTPS.Value)
+	assert.Equal(t, 200, cfg.TranscodeCacheMaxGB.Value)
 }
 
 func TestAddr(t *testing.T) {
-	cfg := &Config{Host: "127.0.0.1", Port: "3000"}
+	cfg := &Config{
+		Host: Field[string]{Value: "127.0.0.1", Source: SourceDefault},
+		Port: Field[string]{Value: "3000", Source: SourceDefault},
+	}
 	assert.Equal(t, "127.0.0.1:3000", cfg.Addr())
 }
 
-func TestMergeFileWithEnvFileValues(t *testing.T) {
-	for _, key := range []string{"DATABASE_URL", "HOST", "PORT", "LOG_LEVEL", "LOG_FORMAT", "TMDB_API_TOKEN", "DATA_DIR"} {
-		t.Setenv(key, "")
-	}
-
-	fc := &FileConfig{
-		Host:     "custom-host",
-		Port:     "9090",
-		LogLevel: "debug",
-	}
-	cfg := MergeFileWithEnv(fc)
-
-	assert.Equal(t, "custom-host", cfg.Host)
-	assert.Equal(t, "9090", cfg.Port)
-	assert.Equal(t, "debug", cfg.LogLevel)
-}
-
-func TestMergeFileWithEnvEnvOverrides(t *testing.T) {
-	t.Setenv("HOST", "env-host")
-	t.Setenv("PORT", "7777")
-
-	fc := &FileConfig{
-		Host: "file-host",
-		Port: "9090",
-	}
-	cfg := MergeFileWithEnv(fc)
-
-	assert.Equal(t, "env-host", cfg.Host)
-	assert.Equal(t, "7777", cfg.Port)
-}
-
-func TestLoadFileSaveFileRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.yaml")
-
-	original := &FileConfig{
-		Host:      "myhost",
-		Port:      "4000",
-		LogLevel:  "warn",
-		LogFormat: "json",
-		DataDir:   "/tmp/data",
-	}
-
-	err := SaveFile(path, original)
-	require.NoError(t, err)
-
-	loaded, err := LoadFile(path)
-	require.NoError(t, err)
-
-	assert.Equal(t, original.Host, loaded.Host)
-	assert.Equal(t, original.Port, loaded.Port)
-	assert.Equal(t, original.LogLevel, loaded.LogLevel)
-	assert.Equal(t, original.LogFormat, loaded.LogFormat)
-	assert.Equal(t, original.DataDir, loaded.DataDir)
-}
-
-func TestLoadFileNotFound(t *testing.T) {
-	_, err := LoadFile("/nonexistent/path.yaml")
-	assert.Error(t, err)
-}
-
 func TestSources(t *testing.T) {
-	for _, key := range []string{"DATABASE_URL", "HOST", "PORT", "LOG_LEVEL", "LOG_FORMAT", "TMDB_API_TOKEN", "DATA_DIR"} {
-		t.Setenv(key, "")
-	}
+	clearHeyaEnv(t)
+	t.Setenv("HEYA_HOST", "from-env")
 
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := Load()
 	sources := cfg.Sources()
 
-	assert.Equal(t, "default", sources["host"])
-	assert.Equal(t, "default", sources["port"])
-}
-
-func TestSourcesEnv(t *testing.T) {
-	t.Setenv("HOST", "from-env")
-
-	cfg := &Config{Host: "from-env"}
-	applyDefaults(cfg)
-	sources := cfg.Sources()
-
-	assert.Equal(t, "env", sources["host"])
-}
-
-func TestToFileConfig(t *testing.T) {
-	cfg := &Config{
-		Host:     "h",
-		Port:     "p",
-		LogLevel: "l",
-		DataDir:  "d",
-	}
-	fc := cfg.ToFileConfig()
-	assert.Equal(t, "h", fc.Host)
-	assert.Equal(t, "p", fc.Port)
-	assert.Equal(t, "d", fc.DataDir)
-}
-
-func TestSaveFileCreatesDirectory(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "sub", "nested", "config.yaml")
-
-	err := SaveFile(path, &FileConfig{Host: "test"})
-	require.NoError(t, err)
-
-	_, err = os.Stat(path)
-	assert.NoError(t, err)
+	assert.Equal(t, SourceEnv, sources["infra.host"].Source)
+	assert.Equal(t, "HEYA_HOST", sources["infra.host"].EnvVar)
+	assert.Equal(t, SourceDefault, sources["infra.port"].Source)
+	assert.Empty(t, sources["infra.port"].EnvVar)
 }

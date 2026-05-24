@@ -45,7 +45,7 @@ var studiosSyncCmd = &cobra.Command{
 
 		ui.Info("Companies", ui.Dim(fmt.Sprintf("%d known", len(names))))
 
-		resolver := studios.NewResolver(cfg.DataDir)
+		resolver := studios.NewResolver(cfg.DataDir.Value)
 		downloaded, skipped, err := resolver.Sync(ctx, names)
 		if err != nil {
 			return err

@@ -7,6 +7,65 @@
       </div>
     </div>
 
+    <!-- Metadata Queue panel — live view of the unified enrich queue -->
+    <section v-if="queueStatus" class="section">
+      <h3 class="section-heading">
+        <Icon name="refresh" :size="14" />
+        Metadata queue
+        <span class="queue-subtle">unified enrich · MaxWorkers=1</span>
+      </h3>
+
+      <div class="queue-panel">
+        <div class="queue-stats">
+          <div class="queue-stat">
+            <span class="queue-stat-num">{{ queueStatus.pending }}</span>
+            <span class="queue-stat-label">pending</span>
+          </div>
+          <div class="queue-priority-bands">
+            <div class="queue-band" :class="{ active: (queueStatus.pending_by_priority['1'] ?? 0) > 0 }">
+              <span class="band-label">P1 · watcher / view</span>
+              <span class="band-count">{{ queueStatus.pending_by_priority['1'] ?? 0 }}</span>
+            </div>
+            <div class="queue-band" :class="{ active: (queueStatus.pending_by_priority['2'] ?? 0) > 0 }">
+              <span class="band-label">P2 · movies + tv</span>
+              <span class="band-count">{{ queueStatus.pending_by_priority['2'] ?? 0 }}</span>
+            </div>
+            <div class="queue-band" :class="{ active: (queueStatus.pending_by_priority['3'] ?? 0) > 0 }">
+              <span class="band-label">P3 · music + books</span>
+              <span class="band-count">{{ queueStatus.pending_by_priority['3'] ?? 0 }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="queueStatus.running" class="queue-current">
+          <div class="queue-current-spinner">
+            <Icon name="loader" :size="14" />
+          </div>
+          <div class="queue-current-info">
+            <div class="queue-current-title">{{ queueStatus.running.item_title || queueStatus.running.kind }}</div>
+            <div class="queue-current-meta">
+              <span v-if="queueStatus.running.media_type">{{ queueStatus.running.media_type }}</span>
+              <span v-if="queueStatus.running.source">· {{ queueStatus.running.source }}</span>
+              <span>· P{{ queueStatus.running.priority }}</span>
+              <span v-if="queueStatus.running.started_at">· {{ timeAgo(queueStatus.running.started_at) }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="queue-idle">
+          <Icon name="check" :size="14" />
+          Queue idle
+        </div>
+
+        <div class="queue-throughput">
+          <span class="throughput-num">{{ queueStatus.recent.completed_5min }}</span>
+          <span class="throughput-label">completed · last 5 min</span>
+          <span v-if="queueStatus.recent.avg_duration_sec > 0" class="throughput-avg">
+            avg {{ queueStatus.recent.avg_duration_sec.toFixed(1) }}s
+          </span>
+        </div>
+      </div>
+    </section>
+
     <!-- Scheduled Tasks -->
     <section class="section">
       <h3 class="section-heading">
@@ -51,13 +110,25 @@
           <!-- Stats -->
           <div v-if="t.stats && t.stats.total > 0" class="task-stats">
             <div class="stats-bar-track">
-              <div class="stats-bar-fill" :style="{ width: (t.stats.total > 0 ? t.stats.complete / t.stats.total * 100 : 0) + '%' }" />
+              <!-- Stacked: complete (green) → failed (red) → pending (rest, gold) -->
+              <div class="stats-bar-fill stats-bar-complete" :style="{ width: (t.stats.complete / t.stats.total * 100) + '%' }" />
+              <div v-if="(t.stats.failed ?? 0) > 0" class="stats-bar-fill stats-bar-failed" :style="{ width: ((t.stats.failed ?? 0) / t.stats.total * 100) + '%' }" />
             </div>
             <div class="stats-label">
               <span class="stats-complete">{{ t.stats.complete }}</span>
+              <span class="stats-text">complete</span>
+              <template v-if="(t.stats.failed ?? 0) > 0">
+                <span class="stats-sep">·</span>
+                <span class="stats-failed">{{ t.stats.failed }}</span>
+                <span class="stats-text">failed</span>
+              </template>
+              <template v-if="t.stats.pending > 0">
+                <span class="stats-sep">·</span>
+                <span class="stats-pending">{{ t.stats.pending }}</span>
+                <span class="stats-text">pending</span>
+              </template>
               <span class="stats-sep">/</span>
               <span class="stats-total">{{ t.stats.total }}</span>
-              <span class="stats-text">complete</span>
             </div>
           </div>
           <div v-else-if="t.stats && t.stats.total === 0" class="task-stats">
@@ -170,6 +241,7 @@ import type { TaskProgressPayload } from '~/composables/useEventBus'
 interface TaskStatsPayload {
   complete: number
   pending: number
+  failed?: number
   total: number
 }
 
@@ -194,14 +266,34 @@ interface ScheduledTask {
   stats: TaskStatsPayload | null
 }
 
+interface MetadataQueueRunning {
+  job_id: number
+  kind: string
+  priority: number
+  item_id?: number
+  item_title?: string
+  media_type?: string
+  source?: string
+  started_at?: string
+}
+
+interface MetadataQueueStatus {
+  pending: number
+  pending_by_priority: Record<string, number>
+  running?: MetadataQueueRunning
+  recent: { completed_5min: number, avg_duration_sec: number }
+}
+
 const tasks = ref<ScheduledTask[]>([])
 const itemsModalTask = ref<string | null>(null)
+const queueStatus = ref<MetadataQueueStatus | null>(null)
+let queuePoll: ReturnType<typeof setInterval> | null = null
 
 function taskIcon(id: string): string {
   if (id === 'generate_trickplay') return 'film'
   if (id === 'generate_thumbnails') return 'image'
   if (id === 'scan_libraries') return 'folder'
-  if (id === 'refresh_metadata') return 'refresh'
+  if (id === 'refresh_stale_items') return 'refresh'
   return 'timer'
 }
 
@@ -234,6 +326,10 @@ function formatDuration(sec: number): string {
 
 async function fetchTasks() {
   try { tasks.value = await apiFetch<ScheduledTask[]>('/api/tasks') } catch {}
+}
+
+async function fetchQueueStatus() {
+  try { queueStatus.value = await apiFetch<MetadataQueueStatus>('/api/jobs/queue/metadata') } catch {}
 }
 
 async function runTask(id: string) {
@@ -293,6 +389,12 @@ watch(liveTaskProgress, () => {
 
 onMounted(() => {
   fetchTasks()
+  fetchQueueStatus()
+  queuePoll = setInterval(fetchQueueStatus, 2000)
+})
+
+onBeforeUnmount(() => {
+  if (queuePoll) clearInterval(queuePoll)
 })
 </script>
 
@@ -340,8 +442,15 @@ onMounted(() => {
 
 /* Stats bar */
 .task-stats { margin-top: 12px; }
-.stats-bar-track { height: 4px; border-radius: 2px; background: var(--bg-0); overflow: hidden; }
-.stats-bar-fill { height: 100%; border-radius: 2px; background: var(--good); transition: width 0.3s ease; }
+.stats-bar-track {
+  height: 4px; border-radius: 2px; background: var(--bg-0); overflow: hidden;
+  display: flex;
+}
+.stats-bar-fill { height: 100%; transition: width 0.3s ease; }
+.stats-bar-complete { background: var(--good); }
+.stats-bar-failed { background: var(--bad, #d6594a); }
+.stats-pending { font-weight: 600; color: var(--gold); }
+.stats-failed { font-weight: 600; color: var(--bad, #d6594a); }
 .stats-label {
   display: flex; align-items: center; gap: 3px; margin-top: 5px;
   font-size: 11px; font-family: var(--font-mono); color: var(--fg-3);
@@ -429,5 +538,87 @@ onMounted(() => {
   color: var(--fg-3); font-size: 13px;
   padding: 14px 16px; background: var(--bg-2);
   border: 1px dashed var(--border); border-radius: var(--r-md);
+}
+
+/* Metadata queue panel */
+.queue-subtle {
+  font-size: 11px; font-weight: 400; color: var(--fg-4);
+  font-family: var(--font-mono); margin-left: 8px;
+}
+.queue-panel {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 18px;
+  align-items: center;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px 18px;
+}
+.queue-stats { display: flex; align-items: center; gap: 18px; }
+.queue-stat { display: flex; flex-direction: column; align-items: flex-start; }
+.queue-stat-num {
+  font-size: 28px; font-weight: 600; line-height: 1;
+  font-family: var(--font-mono); color: var(--fg-1);
+}
+.queue-stat-label {
+  font-size: 10px; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-4);
+  margin-top: 4px;
+}
+.queue-priority-bands { display: flex; flex-direction: column; gap: 4px; min-width: 140px; }
+.queue-band {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3);
+  padding: 2px 6px; border-radius: var(--r-xs);
+  background: var(--bg-2);
+}
+.queue-band.active { color: var(--fg-1); background: var(--bg-3); }
+.band-label { letter-spacing: 0.02em; }
+.band-count { font-weight: 600; }
+
+.queue-current {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.queue-current-spinner {
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  color: var(--gold);
+  animation: queue-spin 1.2s linear infinite;
+}
+@keyframes queue-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.queue-current-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.queue-current-title {
+  font-size: 13px; color: var(--fg-1); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.queue-current-meta {
+  font-size: 11px; font-family: var(--font-mono); color: var(--fg-4);
+  display: flex; gap: 4px;
+}
+
+.queue-idle {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--fg-3);
+  padding: 8px 12px;
+}
+
+.queue-throughput {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  min-width: 110px;
+}
+.throughput-num {
+  font-size: 18px; font-weight: 600; line-height: 1;
+  font-family: var(--font-mono); color: var(--fg-1);
+}
+.throughput-label {
+  font-size: 10px; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-4);
+}
+.throughput-avg {
+  font-size: 11px; font-family: var(--font-mono); color: var(--fg-3);
+  margin-top: 2px;
 }
 </style>

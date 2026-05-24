@@ -479,6 +479,18 @@ func contentTypeFromExt(ext string) string {
 		return "audio/flac"
 	case ".mp3":
 		return "audio/mpeg"
+	case ".m4a", ".aac":
+		return "audio/mp4"
+	case ".ogg", ".oga":
+		return "audio/ogg"
+	case ".opus":
+		return "audio/ogg; codecs=opus"
+	case ".wav":
+		return "audio/wav"
+	case ".wma":
+		return "audio/x-ms-wma"
+	case ".alac":
+		return "audio/mp4; codecs=alac"
 	case ".epub":
 		return "application/epub+zip"
 	case ".pdf":

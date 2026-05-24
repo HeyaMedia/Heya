@@ -7,7 +7,44 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countUserLovedAlbums = `-- name: CountUserLovedAlbums :one
+SELECT count(*) FROM user_favorites
+WHERE user_id = $1 AND entity_type = 'album'
+`
+
+func (q *Queries) CountUserLovedAlbums(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserLovedAlbums, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countUserLovedArtists = `-- name: CountUserLovedArtists :one
+SELECT count(*) FROM user_favorites
+WHERE user_id = $1 AND entity_type = 'artist'
+`
+
+func (q *Queries) CountUserLovedArtists(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserLovedArtists, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countUserLovedTracks = `-- name: CountUserLovedTracks :one
+SELECT count(*) FROM user_favorites WHERE user_id = $1 AND entity_type = 'track'
+`
+
+func (q *Queries) CountUserLovedTracks(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserLovedTracks, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const isFavorited = `-- name: IsFavorited :one
 SELECT EXISTS(
@@ -67,7 +104,7 @@ func (q *Queries) ListFavoritesByEntity(ctx context.Context, arg ListFavoritesBy
 }
 
 const listUserFavoriteMediaItems = `-- name: ListUserFavoriteMediaItems :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error
 FROM media_items mi
 JOIN user_favorites uf ON uf.entity_id = mi.id AND uf.entity_type = 'media_item'
 WHERE uf.user_id = $1
@@ -114,6 +151,356 @@ func (q *Queries) ListUserFavoriteMediaItems(ctx context.Context, arg ListUserFa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SearchVector,
+			&i.MatchedAt,
+			&i.EnrichmentStatus,
+			&i.BaseEnrichedAt,
+			&i.PeopleEnrichedAt,
+			&i.ExtrasEnrichedAt,
+			&i.ImagesEnrichedAt,
+			&i.StructureEnrichedAt,
+			&i.LastEnrichAttemptAt,
+			&i.LastEnrichError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserLovedAlbumIDs = `-- name: ListUserLovedAlbumIDs :many
+SELECT entity_id AS album_id
+FROM user_favorites
+WHERE user_id = $1 AND entity_type = 'album'
+`
+
+func (q *Queries) ListUserLovedAlbumIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listUserLovedAlbumIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var album_id int64
+		if err := rows.Scan(&album_id); err != nil {
+			return nil, err
+		}
+		items = append(items, album_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserLovedAlbums = `-- name: ListUserLovedAlbums :many
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector,
+       a.name           AS artist_name,
+       mi.slug          AS artist_slug,
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
+       uf.created_at    AS loved_at
+FROM user_favorites uf
+JOIN albums      al ON al.id = uf.entity_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE uf.user_id = $1 AND uf.entity_type = 'album' AND l.media_type = 'music'
+ORDER BY uf.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListUserLovedAlbumsParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+type ListUserLovedAlbumsRow struct {
+	ID                 int64              `json:"id"`
+	ArtistID           int64              `json:"artist_id"`
+	Title              string             `json:"title"`
+	Slug               string             `json:"slug"`
+	Year               string             `json:"year"`
+	MusicbrainzID      string             `json:"musicbrainz_id"`
+	AlbumType          string             `json:"album_type"`
+	Genres             []string           `json:"genres"`
+	CoverPath          string             `json:"cover_path"`
+	ReleaseDate        pgtype.Date        `json:"release_date"`
+	Label              string             `json:"label"`
+	Country            string             `json:"country"`
+	Barcode            string             `json:"barcode"`
+	TotalTracks        int32              `json:"total_tracks"`
+	TotalDiscs         int32              `json:"total_discs"`
+	Tags               []string           `json:"tags"`
+	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector       interface{}        `json:"search_vector"`
+	ArtistName         string             `json:"artist_name"`
+	ArtistSlug         string             `json:"artist_slug"`
+	TrackCount         int64              `json:"track_count"`
+	LovedAt            pgtype.Timestamptz `json:"loved_at"`
+}
+
+// The user's favorited albums with artist join, ordered most-recently loved.
+func (q *Queries) ListUserLovedAlbums(ctx context.Context, arg ListUserLovedAlbumsParams) ([]ListUserLovedAlbumsRow, error) {
+	rows, err := q.db.Query(ctx, listUserLovedAlbums, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserLovedAlbumsRow{}
+	for rows.Next() {
+		var i ListUserLovedAlbumsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArtistID,
+			&i.Title,
+			&i.Slug,
+			&i.Year,
+			&i.MusicbrainzID,
+			&i.AlbumType,
+			&i.Genres,
+			&i.CoverPath,
+			&i.ReleaseDate,
+			&i.Label,
+			&i.Country,
+			&i.Barcode,
+			&i.TotalTracks,
+			&i.TotalDiscs,
+			&i.Tags,
+			&i.IntegratedLufs,
+			&i.TruePeakDb,
+			&i.LoudnessRangeDb,
+			&i.LoudnessAnalyzedAt,
+			&i.SearchVector,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.TrackCount,
+			&i.LovedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserLovedArtistIDs = `-- name: ListUserLovedArtistIDs :many
+SELECT entity_id AS artist_id
+FROM user_favorites
+WHERE user_id = $1 AND entity_type = 'artist'
+`
+
+func (q *Queries) ListUserLovedArtistIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listUserLovedArtistIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var artist_id int64
+		if err := rows.Scan(&artist_id); err != nil {
+			return nil, err
+		}
+		items = append(items, artist_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserLovedArtists = `-- name: ListUserLovedArtists :many
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at,
+       mi.slug         AS slug,
+       mi.poster_path  AS poster_path,
+       (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
+       (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
+       uf.created_at AS loved_at
+FROM user_favorites uf
+JOIN artists     a  ON a.id  = uf.entity_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE uf.user_id = $1 AND uf.entity_type = 'artist' AND l.media_type = 'music'
+ORDER BY uf.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListUserLovedArtistsParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+type ListUserLovedArtistsRow struct {
+	ID                    int64              `json:"id"`
+	MediaItemID           int64              `json:"media_item_id"`
+	MusicbrainzID         string             `json:"musicbrainz_id"`
+	Name                  string             `json:"name"`
+	SortName              string             `json:"sort_name"`
+	Disambiguation        string             `json:"disambiguation"`
+	Biography             string             `json:"biography"`
+	SearchVector          interface{}        `json:"search_vector"`
+	DiscographyEnrichedAt pgtype.Timestamptz `json:"discography_enriched_at"`
+	CoverArtEnrichedAt    pgtype.Timestamptz `json:"cover_art_enriched_at"`
+	Slug                  string             `json:"slug"`
+	PosterPath            string             `json:"poster_path"`
+	AlbumCount            int64              `json:"album_count"`
+	TrackCount            int64              `json:"track_count"`
+	LovedAt               pgtype.Timestamptz `json:"loved_at"`
+}
+
+// The user's favorited artists, with poster + counts, ordered most-recently
+// loved first. Mirrors the shape of ListMusicArtists so the UI can reuse the
+// same tile component.
+func (q *Queries) ListUserLovedArtists(ctx context.Context, arg ListUserLovedArtistsParams) ([]ListUserLovedArtistsRow, error) {
+	rows, err := q.db.Query(ctx, listUserLovedArtists, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserLovedArtistsRow{}
+	for rows.Next() {
+		var i ListUserLovedArtistsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaItemID,
+			&i.MusicbrainzID,
+			&i.Name,
+			&i.SortName,
+			&i.Disambiguation,
+			&i.Biography,
+			&i.SearchVector,
+			&i.DiscographyEnrichedAt,
+			&i.CoverArtEnrichedAt,
+			&i.Slug,
+			&i.PosterPath,
+			&i.AlbumCount,
+			&i.TrackCount,
+			&i.LovedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserLovedTrackIDs = `-- name: ListUserLovedTrackIDs :many
+SELECT entity_id AS track_id
+FROM user_favorites
+WHERE user_id = $1 AND entity_type = 'track'
+`
+
+// Compact set of just the IDs so the UI can mark hearts filled on whatever
+// track rows it's currently rendering. Caller filters client-side.
+func (q *Queries) ListUserLovedTrackIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listUserLovedTrackIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var track_id int64
+		if err := rows.Scan(&track_id); err != nil {
+			return nil, err
+		}
+		items = append(items, track_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserLovedTracks = `-- name: ListUserLovedTracks :many
+SELECT t.id           AS track_id,
+       t.title        AS track_title,
+       t.duration     AS duration,
+       t.disc_number  AS disc_number,
+       t.track_number AS track_number,
+       al.id          AS album_id,
+       al.title       AS album_title,
+       al.cover_path  AS album_cover_path,
+       al.year        AS album_year,
+       al.slug        AS album_slug,
+       a.id           AS artist_id,
+       a.name         AS artist_name,
+       mi.slug        AS artist_slug,
+       uf.created_at  AS loved_at
+FROM user_favorites uf
+JOIN tracks      t  ON t.id  = uf.entity_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE uf.user_id = $1 AND uf.entity_type = 'track'
+ORDER BY uf.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListUserLovedTracksParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+type ListUserLovedTracksRow struct {
+	TrackID        int64              `json:"track_id"`
+	TrackTitle     string             `json:"track_title"`
+	Duration       int32              `json:"duration"`
+	DiscNumber     int32              `json:"disc_number"`
+	TrackNumber    int32              `json:"track_number"`
+	AlbumID        int64              `json:"album_id"`
+	AlbumTitle     string             `json:"album_title"`
+	AlbumCoverPath string             `json:"album_cover_path"`
+	AlbumYear      string             `json:"album_year"`
+	AlbumSlug      string             `json:"album_slug"`
+	ArtistID       int64              `json:"artist_id"`
+	ArtistName     string             `json:"artist_name"`
+	ArtistSlug     string             `json:"artist_slug"`
+	LovedAt        pgtype.Timestamptz `json:"loved_at"`
+}
+
+// Flat list of the user's loved tracks across every music library, joined
+// with the album + artist for one-shot rendering on the Loved tab.
+func (q *Queries) ListUserLovedTracks(ctx context.Context, arg ListUserLovedTracksParams) ([]ListUserLovedTracksRow, error) {
+	rows, err := q.db.Query(ctx, listUserLovedTracks, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserLovedTracksRow{}
+	for rows.Next() {
+		var i ListUserLovedTracksRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.AlbumSlug,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.LovedAt,
 		); err != nil {
 			return nil, err
 		}

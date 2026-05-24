@@ -44,8 +44,8 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 	detail := m.enrichArtistFromHeyaMedia(ctx, artist.MusicbrainzID, artist.Name)
 	if detail == nil {
 		// Negative cache: mark so the scan task's staleness gate skips it.
-		if markErr := m.q.MarkArtistEnriched(ctx, artistID); markErr != nil {
-			log.Warn().Err(markErr).Int64("artist_id", artistID).Msg("MarkArtistEnriched failed")
+		if markErr := m.q.MarkArtistDiscographyEnriched(ctx, artistID); markErr != nil {
+			log.Warn().Err(markErr).Int64("artist_id", artistID).Msg("MarkArtistDiscographyEnriched failed")
 		}
 		res.Skipped = true
 		return res, nil
@@ -150,6 +150,12 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 				res.AlbumsUpdated++
 			}
 		}
+		// Backfill / refresh the slug if the album hasn't got one yet, or
+		// the title changed under us. Slug stays stable as a URL identifier
+		// even when title cosmetics change later, so don't re-derive blindly.
+		if dbAlbum.Slug == "" && embedded.Title != "" {
+			m.assignAlbumSlug(ctx, artist.ID, dbAlbum.ID, embedded.Title, newYear)
+		}
 
 		dbTracks, err := m.q.ListTracksByAlbum(ctx, dbAlbum.ID)
 		if err != nil {
@@ -182,8 +188,8 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		}
 	}
 
-	if err := m.q.MarkArtistEnriched(ctx, artistID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		log.Warn().Err(err).Int64("artist_id", artistID).Msg("MarkArtistEnriched failed")
+	if err := m.q.MarkArtistDiscographyEnriched(ctx, artistID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Warn().Err(err).Int64("artist_id", artistID).Msg("MarkArtistDiscographyEnriched failed")
 	}
 	return res, nil
 }

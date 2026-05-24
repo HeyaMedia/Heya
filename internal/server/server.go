@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -13,41 +14,16 @@ import (
 )
 
 func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
-	o := &options{}
-	for _, opt := range opts {
-		opt(o)
-	}
-
 	mux := http.NewServeMux()
+	BuildAPI(mux, app, cfg, opts...)
 
-	registerRoutes(mux, app)
-	registerTailscaleRoutes(mux, app, cfg)
-
-	if o.logBuf != nil {
-		registerLogRoutes(mux, app, o.logBuf)
-	}
-
-	if o.hub != nil {
-		mux.HandleFunc("GET /api/ws", handleWebSocket(o.hub, app.SessionLookup()))
-		// pprof + runtime stats. Admin-only because these dump goroutine
-		// stacks, heap contents, and 30-second CPU profiles. The mux is
-		// wrapped by the admin gate when we register it.
-		debugMux := http.NewServeMux()
-		registerDebugRoutes(debugMux, o.hub)
-		mux.Handle("/api/debug/", auth.Middleware(app.SessionLookup())(adminOnly(debugMux)))
-	}
-
-	docsMux := http.NewServeMux()
-	NewHumaAPI(docsMux, app)
-
-	mux.Handle("GET /api/openapi.json", docsMux)
-	mux.Handle("GET /api/openapi.yaml", docsMux)
-	mux.HandleFunc("GET /api/docs", scalarHandler("/api/openapi.json"))
-
+	// SPA is the only non-/api route — anything that doesn't match a Huma
+	// operation falls through here.
 	mux.Handle("/", spaHandler())
 
 	handler := withMiddleware(mux)
 
+	o := collectOptions(opts...)
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
 		Handler: handler,
@@ -58,10 +34,66 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 	return srv
 }
 
+// BuildAPI registers every Heya operation against mux and returns the API. Use
+// this directly when you need the typed huma.API surface without booting an
+// http.Server — most notably the `heya openapi-spec` CLI, which dumps the
+// generated OpenAPI document without ever serving traffic, and humatest
+// fixtures that exercise input validation / auth gates without a database.
+//
+// app may be a zero-valued &service.App{}: handler closures capture it but
+// are never invoked during pure registration. The hub/logbuf-gated routes
+// self-skip when those options are absent. For spec / test invocations we
+// also short-circuit auth so a missing db doesn't panic — see WithSessions
+// for the opt-in.
+func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...Option) huma.API {
+	o := collectOptions(opts...)
+	sessions := o.sessions
+	if sessions == nil && app != nil && app.DBPool() != nil {
+		sessions = app.SessionLookup()
+	}
+
+	// Huma owns the entire /api/* surface. Every endpoint — JSON, binary,
+	// SSE, WebSocket, pprof — is registered as a typed operation so it
+	// shows up in /api/docs. The actual byte handling for streaming
+	// endpoints is delegated through humago.Unwrap to existing stdlib
+	// handlers (see wrapStream in binary_huma.go).
+	api := newHumaAPI(mux, sessions)
+	registerSystemRoutes(api, app)
+	registerAuthRoutes(api, app)
+	registerAdminRoutes(api, app, o.logBuf)
+	registerTailscaleRoutes(api, app, cfg)
+	registerLibraryRoutes(api, app)
+	registerJobRoutes(api, app)
+	registerTaskRoutes(api, app)
+	registerMediaRoutes(api, app)
+	registerMetadataEditorRoutes(api, app)
+	registerOpenSubtitlesRoutes(api, app)
+	registerMusicRoutes(api, app)
+	registerMeRoutes(api, app)
+	registerStreamRoutes(api, app)
+	registerBinaryRoutes(api, app)
+	registerDocsRoutes(api)
+	if o.hub != nil {
+		registerWebSocketRoutes(api, app, o.hub)
+		registerHumaDebugRoutes(api, o.hub)
+	}
+	registerLogStreamRoute(api, o.logBuf)
+	return api
+}
+
+func collectOptions(opts ...Option) *options {
+	o := &options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o
+}
+
 type options struct {
-	logBuf  *logbuf.RingBuffer
-	hub     *eventhub.Hub
-	baseCtx context.Context
+	logBuf   *logbuf.RingBuffer
+	hub      *eventhub.Hub
+	baseCtx  context.Context
+	sessions auth.SessionLookup
 }
 
 type Option func(*options)
@@ -81,5 +113,14 @@ func WithEventHub(hub *eventhub.Hub) Option {
 func WithBaseContext(ctx context.Context) Option {
 	return func(o *options) {
 		o.baseCtx = ctx
+	}
+}
+
+// WithSessions injects a SessionLookup for the auth middleware. Production
+// callers don't need this — BuildAPI derives it from the App's DB pool —
+// but tests can pass a mock (or nil to force every secured op to 401).
+func WithSessions(s auth.SessionLookup) Option {
+	return func(o *options) {
+		o.sessions = s
 	}
 }

@@ -2,8 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"sort"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -79,43 +79,93 @@ func (t *ScanLibrariesTask) Run(ctx context.Context, progress *ProgressTracker) 
 	q := sqlc.New(t.DB)
 	s := scanner.New(t.DB)
 
-	queued := t.drainQueue()
+	// Re-drain after each library so any Enqueue()s that arrived during the
+	// previous scan (e.g. adding 4 libraries back-to-back, where each post-1
+	// Enqueue's TriggerNow gets rejected as "already running" but the queue
+	// entry still sits in t.queue) get picked up without needing the
+	// scheduler to trigger us again.
+	processed := make(map[int64]bool)
+	totalSeen := 0
 
-	var libs []sqlc.Library
-	if len(queued) > 0 {
-		for _, req := range queued {
-			lib, err := q.GetLibraryByID(ctx, req.LibraryID)
-			if err != nil {
-				log.Warn().Err(err).Int64("library_id", req.LibraryID).Msg("scan task: library not found, skipping")
-				progress.Fail("")
-				continue
-			}
-			libs = append(libs, lib)
-		}
-	} else {
-		var err error
-		libs, err = q.ListLibraries(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
-	progress.SetTotal(len(libs))
-
-	forceMap := make(map[int64]bool)
-	for _, req := range queued {
-		forceMap[req.LibraryID] = req.Force
-	}
-
-	for _, lib := range libs {
+	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		t.scanOneLibrary(ctx, s, q, lib, forceMap[lib.ID], progress)
-	}
+		queued := t.drainQueue()
 
-	return nil
+		var libs []sqlc.Library
+		forceMap := make(map[int64]bool)
+		if len(queued) > 0 {
+			for _, req := range queued {
+				if processed[req.LibraryID] {
+					continue
+				}
+				lib, err := q.GetLibraryByID(ctx, req.LibraryID)
+				if err != nil {
+					log.Warn().Err(err).Int64("library_id", req.LibraryID).Msg("scan task: library not found, skipping")
+					progress.Fail("")
+					continue
+				}
+				libs = append(libs, lib)
+				forceMap[req.LibraryID] = req.Force
+			}
+		} else if totalSeen == 0 {
+			// First iteration with no explicit queue: scan every library (the
+			// scheduled-cadence path). Skip on subsequent iterations so we
+			// don't keep rescanning everything every loop.
+			var err error
+			libs, err = q.ListLibraries(ctx)
+			if err != nil {
+				return err
+			}
+		}
+
+		if len(libs) == 0 {
+			return nil
+		}
+
+		// Process in the same priority order the enrich queue uses:
+		// movies → tv → music → books. Otherwise users on a fresh DB watch
+		// libraries fill in whatever order ListLibraries happened to
+		// return, which is jarring when their main library type is buried
+		// under another.
+		sortLibrariesByPriority(libs)
+
+		totalSeen += len(libs)
+		progress.SetTotal(totalSeen)
+
+		for _, lib := range libs {
+			if ctx.Err() != nil {
+				return nil
+			}
+			t.scanOneLibrary(ctx, s, q, lib, forceMap[lib.ID], progress)
+			processed[lib.ID] = true
+		}
+	}
+}
+
+// sortLibrariesByPriority orders libs by media_type to match the enrich
+// queue's priority bands: movies first, then tv (covers an "Anime"-named
+// library which is still media_type=tv), then music, then books. Stable
+// — libraries inside the same media_type keep their relative order.
+func sortLibrariesByPriority(libs []sqlc.Library) {
+	rank := func(mt sqlc.MediaType) int {
+		switch mt {
+		case sqlc.MediaTypeMovie:
+			return 0
+		case sqlc.MediaTypeTv:
+			return 1
+		case sqlc.MediaTypeMusic:
+			return 2
+		case sqlc.MediaTypeBook:
+			return 3
+		}
+		return 4
+	}
+	sort.SliceStable(libs, func(i, j int) bool {
+		return rank(libs[i].MediaType) < rank(libs[j].MediaType)
+	})
 }
 
 func (t *ScanLibrariesTask) scanOneLibrary(ctx context.Context, s *scanner.Scanner, q *sqlc.Queries, lib sqlc.Library, force bool, progress *ProgressTracker) {
@@ -149,14 +199,11 @@ func (t *ScanLibrariesTask) scanOneLibrary(ctx context.Context, s *scanner.Scann
 
 	enqueued := t.enqueuePendingFiles(ctx, q, lib.ID)
 
-	// Music libraries get a fan-out of per-artist refresh jobs after the scan
-	// completes (the matcher will create new artist rows when MetadataMatchWorker
-	// processes the per-file jobs above; this loop covers existing artists that
-	// have stale or never-fetched enrichment data).
-	refreshed := 0
-	if lib.MediaType == sqlc.MediaTypeMusic {
-		refreshed = t.enqueueMusicArtistRefreshes(ctx, q, lib, force)
-	}
+	// Stale-artist refresh used to be fanned out here for music libraries.
+	// After the match/enrich split, stub-matched items get picked up by
+	// refresh_stale_items naturally (metadata_refreshed_at is NULL until
+	// the first enrich), so this fan-out is redundant.
+	_ = force
 
 	log.Info().
 		Int64("library_id", lib.ID).
@@ -164,7 +211,6 @@ func (t *ScanLibrariesTask) scanOneLibrary(ctx context.Context, s *scanner.Scann
 		Int("new", result.New).
 		Int("deleted", result.Deleted).
 		Int("enqueued", enqueued).
-		Int("music_refreshed", refreshed).
 		Msg("scan task: library done")
 
 	if t.Hub != nil {
@@ -181,56 +227,6 @@ func (t *ScanLibrariesTask) scanOneLibrary(ctx context.Context, s *scanner.Scann
 		}
 	}
 
-}
-
-// enqueueMusicArtistRefreshes fans out one RefreshMusicArtist job per artist
-// in the library. When force=true (operator explicitly re-scanned), it
-// refreshes every artist; otherwise it skips artists enriched within the last
-// 7 days. The match-side path (MetadataMatchWorker) handles new-artist refresh
-// for incremental file adds; this covers existing-artist staleness on scan.
-func (t *ScanLibrariesTask) enqueueMusicArtistRefreshes(ctx context.Context, q *sqlc.Queries, lib sqlc.Library, force bool) int {
-	artists, err := q.ListArtistsByLibrary(ctx, lib.ID)
-	if err != nil {
-		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("scan task: list artists failed")
-		return 0
-	}
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-
-	// First pass: figure out batch size so each enqueued job carries the
-	// correct total. (Worker reports per-artist progress against this total.)
-	var due []sqlc.Artist
-	for _, a := range artists {
-		if !force && a.EnrichedAt.Valid && a.EnrichedAt.Time.After(cutoff) {
-			continue
-		}
-		due = append(due, a)
-	}
-
-	if len(due) > 0 && t.Hub != nil {
-		t.Hub.Emit(eventhub.EventScanProgress, eventhub.ScanPayload{
-			LibraryID:   lib.ID,
-			LibraryName: lib.Name,
-			Phase:       "refresh",
-			Total:       len(due),
-			Done:        0,
-		})
-	}
-
-	count := 0
-	for i, a := range due {
-		if _, err := t.River.Insert(ctx, worker.RefreshMusicArtistArgs{
-			ArtistID:       a.ID,
-			Force:          force,
-			BatchLibraryID: lib.ID,
-			BatchTotal:     len(due),
-			BatchPosition:  i + 1, // 1-indexed; matches MaxWorkers=1 serial order
-		}, nil); err != nil {
-			log.Warn().Err(err).Int64("artist_id", a.ID).Msg("enqueue RefreshMusicArtist failed")
-			continue
-		}
-		count++
-	}
-	return count
 }
 
 func (t *ScanLibrariesTask) enqueuePendingFiles(ctx context.Context, q *sqlc.Queries, libraryID int64) int {

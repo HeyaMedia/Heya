@@ -51,6 +51,7 @@ const tabs = [
   { to: '/settings/transcoding', label: 'Transcoding', icon: 'film', hint: 'Hardware & cache' },
   { to: '/settings/metadata', label: 'Metadata Editor', icon: 'database', hint: 'Edit & manage' },
   { to: '/settings/providers', label: 'Providers', icon: 'key', hint: 'API credentials' },
+  { to: '/settings/sonicanalysis', label: 'Sonic Analysis', icon: 'music', hint: 'ML pipeline + models' },
   { to: '/settings/tasks', label: 'Tasks', icon: 'timer', hint: 'Scheduled & recurring' },
   { to: '/settings/jobs', label: 'Jobs', icon: 'list', hint: 'Queue monitor' },
   { to: '/settings/logs', label: 'Logs', icon: 'clipboard', hint: 'Server log stream' },

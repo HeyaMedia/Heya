@@ -16,8 +16,13 @@
             {{ enabled ? 'Heya is exposed on your tailnet.' : 'Off — Heya only listens on the LAN.' }}
           </div>
         </div>
-        <label class="switch lg">
-          <input type="checkbox" :checked="enabled" :disabled="saving" @change="onMasterToggle(($event.target as HTMLInputElement).checked)">
+        <label class="switch lg" :title="lockTooltip('tailscale.enabled')">
+          <input
+            type="checkbox"
+            :checked="enabled"
+            :disabled="saving || isLocked('tailscale.enabled')"
+            @change="onMasterToggle(($event.target as HTMLInputElement).checked)"
+          >
           <span class="slider" />
         </label>
       </div>
@@ -116,7 +121,13 @@
             <div class="form-title">Hostname</div>
             <div class="form-hint">Shown in the tailnet admin console. Changing this re-onboards the node.</div>
           </div>
-          <input v-model="hostnameDraft" class="input" :disabled="saving" @blur="saveHostname">
+          <input
+            v-model="hostnameDraft"
+            class="input"
+            :disabled="saving || isLocked('tailscale.hostname')"
+            :title="lockTooltip('tailscale.hostname')"
+            @blur="saveHostname"
+          >
         </div>
 
         <div class="toggle-row">
@@ -132,8 +143,13 @@
               <a href="https://login.tailscale.com/admin/dns/https" target="_blank" rel="noopener">admin console</a>.
             </div>
           </div>
-          <label class="switch">
-            <input type="checkbox" :checked="cfg?.https ?? true" :disabled="saving" @change="saveHTTPS(($event.target as HTMLInputElement).checked)">
+          <label class="switch" :title="lockTooltip('tailscale.https')">
+            <input
+              type="checkbox"
+              :checked="cfg?.https ?? true"
+              :disabled="saving || isLocked('tailscale.https')"
+              @change="saveHTTPS(($event.target as HTMLInputElement).checked)"
+            >
             <span class="slider" />
           </label>
         </div>
@@ -155,8 +171,13 @@
               actually does is up to your tailnet config.
             </div>
           </div>
-          <label class="switch">
-            <input type="checkbox" :checked="cfg?.funnel ?? false" :disabled="saving" @change="saveFunnel(($event.target as HTMLInputElement).checked)">
+          <label class="switch" :title="lockTooltip('tailscale.funnel')">
+            <input
+              type="checkbox"
+              :checked="cfg?.funnel ?? false"
+              :disabled="saving || isLocked('tailscale.funnel')"
+              @change="saveFunnel(($event.target as HTMLInputElement).checked)"
+            >
             <span class="slider" />
           </label>
         </div>
@@ -225,6 +246,7 @@
 
 <script setup lang="ts">
 const { enabled, status, cfg, loading, refresh, saveConfig, setFunnel, logout, fetchRaw, subscribeToEvents } = useTailscale()
+const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
 
 const saving = ref(false)
 const loggingOut = ref(false)
@@ -239,7 +261,7 @@ const stateDirHint = computed(() => cfg.value?.state_dir || 'data/tailscale/')
 let unsubscribe: (() => void) | null = null
 
 onMounted(async () => {
-  await refresh()
+  await Promise.all([refresh(), ensureSources()])
   hostnameDraft.value = cfg.value?.hostname ?? 'heya'
   unsubscribe = subscribeToEvents()
 })

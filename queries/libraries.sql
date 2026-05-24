@@ -6,6 +6,15 @@ RETURNING *;
 -- name: GetLibraryByID :one
 SELECT * FROM libraries WHERE id = $1;
 
+-- name: GetLibraryByName :one
+SELECT * FROM libraries WHERE name = $1;
+
+-- name: UpdateLibraryIdentity :one
+UPDATE libraries
+SET paths = $2, media_type = $3, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: ListLibraries :many
 SELECT * FROM libraries ORDER BY created_at ASC;
 

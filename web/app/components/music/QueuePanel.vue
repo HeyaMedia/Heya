@@ -39,24 +39,33 @@
     </div>
 
     <!-- Lyrics -->
-    <div v-if="tab === 'lyrics'" class="qp-body qp-lyrics">
-      <div
-        v-for="(line, i) in sampleLyrics"
-        :key="i"
-        class="lyric-line"
-        :class="{ active: i === activeLyricIdx, past: i < activeLyricIdx }"
-      >
-        {{ line }}
-      </div>
-      <div v-if="!sampleLyrics.length" class="qp-empty">
+    <div v-if="tab === 'lyrics'" class="qp-body qp-lyrics" ref="lyricsScroll">
+      <div v-if="lyricsLoading" class="qp-empty">Loading lyrics…</div>
+      <template v-else-if="lyrics && lyrics.lines.length">
+        <div
+          v-for="(line, i) in lyrics.lines"
+          :key="i"
+          class="lyric-line"
+          :class="{
+            active: lyrics.synced && i === activeLyricIdx,
+            past: lyrics.synced && i < activeLyricIdx,
+            unsynced: !lyrics.synced,
+          }"
+          :ref="(el) => bindLyricRef(el as HTMLElement | null, i)"
+        >
+          {{ line.text || '♪' }}
+        </div>
+      </template>
+      <div v-else class="qp-empty">
         <p>No lyrics available</p>
+        <p style="font-size: 11px; color: var(--fg-3); margin-top: 6px">Drop a matching .lrc next to the audio file and re-scan to add them.</p>
       </div>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-const { playing, currentTrack, queue, queueOpen, position, duration, formatTime, play } = usePlayer()
+const { playing, currentTrack, queue, queueOpen, position, formatTime, play } = usePlayer()
 
 const tab = ref<'queue' | 'lyrics'>('queue')
 
@@ -66,27 +75,66 @@ const upNext = computed(() => {
   return idx >= 0 ? queue.value.slice(idx + 1) : queue.value
 })
 
-const sampleLyrics = [
-  'Under the neon lights we dance',
-  'Through the city of a thousand nights',
-  'Every shadow tells a story',
-  'Every silence hides a song',
-  '',
-  'We are the dreamers of the dawn',
-  'Chasing echoes through the storm',
-  'Hold my hand and don\'t let go',
-  'We\'ll find our way back home',
-  '',
-  'The stars align for those who wait',
-  'And time will heal what words cannot',
-  'So sing with me one final time',
-  'Before the morning steals the light',
-]
+interface LyricsLine { time_ms: number; text: string }
+interface LyricsResponse { synced: boolean; lines: LyricsLine[] }
+
+const lyrics = ref<LyricsResponse | null>(null)
+const lyricsLoading = ref(false)
+const lyricRefs = ref<Array<HTMLElement | null>>([])
+const lyricsScroll = ref<HTMLElement | null>(null)
+
+function bindLyricRef(el: HTMLElement | null, i: number) {
+  lyricRefs.value[i] = el
+}
+
+async function loadLyrics(trackId: number | null | undefined) {
+  if (!trackId) { lyrics.value = null; return }
+  lyricsLoading.value = true
+  lyricRefs.value = []
+  try {
+    lyrics.value = await apiFetch<LyricsResponse>(`/api/tracks/${trackId}/lyrics`)
+  } catch {
+    lyrics.value = null
+  } finally {
+    lyricsLoading.value = false
+  }
+}
+
+// Re-fetch when the playing track changes, but only if the lyrics tab is
+// open or about to be opened — saves a round trip per track on the queue tab.
+watch(
+  () => [currentTrack.value?.id, tab.value, queueOpen.value] as const,
+  ([id, t, open]) => {
+    if (!open || t !== 'lyrics') return
+    if (lyrics.value && currentTrack.value && id === currentTrack.value.id) return
+    loadLyrics(id ?? null)
+  },
+  { immediate: true },
+)
 
 const activeLyricIdx = computed(() => {
-  if (!playing.value || duration.value === 0) return -1
-  const pct = position.value / duration.value
-  return Math.floor(pct * sampleLyrics.length)
+  const list = lyrics.value?.lines
+  if (!lyrics.value?.synced || !list || !list.length) return -1
+  const posMs = position.value * 1000
+  // Binary-search for the last line whose timestamp has passed.
+  let lo = 0, hi = list.length - 1, ans = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if ((list[mid]?.time_ms ?? -1) <= posMs) { ans = mid; lo = mid + 1 }
+    else hi = mid - 1
+  }
+  return ans
+})
+
+// Keep the active lyric centered in the scroller. Smooth scroll so the
+// motion feels intentional (and matches Apple Music / Spotify's behavior).
+watch(activeLyricIdx, (i) => {
+  if (i < 0) return
+  const el = lyricRefs.value[i]
+  if (!el || !lyricsScroll.value) return
+  const container = lyricsScroll.value
+  const target = el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2
+  container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
 })
 </script>
 
@@ -155,4 +203,5 @@ const activeLyricIdx = computed(() => {
 }
 .lyric-line.active { color: var(--gold); transform: scale(1.02); }
 .lyric-line.past { color: var(--fg-2); }
+.lyric-line.unsynced { font-size: 14px; line-height: 1.6; color: var(--fg-1); }
 </style>

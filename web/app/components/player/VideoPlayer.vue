@@ -201,7 +201,7 @@ function autoSelectSubtitle(prefs: ReturnType<typeof playbackForLibrary>) {
 
 async function init() {
   const entityPrefPromise = props.mediaItemId
-    ? apiFetch<PlaybackPreference>(`/api/user/playback/${props.mediaItemId}`).catch(() => null)
+    ? apiFetch<PlaybackPreference>(`/api/me/playback/${props.mediaItemId}`).catch(() => null)
     : Promise.resolve(null)
 
   await Promise.all([loadStreamInfo(), loadSettings(), entityPrefPromise])

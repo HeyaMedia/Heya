@@ -48,6 +48,67 @@ SELECT count(*) FROM media_items WHERE media_type = $1;
 -- name: MarkMetadataRefreshed :exec
 UPDATE media_items SET metadata_refreshed_at = now() WHERE id = $1;
 
+-- name: MarkMatched :exec
+-- Stamped by the match step after writing a search-only stub. Sets the
+-- enrichment_status floor to 'pending' (it's the default for new rows, but
+-- this also covers re-match flows that may have advanced it).
+UPDATE media_items
+   SET matched_at        = now(),
+       enrichment_status = CASE WHEN enrichment_status = '' THEN 'pending' ELSE enrichment_status END
+ WHERE id = $1;
+
+-- name: MarkEnrichAttempted :exec
+-- Called at the start of an enrich attempt. Clears any prior error so a
+-- successful run leaves last_enrich_error empty.
+UPDATE media_items
+   SET last_enrich_attempt_at = now(),
+       last_enrich_error      = ''
+ WHERE id = $1;
+
+-- name: MarkEnrichFailed :exec
+-- Called when an enrich attempt errors. The status flips to 'failed' so the
+-- UI surfaces it; the worker is free to retry on a subsequent run.
+UPDATE media_items
+   SET enrichment_status      = 'failed',
+       last_enrich_error      = $2,
+       last_enrich_attempt_at = now()
+ WHERE id = $1;
+
+-- name: MarkEnrichBaseDone :exec
+-- Type-specific row + base fields populated.
+UPDATE media_items SET base_enriched_at = now() WHERE id = $1;
+
+-- name: MarkEnrichPeopleDone :exec
+-- Cast + crew rows populated.
+UPDATE media_items SET people_enriched_at = now() WHERE id = $1;
+
+-- name: MarkEnrichExtrasDone :exec
+-- Keywords + videos + recommendations + certifications + alt-titles populated.
+UPDATE media_items SET extras_enriched_at = now() WHERE id = $1;
+
+-- name: MarkEnrichImagesDone :exec
+-- Image downloads have been enqueued (URLs known, local cache pending).
+UPDATE media_items SET images_enriched_at = now() WHERE id = $1;
+
+-- name: MarkEnrichStructureDone :exec
+-- TV seasons + episodes tree built. No-op for movies / books / music.
+UPDATE media_items SET structure_enriched_at = now() WHERE id = $1;
+
+-- name: MarkEnrichComplete :exec
+-- Final stamp at the end of a successful enrich. Flips status to 'complete'
+-- and updates metadata_refreshed_at (the legacy stale-detection timestamp).
+UPDATE media_items
+   SET enrichment_status      = 'complete',
+       metadata_refreshed_at  = now()
+ WHERE id = $1;
+
+-- name: MarkEnrichPartial :exec
+-- Used when at least one component has landed but more remain. The worker
+-- only calls this if MarkEnrichComplete won't fire on this run.
+UPDATE media_items
+   SET enrichment_status = 'partial'
+ WHERE id = $1;
+
 -- name: ListUnavailableMediaItemIDs :many
 SELECT DISTINCT mi.id
 FROM media_items mi

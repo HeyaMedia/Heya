@@ -13,6 +13,16 @@ export interface ClientCapabilities {
   supports_hdr10: boolean
   supports_hlg: boolean
   supports_dovi: boolean
+  // Audio caps — used by the music stream decision (direct/remux/transcode).
+  // Probed against a bare <audio> element, distinct from the MSE-in-MP4
+  // codecs above which are for HLS video playback.
+  supports_flac_native: boolean
+  supports_alac: boolean
+  supports_mp3: boolean
+  supports_aac_audio: boolean
+  supports_ogg_vorbis: boolean
+  supports_opus_audio: boolean
+  supports_wav_pcm: boolean
 }
 
 let cachedCaps: ClientCapabilities | null = null
@@ -84,6 +94,19 @@ export function useClientCaps(): ClientCapabilities {
     window.matchMedia?.('(dynamic-range: high)')?.matches
   )
 
+  // Audio: probed via a bare <audio> element (separate from MSE/MP4 video
+  // probes above). `canPlayType` returns "" / "maybe" / "probably" — we treat
+  // anything non-empty as supported, matching the way browsers expose it.
+  const audio = document.createElement('audio')
+  const canAudio = (type: string) => !!audio.canPlayType(type)
+  const supports_flac_native = canAudio('audio/flac') || canAudio('audio/x-flac')
+  const supports_alac = canAudio('audio/mp4; codecs="alac"')
+  const supports_mp3 = canAudio('audio/mpeg') || canAudio('audio/mp3')
+  const supports_aac_audio = canAudio('audio/mp4; codecs="mp4a.40.2"') || canAudio('audio/aac')
+  const supports_ogg_vorbis = canAudio('audio/ogg; codecs="vorbis"')
+  const supports_opus_audio = canAudio('audio/ogg; codecs="opus"')
+  const supports_wav_pcm = canAudio('audio/wav') || canAudio('audio/wave') || canAudio('audio/x-wav')
+
   cachedCaps = {
     supports_hevc,
     supports_hevc_hev1,
@@ -99,6 +122,13 @@ export function useClientCaps(): ClientCapabilities {
     supports_hdr10,
     supports_hlg,
     supports_dovi,
+    supports_flac_native,
+    supports_alac,
+    supports_mp3,
+    supports_aac_audio,
+    supports_ogg_vorbis,
+    supports_opus_audio,
+    supports_wav_pcm,
   }
 
   return cachedCaps

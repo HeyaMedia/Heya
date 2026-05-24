@@ -1,0 +1,270 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/scheduler"
+	"github.com/karbowiak/heya/internal/service"
+)
+
+// registerJobRoutes covers /api/jobs/* and /api/schedules — runtime queue
+// inspection and rescue/retry/cancel verbs.
+func registerJobRoutes(api huma.API, app *service.App) {
+	huma.Register(api, secured(op(http.MethodGet, "/api/jobs", "list-jobs", "List background jobs", "Jobs")),
+		func(ctx context.Context, in *struct {
+			State  string `query:"state" enum:"available,running,scheduled,retryable,completed,cancelled,discarded" doc:"Filter by River state"`
+			Kind   string `query:"kind" maxLength:"64" doc:"Filter by job kind (River task name)"`
+			Limit  int    `query:"limit" minimum:"1" maximum:"200" default:"50"`
+			Offset int    `query:"offset" minimum:"0" default:"0"`
+		}) (*JSONOutput[service.JobListResult], error) {
+			result, err := app.ListJobs(ctx, in.State, in.Kind, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(result), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/jobs/summary", "job-summary", "Job state summary", "Jobs")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.JobSummaryRow], error) {
+			summary, err := app.JobSummary(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(summary), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/rescue", "rescue-jobs", "Rescue stuck jobs", "Jobs")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[rescueBody], error) {
+			rescued, retriesReset, err := app.RescueStuckJobs(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[rescueBody]{Body: rescueBody{Rescued: rescued, RetriesReset: retriesReset}}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/{id}/retry", "retry-job", "Retry a job", "Jobs")),
+		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
+			if err := app.RetryJob(ctx, in.ID); err != nil {
+				if errors.Is(err, service.ErrJobNotRetryable) {
+					return nil, huma.Error404NotFound(err.Error())
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("retried"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/{id}/cancel", "cancel-job", "Cancel a job", "Jobs")),
+		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
+			if err := app.CancelJob(ctx, in.ID); err != nil {
+				if errors.Is(err, service.ErrJobNotCancellable) {
+					return nil, huma.Error404NotFound(err.Error())
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("cancelled"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/jobs/completed", "clear-completed-jobs", "Clear completed jobs", "Jobs")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[clearedBody], error) {
+			n, err := app.ClearCompletedJobs(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[clearedBody]{Body: clearedBody{Cleared: n}}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/jobs", "clear-all-jobs", "Clear all jobs", "Jobs")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[clearedBody], error) {
+			n, err := app.ClearAllJobs(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[clearedBody]{Body: clearedBody{Cleared: n}}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/schedules", "list-schedules", "Periodic schedules computed from library settings", "Jobs")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ScheduleEntry], error) {
+			entries, err := app.ListSchedules(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(entries), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/jobs/queue/metadata", "metadata-queue-status", "Snapshot of the unified metadata enrich queue (pending counts by priority, current item, throughput)", "Jobs")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.MetadataQueueStatus], error) {
+			status, err := app.MetadataQueueStatus(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(status), nil
+		})
+}
+
+// registerTaskRoutes covers /api/tasks/* — the scheduled-task UI for trickplay,
+// thumbnails, scan, and metadata refresh.
+func registerTaskRoutes(api huma.API, app *service.App) {
+	huma.Register(api, secured(op(http.MethodGet, "/api/tasks", "list-tasks", "List scheduled tasks", "Tasks")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]taskResponse], error) {
+			tasks, err := app.ListScheduledTasks(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			progressMap := app.GetAllTaskProgress()
+			if progressMap == nil {
+				progressMap = make(map[scheduler.TaskID]*scheduler.TaskProgress)
+			}
+			statsMap := app.QueryTaskStats(ctx)
+			result := make([]taskResponse, len(tasks))
+			for i, t := range tasks {
+				result[i] = taskToResponse(t, progressMap)
+				if s, ok := statsMap[t.ID]; ok {
+					result[i].Stats = &s
+				}
+			}
+			return noStoreJSON(result), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/tasks/{id}/run", "run-task", "Trigger a scheduled task immediately", "Tasks")),
+		func(ctx context.Context, in *struct {
+			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
+		}) (*StatusOutput, error) {
+			if err := app.TriggerTask(ctx, in.ID); err != nil {
+				if errors.Is(err, service.ErrSchedulerUnavailable) {
+					return nil, huma.Error503ServiceUnavailable(err.Error())
+				}
+				return nil, huma.Error409Conflict(err.Error())
+			}
+			return statusOK("started"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/tasks/{id}/cancel", "cancel-task", "Cancel an in-flight scheduled task", "Tasks")),
+		func(ctx context.Context, in *struct {
+			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
+		}) (*StatusOutput, error) {
+			if err := app.CancelTask(in.ID); err != nil {
+				if errors.Is(err, service.ErrSchedulerUnavailable) {
+					return nil, huma.Error503ServiceUnavailable(err.Error())
+				}
+				return nil, huma.Error409Conflict(err.Error())
+			}
+			return statusOK("cancelled"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/tasks/{id}", "update-task", "Update a scheduled task's window/cadence", "Tasks")),
+		func(ctx context.Context, in *struct {
+			ID   string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
+			Body struct {
+				Enabled           bool   `json:"enabled"`
+				IntervalHours     int32  `json:"interval_hours" minimum:"0" maximum:"720"`
+				DailyStartTime    string `json:"daily_start_time" maxLength:"5" doc:"HH:MM 24h or empty"`
+				DailyEndTime      string `json:"daily_end_time" maxLength:"5"`
+				MaxRuntimeMinutes int32  `json:"max_runtime_minutes" minimum:"0" maximum:"1440"`
+			}
+		}) (*JSONOutput[taskResponse], error) {
+			updated, err := app.UpdateScheduledTask(ctx, in.ID, in.Body.Enabled, in.Body.IntervalHours, in.Body.MaxRuntimeMinutes, in.Body.DailyStartTime, in.Body.DailyEndTime)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[taskResponse]{Body: taskToResponse(updated, nil)}, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/tasks/{id}/items", "task-items", "Items associated with a task run", "Tasks")),
+		func(ctx context.Context, in *struct {
+			ID     string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
+			Status string `query:"status" maxLength:"32" doc:"Filter by item status (pending/running/done/error)"`
+			Limit  int    `query:"limit" minimum:"1" maximum:"200" default:"50"`
+			Offset int    `query:"offset" minimum:"0" default:"0"`
+		}) (*JSONOutput[*service.TaskItemsResult], error) {
+			var (
+				resp *service.TaskItemsResult
+				err  error
+			)
+			switch in.ID {
+			case "generate_trickplay":
+				resp, err = app.QueryTrickplayItems(ctx, in.Status, in.Limit, in.Offset)
+			case "generate_thumbnails":
+				resp, err = app.QueryThumbnailItems(ctx, in.Status, in.Limit, in.Offset)
+			case "scan_libraries":
+				resp, err = app.QueryScanItems(ctx, in.Status, in.Limit, in.Offset)
+			case "refresh_stale_items":
+				resp, err = app.QueryRefreshMetadataItems(ctx, in.Status, in.Limit, in.Offset)
+			case "scan_music_loudness":
+				resp, err = app.QueryLoudnessItems(ctx, in.Status, in.Limit, in.Offset)
+			case "analyze_music_facets":
+				resp, err = app.QueryFacetsItems(ctx, in.Status, in.Limit, in.Offset)
+			default:
+				return nil, huma.Error404NotFound("unknown task")
+			}
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(resp), nil
+		})
+}
+
+type rescueBody struct {
+	Rescued      int64 `json:"rescued"`
+	RetriesReset int64 `json:"retries_reset"`
+}
+
+type clearedBody struct {
+	Cleared int64 `json:"cleared"`
+}
+
+type taskResponse struct {
+	ID                    string                  `json:"id"`
+	DisplayName           string                  `json:"display_name"`
+	Description           string                  `json:"description"`
+	Category              string                  `json:"category"`
+	Enabled               bool                    `json:"enabled"`
+	IntervalHours         int32                   `json:"interval_hours"`
+	DailyStartTime        string                  `json:"daily_start_time"`
+	DailyEndTime          string                  `json:"daily_end_time"`
+	MaxRuntimeMinutes     int32                   `json:"max_runtime_minutes"`
+	LastRunAt             *string                 `json:"last_run_at"`
+	LastRunResult         string                  `json:"last_run_result"`
+	LastRunDurationSec    int32                   `json:"last_run_duration_sec"`
+	LastRunItemsProcessed int32                   `json:"last_run_items_processed"`
+	LastRunItemsTotal     int32                   `json:"last_run_items_total"`
+	NextRunAt             *string                 `json:"next_run_at"`
+	State                 string                  `json:"state"`
+	Progress              *scheduler.TaskProgress `json:"progress"`
+	Stats                 *service.TaskStats      `json:"stats,omitempty"`
+}
+
+func taskToResponse(t sqlc.ScheduledTask, progressMap map[scheduler.TaskID]*scheduler.TaskProgress) taskResponse {
+	r := taskResponse{
+		ID:                    t.ID,
+		DisplayName:           t.DisplayName,
+		Description:           t.Description,
+		Category:              t.Category,
+		Enabled:               t.Enabled,
+		IntervalHours:         t.IntervalHours,
+		DailyStartTime:        t.DailyStartTime,
+		DailyEndTime:          t.DailyEndTime,
+		MaxRuntimeMinutes:     t.MaxRuntimeMinutes,
+		LastRunResult:         t.LastRunResult,
+		LastRunDurationSec:    t.LastRunDurationSec,
+		LastRunItemsProcessed: t.LastRunItemsProcessed,
+		LastRunItemsTotal:     t.LastRunItemsTotal,
+		State:                 "idle",
+	}
+	if t.LastRunAt.Valid {
+		s := t.LastRunAt.Time.UTC().Format("2006-01-02T15:04:05Z")
+		r.LastRunAt = &s
+	}
+	if t.NextRunAt.Valid {
+		s := t.NextRunAt.Time.UTC().Format("2006-01-02T15:04:05Z")
+		r.NextRunAt = &s
+	}
+	if p, ok := progressMap[scheduler.TaskID(t.ID)]; ok && p != nil {
+		r.State = p.State
+		r.Progress = p
+	}
+	return r
+}

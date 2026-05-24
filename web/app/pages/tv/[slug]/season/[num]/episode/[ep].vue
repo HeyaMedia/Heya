@@ -205,10 +205,10 @@ function episodeStillUrl(ep: any) {
 async function toggleWatched() {
   if (!episode.value) return
   if (watched.value) {
-    await apiFetch(`/api/episodes/${episode.value.id}/watched`, { method: 'DELETE' })
+    await apiFetch(`/api/me/watched/episode/${episode.value.id}`, { method: 'DELETE' })
     watchedEpisodes.value.delete(episode.value.id)
   } else {
-    await apiFetch(`/api/episodes/${episode.value.id}/watched`, { method: 'POST' })
+    await apiFetch(`/api/me/watched/episode/${episode.value.id}`, { method: 'POST' })
     watchedEpisodes.value.add(episode.value.id)
   }
 }

@@ -66,7 +66,7 @@ func handleStudioImage(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		resolver := studios.NewResolver(app.ConfigSnapshot().DataDir)
+		resolver := studios.NewResolver(app.ConfigSnapshot().DataDir.Value)
 		logoPath := resolver.LogoPath(name)
 		if logoPath == "" {
 			http.NotFound(w, r)

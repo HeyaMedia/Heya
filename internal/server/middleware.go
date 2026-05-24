@@ -23,7 +23,12 @@ func adminOnly(next http.Handler) http.Handler {
 }
 
 func withMiddleware(h http.Handler) http.Handler {
-	return withRecovery(withLogging(withCORS(h)))
+	// Outermost first: recovery → logging → CORS → gzip → etag → handler.
+	// Recovery wraps everything so panics from gzip/etag/logging still return
+	// 500. Gzip sits inside CORS so OPTIONS replies (no body) skip it. ETag
+	// sits inside gzip so the hash is computed over uncompressed bytes (a
+	// gzip compressor upgrade must not silently invalidate browser caches).
+	return withRecovery(withLogging(withCORS(withGzip(withETag(h)))))
 }
 
 func withLogging(next http.Handler) http.Handler {

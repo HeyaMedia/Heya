@@ -140,7 +140,7 @@ var transcodeCacheCmd = &cobra.Command{
 		showStats, _ := cmd.Flags().GetBool("stats")
 		doClear, _ := cmd.Flags().GetBool("clear")
 
-		cache := transcoder.NewCacheManager(cfg.TranscodeCacheDir, cfg.TranscodeCacheMaxGB)
+		cache := transcoder.NewCacheManager(cfg.TranscodeCacheDir.Value, cfg.TranscodeCacheMaxGB.Value)
 
 		if doClear {
 			if err := cache.Clear(); err != nil {
@@ -153,7 +153,7 @@ var transcodeCacheCmd = &cobra.Command{
 		if showStats {
 			stats := cache.Stats()
 			ui.Header("Transcode Cache")
-			ui.Info("Location", cfg.TranscodeCacheDir)
+			ui.Info("Location", cfg.TranscodeCacheDir.Value)
 			ui.Info("Items", fmt.Sprintf("%d", stats.ItemCount))
 			ui.Info("Size", fmt.Sprintf("%.2f GB", float64(stats.TotalSize)/(1024*1024*1024)))
 			ui.Info("Max Size", fmt.Sprintf("%d GB", stats.MaxSizeGB))

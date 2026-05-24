@@ -25,13 +25,13 @@ var rootCmd = &cobra.Command{
 
 		cfg = config.Load()
 
-		level, err := zerolog.ParseLevel(cfg.LogLevel)
+		level, err := zerolog.ParseLevel(cfg.LogLevel.Value)
 		if err != nil {
 			level = zerolog.InfoLevel
 		}
 		zerolog.SetGlobalLevel(level)
 
-		if cfg.LogFormat == "console" {
+		if cfg.LogFormat.Value == "console" {
 			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 		}
 	},

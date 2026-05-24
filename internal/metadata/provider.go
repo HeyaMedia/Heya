@@ -27,14 +27,28 @@ type FetchOptions struct {
 }
 
 type SearchResult struct {
-	ProviderID   string  `json:"provider_id"`
-	ProviderName string  `json:"provider_name"`
-	Title        string  `json:"title"`
-	Year         string  `json:"year"`
-	Description  string  `json:"description"`
-	PosterURL    string  `json:"poster_url"`
-	Confidence   float64 `json:"confidence"`
-	RawData      any     `json:"-"`
+	ProviderID   string            `json:"provider_id"`
+	ProviderName string            `json:"provider_name"`
+	Title        string            `json:"title"`
+	Year         string            `json:"year"`
+	Description  string            `json:"description"`
+	PosterURL    string            `json:"poster_url"`
+	Confidence   float64           `json:"confidence"`
+	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
+	// AltTitles holds the union of every known title variant for this hit
+	// — locale forms, romanizations, native scripts, AKA titles, aliases.
+	// Empty list (or absent) means the upstream(s) didn't provide
+	// variants. The matcher scores the query against the primary Title
+	// plus every entry here and takes the best score, which is how the
+	// romaji-vs-English anime mismatches get resolved.
+	AltTitles []string `json:"alt_titles,omitempty"`
+	HeyaSlug  string   `json:"heya_slug,omitempty"`
+	// Enriched signals whether the metadata server has detail warm-cached.
+	// True means a follow-up enrich (GetDetail) will be fast (~ms); false
+	// means cold-fetch from upstream (seconds). The match step uses this
+	// alongside score and source count to gate auto-match confidence.
+	Enriched bool `json:"enriched,omitempty"`
+	RawData  any  `json:"-"`
 }
 
 type TitleEntry struct {
@@ -312,6 +326,11 @@ type NFOIDs struct {
 	IMDBID string
 	TVDBID string
 	MBID   string
+	// Title and Year are optional — populated when the NFO sidecar carries
+	// them. The match step uses these to seed the media_items stub before
+	// the enrich worker fetches the full payload.
+	Title string
+	Year  string
 }
 
 type RatingsData struct {

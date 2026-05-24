@@ -1,3 +1,10 @@
+// Hand-maintained types for FE-only shapes and legacy API responses that
+// haven't been migrated to the typed client yet.
+//
+// For new code, prefer the auto-generated types in `./api.gen.ts` (regenerated
+// by `make gen-api-client` from the Go server's OpenAPI spec). The typed
+// client lives in `~/composables/useApiClient.ts`.
+
 export interface User {
   id: number
   username: string
@@ -30,6 +37,16 @@ export interface Library {
   paths: string[]
   created_by: number
   settings: LibrarySettings
+  sources?: LibrarySources
+}
+
+// LibrarySources mirrors the per-field provenance the backend attaches to
+// env-managed libraries. When `name` / `paths` / `media_type` is present,
+// the UI should disable that field and show the env_var in the tooltip.
+export interface LibrarySources {
+  name?: { source: 'env'; env_var: string }
+  paths?: { source: 'env'; env_var: string }
+  media_type?: { source: 'env'; env_var: string }
 }
 
 export type MediaType = 'movie' | 'tv' | 'music' | 'book'
@@ -137,17 +154,118 @@ export interface Artist {
   id: number
   media_item_id: number
   musicbrainz_id: string
-  genres: string[]
+  name: string
+  sort_name: string
+  disambiguation: string
+  biography: string
+  enriched_at: string | null
 }
 
 export interface Album {
   id: number
   artist_id: number
   title: string
-  release_date: string | null
+  slug: string
+  year: string
   musicbrainz_id: string
+  album_type: string
   genres: string[]
+  cover_path: string
+  release_date: string | null
+  label: string
+  country: string
+  barcode: string
+  total_tracks: number
+  total_discs: number
+  tags: string[]
+  integrated_lufs: string | null
+  true_peak_db: string | null
+  loudness_range_db: string | null
+  loudness_analyzed_at: string | null
+}
+
+export interface MusicAlbumDetail {
+  album: Album
+  tracks: TrackView[]
+  artist: Artist
+  artist_slug: string
+  media_item_id: number
+}
+
+export interface Track {
+  id: number
+  album_id: number
+  disc_number: number
+  track_number: number
+  title: string
+  duration: number
+  file_path: string
+  lyrics_path: string
+  library_file_id: number | null
+}
+
+export interface TrackFile {
+  id: number
+  track_id: number
+  library_file_id: number
+  format: string
+  quality_score: number
+  bitrate_kbps: number
+  sample_rate_hz: number
+  bit_depth: number
+  channels: number
+  duration: number
+  size_bytes: number
+  lyrics_path: string
+  integrated_lufs: string | null
+  true_peak_db: string | null
+  loudness_range_db: string | null
+  sample_peak_db: string | null
+  loudness_analyzed_at: string | null
+  created_at: string
+}
+
+export interface TrackView extends Track {
+  files: TrackFile[]
+}
+
+export interface AlbumView extends Album {
+  tracks: TrackView[]
+}
+
+export interface MusicListPage<T> {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface MusicArtistRow extends Artist {
+  slug: string
+  poster_path: string
+  album_count: number
   track_count: number
+}
+
+export interface MusicAlbumRow extends Album {
+  artist_name: string
+  artist_slug: string
+  track_count: number
+}
+
+export interface MusicTrackRow {
+  track_id: number
+  track_title: string
+  duration: number
+  disc_number: number
+  track_number: number
+  album_id: number
+  album_title: string
+  album_cover_path: string
+  album_year: string
+  artist_id: number
+  artist_name: string
+  artist_slug: string
 }
 
 export interface Book {
@@ -450,7 +568,7 @@ export interface MediaDetail {
   tv_series?: TVSeries
   seasons?: TVSeason[]
   artist?: Artist
-  albums?: Album[]
+  albums?: AlbumView[]
   book?: Book
   author?: { id: number; name: string }
   collection?: Collection

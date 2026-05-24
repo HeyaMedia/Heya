@@ -13,18 +13,22 @@ import (
 )
 
 func heyaURL() string {
-	if u := os.Getenv("HEYA_MEDIA_URL"); u != "" {
-		return u
-	}
-	return "https://heya.media"
+	return os.Getenv("HEYA_MEDIA_URL")
 }
 
+// skipIfHeyaDown gates the integration tests on an explicit HEYA_MEDIA_URL
+// (typically a local v0.3.0 heya.media instance). Production may run an
+// older API version, so we don't fall back to it implicitly.
 func skipIfHeyaDown(t *testing.T) {
 	t.Helper()
+	u := heyaURL()
+	if u == "" {
+		t.Skip("HEYA_MEDIA_URL not set — skipping heya.media integration tests")
+	}
 	c := &http.Client{Timeout: 2 * time.Second}
-	resp, err := c.Get(heyaURL() + "/api/v1/health")
+	resp, err := c.Get(u + "/api/v1/health")
 	if err != nil || resp.StatusCode != 200 {
-		t.Skip("heya media server not reachable at " + heyaURL())
+		t.Skip("heya media server not reachable at " + u)
 	}
 }
 
@@ -73,7 +77,9 @@ func TestHeyaProvider_GetDetail(t *testing.T) {
 	c := heyamedia.NewClient(heyaURL())
 	p := heyamedia.NewHeyaProvider(c)
 
-	detail, err := p.GetDetail(context.Background(), "heya:oshi-no-ko-2023", nil)
+	// Elfen Lied (TMDB 42671) — the same fixture LookupByNFO covers, with
+	// the v0.3.0 providerID shape: heya:<kind>:<provider>:<value>.
+	detail, err := p.GetDetail(context.Background(), "heya:tv:tmdb:42671", nil)
 	if err != nil {
 		t.Fatalf("GetDetail failed: %v", err)
 	}

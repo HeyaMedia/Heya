@@ -2,51 +2,87 @@
   <div class="music-home page-pad">
     <h1 class="mh-greeting">{{ greeting }}</h1>
 
-    <div class="mh-mosaic">
-      <div
-        v-for="(item, i) in featured"
-        :key="i"
+    <div v-if="pending" class="mh-loading">Loading…</div>
+
+    <!-- Recently Added Albums — mosaic at the top for at-a-glance new music -->
+    <div v-else-if="data" class="mh-mosaic">
+      <NuxtLink
+        v-for="(al, i) in mosaicAlbums"
+        :key="al.id"
+        :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="mh-mosaic-card card-tile"
-        @click="play(item)"
       >
-        <Poster :idx="i" aspect="1/1" style="width: 56px; height: 56px; border-radius: 6px; flex-shrink: 0" />
+        <Poster :idx="i" :src="al.cover_path || null" aspect="1/1" class="mh-mosaic-art" />
         <div class="mh-mosaic-info">
-          <div style="font-size: 13px; font-weight: 500">{{ item.title }}</div>
-          <div style="font-size: 11px; color: var(--fg-2)">{{ item.artist }}</div>
+          <div class="mh-mosaic-title">{{ al.title }}</div>
+          <div class="mh-mosaic-sub">{{ al.artist_name }}</div>
         </div>
-        <button class="mh-play-btn" @click.stop="play(item)">
+        <button class="mh-play-btn" @click.stop.prevent="playAlbum(al)" title="Play">
           <Icon name="play" :size="16" />
         </button>
-      </div>
+      </NuxtLink>
     </div>
 
-    <div v-for="(row, i) in rows" :key="i" style="margin-top: 36px">
-      <div class="section-row-head">
-        <h2 class="section-title-lg">{{ row.title }}</h2>
-        <span class="more">See all</span>
-      </div>
-      <div class="mh-row-grid">
-        <div
-          v-for="(item, j) in row.items"
-          :key="j"
-          class="card-tile"
-          @click="play(item)"
-        >
-          <Poster :idx="j + i * 6" aspect="1/1" style="border-radius: var(--r-md)" />
-          <div style="margin-top: 10px">
-            <div style="font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ item.title }}</div>
-            <div style="font-size: 11px; color: var(--fg-2)">{{ item.artist }}</div>
-          </div>
+    <!-- Recently Added Artists row -->
+    <MusicScrollRow
+      v-if="data && data.recent_artists.length"
+      title="Recently Added Artists"
+      title-href="/music/artists"
+      :card-size="150"
+    >
+      <NuxtLink
+        v-for="a in data.recent_artists"
+        :key="a.id"
+        :to="`/music/artist/${a.slug}`"
+        class="mh-artist-tile card-tile"
+      >
+        <Poster :idx="a.id" :src="artistPosterUrl(a)" aspect="1/1" class="mh-artist-art" />
+        <div class="mh-tile-meta">
+          <div class="mh-tile-title">{{ a.name }}</div>
+          <div class="mh-tile-sub">{{ a.album_count }} · {{ a.track_count }}</div>
         </div>
-      </div>
+      </NuxtLink>
+    </MusicScrollRow>
+
+    <!-- Recently Added Albums row -->
+    <MusicScrollRow
+      v-if="data && data.recent_albums.length"
+      title="Recently Added Albums"
+      title-href="/music/albums"
+      :card-size="170"
+    >
+      <NuxtLink
+        v-for="al in data.recent_albums"
+        :key="al.id"
+        :to="`/music/artist/${al.artist_slug}/${al.slug}`"
+        class="mh-album-tile card-tile"
+      >
+        <Poster :idx="al.id" :src="al.cover_path || null" aspect="1/1" class="mh-album-art" />
+        <div class="mh-tile-meta">
+          <div class="mh-tile-title">{{ al.title }}</div>
+          <div class="mh-tile-sub">{{ al.artist_name }}{{ al.year ? ' · ' + al.year : '' }}</div>
+        </div>
+      </NuxtLink>
+    </MusicScrollRow>
+
+    <div v-if="data && !data.recent_artists.length && !data.recent_albums.length" class="mh-empty">
+      No music yet — add a music library and let the scanner run.
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { MusicArtistRow, MusicAlbumRow } from '~~/shared/types'
 
-const { play } = usePlayer()
+defineEmits<{ 'see-artists': []; 'see-albums': [] }>()
+
+interface HomeData {
+  recent_artists: MusicArtistRow[]
+  recent_albums: MusicAlbumRow[]
+}
+
+const { data, pending } = useApi<HomeData>('/api/music/home?limit=24')
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -55,51 +91,72 @@ const greeting = computed(() => {
   return 'Good evening'
 })
 
-const makeTracks = (names: string[]): Track[] =>
-  names.map((n, i) => ({
-    id: 100 + i,
-    title: n.split(' - ')[1] || n,
-    artist: n.split(' - ')[0] || 'Unknown',
-    album: 'Album',
-    duration: 180 + Math.floor(Math.random() * 120),
-  }))
+const mosaicAlbums = computed(() => (data.value?.recent_albums ?? []).slice(0, 6))
 
-const featured = makeTracks([
-  'Radiohead - Everything In Its Right Place',
-  'Daft Punk - Around the World',
-  'Björk - Hyperballad',
-  'Massive Attack - Teardrop',
-  'Portishead - Wandering Star',
-  'Air - Cherry Blossom Girl',
-])
+function artistPosterUrl(a: MusicArtistRow): string | null {
+  return a.poster_path ? `/api/media/${a.media_item_id}/image/poster` : null
+}
 
-const rows = [
-  { title: 'Recently Played', items: makeTracks(['Thom Yorke - Dawn Chorus', 'Jon Hopkins - Open Eye Signal', 'Bonobo - Kerala', 'Four Tet - Baby', 'Floating Points - Silhouettes', 'Burial - Archangel']) },
-  { title: 'Made For You', items: makeTracks(['Aphex Twin - Xtal', 'Boards of Canada - Roygbiv', 'Autechre - Gantz Graf', 'Amon Tobin - Four Ton Mantis', 'Squarepusher - Tommib', 'Clark - Ted']) },
-]
+const { play, queue } = usePlayer()
+
+async function playAlbum(al: MusicAlbumRow) {
+  try {
+    const detail = await apiFetch<{ tracks: { id: number; title: string; duration: number; files: { integrated_lufs: string | null; true_peak_db: string | null }[] }[] }>(
+      `/api/music/artists/${al.artist_slug}/albums/${al.slug}`,
+    )
+    if (!detail.tracks.length) return
+    const tracks: Track[] = detail.tracks.map((t) => {
+      const primary = t.files[0]
+      return {
+        id: t.id,
+        title: t.title,
+        artist: al.artist_name,
+        album: al.title,
+        duration: t.duration,
+        stream_url: `/api/tracks/${t.id}/stream`,
+        album_id: al.id,
+        poster: al.cover_path || undefined,
+        integrated_lufs: primary?.integrated_lufs != null ? parseFloat(primary.integrated_lufs) : null,
+        true_peak_db: primary?.true_peak_db != null ? parseFloat(primary.true_peak_db) : null,
+      }
+    })
+    queue.value = tracks
+    await play(tracks[0])
+  } catch {
+    // swallow — clicking the title still routes
+  }
+}
 </script>
 
 <style scoped>
-.mh-greeting { font-size: 30px; font-weight: 600; margin-bottom: 24px; }
+.mh-greeting { font-size: 30px; font-weight: 700; margin-bottom: 24px; letter-spacing: -0.01em; }
+.mh-loading, .mh-empty { color: var(--fg-3); font-size: 14px; padding: 32px 0; }
+
 .mh-mosaic {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 10px;
+  margin-bottom: 36px;
 }
 .mh-mosaic-card {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 8px;
-  background: var(--bg-3);
+  background: rgba(255,255,255,0.04);
   border-radius: var(--r-md);
   cursor: pointer;
   position: relative;
   overflow: hidden;
   transition: background 0.15s;
+  text-decoration: none;
+  color: inherit;
 }
-.mh-mosaic-card:hover { background: var(--bg-4); }
-.mh-mosaic-info { flex: 1; min-width: 0; }
+.mh-mosaic-card:hover { background: rgba(255,255,255,0.08); }
+.mh-mosaic-art { width: 56px; height: 56px; border-radius: 4px; flex-shrink: 0; }
+.mh-mosaic-info { flex: 1; min-width: 0; overflow: hidden; }
+.mh-mosaic-title { font-size: 13px; font-weight: 600; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mh-mosaic-sub { font-size: 11px; color: var(--fg-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mh-play-btn {
   width: 36px; height: 36px;
   border-radius: 50%;
@@ -110,11 +167,36 @@ const rows = [
   transform: translateY(4px);
   transition: opacity 0.2s, transform 0.2s;
   flex-shrink: 0;
+  border: 0;
+  cursor: pointer;
+  box-shadow: 0 4px 14px var(--gold-glow);
 }
 .mh-mosaic-card:hover .mh-play-btn { opacity: 1; transform: none; }
-.mh-row-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 20px;
+
+/* Scrolling-row tiles */
+.mh-artist-tile, .mh-album-tile {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.mh-artist-art { border-radius: 50%; box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
+.mh-album-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
+.mh-tile-meta { margin-top: 12px; text-align: left; padding: 0 2px; }
+.mh-artist-tile .mh-tile-meta { text-align: center; }
+.mh-tile-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mh-tile-sub {
+  font-size: 11px;
+  color: var(--fg-2);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

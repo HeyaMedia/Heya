@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/worker"
+	"github.com/rs/zerolog/log"
 )
 
 // MediaItemView wraps a media item with its availability status.
@@ -79,6 +81,16 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 	item, err := a.GetMediaItem(ctx, idOrSlug)
 	if err != nil {
 		return nil, fmt.Errorf("media item not found: %w", err)
+	}
+
+	// View-promotion: a user is looking at this item right now. If it's
+	// not fully enriched yet, jump the queue at priority 1 ahead of any
+	// in-flight background enrich. The worker's idempotency gate keeps
+	// duplicate enqueues cheap (the second one no-ops fast).
+	if item.EnrichmentStatus != "complete" && a.river != nil {
+		if err := worker.EnqueueEnrich(ctx, a.river, item.ID, item.MediaType, worker.EnrichSourceView); err != nil {
+			log.Debug().Err(err).Int64("item_id", item.ID).Msg("view-promotion enqueue failed")
+		}
 	}
 
 	hasFiles := false
@@ -184,8 +196,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		artist, artistErr := q.GetArtistByMediaItemID(ctx, item.ID)
 		if artistErr == nil {
 			result["artist"] = artist
-			albums, _ := q.ListAlbumsByArtist(ctx, artist.ID)
-			result["albums"] = albums
+			result["albums"] = buildAlbumViews(ctx, q, artist.ID)
 		}
 	case sqlc.MediaTypeBook:
 		book, bookErr := q.GetBookByMediaItemID(ctx, item.ID)
@@ -642,6 +653,38 @@ func (a *App) ListUnmatched(ctx context.Context, libraryID int64) ([]UnmatchedFi
 	}
 
 	return result, nil
+}
+
+// TrackView wraps a track with its physical files, ordered best-first.
+type TrackView struct {
+	sqlc.Track
+	Files []sqlc.TrackFile `json:"files"`
+}
+
+// AlbumView wraps an album with its enriched tracks.
+type AlbumView struct {
+	sqlc.Album
+	Tracks []TrackView `json:"tracks"`
+}
+
+// buildAlbumViews loads albums for an artist with each album's tracks and
+// each track's available files. Files are ordered best-first by the query.
+func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []AlbumView {
+	albums, err := q.ListAlbumsByArtist(ctx, artistID)
+	if err != nil {
+		return nil
+	}
+	views := make([]AlbumView, 0, len(albums))
+	for _, album := range albums {
+		tracks, _ := q.ListTracksByAlbum(ctx, album.ID)
+		trackViews := make([]TrackView, 0, len(tracks))
+		for _, t := range tracks {
+			files, _ := q.ListTrackFilesByTrack(ctx, t.ID)
+			trackViews = append(trackViews, TrackView{Track: t, Files: files})
+		}
+		views = append(views, AlbumView{Album: album, Tracks: trackViews})
+	}
+	return views
 }
 
 // BuildEpisodeFileMap parses library file parse results to build a map

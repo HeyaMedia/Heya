@@ -1,11 +1,8 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
-	"strconv"
 
-	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
@@ -87,31 +84,6 @@ type subStream struct {
 	IsDefault         bool   `json:"is_default"`
 	IsForced          bool   `json:"is_forced"`
 	IsHearingImpaired bool   `json:"is_hearing_impaired"`
-}
-
-func handleGetStreamInfo(app *service.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
-			return
-		}
-
-		file, err := app.GetLibraryFile(r.Context(), fileID)
-		if err != nil {
-			writeError(w, http.StatusNotFound, "file not found")
-			return
-		}
-
-		caps := parseClientCaps(r)
-
-		var info worker.MediaInfo
-		if len(file.MediaInfo) > 0 {
-			json.Unmarshal(file.MediaInfo, &info)
-		}
-
-		writeJSON(w, http.StatusOK, buildStreamInfoResponse(info, caps, file.Path, file.LibraryID))
-	}
 }
 
 func parseClientCaps(r *http.Request) transcoder.ClientCapabilities {

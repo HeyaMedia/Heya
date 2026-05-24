@@ -6,58 +6,67 @@ import (
 	"strings"
 )
 
+// Config holds every infrastructure-level knob loaded at boot. Each Field
+// carries provenance so consumers (handlers, the UI) can tell whether a
+// value came from env or fell back to the built-in default. Anything that
+// belongs to the "user-tunable in the settings UI" category lives in DB
+// tables, not here — see internal/service/sonicanalysis_settings.go and
+// internal/service/tailscale_settings.go.
 type Config struct {
-	DatabaseURL         string
-	Host                string
-	Port                string
-	LogLevel            string
-	LogFormat           string
-	HeyaMediaURL        string
-	DataDir             string
-	TranscodeCacheDir   string
-	TranscodeCacheMaxGB int
-	HWAccel             string
+	DatabaseURL         Field[string]
+	Host                Field[string]
+	Port                Field[string]
+	LogLevel            Field[string]
+	LogFormat           Field[string]
+	HeyaMediaURL        Field[string]
+	DataDir             Field[string]
+	HWAccel             Field[string]
+	TranscodeCacheDir   Field[string]
+	TranscodeCacheMaxGB Field[int]
 	Tailscale           TailscaleConfig
 }
 
+// TailscaleConfig holds the env-sourced tailscale knobs. Enabled/HTTPS/Funnel
+// can also be set from the UI (DB-backed) — the effective value is computed
+// at request time by merging env > db > default. AuthKey and StateDir are
+// boot-time only: never UI-editable, never persisted to DB.
 type TailscaleConfig struct {
-	Enabled  bool   `json:"enabled"`
-	Hostname string `json:"hostname"`
-	AuthKey  string `json:"-"` // never expose over the API
-	StateDir string `json:"state_dir,omitempty"`
-	HTTPS    bool   `json:"https"`
-	Funnel   bool   `json:"funnel"`
+	Enabled  Field[bool]
+	Hostname Field[string]
+	AuthKey  Field[string] `json:"-"` // never exposed via API
+	StateDir Field[string]
+	HTTPS    Field[bool]
+	Funnel   Field[bool]
 }
 
+// Load reads .env / .env.local (without overriding real env), then resolves
+// every Field from the environment. Defaults are applied for any var that
+// wasn't set. There is no yaml layer — Heya is env-only.
 func Load() *Config {
 	loadDotEnv()
 
-	if path := FindConfigFile(); path != "" {
-		if fc, err := LoadFile(path); err == nil {
-			return MergeFileWithEnv(fc)
-		}
-	}
+	dataDir := envString("HEYA_DATA_DIR", "./data")
 
-	cfg := &Config{
-		DatabaseURL:  getenv("DATABASE_URL", ""),
-		Host:         getenv("HOST", ""),
-		Port:         getenv("PORT", ""),
-		LogLevel:     getenv("LOG_LEVEL", ""),
-		LogFormat:    getenv("LOG_FORMAT", ""),
-		HeyaMediaURL: getenv("HEYA_MEDIA_URL", ""),
-		DataDir:      getenv("DATA_DIR", ""),
-		HWAccel:      getenv("HEYA_HWACCEL", ""),
+	return &Config{
+		DatabaseURL:         envString("HEYA_DATABASE_URL", "postgres://heya:heya@localhost:5440/heya?sslmode=disable"),
+		Host:                envString("HEYA_HOST", "0.0.0.0"),
+		Port:                envString("HEYA_PORT", "8080"),
+		LogLevel:            envString("HEYA_LOG_LEVEL", "info"),
+		LogFormat:           envString("HEYA_LOG_FORMAT", "console"),
+		HeyaMediaURL:        envString("HEYA_MEDIA_URL", "https://heya.media"),
+		DataDir:             dataDir,
+		HWAccel:             envString("HEYA_HWACCEL", "auto"),
+		TranscodeCacheDir:   envString("HEYA_TRANSCODE_CACHE_DIR", dataDir.Value+"/transcode"),
+		TranscodeCacheMaxGB: envInt("HEYA_TRANSCODE_CACHE_MAX_GB", 50),
 		Tailscale: TailscaleConfig{
-			Enabled:  getenv("HEYA_TAILSCALE_ENABLED", "") == "true",
-			Hostname: getenv("HEYA_TAILSCALE_HOSTNAME", ""),
-			AuthKey:  getenv("HEYA_TAILSCALE_AUTHKEY", ""),
-			StateDir: getenv("HEYA_TAILSCALE_STATE_DIR", ""),
-			HTTPS:    getenv("HEYA_TAILSCALE_HTTPS", "true") != "false",
-			Funnel:   getenv("HEYA_TAILSCALE_FUNNEL", "") == "true",
+			Enabled:  envBool("HEYA_TAILSCALE_ENABLED", false),
+			Hostname: envString("HEYA_TAILSCALE_HOSTNAME", "heya"),
+			AuthKey:  envString("HEYA_TAILSCALE_AUTHKEY", ""),
+			StateDir: envString("HEYA_TAILSCALE_STATE_DIR", dataDir.Value+"/tailscale"),
+			HTTPS:    envBool("HEYA_TAILSCALE_HTTPS", false),
+			Funnel:   envBool("HEYA_TAILSCALE_FUNNEL", false),
 		},
 	}
-	applyDefaults(cfg)
-	return cfg
 }
 
 func loadDotEnv() {
@@ -77,79 +86,43 @@ func loadDotEnv() {
 			}
 			k = strings.TrimSpace(k)
 			v = strings.TrimSpace(v)
-			if os.Getenv(k) == "" {
-				os.Setenv(k, v)
+			if len(v) >= 2 {
+				first, last := v[0], v[len(v)-1]
+				if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+					v = v[1 : len(v)-1]
+				}
+			}
+			if _, exists := os.LookupEnv(k); !exists {
+				_ = os.Setenv(k, v)
 			}
 		}
 	}
 }
 
-func applyDefaults(cfg *Config) {
-	if cfg.DatabaseURL == "" {
-		cfg.DatabaseURL = "postgres://heya:heya@localhost:5440/heya?sslmode=disable"
-	}
-	if cfg.Host == "" {
-		cfg.Host = "0.0.0.0"
-	}
-	if cfg.Port == "" {
-		cfg.Port = "8080"
-	}
-	if cfg.LogLevel == "" {
-		cfg.LogLevel = "info"
-	}
-	if cfg.LogFormat == "" {
-		cfg.LogFormat = "console"
-	}
-	if cfg.HeyaMediaURL == "" {
-		cfg.HeyaMediaURL = "https://heya.media"
-	}
-	if cfg.DataDir == "" {
-		cfg.DataDir = "./data"
-	}
-	if cfg.TranscodeCacheDir == "" {
-		cfg.TranscodeCacheDir = cfg.DataDir + "/transcode"
-	}
-	if cfg.TranscodeCacheMaxGB == 0 {
-		cfg.TranscodeCacheMaxGB = 50
-	}
-	if cfg.HWAccel == "" {
-		cfg.HWAccel = "auto"
-	}
-	if cfg.Tailscale.Hostname == "" {
-		cfg.Tailscale.Hostname = "heya"
-	}
-	if cfg.Tailscale.StateDir == "" {
-		cfg.Tailscale.StateDir = cfg.DataDir + "/tailscale"
-	}
-}
-
+// Addr returns the host:port the HTTP server should bind.
 func (c *Config) Addr() string {
-	return fmt.Sprintf("%s:%s", c.Host, c.Port)
+	return fmt.Sprintf("%s:%s", c.Host.Value, c.Port.Value)
 }
 
-func (c *Config) ToFileConfig() *FileConfig {
-	return &FileConfig{
-		DatabaseURL:  c.DatabaseURL,
-		Host:         c.Host,
-		Port:         c.Port,
-		LogLevel:     c.LogLevel,
-		LogFormat:    c.LogFormat,
-		HeyaMediaURL: c.HeyaMediaURL,
-		DataDir:      c.DataDir,
-		HWAccel:      c.HWAccel,
-		Tailscale: FileTailscaleConfig{
-			Enabled:  c.Tailscale.Enabled,
-			Hostname: c.Tailscale.Hostname,
-			StateDir: c.Tailscale.StateDir,
-			HTTPS:    c.Tailscale.HTTPS,
-			Funnel:   c.Tailscale.Funnel,
-		},
+// Sources returns the flat key→provenance map for the infra layer. The
+// /api/config/sources endpoint extends this with DB-backed setting groups
+// (tailscale.*, sonic_analysis.*, library.N.*).
+func (c *Config) Sources() map[string]SourceEntry {
+	return map[string]SourceEntry{
+		"infra.database_url":      c.DatabaseURL.Entry(),
+		"infra.host":              c.Host.Entry(),
+		"infra.port":              c.Port.Entry(),
+		"infra.log_level":         c.LogLevel.Entry(),
+		"infra.log_format":        c.LogFormat.Entry(),
+		"infra.data_dir":          c.DataDir.Entry(),
+		"infra.heya_media_url":    c.HeyaMediaURL.Entry(),
+		"transcoder.hwaccel":      c.HWAccel.Entry(),
+		"transcoder.cache_dir":    c.TranscodeCacheDir.Entry(),
+		"transcoder.cache_max_gb": c.TranscodeCacheMaxGB.Entry(),
+		"tailscale.enabled":       c.Tailscale.Enabled.Entry(),
+		"tailscale.hostname":      c.Tailscale.Hostname.Entry(),
+		"tailscale.state_dir":     c.Tailscale.StateDir.Entry(),
+		"tailscale.https":         c.Tailscale.HTTPS.Entry(),
+		"tailscale.funnel":        c.Tailscale.Funnel.Entry(),
 	}
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

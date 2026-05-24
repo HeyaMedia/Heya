@@ -301,7 +301,7 @@ func (a *App) IdentifySearch(ctx context.Context, mediaItemID int64, query, year
 
 	// If the query looks like a URL/shortcode that points to a specific provider
 	// item, resolve it directly to a single result instead of doing a text search.
-	if providerName, providerID, ok := parseIdentifyURL(query); ok {
+	if providerName, providerID, ok := parseIdentifyURL(query, kind); ok {
 		if res, err := a.resolveIdentifyURL(ctx, providerName, providerID, fetchOpts); err == nil {
 			return IdentifySearchResult{Results: []metadata.SearchResult{res}}, nil
 		} else {
@@ -346,17 +346,23 @@ func (a *App) resolveIdentifyURL(ctx context.Context, providerName, providerID s
 	}, nil
 }
 
-// parseIdentifyURL inspects a user-pasted string and returns the provider name
-// and provider ID it refers to, if recognized. Supports:
-//   - Heya media URLs:        http(s)://host/heya_<kind>:<slug>
-//   - Heya shortcodes:        heya_<kind>:<slug>  or  heya:<slug>
-//   - TMDB URLs:              https://www.themoviedb.org/{movie,tv}/<id>[-<name>]
-//   - IMDb URLs:              https://www.imdb.com/title/tt<id>/  (routed via heya lookup)
-func parseIdentifyURL(input string) (provider, providerID string, ok bool) {
+// parseIdentifyURL inspects a user-pasted string and returns the heya provider
+// ID it refers to, if recognized. The hint kind is used when the input itself
+// doesn't disambiguate movie vs. tv (e.g. IMDb URLs).
+//
+// Supported inputs:
+//   - heya.media shortcodes/URLs: heya_<kind>:<provider>:<value>   (kind from prefix)
+//   - heya providerID passthrough: heya:<kind>:<provider>:<value>  (used as-is)
+//   - TMDB URLs:                   https://www.themoviedb.org/{movie,tv}/<id>[-<name>]
+//   - IMDb URLs:                   https://www.imdb.com/title/tt<id>/  (uses hint kind)
+//   - TheTVDB URLs:                https://thetvdb.com/{series,movies}/<id>
+func parseIdentifyURL(input string, hint metadata.MediaKind) (provider, providerID string, ok bool) {
 	s := strings.TrimSpace(input)
 	if s == "" {
 		return "", "", false
 	}
+
+	hintAPI := heyaAPIKind(hint)
 
 	var host string
 	var pathSegments []string
@@ -374,15 +380,21 @@ func parseIdentifyURL(input string) (provider, providerID string, ok bool) {
 	}
 
 	for _, seg := range pathSegments {
-		// Heya media frontend pattern: heya_<kind>:<slug>
+		// heya.media URL/shortcode: heya_<kind>:<provider>:<value>
 		if strings.HasPrefix(seg, "heya_") {
-			if i := strings.Index(seg, ":"); i > 0 && i < len(seg)-1 {
-				return "heya", "heya:" + seg[i+1:], true
+			rest := strings.TrimPrefix(seg, "heya_")
+			parts := strings.SplitN(rest, ":", 3)
+			if len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != "" {
+				return "heya", "heya:" + parts[0] + ":" + parts[1] + ":" + parts[2], true
 			}
 		}
-		// Direct provider-id shortcode: heya:<slug-or-lookup>
-		if strings.HasPrefix(seg, "heya:") && len(seg) > len("heya:") {
-			return "heya", seg, true
+		// Pre-built heya provider ID: heya:<kind>:<provider>:<value>
+		if strings.HasPrefix(seg, "heya:") {
+			rest := strings.TrimPrefix(seg, "heya:")
+			parts := strings.SplitN(rest, ":", 3)
+			if len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != "" {
+				return "heya", seg, true
+			}
 		}
 	}
 
@@ -394,17 +406,17 @@ func parseIdentifyURL(input string) (provider, providerID string, ok bool) {
 				idPart = idPart[:dash]
 			}
 			if _, err := strconv.Atoi(idPart); err == nil {
-				return "heya", "heya:tmdb:" + idPart, true
+				return "heya", "heya:" + tmdbKind + ":tmdb:" + idPart, true
 			}
 		}
 	}
 
-	if strings.Contains(host, "imdb.com") {
+	if strings.Contains(host, "imdb.com") && hintAPI != "" {
 		for i, seg := range pathSegments {
 			if seg == "title" && i+1 < len(pathSegments) {
 				ttID := pathSegments[i+1]
 				if strings.HasPrefix(ttID, "tt") {
-					return "heya", "heya:imdb:" + ttID, true
+					return "heya", "heya:" + hintAPI + ":imdb:" + ttID, true
 				}
 			}
 		}
@@ -412,16 +424,40 @@ func parseIdentifyURL(input string) (provider, providerID string, ok bool) {
 
 	if strings.Contains(host, "thetvdb.com") {
 		for i, seg := range pathSegments {
-			if (seg == "series" || seg == "movies") && i+1 < len(pathSegments) {
-				idPart := pathSegments[i+1]
-				if n, err := strconv.Atoi(idPart); err == nil && n > 0 {
-					return "heya", "heya:tvdb:" + idPart, true
-				}
+			if i+1 >= len(pathSegments) {
+				continue
+			}
+			idPart := pathSegments[i+1]
+			n, err := strconv.Atoi(idPart)
+			if err != nil || n <= 0 {
+				continue
+			}
+			switch seg {
+			case "series":
+				return "heya", "heya:tv:tvdb:" + idPart, true
+			case "movies":
+				return "heya", "heya:movie:tvdb:" + idPart, true
 			}
 		}
 	}
 
 	return "", "", false
+}
+
+// heyaAPIKind maps an internal MediaKind to the api kind segment heya.media
+// uses in /{kind}/{id} (music → artist, others pass through).
+func heyaAPIKind(k metadata.MediaKind) string {
+	switch k {
+	case metadata.KindMovie:
+		return "movie"
+	case metadata.KindTV:
+		return "tv"
+	case metadata.KindMusic:
+		return "artist"
+	case metadata.KindBook:
+		return "book"
+	}
+	return ""
 }
 
 func splitPath(p string) []string {
@@ -525,7 +561,7 @@ func (a *App) DeleteMediaAsset(ctx context.Context, mediaItemID, assetID int64) 
 	}
 
 	if asset.LocalPath != "" {
-		fullPath := filepath.Join(a.config.DataDir, "images", asset.LocalPath)
+		fullPath := filepath.Join(a.config.DataDir.Value, "images", asset.LocalPath)
 		os.Remove(fullPath)
 	}
 
@@ -699,7 +735,7 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 	}
 	destFilename := fmt.Sprintf("custom_%s%s", assetType, ext)
 
-	dirPath := filepath.Join(a.config.DataDir, "images", string(item.MediaType), dirName)
+	dirPath := filepath.Join(a.config.DataDir.Value, "images", string(item.MediaType), dirName)
 	os.MkdirAll(dirPath, 0755)
 
 	dst, err := os.Create(filepath.Join(dirPath, destFilename))

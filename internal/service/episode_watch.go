@@ -62,6 +62,30 @@ func (a *App) UnmarkShowWatched(ctx context.Context, userID, mediaItemID int64) 
 	})
 }
 
+// MarkMediaWatched routes to the per-type marker by inspecting the media
+// item's type. Unifies the FE call-path: a single POST /api/me/watched/media/{id}
+// works for both TV shows (which need all episodes flagged) and movies
+// (single-row marker), replacing the older split endpoints.
+func (a *App) MarkMediaWatched(ctx context.Context, userID, mediaItemID int64, watched bool) error {
+	q := sqlc.New(a.db)
+	item, err := q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return err
+	}
+	switch item.MediaType {
+	case sqlc.MediaTypeTv:
+		if watched {
+			return a.MarkShowWatched(ctx, userID, mediaItemID)
+		}
+		return a.UnmarkShowWatched(ctx, userID, mediaItemID)
+	default:
+		if watched {
+			return a.MarkMovieWatched(ctx, userID, mediaItemID)
+		}
+		return a.UnmarkMovieWatched(ctx, userID, mediaItemID)
+	}
+}
+
 // MarkMovieWatched marks a movie as watched.
 func (a *App) MarkMovieWatched(ctx context.Context, userID, mediaItemID int64) error {
 	q := sqlc.New(a.db)

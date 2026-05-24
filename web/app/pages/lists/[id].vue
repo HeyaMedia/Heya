@@ -64,13 +64,13 @@ const loading = ref(true)
 async function confirmDelete() {
   if (!list.value) return
   if (!confirm(`Delete "${list.value.name}"? This cannot be undone.`)) return
-  await apiFetch(`/api/lists/${list.value.id}`, { method: 'DELETE' })
+  await apiFetch(`/api/me/lists/${list.value.id}`, { method: 'DELETE' })
   navigateTo('/')
 }
 
 onMounted(async () => {
   try {
-    const res = await apiFetch<{ list: UserList; items: MediaItem[] }>(`/api/lists/${listId.value}`)
+    const res = await apiFetch<{ list: UserList; items: MediaItem[] }>(`/api/me/lists/${listId.value}`)
     list.value = res.list
     items.value = res.items || []
   } catch { /* empty */ }

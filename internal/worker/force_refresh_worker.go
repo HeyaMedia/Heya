@@ -4,19 +4,19 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
 
-func pickRefreshProvider(heyaSlug string, externalIDsJSON []byte) (string, string) {
+func pickRefreshProvider(mediaType string, externalIDsJSON []byte) (string, string) {
 	var ids map[string]string
 	json.Unmarshal(externalIDsJSON, &ids)
 
-	if pid := heyamedia.BuildLookupID(heyaSlug, ids); pid != "" {
+	if pid := heyamedia.BuildLookupID(metadata.MediaKind(mediaType), ids); pid != "" {
 		return "heya", pid
 	}
 	return "", ""
@@ -29,81 +29,14 @@ type ForceRefreshMetadataWorker struct {
 
 func (w *ForceRefreshMetadataWorker) Work(ctx context.Context, job *river.Job[ForceRefreshMetadataArgs]) error {
 	q := sqlc.New(w.DB)
-	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	if _, err := q.GetLibraryByID(ctx, job.Args.LibraryID); err != nil {
+		return nil
+	}
+
+	enqueued, err := enqueueForceForLibrary(ctx, w.DB, job.Args.LibraryID)
 	if err != nil {
-		return nil
+		log.Warn().Err(err).Int64("library_id", job.Args.LibraryID).Msg("force_refresh_metadata: enumerate failed")
 	}
-
-	client := river.ClientFromContext[pgx.Tx](ctx)
-
-	// Music libraries refresh per-artist (RefreshMusicArtistWorker handles
-	// album + track enrichment off one heya.media call). The per-file
-	// MetadataFetch path used for movies/TV would call the legacy
-	// createMusic and either duplicate or trip our dedupe constraints.
-	if lib.MediaType == sqlc.MediaTypeMusic {
-		artists, err := q.ListArtistsByLibrary(ctx, job.Args.LibraryID)
-		if err != nil {
-			return nil
-		}
-		enqueued := 0
-		for i, a := range artists {
-			if _, err := client.Insert(ctx, RefreshMusicArtistArgs{
-				ArtistID:       a.ID,
-				Force:          true,
-				BatchLibraryID: lib.ID,
-				BatchTotal:     len(artists),
-				BatchPosition:  i + 1,
-			}, nil); err != nil {
-				log.Warn().Err(err).Int64("artist_id", a.ID).Msg("enqueue RefreshMusicArtist failed")
-				continue
-			}
-			enqueued++
-		}
-		log.Info().Int64("library_id", job.Args.LibraryID).Int("artists_enqueued", enqueued).Msg("force music refresh enqueued")
-		return nil
-	}
-
-	rows, err := w.DB.Query(ctx,
-		`SELECT mi.id, lf.id AS file_id, lf.path,
-		        mi.media_type, mi.external_ids, mi.heya_slug
-		 FROM media_items mi
-		 JOIN library_files lf ON lf.media_item_id = mi.id AND lf.deleted_at IS NULL
-		 WHERE mi.library_id = $1`,
-		job.Args.LibraryID,
-	)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	enqueued := 0
-
-	for rows.Next() {
-		var mediaItemID, fileID int64
-		var filePath, mediaType, heyaSlug string
-		var externalIDsJSON []byte
-
-		if err := rows.Scan(&mediaItemID, &fileID, &filePath, &mediaType, &externalIDsJSON, &heyaSlug); err != nil {
-			continue
-		}
-
-		providerName, providerID := pickRefreshProvider(heyaSlug, externalIDsJSON)
-		if providerName == "" {
-			continue
-		}
-
-		client.Insert(ctx, MetadataFetchArgs{
-			MediaItemID:   mediaItemID,
-			LibraryID:     job.Args.LibraryID,
-			LibraryFileID: fileID,
-			FilePath:      filePath,
-			MediaType:     mediaType,
-			ProviderName:  providerName,
-			ProviderID:    providerID,
-		}, nil)
-		enqueued++
-	}
-
 	log.Info().Int64("library_id", job.Args.LibraryID).Int("enqueued", enqueued).Msg("force metadata refresh enqueued")
 	return nil
 }
@@ -120,10 +53,9 @@ func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[Forc
 		return nil
 	}
 
-	client := river.ClientFromContext[pgx.Tx](ctx)
-
-	// Music: clear cover paths and route through RefreshMusicArtist (same
-	// enrichment cycle covers metadata + artwork from heya.media).
+	// Wipe the existing remote-sourced assets so the enrich pass actually
+	// re-downloads. Music albums use cover_path on the album row; other
+	// media types track per-asset rows in media_assets.
 	if lib.MediaType == sqlc.MediaTypeMusic {
 		_, _ = w.DB.Exec(ctx,
 			`UPDATE albums SET cover_path = '' WHERE artist_id IN
@@ -132,85 +64,66 @@ func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[Forc
 			    WHERE mi.library_id = $1)`,
 			job.Args.LibraryID,
 		)
-		artists, err := q.ListArtistsByLibrary(ctx, job.Args.LibraryID)
-		if err != nil {
-			return nil
-		}
-		enqueued := 0
-		for i, a := range artists {
-			if _, err := client.Insert(ctx, RefreshMusicArtistArgs{
-				ArtistID:       a.ID,
-				Force:          true,
-				BatchLibraryID: lib.ID,
-				BatchTotal:     len(artists),
-				BatchPosition:  i + 1,
-			}, nil); err != nil {
-				continue
-			}
-			enqueued++
-		}
-		log.Info().Int64("library_id", job.Args.LibraryID).Int("artists_enqueued", enqueued).Msg("force music image refresh enqueued")
-		return nil
+	} else {
+		libraryItemIDs := `SELECT id FROM media_items WHERE library_id = $1`
+		_, _ = w.DB.Exec(ctx,
+			`DELETE FROM media_assets
+			 WHERE media_item_id IN (`+libraryItemIDs+`)
+			   AND (source = 'remote' OR label ~ '^(season|s\d+e\d+)')`,
+			job.Args.LibraryID,
+		)
+		_, _ = w.DB.Exec(ctx,
+			`UPDATE media_items SET poster_path = '', backdrop_path = ''
+			 WHERE library_id = $1`,
+			job.Args.LibraryID,
+		)
 	}
 
-	libraryItemIDs := `SELECT id FROM media_items WHERE library_id = $1`
+	enqueued, err := enqueueForceForLibrary(ctx, w.DB, job.Args.LibraryID)
+	if err != nil {
+		log.Warn().Err(err).Int64("library_id", job.Args.LibraryID).Msg("force_refresh_images: enumerate failed")
+	}
+	log.Info().Int64("library_id", job.Args.LibraryID).Int("enqueued", enqueued).Msg("force image refresh enqueued")
+	return nil
+}
 
-	// Clear remote-sourced assets and any with season/episode labels
-	w.DB.Exec(ctx,
-		`DELETE FROM media_assets
-		 WHERE media_item_id IN (`+libraryItemIDs+`)
-		   AND (source = 'remote' OR label ~ '^(season|s\d+e\d+)')`,
-		job.Args.LibraryID,
-	)
-
-	// Reset poster/backdrop paths so the download worker doesn't skip them
-	w.DB.Exec(ctx,
-		`UPDATE media_items SET poster_path = '', backdrop_path = ''
-		 WHERE library_id = $1`,
-		job.Args.LibraryID,
-	)
-
-	rows, err := w.DB.Query(ctx,
-		`SELECT mi.id, lf.id AS file_id, lf.path,
-		        mi.media_type, mi.external_ids, mi.heya_slug
+// enqueueForceForLibrary fans out a forced enrich for every media item in
+// the library. Single pass — the unified enrich worker handles type-specific
+// branching internally, so we don't need separate music / non-music paths
+// anymore.
+func enqueueForceForLibrary(ctx context.Context, db *pgxpool.Pool, libraryID int64) (int, error) {
+	rows, err := db.Query(ctx,
+		`SELECT mi.id, mi.media_type, mi.external_ids
 		 FROM media_items mi
-		 JOIN library_files lf ON lf.media_item_id = mi.id AND lf.deleted_at IS NULL
 		 WHERE mi.library_id = $1`,
-		job.Args.LibraryID,
+		libraryID,
 	)
 	if err != nil {
-		return nil
+		return 0, err
 	}
 	defer rows.Close()
 
 	enqueued := 0
-
 	for rows.Next() {
-		var mediaItemID, fileID int64
-		var filePath, mediaType, heyaSlug string
+		var itemID int64
+		var mediaType string
 		var externalIDsJSON []byte
-
-		if err := rows.Scan(&mediaItemID, &fileID, &filePath, &mediaType, &externalIDsJSON, &heyaSlug); err != nil {
+		if err := rows.Scan(&itemID, &mediaType, &externalIDsJSON); err != nil {
 			continue
 		}
 
-		providerName, providerID := pickRefreshProvider(heyaSlug, externalIDsJSON)
-		if providerName == "" {
+		// Skip items the enrich worker would just fail on. The matcher
+		// stamps external_ids during the search stub, so this should only
+		// catch genuinely unmatched stubs.
+		if _, providerID := pickRefreshProvider(mediaType, externalIDsJSON); providerID == "" && sqlc.MediaType(mediaType) != sqlc.MediaTypeMusic {
 			continue
 		}
 
-		client.Insert(ctx, MetadataFetchArgs{
-			MediaItemID:   mediaItemID,
-			LibraryID:     job.Args.LibraryID,
-			LibraryFileID: fileID,
-			FilePath:      filePath,
-			MediaType:     mediaType,
-			ProviderName:  providerName,
-			ProviderID:    providerID,
-		}, nil)
+		if err := EnqueueEnrichTx(ctx, itemID, sqlc.MediaType(mediaType), EnrichSourceForced); err != nil {
+			log.Warn().Err(err).Int64("item_id", itemID).Msg("enqueue forced enrich failed")
+			continue
+		}
 		enqueued++
 	}
-
-	log.Info().Int64("library_id", job.Args.LibraryID).Int("enqueued", enqueued).Msg("force image refresh enqueued")
-	return nil
+	return enqueued, rows.Err()
 }

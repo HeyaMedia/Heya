@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/scanner"
@@ -214,6 +215,7 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 
 	if hasAudio && primaryAudio != nil {
 		w.updateAudioTrackFile(ctx, q, job.Args.LibraryFileID, info, primaryAudio)
+		w.enqueueLoudnessIfMusic(ctx, q, job.Args.LibraryFileID)
 	}
 
 	if hasVideo && !vfs.IsSMBPath(job.Args.FilePath) {
@@ -396,4 +398,34 @@ func parseIntString(s string) int64 {
 		return 0
 	}
 	return n
+}
+
+// enqueueLoudnessIfMusic schedules an ebur128 pass for the file's track_files
+// row when the file lives in a music library. Silently noops outside music
+// libraries or when no track_files row exists yet (matcher hasn't run).
+func (w *FFProbeWorker) enqueueLoudnessIfMusic(ctx context.Context, q *sqlc.Queries, libraryFileID int64) {
+	tf, err := q.GetTrackFileByLibraryFileID(ctx, libraryFileID)
+	if err != nil {
+		// Matcher hasn't created the track_files row yet. It'll re-trigger
+		// loudness when the row eventually appears via the scheduled
+		// backstop. Don't block the probe pipeline on it.
+		return
+	}
+
+	lf, err := q.GetLibraryFileByID(ctx, libraryFileID)
+	if err != nil {
+		return
+	}
+	lib, err := q.GetLibraryByID(ctx, lf.LibraryID)
+	if err != nil || lib.MediaType != sqlc.MediaTypeMusic {
+		return
+	}
+
+	client := river.ClientFromContext[pgx.Tx](ctx)
+	if client == nil {
+		return
+	}
+	if _, err := client.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: tf.ID}, nil); err != nil {
+		log.Warn().Err(err).Int64("track_file_id", tf.ID).Msg("enqueue track loudness failed")
+	}
 }

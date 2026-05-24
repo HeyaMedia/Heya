@@ -38,7 +38,7 @@ export function useUserSettings() {
   async function load() {
     if (_loaded.value) return
     try {
-      _settings.value = await apiFetch<UserSettingsData>('/api/user/settings')
+      _settings.value = await apiFetch<UserSettingsData>('/api/me/settings')
       _loaded.value = true
     } catch {
       _settings.value = { ...DEFAULT_SETTINGS }
@@ -49,7 +49,7 @@ export function useUserSettings() {
   async function save(updated: UserSettingsData) {
     _settings.value = updated
     try {
-      await apiFetch<UserSettingsData>('/api/user/settings', {
+      await apiFetch<UserSettingsData>('/api/me/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),

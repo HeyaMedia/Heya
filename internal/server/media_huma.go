@@ -1,0 +1,497 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/transcoder"
+)
+
+// registerMediaRoutes covers the broad /api/media + discovery surface:
+// listings, search, dashboard stats, recommendations, activity feed,
+// collections/genres/people/studios facets, transcoder settings, filesystem
+// browse. Streaming endpoints live in stream_huma.go.
+func registerMediaRoutes(api huma.API, app *service.App) {
+	// --- Media listings ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/media", "list-media", "Paginated media items by type", "Media")),
+		func(ctx context.Context, in *struct {
+			Type string `query:"type" enum:"movie,tv,music,book,comic,podcast,radio" example:"movie" doc:"Media type bucket"`
+			Pagination
+		}) (*JSONOutput[[]service.MediaItemView], error) {
+			if in.Type == "" {
+				return nil, huma.Error400BadRequest("?type= parameter is required")
+			}
+			views, err := app.ListMedia(ctx, sqlc.MediaType(in.Type), in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(views, 30), nil
+		})
+
+	// /enriched returns the two enriched-view shapes under a discriminated
+	// envelope so the spec can describe both bodies. The previous design
+	// returned the raw slice with no way to tell movies from tv in OpenAPI.
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/enriched", "list-enriched-media", "Movie/TV listings with derived fields", "Media")),
+		func(ctx context.Context, in *struct {
+			Type   string `query:"type" doc:"movie or tv" enum:"movie,tv"`
+			Limit  int32  `query:"limit" minimum:"1" maximum:"5000" default:"2000"`
+			Offset int32  `query:"offset" minimum:"0" default:"0"`
+		}) (*JSONOutput[enrichedMediaBody], error) {
+			body := enrichedMediaBody{Type: in.Type}
+			switch in.Type {
+			case "movie":
+				views, err := app.ListEnrichedMovies(ctx, in.Limit, in.Offset)
+				if err != nil {
+					return nil, huma.Error500InternalServerError(err.Error())
+				}
+				body.Movies = views
+			case "tv":
+				views, err := app.ListEnrichedTVSeries(ctx, in.Limit, in.Offset)
+				if err != nil {
+					return nil, huma.Error500InternalServerError(err.Error())
+				}
+				body.TV = views
+			default:
+				return nil, huma.Error400BadRequest("?type=movie or ?type=tv is required")
+			}
+			return cachedJSON(body, 30), nil
+		})
+
+	// GetMediaDetail still returns map[string]any (legacy ad-hoc detail blob).
+	// Typing the surface as a loose object is honest about that without
+	// committing to a schema we'd have to keep in sync — schema tightening is
+	// future work once the detail shape settles.
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}", "get-media", "Media item detail (numeric ID or slug)", "Media")),
+		func(ctx context.Context, in *SlugOrIDPath) (*JSONOutput[map[string]any], error) {
+			result, err := app.GetMediaDetail(ctx, in.ID)
+			if err != nil {
+				return nil, huma.Error404NotFound("media item not found")
+			}
+			return cachedJSON(result, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/media/{id}/refresh", "refresh-media", "Force a metadata refresh for one item", "Media")),
+		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
+			if err := app.RefreshMediaItem(ctx, in.ID); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("refreshed"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/missing", "list-missing", "Media whose files no longer exist", "Media")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.MissingMediaItem], error) {
+			items, err := app.ListMissingMedia(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("query failed")
+			}
+			return cachedJSON(items, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/media/missing", "cleanup-missing", "Delete missing media records", "Media")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[deletedCountBody], error) {
+			count, err := app.CleanupMissingMedia(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to find missing items")
+			}
+			return &JSONOutput[deletedCountBody]{Body: deletedCountBody{Deleted: count}}, nil
+		})
+
+	// --- People ---
+	// /api/person/{id} stays singular for now — moves to /api/people/{id} in
+	// the URL-consolidation pass so FE callers update in one batch.
+	huma.Register(api, secured(op(http.MethodGet, "/api/person/{id}", "get-person", "Person detail (numeric ID or slug)", "People")),
+		func(ctx context.Context, in *SlugOrIDPath) (*JSONOutput[map[string]any], error) {
+			result, err := app.GetPerson(ctx, in.ID)
+			if err != nil {
+				return nil, huma.Error404NotFound("person not found")
+			}
+			return cachedJSON(result, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/people/search", "search-people", "Typeahead search across people", "People")),
+		func(ctx context.Context, in *struct {
+			Q     string `query:"q" maxLength:"200" example:"miyazaki" doc:"Query string"`
+			Limit int32  `query:"limit" minimum:"1" maximum:"50" default:"10"`
+		}) (*JSONOutput[[]sqlc.SearchPeopleByNameRow], error) {
+			if in.Q == "" {
+				return cachedJSON([]sqlc.SearchPeopleByNameRow{}, 30), nil
+			}
+			results, err := app.SearchPeople(ctx, in.Q, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(results, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/people/media-ids", "people-media-ids", "Resolve media IDs starring listed people", "People")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				PersonIDs []int64 `json:"person_ids"`
+			}
+		}) (*JSONOutput[[]int64], error) {
+			result, err := app.ListMediaIDsByPeople(ctx, in.Body.PersonIDs)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[[]int64]{Body: result}, nil
+		})
+
+	// --- Studios ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/studios/search", "search-studios", "Typeahead search across studios", "Studios")),
+		func(ctx context.Context, in *struct {
+			Q     string `query:"q" maxLength:"200" example:"a24"`
+			Limit int32  `query:"limit" minimum:"1" maximum:"50" default:"10"`
+		}) (*JSONOutput[[]sqlc.SearchProductionCompaniesByNameRow], error) {
+			if in.Q == "" {
+				return cachedJSON([]sqlc.SearchProductionCompaniesByNameRow{}, 30), nil
+			}
+			results, err := app.SearchStudios(ctx, in.Q, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(results, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/studios/media-ids", "studios-media-ids", "Resolve media IDs produced by listed studios", "Studios")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				CompanyIDs []int64 `json:"company_ids"`
+			}
+		}) (*JSONOutput[[]int64], error) {
+			ids, err := app.ListMediaIDsByStudio(ctx, in.Body.CompanyIDs)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[[]int64]{Body: ids}, nil
+		})
+
+	// --- Search ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/search", "search-all", "Full-text search across all media", "Search")),
+		func(ctx context.Context, in *struct {
+			Q    string `query:"q" minLength:"1" maxLength:"200" example:"godfather"`
+			Type string `query:"type" enum:"movie,tv,music,book,comic,podcast,radio,episode,person" example:"movie" doc:"Optional bucket"`
+			Pagination
+		}) (*JSONOutput[service.SearchBucket], error) {
+			q := strings.TrimSpace(in.Q)
+			if q == "" {
+				return nil, huma.Error400BadRequest("?q= parameter is required")
+			}
+			limit := in.Limit
+			if limit <= 0 || limit > 200 {
+				limit = 60
+			}
+			result, err := app.SearchByType(ctx, q, in.Type, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return cachedJSON(result, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/search/quick", "search-quick", "Lightweight cross-bucket search for the omni-search popover", "Search")),
+		func(ctx context.Context, in *struct {
+			Q string `query:"q" maxLength:"200" example:"blade runner"`
+		}) (*JSONOutput[service.QuickSearchResult], error) {
+			result, err := app.SearchQuick(ctx, strings.TrimSpace(in.Q))
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(result, 30), nil
+		})
+
+	// --- Genres / keywords / collections ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/genres", "list-genres", "All genres with counts", "Discover")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListAllGenresRow], error) {
+			genres, err := app.ListGenres(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(genres, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/genres/{name}", "get-genre", "Media within a genre", "Discover")),
+		func(ctx context.Context, in *struct {
+			Name string `path:"name" maxLength:"128" example:"science-fiction" doc:"Dash-separated genre/keyword (URL form)"`
+			Pagination
+		}) (*JSONOutput[service.GenreResult], error) {
+			limit := in.Limit
+			if limit <= 0 || limit > 200 {
+				limit = 60
+			}
+			result, err := app.GetGenre(ctx, strings.ReplaceAll(in.Name, "-", " "), limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(result, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/keywords/{name}", "get-keyword", "Media tagged with a keyword", "Discover")),
+		func(ctx context.Context, in *struct {
+			Name string `path:"name" maxLength:"128" example:"science-fiction" doc:"Dash-separated genre/keyword (URL form)"`
+			Pagination
+		}) (*JSONOutput[service.KeywordResult], error) {
+			limit := in.Limit
+			if limit <= 0 || limit > 200 {
+				limit = 60
+			}
+			result, err := app.GetKeyword(ctx, strings.ReplaceAll(in.Name, "-", " "), limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(result, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/collections", "list-collections", "All collections", "Discover")),
+		func(ctx context.Context, in *Pagination) (*JSONOutput[service.CollectionListResult], error) {
+			limit := in.Limit
+			if limit <= 0 || limit > 200 {
+				limit = 60
+			}
+			result, err := app.ListCollections(ctx, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(result, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/collections/browse", "browse-collections", "Browseable collection listing", "Discover")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListCollectionsWithLocalMediaRow], error) {
+			result, err := app.BrowseCollections(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(result, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/collections/{id}", "get-collection", "Collection detail", "Discover")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[service.CollectionResult], error) {
+			result, err := app.GetCollection(ctx, in.ID)
+			if err != nil {
+				return nil, huma.Error404NotFound("collection not found")
+			}
+			return cachedJSON(result, 60), nil
+		})
+
+	// --- Recommendations / activity / stats ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/recommendations", "list-recommendations", "Aggregated recommendation feed", "Discover")),
+		func(ctx context.Context, in *struct {
+			Limit int32 `query:"limit" minimum:"1" maximum:"50" default:"20"`
+		}) (*JSONOutput[[]recItem], error) {
+			recs, err := app.ListTopRecommendations(ctx, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			items := make([]recItem, len(recs))
+			for i, r := range recs {
+				var extIDs map[string]string
+				_ = json.Unmarshal(r.ExternalIds, &extIDs)
+				items[i] = recItem{
+					ExternalIDs: extIDs,
+					Title:       r.Title,
+					PosterPath:  r.PosterPath,
+					MediaType:   r.MediaType,
+					VoteAverage: r.VoteAverage,
+					ReleaseDate: r.ReleaseDate,
+					SourceCount: r.SourceCount,
+				}
+				if r.LocalMediaItemID.Valid {
+					items[i].LocalMediaID = &r.LocalMediaItemID.Int64
+				}
+				if r.LocalSlug.Valid {
+					items[i].LocalSlug = &r.LocalSlug.String
+				}
+				if r.LocalPosterPath.Valid {
+					items[i].LocalPosterPath = &r.LocalPosterPath.String
+				}
+			}
+			return cachedJSON(items, 120), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/activity", "activity-feed", "Recent activity events", "Discover")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ActivityItem], error) {
+			return noStoreJSON(app.GetActivityFeed(ctx)), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/stats", "dashboard-stats", "Dashboard counts", "System")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.DashboardStats], error) {
+			return noStoreJSON(app.GetDashboardStats(ctx)), nil
+		})
+
+	// --- Filesystem browser ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/fs/browse", "fs-browse", "Filesystem directory listing (library wizard)", "System")),
+		func(ctx context.Context, in *struct {
+			Path string `query:"path" doc:"Absolute directory to list"`
+		}) (*JSONOutput[fsBrowseBody], error) {
+			dir := in.Path
+			if dir == "" {
+				if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+					dir = "/"
+				} else {
+					dir = "C:\\"
+				}
+			}
+			dir = filepath.Clean(dir)
+			info, err := os.Stat(dir)
+			if err != nil || !info.IsDir() {
+				return nil, huma.Error400BadRequest("path is not a valid directory")
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				return nil, huma.Error403Forbidden("cannot read directory")
+			}
+			var dirs []fsEntry
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), ".") || !e.IsDir() {
+					continue
+				}
+				dirs = append(dirs, fsEntry{
+					Name:  e.Name(),
+					Path:  filepath.Join(dir, e.Name()),
+					IsDir: true,
+				})
+			}
+			sort.Slice(dirs, func(i, j int) bool {
+				return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
+			})
+			body := fsBrowseBody{Path: dir, Entries: dirs}
+			if dir != "/" {
+				body.Parent = filepath.Dir(dir)
+			}
+			return noStoreJSON(body), nil
+		})
+
+	// --- Transcoding settings (status + reconfig + cache clear) ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/transcode/status", "transcode-status", "Transcoder runtime status", "Transcoding")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[transcodeStatusBody], error) {
+			resp := transcodeStatusBody{
+				Available:  transcoder.IsFFmpegAvailable(),
+				ConfigMode: app.ConfigSnapshot().HWAccel.Value,
+				CacheDir:   app.ConfigSnapshot().TranscodeCacheDir.Value,
+				CacheMaxGB: app.ConfigSnapshot().TranscodeCacheMaxGB.Value,
+			}
+			if app.TranscoderSessions() != nil {
+				hw := app.TranscoderSessions().HWAccel()
+				resp.HWAccel = string(hw.Type)
+				resp.HWAccelLabel = hwAccelLabel(hw.Type)
+				resp.EncoderH264 = hw.EncoderH264
+				resp.EncoderHEVC = hw.EncoderHEVC
+			} else {
+				resp.HWAccel = "none"
+				resp.HWAccelLabel = "Disabled"
+			}
+			if app.TranscoderCache() != nil {
+				stats := app.TranscoderCache().Stats()
+				resp.CacheSizeMB = stats.TotalSize / (1024 * 1024)
+				resp.CacheItems = stats.ItemCount
+			}
+			return noStoreJSON(resp), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/transcode/settings", "update-transcode-settings", "Update transcoder settings", "Transcoding")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				HWAccel    string `json:"hw_accel" enum:"auto,none,vaapi,qsv,nvenc,videotoolbox"`
+				CacheMaxGB int    `json:"cache_max_gb" minimum:"0"`
+			}
+		}) (*StatusOutput, error) {
+			if err := app.SaveTranscoderSettings(ctx, in.Body.HWAccel, in.Body.CacheMaxGB); err != nil {
+				if lerr, ok := err.(*service.ErrFieldLockedByEnv); ok {
+					return nil, huma.Error409Conflict(lerr.Error())
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("ok"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/transcode/cache", "clear-transcode-cache", "Clear cached transcoded segments", "Transcoding")),
+		func(ctx context.Context, _ *struct{}) (*StatusOutput, error) {
+			if app.TranscoderCache() == nil {
+				return nil, huma.Error503ServiceUnavailable("transcoding not available")
+			}
+			if err := app.TranscoderCache().Clear(); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("cleared"), nil
+		})
+}
+
+type deletedCountBody struct {
+	Deleted int `json:"deleted"`
+}
+
+// enrichedMediaBody is the discriminated response for /api/media/enriched.
+// `type` tells callers which of `movies`/`tv` is populated — the other is
+// omitted from the response. Spec-wise this is much friendlier than the old
+// "raw slice of either shape" return.
+type enrichedMediaBody struct {
+	Type   string                      `json:"type" doc:"Echoes the requested ?type=" enum:"movie,tv"`
+	Movies []service.EnrichedMovieView `json:"movies,omitempty"`
+	TV     []service.EnrichedTVView    `json:"tv,omitempty"`
+}
+
+type recItem struct {
+	ExternalIDs     map[string]string `json:"external_ids"`
+	Title           string            `json:"title"`
+	PosterPath      string            `json:"poster_path"`
+	MediaType       string            `json:"media_type"`
+	VoteAverage     any               `json:"vote_average"`
+	ReleaseDate     string            `json:"release_date"`
+	LocalMediaID    *int64            `json:"local_media_item_id,omitempty"`
+	LocalSlug       *string           `json:"local_slug,omitempty"`
+	LocalPosterPath *string           `json:"local_poster_path,omitempty"`
+	SourceCount     int32             `json:"source_count"`
+}
+
+type fsEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"is_dir"`
+}
+
+type fsBrowseBody struct {
+	Path    string    `json:"path"`
+	Parent  string    `json:"parent,omitempty"`
+	Entries []fsEntry `json:"entries"`
+}
+
+type transcodeStatusBody struct {
+	Available    bool   `json:"available"`
+	HWAccel      string `json:"hw_accel"`
+	HWAccelLabel string `json:"hw_accel_label"`
+	EncoderH264  string `json:"encoder_h264"`
+	EncoderHEVC  string `json:"encoder_hevc"`
+	CacheDir     string `json:"cache_dir"`
+	CacheMaxGB   int    `json:"cache_max_gb"`
+	CacheSizeMB  int64  `json:"cache_size_mb"`
+	CacheItems   int    `json:"cache_items"`
+	ActiveJobs   int    `json:"active_jobs"`
+	ConfigMode   string `json:"config_mode"`
+}
+
+// Re-exported so handlers in other huma files (sonic analysis, etc.) can refer
+// to App's getter without dragging in transcoder. Kept here because the
+// transcode status body needs the same labels.
+func hwAccelLabel(t transcoder.HwAccelType) string {
+	switch t {
+	case transcoder.HwAccelNVENC:
+		return "NVIDIA NVENC"
+	case transcoder.HwAccelVAAPI:
+		return "VA-API"
+	case transcoder.HwAccelQSV:
+		return "Intel Quick Sync"
+	case transcoder.HwAccelVideoToolbox:
+		return "Apple VideoToolbox"
+	case transcoder.HwAccelNone:
+		return "CPU (Software)"
+	default:
+		return "Unknown"
+	}
+}

@@ -599,7 +599,7 @@ const isFavorited = ref(false)
 
 async function toggleFavorite() {
   if (!detail.value) return
-  const res = await apiFetch<{ favorited: boolean }>('/api/favorites/toggle', {
+  const res = await apiFetch<{ favorited: boolean }>('/api/me/favorites', {
     method: 'POST',
     body: JSON.stringify({ entity_type: 'media_item', entity_id: detail.value.media_item.id }),
   })
@@ -622,7 +622,7 @@ const seasonFavorites = ref<Set<number>>(new Set())
 function isSeasonFavorited(s: any) { return seasonFavorites.value.has(s.id) }
 
 async function toggleSeasonFavorite(s: any) {
-  const res = await apiFetch<{ favorited: boolean }>('/api/favorites/toggle', {
+  const res = await apiFetch<{ favorited: boolean }>('/api/me/favorites', {
     method: 'POST',
     body: JSON.stringify({ entity_type: 'season', entity_id: s.id }),
   })
@@ -660,13 +660,13 @@ function seasonFullyWatched(s: any): boolean {
 
 async function toggleSeasonWatched(s: any) {
   const watched = seasonFullyWatched(s)
-  await apiFetch(`/api/seasons/${s.id}/watched`, { method: 'POST', body: JSON.stringify({ watched: !watched }) })
+  await apiFetch(`/api/me/watched/season/${s.id}`, { method: 'POST', body: JSON.stringify({ watched: !watched }) })
   await loadState()
 }
 
 async function toggleShowWatched() {
   if (!detail.value) return
-  await apiFetch(`/api/media/${detail.value.media_item.id}/watched`, { method: 'POST', body: JSON.stringify({ watched: !showFullyWatched.value }) })
+  await apiFetch(`/api/me/watched/media/${detail.value.media_item.id}`, { method: 'POST', body: JSON.stringify({ watched: !showFullyWatched.value }) })
   await loadState()
 }
 
@@ -680,13 +680,13 @@ const userLists = ref<any[]>([])
 async function loadLists() {
   if (!detail.value) return
   try {
-    userLists.value = await apiFetch<any[]>(`/api/lists?media_item_id=${detail.value.media_item.id}`)
+    userLists.value = await apiFetch<any[]>(`/api/me/lists?media_item_id=${detail.value.media_item.id}`)
   } catch { /* empty */ }
 }
 
 async function createList() {
   if (!newListName.value.trim()) return
-  await apiFetch('/api/lists', { method: 'POST', body: JSON.stringify({ name: newListName.value.trim(), description: newListDesc.value.trim() }) })
+  await apiFetch('/api/me/lists', { method: 'POST', body: JSON.stringify({ name: newListName.value.trim(), description: newListDesc.value.trim() }) })
   newListName.value = ''
   newListDesc.value = ''
   showCreateList.value = false
@@ -696,9 +696,9 @@ async function createList() {
 async function toggleListItem(l: any) {
   if (!detail.value) return
   if (l.contains) {
-    await apiFetch(`/api/lists/${l.id}/items/${detail.value.media_item.id}`, { method: 'DELETE' })
+    await apiFetch(`/api/me/lists/${l.id}/items/${detail.value.media_item.id}`, { method: 'DELETE' })
   } else {
-    await apiFetch(`/api/lists/${l.id}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: detail.value.media_item.id }) })
+    await apiFetch(`/api/me/lists/${l.id}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: detail.value.media_item.id }) })
   }
   await loadLists()
 }

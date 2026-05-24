@@ -40,7 +40,7 @@ export function useDragDrop() {
     if (!mediaId) return
 
     try {
-      await apiFetch(`/api/lists/${listId}/items`, {
+      await apiFetch(`/api/me/lists/${listId}/items`, {
         method: 'POST',
         body: JSON.stringify({ media_item_id: mediaId }),
       })

@@ -20,7 +20,7 @@ var dbWipeCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+		db, err := pgxpool.New(ctx, cfg.DatabaseURL.Value)
 		if err != nil {
 			return err
 		}

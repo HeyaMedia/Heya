@@ -171,7 +171,7 @@ watch(activeView, async (v) => {
       return
     }
     try {
-      const res = await apiFetch<{ items: any[] }>(`/api/lists/${listId}`)
+      const res = await apiFetch<{ items: any[] }>(`/api/me/lists/${listId}`)
       listItems.value = new Set((res.items || []).map((i: any) => i.id))
     } catch { listItems.value = new Set() }
   }
@@ -244,12 +244,12 @@ function openContextMenu(event: MouseEvent, item: EnrichedMediaItem) {
     userLists: userLists.value,
     onToggleWatched: async (id, watched) => {
       try {
-        await apiFetch(`/api/media/${id}/watched`, { method: 'POST', body: JSON.stringify({ watched }) })
+        await apiFetch(`/api/me/watched/media/${id}`, { method: 'POST', body: JSON.stringify({ watched }) })
       } catch { /* ignore */ }
     },
     onToggleFavorite: async (id, favorited) => {
       try {
-        await apiFetch('/api/favorites/toggle', {
+        await apiFetch('/api/me/favorites', {
           method: 'POST',
           body: JSON.stringify({ entity_type: 'media_item', entity_id: id }),
         })
@@ -260,7 +260,7 @@ function openContextMenu(event: MouseEvent, item: EnrichedMediaItem) {
     },
     onAddToList: async (listId, mediaId) => {
       try {
-        await apiFetch(`/api/lists/${listId}/items`, {
+        await apiFetch(`/api/me/lists/${listId}/items`, {
           method: 'POST',
           body: JSON.stringify({ media_item_id: mediaId }),
         })
@@ -273,7 +273,7 @@ async function saveSmartList() {
   const name = prompt('Smart list name:')
   if (!name?.trim()) return
   try {
-    await apiFetch('/api/lists', {
+    await apiFetch('/api/me/lists', {
       method: 'POST',
       body: JSON.stringify({
         name: name.trim(),
@@ -288,7 +288,7 @@ async function saveSmartList() {
 
 async function loadLists() {
   try {
-    userLists.value = await apiFetch<UserList[]>('/api/lists')
+    userLists.value = await apiFetch<UserList[]>('/api/me/lists')
   } catch { /* ignore */ }
 }
 
@@ -302,7 +302,7 @@ onMounted(async () => {
     apiFetch<EnrichedMediaItem[]>('/api/media/enriched?type=tv&limit=5000'),
     apiFetch<Library[]>('/api/libraries'),
     fetchUserState('series'),
-    apiFetch<UserList[]>('/api/lists'),
+    apiFetch<UserList[]>('/api/me/lists'),
   ])
   if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'tv')

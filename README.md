@@ -51,12 +51,17 @@ client's reported capabilities. More detail in
 ```bash
 git clone git@github.com:HeyaMedia/Heya.git
 cd Heya
+cp .env.example .env        # tweak the values you care about
 make db-up                  # start Postgres on :5440
 make build                  # builds frontend (bun) + Go binary into ./bin/heya
-./bin/heya setup            # guided config wizard (writes heya.yaml)
-./bin/heya user create --username admin --email you@example.com --admin
+./bin/heya setup            # guided wizard — writes .env and creates the admin user
 ./bin/heya serve            # http://localhost:8080
 ```
+
+Configuration lives in `.env` (see `.env.example` for every supported key).
+Anything declared in env is locked in the Settings UI with a tooltip pointing
+back to the env var — `HEYA_LIBRARY_<N>_*` even lets you declare libraries
+declaratively for Docker / k8s.
 
 Then add a library via the UI (Settings → Libraries) or CLI
 (`./bin/heya library add …`) and Heya will scan, match, and start populating

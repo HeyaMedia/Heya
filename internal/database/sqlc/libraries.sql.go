@@ -80,6 +80,27 @@ func (q *Queries) GetLibraryByID(ctx context.Context, id int64) (Library, error)
 	return i, err
 }
 
+const getLibraryByName = `-- name: GetLibraryByName :one
+SELECT id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at FROM libraries WHERE name = $1
+`
+
+func (q *Queries) GetLibraryByName(ctx context.Context, name string) (Library, error) {
+	row := q.db.QueryRow(ctx, getLibraryByName, name)
+	var i Library
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.MediaType,
+		&i.Paths,
+		&i.ScanInterval,
+		&i.Settings,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listLibraries = `-- name: ListLibraries :many
 SELECT id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at FROM libraries ORDER BY created_at ASC
 `
@@ -135,6 +156,36 @@ func (q *Queries) UpdateLibrary(ctx context.Context, arg UpdateLibraryParams) (L
 		arg.Paths,
 		arg.ScanInterval,
 	)
+	var i Library
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.MediaType,
+		&i.Paths,
+		&i.ScanInterval,
+		&i.Settings,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateLibraryIdentity = `-- name: UpdateLibraryIdentity :one
+UPDATE libraries
+SET paths = $2, media_type = $3, updated_at = now()
+WHERE id = $1
+RETURNING id, name, media_type, paths, scan_interval, settings, created_by, created_at, updated_at
+`
+
+type UpdateLibraryIdentityParams struct {
+	ID        int64     `json:"id"`
+	Paths     []string  `json:"paths"`
+	MediaType MediaType `json:"media_type"`
+}
+
+func (q *Queries) UpdateLibraryIdentity(ctx context.Context, arg UpdateLibraryIdentityParams) (Library, error) {
+	row := q.db.QueryRow(ctx, updateLibraryIdentity, arg.ID, arg.Paths, arg.MediaType)
 	var i Library
 	err := row.Scan(
 		&i.ID,

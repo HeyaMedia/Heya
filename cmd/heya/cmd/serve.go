@@ -39,7 +39,7 @@ var serveCmd = &cobra.Command{
 		logRing := logbuf.New(2000)
 
 		var baseWriter zerolog.LevelWriter
-		if cfg.LogFormat == "console" {
+		if cfg.LogFormat.Value == "console" {
 			baseWriter = zerolog.MultiLevelWriter(
 				zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339},
 				logRing,
@@ -68,14 +68,26 @@ var serveCmd = &cobra.Command{
 		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
 		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
 
-		taskRunner := scheduler.NewRunner(app.DBPool(), app.EventHub(), cfg.DataDir)
-		taskRunner.Register(&scheduler.GenerateTrickplayTask{DB: app.DBPool(), DataDir: cfg.DataDir})
-		taskRunner.Register(&scheduler.GenerateThumbnailsTask{DB: app.DBPool(), DataDir: cfg.DataDir})
+		taskRunner := scheduler.NewRunner(app.DBPool(), app.EventHub(), cfg.DataDir.Value)
+		taskRunner.Register(&scheduler.GenerateTrickplayTask{DB: app.DBPool(), DataDir: cfg.DataDir.Value})
+		taskRunner.Register(&scheduler.GenerateThumbnailsTask{DB: app.DBPool(), DataDir: cfg.DataDir.Value})
 		taskRunner.Register(app.ScanLibrariesTask())
-		taskRunner.Register(&scheduler.RefreshMetadataTask{DB: app.DBPool(), River: app.RiverClient()})
-		taskRunner.Register(&scheduler.RefreshMusicArtistsTask{DB: app.DBPool(), River: app.RiverClient()})
+		taskRunner.Register(&scheduler.RefreshStaleItemsTask{DB: app.DBPool(), River: app.RiverClient()})
+		taskRunner.Register(&scheduler.ScanMusicLoudnessTask{DB: app.DBPool(), River: app.RiverClient()})
+		if a := app.SonicAnalyzer(); a != nil {
+			taskRunner.Register(&scheduler.AnalyzeMusicTask{
+				DB:       app.DBPool(),
+				Analyzer: a,
+				Fetcher:  app.ModelFetcher(),
+				Enabled:  app.SonicAnalysisEnabled,
+			})
+		}
 		app.SetScheduler(taskRunner)
 		taskRunner.Start(appCtx)
+
+		// Kick off the model fetcher in the background. No-op when
+		// sonic-analysis is disabled in config.
+		app.StartSonicAnalysis(appCtx)
 
 		srv := server.New(cfg, app,
 			server.WithLogBuffer(logRing),
@@ -91,15 +103,15 @@ var serveCmd = &cobra.Command{
 		})
 		app.SetTailscale(tsServer)
 
-		if cfg.Tailscale.Enabled {
+		if cfg.Tailscale.Enabled.Value {
 			go func() {
 				if err := tsServer.Enable(appCtx, tsnetwrap.Config{
 					Enabled:  true,
-					Hostname: cfg.Tailscale.Hostname,
-					AuthKey:  cfg.Tailscale.AuthKey,
-					StateDir: cfg.Tailscale.StateDir,
-					HTTPS:    cfg.Tailscale.HTTPS,
-					Funnel:   cfg.Tailscale.Funnel,
+					Hostname: cfg.Tailscale.Hostname.Value,
+					AuthKey:  cfg.Tailscale.AuthKey.Value,
+					StateDir: cfg.Tailscale.StateDir.Value,
+					HTTPS:    cfg.Tailscale.HTTPS.Value,
+					Funnel:   cfg.Tailscale.Funnel.Value,
 				}); err != nil {
 					tsLogger.Warn().Err(err).Msg("tailscale enable failed; LAN listener continues")
 				}

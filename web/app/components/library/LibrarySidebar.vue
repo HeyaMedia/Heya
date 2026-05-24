@@ -126,7 +126,7 @@ async function createList() {
   const name = prompt('List name:')
   if (!name?.trim()) return
   try {
-    await apiFetch('/api/lists', { method: 'POST', body: JSON.stringify({ name: name.trim() }) })
+    await apiFetch('/api/me/lists', { method: 'POST', body: JSON.stringify({ name: name.trim() }) })
   } catch { /* empty */ }
 }
 

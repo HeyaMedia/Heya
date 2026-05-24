@@ -30,6 +30,8 @@ func NewCacheManager(baseDir string, maxSizeGB int) *CacheManager {
 	}
 }
 
+func (c *CacheManager) BaseDir() string { return c.baseDir }
+
 func (c *CacheManager) SegmentDir(key string) string {
 	safe := strings.ReplaceAll(key, ":", "_")
 	dir := filepath.Join(c.baseDir, safe)

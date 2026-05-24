@@ -64,3 +64,19 @@ pre-commit:
           git diff --stat internal/database/sqlc/ >&2
           exit 1
         fi
+
+    # If any Huma handler changes, regenerate the OpenAPI spec + typed TS
+    # client and block the commit on drift. Catches "I added a new
+    # endpoint but forgot to run make gen-api-client" before it ships.
+    - name: openapi-drift
+      glob:
+        - 'internal/server/*_huma.go'
+        - 'internal/server/huma.go'
+      run: |
+        make gen-api-client >/dev/null
+        if ! git diff --quiet web/shared/api.openapi.json web/shared/types/api.gen.ts; then
+          echo "openapi: regenerated client differs from committed output." >&2
+          echo "Stage the changes under web/shared/ or revert the handler change." >&2
+          git diff --stat web/shared/api.openapi.json web/shared/types/api.gen.ts >&2
+          exit 1
+        fi

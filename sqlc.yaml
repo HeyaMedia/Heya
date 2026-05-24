@@ -15,3 +15,8 @@ sql:
             go_type:
               import: "github.com/jackc/pgx/v5/pgtype"
               type: "Interval"
+          - db_type: "vector"
+            go_type:
+              import: "github.com/pgvector/pgvector-go"
+              type: "Vector"
+              package: "pgvector"

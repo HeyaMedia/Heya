@@ -443,7 +443,7 @@ const TASK_LABELS: Record<string, { label: string, activePrefix: string, icon: s
   generate_trickplay:  { label: 'Generating trickplay',   activePrefix: 'Generating trickplay', icon: 'film' },
   generate_thumbnails: { label: 'Generating thumbnails',  activePrefix: 'Generating thumbnails', icon: 'image' },
   scan_libraries:      { label: 'Scanning libraries',     activePrefix: 'Scanning',     icon: 'folder' },
-  refresh_metadata:    { label: 'Refreshing metadata',    activePrefix: 'Refreshing',   icon: 'refresh' },
+  refresh_stale_items: { label: 'Refreshing metadata',    activePrefix: 'Refreshing',   icon: 'refresh' },
 }
 
 function taskActivityLabel(tp: TaskProgressPayload): string {

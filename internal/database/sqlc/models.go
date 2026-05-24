@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	pgvector "github.com/pgvector/pgvector-go"
 )
 
 type AssetType string
@@ -204,34 +205,56 @@ func (ns NullMediaType) Value() (driver.Value, error) {
 }
 
 type Album struct {
-	ID            int64       `json:"id"`
-	ArtistID      int64       `json:"artist_id"`
-	Title         string      `json:"title"`
-	Year          string      `json:"year"`
-	MusicbrainzID string      `json:"musicbrainz_id"`
-	AlbumType     string      `json:"album_type"`
-	Genres        []string    `json:"genres"`
-	CoverPath     string      `json:"cover_path"`
-	ReleaseDate   pgtype.Date `json:"release_date"`
-	Label         string      `json:"label"`
-	Country       string      `json:"country"`
-	Barcode       string      `json:"barcode"`
-	TotalTracks   int32       `json:"total_tracks"`
-	TotalDiscs    int32       `json:"total_discs"`
-	Tags          []string    `json:"tags"`
-	SearchVector  interface{} `json:"search_vector"`
+	ID                 int64              `json:"id"`
+	ArtistID           int64              `json:"artist_id"`
+	Title              string             `json:"title"`
+	Slug               string             `json:"slug"`
+	Year               string             `json:"year"`
+	MusicbrainzID      string             `json:"musicbrainz_id"`
+	AlbumType          string             `json:"album_type"`
+	Genres             []string           `json:"genres"`
+	CoverPath          string             `json:"cover_path"`
+	ReleaseDate        pgtype.Date        `json:"release_date"`
+	Label              string             `json:"label"`
+	Country            string             `json:"country"`
+	Barcode            string             `json:"barcode"`
+	TotalTracks        int32              `json:"total_tracks"`
+	TotalDiscs         int32              `json:"total_discs"`
+	Tags               []string           `json:"tags"`
+	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector       interface{}        `json:"search_vector"`
+}
+
+type AlbumCentroid struct {
+	AlbumID       int64              `json:"album_id"`
+	SonicCentroid pgvector.Vector    `json:"sonic_centroid"`
+	TextCentroid  pgvector.Vector    `json:"text_centroid"`
+	TrackCount    int32              `json:"track_count"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Artist struct {
-	ID             int64              `json:"id"`
-	MediaItemID    int64              `json:"media_item_id"`
-	MusicbrainzID  string             `json:"musicbrainz_id"`
-	Name           string             `json:"name"`
-	SortName       string             `json:"sort_name"`
-	Disambiguation string             `json:"disambiguation"`
-	Biography      string             `json:"biography"`
-	SearchVector   interface{}        `json:"search_vector"`
-	EnrichedAt     pgtype.Timestamptz `json:"enriched_at"`
+	ID                    int64              `json:"id"`
+	MediaItemID           int64              `json:"media_item_id"`
+	MusicbrainzID         string             `json:"musicbrainz_id"`
+	Name                  string             `json:"name"`
+	SortName              string             `json:"sort_name"`
+	Disambiguation        string             `json:"disambiguation"`
+	Biography             string             `json:"biography"`
+	SearchVector          interface{}        `json:"search_vector"`
+	DiscographyEnrichedAt pgtype.Timestamptz `json:"discography_enriched_at"`
+	CoverArtEnrichedAt    pgtype.Timestamptz `json:"cover_art_enriched_at"`
+}
+
+type ArtistCentroid struct {
+	ArtistID      int64              `json:"artist_id"`
+	SonicCentroid pgvector.Vector    `json:"sonic_centroid"`
+	TextCentroid  pgvector.Vector    `json:"text_centroid"`
+	TrackCount    int32              `json:"track_count"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Author struct {
@@ -440,6 +463,15 @@ type MediaItem struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	SearchVector        interface{}        `json:"search_vector"`
+	MatchedAt           pgtype.Timestamptz `json:"matched_at"`
+	EnrichmentStatus    string             `json:"enrichment_status"`
+	BaseEnrichedAt      pgtype.Timestamptz `json:"base_enriched_at"`
+	PeopleEnrichedAt    pgtype.Timestamptz `json:"people_enriched_at"`
+	ExtrasEnrichedAt    pgtype.Timestamptz `json:"extras_enriched_at"`
+	ImagesEnrichedAt    pgtype.Timestamptz `json:"images_enriched_at"`
+	StructureEnrichedAt pgtype.Timestamptz `json:"structure_enriched_at"`
+	LastEnrichAttemptAt pgtype.Timestamptz `json:"last_enrich_attempt_at"`
+	LastEnrichError     string             `json:"last_enrich_error"`
 }
 
 type MediaKeyword struct {
@@ -619,20 +651,43 @@ type Track struct {
 	LibraryFileID pgtype.Int8 `json:"library_file_id"`
 }
 
+type TrackFacet struct {
+	TrackID          int64              `json:"track_id"`
+	TrackEmbedding   pgvector.Vector    `json:"track_embedding"`
+	ArtistEmbedding  pgvector.Vector    `json:"artist_embedding"`
+	ReleaseEmbedding pgvector.Vector    `json:"release_embedding"`
+	TextEmbedding    pgvector.Vector    `json:"text_embedding"`
+	Bpm              pgtype.Float4      `json:"bpm"`
+	BpmConfidence    pgtype.Float4      `json:"bpm_confidence"`
+	KeyRoot          pgtype.Int2        `json:"key_root"`
+	KeyMode          pgtype.Int2        `json:"key_mode"`
+	KeyClarity       pgtype.Float4      `json:"key_clarity"`
+	TopGenres        []byte             `json:"top_genres"`
+	MoodTags         []byte             `json:"mood_tags"`
+	Waveform         []float32          `json:"waveform"`
+	AnalyzedAt       pgtype.Timestamptz `json:"analyzed_at"`
+	AnalyzerVersion  int32              `json:"analyzer_version"`
+}
+
 type TrackFile struct {
-	ID            int64              `json:"id"`
-	TrackID       int64              `json:"track_id"`
-	LibraryFileID int64              `json:"library_file_id"`
-	Format        string             `json:"format"`
-	QualityScore  int32              `json:"quality_score"`
-	BitrateKbps   int32              `json:"bitrate_kbps"`
-	SampleRateHz  int32              `json:"sample_rate_hz"`
-	BitDepth      int32              `json:"bit_depth"`
-	Channels      int32              `json:"channels"`
-	Duration      int32              `json:"duration"`
-	SizeBytes     int64              `json:"size_bytes"`
-	LyricsPath    string             `json:"lyrics_path"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ID                 int64              `json:"id"`
+	TrackID            int64              `json:"track_id"`
+	LibraryFileID      int64              `json:"library_file_id"`
+	Format             string             `json:"format"`
+	QualityScore       int32              `json:"quality_score"`
+	BitrateKbps        int32              `json:"bitrate_kbps"`
+	SampleRateHz       int32              `json:"sample_rate_hz"`
+	BitDepth           int32              `json:"bit_depth"`
+	Channels           int32              `json:"channels"`
+	Duration           int32              `json:"duration"`
+	SizeBytes          int64              `json:"size_bytes"`
+	LyricsPath         string             `json:"lyrics_path"`
+	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
+	SamplePeakDb       pgtype.Numeric     `json:"sample_peak_db"`
+	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type TvEpisode struct {
@@ -743,6 +798,23 @@ type UserPlaybackPreference struct {
 	SubtitleLanguage string             `json:"subtitle_language"`
 	SubtitleMode     string             `json:"subtitle_mode"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserPlaylist struct {
+	ID          int64              `json:"id"`
+	UserID      int64              `json:"user_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CoverPath   string             `json:"cover_path"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserPlaylistTrack struct {
+	PlaylistID int64              `json:"playlist_id"`
+	TrackID    int64              `json:"track_id"`
+	Position   int32              `json:"position"`
+	AddedAt    pgtype.Timestamptz `json:"added_at"`
 }
 
 type UserWatchProgress struct {

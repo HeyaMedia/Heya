@@ -120,7 +120,7 @@ func openMigrationDB() (*sql.DB, error) {
 	ctx := context.Background()
 	_ = ctx
 
-	db, err := sql.Open("pgx", cfg.DatabaseURL)
+	db, err := sql.Open("pgx", cfg.DatabaseURL.Value)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to database: %w", err)
 	}

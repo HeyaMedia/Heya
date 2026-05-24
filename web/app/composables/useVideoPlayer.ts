@@ -53,7 +53,7 @@ export function useVideoPlayer(fileId: Ref<number>, mediaItemId: Ref<number | nu
   async function reportProgress() {
     if (!mediaItemId.value || state.currentTime < 1) return
     try {
-      await apiFetch(`/api/watch/${mediaItemId.value}/progress`, {
+      await apiFetch(`/api/me/watch/${mediaItemId.value}/progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -84,7 +84,7 @@ export function useVideoPlayer(fileId: Ref<number>, mediaItemId: Ref<number | nu
   async function loadResumePosition(): Promise<number> {
     if (!mediaItemId.value) return 0
     try {
-      const history = await apiFetch<any[]>('/api/watch/continue')
+      const history = await apiFetch<any[]>('/api/me/watch/continue')
       const entry = history?.find((h: any) => h.media_item_id === mediaItemId.value)
       if (entry && !entry.completed && entry.progress_seconds > 10) {
         return entry.progress_seconds

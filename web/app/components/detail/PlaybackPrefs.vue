@@ -59,7 +59,7 @@ async function loadData() {
   try {
     const [langs, prefData] = await Promise.all([
       apiFetch<MediaLanguagesResponse>(`/api/media/${props.mediaItemId}/languages`),
-      apiFetch<PlaybackPreference>(`/api/user/playback/${props.mediaItemId}`),
+      apiFetch<PlaybackPreference>(`/api/me/playback/${props.mediaItemId}`),
     ])
     languages.value = langs
     pref.value = prefData
@@ -70,7 +70,7 @@ async function loadData() {
 async function savePref() {
   saving.value = true
   try {
-    pref.value = await apiFetch<PlaybackPreference>(`/api/user/playback/${props.mediaItemId}`, {
+    pref.value = await apiFetch<PlaybackPreference>(`/api/me/playback/${props.mediaItemId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

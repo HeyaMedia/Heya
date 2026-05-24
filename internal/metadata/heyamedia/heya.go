@@ -2,6 +2,7 @@ package heyamedia
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -22,23 +23,48 @@ func NewHeyaProvider(c *Client) *HeyaProvider {
 	return &HeyaProvider{client: c}
 }
 
-// BuildLookupID returns a heya provider ID for a media item given its slug and
-// external IDs map. Prefers the heya slug if present; otherwise falls back to
-// the highest-priority external ID supported by the heya lookup endpoint.
-// Returns the empty string when no usable identifier is available.
-func BuildLookupID(heyaSlug string, externalIDs map[string]string) string {
-	if heyaSlug != "" {
-		return "heya:" + heyaSlug
+// BuildLookupID returns a heya provider ID of the form
+// "heya:<apiKind>:<provider>:<value>" — the canonical key for the v0.3.0
+// /api/v1/{kind}/{id} endpoint. Picks the highest-priority external ID that
+// the heya.media server accepts for the given kind. Returns "" when no
+// usable identifier is available.
+//
+// heya.media no longer exposes a slug-fetch endpoint, so the heya_slug we
+// keep in our DB is for our own URL routing only — it's not a refetch key.
+func BuildLookupID(kind metadata.MediaKind, externalIDs map[string]string) string {
+	apiKind := heyaKind(kind)
+	if apiKind == "" {
+		return ""
 	}
-	for _, key := range []string{"tmdb", "imdb", "tvdb", "anidb", "mal", "tvmaze", "tvrage", "mbid", "musicbrainz", "ol_work_id", "openlibrary"} {
+	for _, key := range providerOrderForKind(apiKind) {
 		if v := externalIDs[key]; v != "" {
-			return "heya:" + normalizeLookupKey(key) + ":" + v
+			return "heya:" + apiKind + ":" + canonicalProviderKey(key) + ":" + v
 		}
 	}
 	return ""
 }
 
-func normalizeLookupKey(k string) string {
+// providerOrderForKind lists the external-ID providers heya.media accepts for
+// a given api kind, in our preferred priority. Order matches the v0.3.0
+// /{kind}/{id} doc: artist (mbid/apple/discogs/deezer), movie (tmdb/imdb),
+// tv (tmdb/imdb/tvdb + anime IDs), person (tmdb/imdb), book (ol_work_id).
+func providerOrderForKind(apiKind string) []string {
+	switch apiKind {
+	case "artist":
+		return []string{"mbid", "musicbrainz", "apple", "discogs", "deezer"}
+	case "movie":
+		return []string{"tmdb", "imdb"}
+	case "tv":
+		return []string{"tmdb", "tvdb", "imdb", "anidb", "mal", "tvmaze", "tvrage"}
+	case "person":
+		return []string{"tmdb", "imdb"}
+	case "book":
+		return []string{"ol_work_id", "openlibrary"}
+	}
+	return nil
+}
+
+func canonicalProviderKey(k string) string {
 	switch k {
 	case "musicbrainz":
 		return "mbid"
@@ -46,6 +72,17 @@ func normalizeLookupKey(k string) string {
 		return "ol_work_id"
 	}
 	return k
+}
+
+// parseProviderID splits a "heya:<apiKind>:<provider>:<value>" string into
+// its three components. Returns ok=false if the input isn't in that shape.
+func parseProviderID(providerID string) (apiKind, provider, value string, ok bool) {
+	rest := strings.TrimPrefix(providerID, "heya:")
+	parts := strings.SplitN(rest, ":", 3)
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
 }
 
 // Name returns the canonical provider name used in stored provider_name fields.
@@ -61,22 +98,18 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 		return nil, fmt.Errorf("heya: unsupported kind %s", kind)
 	}
 
-	params := url.Values{
-		"query": {query.Title},
-		"kind":  {apiKind},
-		"limit": {"20"},
-	}
-	if query.Year != "" {
-		params.Set("year", query.Year)
-	}
-
-	var resp heyaSearchResponse
-	if err := p.client.get(ctx, "/api/v1/search", params, &resp); err != nil {
+	hits, err := p.searchHits(ctx, apiKind, query.Title, query.Year, query.Artist, 20)
+	if err != nil {
 		return nil, err
 	}
 
-	results := make([]metadata.SearchResult, 0, len(resp.Hits))
-	for _, h := range resp.Hits {
+	results := make([]metadata.SearchResult, 0, len(hits))
+	for _, h := range hits {
+		providerID := buildProviderIDFromHit(apiKind, h)
+		if providerID == "" {
+			// Server returned a hit with no usable id field — skip.
+			continue
+		}
 		confidence := 0.7
 		if h.Enriched {
 			confidence = 0.95
@@ -86,15 +119,57 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 			year = strconv.Itoa(h.Year)
 		}
 		results = append(results, metadata.SearchResult{
-			ProviderID:   "heya:" + h.Slug,
+			ProviderID:   providerID,
 			ProviderName: "heya",
-			Title:        h.Title,
+			Title:        h.Name,
 			Year:         year,
-			PosterURL:    h.Poster,
+			Description:  h.Snippet,
+			PosterURL:    h.Image,
 			Confidence:   confidence,
+			ExternalIDs:  map[string]string(h.ExternalIDs),
+			AltTitles:    h.AltTitles,
+			HeyaSlug:     h.Slug,
+			Enriched:     h.Enriched,
 		})
 	}
 	return results, nil
+}
+
+// searchHits is the raw access path to /api/v1/search — returns the server's
+// SearchHit rows verbatim. Used by Search() and SearchArtistBest().
+func (p *HeyaProvider) searchHits(ctx context.Context, apiKind, query, year, artist string, limit int) ([]SearchHit, error) {
+	if query == "" {
+		return nil, fmt.Errorf("heya: empty search query")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	params := url.Values{
+		"type":  {apiKind},
+		"q":     {query},
+		"limit": {strconv.Itoa(limit)},
+	}
+	if year != "" {
+		params.Set("year", year)
+	}
+	if artist != "" {
+		params.Set("artist", artist)
+	}
+	var resp searchResponse
+	if err := p.client.get(ctx, "/api/v1/search", params, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Results, nil
+}
+
+// buildProviderIDFromHit converts a SearchHit into our internal providerID
+// format. The hit's `id` is already "<provider>:<value>"; we prefix it with
+// "heya:<apiKind>:" so GetDetail can round-trip it back to /{kind}/{id}.
+func buildProviderIDFromHit(apiKind string, h SearchHit) string {
+	if h.ID == "" {
+		return ""
+	}
+	return "heya:" + apiKind + ":" + h.ID
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +177,11 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 // ---------------------------------------------------------------------------
 
 func (p *HeyaProvider) GetDetail(ctx context.Context, providerID string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {
-	resp, err := p.fetchByProviderID(ctx, providerID)
+	apiKind, provider, value, ok := parseProviderID(providerID)
+	if !ok {
+		return nil, fmt.Errorf("heya: invalid provider id %q (expected heya:<kind>:<provider>:<value>)", providerID)
+	}
+	resp, err := p.fetchKindID(ctx, apiKind, provider+":"+value)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +193,7 @@ func (p *HeyaProvider) GetDetail(ctx context.Context, providerID string, opts *m
 // ---------------------------------------------------------------------------
 
 func (p *HeyaProvider) FetchArtwork(ctx context.Context, kind metadata.MediaKind, externalIDs map[string]string, opts *metadata.FetchOptions) ([]metadata.ArtworkResult, error) {
-	resp, err := p.lookupByExternalIDs(ctx, externalIDs)
+	resp, err := p.lookupByExternalIDs(ctx, kind, externalIDs)
 	if err != nil {
 		return nil, nil // gracefully return empty on lookup failure
 	}
@@ -125,8 +204,8 @@ func (p *HeyaProvider) FetchArtwork(ctx context.Context, kind metadata.MediaKind
 // FetchRatings
 // ---------------------------------------------------------------------------
 
-func (p *HeyaProvider) FetchRatings(ctx context.Context, externalIDs map[string]string) (*metadata.RatingsData, error) {
-	resp, err := p.lookupByExternalIDs(ctx, externalIDs)
+func (p *HeyaProvider) FetchRatings(ctx context.Context, kind metadata.MediaKind, externalIDs map[string]string) (*metadata.RatingsData, error) {
+	resp, err := p.lookupByExternalIDs(ctx, kind, externalIDs)
 	if err != nil {
 		return nil, nil
 	}
@@ -138,14 +217,20 @@ func (p *HeyaProvider) FetchRatings(ctx context.Context, externalIDs map[string]
 // ---------------------------------------------------------------------------
 
 func (p *HeyaProvider) LookupByNFO(ctx context.Context, kind metadata.MediaKind, ids metadata.NFOIDs, opts *metadata.FetchOptions) (*metadata.MediaDetail, string, error) {
-	// Try each ID source in priority order.
+	apiKind := heyaKind(kind)
+	if apiKind == "" {
+		return nil, "", fmt.Errorf("heya: unsupported kind %s", kind)
+	}
+
+	// Try each ID source in priority order. The new /{kind}/{id} endpoint
+	// returns the full enriched doc directly (no separate lookup hop).
 	lookups := []struct {
-		param string
-		value string
+		provider string
+		value    string
 	}{
-		{"imdb", ids.IMDBID},
 		{"tmdb", ids.TMDBID},
 		{"tvdb", ids.TVDBID},
+		{"imdb", ids.IMDBID},
 		{"mbid", ids.MBID},
 	}
 
@@ -153,66 +238,252 @@ func (p *HeyaProvider) LookupByNFO(ctx context.Context, kind metadata.MediaKind,
 		if l.value == "" {
 			continue
 		}
-		params := url.Values{l.param: {l.value}}
-		var resp heyaItemResponse
-		if err := p.client.get(ctx, "/api/v1/heya/lookup", params, &resp); err != nil {
+		id := l.provider + ":" + l.value
+		resp, err := p.fetchKindID(ctx, apiKind, id)
+		if err != nil {
 			continue
 		}
-		detail := p.mapDetail(&resp)
-		return detail, "heya:" + resp.Slug, nil
+		detail := p.mapDetail(resp)
+		return detail, "heya:" + apiKind + ":" + id, nil
 	}
 
 	return nil, "", fmt.Errorf("heya: no matching item for NFO IDs")
 }
 
 // ---------------------------------------------------------------------------
+// SearchHit (raw search row)
+// ---------------------------------------------------------------------------
+
+// SearchHit is one row from /api/v1/search (v0.3.0). The endpoint merges
+// warm-cache matches with on-demand provider lookups and returns canonical
+// "<provider>:<value>" keys in `id` — feed `id` directly back to
+// /api/v1/{type}/{id} (or to BuildLookupID-style wrappers) to enrich.
+//
+// enriched=true means the row is already in heya.media's warm DB and `slug`
+// is populated; the fetch returns instantly with no upstream calls.
+type SearchHit struct {
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Name        string   `json:"name"`
+	Year        int      `json:"year,omitempty"`
+	Country     string   `json:"country,omitempty"`
+	Image       string   `json:"image,omitempty"`
+	Snippet     string   `json:"snippet,omitempty"`
+	Sources     []string `json:"sources"`
+	ExternalIDs flexIDs  `json:"external_ids,omitempty"`
+	// AltTitles is the flat, deduped union of every locale variant,
+	// romanization, native-script form, and alias HeyaMedia could pull
+	// from the upstream providers. Used by the matcher to score scanned
+	// filenames against all known title forms, not just the primary
+	// English one — fixes romaji-vs-English anime mismatches and similar.
+	AltTitles []string `json:"alt_titles,omitempty"`
+	Score     float64  `json:"score"`
+	Enriched  bool     `json:"enriched"`
+	Slug      string   `json:"slug,omitempty"`
+}
+
+// flexIDs decodes a JSON object whose values may be strings, numbers, or
+// booleans into a map[string]string. HeyaMedia's revamped search returns
+// numeric IDs (e.g. `"tmdb": 1429`) while older / detail responses still
+// use string form — flexIDs coerces both into the canonical string we
+// store internally.
+//
+// Operates as a regular map for read access — callers do `m["tmdb"]`
+// like always. Only the JSON decode path is special.
+type flexIDs map[string]string
+
+func (f *flexIDs) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		s, ok := flexValueAsString(v)
+		if !ok || s == "" {
+			continue
+		}
+		out[k] = s
+	}
+	*f = out
+	return nil
+}
+
+// flexValueAsString reads a json.RawMessage that may hold a string, number,
+// or boolean and returns its canonical string form. Objects, arrays, and
+// null are skipped (returns ok=false).
+func flexValueAsString(v json.RawMessage) (string, bool) {
+	v = []byte(strings.TrimSpace(string(v)))
+	if len(v) == 0 || string(v) == "null" {
+		return "", false
+	}
+	switch v[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(v, &s); err != nil {
+			return "", false
+		}
+		return s, true
+	case '{', '[':
+		return "", false
+	default:
+		// Number or bool — strip wrapping whitespace, store raw text.
+		return strings.Trim(string(v), `"`), true
+	}
+}
+
+// hasSource reports whether one of the hit's sources matches s (case-insensitive).
+func (h *SearchHit) hasSource(s string) bool {
+	for _, src := range h.Sources {
+		if strings.EqualFold(src, s) {
+			return true
+		}
+	}
+	return false
+}
+
+type searchResponse struct {
+	Type    string      `json:"type"`
+	Query   string      `json:"query"`
+	Results []SearchHit `json:"results"`
+}
+
+// SearchArtistBest searches for an artist by name and picks the best hit to
+// fetch. heya.media sorts the merged result list with enriched warm-cache
+// rows first, then by score within source tier, so hits[0] is usually right.
+// We still bias toward MusicBrainz on cold lookups so we land an MBID in our
+// DB (cross-reference key) instead of an apple/deezer id we can fetch but
+// not cross-reference later.
+func (p *HeyaProvider) SearchArtistBest(ctx context.Context, name string) (*SearchHit, error) {
+	hits, err := p.searchHits(ctx, "artist", name, "", "", 20)
+	if err != nil {
+		return nil, err
+	}
+	if len(hits) == 0 {
+		return nil, nil
+	}
+
+	if hits[0].Enriched {
+		return &hits[0], nil
+	}
+	for i := range hits {
+		if hits[i].hasSource("musicbrainz") {
+			return &hits[i], nil
+		}
+	}
+	return &hits[0], nil
+}
+
+// ---------------------------------------------------------------------------
+// Similar
+// ---------------------------------------------------------------------------
+
+// SimilarHit is one row from /api/v1/similar/artist or /similar/track.
+// Score is normalized 0..1 within each source (Last.fm vs ListenBrainz),
+// so cross-source comparison is approximate at best.
+type SimilarHit struct {
+	Kind   string  `json:"kind"`
+	Name   string  `json:"name"`
+	Artist string  `json:"artist,omitempty"` // only on track similars
+	MBID   string  `json:"mbid,omitempty"`
+	Score  float64 `json:"score"`
+	Source string  `json:"source"` // lastfm | listenbrainz
+	Image  string  `json:"image,omitempty"`
+	URL    string  `json:"url,omitempty"`
+}
+
+type similarResponse struct {
+	Results []SimilarHit `json:"results"`
+}
+
+// SimilarArtists fetches similar-artist suggestions. Prefers MBID lookup
+// (more reliable cross-provider match); falls back to name search.
+func (p *HeyaProvider) SimilarArtists(ctx context.Context, mbid, name string) ([]SimilarHit, error) {
+	params := url.Values{}
+	if mbid != "" {
+		params.Set("mbid", mbid)
+	} else if name != "" {
+		params.Set("name", name)
+	} else {
+		return nil, fmt.Errorf("heya: similar artists needs mbid or name")
+	}
+	var resp similarResponse
+	if err := p.client.get(ctx, "/api/v1/similar/artist", params, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Results, nil
+}
+
+// ---------------------------------------------------------------------------
+// FetchByKindID (path-style, v0.3.0)
+// ---------------------------------------------------------------------------
+
+// FetchByKindID hits `GET /api/v1/{kind}/{id}` and returns the full enriched
+// doc plus the providerID to store. `id` is the `<provider>:<value>` string
+// /search returns. Triggers inline enrichment on cache miss (1–60s typical,
+// up to 5 min for popular music artists).
+//
+// Valid (kind, provider) pairs per the v0.3.0 OpenAPI:
+//   - artist: mbid, apple, discogs, deezer
+//   - movie:  tmdb, imdb
+//   - tv:     tmdb, imdb, tvdb
+//   - person: tmdb, imdb
+//   - book:   ol_work_id (501 on miss — enrichment not implemented yet)
+//
+// Bad provider for the kind → 400 from the server.
+func (p *HeyaProvider) FetchByKindID(ctx context.Context, kind, id string) (*metadata.MediaDetail, string, error) {
+	if kind == "" || id == "" {
+		return nil, "", fmt.Errorf("heya: empty kind or id")
+	}
+	resp, err := p.fetchKindID(ctx, kind, id)
+	if err != nil {
+		return nil, "", err
+	}
+	return p.mapDetail(resp), "heya:" + kind + ":" + id, nil
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-// fetchByProviderID parses the providerID and calls the appropriate endpoint.
-func (p *HeyaProvider) fetchByProviderID(ctx context.Context, providerID string) (*heyaItemResponse, error) {
-	// Strip the "heya:" prefix.
-	rest := strings.TrimPrefix(providerID, "heya:")
-
-	// Check for lookup-style IDs: "tmdb:123", "imdb:tt123", "tvdb:456", etc.
-	if idx := strings.Index(rest, ":"); idx > 0 {
-		idType := rest[:idx]
-		idValue := rest[idx+1:]
-		switch idType {
-		case "tmdb", "imdb", "tvdb", "anidb", "mbid", "ol_work_id", "tvmaze", "tvrage", "mal":
-			params := url.Values{idType: {idValue}}
-			var resp heyaItemResponse
-			if err := p.client.get(ctx, "/api/v1/heya/lookup", params, &resp); err != nil {
-				return nil, err
-			}
-			return &resp, nil
-		}
+// fetchKindID GETs /api/v1/{kind}/{id} where id is "<provider>:<value>".
+// The embedded colon in id is left as-is — net/url's PathEscape doesn't
+// touch colons, and heya.media splits on the rightmost slash to recover id.
+func (p *HeyaProvider) fetchKindID(ctx context.Context, apiKind, id string) (*heyaItemResponse, error) {
+	if apiKind == "" || id == "" {
+		return nil, fmt.Errorf("heya: empty kind or id")
 	}
-
-	// Default: treat the rest as a slug.
+	path := "/api/v1/" + url.PathEscape(apiKind) + "/" + url.PathEscape(id)
 	var resp heyaItemResponse
-	if err := p.client.getJSON(ctx, "/api/v1/heya/"+rest, &resp); err != nil {
+	if err := p.client.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-// lookupByExternalIDs tries to find an item using the best available ID.
-func (p *HeyaProvider) lookupByExternalIDs(ctx context.Context, externalIDs map[string]string) (*heyaItemResponse, error) {
-	order := []string{"imdb", "tmdb", "tvdb", "mbid", "ol_work_id"}
-	for _, key := range order {
-		val, ok := externalIDs[key]
-		if !ok || val == "" {
-			continue
-		}
-		params := url.Values{key: {val}}
-		var resp heyaItemResponse
-		if err := p.client.get(ctx, "/api/v1/heya/lookup", params, &resp); err != nil {
-			continue
-		}
-		return &resp, nil
+// lookupByExternalIDs picks the best external ID for `kind` and fetches the
+// item via /api/v1/{kind}/{provider}:{value}.
+func (p *HeyaProvider) lookupByExternalIDs(ctx context.Context, kind metadata.MediaKind, externalIDs map[string]string) (*heyaItemResponse, error) {
+	apiKind := heyaKind(kind)
+	if apiKind == "" {
+		return nil, fmt.Errorf("heya: unsupported kind %s", kind)
 	}
-	return nil, fmt.Errorf("heya: no matching external ID")
+	for _, key := range providerOrderForKind(apiKind) {
+		val := externalIDs[key]
+		if val == "" {
+			continue
+		}
+		id := canonicalProviderKey(key) + ":" + val
+		resp, err := p.fetchKindID(ctx, apiKind, id)
+		if err != nil {
+			continue
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("heya: no matching external ID for kind %s", apiKind)
 }
 
 // mapDetail converts the full Heya item response into a MediaDetail.
@@ -779,23 +1050,6 @@ func countEpisodes(seasons []heyaSeasonEntry) int {
 // Heya API response types
 // ---------------------------------------------------------------------------
 
-type heyaSearchResponse struct {
-	Hits           []heyaSearchHit `json:"hits"`
-	Query          string          `json:"query"`
-	EstimatedTotal int             `json:"estimated_total"`
-}
-
-type heyaSearchHit struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Kind     string `json:"kind"`
-	Year     int    `json:"year"`
-	Slug     string `json:"slug"`
-	Poster   string `json:"poster"`
-	Enriched bool   `json:"enriched"`
-	TmdbID   int    `json:"tmdb_id"`
-}
-
 type heyaItemResponse struct {
 	ID      string      `json:"id"`
 	Kind    string      `json:"kind"`
@@ -843,7 +1097,7 @@ type heyaPayload struct {
 	Seasons         []heyaSeasonEntry `json:"seasons"`
 	Videos          []heyaVideo       `json:"videos"`
 	Studios         []heyaStudio      `json:"studios"`
-	ExternalIDs     map[string]string `json:"external_ids"`
+	ExternalIDs     flexIDs           `json:"external_ids"`
 	Recommendations []heyaRecEntry    `json:"recommendations"`
 
 	// Dates / status.
@@ -905,7 +1159,7 @@ type heyaAlbumEntry struct {
 	Label       string                `json:"label"`
 	CatalogNo   string                `json:"catalog_no"`
 	Country     string                `json:"country"`
-	ExternalIDs map[string]string     `json:"external_ids"`
+	ExternalIDs flexIDs               `json:"external_ids"`
 	Barcode     string                `json:"barcode"`
 	ISRCs       []string              `json:"isrcs"`
 	Artwork     []heyaArtworkEntry    `json:"artwork"`
@@ -916,14 +1170,14 @@ type heyaAlbumEntry struct {
 }
 
 type heyaAlbumTrackEntry struct {
-	Disc          int               `json:"disc"`
-	Position      int               `json:"position"`
-	Title         string            `json:"title"`
-	Duration      int               `json:"duration"` // seconds
-	ISRC          string            `json:"isrc"`
-	RecordingMBID string            `json:"recording_mbid"`
-	ExternalIDs   map[string]string `json:"external_ids"`
-	Preview       string            `json:"preview"`
+	Disc          int     `json:"disc"`
+	Position      int     `json:"position"`
+	Title         string  `json:"title"`
+	Duration      int     `json:"duration"` // seconds
+	ISRC          string  `json:"isrc"`
+	RecordingMBID string  `json:"recording_mbid"`
+	ExternalIDs   flexIDs `json:"external_ids"`
+	Preview       string  `json:"preview"`
 }
 
 type heyaTitleEntry struct {
@@ -958,7 +1212,7 @@ type heyaCastEntry struct {
 	Order       int               `json:"order"`
 	Gender      string            `json:"gender"`
 	ProfileURLs []HeyaArtworkItem `json:"profile_urls"`
-	ExternalIDs map[string]string `json:"external_ids"`
+	ExternalIDs flexIDs           `json:"external_ids"`
 	Popularity  float64           `json:"popularity"`
 	Source      string            `json:"source"`
 }
@@ -969,7 +1223,7 @@ type heyaCrewEntry struct {
 	Department  string            `json:"department"`
 	Gender      string            `json:"gender"`
 	ProfileURLs []HeyaArtworkItem `json:"profile_urls"`
-	ExternalIDs map[string]string `json:"external_ids"`
+	ExternalIDs flexIDs           `json:"external_ids"`
 	Source      string            `json:"source"`
 }
 
@@ -1048,12 +1302,12 @@ type heyaStudio struct {
 }
 
 type heyaRecEntry struct {
-	ExternalIDs map[string]string `json:"external_ids"`
-	Title       string            `json:"title"`
-	PosterPath  string            `json:"poster_path"`
-	MediaType   string            `json:"media_type"`
-	VoteAverage float64           `json:"vote_average"`
-	ReleaseDate string            `json:"release_date"`
+	ExternalIDs flexIDs `json:"external_ids"`
+	Title       string  `json:"title"`
+	PosterPath  string  `json:"poster_path"`
+	MediaType   string  `json:"media_type"`
+	VoteAverage float64 `json:"vote_average"`
+	ReleaseDate string  `json:"release_date"`
 }
 
 type heyaNetwork struct {
@@ -1108,7 +1362,7 @@ type HeyaPersonPayload struct {
 	Biography          string            `json:"biography"`
 	Biographies        map[string]string `json:"biographies"`
 	Profiles           []HeyaArtworkItem `json:"profiles"`
-	ExternalIDs        map[string]string `json:"external_ids"`
+	ExternalIDs        flexIDs           `json:"external_ids"`
 	Popularity         float64           `json:"popularity"`
 	Homepage           string            `json:"homepage"`
 }
@@ -1128,7 +1382,7 @@ type HeyaArtworkItem struct {
 // This is a package-level function so workers that hold a *Client (not a
 // *HeyaProvider) can call it directly.
 func GetPersonFromHeya(ctx context.Context, c *Client, tmdbID int) (*HeyaPersonResponse, error) {
-	path := fmt.Sprintf("/api/v1/heya/people/lookup?tmdb=%d", tmdbID)
+	path := fmt.Sprintf("/api/v1/person/tmdb:%d", tmdbID)
 	var resp HeyaPersonResponse
 	if err := c.getJSON(ctx, path, &resp); err != nil {
 		return nil, err

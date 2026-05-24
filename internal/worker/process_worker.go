@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,10 +34,16 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 
 	client := river.ClientFromContext[pgx.Tx](ctx)
 
-	client.Insert(ctx, FFProbeArgs{
-		LibraryFileID: file.ID,
-		FilePath:      file.Path,
-	}, nil)
+	// ffprobe only makes sense on actual audio/video bytes. Lyrics, NFOs,
+	// subtitle sidecars, and book formats are companion files the matcher
+	// reads directly via filesystem walks — sending them through ffprobe
+	// just produces "exit status 1" noise in the logs.
+	if isFFProbeable(file.Path) {
+		_, _ = client.Insert(ctx, FFProbeArgs{
+			LibraryFileID: file.ID,
+			FilePath:      file.Path,
+		}, nil)
+	}
 
 	client.Insert(ctx, MetadataMatchArgs{
 		LibraryFileID: file.ID,
@@ -44,4 +52,18 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 	}, nil)
 
 	return nil
+}
+
+// isFFProbeable reports whether a file has audio or video bytes ffmpeg can
+// read. Companion sidecars (.lrc, .nfo, .srt, .ass, .vtt, .jpg) and ebook
+// formats (.epub, .pdf) get a false here.
+func isFFProbeable(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".webm", ".ts", ".mpg", ".mpeg":
+		return true
+	case ".flac", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".opus", ".wma", ".alac", ".aiff", ".aif":
+		return true
+	}
+	return false
 }

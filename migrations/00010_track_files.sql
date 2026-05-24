@@ -21,6 +21,15 @@ CREATE TABLE track_files (
     duration        INTEGER NOT NULL DEFAULT 0,
     size_bytes      BIGINT  NOT NULL DEFAULT 0,
     lyrics_path     TEXT    NOT NULL DEFAULT '',
+    -- EBU R128 loudness fields populated by ScanTrackLoudnessWorker. NULL
+    -- means "not yet analyzed". integrated_lufs and true_peak_db are what
+    -- the engine's normalization block consumes; loudness_range_db and
+    -- sample_peak_db are kept for the track-info popover.
+    integrated_lufs     NUMERIC(6, 2),
+    true_peak_db        NUMERIC(6, 2),
+    loudness_range_db   NUMERIC(6, 2),
+    sample_peak_db      NUMERIC(6, 2),
+    loudness_analyzed_at TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

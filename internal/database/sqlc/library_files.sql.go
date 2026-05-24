@@ -212,7 +212,7 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 }
 
 const getMediaItemByExternalID = `-- name: GetMediaItemByExternalID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error FROM media_items
 WHERE library_id = $1 AND external_ids @> $2::jsonb
 `
 
@@ -248,6 +248,15 @@ func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItem
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SearchVector,
+		&i.MatchedAt,
+		&i.EnrichmentStatus,
+		&i.BaseEnrichedAt,
+		&i.PeopleEnrichedAt,
+		&i.ExtrasEnrichedAt,
+		&i.ImagesEnrichedAt,
+		&i.StructureEnrichedAt,
+		&i.LastEnrichAttemptAt,
+		&i.LastEnrichError,
 	)
 	return i, err
 }

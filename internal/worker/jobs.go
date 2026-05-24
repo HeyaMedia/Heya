@@ -12,6 +12,17 @@ var SingleAssetTypes = map[string]bool{
 	"clearart": true,
 }
 
+// Job priority bands. River runs higher-priority (lower number) jobs first
+// within a queue. The watcher's new-file path overrides ProcessFile to
+// PriorityWatcher at insert-time.
+const (
+	PriorityWatcher    = 1 // fsnotify-discovered file — user just touched this, run ASAP
+	PriorityMatch      = 1 // metadata_match / metadata_fetch — matching is the critical path
+	PriorityScan       = 2 // bulk library-scan ProcessFile + matching support jobs
+	PriorityEnrichment = 3 // ffprobe / images / nfo writing / ratings — happens after match
+	PriorityAnalysis   = 4 // ebur128, future ML / fingerprinting — runs whenever spare
+)
+
 type ProcessFileArgs struct {
 	LibraryFileID int64  `json:"library_file_id"`
 	LibraryID     int64  `json:"library_id"`
@@ -20,7 +31,9 @@ type ProcessFileArgs struct {
 
 func (ProcessFileArgs) Kind() string { return "process_file" }
 func (ProcessFileArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "process", MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	// Default to bulk-scan priority; watcher path overrides to PriorityWatcher
+	// at insert-time so single-file changes jump ahead of any in-flight scan.
+	return river.InsertOpts{Queue: "process", MaxAttempts: 3, Priority: PriorityScan, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 type MetadataMatchArgs struct {
@@ -31,22 +44,7 @@ type MetadataMatchArgs struct {
 
 func (MetadataMatchArgs) Kind() string { return "metadata_match" }
 func (MetadataMatchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, UniqueOpts: river.UniqueOpts{ByArgs: true}}
-}
-
-type MetadataFetchArgs struct {
-	MediaItemID   int64  `json:"media_item_id"`
-	LibraryID     int64  `json:"library_id"`
-	LibraryFileID int64  `json:"library_file_id"`
-	FilePath      string `json:"file_path"`
-	MediaType     string `json:"media_type"`
-	ProviderName  string `json:"provider_name"`
-	ProviderID    string `json:"provider_id"`
-}
-
-func (MetadataFetchArgs) Kind() string { return "metadata_fetch" }
-func (MetadataFetchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3}
+	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, Priority: PriorityMatch, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 type PersonFetchArgs struct {
@@ -60,6 +58,7 @@ func (PersonFetchArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "metadata",
 		MaxAttempts: 3,
+		Priority:    PriorityScan,
 		UniqueOpts:  river.UniqueOpts{ByArgs: true},
 	}
 }
@@ -77,7 +76,7 @@ type DownloadImageArgs struct {
 
 func (DownloadImageArgs) Kind() string { return "download_image" }
 func (DownloadImageArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "images", MaxAttempts: 5}
+	return river.InsertOpts{Queue: "images", MaxAttempts: 5, Priority: PriorityEnrichment}
 }
 
 type FFProbeArgs struct {
@@ -87,7 +86,7 @@ type FFProbeArgs struct {
 
 func (FFProbeArgs) Kind() string { return "ffprobe" }
 func (FFProbeArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "process", MaxAttempts: 3}
+	return river.InsertOpts{Queue: "process", MaxAttempts: 3, Priority: PriorityEnrichment}
 }
 
 type PendingImage struct {
@@ -110,7 +109,7 @@ type DetectLocalAssetsArgs struct {
 
 func (DetectLocalAssetsArgs) Kind() string { return "detect_local_assets" }
 func (DetectLocalAssetsArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "process", MaxAttempts: 3}
+	return river.InsertOpts{Queue: "process", MaxAttempts: 3, Priority: PriorityEnrichment}
 }
 
 type EnrichmentArgs struct {
@@ -120,7 +119,38 @@ type EnrichmentArgs struct {
 
 func (EnrichmentArgs) Kind() string { return "enrichment" }
 func (EnrichmentArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3}
+	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, Priority: PriorityEnrichment}
+}
+
+// EnrichMediaItemArgs is the unified enrich job — replaces MetadataFetchArgs,
+// RefreshMusicArtistArgs, and the secondary artwork pass that EnrichmentArgs
+// covered. One worker, dispatched by media_type. The job only carries the
+// item ID; everything else is looked up so callers don't have to plumb
+// provider IDs / library IDs / file paths through their call chain.
+//
+// Callers should enqueue via service.EnqueueEnrich, which sets the River
+// priority based on (source, media_type) per service.PriorityFor.
+//
+// BatchLibraryID / BatchTotal / BatchPosition are optional batch-context
+// fields used by the post-scan music fan-out so the worker can emit
+// "Refreshing 17/200 (Calvin Harris)" progress events without consulting
+// River's job table.
+type EnrichMediaItemArgs struct {
+	ItemID int64  `json:"item_id"`
+	Source string `json:"source,omitempty"`
+	Force  bool   `json:"force,omitempty"`
+
+	BatchLibraryID int64 `json:"batch_library_id,omitempty"`
+	BatchTotal     int   `json:"batch_total,omitempty"`
+	BatchPosition  int   `json:"batch_position,omitempty"`
+}
+
+func (EnrichMediaItemArgs) Kind() string { return "enrich_media_item" }
+func (EnrichMediaItemArgs) InsertOpts() river.InsertOpts {
+	// Default priority is the middle band (movies/TV). service.EnqueueEnrich
+	// overrides per-insert with the correct priority for the (source,
+	// media_type) combination.
+	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, Priority: 2}
 }
 
 type SaveNFOArgs struct {
@@ -132,7 +162,7 @@ type SaveNFOArgs struct {
 
 func (SaveNFOArgs) Kind() string { return "save_nfo" }
 func (SaveNFOArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "saver", MaxAttempts: 2}
+	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, Priority: PriorityEnrichment}
 }
 
 type SaveImagesArgs struct {
@@ -144,7 +174,7 @@ type SaveImagesArgs struct {
 
 func (SaveImagesArgs) Kind() string { return "save_images" }
 func (SaveImagesArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "saver", MaxAttempts: 2}
+	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, Priority: PriorityEnrichment}
 }
 
 type RatingsFetchArgs struct {
@@ -154,7 +184,7 @@ type RatingsFetchArgs struct {
 
 func (RatingsFetchArgs) Kind() string { return "ratings_fetch" }
 func (RatingsFetchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "ratings", MaxAttempts: 3}
+	return river.InsertOpts{Queue: "ratings", MaxAttempts: 3, Priority: PriorityEnrichment}
 }
 
 type TranscodeArgs struct {
@@ -196,41 +226,51 @@ func (ForceRefreshImagesArgs) InsertOpts() river.InsertOpts {
 }
 
 // SaveMusicNFOArgs writes artist.nfo + album.nfo files for one artist's
-// release tree. Triggered by RefreshMusicArtistWorker when the library's
-// SaveNFO setting is on. Scoped to one artist so a refresh that only touched
-// Calvin Harris doesn't rewrite Ado's NFOs unnecessarily.
+// release tree. Triggered by EnrichMediaItemWorker (music branch) when the
+// library's SaveNFO setting is on. Scoped to one artist so a refresh that
+// only touched Calvin Harris doesn't rewrite Ado's NFOs unnecessarily.
 type SaveMusicNFOArgs struct {
 	ArtistID int64 `json:"artist_id"`
 }
 
 func (SaveMusicNFOArgs) Kind() string { return "save_music_nfo" }
 func (SaveMusicNFOArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, Priority: PriorityEnrichment, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
-// RefreshMusicArtistArgs schedules a heya.media enrichment pass for one
-// artist. Fanned out per-artist after a music library scan and also enqueued
-// inline by MetadataMatchWorker when a new artist is created mid-scan. Unique
-// by (ArtistID, Force) so concurrent matches won't duplicate work.
-//
-// BatchLibraryID + BatchTotal + BatchPosition together let the worker emit
-// "Refreshing 17/200 (Calvin Harris)" progress events without consulting
-// River's job table — they're set by the fan-out caller. Since the
-// music_metadata queue runs MaxWorkers=1, BatchPosition is just the loop
-// index from the fan-out and matches the order workers will pick jobs up.
-type RefreshMusicArtistArgs struct {
-	ArtistID       int64 `json:"artist_id"`
-	Force          bool  `json:"force,omitempty"`
-	BatchLibraryID int64 `json:"batch_library_id,omitempty"`
-	BatchTotal     int   `json:"batch_total,omitempty"`
-	BatchPosition  int   `json:"batch_position,omitempty"`
+// ScanTrackLoudnessArgs runs an ebur128 pass on a single audio file and
+// writes integrated_lufs / true_peak_db / loudness_range_db / sample_peak_db
+// back to its track_files row. CPU-bound, runs on its own `loudness` queue
+// at MaxWorkers=1 so it can't starve the rest of the pipeline.
+type ScanTrackLoudnessArgs struct {
+	TrackFileID int64 `json:"track_file_id"`
 }
 
-func (RefreshMusicArtistArgs) Kind() string { return "refresh_music_artist" }
-func (RefreshMusicArtistArgs) InsertOpts() river.InsertOpts {
+func (ScanTrackLoudnessArgs) Kind() string { return "scan_track_loudness" }
+func (ScanTrackLoudnessArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "music_metadata",
-		MaxAttempts: 3,
+		Queue:       "loudness",
+		MaxAttempts: 2,
+		Priority:    PriorityAnalysis,
+		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+	}
+}
+
+// ScanAlbumLoudnessArgs concatenates every primary track file in an album
+// via ffmpeg's concat demuxer and runs ebur128 over the union — the correct
+// way to measure album loudness (averaging per-track LUFS is mathematically
+// wrong since LUFS is logarithmic). Enqueued by ScanTrackLoudnessWorker when
+// every track in the album has finished individually.
+type ScanAlbumLoudnessArgs struct {
+	AlbumID int64 `json:"album_id"`
+}
+
+func (ScanAlbumLoudnessArgs) Kind() string { return "scan_album_loudness" }
+func (ScanAlbumLoudnessArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "loudness",
+		MaxAttempts: 2,
+		Priority:    PriorityAnalysis,
 		UniqueOpts:  river.UniqueOpts{ByArgs: true},
 	}
 }

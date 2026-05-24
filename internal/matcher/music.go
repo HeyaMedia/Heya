@@ -226,7 +226,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 
 	// Inline heya.media enrichment was removed in Phase 7: matchMusicGroup now
 	// builds skeleton rows from NFO + path only (fast, deterministic, no
-	// network). RefreshMusicArtistWorker picks up the slack asynchronously
+	// network). EnrichMediaItemWorker picks up the slack asynchronously
 	// after the scan, populating bio / disambiguation / external IDs / album
 	// metadata / track titles + durations from the heya.media response.
 	_ = cache // retained for future per-scan caches; unused after decoupling
@@ -293,7 +293,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		return 0, unmatched, 0, 0
 	}
 
-	// embedded album / track enrichment also moved to RefreshMusicArtistWorker.
+	// embedded album / track enrichment also moved to EnrichMediaItemWorker.
 	album, err := m.upsertMusicAlbum(ctx, artist.ID, musicAlbumInput{
 		Title:       albumTitle,
 		Year:        albumYear,
@@ -354,7 +354,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 
 		duration := 0
 		// (duration / canonical title from heya.media populated later by
-		// RefreshMusicArtistWorker via UpdateTrackFromEnrichment)
+		// EnrichMediaItemWorker via UpdateTrackFromEnrichment)
 
 		if !hasTrackInfo && trackTitle == "" {
 			base := filepath.Base(trackFile.Path)
@@ -534,6 +534,8 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 		log.Warn().Err(err).Int64("media_item", item.ID).Msg("failed to set media item slug")
 	}
 
+	_ = m.q.MarkMatched(ctx, item.ID)
+
 	if sortName == "" {
 		sortName = name
 	}
@@ -670,19 +672,29 @@ func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name stri
 	if name == "" {
 		return nil
 	}
-	results, err := m.heya.Search(ctx, metadata.KindMusic, metadata.SearchQuery{Title: name})
-	if err != nil || len(results) == 0 {
+	// Two-step (heya.media v0.3.0): cheap /search for disambiguation, then
+	// /api/v1/artist/{id} for the full enriched doc. /search sorts
+	// already-enriched hits first, so the warm-cache case stays one round
+	// trip end-to-end.
+	hit, err := m.heya.SearchArtistBest(ctx, name)
+	if err != nil || hit == nil {
 		if err != nil {
 			log.Debug().Err(err).Str("name", name).Msg("heya.media artist search failed")
 		}
 		return nil
 	}
-	detail, err := m.heya.GetDetail(ctx, results[0].ProviderID, nil)
-	if err != nil {
-		log.Debug().Err(err).Str("name", name).Msg("heya.media GetDetail failed")
+	detail, _, err := m.heya.FetchByKindID(ctx, "artist", hit.ID)
+	if err != nil || detail == nil {
+		log.Debug().Err(err).Str("name", name).Str("hit_id", hit.ID).Msg("heya.media artist fetch failed")
 		return nil
 	}
-	log.Info().Str("name", name).Str("artist", detail.ArtistName).Msg("enriched artist via heya.media search")
+	log.Info().
+		Str("name", name).
+		Str("hit_id", hit.ID).
+		Bool("enriched_hit", hit.Enriched).
+		Float64("score", hit.Score).
+		Str("artist", detail.ArtistName).
+		Msg("enriched artist via heya.media discover+fetch")
 	return detail
 }
 
@@ -739,7 +751,26 @@ func (m *Matcher) upsertMusicAlbum(ctx context.Context, artistID int64, in music
 	if err != nil {
 		return sqlc.Album{}, fmt.Errorf("creating album: %w", err)
 	}
+	album.Slug = m.assignAlbumSlug(ctx, artistID, album.ID, in.Title, in.Year)
 	return album, nil
+}
+
+// assignAlbumSlug picks a unique-within-artist slug and writes it back.
+// Logged-only on failure — a missing slug just means the album won't appear
+// in /music/{artist}/{album} URLs until the next refresh.
+func (m *Matcher) assignAlbumSlug(ctx context.Context, artistID, albumID int64, title, year string) string {
+	s := slug.GenerateUnique(ctx, title, year, albumID, func(ctx context.Context, candidate string, excludeID int64) (bool, error) {
+		return m.q.AlbumSlugExists(ctx, sqlc.AlbumSlugExistsParams{
+			ArtistID: artistID,
+			Slug:     candidate,
+			ID:       excludeID,
+		})
+	})
+	if err := m.q.SetAlbumSlug(ctx, sqlc.SetAlbumSlugParams{ID: albumID, Slug: s}); err != nil {
+		log.Warn().Err(err).Int64("album_id", albumID).Str("slug", s).Msg("failed to set album slug")
+		return ""
+	}
+	return s
 }
 
 func (m *Matcher) markFile(ctx context.Context, fileID int64, status sqlc.FileStatus, errMsg string, mediaItemID int64) {

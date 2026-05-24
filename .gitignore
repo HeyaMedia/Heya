@@ -43,3 +43,9 @@ data/postgres/
 /heya
 # Local runtime config — copy from heya.example.yaml and edit
 /heya.yaml
+
+# Sonic-analysis runtime models — fetched on first server boot.
+data/models/
+
+# Sonic-analysis PoC test outputs (no longer produced; kept for clarity).
+data/sonic-poc/

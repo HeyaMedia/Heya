@@ -76,7 +76,13 @@
             </div>
           </div>
           <div class="setting-control">
-            <select v-model="form.hwAccel" class="select-input" @change="dirty = true">
+            <select
+              v-model="form.hwAccel"
+              class="select-input"
+              :disabled="isLocked('transcoder.hwaccel')"
+              :title="lockTooltip('transcoder.hwaccel')"
+              @change="dirty = true"
+            >
               <option value="auto">Auto Detect</option>
               <option value="none">CPU (Software)</option>
               <option value="videotoolbox">Apple VideoToolbox</option>
@@ -102,6 +108,8 @@
                 min="1"
                 max="500"
                 class="number-input"
+                :disabled="isLocked('transcoder.cache_max_gb')"
+                :title="lockTooltip('transcoder.cache_max_gb')"
                 @input="dirty = true"
               />
               <span class="input-unit">GB</span>
@@ -113,7 +121,7 @@
       <div class="actions-row">
         <button
           class="btn btn-primary"
-          :disabled="!dirty || saving"
+          :disabled="!dirty || saving || allFieldsLocked"
           @click="saveSettings"
         >
           {{ saving ? 'Saving...' : 'Save Changes' }}
@@ -121,6 +129,10 @@
         <span v-if="saved" class="save-ok">
           <Icon name="check" :size="14" />
           Saved. Restart server to apply hardware acceleration changes.
+        </span>
+        <span v-else-if="allFieldsLocked" class="locked-note">
+          <Icon name="lock" :size="14" />
+          All transcoder fields locked by env vars.
         </span>
       </div>
     </section>
@@ -207,6 +219,11 @@ const saving = ref(false)
 const saved = ref(false)
 const clearing = ref(false)
 
+const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
+const allFieldsLocked = computed(() =>
+  isLocked('transcoder.hwaccel') && isLocked('transcoder.cache_max_gb'),
+)
+
 const form = reactive({
   hwAccel: 'auto',
   cacheMaxGB: 50,
@@ -265,7 +282,9 @@ async function clearCache() {
   clearing.value = false
 }
 
-onMounted(loadStatus)
+onMounted(async () => {
+  await Promise.all([loadStatus(), ensureSources()])
+})
 </script>
 
 <style scoped>
@@ -426,6 +445,15 @@ onMounted(loadStatus)
   font-size: 12px;
   color: var(--good);
 }
+.locked-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.select-input:disabled,
+.number-input:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .quality-note {
   font-size: 12px;

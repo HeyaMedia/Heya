@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -32,7 +33,7 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 		return nil
 	}
 
-	data, err := w.Heya.FetchRatings(ctx, externalIDs)
+	data, err := w.Heya.FetchRatings(ctx, metadata.MediaKind(item.MediaType), externalIDs)
 	if err != nil {
 		log.Debug().Err(err).Msg("ratings fetch failed")
 		return nil

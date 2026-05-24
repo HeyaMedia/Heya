@@ -97,8 +97,13 @@
           <button v-else class="action-btn" @click="scanLib(lib.id)" :disabled="scanning === lib.id" title="Scan">
             <Icon :name="scanning === lib.id ? 'loading' : 'refresh'" :size="15" :class="{ spinning: scanning === lib.id }" />
           </button>
-          <button class="action-btn danger" @click="deleteLib(lib.id)" title="Remove">
-            <Icon name="trash" :size="15" />
+          <button
+            class="action-btn danger"
+            @click="deleteLib(lib)"
+            :disabled="isEnvLocked(lib)"
+            :title="isEnvLocked(lib) ? envLockTooltip(lib) : 'Remove'"
+          >
+            <Icon :name="isEnvLocked(lib) ? 'lock' : 'trash'" :size="15" />
           </button>
         </div>
       </div>
@@ -213,19 +218,41 @@
 
             <div class="modal-body">
               <div class="form-section">
-                <label class="form-label">Folders</label>
-                <div class="paths-list">
+                <label class="form-label">
+                  Folders
+                  <span v-if="editLib?.sources?.paths" class="lock-badge" :title="`Locked by ${editLib.sources.paths.env_var}`">
+                    <Icon name="lock" :size="10" />
+                    {{ editLib.sources.paths.env_var }}
+                  </span>
+                </label>
+                <div v-if="editLib?.sources?.paths" class="paths-locked">
+                  <div v-for="(p, i) in editPaths" :key="i" class="path-locked">
+                    <Icon name="folder" :size="12" />
+                    <span class="mono">{{ p }}</span>
+                  </div>
+                </div>
+                <div v-else class="paths-list">
                   <div v-for="(p, i) in editPaths" :key="i" class="path-row">
                     <LibraryPathInput
                       :model-value="p ?? ''"
                       @update:model-value="(v: string) => { editPaths.splice(i, 1, v) }"
                     />
-                    <button v-if="editPaths.length > 1" type="button" class="path-remove" @click="editPaths.splice(i, 1)">
+                    <button
+                      v-if="editPaths.length > 1"
+                      type="button"
+                      class="path-remove"
+                      @click="editPaths.splice(i, 1)"
+                    >
                       <Icon name="close" :size="12" />
                     </button>
                   </div>
                 </div>
-                <button type="button" class="add-path-btn" @click="editPaths.push('')">
+                <button
+                  v-if="!editLib?.sources?.paths"
+                  type="button"
+                  class="add-path-btn"
+                  @click="editPaths.push('')"
+                >
                   <Icon name="plus" :size="12" />
                   Add folder
                 </button>
@@ -368,7 +395,10 @@ async function saveSettings() {
   saveError.value = ''
   try {
     const paths = editPaths.value.filter(p => p.trim())
-    if (paths.length && paths.join(',') !== editLib.value.paths.join(',')) {
+    // Skip the identity PUT entirely when paths are env-locked — backend
+    // returns 409, but we may as well not ask.
+    const pathsChanged = paths.length && paths.join(',') !== editLib.value.paths.join(',')
+    if (pathsChanged && !editLib.value.sources?.paths) {
       await apiFetch(`/api/libraries/${editLib.value.id}`, {
         method: 'PUT',
         body: JSON.stringify({ name: editLib.value.name, paths }),
@@ -414,11 +444,25 @@ async function scanLib(id: number) {
   scanning.value = null
 }
 
-async function deleteLib(id: number) {
+function isEnvLocked(lib: Library): boolean {
+  return !!(lib.sources?.name || lib.sources?.paths || lib.sources?.media_type)
+}
+
+function envLockTooltip(lib: Library): string {
+  const envVar = lib.sources?.name?.env_var
+  if (envVar) {
+    const base = envVar.replace(/_NAME$/, '')
+    return `Locked by ${base}_NAME / _PATHS / _TYPE — remove the env vars to delete`
+  }
+  return 'Locked by environment variables'
+}
+
+async function deleteLib(lib: Library) {
+  if (isEnvLocked(lib)) return
   if (!confirm('Delete this library and all its media data?')) return
   try {
-    await apiFetch(`/api/libraries/${id}`, { method: 'DELETE' })
-    libraries.value = libraries.value.filter(l => l.id !== id)
+    await apiFetch(`/api/libraries/${lib.id}`, { method: 'DELETE' })
+    libraries.value = libraries.value.filter(l => l.id !== lib.id)
   } catch {}
 }
 
@@ -827,6 +871,37 @@ onMounted(() => {
   transition: color 0.12s ease;
 }
 .add-path-btn:hover { color: var(--gold); }
+
+.lock-badge {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 100px;
+  background: rgba(255,255,255,0.04);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  vertical-align: middle;
+}
+
+.paths-locked { display: flex; flex-direction: column; gap: 6px; }
+.path-locked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  color: var(--fg-2);
+  font-size: 13px;
+}
+.path-locked .mono { font-family: var(--font-mono); font-size: 12px; }
 
 /* Modal transition */
 .modal-enter-active { transition: opacity 0.2s ease; }

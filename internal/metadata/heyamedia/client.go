@@ -19,7 +19,14 @@ func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			// Ceiling for a single HeyaMedia HTTP call. Search is fast
+			// (sub-second to a few seconds) but artist GetDetail can
+			// legitimately take up to 120s on cold cache because
+			// HeyaMedia is rate-limited by its upstream music providers
+			// — give it room. Callers can cancel sooner via ctx; this
+			// is just the worst-case backstop so a hung HeyaMedia
+			// doesn't wedge a worker forever.
+			Timeout: 5 * time.Minute,
 		},
 	}
 }

@@ -148,10 +148,15 @@
 </template>
 
 <script setup lang="ts">
-import type { HealthResponse } from '~~/shared/types'
+import type { components } from '~~/shared/types/api.gen'
 
-interface JobSummary { state: string; count: number }
-interface LogEntry { time: string; level: string; message: string; fields?: Record<string, any> }
+// Showcase: types come straight from the OpenAPI spec — no manual interface
+// definitions, no drift between FE and the Go handler. Rename any of these
+// fields server-side and `make gen-api-client` (CI gate) will break the
+// build until the FE catches up.
+type HealthResponse = components['schemas']['HealthBody']
+type JobSummary = components['schemas']['JobSummaryRow']
+type LogEntry = components['schemas']['Entry']
 
 const health = ref<HealthResponse | null>(null)
 const jobSummary = ref<JobSummary[]>([])
@@ -163,15 +168,19 @@ function formatLogTime(t: string) {
   } catch { return '' }
 }
 
+// First migration to useApiClient — same network behaviour as apiFetch, but
+// path/query/body and the response shape are all inferred from the spec.
+// New code should prefer this over apiFetch / $fetch.
 onMounted(async () => {
+  const api = useApiClient()
   const [h, js, lg] = await Promise.allSettled([
-    $fetch<HealthResponse>('/api/health'),
-    apiFetch<JobSummary[]>('/api/jobs/summary'),
-    apiFetch<LogEntry[]>('/api/logs?n=8'),
+    api.GET('/api/health'),
+    api.GET('/api/jobs/summary'),
+    api.GET('/api/logs', { params: { query: { n: 8 } } }),
   ])
-  if (h.status === 'fulfilled') health.value = h.value
-  if (js.status === 'fulfilled') jobSummary.value = js.value
-  if (lg.status === 'fulfilled') recentLogs.value = lg.value
+  if (h.status === 'fulfilled' && h.value.data) health.value = h.value.data
+  if (js.status === 'fulfilled' && js.value.data) jobSummary.value = js.value.data
+  if (lg.status === 'fulfilled' && lg.value.data) recentLogs.value = lg.value.data
 })
 </script>
 

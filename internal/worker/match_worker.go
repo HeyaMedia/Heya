@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -65,25 +64,13 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 			})
 		}
 
-		client := river.ClientFromContext[pgx.Tx](ctx)
-
-		// Music: enrichment happens out-of-band via RefreshMusicArtistWorker
-		// (heya.media has no per-album fetch yet — the artist payload carries
-		// the full discography). Fan that out instead of MetadataFetchArgs.
-		if mediaType == sqlc.MediaTypeMusic {
-			if matchResult.IsNew && matchResult.ArtistID > 0 {
-				_, _ = client.Insert(ctx, RefreshMusicArtistArgs{ArtistID: matchResult.ArtistID}, nil)
+		// Stub match is on disk; queue the unified enrich job to fill in
+		// the rest. Only on first match — re-matches preserve existing
+		// enriched state.
+		if matchResult.IsNew {
+			if err := EnqueueEnrichTx(ctx, updated.MediaItemID.Int64, mediaType, EnrichSourceScan); err != nil {
+				log.Warn().Err(err).Int64("media_id", updated.MediaItemID.Int64).Msg("enqueue enrich after match failed")
 			}
-		} else if matchResult.IsNew {
-			client.Insert(ctx, MetadataFetchArgs{
-				MediaItemID:   updated.MediaItemID.Int64,
-				LibraryID:     job.Args.LibraryID,
-				LibraryFileID: file.ID,
-				FilePath:      file.Path,
-				MediaType:     job.Args.MediaType,
-				ProviderName:  matchResult.ProviderName,
-				ProviderID:    matchResult.ProviderID,
-			}, nil)
 		}
 
 		log.Info().

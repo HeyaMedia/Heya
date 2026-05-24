@@ -34,6 +34,7 @@
               <div class="item-info">
                 <div class="item-name">{{ item.name }}</div>
                 <div class="item-path">{{ item.path }}</div>
+                <div v-if="item.error" class="item-error" :title="item.error">{{ item.error }}</div>
               </div>
               <div v-if="item.detail" class="item-detail">{{ item.detail }}</div>
               <div class="item-status-label" :class="item.status">{{ item.status }}</div>
@@ -58,6 +59,7 @@ interface TaskItem {
   path: string
   status: string
   detail?: string
+  error?: string
 }
 
 interface TaskItemsResponse {
@@ -65,6 +67,7 @@ interface TaskItemsResponse {
   total: number
   complete: number
   pending: number
+  failed: number
 }
 
 const props = defineProps<{
@@ -78,16 +81,25 @@ const items = ref<TaskItem[]>([])
 const total = ref(0)
 const completeCount = ref(0)
 const pendingCount = ref(0)
+const failedCount = ref(0)
 const loading = ref(false)
 const activeTab = ref('all')
 const offset = ref(0)
 const pageSize = 50
 
-const tabs = computed(() => [
-  { key: 'all', label: 'All', count: total.value },
-  { key: 'complete', label: 'Complete', count: completeCount.value },
-  { key: 'pending', label: 'Pending', count: pendingCount.value },
-])
+const tabs = computed(() => {
+  const base = [
+    { key: 'all', label: 'All', count: total.value },
+    { key: 'complete', label: 'Complete', count: completeCount.value },
+    { key: 'pending', label: 'Pending', count: pendingCount.value },
+  ]
+  // Only show the Failed tab when there's something to look at — keeps
+  // the modal uncluttered for tasks that don't track per-item failure.
+  if (failedCount.value > 0) {
+    base.push({ key: 'failed', label: 'Failed', count: failedCount.value })
+  }
+  return base
+})
 
 async function fetchItems() {
   loading.value = true
@@ -103,6 +115,7 @@ async function fetchItems() {
     total.value = res.total
     completeCount.value = res.complete
     pendingCount.value = res.pending
+    failedCount.value = res.failed ?? 0
   } catch {
     items.value = []
   }
@@ -199,6 +212,7 @@ onUnmounted(() => {
 }
 .item-dot.complete { background: var(--good); }
 .item-dot.pending { background: var(--gold); }
+.item-dot.failed { background: var(--bad, #d6594a); }
 
 .item-info { flex: 1; min-width: 0; }
 .item-name { font-size: 13px; font-weight: 500; color: var(--fg-1); }
@@ -219,6 +233,12 @@ onUnmounted(() => {
 }
 .item-status-label.complete { background: rgba(100,200,140,0.12); color: var(--good); }
 .item-status-label.pending { background: var(--gold-soft); color: var(--gold); }
+.item-status-label.failed { background: rgba(214,89,74,0.14); color: var(--bad, #d6594a); }
+
+.item-error {
+  font-size: 11px; font-family: var(--font-mono); color: var(--bad, #d6594a);
+  margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .modal-footer {
   display: flex; align-items: center; justify-content: center; gap: 12px;

@@ -267,11 +267,14 @@ func (m *Manager) enqueueNewFile(ctx context.Context, lw *LibraryWatcher, filePa
 		return
 	}
 
+	// fsnotify-discovered file: the user just dropped this into the library,
+	// so it jumps ahead of any in-flight bulk scan. PriorityWatcher (1) wins
+	// against PriorityScan (2) which is what the scheduler enqueues at.
 	m.river.Insert(ctx, worker.ProcessFileArgs{
 		LibraryFileID: file.ID,
 		LibraryID:     lw.libraryID,
 		FilePath:      filePath,
-	}, nil)
+	}, &river.InsertOpts{Priority: worker.PriorityWatcher})
 
 	log.Info().Str("path", relPath).Int64("file_id", file.ID).Msg("new media file detected, enqueued for processing")
 }

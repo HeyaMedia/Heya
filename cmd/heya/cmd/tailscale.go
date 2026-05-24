@@ -23,8 +23,8 @@ var tailscaleStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Tailscale node status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !cfg.Tailscale.Enabled {
-			fmt.Println("Tailscale: disabled (toggle on in Settings → Tailscale, or set tailscale.enabled: true in heya.yaml)")
+		if !cfg.Tailscale.Enabled.Value {
+			fmt.Println("Tailscale: disabled (toggle on in Settings → Tailscale, or set HEYA_TAILSCALE_ENABLED=true)")
 			return nil
 		}
 
@@ -68,8 +68,8 @@ var tailscaleLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Clear local tailnet identity (next start re-onboards)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !cfg.Tailscale.Enabled {
-			return fmt.Errorf("tailscale is disabled in heya.yaml")
+		if !cfg.Tailscale.Enabled.Value {
+			return fmt.Errorf("tailscale is disabled (set HEYA_TAILSCALE_ENABLED=true)")
 		}
 		ts := newOneShotTailscale()
 		defer func() { _ = ts.Close() }()
@@ -97,11 +97,11 @@ func newOneShotTailscale() *tsnetwrap.Server {
 func oneShotConfig() tsnetwrap.Config {
 	return tsnetwrap.Config{
 		Enabled:  true,
-		Hostname: cfg.Tailscale.Hostname,
-		AuthKey:  cfg.Tailscale.AuthKey,
-		StateDir: cfg.Tailscale.StateDir,
-		HTTPS:    cfg.Tailscale.HTTPS,
-		Funnel:   cfg.Tailscale.Funnel,
+		Hostname: cfg.Tailscale.Hostname.Value,
+		AuthKey:  cfg.Tailscale.AuthKey.Value,
+		StateDir: cfg.Tailscale.StateDir.Value,
+		HTTPS:    cfg.Tailscale.HTTPS.Value,
+		Funnel:   cfg.Tailscale.Funnel.Value,
 	}
 }
 

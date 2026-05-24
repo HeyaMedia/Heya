@@ -167,10 +167,10 @@ function isSeasonWatched(s: any) {
 async function toggleEpisodeWatched(ep: any) {
   const watched = isWatched(ep.id)
   if (watched) {
-    await apiFetch(`/api/episodes/${ep.id}/watched`, { method: 'DELETE' })
+    await apiFetch(`/api/me/watched/episode/${ep.id}`, { method: 'DELETE' })
     watchedEpisodes.value.delete(ep.id)
   } else {
-    await apiFetch(`/api/episodes/${ep.id}/watched`, { method: 'POST' })
+    await apiFetch(`/api/me/watched/episode/${ep.id}`, { method: 'POST' })
     watchedEpisodes.value.add(ep.id)
   }
 }
@@ -178,14 +178,14 @@ async function toggleEpisodeWatched(ep: any) {
 async function toggleSeasonWatched() {
   if (!season.value) return
   const s = season.value as any
-  await apiFetch(`/api/seasons/${s.id}/watched`, { method: 'POST', body: JSON.stringify({ watched: !allWatched.value }) })
+  await apiFetch(`/api/me/watched/season/${s.id}`, { method: 'POST', body: JSON.stringify({ watched: !allWatched.value }) })
   await loadWatchState()
 }
 
 async function toggleFavorite() {
   if (!season.value) return
   const s = season.value as any
-  const res = await apiFetch<{ favorited: boolean }>('/api/favorites/toggle', {
+  const res = await apiFetch<{ favorited: boolean }>('/api/me/favorites', {
     method: 'POST',
     body: JSON.stringify({ entity_type: 'season', entity_id: s.id }),
   })
@@ -272,7 +272,7 @@ watch(numParam, async () => {
   await loadWatchState()
   if (season.value) {
     const s = season.value as any
-    const res = await apiFetch<{ favorited: boolean }>(`/api/favorites/check?entity_type=season&entity_id=${s.id}`)
+    const res = await apiFetch<{ favorited: boolean }>(`/api/me/favorites/check?entity_type=season&entity_id=${s.id}`)
     seasonFavorited.value = res.favorited
   }
 })

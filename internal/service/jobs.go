@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -9,6 +10,16 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/vfs"
 )
+
+// jsonUnmarshalQuiet is a tiny helper for argsJSON decoding — errors are
+// tolerable (best-effort enrich title lookup), so the call sites get a
+// no-error path when the data is missing or malformed.
+func jsonUnmarshalQuiet(s string, v any) error {
+	if s == "" {
+		return nil
+	}
+	return json.Unmarshal([]byte(s), v)
+}
 
 var (
 	// ErrJobNotRetryable is returned when a job cannot be retried because it is
@@ -98,6 +109,132 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, of
 	}
 
 	return JobListResult{Jobs: jobs, Total: total}, nil
+}
+
+// MetadataQueueStatus is a snapshot of the unified `metadata` enrich queue:
+// pending counts by priority band, the currently-running job (if any) with
+// its target item resolved, and a recent throughput window.
+type MetadataQueueStatus struct {
+	Pending           int                   `json:"pending"`
+	PendingByPriority map[int]int           `json:"pending_by_priority"`
+	Running           *MetadataQueueRunning `json:"running,omitempty"`
+	Recent            MetadataQueueRecent   `json:"recent"`
+}
+
+// MetadataQueueRunning describes the one job currently executing on the
+// metadata queue (MaxWorkers=1, so there's at most one).
+type MetadataQueueRunning struct {
+	JobID     int64     `json:"job_id"`
+	Kind      string    `json:"kind"`
+	Priority  int       `json:"priority"`
+	ItemID    int64     `json:"item_id,omitempty"`
+	ItemTitle string    `json:"item_title,omitempty"`
+	MediaType string    `json:"media_type,omitempty"`
+	Source    string    `json:"source,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// MetadataQueueRecent summarises throughput over a short trailing window so
+// the UI can show "23 enriched in the last 5 min, avg 3.2s each".
+type MetadataQueueRecent struct {
+	Completed5Min  int     `json:"completed_5min"`
+	AvgDurationSec float64 `json:"avg_duration_sec"`
+}
+
+// MetadataQueueStatus returns a snapshot of the enrich queue for the tasks
+// page panel. Queries the river_job table directly (no public River API
+// exposes this cleanly, and the column layout is stable across patch
+// releases).
+func (a *App) MetadataQueueStatus(ctx context.Context) (MetadataQueueStatus, error) {
+	out := MetadataQueueStatus{
+		PendingByPriority: map[int]int{1: 0, 2: 0, 3: 0, 4: 0},
+	}
+
+	rows, err := a.db.Query(ctx, `
+		SELECT priority, count(*)
+		FROM river_job
+		WHERE queue = 'metadata' AND state IN ('available', 'scheduled', 'retryable')
+		GROUP BY priority
+	`)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var p, c int
+		if err := rows.Scan(&p, &c); err != nil {
+			continue
+		}
+		out.PendingByPriority[p] = c
+		out.Pending += c
+	}
+	rows.Close()
+
+	// Currently-running job. With MaxWorkers=1, at most one.
+	var (
+		jobID      int64
+		kind       string
+		argsJSON   string
+		priority   int
+		startedAt  *time.Time
+		running    MetadataQueueRunning
+		haveRunner bool
+	)
+	err = a.db.QueryRow(ctx, `
+		SELECT id, kind, args::text, priority, attempted_at
+		FROM river_job
+		WHERE queue = 'metadata' AND state = 'running'
+		ORDER BY attempted_at ASC
+		LIMIT 1
+	`).Scan(&jobID, &kind, &argsJSON, &priority, &startedAt)
+	if err == nil {
+		haveRunner = true
+		running.JobID = jobID
+		running.Kind = kind
+		running.Priority = priority
+		if startedAt != nil {
+			running.StartedAt = *startedAt
+		}
+		// Best-effort: resolve item_id + title from args for the enrich job.
+		// Other kinds may not carry an item_id — leave those fields empty.
+		var args struct {
+			ItemID int64  `json:"item_id"`
+			Source string `json:"source"`
+		}
+		if jsonErr := jsonUnmarshalQuiet(argsJSON, &args); jsonErr == nil && args.ItemID != 0 {
+			running.ItemID = args.ItemID
+			running.Source = args.Source
+			var title, mt string
+			if titleErr := a.db.QueryRow(ctx,
+				`SELECT title, media_type::text FROM media_items WHERE id = $1`,
+				args.ItemID,
+			).Scan(&title, &mt); titleErr == nil {
+				running.ItemTitle = title
+				running.MediaType = mt
+			}
+		}
+	}
+	// On query error (including the no-rows case) we just leave `running`
+	// unset — the panel degrades gracefully rather than propagating.
+	if haveRunner {
+		out.Running = &running
+	}
+
+	// Throughput in the last 5 minutes.
+	var done int
+	var avgSec float64
+	if err := a.db.QueryRow(ctx, `
+		SELECT
+			count(*),
+			COALESCE(avg(extract(epoch from finalized_at - attempted_at)), 0)
+		FROM river_job
+		WHERE queue = 'metadata' AND state = 'completed'
+		  AND finalized_at > now() - interval '5 minutes'
+	`).Scan(&done, &avgSec); err == nil {
+		out.Recent.Completed5Min = done
+		out.Recent.AvgDurationSec = avgSec
+	}
+
+	return out, nil
 }
 
 // JobSummary returns per-state job counts.

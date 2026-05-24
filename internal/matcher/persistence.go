@@ -67,19 +67,29 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 		})
 	m.q.UpdateMediaItemSlug(ctx, sqlc.UpdateMediaItemSlugParams{ID: item.ID, Slug: itemSlug})
 
-	var createErr error
+	_ = m.q.MarkMatched(ctx, item.ID)
+
+	return item.ID, true, nil
+}
+
+// createTypeSpecificRow inserts the type-specific row (movies / tv_series /
+// books) for a media item. Called by the enrich path (after a successful
+// GetDetail) — not by the match step, which writes only the media_items
+// stub. Music is intentionally absent: the music enrich path goes through
+// matcher.RefreshMusicArtist (album + track upsert from the artist payload)
+// instead of a MediaDetail → CreateMusic shape, so this function no-ops for
+// music. If a future feature needs a music candidate write here, route it
+// through RefreshMusicArtist instead of resurrecting a separate path.
+func (m *Matcher) createTypeSpecificRow(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail, filePath string) error {
 	switch kind {
 	case metadata.KindMovie:
-		createErr = m.createMovie(ctx, item.ID, detail)
+		return m.createMovie(ctx, mediaItemID, detail)
 	case metadata.KindTV:
-		createErr = m.createTVSeries(ctx, item.ID, detail)
-	case metadata.KindMusic:
-		createErr = m.createMusic(ctx, item.ID, detail)
+		return m.createTVSeries(ctx, mediaItemID, detail)
 	case metadata.KindBook:
-		createErr = m.createBook(ctx, item.ID, detail, filePath)
+		return m.createBook(ctx, mediaItemID, detail, filePath)
 	}
-
-	return item.ID, true, createErr
+	return nil
 }
 
 func (m *Matcher) createMovie(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
@@ -557,53 +567,6 @@ func (m *Matcher) upsertCreator(ctx context.Context, c metadata.CreatorDetail) (
 	})
 }
 
-func (m *Matcher) createMusic(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
-	artist, err := m.q.CreateArtist(ctx, sqlc.CreateArtistParams{
-		MediaItemID:   mediaItemID,
-		MusicbrainzID: d.ExternalIDs["musicbrainz_artist"],
-		SortName:      d.ArtistName,
-		Biography:     d.ArtistBio,
-	})
-	if err != nil {
-		return fmt.Errorf("creating artist: %w", err)
-	}
-
-	album, err := m.q.CreateAlbum(ctx, sqlc.CreateAlbumParams{
-		ArtistID:      artist.ID,
-		Title:         d.AlbumTitle,
-		Year:          d.Year,
-		MusicbrainzID: d.ExternalIDs["musicbrainz"],
-		AlbumType:     d.AlbumType,
-		Genres:        emptyIfNil(d.Genres),
-		CoverPath:     d.CoverURL,
-		ReleaseDate:   pgDateFromString(d.PublishDate),
-		Label:         d.Label,
-		Country:       d.Country,
-		Barcode:       d.Barcode,
-		TotalTracks:   int32(len(d.Tracks)),
-		TotalDiscs:    int32(d.TotalDiscs),
-		Tags:          emptyIfNil(d.Tags),
-	})
-	if err != nil {
-		return fmt.Errorf("creating album: %w", err)
-	}
-
-	for _, t := range d.Tracks {
-		_, err := m.q.CreateTrack(ctx, sqlc.CreateTrackParams{
-			AlbumID:     album.ID,
-			DiscNumber:  int32(t.DiscNumber),
-			TrackNumber: int32(t.TrackNumber),
-			Title:       t.Title,
-			Duration:    int32(t.Duration),
-		})
-		if err != nil {
-			log.Warn().Err(err).Str("track", t.Title).Msg("error creating track")
-		}
-	}
-
-	return nil
-}
-
 func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail, filePath string) error {
 	var authorID pgtype.Int8
 
@@ -682,24 +645,18 @@ func mustJSON(v any) []byte {
 }
 
 // StoreEntityMetadata persists type-specific metadata (movie, TV, music, book)
-// for a media item. Called by the worker pipeline (MetadataFetchWorker) and
-// the metadata editor after a manual metadata refresh.
+// for a media item. Called by the worker pipeline (EnrichMediaItemWorker) and
+// the metadata editor after a manual metadata refresh. The match step does
+// NOT call this — it writes only the media_items stub via
+// createOrLinkMediaItem, and the enrich worker fills in the type-specific
+// row here.
 func (m *Matcher) StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail) {
-	switch kind {
-	case metadata.KindMovie:
-		m.createMovie(ctx, mediaItemID, detail)
-	case metadata.KindTV:
-		m.createTVSeries(ctx, mediaItemID, detail)
-	case metadata.KindMusic:
-		m.createMusic(ctx, mediaItemID, detail)
-	case metadata.KindBook:
-		m.createBook(ctx, mediaItemID, detail, "")
-	}
+	_ = m.createTypeSpecificRow(ctx, mediaItemID, kind, detail, "")
 }
 
 // StoreRichMetadata persists cast, crew, keywords, production companies, videos,
 // certifications, recommendations, and collections for a media item. Called by
-// the worker pipeline (MetadataFetchWorker) and the metadata editor.
+// the worker pipeline (EnrichMediaItemWorker) and the metadata editor.
 func (m *Matcher) StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) {
 	m.storeRichMetadata(ctx, mediaItemID, detail)
 }
