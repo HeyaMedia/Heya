@@ -12,8 +12,11 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/goccy/go-json v0.10.6
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
+	github.com/ikawaha/kagome-dict/ipa v1.2.6
+	github.com/ikawaha/kagome/v2 v2.11.0
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/klauspost/compress v1.18.5
+	github.com/klauspost/compress v1.18.6
+	github.com/oapi-codegen/runtime v1.4.1
 	github.com/pgvector/pgvector-go v0.4.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/riverqueue/river v0.38.0
@@ -67,9 +70,6 @@ require (
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/ikawaha/kagome-dict v1.1.7 // indirect
-	github.com/ikawaha/kagome-dict/ipa v1.2.6 // indirect
-	github.com/ikawaha/kagome-dict/uni v1.2.6 // indirect
-	github.com/ikawaha/kagome/v2 v2.11.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -92,7 +92,6 @@ require (
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/oapi-codegen/runtime v1.4.1 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pires/go-proxyproto v0.8.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
