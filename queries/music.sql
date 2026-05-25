@@ -155,6 +155,97 @@ UPDATE tracks
 -- name: UpdateTrackLyricsPath :exec
 UPDATE tracks SET lyrics_path = $2 WHERE id = $1;
 
+-- name: UpdateAlbumCoverPath :exec
+-- Writes a local cover-art path detected from the album folder
+-- (cover.jpg/folder.jpg/front.jpg). Local detection always wins over the
+-- remote URL the matcher captured from heya.media, so this is an
+-- unconditional overwrite (callers gate the call themselves).
+UPDATE albums SET cover_path = $2 WHERE id = $1;
+
+-- name: UpdateArtistExtendedMetadata :exec
+-- Writes the post-00019 fields on artists (everything beyond name / bio /
+-- MBID, which UpdateArtistEnrichedFields handles separately). All fields
+-- are written unconditionally — heya.media is the source of truth for
+-- this slice of the artist row, and a refresh that retrieves fresh
+-- listeners / playcount / popularity should replace the old values.
+UPDATE artists SET
+    listeners        = $2,
+    playcount        = $3,
+    popularity       = $4,
+    annotation       = $5,
+    urls             = $6,
+    wikipedia_links  = $7,
+    profiles         = $8,
+    aliases          = $9,
+    groups           = $10,
+    members          = $11,
+    artist_type      = $12,
+    begin_date       = $13,
+    begin_year       = $14,
+    end_date         = $15,
+    ended            = $16,
+    deathday         = $17,
+    birthplace       = $18,
+    tags             = $19
+WHERE id = $1;
+
+-- name: ReplaceArtistTopTracks :exec
+-- Top tracks are a small ranked list per artist. We replace-on-refresh
+-- rather than upsert because the rank ordering is what we actually
+-- care about — partial updates would leave stale rows interleaved with
+-- new ones. Caller is expected to issue this DELETE followed by N inserts
+-- inside the same transaction.
+DELETE FROM artist_top_tracks WHERE artist_id = $1;
+
+-- name: CreateArtistTopTrack :exec
+INSERT INTO artist_top_tracks (artist_id, rank, title, mbid, playcount, listeners, url)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: ReplaceArtistSimilarArtists :exec
+-- Same replace-on-refresh story as top_tracks. The match scores and
+-- ordering shift slightly on every Last.fm/ListenBrainz refresh, so
+-- treating the list as a transactional swap keeps the page snappy.
+DELETE FROM artist_similar_artists WHERE artist_id = $1;
+
+-- name: CreateArtistSimilarArtist :exec
+INSERT INTO artist_similar_artists (
+    artist_id, rank, name, mbid, match_score, url, local_artist_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: UpdateAlbumExtendedMetadata :exec
+-- The post-00019 album columns. Mirrors UpdateAlbumEnrichedFields' style
+-- (CASE WHEN $N != '' THEN $N ELSE col END) so a sparse heya.media
+-- payload doesn't clobber NFO-derived values that happened to be richer.
+UPDATE albums SET
+    catalog_no       = CASE WHEN $2::text   != '' THEN $2 ELSE catalog_no END,
+    original_title   = CASE WHEN $3::text   != '' THEN $3 ELSE original_title END,
+    language         = CASE WHEN $4::text   != '' THEN $4 ELSE language END,
+    explicit         = $5,
+    duration_seconds = CASE WHEN $6::int    != 0  THEN $6 ELSE duration_seconds END,
+    rating           = CASE WHEN $7::numeric != 0 THEN $7 ELSE rating END,
+    popularity       = $8,
+    listeners        = $9,
+    playcount        = $10,
+    secondary_types  = $11,
+    styles           = $12,
+    isrcs            = $13,
+    external_ids     = $14,
+    artist_credits   = $15
+WHERE id = $1;
+
+-- name: UpdateTrackExtendedMetadata :exec
+-- The post-00019 track columns. external_ids / isrc / recording_mbid are
+-- the keys that unlock LRCLIB lyrics lookups + cross-service deep links.
+-- preview_url is the iTunes/Deezer 30-second sample for hover previews.
+UPDATE tracks SET
+    external_ids   = $2,
+    isrc           = CASE WHEN $3::text != '' THEN $3 ELSE isrc END,
+    recording_mbid = CASE WHEN $4::text != '' THEN $4 ELSE recording_mbid END,
+    preview_url    = CASE WHEN $5::text != '' THEN $5 ELSE preview_url END,
+    explicit       = $6,
+    artist_credits = $7
+WHERE id = $1;
+
 -- name: ListTracksByAlbum :many
 SELECT * FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC;
 

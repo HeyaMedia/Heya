@@ -24,9 +24,10 @@ if (import.meta.client) {
 async function load() {
   loading.value = true
   try {
-    detail.value = await apiFetch<MusicAlbumDetail>(
-      `/api/music/artists/${artistSlug.value}/albums/${albumSlug.value}`,
-    )
+    const { $heya } = useNuxtApp()
+    detail.value = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
+      path: { artist_slug: artistSlug.value, album_slug: albumSlug.value },
+    }) as MusicAlbumDetail
   } catch {
     detail.value = null
   } finally {
@@ -67,7 +68,7 @@ const hasMultipleDiscs = computed(() => {
   return seen.size > 1
 })
 
-const coverUrl = computed(() => album.value?.cover_path || null)
+const coverUrl = computed(() => useAlbumCoverUrl(album.value?.id))
 
 const albumExternalIds = computed<Record<string, string>>(() => {
   // Albums carry just musicbrainz_id today. Synthesize the map so the
@@ -93,7 +94,7 @@ function trackToPlayable(t: TrackView): Track {
     stream_url: `/api/tracks/${t.id}/stream`,
     album_id: album.value?.id,
     artist_id: detail.value?.artist?.id,
-    poster: album.value?.cover_path ?? undefined,
+    poster: useAlbumCoverUrl(album.value?.id) ?? undefined,
     integrated_lufs: primary?.integrated_lufs != null ? parseFloat(primary.integrated_lufs) : null,
     true_peak_db: primary?.true_peak_db != null ? parseFloat(primary.true_peak_db) : null,
   }

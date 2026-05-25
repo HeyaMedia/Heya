@@ -226,6 +226,20 @@ type Album struct {
 	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
 	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
 	SearchVector       interface{}        `json:"search_vector"`
+	CatalogNo          string             `json:"catalog_no"`
+	Explicit           bool               `json:"explicit"`
+	OriginalTitle      string             `json:"original_title"`
+	SecondaryTypes     []string           `json:"secondary_types"`
+	Styles             []string           `json:"styles"`
+	Language           string             `json:"language"`
+	DurationSeconds    int32              `json:"duration_seconds"`
+	Isrcs              []string           `json:"isrcs"`
+	Rating             pgtype.Numeric     `json:"rating"`
+	Popularity         int32              `json:"popularity"`
+	Listeners          int64              `json:"listeners"`
+	Playcount          int64              `json:"playcount"`
+	ExternalIds        []byte             `json:"external_ids"`
+	ArtistCredits      []byte             `json:"artist_credits"`
 }
 
 type AlbumCentroid struct {
@@ -247,6 +261,24 @@ type Artist struct {
 	SearchVector          interface{}        `json:"search_vector"`
 	DiscographyEnrichedAt pgtype.Timestamptz `json:"discography_enriched_at"`
 	CoverArtEnrichedAt    pgtype.Timestamptz `json:"cover_art_enriched_at"`
+	Listeners             int64              `json:"listeners"`
+	Playcount             int64              `json:"playcount"`
+	Popularity            int32              `json:"popularity"`
+	Annotation            string             `json:"annotation"`
+	Urls                  []byte             `json:"urls"`
+	WikipediaLinks        []byte             `json:"wikipedia_links"`
+	Profiles              []byte             `json:"profiles"`
+	Aliases               []string           `json:"aliases"`
+	Groups                []byte             `json:"groups"`
+	Members               []byte             `json:"members"`
+	ArtistType            string             `json:"artist_type"`
+	BeginDate             string             `json:"begin_date"`
+	BeginYear             int32              `json:"begin_year"`
+	EndDate               string             `json:"end_date"`
+	Ended                 bool               `json:"ended"`
+	Deathday              string             `json:"deathday"`
+	Birthplace            string             `json:"birthplace"`
+	Tags                  []string           `json:"tags"`
 }
 
 type ArtistCentroid struct {
@@ -255,6 +287,28 @@ type ArtistCentroid struct {
 	TextCentroid  pgvector.Vector    `json:"text_centroid"`
 	TrackCount    int32              `json:"track_count"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ArtistSimilarArtist struct {
+	ID            int64          `json:"id"`
+	ArtistID      int64          `json:"artist_id"`
+	Rank          int32          `json:"rank"`
+	Name          string         `json:"name"`
+	Mbid          string         `json:"mbid"`
+	MatchScore    pgtype.Numeric `json:"match_score"`
+	Url           string         `json:"url"`
+	LocalArtistID pgtype.Int8    `json:"local_artist_id"`
+}
+
+type ArtistTopTrack struct {
+	ID        int64  `json:"id"`
+	ArtistID  int64  `json:"artist_id"`
+	Rank      int32  `json:"rank"`
+	Title     string `json:"title"`
+	Mbid      string `json:"mbid"`
+	Playcount int64  `json:"playcount"`
+	Listeners int64  `json:"listeners"`
+	Url       string `json:"url"`
 }
 
 type Author struct {
@@ -649,6 +703,12 @@ type Track struct {
 	LyricsPath    string      `json:"lyrics_path"`
 	SearchVector  interface{} `json:"search_vector"`
 	LibraryFileID pgtype.Int8 `json:"library_file_id"`
+	ExternalIds   []byte      `json:"external_ids"`
+	Isrc          string      `json:"isrc"`
+	RecordingMbid string      `json:"recording_mbid"`
+	PreviewUrl    string      `json:"preview_url"`
+	Explicit      bool        `json:"explicit"`
+	ArtistCredits []byte      `json:"artist_credits"`
 }
 
 type TrackFacet struct {

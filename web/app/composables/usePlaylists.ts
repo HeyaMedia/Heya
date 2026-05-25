@@ -22,8 +22,9 @@ async function loadAll() {
   if (!inflight) {
     inflight = (async () => {
       try {
-        const resp = await apiFetch<{ items: UserPlaylistRow[] }>('/api/me/playlists')
-        playlists.value = resp.items ?? []
+        const { $heya } = useNuxtApp()
+        const resp = await $heya('/api/me/playlists')
+        playlists.value = (resp.items as UserPlaylistRow[] | undefined) ?? []
       } catch {
         playlists.value = []
       } finally {
@@ -36,11 +37,11 @@ async function loadAll() {
 }
 
 async function create(name: string, description = '', coverPath = '') {
-  const created = await apiFetch<UserPlaylistRow>('/api/me/playlists', {
+  const { $heya } = useNuxtApp()
+  const created = await $heya('/api/me/playlists', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description, cover_path: coverPath }),
-  })
+    body: { name, description, cover_path: coverPath },
+  }) as UserPlaylistRow
   // Server returns the bare playlist row without aggregate counts — fold in
   // sensible defaults so the sidebar can render immediately.
   playlists.value = [
@@ -51,12 +52,17 @@ async function create(name: string, description = '', coverPath = '') {
 }
 
 async function remove(id: number) {
-  await apiFetch(`/api/me/playlists/${id}`, { method: 'DELETE' })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/playlists/{id}', { method: 'DELETE', path: { id } })
   playlists.value = playlists.value.filter((p) => p.id !== id)
 }
 
 async function addTrack(playlistId: number, trackId: number) {
-  await apiFetch(`/api/me/playlists/${playlistId}/tracks/${trackId}`, { method: 'POST' })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/playlists/{id}/tracks/{track_id}', {
+    method: 'POST',
+    path: { id: playlistId, track_id: trackId },
+  })
   // Bump track_count locally so the sidebar counter stays in sync until next load.
   playlists.value = playlists.value.map((p) =>
     p.id === playlistId ? { ...p, track_count: p.track_count + 1 } : p,
@@ -64,7 +70,11 @@ async function addTrack(playlistId: number, trackId: number) {
 }
 
 async function removeTrack(playlistId: number, trackId: number) {
-  await apiFetch(`/api/me/playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/playlists/{id}/tracks/{track_id}', {
+    method: 'DELETE',
+    path: { id: playlistId, track_id: trackId },
+  })
   playlists.value = playlists.value.map((p) =>
     p.id === playlistId ? { ...p, track_count: Math.max(0, p.track_count - 1) } : p,
   )

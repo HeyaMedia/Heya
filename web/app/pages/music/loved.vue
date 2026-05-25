@@ -16,7 +16,7 @@
       >
         <div class="list-title-cell">
           <VuMeter v-if="currentTrack?.id === row.track_id" :playing="playing" />
-          <Poster v-else :idx="row.track_id" :src="row.album_cover_path || null" aspect="1/1" style="width: 40px; height: 40px; border-radius: 4px; flex-shrink: 0" />
+          <Poster v-else :idx="row.track_id" :src="useAlbumCoverUrl(row.album_id)" aspect="1/1" style="width: 40px; height: 40px; border-radius: 4px; flex-shrink: 0" />
           <div>
             <div class="list-title" :style="currentTrack?.id === row.track_id ? { color: 'var(--gold)' } : {}">{{ row.track_title }}</div>
           </div>
@@ -60,7 +60,9 @@ const { play, queue, currentTrack, playing, formatTime } = usePlayer()
 const loved = useLovedTracks()
 if (import.meta.client) loved.ensureLoaded()
 
-const { data, pending } = useApi<MusicListPage<LovedTrackRow>>('/api/me/loved/tracks?limit=500')
+const lovedRes = await useHeya('/api/me/loved/tracks', { query: { limit: 500 } })
+const data = lovedRes.data as Ref<MusicListPage<LovedTrackRow> | null>
+const pending = lovedRes.pending
 const rows = computed(() => data.value?.items ?? [])
 
 function toPlayable(row: LovedTrackRow): Track {
@@ -73,7 +75,7 @@ function toPlayable(row: LovedTrackRow): Track {
     stream_url: `/api/tracks/${row.track_id}/stream`,
     album_id: row.album_id,
     artist_id: row.artist_id,
-    poster: row.album_cover_path || undefined,
+    poster: useAlbumCoverUrl(row.album_id) ?? undefined,
   }
 }
 

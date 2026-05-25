@@ -36,6 +36,9 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, binaryOp(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
 		wrapStream(handleTMDBImageProxy()))
 
+	huma.Register(api, binaryOp(http.MethodGet, "/api/albums/{id}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
+		wrapStream(handleAlbumCover(app)))
+
 	// --- Video streaming (HLS + direct play) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}", "stream-direct", "Direct video stream (range-served bytes)", "Streaming"),
 		wrapStream(handleDirectStream(app)))

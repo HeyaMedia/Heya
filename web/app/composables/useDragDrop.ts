@@ -40,9 +40,11 @@ export function useDragDrop() {
     if (!mediaId) return
 
     try {
-      await apiFetch(`/api/me/lists/${listId}/items`, {
+      const { $heya } = useNuxtApp()
+      await $heya('/api/me/lists/{id}/items', {
         method: 'POST',
-        body: JSON.stringify({ media_item_id: mediaId }),
+        path: { id: listId },
+        body: { media_item_id: mediaId },
       })
     } catch { /* list may not accept duplicates */ }
 

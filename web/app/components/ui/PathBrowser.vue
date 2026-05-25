@@ -126,9 +126,8 @@ async function fetchDir(path: string) {
   loading.value = true
   filterText.value = ''
   try {
-    const data = await apiFetch<{ path: string; parent: string; entries: { name: string; path: string }[] }>(
-      `/api/fs/browse?path=${encodeURIComponent(path)}`
-    )
+    const { $heya } = useNuxtApp()
+    const data = await $heya('/api/fs/browse', { query: { path } }) as { path: string; parent: string; entries: { name: string; path: string }[] }
     currentPath.value = data.path
     parent.value = data.parent
     entries.value = data.entries

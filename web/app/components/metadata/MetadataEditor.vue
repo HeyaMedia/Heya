@@ -411,11 +411,15 @@ async function fetchDetail() {
   if (!props.mediaId) return
   loading.value = true
   try {
-    detail.value = await apiFetch<MediaDetail>(`/api/media/${props.mediaId}`)
+    const { $heya } = useNuxtApp()
+    // Spec types `id` as `string` because the endpoint accepts a slug OR a numeric ID.
+    detail.value = await $heya('/api/media/{id}', { path: { id: String(props.mediaId) } }) as MediaDetail
     rebuildForm()
     if (detail.value?.media_item?.library_id) {
       try {
-        library.value = await apiFetch<any>(`/api/libraries/${detail.value.media_item.library_id}`)
+        library.value = await $heya('/api/libraries/{id}', {
+          path: { id: detail.value.media_item.library_id },
+        })
       } catch { library.value = null }
     }
   } catch { detail.value = null }
@@ -424,12 +428,14 @@ async function fetchDetail() {
 
 async function save() {
   if (!props.mediaId || !dirty.value) return
+  const { $heya } = useNuxtApp()
 
   if (mode.value === 'episode' && props.episodeId) {
     try {
-      await apiFetch(`/api/media/${props.mediaId}/episode/${props.episodeId}`, {
+      await $heya('/api/media/{id}/episode/{episode_id}', {
         method: 'PUT',
-        body: JSON.stringify(form.value),
+        path: { id: props.mediaId, episode_id: props.episodeId },
+        body: form.value as any,
       })
       await fetchDetail()
     } catch { /* empty */ }
@@ -456,9 +462,10 @@ async function save() {
       original_name: form.value.original_name,
     }
     try {
-      await apiFetch(`/api/media/${props.mediaId}/metadata`, {
+      await $heya('/api/media/{id}/metadata', {
         method: 'PUT',
-        body: JSON.stringify(body),
+        path: { id: props.mediaId },
+        body: body as any,
       })
       await fetchDetail()
     } catch { /* empty */ }
@@ -469,7 +476,8 @@ async function refreshMetadata() {
   if (!props.mediaId) return
   refreshing.value = true
   try {
-    await apiFetch(`/api/media/${props.mediaId}/refresh`, { method: 'POST' })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/media/{id}/refresh', { method: 'POST', path: { id: props.mediaId } })
     await new Promise(r => setTimeout(r, 2000))
     await fetchDetail()
   } catch { /* empty */ }

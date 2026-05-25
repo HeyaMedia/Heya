@@ -148,12 +148,11 @@
 </template>
 
 <script setup lang="ts">
-import type { components } from '~~/shared/types/api.gen'
+// Types come straight from the OpenAPI spec via nuxt-open-fetch — no manual
+// interface definitions, no drift between FE and the Go handler. Rename any
+// of these fields server-side and the build breaks until the FE catches up.
+import type { components } from '#open-fetch-schemas/heya'
 
-// Showcase: types come straight from the OpenAPI spec — no manual interface
-// definitions, no drift between FE and the Go handler. Rename any of these
-// fields server-side and `make gen-api-client` (CI gate) will break the
-// build until the FE catches up.
 type HealthResponse = components['schemas']['HealthBody']
 type JobSummary = components['schemas']['JobSummaryRow']
 type LogEntry = components['schemas']['Entry']
@@ -168,19 +167,18 @@ function formatLogTime(t: string) {
   } catch { return '' }
 }
 
-// First migration to useApiClient — same network behaviour as apiFetch, but
-// path/query/body and the response shape are all inferred from the spec.
-// New code should prefer this over apiFetch / $fetch.
+// Typed Heya client via nuxt-open-fetch — path/query/body and response shape
+// all inferred from the spec.
 onMounted(async () => {
-  const api = useApiClient()
+  const { $heya } = useNuxtApp()
   const [h, js, lg] = await Promise.allSettled([
-    api.GET('/api/health'),
-    api.GET('/api/jobs/summary'),
-    api.GET('/api/logs', { params: { query: { n: 8 } } }),
+    $heya('/api/health') as Promise<HealthResponse>,
+    $heya('/api/jobs/summary') as Promise<JobSummary[]>,
+    $heya('/api/logs', { query: { n: 8 } }) as Promise<LogEntry[]>,
   ])
-  if (h.status === 'fulfilled' && h.value.data) health.value = h.value.data
-  if (js.status === 'fulfilled' && js.value.data) jobSummary.value = js.value.data
-  if (lg.status === 'fulfilled' && lg.value.data) recentLogs.value = lg.value.data
+  if (h.status === 'fulfilled' && h.value) health.value = h.value
+  if (js.status === 'fulfilled' && js.value) jobSummary.value = js.value
+  if (lg.status === 'fulfilled' && lg.value) recentLogs.value = lg.value
 })
 </script>
 

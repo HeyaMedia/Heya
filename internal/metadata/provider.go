@@ -147,6 +147,70 @@ type MediaDetail struct {
 	ArtistBeginDate      string       `json:"artist_begin_date,omitempty"`
 	ArtistBeginYear      int          `json:"artist_begin_year,omitempty"`
 	ArtistBirthplace     string       `json:"artist_birthplace,omitempty"`
+
+	// Music (full coverage — mirrors heya.media ArtistDetail). Captured
+	// into the artists table via the migration in 00019_music_full_metadata.
+	ArtistAliases        []string              `json:"artist_aliases,omitempty"`
+	ArtistAnnotation     string                `json:"artist_annotation,omitempty"`
+	ArtistEndDate        string                `json:"artist_end_date,omitempty"`
+	ArtistEnded          bool                  `json:"artist_ended,omitempty"`
+	ArtistDeathday       string                `json:"artist_deathday,omitempty"`
+	ArtistListeners      int64                 `json:"artist_listeners,omitempty"`
+	ArtistPlaycount      int64                 `json:"artist_playcount,omitempty"`
+	ArtistPopularity     int                   `json:"artist_popularity,omitempty"`
+	ArtistTags           []string              `json:"artist_tags,omitempty"`
+	ArtistURLs           []URLEntry            `json:"artist_urls,omitempty"`
+	ArtistWikipedia      map[string]string     `json:"artist_wikipedia,omitempty"`
+	ArtistProfiles       map[string]string     `json:"artist_profiles,omitempty"`
+	ArtistImages         []ArtworkResult       `json:"artist_images,omitempty"`
+	ArtistGroups         []ArtistRelationEntry `json:"artist_groups,omitempty"`
+	ArtistMembers        []ArtistRelationEntry `json:"artist_members,omitempty"`
+	ArtistTopTracks      []TopTrackEntry       `json:"artist_top_tracks,omitempty"`
+	ArtistSimilarArtists []SimilarArtistEntry  `json:"artist_similar_artists,omitempty"`
+}
+
+// URLEntry is one external link on an artist ({type: "AllMusic", url: "..."}).
+type URLEntry struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+// ArtistRelationEntry covers MusicBrainz group ↔ member relationships
+// (one row per related artist). Same shape for both directions.
+type ArtistRelationEntry struct {
+	Name  string   `json:"name"`
+	MBID  string   `json:"mbid,omitempty"`
+	Slug  string   `json:"slug,omitempty"`
+	Begin string   `json:"begin,omitempty"`
+	End   string   `json:"end,omitempty"`
+	Ended bool     `json:"ended,omitempty"`
+	Roles []string `json:"roles,omitempty"`
+}
+
+// TopTrackEntry is a popularity-ranked track from Last.fm.
+type TopTrackEntry struct {
+	Title     string `json:"title"`
+	MBID      string `json:"mbid,omitempty"`
+	Playcount int64  `json:"playcount,omitempty"`
+	Listeners int64  `json:"listeners,omitempty"`
+	URL       string `json:"url,omitempty"`
+}
+
+// SimilarArtistEntry is one Last.fm / ListenBrainz similarity hit.
+type SimilarArtistEntry struct {
+	Name  string  `json:"name"`
+	MBID  string  `json:"mbid,omitempty"`
+	Match float64 `json:"match,omitempty"`
+	URL   string  `json:"url,omitempty"`
+}
+
+// ArtistCreditEntry is one credit on an album or track ({name, mbid, slug,
+// join_phrase} — join_phrase carries "feat. " / " & " etc.).
+type ArtistCreditEntry struct {
+	Name       string `json:"name"`
+	MBID       string `json:"mbid,omitempty"`
+	Slug       string `json:"slug,omitempty"`
+	JoinPhrase string `json:"join_phrase,omitempty"`
 }
 
 type ArtworkResult struct {
@@ -296,10 +360,13 @@ type TrackDetail struct {
 	TrackNumber int    `json:"track_number"`
 	Title       string `json:"title"`
 	// Duration in seconds (heya.media's native unit).
-	Duration      int    `json:"duration"`
-	ISRC          string `json:"isrc,omitempty"`
-	RecordingMBID string `json:"recording_mbid,omitempty"`
-	PreviewURL    string `json:"preview_url,omitempty"`
+	Duration      int                 `json:"duration"`
+	ISRC          string              `json:"isrc,omitempty"`
+	RecordingMBID string              `json:"recording_mbid,omitempty"`
+	PreviewURL    string              `json:"preview_url,omitempty"`
+	ExternalIDs   map[string]string   `json:"external_ids,omitempty"`
+	Explicit      bool                `json:"explicit,omitempty"`
+	ArtistCredits []ArtistCreditEntry `json:"artist_credits,omitempty"`
 }
 
 // AlbumEntry is one album as returned in payload.albums on an artist lookup.
@@ -319,6 +386,21 @@ type AlbumEntry struct {
 	Popularity  float64           `json:"popularity,omitempty"`
 	CoverURL    string            `json:"cover_url,omitempty"`
 	Tracks      []TrackDetail     `json:"tracks,omitempty"`
+
+	// Extended fields captured from the heya.media Album schema. Mirrors
+	// the columns added in migration 00019.
+	OriginalTitle  string              `json:"original_title,omitempty"`
+	SecondaryTypes []string            `json:"secondary_types,omitempty"`
+	Styles         []string            `json:"styles,omitempty"`
+	Tags           []string            `json:"tags,omitempty"`
+	Genres         []string            `json:"genres,omitempty"`
+	Language       string              `json:"language,omitempty"`
+	Duration       int                 `json:"duration,omitempty"`
+	Rating         float64             `json:"rating,omitempty"`
+	Listeners      int64               `json:"listeners,omitempty"`
+	Playcount      int64               `json:"playcount,omitempty"`
+	Explicit       bool                `json:"explicit,omitempty"`
+	ArtistCredits  []ArtistCreditEntry `json:"artist_credits,omitempty"`
 }
 
 type NFOIDs struct {

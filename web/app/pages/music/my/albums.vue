@@ -13,7 +13,7 @@
         class="grid-tile card-tile"
         style="text-decoration: none; color: inherit"
       >
-        <Poster :idx="al.id" :src="al.cover_path || null" aspect="1/1" />
+        <Poster :idx="al.id" :src="useAlbumCoverUrl(al.id)" aspect="1/1" />
         <div class="grid-tile-meta">
           <div class="grid-tile-title">{{ al.title }}</div>
           <div class="grid-tile-sub">{{ al.artist_name }}{{ al.year ? ' · ' + al.year : '' }}</div>
@@ -30,7 +30,9 @@ definePageMeta({ layout: 'default' })
 
 interface LovedAlbumRow extends MusicAlbumRow { loved_at: string }
 
-const { data, pending } = useApi<MusicListPage<LovedAlbumRow>>('/api/me/loved/albums?limit=500')
+const myAlbumsRes = await useHeya('/api/me/loved/albums', { query: { limit: 500 } })
+const data = myAlbumsRes.data as unknown as Ref<MusicListPage<LovedAlbumRow> | null>
+const pending = myAlbumsRes.pending
 const rows = computed(() => data.value?.items ?? [])
 </script>
 

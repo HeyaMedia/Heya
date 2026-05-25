@@ -43,7 +43,8 @@ export function useTailscale() {
   async function refresh() {
     loading.value = true
     try {
-      const res = await apiFetch<TailscaleResponse>('/api/tailscale/status')
+      const { $heya } = useNuxtApp()
+      const res = await $heya('/api/tailscale/status') as TailscaleResponse
       enabled.value = res.enabled
       status.value = res.status ?? null
       cfg.value = res.config ?? null
@@ -61,30 +62,32 @@ export function useTailscale() {
       funnel: cfg.value?.funnel ?? false,
       ...patch,
     }
-    await apiFetch<{ status: string }>('/api/tailscale/config', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/tailscale/config', {
       method: 'PUT',
-      body: JSON.stringify(merged),
-      headers: { 'Content-Type': 'application/json' },
+      body: merged as any,
     })
     await refresh()
   }
 
   async function setFunnel(on: boolean) {
-    await apiFetch<{ funnel: boolean }>('/api/tailscale/funnel', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/tailscale/funnel', {
       method: 'POST',
-      body: JSON.stringify({ enabled: on }),
-      headers: { 'Content-Type': 'application/json' },
+      body: { enabled: on } as any,
     })
     await refresh()
   }
 
   async function logout() {
-    await apiFetch<{ status: string }>('/api/tailscale/logout', { method: 'POST' })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/tailscale/logout', { method: 'POST' })
     await refresh()
   }
 
   async function fetchRaw() {
-    return apiFetch<Record<string, unknown>>('/api/tailscale/raw')
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/tailscale/raw') as Record<string, unknown>
   }
 
   function subscribeToEvents() {

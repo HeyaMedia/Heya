@@ -57,9 +57,10 @@ const hasSubOptions = computed(() => (languages.value?.subtitle_languages?.lengt
 async function loadData() {
   loading.value = true
   try {
+    const { $heya } = useNuxtApp()
     const [langs, prefData] = await Promise.all([
-      apiFetch<MediaLanguagesResponse>(`/api/media/${props.mediaItemId}/languages`),
-      apiFetch<PlaybackPreference>(`/api/me/playback/${props.mediaItemId}`),
+      $heya('/api/media/{id}/languages', { path: { id: props.mediaItemId } }) as Promise<MediaLanguagesResponse>,
+      $heya('/api/me/playback/{media_id}', { path: { media_id: props.mediaItemId } }) as Promise<PlaybackPreference>,
     ])
     languages.value = langs
     pref.value = prefData
@@ -70,15 +71,16 @@ async function loadData() {
 async function savePref() {
   saving.value = true
   try {
-    pref.value = await apiFetch<PlaybackPreference>(`/api/me/playback/${props.mediaItemId}`, {
+    const { $heya } = useNuxtApp()
+    pref.value = await $heya('/api/me/playback/{media_id}', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      path: { media_id: props.mediaItemId },
+      body: {
         audio_language: pref.value.audio_language,
         subtitle_language: pref.value.subtitle_language,
         subtitle_mode: pref.value.subtitle_mode,
-      }),
-    })
+      } as any,
+    }) as PlaybackPreference
   } catch {}
   saving.value = false
 }

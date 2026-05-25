@@ -26,12 +26,15 @@ import type { MusicArtistRow, MusicListPage } from '~~/shared/types'
 
 definePageMeta({ layout: 'default' })
 
-const { data, pending } = useApi<MusicListPage<MusicArtistRow>>('/api/music/artists?limit=500')
+const artistsRes = await useHeya('/api/music/artists', { query: { limit: 500 } })
+const data = artistsRes.data as unknown as Ref<MusicListPage<MusicArtistRow> | null>
+const pending = artistsRes.pending
 const rows = computed(() => data.value?.items ?? [])
 
-function artistPosterUrl(a: MusicArtistRow): string | null {
-  return a.poster_path ? `/api/media/${a.media_item_id}/image/poster` : null
-}
+// See MusicHome.vue — the endpoint falls back through media_assets when
+// media_items.poster_path is empty, so unconditional URL emit + Poster's
+// imgError gradient handles both populated and missing-image cases.
+const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl(a.media_item_id)
 </script>
 
 <style scoped>

@@ -121,7 +121,10 @@ const canSave = computed(() => os.apiKey && os.username && os.password)
 
 onMounted(async () => {
   try {
-    const res = await apiFetch<{ key: string; value: any }>('/api/system-settings/opensubtitles')
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/system-settings/{key}', {
+      path: { key: 'opensubtitles' },
+    }) as { key: string; value: any }
     if (res.value) {
       os.apiKey = res.value.api_key || ''
       os.username = res.value.username || ''
@@ -134,10 +137,11 @@ async function testConnection() {
   testing.value = true
   testResult.value = null
   try {
-    const res = await apiFetch<{ ok: boolean; user?: any; error?: string }>('/api/opensubtitles/test', {
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/opensubtitles/test', {
       method: 'POST',
-      body: JSON.stringify({ api_key: os.apiKey, username: os.username, password: os.password }),
-    })
+      body: { api_key: os.apiKey, username: os.username, password: os.password } as any,
+    }) as { ok: boolean; user?: any; error?: string }
     testResult.value = res
   } catch (e: any) {
     testResult.value = { ok: false, error: e.message || 'Request failed' }
@@ -149,11 +153,11 @@ async function saveCredentials() {
   saving.value = true
   saved.value = false
   try {
-    await apiFetch('/api/system-settings/opensubtitles', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/system-settings/{key}', {
       method: 'PUT',
-      body: JSON.stringify({
-        value: { api_key: os.apiKey, username: os.username, password: os.password },
-      }),
+      path: { key: 'opensubtitles' },
+      body: { value: { api_key: os.apiKey, username: os.username, password: os.password } } as any,
     })
     saved.value = true
     setTimeout(() => { saved.value = false }, 3000)

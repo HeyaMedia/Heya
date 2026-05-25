@@ -168,9 +168,10 @@ const genresLoading = ref(true)
 onMounted(async () => {
   inputEl.value?.focus()
   try {
+    const { $heya } = useNuxtApp()
     const [g, c] = await Promise.all([
-      apiFetch<GenreRow[]>('/api/genres'),
-      apiFetch<{ items: CollectionRow[] }>('/api/collections?limit=20'),
+      $heya('/api/genres') as Promise<GenreRow[]>,
+      $heya('/api/collections', { query: { limit: 20 } }) as Promise<{ items: CollectionRow[] }>,
     ])
     genres.value = g || []
     collections.value = (c?.items || []).filter(x => x.movie_count > 0)
@@ -186,7 +187,8 @@ async function fetchAll(q: string) {
   if (!q) { data.value = null; return }
   loading.value = true
   try {
-    data.value = await apiFetch<QuickSearchResponse>(`/api/search/quick?q=${encodeURIComponent(q)}`)
+    const { $heya } = useNuxtApp()
+    data.value = await $heya('/api/search/quick', { query: { q } }) as QuickSearchResponse
   } catch { data.value = null }
   finally { loading.value = false }
 }
@@ -223,8 +225,10 @@ async function loadFiltered(reset = true) {
   if (reset) { filteredItems.value = []; filteredOffset.value = 0; filteredTotal.value = 0 }
   loadingFiltered.value = true
   try {
-    const params = new URLSearchParams({ q: query.value, type: activeType.value, limit: String(PAGE_SIZE), offset: String(filteredOffset.value) })
-    const res = await apiFetch<SearchBucket<any>>(`/api/search?${params}`)
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/search', {
+      query: { q: query.value, type: activeType.value as any, limit: PAGE_SIZE, offset: filteredOffset.value },
+    }) as SearchBucket<any>
     filteredItems.value = filteredItems.value.concat(res.items || [])
     filteredTotal.value = res.total || 0
     filteredOffset.value += (res.items?.length || 0)

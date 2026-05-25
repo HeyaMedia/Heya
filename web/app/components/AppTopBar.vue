@@ -459,7 +459,10 @@ const hasActivity = computed(() =>
 )
 
 async function cancelAllJobs() {
-  try { await apiFetch('/api/libraries/scan/cancel-all', { method: 'POST' }) } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries/scan/cancel-all', { method: 'POST' })
+  } catch {}
 }
 
 const jobsByKind = computed(() => {

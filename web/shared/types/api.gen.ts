@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/albums/{id}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Album cover bytes (local file or 302 to upstream URL) */
+        get: operations["album-cover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/albums/{id}/sonic-similar": {
         parameters: {
             query?: never;
@@ -3265,6 +3282,8 @@ export interface components {
             /** Format: int64 */
             id: number;
             /** Format: int64 */
+            library_id: number;
+            /** Format: int64 */
             media_item_id: number;
             media_type: string;
             poster_path: string;
@@ -3429,6 +3448,8 @@ export interface components {
             entity_type: string;
             /** Format: int64 */
             id: number;
+            /** Format: int64 */
+            library_id: number;
             /** Format: int64 */
             media_item_id: number;
             media_type: string;
@@ -5201,6 +5222,35 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "album-cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary response — content type set per endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Error */

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 )
 
 // MarkEpisodeWatched marks a single episode as watched for a user.
@@ -199,11 +200,30 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 		}
 	}
 
+	// Overlay the localized episode title using the series library's
+	// PreferredLanguage. Without this an anime up-next stays in Japanese
+	// even when the library is set to English.
+	title := ep.Title
+	if item, err := q.GetMediaItemByID(ctx, mediaItemID); err == nil {
+		if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
+			lang := metadata.ParseSettings(lib.Settings).PreferredLanguage
+			if lang != "" {
+				if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: ep.EpisodeID, Language: lang}); err == nil && t.Title != "" {
+					title = t.Title
+				} else if lang != "en" {
+					if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: ep.EpisodeID, Language: "en"}); err == nil && t.Title != "" {
+						title = t.Title
+					}
+				}
+			}
+		}
+	}
+
 	return UpNextResult{
 		HasNext:       true,
 		EpisodeID:     ep.EpisodeID,
 		EpisodeNumber: ep.EpisodeNumber,
-		EpisodeTitle:  ep.Title,
+		EpisodeTitle:  title,
 		SeasonNumber:  ep.SeasonNumber,
 		SeasonID:      ep.SeasonID,
 		MediaItemID:   ep.MediaItemID,

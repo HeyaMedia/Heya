@@ -22,6 +22,14 @@ type RefreshArtistResult struct {
 	AlbumsUpdated  int    // DB albums whose fields actually changed
 	TracksUpdated  int    // tracks whose title or duration was upgraded
 	HeyaProviderID string // for telemetry
+	// Artist-level artwork from heya.media. PosterURL / BackdropURL are the
+	// upstream's "primary" picks; ArtistImages is the full classified pool
+	// the worker uses to fill remaining gaps (logo / banner / clearart /
+	// thumb plus secondary backdrops). The matcher only carries these
+	// through — it doesn't queue downloads or write media_assets rows.
+	PosterURL    string
+	BackdropURL  string
+	ArtistImages []metadata.ArtworkResult
 }
 
 // RefreshMusicArtist re-fetches an artist from heya.media and writes the
@@ -51,6 +59,9 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		return res, nil
 	}
 	res.HeyaProviderID = "heya:" + detail.HeyaSlug
+	res.PosterURL = detail.PosterURL
+	res.BackdropURL = detail.BackdropURL
+	res.ArtistImages = detail.ArtistImages
 
 	// Artist row: only overwrite fields when the new value is non-empty
 	// (UpdateArtistEnrichedFields handles that at the SQL level).
@@ -67,6 +78,20 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		Column6: detail.ArtistBio,
 	}); err != nil {
 		return res, fmt.Errorf("update artist %d: %w", artistID, err)
+	}
+
+	// Extended artist metadata — all the post-00019 columns. Failures here
+	// are logged but not fatal: a refresh that wrote name/bio/MBID
+	// successfully shouldn't reroll if listeners/popularity update bombs
+	// (most likely cause: JSONB encoding of a sparse heya.media field).
+	if err := m.writeArtistExtendedMetadata(ctx, artistID, detail); err != nil {
+		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist extended metadata failed")
+	}
+	if err := m.writeArtistTopTracks(ctx, artistID, detail.ArtistTopTracks); err != nil {
+		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist top tracks failed")
+	}
+	if err := m.writeArtistSimilarArtists(ctx, artistID, detail.ArtistSimilarArtists); err != nil {
+		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist similar artists failed")
 	}
 
 	// media_item.external_ids: merge enriched IDs into whatever's there.
@@ -157,6 +182,12 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 			m.assignAlbumSlug(ctx, artist.ID, dbAlbum.ID, embedded.Title, newYear)
 		}
 
+		// Extended album metadata (post-00019 columns). Best-effort —
+		// failures here don't abort the per-album loop.
+		if err := m.writeAlbumExtendedMetadata(ctx, dbAlbum.ID, embedded); err != nil {
+			log.Warn().Err(err).Int64("album", dbAlbum.ID).Msg("write album extended metadata failed")
+		}
+
 		dbTracks, err := m.q.ListTracksByAlbum(ctx, dbAlbum.ID)
 		if err != nil {
 			continue
@@ -185,7 +216,30 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 					res.TracksUpdated++
 				}
 			}
+
+			// Extended track metadata — external_ids / isrc /
+			// recording_mbid / preview_url / explicit / artist_credits.
+			// Separate from the title/duration update path so the
+			// title-only "did the row actually change?" gate doesn't
+			// block writes to these.
+			if err := m.writeTrackExtendedMetadata(ctx, dbTrack.ID, embeddedTrack); err != nil {
+				log.Warn().Err(err).Int64("track", dbTrack.ID).Msg("write track extended metadata failed")
+			}
 		}
+	}
+
+	// Backfill any still-empty slugs from the DB-side title. This catches
+	// albums heya.media has no record of (local-only releases, releases
+	// not yet enriched upstream, or — common when the user is on a self-
+	// hosted heya.media without MusicBrainz reachability — albums whose
+	// MBID lookup 404'd). The transliteration pass in slug.Generate
+	// handles kana/kanji, so a previously-stuck "untitled" slug becomes
+	// a real romanized one as soon as a refresh runs.
+	for _, dbAlbum := range dbAlbums {
+		if dbAlbum.Slug != "" || dbAlbum.Title == "" {
+			continue
+		}
+		m.assignAlbumSlug(ctx, artistID, dbAlbum.ID, dbAlbum.Title, dbAlbum.Year)
 	}
 
 	if err := m.q.MarkArtistDiscographyEnriched(ctx, artistID); err != nil && !errors.Is(err, pgx.ErrNoRows) {

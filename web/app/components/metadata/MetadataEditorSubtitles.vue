@@ -163,7 +163,10 @@ function subtitleFilename(s: any): string {
 
 async function fetchEmbeddedSubs() {
   try {
-    const files = await apiFetch<FileInfo[]>(`/api/media/${props.mediaId}/files`)
+    const { $heya } = useNuxtApp()
+    const files = await $heya('/api/media/{id}/files', {
+      path: { id: props.mediaId },
+    }) as FileInfo[]
     const target = props.fileId ? files.find(f => f.id === props.fileId) : files[0]
     if (target?.streams) {
       embeddedSubs.value = target.streams.filter(s => s.codec_type === 'subtitle')
@@ -175,7 +178,10 @@ async function fetchEmbeddedSubs() {
 
 async function checkOSConfigured() {
   try {
-    const res = await apiFetch<{ key: string; value: any }>('/api/system-settings/opensubtitles')
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/system-settings/{key}', {
+      path: { key: 'opensubtitles' },
+    }) as { key: string; value: any }
     osConfigured.value = !!(res.value?.api_key && res.value?.username)
   } catch {
     osConfigured.value = false
@@ -192,10 +198,11 @@ async function doSearch() {
   searching.value = true
   searched.value = true
   try {
-    const params = new URLSearchParams({ media_id: String(props.mediaId) })
-    if (searchQuery.value) params.set('query', searchQuery.value)
-    if (searchLangs.value) params.set('languages', searchLangs.value)
-    const res = await apiFetch<{ data: any[] }>(`/api/opensubtitles/search?${params}`)
+    const { $heya } = useNuxtApp()
+    const query: Record<string, any> = { media_id: props.mediaId }
+    if (searchQuery.value) query.query = searchQuery.value
+    if (searchLangs.value) query.languages = searchLangs.value
+    const res = await $heya('/api/opensubtitles/search', { query }) as { data: any[] }
     searchResults.value = res.data || []
   } catch {
     searchResults.value = []
@@ -207,14 +214,15 @@ async function downloadSubtitle(r: any) {
   if (!r.attributes?.files?.length) return
   downloading.value = r.id
   try {
-    await apiFetch('/api/opensubtitles/download', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/opensubtitles/download', {
       method: 'POST',
-      body: JSON.stringify({
+      body: {
         media_item_id: props.mediaId,
         file_id: r.attributes.files[0].file_id,
         language: r.attributes.language,
         file_name: r.attributes.files[0].file_name,
-      }),
+      } as any,
     })
     emit('refresh')
   } catch { /* empty */ }
@@ -224,7 +232,11 @@ async function downloadSubtitle(r: any) {
 async function deleteSubtitle(s: any) {
   if (!confirm('Delete this subtitle file?')) return
   try {
-    await apiFetch(`/api/media/${props.mediaId}/assets/${s.id}`, { method: 'DELETE' })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/media/{id}/assets/{asset_id}', {
+      method: 'DELETE',
+      path: { id: props.mediaId, asset_id: s.id },
+    })
     emit('refresh')
   } catch { /* empty */ }
 }

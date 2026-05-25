@@ -75,11 +75,13 @@ async function search() {
   searching.value = true
   searched.value = true
   try {
-    const params = new URLSearchParams({ q: query.value })
-    if (year.value) params.set('year', year.value)
-    const res = await apiFetch<{ results: ProviderSearchResult[] }>(
-      `/api/media/${props.mediaId}/identify?${params}`
-    )
+    const { $heya } = useNuxtApp()
+    const q: Record<string, any> = { q: query.value }
+    if (year.value) q.year = year.value
+    const res = await $heya('/api/media/{id}/identify', {
+      path: { id: props.mediaId },
+      query: q,
+    }) as { results: ProviderSearchResult[] }
     results.value = res.results || []
   } catch { results.value = [] }
   searching.value = false
@@ -88,9 +90,11 @@ async function search() {
 async function apply(r: ProviderSearchResult) {
   if (!confirm(`Replace all metadata with "${r.title}" from ${r.provider_name}? This will overwrite current metadata.`)) return
   try {
-    await apiFetch(`/api/media/${props.mediaId}/identify`, {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/media/{id}/identify', {
       method: 'POST',
-      body: JSON.stringify({ provider_name: r.provider_name, provider_id: r.provider_id }),
+      path: { id: props.mediaId },
+      body: { provider_name: r.provider_name, provider_id: r.provider_id } as any,
     })
     emit('applied')
   } catch { /* empty */ }

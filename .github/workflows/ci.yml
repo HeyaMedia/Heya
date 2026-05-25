@@ -50,24 +50,25 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Go is set up here (not just in go-static) so this job can regenerate
-      # the OpenAPI spec + typed TS client and verify they match what's
-      # committed. Mirrors the sqlc-drift check: if a Huma handler changed
-      # and the FE client wasn't regenerated, the build fails here.
+      # the OpenAPI spec and verify it matches what's committed. Mirrors the
+      # sqlc-drift check: if a Huma handler changed and the spec wasn't
+      # regenerated, the build fails here. nuxt-open-fetch consumes the spec
+      # at Nuxt build time, so this single artifact is enough.
       - name: Setup Go (for openapi-spec CLI)
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Regenerate API spec + TS client
+      - name: Regenerate API spec
         run: make gen-api-client
 
-      - name: Verify API spec + TS client are up to date
+      - name: Verify API spec is up to date
         run: |
-          if ! git diff --quiet web/shared/api.openapi.json web/shared/types/api.gen.ts; then
-            echo "::error::OpenAPI spec or generated TS client is out of date."
+          if ! git diff --quiet web/shared/api.openapi.json; then
+            echo "::error::OpenAPI spec is out of date."
             echo "Run 'make gen-api-client' locally and commit the result."
-            git diff --stat web/shared/api.openapi.json web/shared/types/api.gen.ts
+            git diff --stat web/shared/api.openapi.json
             exit 1
           fi
 

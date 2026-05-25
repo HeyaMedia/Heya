@@ -82,7 +82,8 @@ function timeAgo(ts: string) {
 
 onMounted(async () => {
   try {
-    items.value = await apiFetch<ActivityItem[]>('/api/activity')
+    const { $heya } = useNuxtApp()
+    items.value = await $heya('/api/activity') as ActivityItem[]
   } catch { /* empty */ }
 })
 </script>

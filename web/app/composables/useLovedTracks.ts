@@ -26,11 +26,17 @@ const slots: Record<EntityKind, LovedSet> = {
   album: makeSlot('album'),
 }
 
-const pluralPath: Record<EntityKind, string> = {
-  track: 'tracks',
-  artist: 'artists',
-  album: 'albums',
-}
+const idsPaths = {
+  track: '/api/me/loved/tracks/ids',
+  artist: '/api/me/loved/artists/ids',
+  album: '/api/me/loved/albums/ids',
+} as const
+
+const itemPaths = {
+  track: '/api/me/loved/tracks/{id}',
+  artist: '/api/me/loved/artists/{id}',
+  album: '/api/me/loved/albums/{id}',
+} as const
 
 async function loadKind(kind: EntityKind) {
   const slot = slots[kind]
@@ -38,7 +44,8 @@ async function loadKind(kind: EntityKind) {
   if (!slot.inflight) {
     slot.inflight = (async () => {
       try {
-        const resp = await apiFetch<{ ids: number[] }>(`/api/me/loved/${pluralPath[kind]}/ids`)
+        const { $heya } = useNuxtApp()
+        const resp = await $heya(idsPaths[kind]) as { ids: number[] }
         slot.ids.value = new Set(resp.ids ?? [])
       } catch {
         // Empty set is the safe default — heart stays unfilled, toggles still work.
@@ -61,7 +68,8 @@ async function toggleKind(kind: EntityKind, id: number) {
   slot.ids.value = replaced
   try {
     const method = next ? 'POST' : 'DELETE'
-    const resp = await apiFetch<{ loved: boolean }>(`/api/me/loved/${pluralPath[kind]}/${id}`, { method })
+    const { $heya } = useNuxtApp()
+    const resp = await $heya(itemPaths[kind], { method, path: { id } }) as { loved: boolean }
     if (resp.loved !== next) {
       const final = new Set(slot.ids.value)
       if (resp.loved) final.add(id)

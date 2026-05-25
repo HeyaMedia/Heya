@@ -54,11 +54,22 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 
 	localPath, err := w.Downloader.Download(ctx, job.Args.URL, job.Args.MediaType, dirName, filename)
 	if err != nil {
-		log.Warn().Err(err).Str("url", job.Args.URL).Msg("image download failed")
+		log.Warn().Err(err).
+			Int64("item_id", job.Args.MediaItemID).
+			Str("media_type", job.Args.MediaType).
+			Str("asset_type", job.Args.AssetType).
+			Str("url", job.Args.URL).
+			Msg("image download failed")
 		return nil
 	}
 
 	if localPath == "" {
+		log.Warn().
+			Int64("item_id", job.Args.MediaItemID).
+			Str("media_type", job.Args.MediaType).
+			Str("asset_type", job.Args.AssetType).
+			Str("url", job.Args.URL).
+			Msg("image download returned empty path")
 		return nil
 	}
 
@@ -107,6 +118,11 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 				ProviderKind:     item.ProviderKind,
 				HeyaSlug:         item.HeyaSlug,
 			})
+			log.Info().
+				Int64("item_id", item.ID).
+				Str("media_type", job.Args.MediaType).
+				Str("local_path", localPath).
+				Msg("poster_path updated")
 			if w.Hub != nil {
 				w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
 					MediaItemID: job.Args.MediaItemID,

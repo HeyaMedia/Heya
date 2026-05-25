@@ -104,13 +104,14 @@ const tabs = computed(() => {
 async function fetchItems() {
   loading.value = true
   try {
-    const params = new URLSearchParams({
-      limit: String(pageSize),
-      offset: String(offset.value),
-    })
-    if (activeTab.value !== 'all') params.set('status', activeTab.value)
+    const { $heya } = useNuxtApp()
+    const query: Record<string, any> = { limit: pageSize, offset: offset.value }
+    if (activeTab.value !== 'all') query.status = activeTab.value
 
-    const res = await apiFetch<TaskItemsResponse>(`/api/tasks/${props.taskId}/items?${params}`)
+    const res = await $heya('/api/tasks/{id}/items', {
+      path: { id: props.taskId as any },
+      query,
+    }) as TaskItemsResponse
     items.value = res.items
     total.value = res.total
     completeCount.value = res.complete

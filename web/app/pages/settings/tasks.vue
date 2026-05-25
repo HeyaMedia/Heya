@@ -325,32 +325,48 @@ function formatDuration(sec: number): string {
 }
 
 async function fetchTasks() {
-  try { tasks.value = await apiFetch<ScheduledTask[]>('/api/tasks') } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    tasks.value = await $heya('/api/tasks') as ScheduledTask[]
+  } catch {}
 }
 
 async function fetchQueueStatus() {
-  try { queueStatus.value = await apiFetch<MetadataQueueStatus>('/api/jobs/queue/metadata') } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    queueStatus.value = await $heya('/api/jobs/queue/metadata') as MetadataQueueStatus
+  } catch {}
 }
 
 async function runTask(id: string) {
-  try { await apiFetch(`/api/tasks/${id}/run`, { method: 'POST' }); fetchTasks() } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/tasks/{id}/run', { method: 'POST', path: { id: id as any } })
+    fetchTasks()
+  } catch {}
 }
 
 async function cancelTask(id: string) {
-  try { await apiFetch(`/api/tasks/${id}/cancel`, { method: 'POST' }); fetchTasks() } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/tasks/{id}/cancel', { method: 'POST', path: { id: id as any } })
+    fetchTasks()
+  } catch {}
 }
 
 async function toggleEnabled(t: ScheduledTask) {
   try {
-    await apiFetch(`/api/tasks/${t.id}`, {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/tasks/{id}', {
       method: 'PUT',
-      body: JSON.stringify({
+      path: { id: t.id as any },
+      body: {
         enabled: !t.enabled,
         interval_hours: t.interval_hours,
         daily_start_time: t.daily_start_time,
         daily_end_time: t.daily_end_time,
         max_runtime_minutes: t.max_runtime_minutes,
-      }),
+      } as any,
     })
     fetchTasks()
   } catch {}
@@ -366,7 +382,8 @@ async function updateField(t: ScheduledTask, field: string, value: any) {
   }
   body[field] = value
   try {
-    await apiFetch(`/api/tasks/${t.id}`, { method: 'PUT', body: JSON.stringify(body) })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/tasks/{id}', { method: 'PUT', path: { id: t.id as any }, body: body as any })
     fetchTasks()
   } catch {}
 }

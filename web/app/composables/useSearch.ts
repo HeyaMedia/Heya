@@ -86,10 +86,9 @@ export function useQuickSearch(debounceMs = 200) {
     loading.value = true
     error.value = null
     try {
-      const res = await apiFetch<QuickSearchResponse>(
-        `/api/search/quick?q=${encodeURIComponent(q)}`,
-      )
-      if (my === seq) data.value = res
+      const { $heya } = useNuxtApp()
+      const res = await $heya('/api/search/quick', { query: { q } })
+      if (my === seq) data.value = res as unknown as QuickSearchResponse
     } catch (e: any) {
       if (my === seq) error.value = e?.message || 'Search failed'
     } finally {
@@ -141,11 +140,10 @@ export async function fetchSearch<T = any>(
   limit = 60,
   offset = 0,
 ): Promise<SearchBucket<T> | T[]> {
-  const params = new URLSearchParams({ q })
-  if (type) params.set('type', type)
-  params.set('limit', String(limit))
-  params.set('offset', String(offset))
-  return apiFetch(`/api/search?${params.toString()}`)
+  const { $heya } = useNuxtApp()
+  return $heya('/api/search', {
+    query: { q, type: type || undefined, limit, offset } as any,
+  }) as unknown as Promise<SearchBucket<T> | T[]>
 }
 
 export function personImageUrl(personId: number) {

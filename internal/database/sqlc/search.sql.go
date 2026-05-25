@@ -12,7 +12,7 @@ import (
 )
 
 const searchAlbums = `-- name: SearchAlbums :many
-SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector,
+SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector, a.catalog_no, a.explicit, a.original_title, a.secondary_types, a.styles, a.language, a.duration_seconds, a.isrcs, a.rating, a.popularity, a.listeners, a.playcount, a.external_ids, a.artist_credits,
        mi.id AS artist_media_item_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug
@@ -62,6 +62,20 @@ type SearchAlbumsRow struct {
 	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
 	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
 	SearchVector       interface{}        `json:"search_vector"`
+	CatalogNo          string             `json:"catalog_no"`
+	Explicit           bool               `json:"explicit"`
+	OriginalTitle      string             `json:"original_title"`
+	SecondaryTypes     []string           `json:"secondary_types"`
+	Styles             []string           `json:"styles"`
+	Language           string             `json:"language"`
+	DurationSeconds    int32              `json:"duration_seconds"`
+	Isrcs              []string           `json:"isrcs"`
+	Rating             pgtype.Numeric     `json:"rating"`
+	Popularity         int32              `json:"popularity"`
+	Listeners          int64              `json:"listeners"`
+	Playcount          int64              `json:"playcount"`
+	ExternalIds        []byte             `json:"external_ids"`
+	ArtistCredits      []byte             `json:"artist_credits"`
 	ArtistMediaItemID  int64              `json:"artist_media_item_id"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
@@ -98,6 +112,20 @@ func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]S
 			&i.LoudnessRangeDb,
 			&i.LoudnessAnalyzedAt,
 			&i.SearchVector,
+			&i.CatalogNo,
+			&i.Explicit,
+			&i.OriginalTitle,
+			&i.SecondaryTypes,
+			&i.Styles,
+			&i.Language,
+			&i.DurationSeconds,
+			&i.Isrcs,
+			&i.Rating,
+			&i.Popularity,
+			&i.Listeners,
+			&i.Playcount,
+			&i.ExternalIds,
+			&i.ArtistCredits,
 			&i.ArtistMediaItemID,
 			&i.ArtistName,
 			&i.ArtistSlug,
@@ -502,7 +530,7 @@ func (q *Queries) SearchPeopleCount(ctx context.Context, lower string) (int64, e
 }
 
 const searchTracks = `-- name: SearchTracks :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id,
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits,
        a.title AS album_title,
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
@@ -544,6 +572,12 @@ type SearchTracksRow struct {
 	LyricsPath        string      `json:"lyrics_path"`
 	SearchVector      interface{} `json:"search_vector"`
 	LibraryFileID     pgtype.Int8 `json:"library_file_id"`
+	ExternalIds       []byte      `json:"external_ids"`
+	Isrc              string      `json:"isrc"`
+	RecordingMbid     string      `json:"recording_mbid"`
+	PreviewUrl        string      `json:"preview_url"`
+	Explicit          bool        `json:"explicit"`
+	ArtistCredits     []byte      `json:"artist_credits"`
 	AlbumTitle        string      `json:"album_title"`
 	AlbumCoverPath    string      `json:"album_cover_path"`
 	ArtistMediaItemID int64       `json:"artist_media_item_id"`
@@ -571,6 +605,12 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.LyricsPath,
 			&i.SearchVector,
 			&i.LibraryFileID,
+			&i.ExternalIds,
+			&i.Isrc,
+			&i.RecordingMbid,
+			&i.PreviewUrl,
+			&i.Explicit,
+			&i.ArtistCredits,
 			&i.AlbumTitle,
 			&i.AlbumCoverPath,
 			&i.ArtistMediaItemID,

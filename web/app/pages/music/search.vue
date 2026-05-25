@@ -26,7 +26,7 @@
         class="ss-row card-tile"
         @click="playRow(row, i)"
       >
-        <Poster :idx="row.id" :src="null" aspect="1/1" class="ss-art" />
+        <Poster :idx="row.id" :src="useAlbumCoverUrl(row.album_id)" aspect="1/1" class="ss-art" />
         <div class="ss-meta">
           <div class="ss-rtitle">{{ row.title }}</div>
           <div class="ss-rsub">match {{ ((1 - row.distance) * 100).toFixed(0) }}%</div>
@@ -70,9 +70,10 @@ async function runSearch() {
   loading.value = true
   error.value = null
   try {
-    const res = await apiFetch<{ items: SonicTrackResult[] }>(
-      `/api/music/search-sonic?q=${encodeURIComponent(trimmed)}&limit=24`,
-    )
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/music/search-sonic', {
+      query: { q: trimmed, limit: 24 },
+    }) as { items: SonicTrackResult[] }
     results.value = res.items ?? []
   } catch (e: any) {
     error.value = e?.data?.error ?? 'Search failed (analyzer model may still be loading).'

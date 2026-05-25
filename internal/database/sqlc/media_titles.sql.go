@@ -48,7 +48,18 @@ func (q *Queries) DeleteMediaTitlesByItem(ctx context.Context, mediaItemID int64
 
 const getMediaTitleByLanguage = `-- name: GetMediaTitleByLanguage :one
 SELECT id, media_item_id, title, language, country, title_type, source FROM media_titles
-WHERE media_item_id = $1 AND language = $2 AND title_type = 'official'
+WHERE media_item_id = $1
+  AND (language = $2 OR language LIKE $2 || '-%')
+ORDER BY
+  CASE WHEN language = $2 THEN 0 ELSE 1 END,
+  CASE title_type
+    WHEN 'official' THEN 0
+    WHEN 'original' THEN 1
+    WHEN 'romanized' THEN 2
+    WHEN 'alternative' THEN 3
+    ELSE 4
+  END,
+  id
 LIMIT 1
 `
 
@@ -57,6 +68,14 @@ type GetMediaTitleByLanguageParams struct {
 	Language    string `json:"language"`
 }
 
+// Pick the best matching title for a (item, language) pair:
+//   - Prefer an exact language match (en = en) over a locale-variant
+//     match (en matches en-US / en-GB) — handled in the ORDER BY.
+//   - Prefer official > original > romanized > alternative > anything —
+//     heya.media tags anime English titles as 'alternative' / 'romanized'
+//     rather than 'official', so a strict title_type='official' filter
+//     would miss them entirely and the UI would fall back to the raw
+//     canonical Japanese title.
 func (q *Queries) GetMediaTitleByLanguage(ctx context.Context, arg GetMediaTitleByLanguageParams) (MediaTitle, error) {
 	row := q.db.QueryRow(ctx, getMediaTitleByLanguage, arg.MediaItemID, arg.Language)
 	var i MediaTitle

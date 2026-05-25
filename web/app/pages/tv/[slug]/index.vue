@@ -590,7 +590,10 @@ function playFirstEpisode() {
 async function loadUpNext() {
   if (!detail.value) return
   try {
-    upNext.value = await apiFetch<UpNextData>(`/api/media/${detail.value.media_item.id}/up-next`)
+    const { $heya } = useNuxtApp()
+    upNext.value = await $heya('/api/media/{id}/up-next', {
+      path: { id: detail.value.media_item.id as any },
+    }) as UpNextData
   } catch { /* empty */ }
 }
 
@@ -599,10 +602,11 @@ const isFavorited = ref(false)
 
 async function toggleFavorite() {
   if (!detail.value) return
-  const res = await apiFetch<{ favorited: boolean }>('/api/me/favorites', {
+  const { $heya } = useNuxtApp()
+  const res = await $heya('/api/me/favorites', {
     method: 'POST',
-    body: JSON.stringify({ entity_type: 'media_item', entity_id: detail.value.media_item.id }),
-  })
+    body: { entity_type: 'media_item', entity_id: detail.value.media_item.id } as any,
+  }) as { favorited: boolean }
   isFavorited.value = res.favorited
 }
 
@@ -622,10 +626,11 @@ const seasonFavorites = ref<Set<number>>(new Set())
 function isSeasonFavorited(s: any) { return seasonFavorites.value.has(s.id) }
 
 async function toggleSeasonFavorite(s: any) {
-  const res = await apiFetch<{ favorited: boolean }>('/api/me/favorites', {
+  const { $heya } = useNuxtApp()
+  const res = await $heya('/api/me/favorites', {
     method: 'POST',
-    body: JSON.stringify({ entity_type: 'season', entity_id: s.id }),
-  })
+    body: { entity_type: 'season', entity_id: s.id } as any,
+  }) as { favorited: boolean }
   if (res.favorited) seasonFavorites.value.add(s.id)
   else seasonFavorites.value.delete(s.id)
 }
@@ -660,13 +665,23 @@ function seasonFullyWatched(s: any): boolean {
 
 async function toggleSeasonWatched(s: any) {
   const watched = seasonFullyWatched(s)
-  await apiFetch(`/api/me/watched/season/${s.id}`, { method: 'POST', body: JSON.stringify({ watched: !watched }) })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/watched/season/{id}', {
+    method: 'POST',
+    path: { id: s.id },
+    body: { watched: !watched } as any,
+  })
   await loadState()
 }
 
 async function toggleShowWatched() {
   if (!detail.value) return
-  await apiFetch(`/api/me/watched/media/${detail.value.media_item.id}`, { method: 'POST', body: JSON.stringify({ watched: !showFullyWatched.value }) })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/watched/media/{id}', {
+    method: 'POST',
+    path: { id: detail.value.media_item.id },
+    body: { watched: !showFullyWatched.value } as any,
+  })
   await loadState()
 }
 
@@ -680,13 +695,20 @@ const userLists = ref<any[]>([])
 async function loadLists() {
   if (!detail.value) return
   try {
-    userLists.value = await apiFetch<any[]>(`/api/me/lists?media_item_id=${detail.value.media_item.id}`)
+    const { $heya } = useNuxtApp()
+    userLists.value = await $heya('/api/me/lists', {
+      query: { media_item_id: detail.value.media_item.id },
+    }) as any[]
   } catch { /* empty */ }
 }
 
 async function createList() {
   if (!newListName.value.trim()) return
-  await apiFetch('/api/me/lists', { method: 'POST', body: JSON.stringify({ name: newListName.value.trim(), description: newListDesc.value.trim() }) })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/lists', {
+    method: 'POST',
+    body: { name: newListName.value.trim(), description: newListDesc.value.trim() } as any,
+  })
   newListName.value = ''
   newListDesc.value = ''
   showCreateList.value = false
@@ -695,10 +717,18 @@ async function createList() {
 
 async function toggleListItem(l: any) {
   if (!detail.value) return
+  const { $heya } = useNuxtApp()
   if (l.contains) {
-    await apiFetch(`/api/me/lists/${l.id}/items/${detail.value.media_item.id}`, { method: 'DELETE' })
+    await $heya('/api/me/lists/{id}/items/{media_id}', {
+      method: 'DELETE',
+      path: { id: l.id, media_id: detail.value.media_item.id },
+    })
   } else {
-    await apiFetch(`/api/me/lists/${l.id}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: detail.value.media_item.id }) })
+    await $heya('/api/me/lists/{id}/items', {
+      method: 'POST',
+      path: { id: l.id },
+      body: { media_item_id: detail.value.media_item.id } as any,
+    })
   }
   await loadLists()
 }
@@ -729,7 +759,10 @@ function formatYear(d: string) { return d?.slice(0, 4) || '' }
 
 onMounted(async () => {
   try {
-    detail.value = await apiFetch<MediaDetail>(`/api/media/${slug.value}`)
+    const { $heya } = useNuxtApp()
+    detail.value = await $heya('/api/media/{id}', {
+      path: { id: slug.value as any },
+    }) as MediaDetail
     await nextTick()
     backdropA.value = getBackdropUrl(0)
     backdropB.value = getBackdropUrl(0)

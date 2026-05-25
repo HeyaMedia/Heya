@@ -13,7 +13,13 @@ var (
 )
 
 func Generate(title, year string) string {
-	s := strings.ToLower(title)
+	// Romanize any Japanese text first so kana/kanji titles produce
+	// readable slugs instead of getting stripped to "untitled" by the
+	// non-alphanumeric filter. Mixed-script titles keep their Latin
+	// parts untouched — Transliterate is a no-op when no Japanese
+	// characters are present.
+	s := Transliterate(title)
+	s = strings.ToLower(s)
 	s = nonAlphaNum.ReplaceAllString(s, "-")
 	s = leadTrail.ReplaceAllString(s, "")
 	if s == "" {

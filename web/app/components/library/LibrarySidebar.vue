@@ -126,13 +126,18 @@ async function createList() {
   const name = prompt('List name:')
   if (!name?.trim()) return
   try {
-    await apiFetch('/api/me/lists', { method: 'POST', body: JSON.stringify({ name: name.trim() }) })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/me/lists', {
+      method: 'POST',
+      body: { name: name.trim() } as any,
+    })
   } catch { /* empty */ }
 }
 
 async function loadCollections() {
   try {
-    tmdbCollections.value = await apiFetch<CollectionBrowse[]>('/api/collections/browse')
+    const { $heya } = useNuxtApp()
+    tmdbCollections.value = await $heya('/api/collections/browse') as CollectionBrowse[]
   } catch { /* empty */ }
 }
 

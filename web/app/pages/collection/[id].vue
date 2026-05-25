@@ -68,7 +68,8 @@ const loading = ref(true)
 
 onMounted(async () => {
   try {
-    const res = await apiFetch<{ collection: CollectionDetail; movies: MediaItem[] }>(`/api/collections/${id.value}`)
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/collections/{id}', { path: { id: Number(id.value) } }) as { collection: CollectionDetail; movies: MediaItem[] }
     collection.value = res.collection
     movies.value = res.movies || []
   } catch { /* empty */ }

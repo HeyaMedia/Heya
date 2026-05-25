@@ -248,7 +248,8 @@ function formatSize(mb: number | undefined) {
 
 async function loadStatus() {
   try {
-    status.value = await apiFetch<TranscodeStatus>('/api/transcode/status')
+    const { $heya } = useNuxtApp()
+    status.value = await $heya('/api/transcode/status') as TranscodeStatus
     form.hwAccel = status.value.config_mode || 'auto'
     form.cacheMaxGB = status.value.cache_max_gb || 50
   } catch {}
@@ -258,13 +259,13 @@ async function saveSettings() {
   saving.value = true
   saved.value = false
   try {
-    await apiFetch('/api/transcode/settings', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/transcode/settings', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: {
         hw_accel: form.hwAccel,
         cache_max_gb: form.cacheMaxGB,
-      }),
+      } as any,
     })
     dirty.value = false
     saved.value = true
@@ -276,7 +277,8 @@ async function saveSettings() {
 async function clearCache() {
   clearing.value = true
   try {
-    await apiFetch('/api/transcode/cache', { method: 'DELETE' })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/transcode/cache', { method: 'DELETE' })
     await loadStatus()
   } catch {}
   clearing.value = false

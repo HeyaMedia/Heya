@@ -30,12 +30,14 @@ definePageMeta({ layout: 'default' })
 
 interface LovedArtistRow extends MusicArtistRow { loved_at: string }
 
-const { data, pending } = useApi<MusicListPage<LovedArtistRow>>('/api/me/loved/artists?limit=500')
+const myArtistsRes = await useHeya('/api/me/loved/artists', { query: { limit: 500 } })
+const data = myArtistsRes.data as unknown as Ref<MusicListPage<LovedArtistRow> | null>
+const pending = myArtistsRes.pending
 const rows = computed(() => data.value?.items ?? [])
 
-function artistPosterUrl(a: MusicArtistRow): string | null {
-  return a.poster_path ? `/api/media/${a.media_item_id}/image/poster` : null
-}
+// See MusicHome.vue — endpoint falls back through media_assets when
+// media_items.poster_path is empty.
+const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl(a.media_item_id)
 </script>
 
 <style scoped>

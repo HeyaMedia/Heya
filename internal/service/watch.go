@@ -37,12 +37,28 @@ func (a *App) UpdateWatchProgress(ctx context.Context, userID int64, entityType 
 
 func (a *App) ListContinueWatching(ctx context.Context, userID int64) ([]sqlc.ListContinueWatchingRow, error) {
 	q := sqlc.New(a.db)
-	return q.ListContinueWatching(ctx, userID)
+	rows, err := q.ListContinueWatching(ctx, userID)
+	if err != nil {
+		return rows, err
+	}
+	resolveTitle := a.preferredTitleResolver(ctx, q)
+	for i := range rows {
+		rows[i].Title = resolveTitle(rows[i].MediaItemID, rows[i].LibraryID, rows[i].Title)
+	}
+	return rows, nil
 }
 
 func (a *App) ListRecentlyWatched(ctx context.Context, userID int64) ([]sqlc.ListRecentlyWatchedRow, error) {
 	q := sqlc.New(a.db)
-	return q.ListRecentlyWatched(ctx, userID)
+	rows, err := q.ListRecentlyWatched(ctx, userID)
+	if err != nil {
+		return rows, err
+	}
+	resolveTitle := a.preferredTitleResolver(ctx, q)
+	for i := range rows {
+		rows[i].Title = resolveTitle(rows[i].MediaItemID, rows[i].LibraryID, rows[i].Title)
+	}
+	return rows, nil
 }
 
 func (a *App) ToggleFavorite(ctx context.Context, userID, mediaItemID int64) error {

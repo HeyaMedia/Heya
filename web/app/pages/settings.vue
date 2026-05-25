@@ -197,7 +197,6 @@ const tabs = [
 
 .settings-page {
   padding: 32px 48px 80px;
-  max-width: 960px;
 }
 
 @media (max-width: 1100px) {

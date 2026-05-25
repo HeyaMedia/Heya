@@ -1,0 +1,165 @@
+<template>
+  <section v-if="items.length" class="content-row">
+    <div class="section-row-head">
+      <div>
+        <h2 class="section-title-lg">Up Next</h2>
+        <div class="row-subtitle">Pick up where you left off</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <button class="scroll-btn" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-btn" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
+      </div>
+    </div>
+    <div class="row-scroll" ref="scrollEl">
+      <div
+        v-for="(item, i) in items"
+        :key="item.id"
+        class="un-tile"
+        :style="{ width: '168px' }"
+      >
+        <!-- Poster: clicking plays the next episode directly -->
+        <button
+          class="un-poster"
+          :aria-label="`Play ${item.title} ${item.episode_label}`"
+          @click="$emit('play', item)"
+        >
+          <Poster
+            :idx="i"
+            :src="usePosterUrl(item.id)"
+            :title="item.title"
+            :aspect="'2/3'"
+          />
+          <div class="un-play-overlay">
+            <div class="un-play-btn"><Icon name="play" :size="18" /></div>
+          </div>
+        </button>
+        <div class="un-meta">
+          <!-- Series title: link to the series page -->
+          <NuxtLink :to="seriesUrl(item)" class="un-title">{{ item.title }}</NuxtLink>
+          <!-- Episode line: link to the episode page -->
+          <NuxtLink :to="episodeUrl(item)" class="un-sub">{{ item.episode_label }}</NuxtLink>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<script setup lang="ts">
+export interface UpNextItem {
+  id: number
+  title: string
+  slug: string
+  season_number: number
+  episode_number: number
+  episode_label: string
+  play_file_id: number
+}
+
+defineProps<{ items: UpNextItem[] }>()
+defineEmits<{ play: [item: UpNextItem] }>()
+
+const scrollEl = ref<HTMLElement>()
+
+function scrollBy(dir: number) {
+  if (!scrollEl.value) return
+  scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
+}
+
+function seriesUrl(item: UpNextItem) {
+  return `/tv/${item.slug}`
+}
+
+function episodeUrl(item: UpNextItem) {
+  return `/tv/${item.slug}/season/${item.season_number}/episode/${item.episode_number}`
+}
+</script>
+
+<style scoped>
+.content-row { margin-bottom: 40px; }
+.row-subtitle {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  margin-top: 2px;
+  letter-spacing: 0.04em;
+}
+
+.row-scroll {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.row-scroll::-webkit-scrollbar { display: none; }
+.row-scroll > * { scroll-snap-align: start; }
+
+.scroll-btn {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  color: var(--fg-2); transition: all 0.15s;
+}
+.scroll-btn:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
+
+.un-tile { flex-shrink: 0; }
+
+.un-poster {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: transparent;
+  cursor: pointer;
+}
+.un-play-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.35);
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.un-poster:hover .un-play-overlay,
+.un-poster:focus-visible .un-play-overlay { opacity: 1; }
+.un-play-btn {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: rgba(255,255,255,0.18);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+}
+
+.un-meta {
+  padding: 8px 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.un-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-0);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.un-title:hover { color: var(--gold); }
+.un-sub {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.un-sub:hover { color: var(--fg-1); }
+</style>

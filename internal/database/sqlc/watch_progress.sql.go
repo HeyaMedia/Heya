@@ -122,6 +122,7 @@ func (q *Queries) IsEpisodeWatched(ctx context.Context, arg IsEpisodeWatchedPara
 const listContinueWatching = `-- name: ListContinueWatching :many
 SELECT wp.id, wp.entity_type, wp.entity_id, wp.progress_seconds, wp.total_seconds, wp.updated_at,
        COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
        COALESCE(mi.title, ep_mi.title) AS title,
        COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
        COALESCE(mi.slug, ep_mi.slug) AS slug,
@@ -148,6 +149,7 @@ type ListContinueWatchingRow struct {
 	TotalSeconds    int32              `json:"total_seconds"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	MediaItemID     int64              `json:"media_item_id"`
+	LibraryID       int64              `json:"library_id"`
 	Title           string             `json:"title"`
 	PosterPath      string             `json:"poster_path"`
 	Slug            string             `json:"slug"`
@@ -175,6 +177,7 @@ func (q *Queries) ListContinueWatching(ctx context.Context, userID int64) ([]Lis
 			&i.TotalSeconds,
 			&i.UpdatedAt,
 			&i.MediaItemID,
+			&i.LibraryID,
 			&i.Title,
 			&i.PosterPath,
 			&i.Slug,
@@ -298,6 +301,7 @@ const listRecentlyWatched = `-- name: ListRecentlyWatched :many
 SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
        wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
        COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
        COALESCE(mi.title, ep_mi.title) AS title,
        COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
        COALESCE(mi.slug, ep_mi.slug) AS slug,
@@ -319,6 +323,7 @@ type ListRecentlyWatchedRow struct {
 	EntityID    int64              `json:"entity_id"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	MediaItemID int64              `json:"media_item_id"`
+	LibraryID   int64              `json:"library_id"`
 	Title       string             `json:"title"`
 	PosterPath  string             `json:"poster_path"`
 	Slug        string             `json:"slug"`
@@ -341,6 +346,7 @@ func (q *Queries) ListRecentlyWatched(ctx context.Context, userID int64) ([]List
 			&i.EntityID,
 			&i.UpdatedAt,
 			&i.MediaItemID,
+			&i.LibraryID,
 			&i.Title,
 			&i.PosterPath,
 			&i.Slug,

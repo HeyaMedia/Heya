@@ -373,9 +373,11 @@ const contentExpanded = ref(false)
 const isFavorited = ref(false)
 async function toggleFavorite() {
   if (!detail.value) return
-  const res = await apiFetch<{ favorited: boolean }>('/api/me/favorites', {
-    method: 'POST', body: JSON.stringify({ entity_type: 'media_item', entity_id: detail.value.media_item.id }),
-  })
+  const { $heya } = useNuxtApp()
+  const res = await $heya('/api/me/favorites', {
+    method: 'POST',
+    body: { entity_type: 'media_item', entity_id: detail.value.media_item.id } as any,
+  }) as { favorited: boolean }
   isFavorited.value = res.favorited
 }
 
@@ -383,7 +385,12 @@ async function toggleFavorite() {
 const isWatched = ref(false)
 async function toggleWatched() {
   if (!detail.value) return
-  await apiFetch(`/api/me/watched/media/${detail.value.media_item.id}`, { method: 'POST', body: JSON.stringify({ watched: !isWatched.value }) })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/watched/media/{id}', {
+    method: 'POST',
+    path: { id: detail.value.media_item.id },
+    body: { watched: !isWatched.value } as any,
+  })
   isWatched.value = !isWatched.value
 }
 
@@ -397,18 +404,38 @@ const userLists = ref<any[]>([])
 
 async function loadLists() {
   if (!detail.value) return
-  try { userLists.value = await apiFetch<any[]>(`/api/me/lists?media_item_id=${detail.value.media_item.id}`) } catch { /* empty */ }
+  try {
+    const { $heya } = useNuxtApp()
+    userLists.value = await $heya('/api/me/lists', {
+      query: { media_item_id: detail.value.media_item.id },
+    }) as any[]
+  } catch { /* empty */ }
 }
 async function createList() {
   if (!newListName.value.trim()) return
-  await apiFetch('/api/me/lists', { method: 'POST', body: JSON.stringify({ name: newListName.value.trim(), description: newListDesc.value.trim() }) })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/lists', {
+    method: 'POST',
+    body: { name: newListName.value.trim(), description: newListDesc.value.trim() } as any,
+  })
   newListName.value = ''; newListDesc.value = ''; showCreateList.value = false
   await loadLists()
 }
 async function toggleListItem(l: any) {
   if (!detail.value) return
-  if (l.contains) { await apiFetch(`/api/me/lists/${l.id}/items/${detail.value.media_item.id}`, { method: 'DELETE' }) }
-  else { await apiFetch(`/api/me/lists/${l.id}/items`, { method: 'POST', body: JSON.stringify({ media_item_id: detail.value.media_item.id }) }) }
+  const { $heya } = useNuxtApp()
+  if (l.contains) {
+    await $heya('/api/me/lists/{id}/items/{media_id}', {
+      method: 'DELETE',
+      path: { id: l.id, media_id: detail.value.media_item.id },
+    })
+  } else {
+    await $heya('/api/me/lists/{id}/items', {
+      method: 'POST',
+      path: { id: l.id },
+      body: { media_item_id: detail.value.media_item.id } as any,
+    })
+  }
   await loadLists()
 }
 watch(showListModal, (v) => { if (v) loadLists() })
@@ -650,8 +677,11 @@ function recPosterUrl(r: any): string {
 }
 
 onMounted(async () => {
+  const { $heya } = useNuxtApp()
   try {
-    detail.value = await apiFetch<MediaDetail>(`/api/media/${props.mediaId}`)
+    detail.value = await $heya('/api/media/{id}', {
+      path: { id: props.mediaId as any },
+    }) as MediaDetail
   } catch { /* empty */ }
   loading.value = false
 
@@ -666,7 +696,9 @@ onMounted(async () => {
   }
 
   if (detail.value) {
-    const res = await apiFetch<{ favorited: boolean }>(`/api/me/favorites/check?entity_type=media_item&entity_id=${detail.value.media_item.id}`)
+    const res = await $heya('/api/me/favorites/check', {
+      query: { entity_type: 'media_item', entity_id: detail.value.media_item.id },
+    }) as { favorited: boolean }
     isFavorited.value = res.favorited
   }
 })

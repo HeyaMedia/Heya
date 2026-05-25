@@ -13,7 +13,8 @@ const loading = ref(true)
 async function load() {
   loading.value = true
   try {
-    const detail = await apiFetch<MediaDetail>(`/api/media/${slug.value}`)
+    const { $heya } = useNuxtApp()
+    const detail = await $heya('/api/media/{id}', { path: { id: slug.value } }) as MediaDetail
     mediaId.value = detail.media_item.id
     mediaType.value = detail.media_item.media_type
   } catch {

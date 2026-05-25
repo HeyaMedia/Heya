@@ -1,6 +1,6 @@
 <template>
   <div class="scroll" style="height: 100%">
-    <HeroA :items="heroItems" :movies="movieDetails" />
+    <HeroA :items="heroItems" :movies="movieDetails" :play-info="heroPlayInfo" @play="onHeroPlay" />
 
     <div class="page-pad">
       <ContinueWatchingRow
@@ -9,11 +9,10 @@
         @play="onPlayContinue"
       />
 
-      <ContentRow
-        v-if="recentlyWatched.length"
-        title="Recently Watched"
-        :items="recentlyWatched"
-        @tile="(item) => navigateTo(mediaUrl(item))"
+      <UpNextRow
+        v-if="upNextItems.length"
+        :items="upNextItems"
+        @play="onPlayUpNext"
       />
 
       <ContentRow
@@ -43,7 +42,7 @@
 
       <ContentRow
         v-if="recentTV.length"
-        title="TV Shows"
+        title="Recently Added TV Shows"
         subtitle="Across all libraries"
         :items="recentTV"
         more="See all"
@@ -53,7 +52,8 @@
 
       <ContentRow
         v-if="recentMusic.length"
-        title="Music"
+        title="Recently Added Music"
+        subtitle="Across all libraries"
         :items="recentMusic"
         :aspect="'1/1'"
         :tile-width="168"
@@ -64,14 +64,13 @@
 
       <ContentRow
         v-if="recentBooks.length"
-        title="Books"
+        title="Recently Added Books"
+        subtitle="Across all libraries"
         :items="recentBooks"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @more="navigateTo('/books')"
       />
-
-      <ActivityFeed />
 
       <div v-if="!loading && !hasContent" class="empty-home">
         <h2>Welcome to Heya</h2>
@@ -88,14 +87,17 @@
 <script setup lang="ts">
 import type { MediaItem, MediaDetail, MediaType, Movie } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
+import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
+import type { UpNextItem } from '~/components/home/UpNextRow.vue'
 
 const recentMovies = ref<MediaItem[]>([])
 const recentTV = ref<MediaItem[]>([])
 const recentMusic = ref<MediaItem[]>([])
 const recentBooks = ref<MediaItem[]>([])
 const movieDetails = ref<Record<number, Movie>>({})
+const heroPlayInfo = ref<Record<number, HeroPlayInfo>>({})
 const continueWatching = ref<ContinueWatchingItem[]>([])
-const recentlyWatched = ref<MediaItem[]>([])
+const upNextItems = ref<UpNextItem[]>([])
 const favoriteItems = ref<MediaItem[]>([])
 const recommendedItems = ref<MediaItem[]>([])
 const loading = ref(true)
@@ -122,6 +124,7 @@ function onPlayContinue(item: ContinueWatchingItem) {
 }
 
 async function loadMedia() {
+  const { $heya } = useNuxtApp()
   // Type-specific feeds first so the cross-cutting endpoints below can dedupe
   // against them.
   const typeRefsTuple: [MediaType, Ref<MediaItem[]>][] = [
@@ -129,7 +132,7 @@ async function loadMedia() {
   ]
   await Promise.allSettled(typeRefsTuple.map(async ([t, target]) => {
     try {
-      target.value = await apiFetch<MediaItem[]>(`/api/media?type=${t}&limit=20`)
+      target.value = await $heya('/api/media', { query: { type: t, limit: 20 } }) as MediaItem[]
     } catch (e) {
       console.warn(`Failed to load ${t}:`, e)
     }
@@ -137,28 +140,67 @@ async function loadMedia() {
 
   // Cross-cutting personal data — keep as a typed 4-tuple so each result keeps
   // its own value shape after destructuring.
+  type RecentlyWatchedRow = {
+    media_item_id: number
+    title: string
+    poster_path: string
+    slug: string
+    media_type: string
+  }
   const [cwRes, rwRes, favRes, recRes] = await Promise.allSettled([
-    apiFetch<ContinueWatchingItem[]>('/api/me/watch/continue'),
-    apiFetch<{ media_item_id: number }[]>('/api/me/watch/recent'),
-    apiFetch<{ favorited: number[] }>('/api/me/state', {
+    $heya('/api/me/watch/continue') as Promise<ContinueWatchingItem[]>,
+    $heya('/api/me/watch/recent') as Promise<RecentlyWatchedRow[]>,
+    $heya('/api/me/state', {
       method: 'POST',
-      body: JSON.stringify({ scope: 'movies' }),
-    }),
-    apiFetch<{ local_media_item_id: number | null }[]>('/api/recommendations?limit=20'),
+      body: { scope: 'movies' } as any,
+    }) as Promise<{ favorited: number[] }>,
+    $heya('/api/recommendations', { query: { limit: 20 } }) as Promise<{ local_media_item_id: number | null }[]>,
   ])
 
   if (cwRes.status === 'fulfilled') {
     continueWatching.value = cwRes.value || []
   }
 
+  // Up Next: for each unique TV series the user has watch history on,
+  // resolve the next unwatched episode. We never show movies here — a
+  // completed movie has no "next" and Continue Watching already covers
+  // a partway-through movie.
   if (rwRes.status === 'fulfilled' && rwRes.value?.length) {
-    const rwItems = rwRes.value
-    const allMedia = [...recentMovies.value, ...recentTV.value]
-    const mediaMap = new Map(allMedia.map(m => [m.id, m]))
-    recentlyWatched.value = rwItems
-      .map(rw => mediaMap.get(rw.media_item_id))
-      .filter((m): m is MediaItem => !!m)
-      .slice(0, 20)
+    const tvSeries = new Map<number, RecentlyWatchedRow>()
+    for (const row of rwRes.value) {
+      if (row.media_type !== 'tv') continue
+      if (!tvSeries.has(row.media_item_id)) tvSeries.set(row.media_item_id, row)
+    }
+    const resolved = await Promise.allSettled(
+      Array.from(tvSeries.values()).map(async row => {
+        const up = await $heya('/api/media/{id}/up-next', { path: { id: row.media_item_id as any } }) as {
+          has_next: boolean; file_id?: number
+          season_number?: number; episode_number?: number; episode_title?: string
+        }
+        return { row, up }
+      })
+    )
+    const entries: UpNextItem[] = []
+    for (const r of resolved) {
+      if (r.status !== 'fulfilled') continue
+      const { row, up } = r.value
+      if (!up?.has_next || !up.file_id) continue
+      const sNum = up.season_number ?? 0
+      const eNum = up.episode_number ?? 0
+      const s = String(sNum).padStart(2, '0')
+      const e = String(eNum).padStart(2, '0')
+      const label = up.episode_title ? `S${s}E${e} · ${up.episode_title}` : `S${s}E${e}`
+      entries.push({
+        id: row.media_item_id,
+        title: row.title,
+        slug: row.slug,
+        season_number: sNum,
+        episode_number: eNum,
+        episode_label: label,
+        play_file_id: up.file_id,
+      })
+    }
+    upNextItems.value = entries.slice(0, 20)
   }
 
   if (favRes.status === 'fulfilled') {
@@ -178,16 +220,19 @@ async function loadMedia() {
       .filter((m): m is MediaItem => !!m)
     const existingIds = new Set([
       ...favoriteItems.value.map(m => m.id),
-      ...recentlyWatched.value.map(m => m.id),
+      ...upNextItems.value.map(m => m.id),
     ])
     recommendedItems.value = localRecs.filter(m => !existingIds.has(m.id)).slice(0, 20)
   }
 
   for (const item of heroItems.value) {
     try {
-      const detail = await apiFetch<MediaDetail>(`/api/media/${item.id}`)
+      // /api/media/{id} accepts slug or numeric ID — spec types id as string.
+      const detail = await $heya('/api/media/{id}', { path: { id: String(item.id) } }) as MediaDetail
       if (detail.movie) {
         movieDetails.value[item.id] = detail.movie
+        const fileId = detail.files?.[0]?.id ?? null
+        if (fileId) heroPlayInfo.value[item.id] = { fileId }
       } else if (detail.tv_series) {
         // Hero only reads a small subset (genres, rating, release_date) so a
         // minimal Movie-shaped projection is enough.
@@ -197,11 +242,48 @@ async function loadMedia() {
           rating: detail.tv_series.rating, release_date: detail.tv_series.first_air_date,
           original_title: '', original_language: '', budget: 0, revenue: 0,
         }
+        // Resolve next-unwatched episode separately so Play jumps straight
+        // into the show, matching the series page's "Play SXXEXX - Title"
+        // button verbatim.
+        try {
+          const up = await $heya('/api/media/{id}/up-next', { path: { id: item.id as any } }) as {
+            has_next: boolean; file_id?: number
+            season_number?: number; episode_number?: number; episode_title?: string
+          }
+          if (up?.has_next && up.file_id) {
+            const s = String(up.season_number ?? 0).padStart(2, '0')
+            const e = String(up.episode_number ?? 0).padStart(2, '0')
+            const base = `S${s}E${e}`
+            const label = up.episode_title ? `${base} - ${up.episode_title}` : base
+            heroPlayInfo.value[item.id] = { fileId: up.file_id, label }
+          }
+        } catch { /* empty */ }
       }
     } catch { /* empty */ }
   }
 
   loading.value = false
+}
+
+function onHeroPlay(item: MediaItem) {
+  const info = heroPlayInfo.value[item.id]
+  if (!info?.fileId) return
+  const titleSuffix = info.label ? ` - ${info.label}` : ''
+  const params = new URLSearchParams({
+    media_item_id: String(item.id),
+    title: `${item.title}${titleSuffix}`,
+  })
+  navigateTo(`/watch/${info.fileId}?${params}`)
+}
+
+function onPlayUpNext(entry: UpNextItem) {
+  const s = String(entry.season_number).padStart(2, '0')
+  const e = String(entry.episode_number).padStart(2, '0')
+  const params = new URLSearchParams({
+    media_item_id: String(entry.id),
+    title: `${entry.title} - S${s}E${e}`,
+  })
+  navigateTo(`/watch/${entry.play_file_id}?${params}`)
 }
 
 const { on } = useEventBus()
@@ -213,6 +295,7 @@ const typeRefs: Record<string, Ref<MediaItem[]>> = {
 onMounted(() => {
   loadMedia()
 
+  const { $heya } = useNuxtApp()
   const unsubs = [
     on('media.added', (event) => {
       const mt = (event.payload as { media_type?: string }).media_type
@@ -221,7 +304,7 @@ onMounted(() => {
       const existing = mediaRefreshTimers[mt]
       if (existing) clearTimeout(existing)
       mediaRefreshTimers[mt] = setTimeout(() => {
-        apiFetch<MediaItem[]>(`/api/media?type=${mt}&limit=20`)
+        ($heya('/api/media', { query: { type: mt as any, limit: 20 } }) as Promise<MediaItem[]>)
           .then(items => { target.value = items })
           .catch(() => {})
       }, 2000)
@@ -233,7 +316,7 @@ onMounted(() => {
       const existing = mediaRefreshTimers[mt]
       if (existing) clearTimeout(existing)
       mediaRefreshTimers[mt] = setTimeout(() => {
-        apiFetch<MediaItem[]>(`/api/media?type=${mt}&limit=20`)
+        ($heya('/api/media', { query: { type: mt as any, limit: 20 } }) as Promise<MediaItem[]>)
           .then(items => { target.value = items })
           .catch(() => {})
       }, 3000)

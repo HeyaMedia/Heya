@@ -19,9 +19,9 @@
     </div>
 
     <div class="hero-inner">
-      <div class="hero-poster">
+      <NuxtLink :to="mediaUrl(current)" class="hero-poster">
         <Poster :idx="currentIdx" :src="posterUrl" :aspect="'2/3'" />
-      </div>
+      </NuxtLink>
 
       <div class="hero-info">
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px">
@@ -29,7 +29,9 @@
           <span class="hero-counter">{{ String(currentIdx + 1).padStart(2, '0') }} / {{ String(items.length).padStart(2, '0') }}</span>
         </div>
 
-        <h1 class="hero-title">{{ current.title }}</h1>
+        <NuxtLink :to="mediaUrl(current)" class="hero-title-link">
+          <h1 class="hero-title">{{ current.title }}</h1>
+        </NuxtLink>
 
         <div class="hero-meta-row" v-if="current.year || movie?.runtime_minutes || movie?.rating">
           <span v-if="current.year">{{ current.year }}</span>
@@ -47,14 +49,18 @@
         </p>
 
         <div class="hero-actions">
-          <NuxtLink :to="mediaUrl(current)" class="btn btn-primary">
+          <button
+            class="btn btn-primary"
+            :disabled="!canPlayCurrent"
+            @click="$emit('play', current)"
+          >
             <Icon name="play" :size="16" />
-            Play
-          </NuxtLink>
-          <button class="btn btn-ghost">
-            <Icon name="plus" :size="16" />
-            Add to list
+            {{ playLabel }}
           </button>
+          <NuxtLink :to="mediaUrl(current)" class="btn btn-ghost">
+            <Icon name="info" :size="16" />
+            Details
+          </NuxtLink>
         </div>
 
         <div class="hero-dots" v-if="items.length > 1" @mouseenter="pauseHero" @mouseleave="resumeHero">
@@ -74,10 +80,23 @@
 <script setup lang="ts">
 import type { MediaItem, Movie } from '~~/shared/types'
 
+// playInfo: per-item playback hint resolved by the parent. Movies populate
+// fileId from detail.files[0]; TV populates fileId + label from /up-next.
+// When fileId is null the Play button stays disabled — the hero shouldn't
+// silently navigate to the detail page when the user explicitly asked to
+// play.
+export interface HeroPlayInfo {
+  fileId: number | null
+  label?: string
+}
+
 const props = defineProps<{
   items: MediaItem[]
   movies?: Record<number, Movie>
+  playInfo?: Record<number, HeroPlayInfo>
 }>()
+
+defineEmits<{ play: [item: MediaItem] }>()
 
 const INTERVAL = 7000
 const currentIdx = ref(0)
@@ -91,6 +110,15 @@ const bgB = ref<string | null>(null)
 const current = computed(() => (props.items[currentIdx.value] ?? props.items[0])!)
 const movie = computed(() => props.movies?.[current.value.id])
 const posterUrl = computed(() => current.value ? usePosterUrl(current.value.id) : null)
+
+const currentPlay = computed<HeroPlayInfo | undefined>(() => props.playInfo?.[current.value.id])
+const canPlayCurrent = computed(() => !!currentPlay.value?.fileId)
+const playLabel = computed(() => {
+  const info = currentPlay.value
+  if (!info) return 'Play'
+  if (info.label) return `Play ${info.label}`
+  return 'Play'
+})
 
 function getBackdropUrl(idx: number) {
   const item = props.items[idx]
@@ -143,12 +171,28 @@ function jumpHero(idx: number) {
   if (!heroPaused.value) startTimer()
 }
 
-onMounted(() => {
+function initBackdrops() {
+  showA.value = true
+  currentIdx.value = 0
   bgA.value = getBackdropUrl(0)
-  if (props.items.length > 1) {
-    bgB.value = getBackdropUrl(1)
-    startTimer()
-  }
+  bgB.value = props.items.length > 1 ? getBackdropUrl(1) : null
+}
+
+// items arrive async from the parent — bgA stays null if we only set it in
+// onMounted. Watch the first item id so we (re)initialize as soon as data lands.
+watch(
+  () => props.items[0]?.id,
+  (id) => {
+    if (!id) return
+    if (timeout) { clearTimeout(timeout); timeout = null }
+    initBackdrops()
+    if (props.items.length > 1 && !heroPaused.value) startTimer()
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  if (timeout) clearTimeout(timeout)
 })
 
 onUnmounted(() => {
@@ -198,7 +242,17 @@ onUnmounted(() => {
   box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
   border-radius: var(--r-md);
   overflow: hidden;
+  display: block;
+  transition: transform 0.2s ease;
 }
+.hero-poster:hover { transform: translateY(-2px); }
+.hero-title-link {
+  color: inherit;
+  text-decoration: none;
+  display: inline-block;
+}
+.hero-title-link:hover .hero-title { color: var(--gold); }
+.hero-title { transition: color 0.15s ease; }
 .hero-info {
   display: flex;
   flex-direction: column;

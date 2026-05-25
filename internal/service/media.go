@@ -33,6 +33,11 @@ type EpisodeFileEntry struct {
 }
 
 // ListMedia returns media items of the given type with availability flags.
+// Each item's Title is overlaid with the localized variant matching its
+// library's PreferredLanguage when one is configured — so the rails on the
+// home page and library views show e.g. "Oshi No Ko" instead of the raw
+// canonical title when the library is set to English. Falls back to en,
+// then to the raw title.
 func (a *App) ListMedia(ctx context.Context, mediaType sqlc.MediaType, limit, offset int32) ([]MediaItemView, error) {
 	q := sqlc.New(a.db)
 
@@ -51,8 +56,10 @@ func (a *App) ListMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 		unavailable[id] = true
 	}
 
+	resolveTitle := a.preferredTitleResolver(ctx, q)
 	views := make([]MediaItemView, len(items))
 	for i, item := range items {
+		item.Title = resolveTitle(item.ID, item.LibraryID, item.Title)
 		views[i] = MediaItemView{
 			MediaItem: item,
 			Available: !unavailable[item.ID],
@@ -60,6 +67,36 @@ func (a *App) ListMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 	}
 
 	return views, nil
+}
+
+// preferredTitleResolver returns a closure that overlays the library's
+// PreferredLanguage title on a (mediaItemID, libraryID) pair, falling back
+// to English and then the supplied raw title. Library settings are cached
+// for the closure's lifetime so a batch of items (a list page, a rail) only
+// hits the libraries table once per distinct library.
+func (a *App) preferredTitleResolver(ctx context.Context, q *sqlc.Queries) func(mediaItemID, libraryID int64, fallback string) string {
+	libLang := map[int64]string{}
+	return func(mediaItemID, libraryID int64, fallback string) string {
+		lang, cached := libLang[libraryID]
+		if !cached {
+			if lib, err := q.GetLibraryByID(ctx, libraryID); err == nil {
+				lang = metadata.ParseSettings(lib.Settings).PreferredLanguage
+			}
+			libLang[libraryID] = lang
+		}
+		if lang == "" {
+			return fallback
+		}
+		if t, err := q.GetMediaTitleByLanguage(ctx, sqlc.GetMediaTitleByLanguageParams{MediaItemID: mediaItemID, Language: lang}); err == nil && t.Title != "" {
+			return t.Title
+		}
+		if lang != "en" {
+			if t, err := q.GetMediaTitleByLanguage(ctx, sqlc.GetMediaTitleByLanguageParams{MediaItemID: mediaItemID, Language: "en"}); err == nil && t.Title != "" {
+				return t.Title
+			}
+		}
+		return fallback
+	}
 }
 
 // GetMediaItem resolves a media item by numeric ID or slug string.
@@ -584,6 +621,23 @@ func (a *App) GetPersonImagePath(ctx context.Context, personID int64) (string, b
 		return "", false
 	}
 	return person.ProfilePath, true
+}
+
+// GetAlbumCover returns the album's cover, distinguishing local files from
+// upstream URLs so the HTTP handler can decide between serving bytes
+// directly or 302'ing the client. The third return is true when `path` is
+// an external URL (heya.media / Deezer / etc.) and false when it's a local
+// file path the handler should open + stream.
+func (a *App) GetAlbumCover(ctx context.Context, albumID int64) (path string, remote bool, ok bool) {
+	q := sqlc.New(a.db)
+	album, err := q.GetAlbumByID(ctx, albumID)
+	if err != nil || album.CoverPath == "" {
+		return "", false, false
+	}
+	if strings.HasPrefix(album.CoverPath, "http://") || strings.HasPrefix(album.CoverPath, "https://") {
+		return album.CoverPath, true, true
+	}
+	return album.CoverPath, false, true
 }
 
 // GetStudioLogoName resolves the production company name for logo lookup.

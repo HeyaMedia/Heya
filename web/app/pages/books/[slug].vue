@@ -9,7 +9,8 @@ const loading = ref(true)
 
 onMounted(async () => {
   try {
-    const detail = await apiFetch<MediaDetail>(`/api/media/${slug.value}`)
+    const { $heya } = useNuxtApp()
+    const detail = await $heya('/api/media/{id}', { path: { id: slug.value } }) as MediaDetail
     mediaId.value = detail.media_item.id
   } catch {
     navigateTo('/books')

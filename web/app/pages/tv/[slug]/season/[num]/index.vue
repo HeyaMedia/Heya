@@ -166,11 +166,18 @@ function isSeasonWatched(s: any) {
 
 async function toggleEpisodeWatched(ep: any) {
   const watched = isWatched(ep.id)
+  const { $heya } = useNuxtApp()
   if (watched) {
-    await apiFetch(`/api/me/watched/episode/${ep.id}`, { method: 'DELETE' })
+    await $heya('/api/me/watched/episode/{id}', {
+      method: 'DELETE',
+      path: { id: ep.id },
+    })
     watchedEpisodes.value.delete(ep.id)
   } else {
-    await apiFetch(`/api/me/watched/episode/${ep.id}`, { method: 'POST' })
+    await $heya('/api/me/watched/episode/{id}', {
+      method: 'POST',
+      path: { id: ep.id },
+    })
     watchedEpisodes.value.add(ep.id)
   }
 }
@@ -178,17 +185,23 @@ async function toggleEpisodeWatched(ep: any) {
 async function toggleSeasonWatched() {
   if (!season.value) return
   const s = season.value as any
-  await apiFetch(`/api/me/watched/season/${s.id}`, { method: 'POST', body: JSON.stringify({ watched: !allWatched.value }) })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/watched/season/{id}', {
+    method: 'POST',
+    path: { id: s.id },
+    body: { watched: !allWatched.value } as any,
+  })
   await loadWatchState()
 }
 
 async function toggleFavorite() {
   if (!season.value) return
   const s = season.value as any
-  const res = await apiFetch<{ favorited: boolean }>('/api/me/favorites', {
+  const { $heya } = useNuxtApp()
+  const res = await $heya('/api/me/favorites', {
     method: 'POST',
-    body: JSON.stringify({ entity_type: 'season', entity_id: s.id }),
-  })
+    body: { entity_type: 'season', entity_id: s.id } as any,
+  }) as { favorited: boolean }
   seasonFavorited.value = res.favorited
 }
 
@@ -262,7 +275,10 @@ function formatYear(d: string) { return d?.slice(0, 4) || '' }
 
 onMounted(async () => {
   try {
-    detail.value = await apiFetch<MediaDetail>(`/api/media/${slug.value}`)
+    const { $heya } = useNuxtApp()
+    detail.value = await $heya('/api/media/{id}', {
+      path: { id: slug.value as any },
+    }) as MediaDetail
     await loadWatchState()
   } catch { navigateTo('/tv') }
   loading.value = false
@@ -272,7 +288,10 @@ watch(numParam, async () => {
   await loadWatchState()
   if (season.value) {
     const s = season.value as any
-    const res = await apiFetch<{ favorited: boolean }>(`/api/me/favorites/check?entity_type=season&entity_id=${s.id}`)
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/me/favorites/check', {
+      query: { entity_type: 'season', entity_id: s.id },
+    }) as { favorited: boolean }
     seasonFavorited.value = res.favorited
   }
 })

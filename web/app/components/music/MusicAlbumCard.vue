@@ -77,7 +77,7 @@ const { currentTrack, formatTime } = usePlayer()
 
 const expanded = ref(false)
 
-const coverUrl = computed(() => props.album.cover_path || null)
+const coverUrl = computed(() => useAlbumCoverUrl(props.album.id))
 
 const albumHref = computed(() => {
   if (!props.album.slug) return ''

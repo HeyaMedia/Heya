@@ -60,9 +60,11 @@ async function fetchGenre(reset = true) {
     total.value = 0
   }
   const offset = reset ? 0 : items.value.length
-  const res = await apiFetch<{ genre: string; items: MediaItem[]; total: number }>(
-    `/api/genres/${encodeURIComponent(name.value)}?limit=${PAGE_SIZE}&offset=${offset}`
-  )
+  const { $heya } = useNuxtApp()
+  const res = await $heya('/api/genres/{name}', {
+    path: { name: name.value },
+    query: { limit: PAGE_SIZE, offset },
+  }) as { genre: string; items: MediaItem[]; total: number }
   if (reset) {
     items.value = res.items || []
   } else {

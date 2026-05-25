@@ -201,9 +201,11 @@ async function openFindModal(type: string) {
   findResults.value = []
   findProviderFilter.value = 'all'
   try {
-    const res = await apiFetch<{ results: ArtworkSearchResult[] }>(
-      `/api/media/${props.mediaId}/assets/search?type=${type}`
-    )
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/media/{id}/assets/search', {
+      path: { id: props.mediaId },
+      query: { type: type as any },
+    }) as { results: ArtworkSearchResult[] }
     findResults.value = res.results || []
   } catch { findResults.value = [] }
   findLoading.value = false
@@ -211,7 +213,11 @@ async function openFindModal(type: string) {
 
 async function setPrimary(asset: any) {
   try {
-    await apiFetch(`/api/media/${props.mediaId}/assets/${asset.id}/primary`, { method: 'PUT' })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/media/{id}/assets/{asset_id}/primary', {
+      method: 'PUT',
+      path: { id: props.mediaId, asset_id: asset.id },
+    })
     emit('refresh')
   } catch { /* empty */ }
 }
@@ -219,16 +225,22 @@ async function setPrimary(asset: any) {
 async function deleteAsset(asset: any) {
   if (!confirm('Delete this image?')) return
   try {
-    await apiFetch(`/api/media/${props.mediaId}/assets/${asset.id}`, { method: 'DELETE' })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/media/{id}/assets/{asset_id}', {
+      method: 'DELETE',
+      path: { id: props.mediaId, asset_id: asset.id },
+    })
     emit('refresh')
   } catch { /* empty */ }
 }
 
 async function downloadArt(art: ArtworkSearchResult) {
   try {
-    await apiFetch(`/api/media/${props.mediaId}/assets/download`, {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/media/{id}/assets/download', {
       method: 'POST',
-      body: JSON.stringify({ url: art.url, asset_type: art.asset_type || findModalType.value }),
+      path: { id: props.mediaId },
+      body: { url: art.url, asset_type: art.asset_type || findModalType.value } as any,
     })
     emit('refresh')
   } catch { /* empty */ }
@@ -243,11 +255,14 @@ async function uploadFile(e: Event) {
   form.append('file', file)
   form.append('asset_type', 'poster')
 
+  // Multipart upload — stays on raw $fetch. $heya / openapi-fetch insist on
+  // JSON bodies, and the spec doesn't model the multipart shape anyway.
   try {
-    await apiFetch(`/api/media/${props.mediaId}/assets/upload`, {
+    const { token } = useAuth()
+    await $fetch(`/api/media/${props.mediaId}/assets/upload`, {
       method: 'POST',
       body: form,
-      headers: {},
+      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
     })
     emit('refresh')
   } catch { /* empty */ }

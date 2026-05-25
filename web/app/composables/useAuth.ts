@@ -1,3 +1,11 @@
+// Bearer-token auth backed by the typed `$heya` openFetch client.
+//
+// Why login/register call $fetch directly instead of $heya: those endpoints run
+// *before* a token exists, but plugins/heyaApi.client.ts still attaches the
+// `Authorization` header on every $heya call. That's harmless for /login &
+// /register (header is empty), but the openFetch path also runs the global 401
+// handler — and a wrong-password login is a 401 we want to surface, not a
+// forced logout. Easier to keep these two on plain $fetch.
 import type { User, AuthResponse } from '~~/shared/types'
 
 const TOKEN_KEY = 'heya_token'
@@ -42,10 +50,8 @@ export function useAuth() {
   async function fetchUser() {
     if (!token.value) return
     try {
-      const data = await $fetch<User>('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token.value}` },
-      })
-      user.value = data
+      const { $heya } = useNuxtApp()
+      user.value = await $heya('/api/auth/me')
     } catch {
       logout()
     }
@@ -53,10 +59,8 @@ export function useAuth() {
 
   function logout() {
     if (token.value) {
-      $fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token.value}` },
-      }).catch(() => {})
+      const { $heya } = useNuxtApp()
+      $heya('/api/auth/logout', { method: 'POST' }).catch(() => {})
     }
     token.value = null
     user.value = null

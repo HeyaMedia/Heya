@@ -204,11 +204,18 @@ function episodeStillUrl(ep: any) {
 
 async function toggleWatched() {
   if (!episode.value) return
+  const { $heya } = useNuxtApp()
   if (watched.value) {
-    await apiFetch(`/api/me/watched/episode/${episode.value.id}`, { method: 'DELETE' })
+    await $heya('/api/me/watched/episode/{id}', {
+      method: 'DELETE',
+      path: { id: episode.value.id },
+    })
     watchedEpisodes.value.delete(episode.value.id)
   } else {
-    await apiFetch(`/api/me/watched/episode/${episode.value.id}`, { method: 'POST' })
+    await $heya('/api/me/watched/episode/{id}', {
+      method: 'POST',
+      path: { id: episode.value.id },
+    })
     watchedEpisodes.value.add(episode.value.id)
   }
 }
@@ -248,13 +255,19 @@ async function loadStreamInfo() {
     const caps = useClientCaps()
     const capsQuery = capsToQueryString(caps)
     const url = `/api/stream/${fileId.value}/info${capsQuery ? `?${capsQuery}` : ''}`
-    streamInfo.value = await apiFetch<StreamInfoResponse>(url)
+    const token = useAuth().token.value
+    streamInfo.value = await $fetch<StreamInfoResponse>(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
   } catch {}
 }
 
 onMounted(async () => {
   try {
-    detail.value = await apiFetch<MediaDetail>(`/api/media/${slug.value}`)
+    const { $heya } = useNuxtApp()
+    detail.value = await $heya('/api/media/{id}', {
+      path: { id: slug.value as any },
+    }) as MediaDetail
     await Promise.all([loadWatchState(), loadStreamInfo()])
   } catch { navigateTo(`/tv/${slug.value}`) }
   loading.value = false

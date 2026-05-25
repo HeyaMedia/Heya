@@ -7,7 +7,9 @@ const id = parseInt(route.params.id as string, 10)
 onMounted(async () => {
   if (isNaN(id)) { navigateTo('/'); return }
   try {
-    const detail = await apiFetch<MediaDetail>(`/api/media/${id}`)
+    const { $heya } = useNuxtApp()
+    // Spec types `id` as `string` because the endpoint accepts slug or numeric ID.
+    const detail = await $heya('/api/media/{id}', { path: { id: String(id) } }) as MediaDetail
     const url = mediaUrl(detail.media_item)
     navigateTo(url, { replace: true })
   } catch {

@@ -11,7 +11,7 @@
         class="grid-tile card-tile"
         style="text-decoration: none; color: inherit"
       >
-        <Poster :idx="al.id" :src="al.cover_path || null" aspect="1/1" />
+        <Poster :idx="al.id" :src="useAlbumCoverUrl(al.id)" aspect="1/1" />
         <div class="grid-tile-meta">
           <div class="grid-tile-title">{{ al.title }}</div>
           <div class="grid-tile-sub">{{ al.artist_name }}{{ al.year ? ' · ' + al.year : '' }}</div>
@@ -26,7 +26,9 @@ import type { MusicAlbumRow, MusicListPage } from '~~/shared/types'
 
 definePageMeta({ layout: 'default' })
 
-const { data, pending } = useApi<MusicListPage<MusicAlbumRow>>('/api/music/albums?limit=500')
+const albumsRes = await useHeya('/api/music/albums', { query: { limit: 500 } })
+const data = albumsRes.data as unknown as Ref<MusicListPage<MusicAlbumRow> | null>
+const pending = albumsRes.pending
 const rows = computed(() => data.value?.items ?? [])
 </script>
 

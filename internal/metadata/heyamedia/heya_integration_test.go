@@ -26,7 +26,7 @@ func skipIfHeyaDown(t *testing.T) {
 		t.Skip("HEYA_MEDIA_URL not set — skipping heya.media integration tests")
 	}
 	c := &http.Client{Timeout: 2 * time.Second}
-	resp, err := c.Get(u + "/api/v1/health")
+	resp, err := c.Get(u + "/api/v1/health/live")
 	if err != nil || resp.StatusCode != 200 {
 		t.Skip("heya media server not reachable at " + u)
 	}

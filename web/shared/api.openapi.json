@@ -67,6 +67,10 @@
           "album_type": {
             "type": "string"
           },
+          "artist_credits": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "artist_id": {
             "format": "int64",
             "type": "integer"
@@ -74,10 +78,24 @@
           "barcode": {
             "type": "string"
           },
+          "catalog_no": {
+            "type": "string"
+          },
           "country": {
             "type": "string"
           },
           "cover_path": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "explicit": {
+            "type": "boolean"
+          },
+          "external_ids": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "genres": {
@@ -96,8 +114,24 @@
           "integrated_lufs": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "isrcs": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "label": {
             "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "listeners": {
+            "format": "int64",
+            "type": "integer"
           },
           "loudness_analyzed_at": {
             "$ref": "#/components/schemas/Timestamptz"
@@ -108,12 +142,44 @@
           "musicbrainz_id": {
             "type": "string"
           },
+          "original_title": {
+            "type": "string"
+          },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Numeric"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
           "search_vector": {},
+          "secondary_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "slug": {
             "type": "string"
+          },
+          "styles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "tags": {
             "items": {
@@ -163,7 +229,21 @@
           "true_peak_db",
           "loudness_range_db",
           "loudness_analyzed_at",
-          "search_vector"
+          "search_vector",
+          "catalog_no",
+          "explicit",
+          "original_title",
+          "secondary_types",
+          "styles",
+          "language",
+          "duration_seconds",
+          "isrcs",
+          "rating",
+          "popularity",
+          "listeners",
+          "playcount",
+          "external_ids",
+          "artist_credits"
         ],
         "type": "object"
       },
@@ -199,11 +279,39 @@
       "Artist": {
         "additionalProperties": false,
         "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "annotation": {
+            "type": "string"
+          },
+          "artist_type": {
+            "type": "string"
+          },
+          "begin_date": {
+            "type": "string"
+          },
+          "begin_year": {
+            "format": "int32",
+            "type": "integer"
+          },
           "biography": {
+            "type": "string"
+          },
+          "birthplace": {
             "type": "string"
           },
           "cover_art_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
+          },
+          "deathday": {
+            "type": "string"
           },
           "disambiguation": {
             "type": "string"
@@ -211,7 +319,21 @@
           "discography_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "end_date": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "groups": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners": {
             "format": "int64",
             "type": "integer"
           },
@@ -219,14 +341,47 @@
             "format": "int64",
             "type": "integer"
           },
+          "members": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
           "name": {
             "type": "string"
           },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "profiles": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "search_vector": {},
           "sort_name": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "urls": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "wikipedia_links": {
+            "contentEncoding": "base64",
             "type": "string"
           }
         },
@@ -240,7 +395,25 @@
           "biography",
           "search_vector",
           "discography_enriched_at",
-          "cover_art_enriched_at"
+          "cover_art_enriched_at",
+          "listeners",
+          "playcount",
+          "popularity",
+          "annotation",
+          "urls",
+          "wikipedia_links",
+          "profiles",
+          "aliases",
+          "groups",
+          "members",
+          "artist_type",
+          "begin_date",
+          "begin_year",
+          "end_date",
+          "ended",
+          "deathday",
+          "birthplace",
+          "tags"
         ],
         "type": "object"
       },
@@ -2135,6 +2308,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "library_id": {
+            "format": "int64",
+            "type": "integer"
+          },
           "media_item_id": {
             "format": "int64",
             "type": "integer"
@@ -2174,6 +2351,7 @@
           "total_seconds",
           "updated_at",
           "media_item_id",
+          "library_id",
           "title",
           "poster_path",
           "slug",
@@ -2190,6 +2368,10 @@
           "album_type": {
             "type": "string"
           },
+          "artist_credits": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "artist_id": {
             "format": "int64",
             "type": "integer"
@@ -2203,10 +2385,24 @@
           "barcode": {
             "type": "string"
           },
+          "catalog_no": {
+            "type": "string"
+          },
           "country": {
             "type": "string"
           },
           "cover_path": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "explicit": {
+            "type": "boolean"
+          },
+          "external_ids": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "genres": {
@@ -2225,8 +2421,24 @@
           "integrated_lufs": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "isrcs": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "label": {
             "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "listeners": {
+            "format": "int64",
+            "type": "integer"
           },
           "loudness_analyzed_at": {
             "$ref": "#/components/schemas/Timestamptz"
@@ -2237,12 +2449,44 @@
           "musicbrainz_id": {
             "type": "string"
           },
+          "original_title": {
+            "type": "string"
+          },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Numeric"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
           "search_vector": {},
+          "secondary_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "slug": {
             "type": "string"
+          },
+          "styles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "tags": {
             "items": {
@@ -2297,6 +2541,20 @@
           "loudness_range_db",
           "loudness_analyzed_at",
           "search_vector",
+          "catalog_no",
+          "explicit",
+          "original_title",
+          "secondary_types",
+          "styles",
+          "language",
+          "duration_seconds",
+          "isrcs",
+          "rating",
+          "popularity",
+          "listeners",
+          "playcount",
+          "external_ids",
+          "artist_credits",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -2310,11 +2568,39 @@
             "format": "int64",
             "type": "integer"
           },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "annotation": {
+            "type": "string"
+          },
+          "artist_type": {
+            "type": "string"
+          },
+          "begin_date": {
+            "type": "string"
+          },
+          "begin_year": {
+            "format": "int32",
+            "type": "integer"
+          },
           "biography": {
+            "type": "string"
+          },
+          "birthplace": {
             "type": "string"
           },
           "cover_art_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
+          },
+          "deathday": {
+            "type": "string"
           },
           "disambiguation": {
             "type": "string"
@@ -2322,7 +2608,21 @@
           "discography_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "end_date": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "groups": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners": {
             "format": "int64",
             "type": "integer"
           },
@@ -2330,13 +2630,29 @@
             "format": "int64",
             "type": "integer"
           },
+          "members": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
           "name": {
             "type": "string"
           },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
           "poster_path": {
+            "type": "string"
+          },
+          "profiles": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "search_vector": {},
@@ -2346,9 +2662,26 @@
           "sort_name": {
             "type": "string"
           },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "track_count": {
             "format": "int64",
             "type": "integer"
+          },
+          "urls": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "wikipedia_links": {
+            "contentEncoding": "base64",
+            "type": "string"
           }
         },
         "required": [
@@ -2362,6 +2695,24 @@
           "search_vector",
           "discography_enriched_at",
           "cover_art_enriched_at",
+          "listeners",
+          "playcount",
+          "popularity",
+          "annotation",
+          "urls",
+          "wikipedia_links",
+          "profiles",
+          "aliases",
+          "groups",
+          "members",
+          "artist_type",
+          "begin_date",
+          "begin_year",
+          "end_date",
+          "ended",
+          "deathday",
+          "birthplace",
+          "tags",
           "slug",
           "poster_path",
           "album_count",
@@ -2512,6 +2863,10 @@
           "album_type": {
             "type": "string"
           },
+          "artist_credits": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "artist_id": {
             "format": "int64",
             "type": "integer"
@@ -2525,10 +2880,24 @@
           "barcode": {
             "type": "string"
           },
+          "catalog_no": {
+            "type": "string"
+          },
           "country": {
             "type": "string"
           },
           "cover_path": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "explicit": {
+            "type": "boolean"
+          },
+          "external_ids": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "genres": {
@@ -2547,8 +2916,24 @@
           "integrated_lufs": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "isrcs": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "label": {
             "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "listeners": {
+            "format": "int64",
+            "type": "integer"
           },
           "loudness_analyzed_at": {
             "$ref": "#/components/schemas/Timestamptz"
@@ -2559,12 +2944,44 @@
           "musicbrainz_id": {
             "type": "string"
           },
+          "original_title": {
+            "type": "string"
+          },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Numeric"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
           "search_vector": {},
+          "secondary_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "slug": {
             "type": "string"
+          },
+          "styles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "tags": {
             "items": {
@@ -2619,6 +3036,20 @@
           "loudness_range_db",
           "loudness_analyzed_at",
           "search_vector",
+          "catalog_no",
+          "explicit",
+          "original_title",
+          "secondary_types",
+          "styles",
+          "language",
+          "duration_seconds",
+          "isrcs",
+          "rating",
+          "popularity",
+          "listeners",
+          "playcount",
+          "external_ids",
+          "artist_credits",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -2632,11 +3063,39 @@
             "format": "int64",
             "type": "integer"
           },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "annotation": {
+            "type": "string"
+          },
+          "artist_type": {
+            "type": "string"
+          },
+          "begin_date": {
+            "type": "string"
+          },
+          "begin_year": {
+            "format": "int32",
+            "type": "integer"
+          },
           "biography": {
+            "type": "string"
+          },
+          "birthplace": {
             "type": "string"
           },
           "cover_art_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
+          },
+          "deathday": {
+            "type": "string"
           },
           "disambiguation": {
             "type": "string"
@@ -2644,7 +3103,21 @@
           "discography_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "end_date": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "groups": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners": {
             "format": "int64",
             "type": "integer"
           },
@@ -2652,13 +3125,29 @@
             "format": "int64",
             "type": "integer"
           },
+          "members": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
           "name": {
             "type": "string"
           },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
           "poster_path": {
+            "type": "string"
+          },
+          "profiles": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "search_vector": {},
@@ -2668,9 +3157,26 @@
           "sort_name": {
             "type": "string"
           },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "track_count": {
             "format": "int64",
             "type": "integer"
+          },
+          "urls": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "wikipedia_links": {
+            "contentEncoding": "base64",
+            "type": "string"
           }
         },
         "required": [
@@ -2684,6 +3190,24 @@
           "search_vector",
           "discography_enriched_at",
           "cover_art_enriched_at",
+          "listeners",
+          "playcount",
+          "popularity",
+          "annotation",
+          "urls",
+          "wikipedia_links",
+          "profiles",
+          "aliases",
+          "groups",
+          "members",
+          "artist_type",
+          "begin_date",
+          "begin_year",
+          "end_date",
+          "ended",
+          "deathday",
+          "birthplace",
+          "tags",
           "slug",
           "poster_path",
           "album_count",
@@ -2702,6 +3226,10 @@
             "type": "string"
           },
           "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "library_id": {
             "format": "int64",
             "type": "integer"
           },
@@ -2731,6 +3259,7 @@
           "entity_id",
           "updated_at",
           "media_item_id",
+          "library_id",
           "title",
           "poster_path",
           "slug",
@@ -2742,6 +3271,10 @@
         "additionalProperties": false,
         "properties": {
           "album_type": {
+            "type": "string"
+          },
+          "artist_credits": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "artist_id": {
@@ -2757,10 +3290,24 @@
           "barcode": {
             "type": "string"
           },
+          "catalog_no": {
+            "type": "string"
+          },
           "country": {
             "type": "string"
           },
           "cover_path": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "explicit": {
+            "type": "boolean"
+          },
+          "external_ids": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "genres": {
@@ -2779,8 +3326,24 @@
           "integrated_lufs": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "isrcs": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "label": {
             "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "listeners": {
+            "format": "int64",
+            "type": "integer"
           },
           "loudness_analyzed_at": {
             "$ref": "#/components/schemas/Timestamptz"
@@ -2794,12 +3357,44 @@
           "musicbrainz_id": {
             "type": "string"
           },
+          "original_title": {
+            "type": "string"
+          },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Numeric"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
           "search_vector": {},
+          "secondary_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "slug": {
             "type": "string"
+          },
+          "styles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "tags": {
             "items": {
@@ -2854,6 +3449,20 @@
           "loudness_range_db",
           "loudness_analyzed_at",
           "search_vector",
+          "catalog_no",
+          "explicit",
+          "original_title",
+          "secondary_types",
+          "styles",
+          "language",
+          "duration_seconds",
+          "isrcs",
+          "rating",
+          "popularity",
+          "listeners",
+          "playcount",
+          "external_ids",
+          "artist_credits",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -2868,11 +3477,39 @@
             "format": "int64",
             "type": "integer"
           },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "annotation": {
+            "type": "string"
+          },
+          "artist_type": {
+            "type": "string"
+          },
+          "begin_date": {
+            "type": "string"
+          },
+          "begin_year": {
+            "format": "int32",
+            "type": "integer"
+          },
           "biography": {
+            "type": "string"
+          },
+          "birthplace": {
             "type": "string"
           },
           "cover_art_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
+          },
+          "deathday": {
+            "type": "string"
           },
           "disambiguation": {
             "type": "string"
@@ -2880,7 +3517,21 @@
           "discography_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "end_date": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "groups": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners": {
             "format": "int64",
             "type": "integer"
           },
@@ -2891,13 +3542,29 @@
             "format": "int64",
             "type": "integer"
           },
+          "members": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
           "name": {
             "type": "string"
           },
+          "playcount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "popularity": {
+            "format": "int32",
+            "type": "integer"
+          },
           "poster_path": {
+            "type": "string"
+          },
+          "profiles": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "search_vector": {},
@@ -2907,9 +3574,26 @@
           "sort_name": {
             "type": "string"
           },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "track_count": {
             "format": "int64",
             "type": "integer"
+          },
+          "urls": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "wikipedia_links": {
+            "contentEncoding": "base64",
+            "type": "string"
           }
         },
         "required": [
@@ -2923,6 +3607,24 @@
           "search_vector",
           "discography_enriched_at",
           "cover_art_enriched_at",
+          "listeners",
+          "playcount",
+          "popularity",
+          "annotation",
+          "urls",
+          "wikipedia_links",
+          "profiles",
+          "aliases",
+          "groups",
+          "members",
+          "artist_type",
+          "begin_date",
+          "begin_year",
+          "end_date",
+          "ended",
+          "deathday",
+          "birthplace",
+          "tags",
           "slug",
           "poster_path",
           "album_count",
@@ -6217,6 +6919,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "artist_credits": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "disc_number": {
             "format": "int32",
             "type": "integer"
@@ -6224,6 +6930,13 @@
           "duration": {
             "format": "int32",
             "type": "integer"
+          },
+          "explicit": {
+            "type": "boolean"
+          },
+          "external_ids": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "file_path": {
             "type": "string"
@@ -6241,10 +6954,19 @@
             "format": "int64",
             "type": "integer"
           },
+          "isrc": {
+            "type": "string"
+          },
           "library_file_id": {
             "$ref": "#/components/schemas/Int8"
           },
           "lyrics_path": {
+            "type": "string"
+          },
+          "preview_url": {
+            "type": "string"
+          },
+          "recording_mbid": {
             "type": "string"
           },
           "search_vector": {},
@@ -6267,7 +6989,13 @@
           "file_path",
           "lyrics_path",
           "search_vector",
-          "library_file_id"
+          "library_file_id",
+          "external_ids",
+          "isrc",
+          "recording_mbid",
+          "preview_url",
+          "explicit",
+          "artist_credits"
         ],
         "type": "object"
       },
@@ -7796,6 +8524,33 @@
         "summary": "Sonic-analysis runtime status",
         "tags": [
           "Admin"
+        ]
+      }
+    },
+    "/api/albums/{id}/cover": {
+      "get": {
+        "operationId": "album-cover",
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Album cover bytes (local file or 302 to upstream URL)",
+        "tags": [
+          "Images"
         ]
       }
     },

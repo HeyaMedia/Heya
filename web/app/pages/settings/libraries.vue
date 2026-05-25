@@ -307,17 +307,26 @@ const hasAnyProgress = computed(() => Object.keys(scanProgress.value).length > 0
 async function scanAll() {
   scanningAll.value = true
   try {
-    await Promise.all(libraries.value.map(lib => apiFetch(`/api/libraries/${lib.id}/scan`, { method: 'POST' })))
+    const { $heya } = useNuxtApp()
+    await Promise.all(libraries.value.map(lib =>
+      $heya('/api/libraries/{id}/scan', { method: 'POST', path: { id: lib.id } }),
+    ))
   } catch {}
   scanningAll.value = false
 }
 
 async function cancelLib(id: number) {
-  try { await apiFetch(`/api/libraries/${id}/scan/cancel`, { method: 'POST' }) } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries/{id}/scan/cancel', { method: 'POST', path: { id } })
+  } catch {}
 }
 
 async function cancelAll() {
-  try { await apiFetch('/api/libraries/scan/cancel-all', { method: 'POST' }) } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries/scan/cancel-all', { method: 'POST' })
+  } catch {}
 }
 
 function defaultSettings(type: string): LibrarySettings {
@@ -362,9 +371,10 @@ async function addLibrary() {
   const paths = newLib.value.paths.filter(p => p.trim())
   if (!paths.length) { addError.value = 'At least one folder is required'; return }
   try {
-    await apiFetch('/api/libraries', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries', {
       method: 'POST',
-      body: JSON.stringify({ name: newLib.value.name, media_type: newLib.value.media_type, paths, settings: newLib.value.settings }),
+      body: { name: newLib.value.name, media_type: newLib.value.media_type, paths, settings: newLib.value.settings } as any,
     })
     showAdd.value = false
     await fetchLibraries()
@@ -394,20 +404,23 @@ async function saveSettings() {
   saving.value = true
   saveError.value = ''
   try {
+    const { $heya } = useNuxtApp()
     const paths = editPaths.value.filter(p => p.trim())
     // Skip the identity PUT entirely when paths are env-locked — backend
     // returns 409, but we may as well not ask.
     const pathsChanged = paths.length && paths.join(',') !== editLib.value.paths.join(',')
     if (pathsChanged && !editLib.value.sources?.paths) {
-      await apiFetch(`/api/libraries/${editLib.value.id}`, {
+      await $heya('/api/libraries/{id}', {
         method: 'PUT',
-        body: JSON.stringify({ name: editLib.value.name, paths }),
+        path: { id: editLib.value.id },
+        body: { name: editLib.value.name, paths } as any,
       })
     }
-    const updated = await apiFetch<Library>(`/api/libraries/${editLib.value.id}/settings`, {
+    const updated = await $heya('/api/libraries/{id}/settings', {
       method: 'PUT',
-      body: JSON.stringify(editSettings.value),
-    })
+      path: { id: editLib.value.id },
+      body: editSettings.value as any,
+    }) as Library
     const idx = libraries.value.findIndex(l => l.id === updated.id)
     if (idx >= 0) libraries.value[idx] = updated
     editLib.value = null
@@ -430,17 +443,26 @@ function toggleMore(id: number) {
 
 async function forceRefreshMetadata(id: number) {
   moreOpen.value = null
-  try { await apiFetch(`/api/libraries/${id}/refresh-metadata`, { method: 'POST' }) } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries/{id}/refresh-metadata', { method: 'POST', path: { id } })
+  } catch {}
 }
 
 async function forceRefreshImages(id: number) {
   moreOpen.value = null
-  try { await apiFetch(`/api/libraries/${id}/refresh-images`, { method: 'POST' }) } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries/{id}/refresh-images', { method: 'POST', path: { id } })
+  } catch {}
 }
 
 async function scanLib(id: number) {
   scanning.value = id
-  try { await apiFetch(`/api/libraries/${id}/scan`, { method: 'POST' }) } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries/{id}/scan', { method: 'POST', path: { id } })
+  } catch {}
   scanning.value = null
 }
 
@@ -461,13 +483,17 @@ async function deleteLib(lib: Library) {
   if (isEnvLocked(lib)) return
   if (!confirm('Delete this library and all its media data?')) return
   try {
-    await apiFetch(`/api/libraries/${lib.id}`, { method: 'DELETE' })
+    const { $heya } = useNuxtApp()
+    await $heya('/api/libraries/{id}', { method: 'DELETE', path: { id: lib.id } })
     libraries.value = libraries.value.filter(l => l.id !== lib.id)
   } catch {}
 }
 
 async function fetchLibraries() {
-  try { libraries.value = await apiFetch<Library[]>('/api/libraries') } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    libraries.value = await $heya('/api/libraries') as Library[]
+  } catch {}
 }
 
 onMounted(() => {

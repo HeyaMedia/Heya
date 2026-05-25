@@ -685,8 +685,35 @@ func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name stri
 	}
 	detail, _, err := m.heya.FetchByKindID(ctx, "artist", hit.ID)
 	if err != nil || detail == nil {
+		// heya.media has the artist in its search index (with an image
+		// URL) but no full enriched record yet — common for hits keyed
+		// on discogs/deezer when warm enrichment hasn't run. Synthesise
+		// a minimal MediaDetail so the caller can at least download the
+		// search-hit image; without this we'd throw away a perfectly
+		// good poster URL and the artist would stay imageless until
+		// heya.media's backend enriches it (which may never happen).
+		if hit.Image != "" {
+			log.Info().
+				Str("name", name).
+				Str("hit_id", hit.ID).
+				Err(err).
+				Msg("heya.media artist fetch failed; using search-hit image")
+			return &metadata.MediaDetail{
+				Title:       hit.Name,
+				ArtistName:  hit.Name,
+				PosterURL:   hit.Image,
+				HeyaSlug:    hit.Slug,
+				ExternalIDs: map[string]string{},
+			}
+		}
 		log.Debug().Err(err).Str("name", name).Str("hit_id", hit.ID).Msg("heya.media artist fetch failed")
 		return nil
+	}
+	// Detail came back but heya.media's payload may not include any
+	// artwork — fall back to the search-hit image so at least the poster
+	// is populated even when the warm enrichment payload is image-less.
+	if detail.PosterURL == "" && hit.Image != "" {
+		detail.PosterURL = hit.Image
 	}
 	log.Info().
 		Str("name", name).

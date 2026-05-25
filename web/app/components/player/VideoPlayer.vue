@@ -200,8 +200,9 @@ function autoSelectSubtitle(prefs: ReturnType<typeof playbackForLibrary>) {
 }
 
 async function init() {
+  const { $heya } = useNuxtApp()
   const entityPrefPromise = props.mediaItemId
-    ? apiFetch<PlaybackPreference>(`/api/me/playback/${props.mediaItemId}`).catch(() => null)
+    ? ($heya('/api/me/playback/{media_id}', { path: { media_id: props.mediaItemId } }) as Promise<PlaybackPreference>).catch(() => null)
     : Promise.resolve(null)
 
   await Promise.all([loadStreamInfo(), loadSettings(), entityPrefPromise])
@@ -247,9 +248,13 @@ async function init() {
   loadTrickplay(token.value!).catch(() => {})
 
   if (props.mediaItemId) {
-    apiFetch<UpNextData>(`/api/media/${props.mediaItemId}/up-next`).then(data => {
-      if (data?.has_next && data.file_id) upNext.value = data
-    }).catch(() => {})
+    // /api/media/{id} accepts slug or numeric ID — spec types id as string.
+    $heya('/api/media/{id}/up-next', { path: { id: props.mediaItemId } })
+      .then(data => {
+        const ud = data as UpNextData
+        if (ud?.has_next && ud.file_id) upNext.value = ud
+      })
+      .catch(() => {})
   }
 }
 

@@ -310,7 +310,10 @@ function searchPeople() {
   if (!personQuery.value.trim()) { personResults.value = []; return }
   personDebounce = setTimeout(async () => {
     try {
-      personResults.value = await apiFetch(`/api/people/search?q=${encodeURIComponent(personQuery.value)}&limit=8`)
+      const { $heya } = useNuxtApp()
+      personResults.value = await $heya('/api/people/search', {
+        query: { q: personQuery.value, limit: 8 },
+      }) as any
     } catch { personResults.value = [] }
   }, 200)
 }
@@ -339,7 +342,10 @@ function searchStudios() {
   if (!studioQuery.value.trim()) { studioResults.value = []; return }
   studioDebounce = setTimeout(async () => {
     try {
-      studioResults.value = await apiFetch(`/api/studios/search?q=${encodeURIComponent(studioQuery.value)}&limit=8`)
+      const { $heya } = useNuxtApp()
+      studioResults.value = await $heya('/api/studios/search', {
+        query: { q: studioQuery.value, limit: 8 },
+      }) as any
     } catch { studioResults.value = [] }
   }, 200)
 }

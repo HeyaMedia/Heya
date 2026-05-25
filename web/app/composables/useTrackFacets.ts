@@ -42,7 +42,8 @@ const waveformCache = new Map<number, number[] | null>()
 export async function fetchTrackFacets(trackId: number): Promise<TrackFacets | null> {
   if (facetsCache.has(trackId)) return facetsCache.get(trackId)!
   try {
-    const data = await apiFetch<TrackFacets>(`/api/tracks/${trackId}/facets`)
+    const { $heya } = useNuxtApp()
+    const data = await $heya('/api/tracks/{id}/facets', { path: { id: trackId } }) as TrackFacets
     facetsCache.set(trackId, data)
     return data
   } catch {
@@ -54,7 +55,8 @@ export async function fetchTrackFacets(trackId: number): Promise<TrackFacets | n
 export async function fetchTrackWaveform(trackId: number): Promise<number[] | null> {
   if (waveformCache.has(trackId)) return waveformCache.get(trackId)!
   try {
-    const data = await apiFetch<{ waveform: number[] }>(`/api/tracks/${trackId}/waveform`)
+    const { $heya } = useNuxtApp()
+    const data = await $heya('/api/tracks/{id}/waveform', { path: { id: trackId } }) as { waveform: number[] }
     const wf = data.waveform ?? null
     waveformCache.set(trackId, wf)
     return wf

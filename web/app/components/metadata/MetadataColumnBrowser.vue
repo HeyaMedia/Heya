@@ -123,7 +123,8 @@ async function toggleLib(id: number) {
   if (!libMedia.value[id]) {
     libLoading.value[id] = true
     try {
-      const items = await apiFetch<MediaItem[]>(`/api/libraries/${id}/media?limit=2000`)
+      const { $heya } = useNuxtApp()
+      const items = await $heya('/api/libraries/{id}/media', { path: { id }, query: { limit: 2000 } }) as MediaItem[]
       libMedia.value[id] = items
       libCounts.value[id] = items.length
     } catch { libMedia.value[id] = [] }
@@ -142,8 +143,9 @@ async function toggleItem(item: MediaItem) {
 
   if (!itemSeasons.value[item.id] && item.media_type === 'tv') {
     try {
-      const detail = await apiFetch<any>(`/api/media/${item.id}`)
-      itemSeasons.value[item.id] = detail.seasons || []
+      const { $heya } = useNuxtApp()
+      const detail = await $heya('/api/media/{id}', { path: { id: String(item.id) } }) as MediaDetail
+      itemSeasons.value[item.id] = (detail as any).seasons || []
     } catch { itemSeasons.value[item.id] = [] }
   }
 }
@@ -179,7 +181,8 @@ function clickEpisode(mediaId: number, episodeId: number) {
 
 onMounted(async () => {
   try {
-    libraries.value = await apiFetch<Library[]>('/api/libraries')
+    const { $heya } = useNuxtApp()
+    libraries.value = await $heya('/api/libraries') as Library[]
   } catch { /* empty */ }
   loadingLibs.value = false
 })

@@ -1,9 +1,10 @@
-// Hand-maintained types for FE-only shapes and legacy API responses that
-// haven't been migrated to the typed client yet.
+// Hand-maintained types for FE-only shapes (filter state, view models) and
+// API responses where the local shape diverges from the spec (pgtype objects
+// flattened to strings, etc.).
 //
-// For new code, prefer the auto-generated types in `./api.gen.ts` (regenerated
-// by `make gen-api-client` from the Go server's OpenAPI spec). The typed
-// client lives in `~/composables/useApiClient.ts`.
+// For API response types that match the spec, prefer importing from
+// `#open-fetch-schemas/heya` (`components['schemas']['Foo']`) instead of
+// re-declaring the shape here. See `pages/settings/server.vue` for an example.
 
 export interface User {
   id: number

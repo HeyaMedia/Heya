@@ -21,7 +21,8 @@ export function useConfigSources() {
   async function refresh() {
     loading.value = true
     try {
-      sources.value = await apiFetch<ConfigSourcesMap>('/api/config/sources')
+      const { $heya } = useNuxtApp()
+      sources.value = await $heya('/api/config/sources') as ConfigSourcesMap
       loaded.value = true
     } catch {
       sources.value = sources.value ?? {}

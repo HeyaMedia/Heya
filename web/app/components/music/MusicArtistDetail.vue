@@ -75,7 +75,7 @@
           class="discog-tile card-tile"
         >
           <div class="discog-art-wrap">
-            <Poster :idx="album.id" :src="album.cover_path || null" aspect="1/1" class="discog-art" />
+            <Poster :idx="album.id" :src="useAlbumCoverUrl(album.id)" aspect="1/1" class="discog-art" />
             <button class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
               <Icon name="play" :size="14" />
             </button>
@@ -239,7 +239,7 @@ function trackFromAlbum(album: AlbumView, t: TrackView): Track {
     stream_url: `/api/tracks/${t.id}/stream`,
     album_id: album.id,
     artist_id: artist.value?.id,
-    poster: album.cover_path || undefined,
+    poster: useAlbumCoverUrl(album.id) ?? undefined,
     integrated_lufs: primary?.integrated_lufs != null ? parseFloat(primary.integrated_lufs) : null,
     true_peak_db: primary?.true_peak_db != null ? parseFloat(primary.true_peak_db) : null,
   }
@@ -282,14 +282,19 @@ function formatDuration(seconds: number) {
 async function loadDetail() {
   loading.value = true
   try {
-    detail.value = await apiFetch<MediaDetail>(`/api/media/${props.mediaId}`)
+    const { $heya } = useNuxtApp()
+    // /api/media/{id} accepts slug or numeric ID — spec types id as string.
+    detail.value = await $heya('/api/media/{id}', { path: { id: String(props.mediaId) } }) as MediaDetail
     if (artist.value?.id) {
-      apiFetch<SimilarArtistRow[]>(`/api/music/artists/${artist.value.id}/similar`)
-        .then((rows) => { similar.value = rows ?? [] })
+      const artistId = artist.value.id
+      // Fire both off in parallel — they're cheap and the artist page is the
+      // hot path. Each promise swallows its own failure so a missing sonic
+      // index doesn't blow away the similar-artists list.
+      $heya('/api/music/artists/{id}/similar', { path: { id: artistId } })
+        .then((rows) => { similar.value = (rows as SimilarArtistRow[]) ?? [] })
         .catch(() => { similar.value = [] })
-      // Local sonic similarity — works only for analyzed artists.
-      apiFetch<{ items: SonicSimilarArtistRow[] }>(`/api/music/artists/${artist.value.id}/sonic-similar?limit=12`)
-        .then((res) => { sonicSimilar.value = res.items ?? [] })
+      $heya('/api/music/artists/{id}/sonic-similar', { path: { id: artistId }, query: { limit: 12 } })
+        .then((res) => { sonicSimilar.value = ((res as { items: SonicSimilarArtistRow[] }).items) ?? [] })
         .catch(() => { sonicSimilar.value = [] })
     }
   } catch {

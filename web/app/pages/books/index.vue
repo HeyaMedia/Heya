@@ -101,9 +101,10 @@ function formatDate(d: string) {
 }
 
 onMounted(async () => {
+  const { $heya } = useNuxtApp()
   const [mediaRes, libRes] = await Promise.allSettled([
-    apiFetch<MediaItem[]>('/api/media?type=book&limit=500'),
-    apiFetch<Library[]>('/api/libraries'),
+    $heya('/api/media', { query: { type: 'book', limit: 500 } }) as Promise<MediaItem[]>,
+    $heya('/api/libraries') as Promise<Library[]>,
   ])
   if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'book')

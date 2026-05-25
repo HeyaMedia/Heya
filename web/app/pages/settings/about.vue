@@ -124,7 +124,10 @@ import type { HealthResponse } from '~~/shared/types'
 const health = ref<HealthResponse | null>(null)
 
 onMounted(async () => {
-  try { health.value = await $fetch<HealthResponse>('/api/health') } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    health.value = await $heya('/api/health') as HealthResponse
+  } catch {}
 })
 </script>
 

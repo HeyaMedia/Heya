@@ -1,0 +1,44 @@
+# Source-of-truth files only — keep the build context lean so layer caching
+# and `docker build` upload times stay short.
+
+# Build outputs (regenerated in the image)
+bin/
+web/.nuxt/
+web/.output/
+web/dist/
+web/node_modules/
+
+# Local runtime data — never bake into the image
+data/
+fulldata/
+tmp/
+
+# VCS + CI metadata — not needed for compile
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Editor / tooling state
+.idea/
+.vscode/
+.air.toml
+.editorconfig
+
+# Local secrets / env (image reads HEYA_* at runtime via -e or docker-compose)
+.env
+.env.local
+.env.*.local
+
+# Docs + dev meta
+*.md
+docs/
+
+# Test fixtures + coverage
+coverage.out
+coverage.html
+testdata/
+
+# Logs and OS junk
+*.log
+.DS_Store

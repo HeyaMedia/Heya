@@ -162,7 +162,10 @@ watch(activeView, async (v) => {
       return
     }
     try {
-      const res = await apiFetch<{ items: any[] }>(`/api/me/lists/${listId}`)
+      const { $heya } = useNuxtApp()
+      const res = await $heya('/api/me/lists/{id}', {
+        path: { id: Number(listId) },
+      }) as { items: any[] }
       listItems.value = new Set((res.items || []).map((i: any) => i.id))
     } catch { listItems.value = new Set() }
   }
@@ -203,12 +206,13 @@ const sorted = computed(() => {
 
 async function onFiltersChange(f: FilterState) {
   filters.value = f
+  const { $heya } = useNuxtApp()
   if (f.personIds.length > 0) {
     try {
-      const ids: number[] = await apiFetch('/api/people/media-ids', {
+      const ids = await $heya('/api/people/media-ids', {
         method: 'POST',
-        body: JSON.stringify({ person_ids: f.personIds }),
-      })
+        body: { person_ids: f.personIds } as any,
+      }) as number[]
       personMediaIds.value = new Set(ids)
     } catch {
       // Fallback: search cast directly
@@ -219,10 +223,10 @@ async function onFiltersChange(f: FilterState) {
   }
   if (f.studioIds.length > 0) {
     try {
-      const ids: number[] = await apiFetch('/api/studios/media-ids', {
+      const ids = await $heya('/api/studios/media-ids', {
         method: 'POST',
-        body: JSON.stringify({ company_ids: f.studioIds }),
-      })
+        body: { company_ids: f.studioIds } as any,
+      }) as number[]
       studioMediaIds.value = new Set(ids)
     } catch {
       studioMediaIds.value = new Set()
@@ -233,15 +237,17 @@ async function onFiltersChange(f: FilterState) {
 }
 
 function openContextMenu(event: MouseEvent, item: EnrichedMediaItem) {
+  const { $heya } = useNuxtApp()
   showMenu(event, item, {
     watchedSet: watchedSet.value,
     favoritedSet: favoritedSet.value,
     userLists: userLists.value,
     onToggleWatched: async (id, watched) => {
       try {
-        await apiFetch(`/api/me/watched/media/${id}`, {
+        await $heya('/api/me/watched/media/{id}', {
           method: 'POST',
-          body: JSON.stringify({ watched }),
+          path: { id },
+          body: { watched } as any,
         })
         if (watched) watchedSet.value.add(id)
         else watchedSet.value.delete(id)
@@ -250,9 +256,9 @@ function openContextMenu(event: MouseEvent, item: EnrichedMediaItem) {
     },
     onToggleFavorite: async (id, favorited) => {
       try {
-        await apiFetch('/api/me/favorites', {
+        await $heya('/api/me/favorites', {
           method: 'POST',
-          body: JSON.stringify({ entity_type: 'media_item', entity_id: id }),
+          body: { entity_type: 'media_item', entity_id: id } as any,
         })
         if (favorited) favoritedSet.value.add(id)
         else favoritedSet.value.delete(id)
@@ -261,9 +267,10 @@ function openContextMenu(event: MouseEvent, item: EnrichedMediaItem) {
     },
     onAddToList: async (listId, mediaId) => {
       try {
-        await apiFetch(`/api/me/lists/${listId}/items`, {
+        await $heya('/api/me/lists/{id}/items', {
           method: 'POST',
-          body: JSON.stringify({ media_item_id: mediaId }),
+          path: { id: listId },
+          body: { media_item_id: mediaId } as any,
         })
       } catch { /* ignore */ }
     },
@@ -274,14 +281,15 @@ async function saveSmartList() {
   const name = prompt('Smart list name:')
   if (!name?.trim()) return
   try {
-    await apiFetch('/api/me/lists', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/me/lists', {
       method: 'POST',
-      body: JSON.stringify({
+      body: {
         name: name.trim(),
         list_type: 'smart',
         filter_json: filters.value,
         media_type: 'movie',
-      }),
+      } as any,
     })
     await loadLists()
   } catch { /* ignore */ }
@@ -289,7 +297,8 @@ async function saveSmartList() {
 
 async function loadLists() {
   try {
-    userLists.value = await apiFetch<UserList[]>('/api/me/lists')
+    const { $heya } = useNuxtApp()
+    userLists.value = await $heya('/api/me/lists') as UserList[]
   } catch { /* ignore */ }
 }
 
@@ -299,13 +308,16 @@ function formatDate(d: string) {
 }
 
 onMounted(async () => {
+  const { $heya } = useNuxtApp()
   const [mediaRes, libRes, stateRes, listsRes] = await Promise.allSettled([
-    apiFetch<EnrichedMediaItem[]>('/api/media/enriched?type=movie&limit=5000'),
-    apiFetch<Library[]>('/api/libraries'),
+    // /api/media/enriched wraps results in `{ movies, tv, type }` since the
+    // API rewrite — unwrap the relevant branch.
+    $heya('/api/media/enriched', { query: { type: 'movie', limit: 5000 } }) as Promise<{ movies: EnrichedMediaItem[] | null }>,
+    $heya('/api/libraries') as Promise<Library[]>,
     fetchUserState('movies'),
-    apiFetch<UserList[]>('/api/me/lists'),
+    $heya('/api/me/lists') as Promise<UserList[]>,
   ])
-  if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
+  if (mediaRes.status === 'fulfilled') items.value = mediaRes.value.movies ?? []
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'movie')
   if (stateRes.status === 'fulfilled') {
     favoritedSet.value = new Set(stateRes.value.favorited || [])

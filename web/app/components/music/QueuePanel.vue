@@ -92,7 +92,8 @@ async function loadLyrics(trackId: number | null | undefined) {
   lyricsLoading.value = true
   lyricRefs.value = []
   try {
-    lyrics.value = await apiFetch<LyricsResponse>(`/api/tracks/${trackId}/lyrics`)
+    const { $heya } = useNuxtApp()
+    lyrics.value = await $heya('/api/tracks/{id}/lyrics', { path: { id: trackId } }) as LyricsResponse
   } catch {
     lyrics.value = null
   } finally {

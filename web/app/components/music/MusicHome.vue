@@ -12,7 +12,7 @@
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="mh-mosaic-card card-tile"
       >
-        <Poster :idx="i" :src="al.cover_path || null" aspect="1/1" class="mh-mosaic-art" />
+        <Poster :idx="i" :src="useAlbumCoverUrl(al.id)" aspect="1/1" class="mh-mosaic-art" />
         <div class="mh-mosaic-info">
           <div class="mh-mosaic-title">{{ al.title }}</div>
           <div class="mh-mosaic-sub">{{ al.artist_name }}</div>
@@ -57,7 +57,7 @@
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="mh-album-tile card-tile"
       >
-        <Poster :idx="al.id" :src="al.cover_path || null" aspect="1/1" class="mh-album-art" />
+        <Poster :idx="al.id" :src="useAlbumCoverUrl(al.id)" aspect="1/1" class="mh-album-art" />
         <div class="mh-tile-meta">
           <div class="mh-tile-title">{{ al.title }}</div>
           <div class="mh-tile-sub">{{ al.artist_name }}{{ al.year ? ' · ' + al.year : '' }}</div>
@@ -82,7 +82,12 @@ interface HomeData {
   recent_albums: MusicAlbumRow[]
 }
 
-const { data, pending } = useApi<HomeData>('/api/music/home?limit=24')
+const homeRes = await useHeya('/api/music/home', { query: { limit: 24 } })
+// Spec-generated types are stricter than the hand-maintained MusicArtistRow /
+// MusicAlbumRow (e.g. pgtype.Timestamp vs string). Cast through `unknown`
+// since downstream consumers only touch the fields both shapes agree on.
+const data = homeRes.data as unknown as Ref<HomeData | null>
+const pending = homeRes.pending
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -93,17 +98,21 @@ const greeting = computed(() => {
 
 const mosaicAlbums = computed(() => (data.value?.recent_albums ?? []).slice(0, 6))
 
-function artistPosterUrl(a: MusicArtistRow): string | null {
-  return a.poster_path ? `/api/media/${a.media_item_id}/image/poster` : null
-}
+// Don't gate on a.poster_path — the /api/media/{id}/image/poster endpoint
+// falls back through media_assets when the column is empty (common for
+// freshly-scanned artists whose local-detector results landed in
+// media_assets but haven't been mirrored to media_items.poster_path yet).
+// Poster's imgError handler shows the gradient placeholder on 404.
+const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl(a.media_item_id)
 
 const { play, queue } = usePlayer()
 
 async function playAlbum(al: MusicAlbumRow) {
   try {
-    const detail = await apiFetch<{ tracks: { id: number; title: string; duration: number; files: { integrated_lufs: string | null; true_peak_db: string | null }[] }[] }>(
-      `/api/music/artists/${al.artist_slug}/albums/${al.slug}`,
-    )
+    const { $heya } = useNuxtApp()
+    const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
+      path: { artist_slug: al.artist_slug, album_slug: al.slug },
+    }) as { tracks: { id: number; title: string; duration: number; files: { integrated_lufs: string | null; true_peak_db: string | null }[] }[] }
     if (!detail.tracks.length) return
     const tracks: Track[] = detail.tracks.map((t) => {
       const primary = t.files[0]
@@ -115,7 +124,7 @@ async function playAlbum(al: MusicAlbumRow) {
         duration: t.duration,
         stream_url: `/api/tracks/${t.id}/stream`,
         album_id: al.id,
-        poster: al.cover_path || undefined,
+        poster: useAlbumCoverUrl(al.id) ?? undefined,
         integrated_lufs: primary?.integrated_lufs != null ? parseFloat(primary.integrated_lufs) : null,
         true_peak_db: primary?.true_peak_db != null ? parseFloat(primary.true_peak_db) : null,
       }

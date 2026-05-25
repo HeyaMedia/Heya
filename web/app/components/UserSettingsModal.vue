@@ -5,7 +5,8 @@ import type { PlaybackSettings, LibraryPlaybackOverride, UserSettingsData } from
 const emit = defineEmits<{ close: [] }>()
 
 const { settings, load, save } = useUserSettings()
-const { data: libraries } = await useApi<Library[]>('/api/libraries')
+const librariesRes = await useHeya('/api/libraries')
+const libraries = librariesRes.data as Ref<Library[] | null>
 
 await load()
 

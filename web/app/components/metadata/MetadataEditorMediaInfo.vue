@@ -163,7 +163,8 @@ function formatContainer(c: string): string {
 async function fetchFiles() {
   loading.value = true
   try {
-    const all = await apiFetch<FileInfo[]>(`/api/media/${props.mediaId}/files`)
+    const { $heya } = useNuxtApp()
+    const all = await $heya('/api/media/{id}/files', { path: { id: props.mediaId } }) as FileInfo[]
     if (props.fileId) {
       files.value = all.filter(f => f.id === props.fileId)
     } else {

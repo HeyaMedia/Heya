@@ -1,6 +1,11 @@
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev gen-api-client
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev gen-api-client gen-heyamedia-client docker docker-run
+
+# Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
+# bumps occasionally break field shapes and we want clients to match.
+OAPI_CODEGEN := github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1
+HEYAMEDIA_URL ?= https://heya.media
 
 build-frontend:
 	cd web && bun install && bun run build
@@ -51,7 +56,6 @@ db-reset: build-go
 	docker compose up -d postgres
 	@echo "Waiting for postgres..."
 	@sleep 2
-	./bin/heya user create --username admin --email admin@localhost --password admin --admin
 
 reset: build-go
 	docker compose down
@@ -59,7 +63,6 @@ reset: build-go
 	docker compose up -d postgres
 	@echo "Waiting for postgres..."
 	@sleep 2
-	./bin/heya user create --username admin --email admin@localhost --password admin --admin
 
 migrate:
 	goose -dir migrations postgres "$(DATABASE_URL)" up
@@ -67,9 +70,51 @@ migrate:
 migrate-down:
 	goose -dir migrations postgres "$(DATABASE_URL)" down
 
-# Regenerate the committed OpenAPI spec + typed TS client. Run any time you
-# add or change a `*_huma.go` handler. CI also runs this and fails on drift,
-# so a forgotten regen turns into a red build, not a silent skew.
+# Regenerate the committed OpenAPI spec. Run any time you add or change a
+# `*_huma.go` handler. CI also runs this and fails on drift, so a forgotten
+# regen turns into a red build, not a silent skew.
+#
+# The typed TS client (paths, components, $heya/useHeya) is generated from
+# this spec at Nuxt build time by `nuxt-open-fetch` — no separate FE codegen
+# step needed.
 gen-api-client:
 	go run ./cmd/heya openapi-spec --format json -o web/shared/api.openapi.json
-	cd web && bunx --bun openapi-typescript shared/api.openapi.json -o shared/types/api.gen.ts
+
+# Regenerate the typed Go client for the upstream heya.media metadata
+# server. The TS counterpart isn't wired — the FE only talks to Heya's
+# own API, which proxies heya.media server-side. If the FE ever needs
+# direct upstream types, add an `openapi-typescript` step here outputting
+# to a non-auto-imported path (Nuxt would otherwise hit duplicate-symbol
+# warnings with shared/types/api.gen.ts, which exports the same
+# openapi-typescript top-level names).
+#
+# Fetches the 3.0 spec directly from HEYAMEDIA_URL — oapi-codegen v2.4.x
+# needs 3.0; heya.media downgrades its 3.1 master server-side and exposes
+# both. Spec snapshot gets committed so the build is reproducible without
+# network. CI runs this + diffs to enforce regen-on-spec-bump.
+gen-heyamedia-client:
+	@command -v curl >/dev/null || { echo "curl is required"; exit 1; }
+	curl -fsSL "$(HEYAMEDIA_URL)/api/openapi-3.0.json" -o clients/heyamedia/openapi-3.0.json
+	go run $(OAPI_CODEGEN) \
+		-config clients/heyamedia/cfg.yaml \
+		clients/heyamedia/openapi-3.0.json
+
+# Build the production container locally. Multi-stage: bun frontend ->
+# go backend -> minideb runtime with jellyfin-ffmpeg + libonnxruntime.
+# Tag is `heya:dev` so it doesn't collide with whatever ghcr.io pulls
+# when you `docker pull` later.
+#
+# --platform=linux/amd64 because jellyfin-ffmpeg's apt repo only ships
+# amd64 .debs. On Apple Silicon this means QEMU emulation (slow), on
+# Linux amd64 it's a no-op. CI on GHCR runners matches natively.
+docker:
+	docker build --platform=linux/amd64 -t heya:dev .
+
+# Run the locally-built image against the docker-compose postgres on the
+# host. Bind-mounts ./data so the Tailscale state + transcode cache survive.
+docker-run:
+	docker run --rm -it \
+		-p 8080:8080 \
+		-v $(PWD)/data:/data \
+		-e HEYA_DATABASE_URL='postgres://heya:heya@host.docker.internal:5440/heya?sslmode=disable' \
+		heya:dev

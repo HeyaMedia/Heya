@@ -60,9 +60,11 @@ async function fetchKeyword(reset = true) {
     total.value = 0
   }
   const offset = reset ? 0 : items.value.length
-  const res = await apiFetch<{ keyword: string; items: MediaItem[]; total: number }>(
-    `/api/keywords/${encodeURIComponent(name.value)}?limit=${PAGE_SIZE}&offset=${offset}`
-  )
+  const { $heya } = useNuxtApp()
+  const res = await $heya('/api/keywords/{name}', {
+    path: { name: name.value },
+    query: { limit: PAGE_SIZE, offset },
+  }) as { keyword: string; items: MediaItem[]; total: number }
   if (reset) {
     items.value = res.items || []
   } else {

@@ -64,13 +64,20 @@ const loading = ref(true)
 async function confirmDelete() {
   if (!list.value) return
   if (!confirm(`Delete "${list.value.name}"? This cannot be undone.`)) return
-  await apiFetch(`/api/me/lists/${list.value.id}`, { method: 'DELETE' })
+  const { $heya } = useNuxtApp()
+  await $heya('/api/me/lists/{id}', {
+    method: 'DELETE',
+    path: { id: list.value.id },
+  })
   navigateTo('/')
 }
 
 onMounted(async () => {
   try {
-    const res = await apiFetch<{ list: UserList; items: MediaItem[] }>(`/api/me/lists/${listId.value}`)
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/me/lists/{id}', {
+      path: { id: Number(listId.value) },
+    }) as { list: UserList; items: MediaItem[] }
     list.value = res.list
     items.value = res.items || []
   } catch { /* empty */ }

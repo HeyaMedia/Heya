@@ -358,7 +358,8 @@ const manifestGroups = computed(() => {
 
 async function loadSettings() {
   try {
-    settings.value = await apiFetch<SonicSettings>('/api/admin/sonicanalysis/settings')
+    const { $heya } = useNuxtApp()
+    settings.value = await $heya('/api/admin/sonicanalysis/settings') as SonicSettings
   } catch {
     settings.value = {
       enabled: false,
@@ -373,11 +374,11 @@ async function toggleEnabled() {
   enableSaving.value = true
   const next = { ...settings.value, enabled: !settings.value.enabled }
   try {
-    await apiFetch('/api/admin/sonicanalysis/settings', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/admin/sonicanalysis/settings', {
       method: 'PUT',
       body: next as any,
-      headers: { 'Content-Type': 'application/json' },
-    } as any)
+    })
     settings.value = next
     // Refresh status to pick up the new fetcher state (the backend
     // kicks off a fetch on enable transitions).
@@ -403,7 +404,8 @@ const hiddenAccelerators = computed(() => {
 
 async function loadStatus() {
   try {
-    status.value = await apiFetch<SonicStatus>('/api/admin/sonicanalysis/status')
+    const { $heya } = useNuxtApp()
+    status.value = await $heya('/api/admin/sonicanalysis/status') as SonicStatus
     if (status.value?.fetcher?.state === 'fetching') {
       fetching.value = true
     } else if (status.value?.fetcher?.state === 'ready' && fetching.value) {
@@ -425,14 +427,11 @@ async function save() {
   saving.value = true
   saved.value = null
   try {
-    const res = await apiFetch<{ status: string; applied: boolean }>(
-      '/api/admin/sonicanalysis/settings',
-      {
-        method: 'PUT',
-        body: settings.value as any,
-        headers: { 'Content-Type': 'application/json' },
-      } as any,
-    )
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/admin/sonicanalysis/settings', {
+      method: 'PUT',
+      body: settings.value as any,
+    }) as { status: string; applied: boolean }
     saved.value = res.applied
       ? 'Saved & applied'
       : 'Saved (will apply at next idle — analyzer is busy)'
@@ -447,11 +446,11 @@ async function save() {
 async function triggerFetch() {
   fetching.value = true
   try {
-    await apiFetch('/api/admin/sonicanalysis/fetch', {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/admin/sonicanalysis/fetch', {
       method: 'POST',
-      body: {},
-      headers: { 'Content-Type': 'application/json' },
-    } as any)
+      body: {} as any,
+    })
   } catch {
     fetching.value = false
   }

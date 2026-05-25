@@ -85,7 +85,8 @@ function formatLogTime(t: string) {
 
 async function fetchLogs() {
   try {
-    const entries = await apiFetch<LogEntry[]>('/api/logs?n=500')
+    const { $heya } = useNuxtApp()
+    const entries = await $heya('/api/logs', { query: { n: 500 } }) as LogEntry[]
     logs.value = entries.reverse()
   } catch {}
 }

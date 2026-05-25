@@ -162,42 +162,66 @@ function formatArgs(raw: string) {
 
 async function fetchJobs() {
   try {
-    const params = new URLSearchParams({ limit: '50', offset: String(jobOffset.value) })
-    if (jobFilter.value) params.set('state', jobFilter.value)
-    const res = await apiFetch<{ jobs: JobRow[], total: number }>(`/api/jobs?${params}`)
+    const { $heya } = useNuxtApp()
+    const query: Record<string, any> = { limit: 50, offset: jobOffset.value }
+    if (jobFilter.value) query.state = jobFilter.value
+    const res = await $heya('/api/jobs', { query }) as { jobs: JobRow[]; total: number }
     jobs.value = res.jobs
     jobTotal.value = res.total
   } catch {}
 }
 
 async function fetchJobSummary() {
-  try { jobSummary.value = await apiFetch<JobSummary[]>('/api/jobs/summary') } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    jobSummary.value = await $heya('/api/jobs/summary') as JobSummary[]
+  } catch {}
 }
 
 async function retryJob(id: number) {
-  try { await apiFetch(`/api/jobs/${id}/retry`, { method: 'POST' }); refresh() } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/jobs/{id}/retry', { method: 'POST', path: { id } })
+    refresh()
+  } catch {}
 }
 
 async function cancelJob(id: number) {
-  try { await apiFetch(`/api/jobs/${id}/cancel`, { method: 'POST' }); refresh() } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/jobs/{id}/cancel', { method: 'POST', path: { id } })
+    refresh()
+  } catch {}
 }
 
 async function rescueStuck() {
   rescuing.value = true
-  try { await apiFetch('/api/jobs/rescue', { method: 'POST' }); refresh() } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/jobs/rescue', { method: 'POST' })
+    refresh()
+  } catch {}
   rescuing.value = false
 }
 
 async function clearCompleted() {
   clearing.value = true
-  try { await apiFetch('/api/jobs/completed', { method: 'DELETE' }); refresh() } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/jobs/completed', { method: 'DELETE' })
+    refresh()
+  } catch {}
   clearing.value = false
 }
 
 async function clearAll() {
   if (!confirm('Delete ALL jobs including pending and running? This cannot be undone.')) return
   clearingAll.value = true
-  try { await apiFetch('/api/jobs', { method: 'DELETE' }); refresh() } catch {}
+  try {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/jobs', { method: 'DELETE' })
+    refresh()
+  } catch {}
   clearingAll.value = false
 }
 

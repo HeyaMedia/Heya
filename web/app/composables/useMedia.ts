@@ -11,6 +11,16 @@ export function useBackdropUrl(mediaId: number | undefined) {
   return useImageUrl(mediaId, 'backdrop')
 }
 
+// useAlbumCoverUrl returns the canonical album-cover URL. Use this instead
+// of binding `album.cover_path` directly — the raw column may hold a
+// `data/...` filesystem path (the Nuxt router treats those as routes and
+// renders the SPA shell) or an upstream URL. The endpoint resolves both:
+// serves the local file when present, 302-redirects to upstream otherwise.
+export function useAlbumCoverUrl(albumId: number | undefined) {
+  if (!albumId) return null
+  return `/api/albums/${albumId}/cover`
+}
+
 export function mediaTypeColor(type: string) {
   const colors: Record<string, string> = {
     movie: 'text-heya-movie',

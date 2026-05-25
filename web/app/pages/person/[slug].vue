@@ -311,7 +311,8 @@ function formatDate(d: string) {
 
 onMounted(async () => {
   try {
-    data.value = await apiFetch<PersonResponse>(`/api/person/${slug.value}`)
+    const { $heya } = useNuxtApp()
+    data.value = await $heya('/api/person/{id}', { path: { id: slug.value } }) as PersonResponse
   } catch { /* empty */ }
   loading.value = false
 })

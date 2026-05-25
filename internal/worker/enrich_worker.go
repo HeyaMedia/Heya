@@ -34,6 +34,10 @@ type EnrichMediaItemWorker struct {
 	Matcher MatchService
 	Heya    *heyamedia.HeyaProvider
 	Hub     EventPublisher
+	// DataDir is the root for cached artwork copies (data/images/...). The
+	// music enrich path reads local poster/backdrop/logo from the artist
+	// folder and copies them here before falling back to heya.media URLs.
+	DataDir string
 }
 
 func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichMediaItemArgs]) error {
@@ -183,9 +187,25 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	_ = q.MarkEnrichBaseDone(ctx, item.ID)
 	_ = q.MarkEnrichStructureDone(ctx, item.ID) // artist → albums → tracks tree
 
-	// Cover art download is queued from inside the matcher today (via the
-	// album.cover_path update + the image worker). Mark images done — the
-	// actual file lands asynchronously.
+	// Artist artwork: local-first, heya.media fills any gaps.
+	//
+	// 1. Scan the artist folder for Kodi-convention art (folder.jpg,
+	//    backdrop*.jpg, logo.png, banner.jpg, fanart, clearart, thumb).
+	//    Detected files are copied into the cache dir, recorded as
+	//    media_assets rows with source='local', and the primary poster
+	//    + backdrop are also written to media_items.poster_path /
+	//    backdrop_path so the /api/media/{id}/image endpoints serve them
+	//    directly. Movies/TV already get this via DetectLocalAssetsWorker
+	//    — this restores parity for music.
+	// 2. For slots that didn't land locally, queueArtistArtworkGaps walks
+	//    the per-slot caps (1 of poster/logo/banner/clearart/thumb, up to
+	//    5 unique backdrops) and queues DownloadImageArgs for the missing
+	//    slots from heya.media's pool. Already-used remote URLs are
+	//    skipped so repeated refreshes don't re-download the same file.
+	local := detectLocalMusicAssets(ctx, q, w.DataDir, item.ID)
+	remote := rankRemoteArtistImages(res.ArtistImages, res.PosterURL, res.BackdropURL)
+	client := river.ClientFromContext[pgx.Tx](ctx)
+	queueArtistArtworkGaps(ctx, client, item, string(item.MediaType), local, remote)
 	_ = q.MarkEnrichImagesDone(ctx, item.ID)
 
 	// SaveMusicNFO is the music-specific analogue of SaveNFO. Mirror the
@@ -193,7 +213,6 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
 		settings := metadata.ParseSettings(lib.Settings)
 		if settings.SaveNFO {
-			client := river.ClientFromContext[pgx.Tx](ctx)
 			if _, err := client.Insert(ctx, SaveMusicNFOArgs{ArtistID: artist.ID}, nil); err != nil {
 				log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("enqueue SaveMusicNFO failed")
 			}

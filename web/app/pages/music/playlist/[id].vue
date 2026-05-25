@@ -54,7 +54,7 @@
           <div class="pl-num mono">{{ i + 1 }}</div>
           <div class="pl-title-cell">
             <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
-            <Poster v-else :idx="t.track_id" :src="t.album_cover_path || null" aspect="1/1" class="pl-thumb" />
+            <Poster v-else :idx="t.track_id" :src="useAlbumCoverUrl(t.album_id)" aspect="1/1" class="pl-thumb" />
             <div class="pl-title-text">
               <div class="pl-title" :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}">{{ t.track_title }}</div>
               <div class="pl-artist">{{ t.artist_name }}</div>
@@ -122,7 +122,8 @@ const playlists = usePlaylists()
 async function load() {
   loading.value = true
   try {
-    detail.value = await apiFetch<PlaylistDetailResponse>(`/api/me/playlists/${playlistId.value}`)
+    const { $heya } = useNuxtApp()
+    detail.value = await $heya('/api/me/playlists/{id}', { path: { id: playlistId.value } }) as PlaylistDetailResponse
   } catch {
     detail.value = null
   } finally {
@@ -135,9 +136,12 @@ const pl = computed(() => detail.value!.playlist)
 const tracks = computed(() => detail.value?.tracks ?? [])
 const totalDuration = computed(() => tracks.value.reduce((s, t) => s + (t.duration || 0), 0))
 const coverUrl = computed(() => {
+  // Playlist's own cover_path is a user-uploaded image URL (kept as-is) —
+  // synthesize from the first track's album cover otherwise so the hero
+  // isn't blank for fresh playlists.
   if (pl.value.cover_path) return pl.value.cover_path
-  // Synthesize: use the first track's album cover.
-  return tracks.value[0]?.album_cover_path || null
+  const first = tracks.value[0]
+  return first ? useAlbumCoverUrl(first.album_id) : null
 })
 const coverStyle = computed(() => coverUrl.value ? { backgroundImage: `url(${coverUrl.value})` } : {})
 
@@ -151,7 +155,7 @@ function toPlayable(row: PlaylistTrackRow): Track {
     stream_url: `/api/tracks/${row.track_id}/stream`,
     album_id: row.album_id,
     artist_id: row.artist_id,
-    poster: row.album_cover_path || undefined,
+    poster: useAlbumCoverUrl(row.album_id) ?? undefined,
   }
 }
 

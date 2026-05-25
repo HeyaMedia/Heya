@@ -46,8 +46,9 @@ export async function fetchUserState(scope: 'series'): Promise<UserStateSeries>
 export async function fetchUserState(scope: 'seasons', seriesId: number): Promise<UserStateSeasons>
 export async function fetchUserState(scope: 'episodes', seriesId: number): Promise<UserStateEpisodes>
 export async function fetchUserState(scope: string, seriesId?: number): Promise<any> {
-  return apiFetch('/api/me/state', {
+  const { $heya } = useNuxtApp()
+  return $heya('/api/me/state', {
     method: 'POST',
-    body: JSON.stringify({ scope, series_id: seriesId || 0 }),
+    body: { scope, series_id: seriesId || 0 } as any,
   })
 }
