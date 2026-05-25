@@ -144,7 +144,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        # pgvector image, not stock postgres:17 — migration 00015_track_facets
+        # does `CREATE EXTENSION vector;` for sonic-similarity centroids and
+        # the stock image doesn't ship it. Matches docker-compose.yml.
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: heya
           POSTGRES_PASSWORD: heya
