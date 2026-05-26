@@ -7,13 +7,13 @@
     <!-- Condensed hero -->
     <div class="hero-compact">
       <div class="hero-bg">
-        <img v-if="backdropUrl" :src="backdropUrl" class="hero-bg-img visible" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+        <NuxtImg v-if="backdropUrl" :src="backdropUrl" :width="1920" :quality="80" class="hero-bg-img visible" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="hero-bg-fade" />
       </div>
 
       <div class="hero-content">
         <NuxtLink :to="`/tv/${slug}`" class="hero-poster-link">
-          <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" />
+          <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" :width="600" />
         </NuxtLink>
 
         <div class="hero-info">
@@ -104,6 +104,7 @@
 
 <script setup lang="ts">
 import type { MediaDetail } from '~~/shared/types'
+import { useQuery } from '@tanstack/vue-query'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
@@ -114,8 +115,19 @@ const currentSeasonNum = computed(() => {
   return parseInt(numParam.value) || 1
 })
 
-const detail = ref<MediaDetail | null>(null)
-const loading = ref(true)
+// Same cache key as the parent /tv/:slug page — the season view shares the
+// underlying MediaDetail (series) document, so opening a season from the
+// series page hits the cache instantly.
+const { $heya } = useNuxtApp()
+const detailQuery = useQuery({
+  queryKey: ['media', 'detail', slug],
+  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: slug.value as never } })) as MediaDetail,
+  staleTime: 1000 * 60 * 5,
+  retry: false,
+})
+const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
+const loading = computed(() => detailQuery.isPending.value)
+watch(detailQuery.error, (err) => { if (err) navigateTo('/tv') })
 const watchedEpisodes = ref<Set<number>>(new Set())
 const episodeProgress = ref<Map<number, { progress: number; total: number }>>(new Map())
 const seasonFavorited = ref(false)
@@ -273,16 +285,10 @@ function formatDate(d: string) {
 
 function formatYear(d: string) { return d?.slice(0, 4) || '' }
 
-onMounted(async () => {
-  try {
-    const { $heya } = useNuxtApp()
-    detail.value = await $heya('/api/media/{id}', {
-      path: { id: slug.value as any },
-    }) as MediaDetail
-    await loadWatchState()
-  } catch { navigateTo('/tv') }
-  loading.value = false
-})
+// Trigger watch-state load whenever detail data arrives.
+watch(detail, async (d) => {
+  if (d) await loadWatchState()
+}, { immediate: true })
 
 watch(numParam, async () => {
   await loadWatchState()

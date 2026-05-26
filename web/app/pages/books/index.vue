@@ -25,19 +25,29 @@
           </div>
         </div>
 
-        <div v-else-if="view === 'grid'" class="grid-posters" style="padding: 0 32px 80px">
-          <div
-            v-for="(item, i) in sorted"
-            :key="item.id"
-            class="grid-tile card-tile"
-            @click="navigateTo(mediaUrl(item))"
+        <div v-else-if="view === 'grid'" ref="gridWrap" class="grid-virt" style="padding: 0 32px 80px">
+          <RecycleScroller
+            :items="gridRows"
+            :item-size="rowHeight"
+            key-field="key"
+            page-mode
+            v-slot="{ item: row, index: rowIdx }"
           >
-            <Poster :idx="i" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
-            <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ item.title }}</div>
-              <div class="grid-tile-sub">{{ item.year }}</div>
+            <div class="grid-row" :style="{ gridTemplateColumns: `repeat(${gridCols}, 1fr)` }">
+              <div
+                v-for="(item, colIdx) in row.items"
+                :key="item.id"
+                class="grid-tile card-tile"
+                @click="navigateTo(mediaUrl(item))"
+              >
+                <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
+                <div class="grid-tile-meta">
+                  <div class="grid-tile-title">{{ item.title }}</div>
+                  <div class="grid-tile-sub">{{ item.year }}</div>
+                </div>
+              </div>
             </div>
-          </div>
+          </RecycleScroller>
         </div>
 
         <div v-else class="list-rows" style="padding: 0 32px 80px">
@@ -46,22 +56,28 @@
             <div>Year</div>
             <div>Added</div>
           </div>
-          <div
-            v-for="item in sorted"
-            :key="item.id"
-            class="list-row"
-            @click="navigateTo(mediaUrl(item))"
+          <RecycleScroller
+            :items="sorted"
+            :item-size="70"
+            key-field="id"
+            page-mode
+            v-slot="{ item }"
           >
-            <div class="list-title-cell">
-              <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
-              <div>
-                <div class="list-title">{{ item.title }}</div>
-                <div class="list-sub">{{ item.year }}</div>
+            <div
+              class="list-row"
+              @click="navigateTo(mediaUrl(item))"
+            >
+              <div class="list-title-cell">
+                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
+                <div>
+                  <div class="list-title">{{ item.title }}</div>
+                  <div class="list-sub">{{ item.year }}</div>
+                </div>
               </div>
+              <div>{{ item.year }}</div>
+              <div class="list-added">{{ formatDate(item.created_at) }}</div>
             </div>
-            <div>{{ item.year }}</div>
-            <div class="list-added">{{ formatDate(item.created_at) }}</div>
-          </div>
+          </RecycleScroller>
         </div>
 
         <div v-if="!loading && !items.length" class="empty-lib">
@@ -76,6 +92,7 @@
 import type { MediaItem, Library } from '~~/shared/types'
 
 
+const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<MediaItem[]>([])
 const libraries = ref<Library[]>([])
 const loading = ref(true)
@@ -94,6 +111,8 @@ const sorted = computed(() => {
   }
   return list
 })
+
+const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted)
 
 function formatDate(d: string) {
   if (!d) return ''
@@ -114,5 +133,7 @@ onMounted(async () => {
 
 <style scoped>
 .lib-content { min-height: 200px; }
+.grid-virt { /* container for usePosterGrid; width is the source of truth */ }
+.grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
 .empty-lib { padding: 80px 32px; text-align: center; color: var(--fg-2); font-size: 15px; }
 </style>

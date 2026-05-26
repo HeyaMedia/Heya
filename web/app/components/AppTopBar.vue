@@ -42,8 +42,15 @@
           <Icon name="close" :size="14" />
         </button>
 
+        <Teleport to="body">
         <Transition name="dropdown">
-          <div v-if="showDropdown" class="search-dropdown" @mousedown.prevent>
+          <div
+            v-if="showDropdown"
+            ref="searchDropdownRef"
+            class="search-dropdown surface"
+            :style="{ top: searchDropdownTop + 'px', right: searchDropdownRight + 'px' }"
+            @mousedown.prevent
+          >
             <div v-if="search.loading.value && !search.data.value" class="search-loading">
               <span class="search-spinner" /> Searching…
             </div>
@@ -67,7 +74,7 @@
                   @mouseenter="selectedIdx = flatIndex(sIdx, iIdx)"
                 >
                   <div class="search-result-thumb" :class="section.thumbShape">
-                    <img v-if="thumbUrl(section.key, item)" :src="thumbUrl(section.key, item)!" loading="lazy" />
+                    <NuxtImg v-if="thumbUrl(section.key, item)" :src="thumbUrl(section.key, item)!" :width="80" :quality="80" loading="lazy" />
                     <Icon v-else :name="section.icon" :size="14" />
                   </div>
                   <div class="search-result-body">
@@ -100,13 +107,21 @@
             </div>
           </div>
         </Transition>
+        </Teleport>
       </div>
-      <button class="btn-icon" title="Cast"><Icon name="cast" :size="18" /></button>
+      <AppTooltip label="Cast">
+        <button class="btn-icon"><Icon name="cast" :size="18" /></button>
+      </AppTooltip>
 
       <!-- Activity indicator -->
-      <div class="activity-wrap" ref="activityRef">
-        <button class="activity-btn" title="Activity" @click="activityOpen = !activityOpen">
-          <svg v-if="hasActivity" class="activity-ring" viewBox="0 0 36 36">
+      <AppMenu
+        v-model="activityOpen"
+        :width="320"
+        trigger-class="btn-icon activity-btn"
+        trigger-title="Activity"
+      >
+        <template #trigger>
+          <svg v-if="hasActivity" class="activity-ring" viewBox="0 0 36 36" preserveAspectRatio="xMidYMid meet">
             <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2" />
             <circle
               class="ring-arc"
@@ -120,15 +135,35 @@
             />
           </svg>
           <Icon name="pulse" :size="15" class="activity-icon" :class="{ active: hasActivity }" />
-        </button>
-        <Transition name="dropdown">
-          <div v-if="activityOpen" class="activity-dropdown">
+        </template>
             <div class="activity-header">
               <span class="activity-title">Activity</span>
               <span class="activity-status" :class="{ live: wsConnected }">
                 <span class="status-pulse" />
                 {{ wsConnected ? 'Live' : 'Offline' }}
               </span>
+            </div>
+
+            <div v-if="nowPlayingSessions.length" class="activity-section">
+              <div class="activity-section-title">Now Playing</div>
+              <div v-for="s in nowPlayingSessions" :key="s.session_id" class="now-playing-card">
+                <div class="np-header">
+                  <Icon :name="s.paused ? 'pause' : 'play'" :size="11" :class="['np-icon', { paused: s.paused }]" />
+                  <span class="np-title">{{ s.media_title || 'Unknown' }}</span>
+                </div>
+                <div v-if="s.media_subtitle" class="np-subtitle">{{ s.media_subtitle }}</div>
+                <div class="np-meta">
+                  <span class="np-user">{{ s.username }}</span>
+                  <span v-if="transcodeLabel(s)" class="np-sep">·</span>
+                  <span v-if="transcodeLabel(s)" class="np-mode">{{ transcodeLabel(s) }}</span>
+                  <span v-if="s.video_codec" class="np-sep">·</span>
+                  <span v-if="s.video_codec" class="np-codec mono">{{ s.video_codec.toUpperCase() }}{{ s.height ? ` ${s.height}p` : '' }}</span>
+                </div>
+                <div class="np-progress">
+                  <div class="np-progress-bar"><div class="np-progress-fill" :style="{ width: sessionProgressPct(s) + '%' }" /></div>
+                  <span class="np-progress-label mono">{{ formatSessionTime(s.position_seconds) }} / {{ formatSessionTime(s.total_seconds) }}</span>
+                </div>
+              </div>
             </div>
 
             <div v-if="progressLibs.length" class="activity-section">
@@ -154,27 +189,29 @@
 
             <div v-if="runningTasks.length" class="activity-section">
               <div class="activity-section-title">Tasks</div>
-              <div v-for="tp in runningTasks" :key="tp.task_id" class="activity-item">
-                <div class="activity-item-icon task">
-                  <svg class="mini-ring" viewBox="0 0 26 26">
-                    <circle class="mini-track" cx="13" cy="13" r="10" />
-                    <circle class="mini-fill" cx="13" cy="13" r="10"
-                      :stroke-dasharray="62.83"
-                      :stroke-dashoffset="62.83 - 62.83 * (tp.total > 0 ? tp.completed / tp.total : 0)"
-                    />
-                  </svg>
-                  <Icon :name="TASK_LABELS[tp.task_id]?.icon ?? 'timer'" :size="10" class="mini-icon" />
+              <div v-for="tp in runningTasks" :key="tp.task_id" class="task-card">
+                <div class="task-card-header">
+                  <div class="task-card-icon">
+                    <Icon :name="TASK_LABELS[tp.task_id]?.icon ?? 'timer'" :size="13" />
+                  </div>
+                  <span class="task-card-title">{{ taskTitle(tp) }}</span>
+                  <span class="task-card-counts mono">
+                    <template v-if="(tp.running ?? 0) > 0">{{ tp.running }} running</template>
+                    <template v-if="(tp.running ?? 0) > 0 && (tp.pending ?? 0) > 0"> · </template>
+                    <template v-if="(tp.pending ?? 0) > 0">{{ tp.pending }} pending</template>
+                  </span>
                 </div>
-                <div class="activity-item-text">
-                  <span class="activity-item-name">{{ taskActivityLabel(tp) }}</span>
-                  <span class="activity-item-detail">{{ tp.completed }}/{{ tp.total }}</span>
+                <div v-if="tp.current_item" class="task-card-line task-card-item">
+                  {{ tp.current_item }}
                 </div>
-                <span v-if="tp.total > 1" class="activity-pct">{{ tp.total > 0 ? Math.round(tp.completed / tp.total * 100) : 0 }}%</span>
+                <div v-if="tp.current_stage" class="task-card-line task-card-stage">
+                  <Icon name="chevright" :size="9" /> {{ tp.current_stage }}
+                </div>
               </div>
             </div>
 
             <div v-if="jobsByKind.length" class="activity-section">
-              <div class="activity-section-title">Running</div>
+              <div class="activity-section-title">Other activity</div>
               <div v-for="grp in jobsByKind" :key="grp.kind" class="activity-item">
                 <div class="activity-item-icon job">
                   <Icon :name="jobIcon(grp.kind)" :size="12" />
@@ -212,9 +249,7 @@
                 Cancel all
               </button>
             </div>
-          </div>
-        </Transition>
-      </div>
+      </AppMenu>
 
       <UserDropdown />
     </div>
@@ -231,20 +266,43 @@ const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgre
 const progressLibs = computed(() => Object.values(scanProgress.value))
 
 const KIND_LABELS: Record<string, { label: string, icon: string }> = {
-  scan_library:     { label: 'Scanning library',       icon: 'folder' },
-  process_file:     { label: 'Processing file',        icon: 'list' },
-  ffprobe:          { label: 'Analyzing media',        icon: 'eq' },
-  metadata_match:   { label: 'Matching metadata',      icon: 'database' },
-  metadata_fetch:   { label: 'Fetching metadata',      icon: 'cloud-download' },
-  download_image:   { label: 'Downloading artwork',    icon: 'cloud-download' },
-  person_fetch:     { label: 'Fetching cast & crew',   icon: 'users' },
-  enrichment:       { label: 'Enriching artwork',      icon: 'star' },
-  ratings_fetch:    { label: 'Fetching ratings',       icon: 'star' },
-  save_nfo:         { label: 'Writing NFO file',       icon: 'clipboard' },
-  save_images:      { label: 'Saving images',          icon: 'clipboard' },
-  metadata_refresh: { label: 'Refreshing metadata',    icon: 'refresh' },
-  transcode:        { label: 'Transcoding',            icon: 'film' },
-  soft_delete:      { label: 'Cleaning up',            icon: 'trash' },
+  // Scanner pipeline
+  kickoff_library_scan:    { label: 'Library scan kickoff',  icon: 'folder' },
+  process_file:            { label: 'Processing file',       icon: 'list' },
+  ffprobe:                 { label: 'Probing media',         icon: 'eq' },
+  detect_local_assets:     { label: 'Detecting sidecars',    icon: 'list' },
+  metadata_match:          { label: 'Matching metadata',     icon: 'database' },
+  // Enrich pipeline
+  kickoff_refresh_stale:   { label: 'Refresh kickoff',       icon: 'refresh' },
+  enrich_media_item:       { label: 'Enriching item',        icon: 'cloud-download' },
+  person_fetch:            { label: 'Fetching cast & crew',  icon: 'users' },
+  ratings_fetch:           { label: 'Fetching ratings',      icon: 'star' },
+  force_refresh_metadata:  { label: 'Force refresh',         icon: 'refresh' },
+  fetch_artwork:           { label: 'Fetching artwork',      icon: 'star' },
+  // Images
+  download_image:          { label: 'Downloading artwork',   icon: 'cloud-download' },
+  save_images:             { label: 'Saving images',         icon: 'clipboard' },
+  force_refresh_images:    { label: 'Force refresh images',  icon: 'refresh' },
+  // NFOs
+  save_nfo:                { label: 'Writing NFO',           icon: 'clipboard' },
+  save_music_nfo:          { label: 'Writing music NFO',     icon: 'clipboard' },
+  // Loudness
+  kickoff_music_loudness:  { label: 'Loudness kickoff',      icon: 'eq' },
+  scan_track_loudness:     { label: 'Measuring loudness',    icon: 'eq' },
+  scan_album_loudness:     { label: 'Album loudness',        icon: 'eq' },
+  // Trickplay + thumbnails
+  kickoff_trickplay:       { label: 'Trickplay kickoff',     icon: 'film' },
+  trickplay_file:          { label: 'Generating trickplay',  icon: 'film' },
+  kickoff_thumbnails:      { label: 'Thumbnails kickoff',    icon: 'image' },
+  thumbnail_extra:         { label: 'Extracting thumbnail',  icon: 'image' },
+  // Sonic analysis
+  kickoff_sonic_analysis:  { label: 'Sonic kickoff',         icon: 'eq' },
+  analyze_track_facets:    { label: 'Analyzing track',       icon: 'eq' },
+  refresh_artist_centroids:{ label: 'Refresh artist centroid', icon: 'users' },
+  refresh_album_centroids: { label: 'Refresh album centroid',  icon: 'list' },
+  // Misc
+  transcode:               { label: 'Transcoding',           icon: 'film' },
+  soft_delete:             { label: 'Cleaning up',           icon: 'trash' },
 }
 
 function jobLabel(kind: string) {
@@ -257,11 +315,23 @@ function jobIcon(kind: string) {
 
 const searchInput = ref<HTMLInputElement>()
 const searchWrapRef = ref<HTMLElement>()
+const searchDropdownRef = ref<HTMLElement>()
 const searchFocused = ref(false)
 const search = useQuickSearch(180)
 const selectedIdx = ref(-1)
 const activityOpen = ref(false)
-const activityRef = ref<HTMLElement>()
+
+// The search dropdown is teleported to <body> because `.topbar` has its own
+// `backdrop-filter` — a child element's backdrop-filter rendered inside that
+// stacking context composites weirdly (the child looks 30% opaque even when
+// its background is 92% solid). Living outside .topbar fixes the optics and
+// also gives the dropdown the same paint stream as the reka-portaled
+// activity/user menus. Position tracks the search-wrap via VueUse's
+// useElementBounding + useWindowSize so resizes stay anchored.
+const { bottom: swBottom, right: swRight } = useElementBounding(searchWrapRef)
+const { width: vw } = useWindowSize()
+const searchDropdownTop = computed(() => swBottom.value + 8)
+const searchDropdownRight = computed(() => vw.value - swRight.value)
 
 interface Section {
   key: 'movies' | 'tv' | 'music' | 'books' | 'albums' | 'tracks' | 'collections' | 'people'
@@ -414,7 +484,7 @@ function goToResult(kind: Section['key'], item: any) {
       path = `/tv/${item.slug || slugify(item.title)}`
       break
     case 'music':
-      path = `/music/${item.slug || slugify(item.title)}`
+      path = `/music/artist/${item.slug || slugify(item.title)}`
       break
     case 'books':
       path = `/books/${item.slug || slugify(item.title)}`
@@ -423,11 +493,22 @@ function goToResult(kind: Section['key'], item: any) {
       path = `/person/${item.slug || slugify(item.name)}`
       break
     case 'albums':
-      // No dedicated album page yet — jump to artist with an anchor.
-      path = `/music/${item.artist_slug || slugify(item.artist_name)}#album-${item.id}`
+      // Land on the album detail page. `slug` is the album slug; falls back
+      // to the artist page if either piece is missing rather than 404'ing.
+      if (item.artist_slug && item.slug) {
+        path = `/music/artist/${item.artist_slug}/${item.slug}`
+      } else {
+        path = `/music/artist/${item.artist_slug || slugify(item.artist_name)}`
+      }
       break
     case 'tracks':
-      path = `/music/${item.artist_slug || slugify(item.artist_name)}#track-${item.id}`
+      // No dedicated track page yet — land on the album so the user can scroll
+      // and play. Album-slug shipped on the search row in the slug refactor.
+      if (item.artist_slug && item.album_slug) {
+        path = `/music/artist/${item.artist_slug}/${item.album_slug}`
+      } else {
+        path = `/music/artist/${item.artist_slug || slugify(item.artist_name)}`
+      }
       break
     case 'collections':
       path = `/search?q=${encodeURIComponent(item.name)}&type=collections`
@@ -439,23 +520,40 @@ function goToResult(kind: Section['key'], item: any) {
 
 const runningTasks = computed(() => Object.values(taskProgress.value))
 
-const TASK_LABELS: Record<string, { label: string, activePrefix: string, icon: string }> = {
-  generate_trickplay:  { label: 'Generating trickplay',   activePrefix: 'Generating trickplay', icon: 'film' },
-  generate_thumbnails: { label: 'Generating thumbnails',  activePrefix: 'Generating thumbnails', icon: 'image' },
-  scan_libraries:      { label: 'Scanning libraries',     activePrefix: 'Scanning',     icon: 'folder' },
-  refresh_stale_items: { label: 'Refreshing metadata',    activePrefix: 'Refreshing',   icon: 'refresh' },
+// Live playback sessions — populated by the WS push from
+// session.update events (see useActiveSessions). Shown in the activity
+// panel so you can see who's watching what across all clients.
+const { sessions: nowPlayingSessions, formatTime: formatSessionTime, progressPct: sessionProgressPct, transcodeLabel } = useActiveSessions()
+
+// Task titles for the Activity panel cards. Single source of truth —
+// shown as the bold header for each running task; the work item goes
+// below as a separate line. Covers the 6 scheduled tasks plus the 6
+// synthetic buckets (transcoding, artwork, nfo_writes, …) that group
+// ad-hoc workers so they show up as labelled cards instead of bare
+// counts.
+const TASK_LABELS: Record<string, { label: string, icon: string }> = {
+  // Scheduled tasks.
+  generate_trickplay:   { label: 'Trickplay',        icon: 'film' },
+  generate_thumbnails:  { label: 'Thumbnails',       icon: 'image' },
+  scan_libraries:       { label: 'Library Scan',     icon: 'folder' },
+  refresh_stale_items:  { label: 'Metadata Refresh', icon: 'refresh' },
+  scan_music_loudness:  { label: 'Loudness Scan',    icon: 'eq' },
+  analyze_music_facets: { label: 'Sonic Analysis',   icon: 'eq' },
+  // Synthetic buckets.
+  transcoding:          { label: 'Transcoding',      icon: 'film' },
+  artwork:              { label: 'Artwork',          icon: 'image' },
+  nfo_writes:           { label: 'NFO Writes',       icon: 'clipboard' },
+  external_lookups:     { label: 'External Lookups', icon: 'cloud-download' },
+  refresh_actions:      { label: 'Library Refresh',  icon: 'refresh' },
+  cleanup:              { label: 'Cleanup',          icon: 'trash' },
 }
 
-function taskActivityLabel(tp: TaskProgressPayload): string {
-  const meta = TASK_LABELS[tp.task_id]
-  if (meta?.activePrefix && tp.current_item) {
-    return `${meta.activePrefix} ${tp.current_item}`
-  }
-  return meta?.label ?? tp.task_id
+function taskTitle(tp: TaskProgressPayload): string {
+  return TASK_LABELS[tp.task_id]?.label ?? tp.task_id
 }
 
 const hasActivity = computed(() =>
-  activeScans.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || runningTasks.value.length > 0
+  activeScans.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || runningTasks.value.length > 0 || nowPlayingSessions.value.length > 0
 )
 
 async function cancelAllJobs() {
@@ -465,9 +563,39 @@ async function cancelAllJobs() {
   } catch {}
 }
 
+// Kinds covered by a running task card — they appear in the Tasks
+// section with their own labels and counts, so listing them again
+// under "Other activity" would be noisy double-display. Mirrors the
+// backend's worker.TaskKinds (scheduled + synthetic).
+const TASK_KINDS_BY_TASK: Record<string, string[]> = {
+  // Scheduled.
+  scan_libraries:       ['kickoff_library_scan', 'process_file', 'ffprobe', 'detect_local_assets', 'metadata_match'],
+  refresh_stale_items:  ['kickoff_refresh_stale', 'enrich_media_item'],
+  scan_music_loudness:  ['kickoff_music_loudness', 'scan_track_loudness', 'scan_album_loudness'],
+  generate_trickplay:   ['kickoff_trickplay', 'trickplay_file'],
+  generate_thumbnails:  ['kickoff_thumbnails', 'thumbnail_extra'],
+  analyze_music_facets: ['kickoff_sonic_analysis', 'analyze_track_facets', 'refresh_artist_centroids', 'refresh_album_centroids'],
+  // Synthetic.
+  transcoding:          ['transcode'],
+  artwork:              ['download_image', 'fetch_artwork', 'save_images'],
+  nfo_writes:           ['save_nfo', 'save_music_nfo'],
+  external_lookups:     ['person_fetch', 'ratings_fetch'],
+  refresh_actions:      ['force_refresh_metadata', 'force_refresh_images'],
+  cleanup:              ['soft_delete'],
+}
+
+const coveredKinds = computed(() => {
+  const covered = new Set<string>()
+  for (const tp of runningTasks.value) {
+    for (const k of TASK_KINDS_BY_TASK[tp.task_id] ?? []) covered.add(k)
+  }
+  return covered
+})
+
 const jobsByKind = computed(() => {
   const counts: Record<string, number> = {}
   for (const j of activeJobs.value) {
+    if (coveredKinds.value.has(j.kind)) continue
     counts[j.kind] = (counts[j.kind] ?? 0) + 1
   }
   return Object.entries(counts)
@@ -490,22 +618,11 @@ function isActive(t: typeof tabs[0]) {
   return false
 }
 
-onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
-})
-
-function handleClickOutside(e: MouseEvent) {
-  if (activityRef.value && !activityRef.value.contains(e.target as Node)) {
-    activityOpen.value = false
-  }
-  if (searchWrapRef.value && !searchWrapRef.value.contains(e.target as Node)) {
-    closeDropdown()
-  }
-}
+// Both the search-wrap (trigger) and the teleported dropdown count as
+// "inside" — without ignore, clicking a result row would close before the
+// row's @click could fire because the row is no longer a DOM descendant of
+// the search-wrap.
+onClickOutside(searchWrapRef, () => closeDropdown(), { ignore: [searchDropdownRef] })
 
 // Close dropdown on route changes (e.g. after clicking a result).
 watch(() => route.fullPath, () => { closeDropdown() })
@@ -542,7 +659,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
 }
 .topbar-tabs .tab:hover { color: var(--fg-0); background: rgba(255,255,255,0.04); }
 .topbar-tabs .tab.active { color: var(--gold); }
-.topbar-right { display: flex; align-items: center; gap: 4px; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
 .search-wrap { display: flex; align-items: center; gap: 8px; }
 .search-wrap.open {
   background: var(--bg-3);
@@ -558,19 +675,17 @@ watch(() => route.fullPath, () => { closeDropdown() })
 .search-close { color: var(--fg-3); }
 .search-close:hover { color: var(--fg-0); }
 
-/* Search dropdown */
+/* Search dropdown — teleported to <body> (see useElementBounding wiring in
+   script) so we sidestep .topbar's backdrop-filter compositing. Position is
+   driven inline via :style.top/.right; the rule below only owns layout +
+   the .surface entry animation. */
 .search-dropdown {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   width: 460px;
   max-height: 70vh;
   overflow-y: auto;
-  background: var(--bg-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-3);
-  z-index: 100;
+  transform-origin: top right;
+  animation: surface-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .search-loading,
@@ -710,49 +825,52 @@ watch(() => route.fullPath, () => { closeDropdown() })
   background: rgba(255,255,255,0.02);
 }
 .search-footer:hover { color: var(--gold); }
-/* Activity button */
-.activity-wrap { position: relative; }
-
-.activity-btn {
-  position: relative;
-  width: 36px; height: 36px;
-  border-radius: var(--r-md);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--fg-2);
-  transition: color 0.15s, background 0.15s;
-}
-.activity-btn:hover { color: var(--fg-0); background: rgba(255,255,255,0.04); }
-
-.activity-ring {
-  position: absolute;
-  inset: 0;
-  width: 36px; height: 36px;
-  animation: spin-ring 1.4s linear infinite;
-}
+/* Activity button — uses the global .btn-icon class for size/hover/active so it
+   visually matches the Cast button. The .activity-btn marker only exists to
+   pin the spinning ring to the button (see unscoped block below — the button
+   element is rendered by AppMenu with a different data-v scope, so
+   position:relative + .activity-ring need to live outside `scoped`). */
 .ring-arc { transition: stroke-dashoffset 0.3s ease; }
-
 .activity-icon { z-index: 1; }
 .activity-icon.active { color: var(--gold); }
-
-@keyframes spin-ring { to { transform: rotate(360deg); } }
 
 @keyframes pulse-activity {
   0%, 100% { box-shadow: 0 0 0 0 rgba(230, 185, 74, 0.4); }
   50% { box-shadow: 0 0 0 4px rgba(230, 185, 74, 0); }
 }
 
-.activity-dropdown {
+/* Activity-dropdown styles moved to the non-scoped block below — see note there. */
+
+/* Dropdown transition */
+.dropdown-enter-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.dropdown-leave-active { transition: opacity 0.1s ease, transform 0.1s ease; }
+.dropdown-enter-from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+.dropdown-leave-to { opacity: 0; transform: translateY(-2px); }
+</style>
+
+<!--
+  Activity dropdown is rendered through reka's DropdownMenuPortal (teleported
+  to <body>) so its content lives outside this component's scoped CSS context.
+  Keep these unscoped so the popover actually picks up a background, padding,
+  and the rest of its visual identity.
+-->
+<style>
+/* Surface chrome comes from AppMenu's wrapped AppSurface (the .surface class).
+   This file only defines activity-specific inner-layout rules below. */
+
+/* The activity trigger button is rendered inside <AppMenu>, so it gets
+   AppMenu's data-v scope id — not this component's. Anything that needs to
+   land on the button itself (not its slot contents) has to be unscoped. */
+.activity-btn { position: relative; }
+
+.activity-ring {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: 300px;
-  background: var(--bg-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-3);
-  overflow: hidden;
-  z-index: 100;
+  inset: 0;
+  width: 100%; height: 100%;
+  animation: spin-ring 1.4s linear infinite;
+  pointer-events: none;
 }
+@keyframes spin-ring { to { transform: rotate(360deg); } }
 
 .activity-header {
   display: flex;
@@ -762,10 +880,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   border-bottom: 1px solid var(--border);
 }
 
-.activity-title {
-  font-size: 13px;
-  font-weight: 600;
-}
+.activity-title { font-size: 13px; font-weight: 600; }
 
 .activity-status {
   display: inline-flex;
@@ -778,23 +893,24 @@ watch(() => route.fullPath, () => { closeDropdown() })
   letter-spacing: 0.06em;
   color: var(--fg-3);
 }
-
 .activity-status.live { color: var(--good); }
 
-.status-pulse {
+.activity-dropdown .status-pulse {
   width: 5px; height: 5px;
   border-radius: 50%;
   background: var(--fg-4);
 }
-
 .activity-status.live .status-pulse {
   background: var(--good);
   animation: pulse-activity 2s ease-in-out infinite;
 }
+@keyframes pulse-activity {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 185, 74, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(230, 185, 74, 0); }
+}
 
 .activity-section { padding: 10px 16px; }
 .activity-section + .activity-section { border-top: 1px solid var(--border); }
-
 .activity-section-title {
   font-size: 9px;
   font-weight: 700;
@@ -805,11 +921,135 @@ watch(() => route.fullPath, () => { closeDropdown() })
   margin-bottom: 8px;
 }
 
-.activity-item {
+.activity-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+
+/* Task card — used in the Activity dropdown's Tasks section.
+   Three lines: header (icon + title + counts), current item, current
+   stage. Each task gets its own visual block instead of a one-liner. */
+.task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+}
+.task-card + .task-card { margin-top: 6px; }
+.task-card-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 0;
+  gap: 8px;
+}
+.task-card-icon {
+  width: 22px; height: 22px;
+  border-radius: var(--r-xs);
+  background: var(--gold-soft);
+  color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.task-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  flex: 1;
+  min-width: 0;
+}
+.task-card-counts {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.task-card-line {
+  font-size: 12px;
+  padding-left: 30px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-card-item {
+  color: var(--fg-1);
+}
+.task-card-stage {
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* Now Playing — one card per live playback session in the activity panel. */
+.now-playing-card {
+  padding: 8px 10px;
+  background: rgba(255, 196, 50, 0.04);
+  border: 1px solid rgba(255, 196, 50, 0.12);
+  border-radius: var(--r-sm);
+}
+.now-playing-card + .now-playing-card { margin-top: 6px; }
+.np-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.np-icon { color: var(--gold); }
+.np-icon.paused { color: var(--fg-3); }
+.np-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-0);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.np-subtitle {
+  font-size: 11px;
+  color: var(--fg-2);
+  margin-bottom: 4px;
+  padding-left: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.np-meta {
+  font-size: 10px;
+  color: var(--fg-3);
+  margin-bottom: 6px;
+  padding-left: 17px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.np-user { color: var(--fg-1); font-weight: 500; }
+.np-mode { color: var(--gold); }
+.np-codec { color: var(--fg-2); }
+.np-sep { color: var(--fg-3); }
+.np-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 17px;
+}
+.np-progress-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.np-progress-fill {
+  height: 100%;
+  background: var(--gold);
+  transition: width 0.3s ease;
+}
+.np-progress-label {
+  font-size: 10px;
+  color: var(--fg-3);
+  white-space: nowrap;
 }
 
 .activity-item-icon {
@@ -818,28 +1058,28 @@ watch(() => route.fullPath, () => { closeDropdown() })
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
+.activity-item-icon.scan { background: var(--gold-soft); color: var(--gold); position: relative; }
+.activity-item-icon.queue { background: rgba(140, 160, 255, 0.1); color: rgb(140, 160, 255); }
+.activity-item-icon.job { background: rgba(200, 140, 255, 0.1); color: rgb(200, 140, 255); }
+.activity-item-icon.task { background: var(--gold-soft); color: var(--gold); position: relative; }
 
-.activity-item-icon.scan {
-  background: var(--gold-soft);
-  color: var(--gold);
-  position: relative;
-}
-.mini-ring {
+.activity-dropdown .mini-ring {
   position: absolute;
   inset: -1px;
   width: calc(100% + 2px);
   height: calc(100% + 2px);
   transform: rotate(-90deg);
 }
-.mini-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 2.5; }
-.mini-fill {
+.activity-dropdown .mini-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 2.5; }
+.activity-dropdown .mini-fill {
   fill: none;
   stroke: var(--gold);
   stroke-width: 2.5;
   stroke-linecap: round;
   transition: stroke-dashoffset 0.4s ease;
 }
-.mini-icon { position: relative; z-index: 1; }
+.activity-dropdown .mini-icon { position: relative; z-index: 1; }
+
 .activity-pct {
   font-size: 10px;
   font-weight: 700;
@@ -847,9 +1087,6 @@ watch(() => route.fullPath, () => { closeDropdown() })
   color: var(--gold);
   flex-shrink: 0;
 }
-.activity-item-icon.queue { background: rgba(140, 160, 255, 0.1); color: rgb(140, 160, 255); }
-.activity-item-icon.job { background: rgba(200, 140, 255, 0.1); color: rgb(200, 140, 255); }
-.activity-item-icon.task { background: var(--gold-soft); color: var(--gold); position: relative; }
 
 .activity-count-badge {
   font-size: 10px;
@@ -904,12 +1141,5 @@ watch(() => route.fullPath, () => { closeDropdown() })
   font-family: var(--font-mono);
   transition: color 0.12s ease;
 }
-
 .activity-link:hover { color: var(--gold); }
-
-/* Dropdown transition */
-.dropdown-enter-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.dropdown-leave-active { transition: opacity 0.1s ease, transform 0.1s ease; }
-.dropdown-enter-from { opacity: 0; transform: translateY(-4px) scale(0.98); }
-.dropdown-leave-to { opacity: 0; transform: translateY(-2px); }
 </style>

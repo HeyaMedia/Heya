@@ -1,9 +1,12 @@
 <template>
   <div class="poster" :class="className" :style="{ aspectRatio: aspect || '2/3', ...style }">
-    <img
+    <NuxtImg
       v-if="src && !imgError"
       :src="src"
       :alt="title"
+      :width="width ?? 200"
+      :quality="80"
+      densities="1x 2x"
       class="absolute inset-0 w-full h-full object-cover z-0"
       loading="lazy"
       @error="imgError = true"
@@ -43,6 +46,12 @@ const props = defineProps<{
   aspect?: string
   className?: string
   style?: Record<string, string>
+  // Base width hint passed to the resize provider. The `densities="1x 2x"`
+  // attribute on <NuxtImg> below auto-doubles it for HiDPI displays via
+  // srcset, so the request you see in DevTools is either `?w={width}` on 1x
+  // or `?w={width*2}` on 2x — the browser picks. Default 200 covers the
+  // ~160-180px CSS grid cards. Pass a larger value for hero crops.
+  width?: number
 }>()
 
 const imgError = ref(false)

@@ -6,14 +6,14 @@
   <div v-else-if="collection" class="scroll" style="height: 100%">
     <!-- Hero with backdrop -->
     <div class="col-hero" v-if="collection.backdrop_path">
-      <img :src="collection.backdrop_path" class="col-hero-bg" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+      <img :src="collection.backdrop_path" class="col-hero-bg" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
       <div class="col-hero-fade" />
     </div>
 
     <div class="page-pad" style="position: relative; z-index: 2" :style="collection.backdrop_path ? 'margin-top: -120px' : ''">
       <div class="col-header">
         <div v-if="collection.poster_path" class="col-poster">
-          <img :src="collection.poster_path" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+          <img :src="collection.poster_path" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         </div>
         <div class="col-info">
           <div class="col-eyebrow">Collection</div>

@@ -1,19 +1,23 @@
 <template>
   <section class="hero" v-if="items.length">
     <div class="hero-bg">
-      <img
+      <NuxtImg
         v-if="bgA"
         :src="bgA"
+        :width="1920"
+        :quality="80"
         class="hero-bg-img"
         :class="{ visible: showA }"
-        @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+        @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
       />
-      <img
+      <NuxtImg
         v-if="bgB"
         :src="bgB"
+        :width="1920"
+        :quality="80"
         class="hero-bg-img"
         :class="{ visible: !showA }"
-        @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+        @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
       />
       <div class="hero-bg-gradient" />
     </div>
@@ -88,6 +92,10 @@ import type { MediaItem, Movie } from '~~/shared/types'
 export interface HeroPlayInfo {
   fileId: number | null
   label?: string
+  // For TV hero entries, the resolved next-unwatched episode_id. Used by
+  // the watch route to set entity_type=episode so the activity panel
+  // shows "S01E03 · Episode title".
+  episodeId?: number
 }
 
 const props = defineProps<{
@@ -113,11 +121,21 @@ const posterUrl = computed(() => current.value ? usePosterUrl(current.value.id) 
 
 const currentPlay = computed<HeroPlayInfo | undefined>(() => props.playInfo?.[current.value.id])
 const canPlayCurrent = computed(() => !!currentPlay.value?.fileId)
+
+// Resume detection — picks the right entity type for the hero item.
+// Movies key on the media_item_id; TV keys on the next-unwatched
+// episode_id (carried in HeroPlayInfo.episodeId, set when /up-next
+// resolved a file for the hero target).
+const heroEntityType = computed(() => currentPlay.value?.episodeId ? 'episode' : 'movie')
+const heroEntityId = computed(() => currentPlay.value?.episodeId ?? current.value?.id ?? 0)
+const { inProgress: heroInProgress } = useWatchResume(heroEntityType, heroEntityId)
+
 const playLabel = computed(() => {
   const info = currentPlay.value
-  if (!info) return 'Play'
-  if (info.label) return `Play ${info.label}`
-  return 'Play'
+  const verb = heroInProgress.value ? 'Resume' : 'Play'
+  if (!info) return verb
+  if (info.label) return `${verb} ${info.label}`
+  return verb
 })
 
 function getBackdropUrl(idx: number) {

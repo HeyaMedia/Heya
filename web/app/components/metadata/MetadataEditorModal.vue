@@ -1,24 +1,32 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div v-if="show" class="me-overlay" @click.self="$emit('close')">
-        <div class="me-dialog">
-          <button class="me-close" @click="$emit('close')">
+  <DialogRoot :open="show" @update:open="(v) => v ? null : $emit('close')">
+    <DialogPortal>
+      <Transition name="modal">
+        <DialogOverlay v-if="show" class="me-overlay" />
+      </Transition>
+      <Transition name="modal">
+        <DialogContent v-if="show" class="me-dialog" :aria-describedby="undefined">
+          <VisuallyHidden>
+            <DialogTitle>Edit metadata</DialogTitle>
+          </VisuallyHidden>
+          <DialogClose class="me-close" aria-label="Close">
             <Icon name="close" :size="18" />
-          </button>
+          </DialogClose>
           <MetadataManager
             :fixed-media-id="mediaId"
             :fixed-season-id="seasonId"
             :fixed-episode-id="episodeId"
             @close="$emit('close')"
           />
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+        </DialogContent>
+      </Transition>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <script setup lang="ts">
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogClose, VisuallyHidden } from 'reka-ui'
+
 defineProps<{
   mediaId: number
   seasonId?: number | null
@@ -36,12 +44,13 @@ defineEmits<{ close: [] }>()
   z-index: 1000;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .me-dialog {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1001;
   width: 96vw;
   max-width: 1100px;
   height: 90vh;
@@ -50,7 +59,6 @@ defineEmits<{ close: [] }>()
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   overflow: hidden;
-  position: relative;
   box-shadow: var(--shadow-3);
   display: flex;
   flex-direction: column;
@@ -80,16 +88,10 @@ defineEmits<{ close: [] }>()
 
 .modal-enter-active,
 .modal-leave-active {
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
-}
-.modal-enter-from .me-dialog {
-  transform: scale(0.96) translateY(8px);
-}
-.modal-leave-to .me-dialog {
-  transform: scale(0.98);
 }
 </style>

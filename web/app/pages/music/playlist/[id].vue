@@ -7,7 +7,7 @@
       <div class="pl-hero-fade" />
       <div class="pl-hero-content">
         <div class="pl-hero-art">
-          <img v-if="coverUrl" :src="coverUrl" :alt="`${pl.name} cover`" />
+          <NuxtImg v-if="coverUrl" :src="coverUrl" :width="400" :quality="80" :alt="`${pl.name} cover`" />
           <Icon v-else name="heart" :size="48" />
         </div>
         <div class="pl-hero-meta">
@@ -45,30 +45,33 @@
         <div class="list-row list-row-head pl-cols">
           <div>#</div><div>Title</div><div>Album</div><div>Added</div><div></div><div style="text-align: right">Duration</div>
         </div>
-        <div
-          v-for="(t, i) in tracks"
-          :key="t.track_id"
-          class="list-row pl-cols"
-          @click="playFrom(i)"
+        <RecycleScroller
+          :items="tracks"
+          :item-size="62"
+          key-field="track_id"
+          page-mode
+          v-slot="{ item: t, index: i }"
         >
-          <div class="pl-num mono">{{ i + 1 }}</div>
-          <div class="pl-title-cell">
-            <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
-            <Poster v-else :idx="t.track_id" :src="useAlbumCoverUrl(t.album_id)" aspect="1/1" class="pl-thumb" />
-            <div class="pl-title-text">
-              <div class="pl-title" :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}">{{ t.track_title }}</div>
-              <div class="pl-artist">{{ t.artist_name }}</div>
+          <div class="list-row pl-cols" @click="playFrom(i)">
+            <div class="pl-num mono">{{ i + 1 }}</div>
+            <div class="pl-title-cell">
+              <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
+              <Poster v-else :idx="t.track_id" :src="useAlbumCoverUrl(t.artist_slug, t.album_slug)" aspect="1/1" class="pl-thumb" />
+              <div class="pl-title-text">
+                <div class="pl-title" :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}">{{ t.track_title }}</div>
+                <div class="pl-artist">{{ t.artist_name }}</div>
+              </div>
             </div>
+            <div class="pl-album">
+              <NuxtLink :to="`/music/artist/${t.artist_slug}/${t.album_slug}`" class="pl-album-link" @click.stop>{{ t.album_title }}</NuxtLink>
+            </div>
+            <div class="pl-added mono">{{ formatDate(t.added_at) }}</div>
+            <button class="pl-remove" @click.stop="removeRow(t.track_id)" title="Remove from playlist">
+              <Icon name="close" :size="14" />
+            </button>
+            <div class="pl-dur mono">{{ formatTime(t.duration) }}</div>
           </div>
-          <div class="pl-album">
-            <NuxtLink :to="`/music/artist/${t.artist_slug}/${t.album_slug}`" class="pl-album-link" @click.stop>{{ t.album_title }}</NuxtLink>
-          </div>
-          <div class="pl-added mono">{{ formatDate(t.added_at) }}</div>
-          <button class="pl-remove" @click.stop="removeRow(t.track_id)" title="Remove from playlist">
-            <Icon name="close" :size="14" />
-          </button>
-          <div class="pl-dur mono">{{ formatTime(t.duration) }}</div>
-        </div>
+        </RecycleScroller>
       </div>
     </section>
   </div>
@@ -76,6 +79,7 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
 
@@ -113,24 +117,21 @@ const route = useRoute()
 const router = useRouter()
 const playlistId = computed(() => Number(route.params.id))
 
-const detail = ref<PlaylistDetailResponse | null>(null)
-const loading = ref(true)
-
 const { play, queue, currentTrack, playing, formatTime } = usePlayer()
 const playlists = usePlaylists()
+const queryClient = useQueryClient()
+const { $heya } = useNuxtApp()
 
-async function load() {
-  loading.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    detail.value = await $heya('/api/me/playlists/{id}', { path: { id: playlistId.value } }) as PlaylistDetailResponse
-  } catch {
-    detail.value = null
-  } finally {
-    loading.value = false
-  }
-}
-watch(playlistId, load, { immediate: true })
+// Keyed by playlist id so each playlist gets its own cache slot. Reactive
+// key (playlistId) automatically triggers a refetch when navigating
+// between playlists via URL.
+const detailQuery = useQuery({
+  queryKey: ['music', 'playlist', playlistId],
+  queryFn: async () => await $heya('/api/me/playlists/{id}', { path: { id: playlistId.value } }) as unknown as PlaylistDetailResponse,
+  staleTime: 1000 * 30,
+})
+const loading = computed(() => detailQuery.isPending.value)
+const detail = computed<PlaylistDetailResponse | null>(() => detailQuery.data.value ?? null)
 
 const pl = computed(() => detail.value!.playlist)
 const tracks = computed(() => detail.value?.tracks ?? [])
@@ -141,7 +142,7 @@ const coverUrl = computed(() => {
   // isn't blank for fresh playlists.
   if (pl.value.cover_path) return pl.value.cover_path
   const first = tracks.value[0]
-  return first ? useAlbumCoverUrl(first.album_id) : null
+  return first ? useAlbumCoverUrl(first.artist_slug, first.album_slug) : null
 })
 const coverStyle = computed(() => coverUrl.value ? { backgroundImage: `url(${coverUrl.value})` } : {})
 
@@ -152,10 +153,10 @@ function toPlayable(row: PlaylistTrackRow): Track {
     artist: row.artist_name,
     album: row.album_title,
     duration: row.duration,
-    stream_url: `/api/tracks/${row.track_id}/stream`,
+    stream_url: `/api/music/tracks/${row.track_id}/stream`,
     album_id: row.album_id,
     artist_id: row.artist_id,
-    poster: useAlbumCoverUrl(row.album_id) ?? undefined,
+    poster: useAlbumCoverUrl(row.artist_slug, row.album_slug) ?? undefined,
   }
 }
 
@@ -176,15 +177,26 @@ async function playFrom(idx: number) {
 
 async function removeRow(trackId: number) {
   await playlists.removeTrack(playlistId.value, trackId)
-  // Optimistic: drop locally so the row disappears immediately.
-  if (detail.value) {
-    detail.value.tracks = detail.value.tracks.filter((t) => t.track_id !== trackId)
-  }
+  // Optimistic update via the query cache so the row disappears immediately
+  // while the server reflects the same change. Avoids a refetch round-trip.
+  queryClient.setQueryData(['music', 'playlist', playlistId.value], (prev: PlaylistDetailResponse | undefined) => {
+    if (!prev) return prev
+    return { ...prev, tracks: prev.tracks.filter(t => t.track_id !== trackId) }
+  })
+  // Recent Playlists shelf on the home page derives last-played from
+  // playlist tracks; invalidate so a possible last-played change shows up.
+  queryClient.invalidateQueries({ queryKey: ['music', 'home', 'recent-playlists'] })
 }
 
 async function onDelete() {
   if (!detail.value) return
-  if (!window.confirm(`Delete "${detail.value.playlist.name}"? This can't be undone.`)) return
+  const ok = await useConfirm().confirm({
+    title: `Delete "${detail.value.playlist.name}"?`,
+    message: "This can't be undone.",
+    confirmLabel: 'Delete',
+    destructive: true,
+  })
+  if (!ok) return
   await playlists.remove(playlistId.value)
   router.push('/music')
 }

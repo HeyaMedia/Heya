@@ -151,15 +151,64 @@ export interface TVEpisode {
   preferred_overview?: string
 }
 
+export interface ArtistURL {
+  type: string
+  url: string
+}
+
+export interface ArtistMember {
+  name: string
+  mbid?: string
+  begin_year?: number
+  end_year?: number
+}
+
+// Mirrors service.ArtistView (the FE-facing artist envelope). Fields tagged
+// `omitempty` on the server may be absent.
 export interface Artist {
   id: number
   media_item_id: number
-  musicbrainz_id: string
+  musicbrainz_id?: string
   name: string
-  sort_name: string
-  disambiguation: string
-  biography: string
-  enriched_at: string | null
+  sort_name?: string
+  disambiguation?: string
+  biography?: string
+  annotation?: string
+  artist_type?: string
+  begin_date?: string
+  begin_year?: number
+  end_date?: string
+  ended?: boolean
+  deathday?: string
+  birthplace?: string
+  listeners?: number
+  playcount?: number
+  popularity?: number
+  tags?: string[]
+  aliases?: string[]
+  urls?: ArtistURL[]
+  wikipedia_links?: Record<string, string>
+  profiles?: Record<string, string>
+  groups?: ArtistMember[]
+  members?: ArtistMember[]
+  discography_enriched_at?: string | null
+  cover_art_enriched_at?: string | null
+}
+
+export interface ArtistTopTrackRow {
+  rank: number
+  title: string
+  mbid?: string
+  playcount: number
+  listeners: number
+  url?: string
+  local_track_id?: number
+  local_album_id?: number
+  local_album_title?: string
+  local_album_slug?: string
+  local_album_year?: string
+  local_duration?: number
+  local_cover_path?: string
 }
 
 export interface Album {
@@ -439,12 +488,42 @@ export interface PersonCrewCredit {
   poster_path: string
 }
 
+// PersonExternalCredit mirrors sqlc.ListPersonExternalCreditsRow. It's a
+// credit reported by the upstream metadata aggregator for titles that
+// MAY or may NOT be in the local library. The service layer drops rows
+// that *are* in the library (because cast_credits/crew_credits already
+// represent those with linkable IDs), so anything that reaches the FE
+// here is genuinely "known for, not owned".
+export interface PersonExternalCredit {
+  id: number
+  person_id: number
+  kind: 'cast' | 'crew' | 'known_for'
+  media_kind: string
+  title: string
+  year: number
+  character: string
+  job: string
+  department: string
+  episode_count: number
+  display_order: number
+  slug: string
+  poster_url: string
+  external_ids: Record<string, string>
+  source: string
+  matched_media_item_id: number
+  matched_slug: string
+  matched_media_type: string
+}
+
 export interface PersonResponse {
   person: PersonDetail
   cast_credits?: PersonCastCredit[]
   crew_credits?: PersonCrewCredit[]
   biographies?: PersonBiography[]
   profiles?: PersonProfile[]
+  external_cast?: PersonExternalCredit[]
+  external_crew?: PersonExternalCredit[]
+  external_known_for?: PersonExternalCredit[]
 }
 
 export interface MediaFile {

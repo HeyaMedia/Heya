@@ -45,74 +45,61 @@
     </div>
 
     <!-- Search Modal -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="showSearch" class="sub-modal-overlay" @click.self="showSearch = false">
-          <div class="sub-modal">
-            <div class="sub-modal-head">
-              <h3 class="sub-modal-title">Search OpenSubtitles</h3>
-              <button class="sub-modal-close" @click="showSearch = false">
-                <Icon name="close" :size="16" />
-              </button>
-            </div>
+    <AppDialog v-model="showSearch" title="Search OpenSubtitles" size="lg">
+      <div class="sub-search-bar">
+        <input
+          v-model="searchQuery"
+          type="text"
+          class="sub-search-input"
+          placeholder="Search or leave blank to use media title..."
+          @keydown.enter="doSearch"
+        />
+        <input
+          v-model="searchLangs"
+          type="text"
+          class="sub-search-langs"
+          placeholder="en,da"
+          title="Languages (comma-separated ISO codes)"
+        />
+        <button class="btn btn-primary" :disabled="searching" @click="doSearch">
+          {{ searching ? 'Searching...' : 'Search' }}
+        </button>
+      </div>
 
-            <div class="sub-search-bar">
-              <input
-                v-model="searchQuery"
-                type="text"
-                class="sub-search-input"
-                placeholder="Search or leave blank to use media title..."
-                @keydown.enter="doSearch"
-              />
-              <input
-                v-model="searchLangs"
-                type="text"
-                class="sub-search-langs"
-                placeholder="en,da"
-                title="Languages (comma-separated ISO codes)"
-              />
-              <button class="btn btn-primary" :disabled="searching" @click="doSearch">
-                {{ searching ? 'Searching...' : 'Search' }}
-              </button>
-            </div>
-
-            <div class="sub-modal-body scroll">
-              <div v-if="searching" class="sub-modal-empty">
-                <Icon name="loading" :size="18" />
-                Searching...
-              </div>
-              <div v-else-if="searched && !searchResults.length" class="sub-modal-empty">
-                No subtitles found
-              </div>
-              <div v-for="r in searchResults" :key="r.id" class="sub-result">
-                <div class="sub-result-main">
-                  <span class="sub-lang-badge">{{ r.attributes.language.toUpperCase() }}</span>
-                  <span class="sub-result-release">{{ r.attributes.release || 'Unknown release' }}</span>
-                  <span v-if="r.attributes.hearing_impaired" class="sub-tag sub-tag-hi">HI</span>
-                  <span v-if="r.attributes.foreign_parts_only" class="sub-tag sub-tag-forced">Foreign</span>
-                  <span v-if="r.attributes.ai_translated" class="sub-tag">AI</span>
-                  <span v-if="r.attributes.from_trusted" class="sub-tag sub-tag-trusted">Trusted</span>
-                </div>
-                <div class="sub-result-meta">
-                  <span class="sub-result-stat">{{ r.attributes.download_count.toLocaleString() }} downloads</span>
-                  <span v-if="r.attributes.ratings > 0" class="sub-result-stat">{{ r.attributes.ratings.toFixed(1) }} rating</span>
-                  <span class="sub-result-stat">{{ r.attributes.uploader?.name || 'Unknown' }}</span>
-                </div>
-                <button
-                  class="btn btn-ghost-sm sub-result-dl"
-                  :disabled="downloading === r.id"
-                  @click="downloadSubtitle(r)"
-                >
-                  <Icon v-if="downloading === r.id" name="loading" :size="12" />
-                  <Icon v-else name="download" :size="12" />
-                  {{ downloading === r.id ? 'Downloading...' : 'Download' }}
-                </button>
-              </div>
-            </div>
-          </div>
+      <div class="sub-results scroll">
+        <div v-if="searching" class="sub-modal-empty">
+          <Icon name="loading" :size="18" />
+          Searching...
         </div>
-      </Transition>
-    </Teleport>
+        <div v-else-if="searched && !searchResults.length" class="sub-modal-empty">
+          No subtitles found
+        </div>
+        <div v-for="r in searchResults" :key="r.id" class="sub-result">
+          <div class="sub-result-main">
+            <span class="sub-lang-badge">{{ r.attributes.language.toUpperCase() }}</span>
+            <span class="sub-result-release">{{ r.attributes.release || 'Unknown release' }}</span>
+            <span v-if="r.attributes.hearing_impaired" class="sub-tag sub-tag-hi">HI</span>
+            <span v-if="r.attributes.foreign_parts_only" class="sub-tag sub-tag-forced">Foreign</span>
+            <span v-if="r.attributes.ai_translated" class="sub-tag">AI</span>
+            <span v-if="r.attributes.from_trusted" class="sub-tag sub-tag-trusted">Trusted</span>
+          </div>
+          <div class="sub-result-meta">
+            <span class="sub-result-stat">{{ r.attributes.download_count.toLocaleString() }} downloads</span>
+            <span v-if="r.attributes.ratings > 0" class="sub-result-stat">{{ r.attributes.ratings.toFixed(1) }} rating</span>
+            <span class="sub-result-stat">{{ r.attributes.uploader?.name || 'Unknown' }}</span>
+          </div>
+          <button
+            class="btn btn-ghost-sm sub-result-dl"
+            :disabled="downloading === r.id"
+            @click="downloadSubtitle(r)"
+          >
+            <Icon v-if="downloading === r.id" name="loading" :size="12" />
+            <Icon v-else name="download" :size="12" />
+            {{ downloading === r.id ? 'Downloading...' : 'Download' }}
+          </button>
+        </div>
+      </div>
+    </AppDialog>
   </div>
 </template>
 
@@ -230,7 +217,12 @@ async function downloadSubtitle(r: any) {
 }
 
 async function deleteSubtitle(s: any) {
-  if (!confirm('Delete this subtitle file?')) return
+  const ok = await useConfirm().confirm({
+    title: 'Delete subtitle?',
+    confirmLabel: 'Delete',
+    destructive: true,
+  })
+  if (!ok) return
   try {
     const { $heya } = useNuxtApp()
     await $heya('/api/media/{id}/assets/{asset_id}', {
@@ -390,68 +382,14 @@ watch(() => props.mediaId, () => {
 }
 
 /* Search modal */
-.sub-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sub-modal {
-  width: 90vw;
-  max-width: 800px;
-  max-height: 85vh;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: var(--shadow-3);
-}
-
-.sub-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.sub-modal-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--fg-0);
-  margin: 0;
-}
-
-.sub-modal-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--fg-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.12s;
-}
-.sub-modal-close:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--fg-0);
-}
-
+/* AppDialog supplies overlay/panel/header chrome; rules below are
+   layout-only for the search bar + results list inside the body. */
 .sub-search-bar {
   display: flex;
   gap: 8px;
-  padding: 16px 20px;
+  padding-bottom: 14px;
+  margin-bottom: 6px;
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
 }
 
 .sub-search-input {
@@ -482,10 +420,10 @@ watch(() => props.mediaId, () => {
 }
 .sub-search-langs:focus { border-color: var(--gold); }
 
-.sub-modal-body {
-  flex: 1;
+.sub-results {
+  /* AppDialog body already scrolls; let this region grow to fill it. */
+  max-height: 56vh;
   overflow-y: auto;
-  padding: 8px 0;
 }
 
 .sub-modal-empty {
@@ -544,9 +482,4 @@ watch(() => props.mediaId, () => {
 .sub-result-dl {
   flex-shrink: 0;
 }
-
-.modal-enter-active,
-.modal-leave-active { transition: all 0.2s ease; }
-.modal-enter-from,
-.modal-leave-to { opacity: 0; }
 </style>

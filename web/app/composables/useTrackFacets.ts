@@ -1,10 +1,17 @@
 // useTrackFacets fetches a track's sonic-analysis facets + waveform.
 // Used by Playbar (waveform) and the music UI (BPM/key/mood chips).
 //
+// Backed by vue-query so the cache is shared with the rest of the app and
+// dedupes across components — a track that's playing AND visible on a
+// detail page only hits the API once. The cache survives route changes
+// and (uniquely for facets) cross-component remounts.
+//
 // Failure modes are silent — when a track hasn't been analyzed yet,
 // the endpoint returns 404 and we resolve to nulls so callers can
 // render a fallback (e.g. a plain gradient bar in place of the
 // waveform).
+
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 export interface TrackKey {
   root: string
@@ -33,62 +40,95 @@ export interface TrackFacets {
   analyzer_version: number
 }
 
-// In-memory caches scoped to one page load. Avoids hammering the
-// API when the playbar re-renders or the user toggles a panel that
-// re-mounts a chip row.
-const facetsCache = new Map<number, TrackFacets | null>()
-const waveformCache = new Map<number, number[] | null>()
+function facetsKey(trackId: number) {
+  return ['music', 'track', 'facets', trackId] as const
+}
 
+function waveformKey(trackId: number) {
+  return ['music', 'track', 'waveform', trackId] as const
+}
+
+// Imperative fetchers — used when a caller wants a one-shot result outside
+// a setup() context. Routes through queryClient.fetchQuery so the cache
+// stays consistent with the reactive composable below.
+//
+// Radio + podcast tracks use negative synthetic IDs — they don't have
+// music-library facets, so skip the round-trip and the inevitable 422.
 export async function fetchTrackFacets(trackId: number): Promise<TrackFacets | null> {
-  if (facetsCache.has(trackId)) return facetsCache.get(trackId)!
+  if (trackId <= 0) return null
+  const queryClient = useNuxtApp().$queryClient
   try {
-    const { $heya } = useNuxtApp()
-    const data = await $heya('/api/tracks/{id}/facets', { path: { id: trackId } }) as TrackFacets
-    facetsCache.set(trackId, data)
-    return data
+    return await queryClient.fetchQuery({
+      queryKey: facetsKey(trackId),
+      queryFn: async () => {
+        const { $heya } = useNuxtApp()
+        return await $heya('/api/music/tracks/{id}/facets', { path: { id: trackId } }) as TrackFacets
+      },
+      staleTime: 1000 * 60 * 60,
+    })
   } catch {
-    facetsCache.set(trackId, null)
     return null
   }
 }
 
 export async function fetchTrackWaveform(trackId: number): Promise<number[] | null> {
-  if (waveformCache.has(trackId)) return waveformCache.get(trackId)!
+  if (trackId <= 0) return null
+  const queryClient = useNuxtApp().$queryClient
   try {
-    const { $heya } = useNuxtApp()
-    const data = await $heya('/api/tracks/{id}/waveform', { path: { id: trackId } }) as { waveform: number[] }
-    const wf = data.waveform ?? null
-    waveformCache.set(trackId, wf)
-    return wf
+    const res = await queryClient.fetchQuery({
+      queryKey: waveformKey(trackId),
+      queryFn: async () => {
+        const { $heya } = useNuxtApp()
+        const data = await $heya('/api/music/tracks/{id}/waveform', { path: { id: trackId } }) as { waveform: number[] }
+        return data.waveform ?? null
+      },
+      staleTime: 1000 * 60 * 60,
+    })
+    return res
   } catch {
-    waveformCache.set(trackId, null)
     return null
   }
 }
 
 // useTrackFacets is the reactive flavor — fetches when trackId
-// changes, exposes facets + waveform + loading flag.
+// changes, exposes facets + waveform + loading flag. The two useQuery
+// calls share keys with the imperative wrappers above, so the cache is
+// uniform regardless of which entry point a consumer used.
 export function useTrackFacets(trackId: Ref<number | null | undefined>) {
-  const facets = ref<TrackFacets | null>(null)
-  const waveform = ref<number[] | null>(null)
-  const loading = ref(false)
+  // `enabled: () => ...` lets us skip negative/null IDs cleanly.
+  const enabled = computed(() => typeof trackId.value === 'number' && trackId.value > 0)
 
-  watch(
-    trackId,
-    async id => {
-      if (!id) {
-        facets.value = null
-        waveform.value = null
-        return
-      }
-      loading.value = true
-      const [f, wf] = await Promise.all([fetchTrackFacets(id), fetchTrackWaveform(id)])
-      facets.value = f
-      waveform.value = wf
-      loading.value = false
+  const facetsQuery = useQuery({
+    queryKey: ['music', 'track', 'facets', trackId],
+    queryFn: async () => {
+      const { $heya } = useNuxtApp()
+      return await $heya('/api/music/tracks/{id}/facets', { path: { id: trackId.value as number } }) as TrackFacets
     },
-    { immediate: true },
-  )
+    enabled,
+    staleTime: 1000 * 60 * 60,
+    retry: false,
+  })
+
+  const waveformQuery = useQuery({
+    queryKey: ['music', 'track', 'waveform', trackId],
+    queryFn: async () => {
+      const { $heya } = useNuxtApp()
+      const data = await $heya('/api/music/tracks/{id}/waveform', { path: { id: trackId.value as number } }) as { waveform: number[] }
+      return data.waveform ?? null
+    },
+    enabled,
+    staleTime: 1000 * 60 * 60,
+    retry: false,
+  })
+
+  const facets = computed<TrackFacets | null>(() => facetsQuery.data.value ?? null)
+  const waveform = computed<number[] | null>(() => waveformQuery.data.value ?? null)
+  const loading = computed(() => facetsQuery.isPending.value || waveformQuery.isPending.value)
 
   return { facets, waveform, loading }
 }
+
+// Pull queryClient via Nuxt's injection so the imperative wrappers above
+// can reach it without a setup() context. Both the reactive composable
+// and the imperative wrappers ultimately read/write the same cache slots.
+void useQueryClient

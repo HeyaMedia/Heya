@@ -1,125 +1,146 @@
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="eq-overlay" @click.self="$emit('close')">
-      <div class="eq-modal">
-        <div class="eq-header">
-          <h3 class="eq-title">Equalizer</h3>
-          <div class="eq-header-actions">
-            <button
-              class="eq-toggle"
-              :class="{ on: eq.enabled }"
-              @click="settings.setEQEnabled(!eq.enabled)"
-              :title="eq.enabled ? 'Disable EQ' : 'Enable EQ'"
-            >
-              <span class="eq-toggle-dot" />
-              <span>{{ eq.enabled ? 'On' : 'Off' }}</span>
-            </button>
-            <button class="btn-icon" @click="$emit('close')"><Icon name="close" :size="18" /></button>
-          </div>
+  <AppDialog
+    :model-value="open"
+    title="Equalizer"
+    size="md"
+    @update:model-value="(v) => v ? null : $emit('close')"
+  >
+    <!-- Master enable toggle — promoted to a labeled row so the relationship
+         between the switch and "the whole EQ" is explicit. The old design
+         tucked this into the header next to the close button. -->
+    <div class="eq-master-row">
+      <span class="eq-master-label">Enable equalizer</span>
+      <AppSwitch
+        :model-value="eq.enabled"
+        :aria-label="eq.enabled ? 'Disable EQ' : 'Enable EQ'"
+        size="md"
+        @update:model-value="settings.setEQEnabled"
+      />
+    </div>
+
+    <div class="eq-presets">
+      <button
+        v-for="p in settings.presets"
+        :key="p.name"
+        class="eq-preset"
+        :class="{ active: eq.presetName === p.name }"
+        @click="settings.applyPreset(p.name)"
+      >
+        {{ p.name }}
+      </button>
+    </div>
+
+    <div class="eq-bands">
+      <div v-for="(value, i) in eq.bands" :key="i" class="eq-band">
+        <div
+          class="eq-bar-track"
+          @mousedown="startDrag($event, i)"
+        >
+          <div class="eq-bar-baseline" />
+          <div
+            class="eq-bar-fill"
+            :class="{ negative: value < 0 }"
+            :style="bandStyle(value)"
+          />
+          <div class="eq-bar-knob" :style="knobStyle(value)" />
         </div>
+        <span class="eq-val">{{ value > 0 ? `+${value}` : value }}</span>
+        <span class="eq-freq">{{ BAND_LABELS[i] }}</span>
+      </div>
+    </div>
 
-        <div class="eq-presets">
-          <button
-            v-for="p in settings.presets"
-            :key="p.name"
-            class="eq-preset"
-            :class="{ active: eq.presetName === p.name }"
-            @click="settings.applyPreset(p.name)"
-          >
-            {{ p.name }}
-          </button>
+    <div class="eq-extras">
+      <div class="eq-extra-row">
+        <span class="eq-extra-label">Pre-amp</span>
+        <AppSlider
+          :model-value="eq.preamp"
+          :min="-12"
+          :max="12"
+          :step="0.5"
+          bipolar
+          aria-label="Pre-amp"
+          class="eq-slider-flex"
+          @update:model-value="settings.setPreamp"
+        />
+        <span class="eq-extra-val">{{ eq.preamp > 0 ? `+${eq.preamp}` : eq.preamp }} dB</span>
+      </div>
+      <div class="eq-extra-row">
+        <span class="eq-extra-label">Post-gain</span>
+        <AppSlider
+          :model-value="eq.postgain"
+          :min="-12"
+          :max="12"
+          :step="0.5"
+          bipolar
+          aria-label="Post-gain"
+          class="eq-slider-flex"
+          @update:model-value="settings.setPostgain"
+        />
+        <span class="eq-extra-val">{{ eq.postgain > 0 ? `+${eq.postgain}` : eq.postgain }} dB</span>
+      </div>
+
+      <div class="eq-divider" />
+
+      <div class="eq-extra-row">
+        <span class="eq-extra-label">Crossfade</span>
+        <div class="eq-select-wrap">
+          <AppSelect
+            :model-value="crossfade.mode"
+            :options="CROSSFADE_OPTIONS"
+            aria-label="Crossfade mode"
+            @change="v => settings.setCrossfadeMode(v as 'gapless' | 'crossfade')"
+          />
         </div>
+        <AppSlider
+          v-if="crossfade.mode === 'crossfade'"
+          :model-value="crossfade.durationSeconds"
+          :min="1"
+          :max="12"
+          :step="1"
+          aria-label="Crossfade duration"
+          class="eq-slider-flex"
+          @update:model-value="settings.setCrossfadeDuration"
+        />
+        <span v-if="crossfade.mode === 'crossfade'" class="eq-extra-val">{{ crossfade.durationSeconds }}s</span>
+      </div>
 
-        <div class="eq-bands">
-          <div v-for="(value, i) in eq.bands" :key="i" class="eq-band">
-            <div
-              class="eq-bar-track"
-              @mousedown="startDrag($event, i)"
-            >
-              <div class="eq-bar-baseline" />
-              <div
-                class="eq-bar-fill"
-                :class="{ negative: value < 0 }"
-                :style="bandStyle(value)"
-              />
-              <div class="eq-bar-knob" :style="knobStyle(value)" />
-            </div>
-            <span class="eq-val">{{ value > 0 ? `+${value}` : value }}</span>
-            <span class="eq-freq">{{ BAND_LABELS[i] }}</span>
-          </div>
-        </div>
-
-        <div class="eq-extras">
-          <div class="eq-extra-row">
-            <span class="eq-extra-label">Pre-amp</span>
-            <input
-              type="range" min="-12" max="12" step="0.5"
-              :value="eq.preamp"
-              @input="(e) => settings.setPreamp(parseFloat((e.target as HTMLInputElement).value))"
-              class="eq-slider"
-            />
-            <span class="eq-extra-val">{{ eq.preamp > 0 ? `+${eq.preamp}` : eq.preamp }} dB</span>
-          </div>
-          <div class="eq-extra-row">
-            <span class="eq-extra-label">Post-gain</span>
-            <input
-              type="range" min="-12" max="12" step="0.5"
-              :value="eq.postgain"
-              @input="(e) => settings.setPostgain(parseFloat((e.target as HTMLInputElement).value))"
-              class="eq-slider"
-            />
-            <span class="eq-extra-val">{{ eq.postgain > 0 ? `+${eq.postgain}` : eq.postgain }} dB</span>
-          </div>
-
-          <div class="eq-divider" />
-
-          <div class="eq-extra-row">
-            <span class="eq-extra-label">Crossfade</span>
-            <select
-              class="eq-select"
-              :value="crossfade.mode"
-              @change="(e) => settings.setCrossfadeMode((e.target as HTMLSelectElement).value as 'gapless' | 'crossfade')"
-            >
-              <option value="gapless">Gapless</option>
-              <option value="crossfade">Crossfade</option>
-            </select>
-            <input
-              v-if="crossfade.mode === 'crossfade'"
-              type="range" min="1" max="12" step="1"
-              :value="crossfade.durationSeconds"
-              @input="(e) => settings.setCrossfadeDuration(parseInt((e.target as HTMLInputElement).value, 10))"
-              class="eq-slider"
-            />
-            <span v-if="crossfade.mode === 'crossfade'" class="eq-extra-val">{{ crossfade.durationSeconds }}s</span>
-          </div>
-
-          <div class="eq-extra-row">
-            <span class="eq-extra-label">Replay Gain</span>
-            <select
-              class="eq-select"
-              :value="replayGain.mode"
-              @change="(e) => settings.setReplayGainMode((e.target as HTMLSelectElement).value as 'off' | 'track' | 'album' | 'auto')"
-            >
-              <option value="off">Off — native level</option>
-              <option value="track">Track — each song normalized</option>
-              <option value="album">Album — preserve album dynamics</option>
-              <option value="auto">Auto — track on shuffle, album otherwise</option>
-            </select>
-          </div>
+      <div class="eq-extra-row">
+        <span class="eq-extra-label">Replay Gain</span>
+        <div class="eq-select-wrap eq-select-wrap-wide">
+          <AppSelect
+            :model-value="replayGain.mode"
+            :options="REPLAY_GAIN_OPTIONS"
+            aria-label="Replay gain mode"
+            @change="v => settings.setReplayGainMode(v as 'off' | 'track' | 'album' | 'auto')"
+          />
         </div>
       </div>
     </div>
-  </Teleport>
+  </AppDialog>
 </template>
 
 <script setup lang="ts">
 defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 
+import type { SelectOption } from '~/components/ui/AppSelect.vue'
+
 const settings = useAudioSettings()
 const eq = settings.eq
 const crossfade = settings.crossfade
 const replayGain = settings.replayGain
+
+const CROSSFADE_OPTIONS: SelectOption[] = [
+  { value: 'gapless', label: 'Gapless' },
+  { value: 'crossfade', label: 'Crossfade' },
+]
+
+const REPLAY_GAIN_OPTIONS: SelectOption[] = [
+  { value: 'off',   label: 'Off — native level' },
+  { value: 'track', label: 'Track — each song normalized' },
+  { value: 'album', label: 'Album — preserve album dynamics' },
+  { value: 'auto',  label: 'Auto — track on shuffle, album otherwise' },
+]
 
 const BAND_LABELS = ['32', '64', '125', '250', '500', '1K', '2K', '4K', '8K', '16K'] as const
 
@@ -146,8 +167,6 @@ function startDrag(e: MouseEvent, index: number) {
   dragIndex = index
   dragRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   applyDrag(e.clientY)
-  window.addEventListener('mousemove', onDragMove)
-  window.addEventListener('mouseup', stopDrag)
 }
 function applyDrag(clientY: number) {
   if (dragIndex < 0 || !dragRect) return
@@ -156,57 +175,29 @@ function applyDrag(clientY: number) {
   const value = Math.round(((1 - Math.max(0, Math.min(1, y))) * 24 - 12) * 2) / 2
   settings.setEQBand(dragIndex, value)
 }
-function onDragMove(e: MouseEvent) { applyDrag(e.clientY) }
-function stopDrag() {
-  dragIndex = -1
-  dragRect = null
-  window.removeEventListener('mousemove', onDragMove)
-  window.removeEventListener('mouseup', stopDrag)
-}
+useEventListener(window, 'mousemove', (e: MouseEvent) => { if (dragIndex >= 0) applyDrag(e.clientY) })
+useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 </script>
 
 <style scoped>
-.eq-overlay {
-  position: fixed; inset: 0; z-index: 200;
-  background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(12px);
-  display: flex; align-items: center; justify-content: center;
-}
-.eq-modal {
-  width: 560px;
-  max-width: 92vw;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 24px 28px 28px;
-  box-shadow: var(--shadow-3);
-}
-.eq-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-.eq-title { font-size: 16px; font-weight: 600; }
-.eq-header-actions { display: flex; align-items: center; gap: 10px; }
-.eq-toggle {
-  display: inline-flex;
+/* AppDialog supplies the modal chrome (overlay/panel/header/close). The
+   rules below are layout-only for the EQ-specific body content. */
+
+.eq-master-row {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 14px 5px 8px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.05);
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
-  font-size: 11px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-2);
-  cursor: pointer;
+  border-radius: var(--r-md);
 }
-.eq-toggle.on { background: var(--gold-soft); border-color: rgba(230,185,74,0.4); color: var(--gold-bright); }
-.eq-toggle-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--fg-3);
-  transition: background 0.15s;
+.eq-master-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-1);
 }
-.eq-toggle.on .eq-toggle-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
 
 .eq-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
 .eq-preset {
@@ -283,41 +274,17 @@ function stopDrag() {
   min-width: 56px;
   text-align: right;
 }
-.eq-slider {
-  flex: 1;
-  -webkit-appearance: none;
-  appearance: none;
-  height: 4px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
+/* The AppSlider has its own visual identity; we only need the row layout
+   constraint that it takes the remaining horizontal space. Pre-amp,
+   Post-gain, and Crossfade-duration all share this. */
+.eq-slider-flex { flex: 1; min-width: 0; }
+.eq-select-wrap {
+  /* AppSelect's trigger is width:100% — we constrain it via the wrapper.
+     Crossfade gets a compact slot so the slider sits next to it; Replay
+     Gain takes the full remaining width since its option labels are long. */
+  flex: 0 0 160px;
+  min-width: 0;
 }
-.eq-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--gold);
-  cursor: pointer;
-}
-.eq-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--gold);
-  border: 0;
-  cursor: pointer;
-}
-.eq-select {
-  flex: 1;
-  background: var(--bg-3);
-  color: var(--fg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 6px 10px;
-  font-size: 12px;
-  font-family: inherit;
-}
+.eq-select-wrap-wide { flex: 1; }
 .eq-divider { height: 1px; background: var(--border); margin: 6px 0; }
 </style>

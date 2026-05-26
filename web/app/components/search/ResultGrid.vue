@@ -2,7 +2,7 @@
   <div v-if="sectionKey === 'tracks'" class="track-list">
     <button v-for="item in items" :key="item.id" class="track-row" @click="go(item)">
       <div class="track-thumb">
-        <img v-if="item.artist_media_item_id" :src="`/api/media/${item.artist_media_item_id}/image/poster`" loading="lazy" />
+        <NuxtImg v-if="item.artist_media_item_id" :src="`/api/media/${item.artist_media_item_id}/image/poster`" :width="100" :quality="80" loading="lazy" />
         <Icon v-else name="music" :size="16" />
       </div>
       <div class="track-body">
@@ -22,7 +22,7 @@
         @click="go(item)"
       >
         <div class="person-avatar">
-          <img :src="personImageUrl(item.id)" loading="lazy" @error="onImgError" />
+          <NuxtImg :src="personImageUrl(item.id)" :width="200" :quality="80" loading="lazy" @error="onImgError" />
         </div>
         <div class="person-name">{{ item.name }}</div>
         <div class="person-sub">
@@ -39,16 +39,13 @@
         class="grid-tile card-tile"
         @click="go(item)"
       >
-        <Poster
+        <MediaCard
           :idx="i"
           :src="posterUrl(item)"
           :aspect="aspectFor()"
           :title="title(item)"
+          :subtitle="subtitle(item)"
         />
-        <div class="grid-tile-meta">
-          <div class="grid-tile-title">{{ title(item) }}</div>
-          <div v-if="subtitle(item)" class="grid-tile-sub">{{ subtitle(item) }}</div>
-        </div>
       </div>
     </template>
   </div>
@@ -108,15 +105,22 @@ function go(item: any) {
     case 'tv':
       return navigateTo(`/tv/${item.slug || slugify(item.title)}`)
     case 'music':
-      return navigateTo(`/music/${item.slug || slugify(item.title)}`)
+      return navigateTo(`/music/artist/${item.slug || slugify(item.title)}`)
     case 'books':
       return navigateTo(`/books/${item.slug || slugify(item.title)}`)
     case 'people':
       return navigateTo(`/person/${item.slug || slugify(item.name)}`)
     case 'albums':
-      return navigateTo(`/music/${item.artist_slug || slugify(item.artist_name)}#album-${item.id}`)
+      // The album row carries the album slug as `slug` (sqlc maps `al.slug`
+      // straight through). Fall back to the artist page if the album slug
+      // is missing — better than landing on a 404.
+      if (item.artist_slug && item.slug) return navigateTo(`/music/artist/${item.artist_slug}/${item.slug}`)
+      return navigateTo(`/music/artist/${item.artist_slug || slugify(item.artist_name)}`)
     case 'tracks':
-      return navigateTo(`/music/${item.artist_slug || slugify(item.artist_name)}#track-${item.id}`)
+      // Tracks don't have their own page yet — land on the album so the
+      // user can scroll to the track and play from there.
+      if (item.artist_slug && item.album_slug) return navigateTo(`/music/artist/${item.artist_slug}/${item.album_slug}`)
+      return navigateTo(`/music/artist/${item.artist_slug || slugify(item.artist_name)}`)
   }
 }
 
@@ -127,7 +131,8 @@ function fmtDuration(ms: number): string {
   return `${m}:${s}`
 }
 
-function onImgError(e: Event) {
+function onImgError(e: Event | string) {
+  if (typeof e === 'string') return
   const img = e.target as HTMLImageElement
   img.style.display = 'none'
 }
@@ -151,25 +156,7 @@ function onImgError(e: Event) {
 .grid-tile {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   cursor: pointer;
-}
-.grid-tile-meta { padding: 0 2px; }
-.grid-tile-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg-0);
-  line-height: 1.3;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.grid-tile-sub {
-  font-size: 11px;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-  margin-top: 2px;
 }
 
 .person-card {

@@ -1,30 +1,30 @@
 <script setup lang="ts">
 import type { MediaDetail } from '~~/shared/types'
+import { useQuery } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
 
-const mediaId = ref<number | null>(null)
-const mediaType = ref<string | null>(null)
-const loading = ref(true)
+const { $heya } = useNuxtApp()
+const detailQuery = useQuery({
+  queryKey: ['media', 'detail', slug],
+  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: slug.value } })) as MediaDetail,
+  staleTime: 1000 * 60 * 5,
+  retry: false,
+})
 
-async function load() {
-  loading.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    const detail = await $heya('/api/media/{id}', { path: { id: slug.value } }) as MediaDetail
-    mediaId.value = detail.media_item.id
-    mediaType.value = detail.media_item.media_type
-  } catch {
-    navigateTo('/music')
-  } finally {
-    loading.value = false
-  }
-}
+// Redirect on confirmed not-found rather than every transient error —
+// the retry: false stops the infinite-spinner case but a real 404 still
+// bubbles into errored state.
+watch(detailQuery.error, (err) => {
+  if (err) navigateTo('/music')
+})
 
-watch(slug, load, { immediate: true })
+const mediaId = computed(() => detailQuery.data.value?.media_item.id ?? null)
+const mediaType = computed(() => detailQuery.data.value?.media_item.media_type ?? null)
+const loading = computed(() => detailQuery.isPending.value)
 </script>
 
 <template>

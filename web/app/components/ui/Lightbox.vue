@@ -1,32 +1,46 @@
 <template>
-  <Teleport to="body">
-    <Transition name="lb">
-      <div v-if="isOpen" class="lb-overlay" @click.self="close">
-        <img :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop />
+  <DialogRoot :open="isOpen" @update:open="(v) => v ? null : close()">
+    <DialogPortal>
+      <Transition name="lb">
+        <DialogOverlay v-if="isOpen" class="lb-overlay" />
+      </Transition>
+      <Transition name="lb">
+        <DialogContent
+          v-if="isOpen"
+          class="lb-content"
+          :aria-describedby="undefined"
+          @click.self="close"
+        >
+          <VisuallyHidden>
+            <DialogTitle>Image viewer</DialogTitle>
+          </VisuallyHidden>
 
-        <button class="lb-close" @click="close"><Icon name="close" :size="20" /></button>
+          <img :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop />
 
-        <button v-if="hasPrev" class="lb-nav lb-prev" @click.stop="prev"><Icon name="chevleft" :size="28" /></button>
-        <button v-if="hasNext" class="lb-nav lb-next" @click.stop="next"><Icon name="chevright" :size="28" /></button>
+          <DialogClose class="lb-close" aria-label="Close"><Icon name="close" :size="20" /></DialogClose>
 
-        <div v-if="total > 1" class="lb-counter">{{ index + 1 }} / {{ total }}</div>
-      </div>
-    </Transition>
-  </Teleport>
+          <button v-if="hasPrev" class="lb-nav lb-prev" @click.stop="prev"><Icon name="chevleft" :size="28" /></button>
+          <button v-if="hasNext" class="lb-nav lb-next" @click.stop="next"><Icon name="chevright" :size="28" /></button>
+
+          <div v-if="total > 1" class="lb-counter">{{ index + 1 }} / {{ total }}</div>
+        </DialogContent>
+      </Transition>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <script setup lang="ts">
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogClose, VisuallyHidden } from 'reka-ui'
+
 const { isOpen, currentSrc, index, total, hasNext, hasPrev, close, next, prev } = useLightbox()
 
-function onKeydown(e: KeyboardEvent) {
+// reka's DialogContent handles Escape natively. Arrow keys aren't part of
+// the dialog primitive, so we still wire those manually.
+useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   if (!isOpen.value) return
-  if (e.key === 'Escape') close()
-  else if (e.key === 'ArrowRight' && hasNext.value) next()
+  if (e.key === 'ArrowRight' && hasNext.value) next()
   else if (e.key === 'ArrowLeft' && hasPrev.value) prev()
-}
-
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+})
 </script>
 
 <style scoped>
@@ -35,10 +49,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   inset: 0;
   z-index: 9999;
   background: rgba(0, 0, 0, 0.92);
+}
+.lb-content {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: zoom-out;
+  /* Lightbox covers the full viewport — reset any default Dialog focus ring. */
+  outline: none;
 }
 .lb-img {
   max-width: 92vw;

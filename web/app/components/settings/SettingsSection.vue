@@ -1,0 +1,98 @@
+<script setup lang="ts">
+defineProps<{
+  title: string
+  description?: string
+  icon?: string
+  info?: string
+  lockedBy?: string
+}>()
+</script>
+
+<template>
+  <section class="sv2-section">
+    <header class="sv2-section-head">
+      <div class="sv2-section-titles">
+        <h3 class="sv2-section-title">
+          <Icon v-if="icon" :name="icon" :size="14" />
+          <span>{{ title }}</span>
+          <AppTooltip v-if="info" :label="info">
+            <Icon name="info" :size="12" class="sv2-section-info" />
+          </AppTooltip>
+          <span v-if="lockedBy" class="sv2-section-lock" :title="`Managed by ${lockedBy}`">
+            <Icon name="key" :size="10" />
+            {{ lockedBy }}
+          </span>
+        </h3>
+        <p v-if="description" class="sv2-section-desc">{{ description }}</p>
+      </div>
+      <div class="sv2-section-actions">
+        <slot name="actions" />
+      </div>
+    </header>
+    <div class="sv2-section-body">
+      <slot />
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.sv2-section {
+  margin-bottom: 28px;
+}
+.sv2-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.sv2-section-titles {
+  min-width: 0;
+  flex: 1;
+}
+.sv2-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-1);
+}
+.sv2-section-info {
+  color: var(--fg-3);
+  cursor: help;
+}
+.sv2-section-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--gold-soft);
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+.sv2-section-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--fg-3);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.sv2-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.sv2-section-body { display: block; }
+</style>

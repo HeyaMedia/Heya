@@ -11,14 +11,21 @@
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
-    "@phosphor-icons/vue": "^2.2.1",
+    "@nuxt/image": "^2.0.0",
+    "@tanstack/vue-query": "^5.100.14",
+    "@vueuse/core": "^14.3.0",
+    "@vueuse/nuxt": "^14.3.0",
     "akarisub": "^0.2.0",
     "hls.js": "^1.6.16",
     "nuxt": "^4.4.6",
-    "nuxt-open-fetch": "^0.13.9"
+    "nuxt-open-fetch": "^0.13.9",
+    "nuxt-phosphor-icons": "^2.3.3",
+    "reka-ui": "^2.9.8",
+    "vue-virtual-scroller": "^3.0.4"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.14.0",
+    "@tanstack/vue-query-devtools": "^6.1.33",
     "typescript": "^6.0.3"
   }
 }

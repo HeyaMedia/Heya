@@ -11,32 +11,28 @@
     </div>
     <div class="row-scroll" ref="scrollEl">
       <div
-        v-for="item in items"
+        v-for="(item, i) in items"
         :key="item.id"
         class="cw-tile"
         @click="$emit('play', item)"
       >
-        <div class="cw-thumb">
-          <img :src="thumbUrl(item)" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-          <div class="cw-play-overlay">
-            <div class="cw-play-btn"><Icon name="play" :size="16" /></div>
-          </div>
-          <div class="cw-progress-bar">
-            <div class="cw-progress-fill" :style="{ width: progressPct(item) + '%' }" />
-          </div>
-        </div>
-        <div class="cw-meta">
-          <div class="cw-title">{{ item.title }}</div>
-          <div class="cw-sub">
-            <template v-if="item.entity_type === 'episode' && item.season_number">
-              S{{ String(item.season_number).padStart(2, '0') }}E{{ String(item.episode_number).padStart(2, '0') }}
-              <span v-if="item.episode_title"> · {{ item.episode_title }}</span>
-            </template>
-            <template v-else>
-              {{ formatRemaining(item) }}
-            </template>
-          </div>
-        </div>
+        <MediaCard
+          :idx="i"
+          :src="thumbUrl(item)"
+          aspect="16/9"
+          :title="item.title"
+          :subtitle="bottomLine(item)"
+          :badge-tl="episodeBadge(item)"
+          :badge-tr="formatRemaining(item)"
+          :badge-tr-gold="false"
+          :progress-pct="progressPct(item)"
+        >
+          <template #badges>
+            <div class="cw-play-overlay">
+              <div class="cw-play-btn"><Icon name="play" :size="16" /></div>
+            </div>
+          </template>
+        </MediaCard>
       </div>
     </div>
   </section>
@@ -57,6 +53,10 @@ export interface ContinueWatchingItem {
   episode_number?: number
   episode_title?: string
   season_number?: number
+  // file_id is enriched by the backend so the FE can navigate to /watch
+  // without a second lookup. 0 when the file can't be resolved (deleted /
+  // mismatched parse) — the FE should hide or disable the tile in that case.
+  file_id: number
 }
 
 defineProps<{ items: ContinueWatchingItem[] }>()
@@ -86,8 +86,20 @@ function formatRemaining(item: ContinueWatchingItem): string {
   const remaining = item.total_seconds - item.progress_seconds
   if (remaining <= 0) return ''
   const m = Math.ceil(remaining / 60)
-  if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m remaining`
-  return `${m}m remaining`
+  if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m left`
+  return `${m}m left`
+}
+
+function episodeBadge(item: ContinueWatchingItem): string {
+  if (item.entity_type === 'episode' && item.season_number && item.episode_number) {
+    return `S${String(item.season_number).padStart(2, '0')}E${String(item.episode_number).padStart(2, '0')}`
+  }
+  return ''
+}
+
+function bottomLine(item: ContinueWatchingItem): string {
+  if (item.entity_type === 'episode' && item.episode_title) return item.episode_title
+  return ''
 }
 </script>
 
@@ -114,41 +126,20 @@ function formatRemaining(item: ContinueWatchingItem): string {
 .cw-tile {
   width: 280px; flex-shrink: 0; cursor: pointer;
 }
-.cw-thumb {
-  position: relative; aspect-ratio: 16/9;
-  border-radius: var(--r-md); overflow: hidden;
-  background: var(--bg-3);
-}
-.cw-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
+/* Play overlay sits in MediaCard's badges slot — covers the full image,
+   becomes visible only on hover. Above the gradient via z-index. */
 .cw-play-overlay {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0,0,0,0.3);
   opacity: 0; transition: opacity 0.15s;
+  z-index: 3; pointer-events: none;
 }
 .cw-tile:hover .cw-play-overlay { opacity: 1; }
 .cw-play-btn {
   width: 40px; height: 40px; border-radius: 50%;
-  background: rgba(255,255,255,0.15); backdrop-filter: blur(4px);
+  background: rgba(255,255,255,0.18); backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center; color: #fff;
-}
-
-.cw-progress-bar {
-  position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
-  background: rgba(255,255,255,0.15);
-}
-.cw-progress-fill {
-  height: 100%; background: var(--gold); border-radius: 0 2px 2px 0;
-}
-
-.cw-meta { padding: 8px 2px 0; }
-.cw-title {
-  font-size: 13px; font-weight: 500; color: var(--fg-0);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.cw-sub {
-  font-size: 11px; color: var(--fg-3); font-family: var(--font-mono);
-  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 </style>

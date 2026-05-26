@@ -2,30 +2,70 @@
   <div v-if="loading" class="m-loading page-pad">Loading…</div>
   <div v-else-if="!artist" class="m-empty page-pad">Artist not found.</div>
   <div v-else class="artist-page">
-    <!-- Backdrop hero — plexify layout with floating round actions -->
+    <!-- Hero (Plexify style): full-bleed backdrop with a circular poster
+         on the left, bio + tags inline beside the name, and a stats line
+         with rating below. Floating round actions on the right. -->
     <section class="hero">
       <div class="hero-backdrop" :style="backdropStyle" />
       <div class="hero-fade" />
       <div class="hero-content">
+        <div class="hero-left">
+          <Poster :idx="artist.id" :src="artistPosterUrl" aspect="1/1" class="hero-poster" :width="320" />
+        </div>
         <div class="hero-meta">
-          <div class="hero-kind">Artist</div>
+          <div class="hero-kind">{{ heroKindLabel }}</div>
           <h1 class="hero-title">{{ artist.name }}</h1>
-          <div v-if="artist.disambiguation" class="hero-disambig">{{ artist.disambiguation }}</div>
-          <div class="hero-counts">
-            <span>{{ totalAlbums }} {{ totalAlbums === 1 ? 'release' : 'releases' }}</span>
-            <span class="dot">·</span>
-            <span>{{ totalTracks }} tracks</span>
-            <span v-if="totalDuration > 0" class="dot">·</span>
-            <span v-if="totalDuration > 0">{{ formatDuration(totalDuration) }}</span>
+          <div v-if="(artist.tags?.length ?? 0) > 0" class="tag-row">
+            <NuxtLink
+              v-for="tag in (artist.tags ?? []).slice(0, 8)"
+              :key="tag"
+              :to="`/music/browse/genre/${encodeURIComponent(tag)}`"
+              class="tag-chip"
+            >{{ tag }}</NuxtLink>
+          </div>
+          <p v-if="artist.biography" class="hero-bio" :class="{ collapsed: !bioOpen && artist.biography.length > 320 }">
+            {{ artist.biography }}
+          </p>
+          <button v-if="artist.biography && artist.biography.length > 320" class="hero-bio-toggle" @click="bioOpen = !bioOpen">
+            {{ bioOpen ? 'Less' : 'More' }}
+          </button>
+          <div class="hero-stats">
+            <div class="hero-stats-stars" @click.stop>
+              <StarRating
+                :model-value="artistRatings.get(artist.id) ?? 0"
+                size="sm"
+                @update:model-value="(v) => onRateArtist(artist!.id, v)"
+              />
+            </div>
+            <template v-if="(artist.listeners ?? 0) > 0">
+              <span class="stat-dot">·</span>
+              <span class="stat">{{ formatBigInt(artist.listeners!) }} listeners</span>
+            </template>
+            <template v-if="(artist.playcount ?? 0) > 0">
+              <span class="stat-dot">·</span>
+              <span class="stat">{{ formatBigInt(artist.playcount!) }} plays</span>
+            </template>
+            <template v-if="lifecycleLabel">
+              <span class="stat-dot">·</span>
+              <span class="stat">{{ artist.artist_type === 'Group' ? 'Active' : 'Born' }} {{ lifecycleLabel }}</span>
+            </template>
+            <template v-if="originLabel">
+              <span class="stat-dot">·</span>
+              <span class="stat">{{ originLabel }}</span>
+            </template>
+            <template v-if="totalAlbums > 0">
+              <span class="stat-dot">·</span>
+              <span class="stat">{{ totalAlbums }} {{ totalAlbums === 1 ? 'release' : 'releases' }} · {{ totalTracks }} tracks</span>
+            </template>
           </div>
           <ExternalLinks
             kind="artist"
             :external-ids="detail?.media_item?.external_ids ?? {}"
+            class="hero-ext"
           />
         </div>
-        <Poster :idx="artist.id" :src="artistPosterUrl" aspect="1/1" class="hero-poster" />
       </div>
-      <!-- Floating round actions, bottom-right of the hero (plexify style) -->
+      <!-- Floating round actions -->
       <div class="hero-floating-actions">
         <button class="hero-round hero-round-primary" @click="playAll(false)" title="Play">
           <Icon name="play" :size="22" />
@@ -33,35 +73,110 @@
         <button class="hero-round" @click="playAll(true)" title="Shuffle">
           <Icon name="shuffle" :size="18" />
         </button>
-        <button
-          class="hero-round"
-          :class="{ active: lovedArtist.isLoved(artist.id) }"
-          @click="lovedArtist.toggle(artist.id)"
-          :title="lovedArtist.isLoved(artist.id) ? 'Remove from My Artists' : 'Add to My Artists'"
-        >
-          <Icon :name="lovedArtist.isLoved(artist.id) ? 'heartfill' : 'heart'" :size="18" />
-        </button>
         <button class="hero-round" @click="addAllToQueue" title="Add to queue">
           <Icon name="plus" :size="18" />
+        </button>
+        <button
+          class="hero-round"
+          @click="startArtistRadio"
+          :disabled="radio.starting.value"
+          title="Start radio from this artist"
+        >
+          <Icon name="radio" :size="18" />
         </button>
       </div>
     </section>
 
-    <!-- Bio -->
-    <section v-if="artist.biography" class="bio page-pad">
-      <p class="bio-text" :class="{ collapsed: !bioOpen && (artist.biography.length > 600) }">
-        {{ artist.biography }}
-      </p>
-      <button v-if="artist.biography.length > 600" class="bio-toggle" @click="bioOpen = !bioOpen">
-        {{ bioOpen ? 'Show less' : 'Read more' }}
+    <!-- Popular Tracks: Plexify-style numbered list with star + duration -->
+    <section v-if="topTracks.length" class="top-tracks artist-section">
+      <div class="section-row-head tt-head">
+        <h2 class="section-title-lg">Popular Tracks</h2>
+        <button class="pill-btn" @click="playTopAll(false)" :disabled="!hasPlayableTopTracks">
+          <Icon name="play" :size="13" /><span>Play</span>
+        </button>
+        <button class="pill-btn pill-btn-ghost" @click="playTopAll(true)" :disabled="!hasPlayableTopTracks">
+          <Icon name="shuffle" :size="13" /><span>Shuffle</span>
+        </button>
+      </div>
+      <ol class="tt-list">
+        <li
+          v-for="(t, idx) in topTracks.slice(0, ttExpanded ? topTracks.length : 8)"
+          :key="`tt-${t.local_track_id}-${idx}`"
+          class="tt-row"
+        >
+          <div class="tt-leader">
+            <span class="tt-rank">{{ idx + 1 }}</span>
+            <button
+              class="tt-hover-play"
+              type="button"
+              @click="playTopTrack(t)"
+              :title="`Play ${t.title}`"
+            >
+              <Icon name="play" :size="12" />
+            </button>
+          </div>
+          <div class="tt-meta">
+            <span class="tt-title">{{ t.title }}</span>
+            <template v-if="t.local_album_title">
+              <span class="tt-album-sep">·</span>
+              <NuxtLink
+                :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
+                class="tt-album"
+              >{{ t.local_album_title }}</NuxtLink>
+            </template>
+          </div>
+          <div class="tt-stars" @click.stop>
+            <StarRating
+              :model-value="trackRatings.get(t.local_track_id!) ?? 0"
+              size="sm"
+              @update:model-value="(v) => onRateTrack(t.local_track_id!, v)"
+            />
+          </div>
+          <div v-if="t.local_duration" class="tt-duration">{{ formatTime(t.local_duration) }}</div>
+          <div v-else class="tt-duration" />
+        </li>
+      </ol>
+      <button v-if="topTracks.length > 8" class="tt-more" @click="ttExpanded = !ttExpanded">
+        {{ ttExpanded ? 'Show fewer' : `See all ${topTracks.length}` }}
       </button>
     </section>
 
-    <!-- Discography by release kind — compact grid, click → album page -->
+    <!-- Band lifecycle: members of this group / groups this person plays in -->
+    <section v-if="(artist.members?.length ?? 0) > 0" class="members artist-section">
+      <div class="section-row-head">
+        <h2 class="section-title-lg">Members</h2>
+        <span class="more">{{ artist.members!.length }}</span>
+      </div>
+      <div class="member-grid">
+        <div v-for="m in artist.members" :key="`mem-${m.name}`" class="member-chip">
+          <div class="member-name">{{ m.name }}</div>
+          <div v-if="m.begin_year || m.end_year" class="member-years">
+            {{ m.begin_year || '?' }}–{{ m.end_year || 'present' }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="(artist.groups?.length ?? 0) > 0" class="members artist-section">
+      <div class="section-row-head">
+        <h2 class="section-title-lg">Member of</h2>
+        <span class="more">{{ artist.groups!.length }}</span>
+      </div>
+      <div class="member-grid">
+        <div v-for="g in artist.groups" :key="`grp-${g.name}`" class="member-chip">
+          <div class="member-name">{{ g.name }}</div>
+          <div v-if="g.begin_year || g.end_year" class="member-years">
+            {{ g.begin_year || '?' }}–{{ g.end_year || 'present' }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Discography by release kind -->
     <section
       v-for="group in groupedDiscography"
       :key="group.kind"
-      class="discog page-pad"
+      class="discog artist-section"
     >
       <div class="section-row-head">
         <h2 class="section-title-lg">{{ group.label }}</h2>
@@ -75,7 +190,7 @@
           class="discog-tile card-tile"
         >
           <div class="discog-art-wrap">
-            <Poster :idx="album.id" :src="useAlbumCoverUrl(album.id)" aspect="1/1" class="discog-art" />
+            <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="discog-art" />
             <button class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
               <Icon name="play" :size="14" />
             </button>
@@ -93,7 +208,7 @@
     </section>
 
     <!-- Sonic similar — local pgvector centroids -->
-    <section v-if="sonicSimilar.length" class="similar page-pad">
+    <section v-if="sonicSimilar.length" class="similar artist-section">
       <div class="section-row-head">
         <h2 class="section-title-lg">Sounds Like</h2>
         <span class="more">{{ sonicSimilar.length }}</span>
@@ -106,7 +221,7 @@
           class="similar-tile card-tile"
           :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
         >
-          <Poster :idx="row.id" :src="`/api/media/${row.media_item_id}/image/poster`" aspect="1/1" style="border-radius: 50%" />
+          <Poster :idx="row.id" :src="`/api/media/${row.media_item_id}/image/poster`" aspect="1/1" :width="200" style="border-radius: 50%" />
           <div class="similar-tile-name">{{ row.name }}</div>
           <div class="similar-tile-source">sonic match</div>
         </NuxtLink>
@@ -114,7 +229,7 @@
     </section>
 
     <!-- Similar artists — Last.fm + ListenBrainz via heya.media -->
-    <section v-if="similar.length" class="similar page-pad">
+    <section v-if="similar.length" class="similar artist-section">
       <div class="section-row-head">
         <h2 class="section-title-lg">Similar Artists</h2>
         <span class="more">{{ similar.length }}</span>
@@ -129,29 +244,82 @@
           :class="{ 'similar-external': !row.local_slug }"
           :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
         >
-          <Poster :idx="i" :src="row.image" aspect="1/1" style="border-radius: 50%" />
+          <Poster :idx="i" :src="row.image" aspect="1/1" :width="200" style="border-radius: 50%" />
           <div class="similar-tile-name">{{ row.name }}</div>
           <div class="similar-tile-source">{{ row.source }}</div>
         </component>
       </div>
     </section>
+
+    <!-- External links + Wikipedia -->
+    <section v-if="externalLinks.length || wikipediaLinks.length" class="links artist-section">
+      <div class="section-row-head">
+        <h2 class="section-title-lg">Around the web</h2>
+      </div>
+      <div v-if="externalLinks.length" class="link-grid">
+        <a
+          v-for="(l, i) in externalLinks"
+          :key="`url-${i}`"
+          :href="l.url"
+          target="_blank"
+          rel="noopener"
+          class="link-chip"
+        >
+          <Icon name="link" :size="12" />
+          <span>{{ l.type }}</span>
+        </a>
+      </div>
+      <details v-if="wikipediaLinks.length" class="wiki-details">
+        <summary class="wiki-summary">Wikipedia ({{ wikipediaLinks.length }} languages)</summary>
+        <div class="link-grid wiki-grid">
+          <a
+            v-for="w in wikipediaLinks"
+            :key="`wiki-${w.lang}`"
+            :href="w.url"
+            target="_blank"
+            rel="noopener"
+            class="link-chip"
+          >
+            <Icon name="link" :size="12" />
+            <span>{{ w.lang }}</span>
+          </a>
+        </div>
+      </details>
+    </section>
+
+    <div v-if="(artist.aliases?.length ?? 0) > 0" class="alias-row artist-section">
+      <span class="alias-label">Also known as</span>
+      <span class="alias-list">{{ artist.aliases!.join(' · ') }}</span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { AlbumView, Artist, MediaDetail, TrackView } from '~~/shared/types'
+import type { AlbumView, Artist, ArtistTopTrackRow, MediaDetail, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 const props = defineProps<{ mediaId: number }>()
 
 const route = useRoute()
 const { play, queue, formatTime } = usePlayer()
-const lovedArtist = useLovedEntity('artist')
-if (import.meta.client) lovedArtist.ensureLoaded()
+const radio = useRadio()
 
-const detail = ref<MediaDetail | null>(null)
-const loading = ref(true)
+const artistRatings = useRatings('artist')
+const trackRatings = useRatings('track')
+async function onRateArtist(id: number, v: number) {
+  try { await artistRatings.set(id, v) } catch { /* rollback handled */ }
+}
+async function onRateTrack(id: number, v: number) {
+  try { await trackRatings.set(id, v) } catch { /* rollback handled */ }
+}
+
+async function startArtistRadio() {
+  await radio.startRadio({ kind: 'artist', artist_slug: route.params.slug as string })
+}
+
 const bioOpen = ref(false)
+const ttExpanded = ref(false)
 
 interface SimilarArtistRow {
   name: string
@@ -163,11 +331,7 @@ interface SimilarArtistRow {
   local_slug?: string
   local_artist_id?: number
 }
-const similar = ref<SimilarArtistRow[]>([])
 
-// Sonic-similarity from the local pgvector artist centroids.
-// Distinct from `similar` above (Last.fm/LB graph) — these only
-// exist for artists whose tracks have been analyzed.
 interface SonicSimilarArtistRow {
   id: number
   name: string
@@ -175,9 +339,72 @@ interface SonicSimilarArtistRow {
   media_slug: string
   distance: number
 }
-const sonicSimilar = ref<SonicSimilarArtistRow[]>([])
+
+const { $heya } = useNuxtApp()
+const detailQuery = useQuery({
+  queryKey: ['media', 'detail', () => props.mediaId],
+  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: String(props.mediaId) } })) as MediaDetail,
+  staleTime: 1000 * 60 * 5,
+})
+const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
+const loading = computed(() => detailQuery.isPending.value)
+
+const artistSlugForQueries = computed(() => detail.value?.media_item?.slug ?? (route.params.slug as string | undefined) ?? '')
+
+const similarQuery = useQuery({
+  queryKey: ['music', 'artist', 'similar', artistSlugForQueries],
+  queryFn: async () => (await $heya('/api/music/artists/{slug}/similar', { path: { slug: artistSlugForQueries.value } })) as SimilarArtistRow[],
+  enabled: () => artistSlugForQueries.value.length > 0,
+  staleTime: 1000 * 60 * 30,
+  retry: false,
+})
+const similar = computed<SimilarArtistRow[]>(() => similarQuery.data.value ?? [])
+
+const sonicSimilarQuery = useQuery({
+  queryKey: ['music', 'artist', 'sonic-similar', artistSlugForQueries, { limit: 12 }],
+  queryFn: async () => ((await $heya('/api/music/artists/{slug}/sonic-similar', { path: { slug: artistSlugForQueries.value }, query: { limit: 12 } })) as { items: SonicSimilarArtistRow[] }).items ?? [],
+  enabled: () => artistSlugForQueries.value.length > 0,
+  staleTime: 1000 * 60 * 30,
+  retry: false,
+})
+const sonicSimilar = computed<SonicSimilarArtistRow[]>(() => sonicSimilarQuery.data.value ?? [])
+
+const topTracksQuery = useQuery({
+  queryKey: ['music', 'artist', 'top-tracks', artistSlugForQueries, { limit: 25 }],
+  queryFn: async () => ((await $heya('/api/music/artists/{slug}/top-tracks', { path: { slug: artistSlugForQueries.value }, query: { limit: 25 } })) as { items: ArtistTopTrackRow[] }).items ?? [],
+  enabled: () => artistSlugForQueries.value.length > 0,
+  staleTime: 1000 * 60 * 30,
+  retry: false,
+})
+// Owned-only filter — Last.fm rows we can't play are noise on a library page.
+// External links to Last.fm still live in the "Around the web" section.
+// Deduped by local_track_id so "Usseewa" + "うっせぇわ" (which both resolve
+// to the same recording) collapse to one rail entry.
+const topTracks = computed<ArtistTopTrackRow[]>(() => {
+  const seen = new Set<number>()
+  const out: ArtistTopTrackRow[] = []
+  for (const t of topTracksQuery.data.value ?? []) {
+    if (!t.local_track_id || seen.has(t.local_track_id)) continue
+    seen.add(t.local_track_id)
+    out.push(t)
+  }
+  return out
+})
+
+const hasPlayableTopTracks = computed(() => topTracks.value.length > 0)
 
 const artist = computed<Artist | null>(() => detail.value?.artist ?? null)
+watch(artist, (a) => {
+  if (a?.id && a.id > 0) artistRatings.load(a.id).catch(() => 0)
+}, { immediate: true })
+
+// Prime the per-track rating cache once the top-tracks list lands so the
+// star widgets paint at correct values rather than starting at 0.
+watch(topTracks, (rows) => {
+  const ids = rows.filter((r) => r.local_track_id).map((r) => r.local_track_id!) as number[]
+  if (ids.length) trackRatings.primeBulk(ids).catch(() => 0)
+})
+
 const albums = computed<AlbumView[]>(() => detail.value?.albums ?? [])
 
 const artistPosterUrl = computed(() => {
@@ -191,9 +418,15 @@ const backdropStyle = computed(() => {
 
 const totalAlbums = computed(() => albums.value.length)
 const totalTracks = computed(() => albums.value.reduce((sum, al) => sum + al.tracks.length, 0))
-const totalDuration = computed(() =>
-  albums.value.reduce((sum, al) => sum + al.tracks.reduce((s, t) => s + (t.duration || 0), 0), 0),
-)
+
+const heroKindLabel = computed(() => {
+  const t = artist.value?.artist_type ?? ''
+  if (t === 'Group') return 'BAND'
+  if (t === 'Person') return 'ARTIST'
+  if (t === 'Character') return 'CHARACTER'
+  if (t) return t.toUpperCase()
+  return 'ARTIST'
+})
 
 const KIND_ORDER = ['album', 'ep', 'single', 'compilation', 'live', 'soundtrack', 'remix', 'demo', 'other']
 const KIND_LABEL: Record<string, string> = {
@@ -228,6 +461,56 @@ const groupedDiscography = computed(() => {
     .map((kind) => ({ kind, label: KIND_LABEL[kind] ?? kind, albums: byKind.get(kind)! }))
 })
 
+// Birthplace can come through as a Wikidata QID we don't yet resolve; only
+// show when it's a human-readable token.
+const originLabel = computed(() => {
+  const bp = artist.value?.birthplace ?? ''
+  if (!bp) return ''
+  if (/^Q\d+$/.test(bp)) return ''
+  return bp
+})
+
+const lifecycleLabel = computed(() => {
+  const a = artist.value
+  if (!a) return ''
+  const start = a.begin_year ? String(a.begin_year) : (a.begin_date || '')
+  const end = a.deathday || a.end_date || (a.ended ? '?' : '')
+  if (!start && !end) return ''
+  if (a.artist_type === 'Group') {
+    if (start && end) return `${start}–${end}`
+    if (start) return `since ${start}`
+    return end
+  }
+  if (start && a.deathday) return `${start} – ${a.deathday}`
+  return start
+})
+
+const externalLinks = computed(() => {
+  const seen = new Set<string>()
+  const out: { type: string; url: string }[] = []
+  for (const l of (artist.value?.urls ?? [])) {
+    if (!l.url || seen.has(l.url)) continue
+    seen.add(l.url)
+    out.push({ type: l.type || 'link', url: l.url })
+  }
+  out.sort((a, b) => a.type.localeCompare(b.type))
+  return out
+})
+
+const wikipediaLinks = computed(() => {
+  const links = artist.value?.wikipedia_links ?? {}
+  return Object.entries(links)
+    .map(([lang, url]) => ({ lang, url }))
+    .sort((a, b) => a.lang.localeCompare(b.lang))
+})
+
+function formatBigInt(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+  return n.toLocaleString()
+}
+
 function trackFromAlbum(album: AlbumView, t: TrackView): Track {
   const primary = t.files[0]
   return {
@@ -236,10 +519,10 @@ function trackFromAlbum(album: AlbumView, t: TrackView): Track {
     artist: artist.value?.name ?? '',
     album: album.title,
     duration: t.duration,
-    stream_url: `/api/tracks/${t.id}/stream`,
+    stream_url: `/api/music/tracks/${t.id}/stream`,
     album_id: album.id,
     artist_id: artist.value?.id,
-    poster: useAlbumCoverUrl(album.id) ?? undefined,
+    poster: useAlbumCoverUrl(route.params.slug as string, album.slug) ?? undefined,
     integrated_lufs: primary?.integrated_lufs != null ? parseFloat(primary.integrated_lufs) : null,
     true_peak_db: primary?.true_peak_db != null ? parseFloat(primary.true_peak_db) : null,
   }
@@ -272,48 +555,47 @@ function addAllToQueue() {
   queue.value = [...queue.value, ...tracks]
 }
 
-function formatDuration(seconds: number) {
-  if (seconds < 3600) return formatTime(seconds)
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
-
-async function loadDetail() {
-  loading.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    // /api/media/{id} accepts slug or numeric ID — spec types id as string.
-    detail.value = await $heya('/api/media/{id}', { path: { id: String(props.mediaId) } }) as MediaDetail
-    if (artist.value?.id) {
-      const artistId = artist.value.id
-      // Fire both off in parallel — they're cheap and the artist page is the
-      // hot path. Each promise swallows its own failure so a missing sonic
-      // index doesn't blow away the similar-artists list.
-      $heya('/api/music/artists/{id}/similar', { path: { id: artistId } })
-        .then((rows) => { similar.value = (rows as SimilarArtistRow[]) ?? [] })
-        .catch(() => { similar.value = [] })
-      $heya('/api/music/artists/{id}/sonic-similar', { path: { id: artistId }, query: { limit: 12 } })
-        .then((res) => { sonicSimilar.value = ((res as { items: SonicSimilarArtistRow[] }).items) ?? [] })
-        .catch(() => { sonicSimilar.value = [] })
-    }
-  } catch {
-    detail.value = null
-    similar.value = []
-    sonicSimilar.value = []
-  } finally {
-    loading.value = false
+function topTrackToTrack(t: ArtistTopTrackRow): Track {
+  return {
+    id: t.local_track_id!,
+    title: t.title,
+    artist: artist.value?.name ?? '',
+    album: t.local_album_title ?? '',
+    duration: t.local_duration ?? 0,
+    stream_url: `/api/music/tracks/${t.local_track_id}/stream`,
+    album_id: t.local_album_id ?? 0,
+    artist_id: artist.value?.id,
+    poster: useAlbumCoverUrl(route.params.slug as string, t.local_album_slug ?? '') ?? undefined,
   }
 }
 
-watch(() => props.mediaId, loadDetail, { immediate: true })
+async function playTopTrack(t: ArtistTopTrackRow) {
+  if (!t.local_track_id) return
+  const built = topTrackToTrack(t)
+  queue.value = [built]
+  await play(built)
+}
+
+async function playTopAll(shuffle: boolean) {
+  let owned = topTracks.value.filter((t) => t.local_track_id).map(topTrackToTrack)
+  if (!owned.length) return
+  if (shuffle) owned = [...owned].sort(() => Math.random() - 0.5)
+  queue.value = owned
+  await play(owned[0]!)
+}
 
 if (import.meta.client) {
+  const queryClient = useQueryClient()
   const bus = useEventBus()
   bus.connect()
   const off = bus.on('media.updated', (e) => {
     const payload = e.payload as { media_item_id?: number } | undefined
-    if (payload?.media_item_id === props.mediaId) loadDetail()
+    if (payload?.media_item_id === props.mediaId) {
+      queryClient.invalidateQueries({ queryKey: ['media', 'detail', props.mediaId] })
+      queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'similar', artistSlugForQueries.value] })
+      queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'sonic-similar', artistSlugForQueries.value, { limit: 12 }] })
+      queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'top-tracks', artistSlugForQueries.value, { limit: 25 }] })
+    }
   })
   onBeforeUnmount(() => { off() })
 }
@@ -323,9 +605,20 @@ if (import.meta.client) {
 .artist-page { padding-bottom: 80px; }
 .m-loading, .m-empty { color: var(--fg-3); padding: 32px 40px; }
 
+/* Inner sections use side padding from `.page-pad` but skip the 80px bottom
+   gap so the rails stack tight on this page. The page-level breathing room
+   comes from `.artist-page { padding-bottom: 80px }`. */
+.artist-section {
+  padding: 18px 40px 0;
+}
+@media (max-width: 1100px) {
+  .artist-section { padding: 16px 24px 0; }
+}
+
+/* Hero ============================================================ */
 .hero {
   position: relative;
-  min-height: 380px;
+  min-height: 460px;
   display: flex;
   align-items: flex-end;
   overflow: hidden;
@@ -337,12 +630,14 @@ if (import.meta.client) {
   background-size: cover;
   background-position: center 25%;
   z-index: 0;
+  filter: saturate(1.05);
 }
 .hero-fade {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.55) 60%, var(--bg-0) 100%);
+    linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 55%, var(--bg-0) 100%),
+    linear-gradient(90deg, rgba(0,0,0,0.45) 0%, transparent 60%);
   z-index: 1;
 }
 .hero-content {
@@ -350,50 +645,107 @@ if (import.meta.client) {
   z-index: 2;
   display: flex;
   align-items: flex-end;
-  gap: 32px;
-  padding: 32px 40px 36px;
+  gap: 28px;
+  padding: 26px 40px 28px;
   width: 100%;
 }
-.hero-meta { flex: 1; min-width: 0; }
+.hero-left { flex-shrink: 0; align-self: flex-end; }
 .hero-poster {
-  width: 160px;
-  height: 160px;
+  width: 200px;
+  height: 200px;
   border-radius: 50%;
-  box-shadow: 0 24px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05);
-  flex-shrink: 0;
-  display: none; /* hidden when backdrop already shows the face */
+  box-shadow: 0 22px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
 }
-@media (max-width: 700px) {
-  .hero-poster { display: block; }
-}
+.hero-meta { flex: 1; min-width: 0; }
 .hero-kind {
   font-size: 11px;
   font-family: var(--font-mono);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--fg-2);
-  margin-bottom: 6px;
+  letter-spacing: 0.16em;
+  color: var(--fg-1);
+  opacity: 0.9;
+  margin-bottom: 4px;
 }
 .hero-title {
-  font-size: clamp(44px, 6vw, 72px);
+  font-size: clamp(44px, 6.6vw, 76px);
   font-weight: 800;
   color: var(--fg-0);
-  line-height: 0.98;
-  margin-bottom: 8px;
+  line-height: 0.96;
+  margin-bottom: 10px;
   letter-spacing: -0.025em;
   text-shadow: 0 2px 24px rgba(0,0,0,0.55);
 }
-.hero-disambig { font-size: 14px; color: var(--fg-2); margin-bottom: 10px; }
-.hero-counts {
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.tag-chip {
+  display: inline-flex;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.10);
+  font-size: 11px;
+  color: var(--fg-0);
+  text-decoration: none;
+  text-transform: lowercase;
+  transition: all 0.12s;
+  backdrop-filter: blur(6px);
+}
+.tag-chip:hover {
+  background: var(--gold-soft);
+  color: var(--gold);
+  border-color: var(--gold-soft);
+}
+.hero-bio {
+  color: var(--fg-1);
+  line-height: 1.5;
+  font-size: 13px;
+  max-width: 72ch;
+  margin: 0;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+}
+.hero-bio.collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hero-bio-toggle {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--gold);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.hero-bio-toggle:hover { color: var(--gold-bright); }
+.hero-bio-toggle::before { content: '▾ '; margin-right: 4px; opacity: 0.7; }
+
+.hero-stats {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  margin-top: 12px;
   font-size: 12px;
   color: var(--fg-1);
-  margin-bottom: 14px;
   font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.5);
 }
-.dot { color: var(--fg-3); }
+.hero-stats-stars {
+  display: inline-flex;
+  margin-right: 4px;
+}
+.stat-dot { color: var(--fg-3); }
+.stat { color: var(--fg-1); }
+.hero-ext { margin-top: 10px; }
 
 .hero-floating-actions {
   position: absolute;
@@ -405,8 +757,8 @@ if (import.meta.client) {
   gap: 10px;
 }
 .hero-round {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(0,0,0,0.4);
@@ -420,10 +772,9 @@ if (import.meta.client) {
 }
 .hero-round:hover { background: rgba(0,0,0,0.55); transform: scale(1.05); }
 .hero-round:active { transform: scale(0.95); }
-.hero-round.active { color: var(--gold); }
 .hero-round-primary {
-  width: 64px;
-  height: 64px;
+  width: 58px;
+  height: 58px;
   background: var(--gold);
   color: var(--bg-0);
   border-color: transparent;
@@ -431,43 +782,177 @@ if (import.meta.client) {
 }
 .hero-round-primary:hover { background: var(--gold-bright); }
 
-.bio { padding-top: 24px; max-width: 80ch; }
-.bio-text { color: var(--fg-1); line-height: 1.65; font-size: 14px; white-space: pre-line; }
-.bio-text.collapsed {
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+/* Popular Tracks ================================================== */
+.top-tracks {}
+.section-row-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.section-row-head .more {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-left: auto;
 }
-.bio-toggle {
+.tt-head { margin-bottom: 8px; }
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--gold);
+  color: var(--bg-0);
   font-size: 12px;
-  color: var(--gold);
-  margin-top: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.12s;
+}
+.pill-btn:hover { filter: brightness(1.1); }
+.pill-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+.pill-btn-ghost {
+  background: rgba(255,255,255,0.06);
+  color: var(--fg-1);
+}
+.pill-btn-ghost:hover { background: rgba(255,255,255,0.10); }
+
+.tt-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tt-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto 50px;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  transition: background 0.12s;
+  min-height: 32px;
+}
+.tt-row:hover { background: rgba(255,255,255,0.04); }
+.tt-row:hover .tt-rank { opacity: 0; }
+.tt-row:hover .tt-hover-play { opacity: 1; }
+.tt-leader {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 22px;
+}
+.tt-rank {
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  font-size: 12px;
+  transition: opacity 0.12s;
+}
+.tt-hover-play {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--gold);
+  color: var(--bg-0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, filter 0.12s;
+}
+.tt-hover-play:hover { filter: brightness(1.1); }
+.tt-hover-play.tt-hover-play-disabled {
+  background: rgba(255,255,255,0.06);
+  color: var(--fg-3);
+  cursor: default;
+}
+.tt-external .tt-title { color: var(--fg-2); }
+.tt-external .tt-album { color: var(--fg-3); }
+.tt-meta {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tt-title {
+  font-size: 13px;
+  color: var(--fg-0);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tt-album-sep { color: var(--fg-3); font-size: 11px; }
+.tt-album {
+  font-size: 12px;
+  color: var(--fg-2);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tt-album:hover { color: var(--gold); }
+.tt-album-missing { font-style: italic; color: var(--fg-3); opacity: 0.7; }
+.tt-stars { display: inline-flex; }
+.tt-duration {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-3);
+  text-align: right;
+}
+.tt-more {
+  margin-top: 6px;
   background: none;
   border: none;
+  color: var(--gold);
   cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
 }
-.bio-toggle:hover { color: var(--gold-bright); }
+.tt-more:hover { color: var(--gold-bright); }
 
-.discog { padding-top: 18px; }
+/* Members / Groups ================================================ */
+.member-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.member-chip {
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  min-width: 140px;
+}
+.member-name { font-size: 13px; color: var(--fg-0); font-weight: 600; }
+.member-years {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  margin-top: 1px;
+  letter-spacing: 0.03em;
+}
+
+/* Discography ===================================================== */
 .discog-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
 }
-.discog-tile {
-  text-decoration: none;
-  color: inherit;
-  display: block;
-}
+.discog-tile { text-decoration: none; color: inherit; display: block; }
 .discog-art-wrap { position: relative; }
 .discog-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
 .discog-play {
   position: absolute;
   right: 8px;
   bottom: 8px;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: 0;
   background: var(--gold);
@@ -482,9 +967,9 @@ if (import.meta.client) {
   box-shadow: 0 6px 18px var(--gold-glow);
 }
 .discog-tile:hover .discog-play { opacity: 1; transform: none; }
-.discog-meta { margin-top: 10px; padding: 0 2px; }
+.discog-meta { margin-top: 8px; padding: 0 2px; }
 .discog-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--fg-0);
   overflow: hidden;
@@ -495,13 +980,14 @@ if (import.meta.client) {
   font-size: 11px;
   color: var(--fg-2);
   font-family: var(--font-mono);
-  margin-top: 3px;
+  margin-top: 2px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
+.dot { color: var(--fg-3); }
 
-.similar { padding-top: 18px; }
+/* Similar rails =================================================== */
 .similar-row {
   display: grid;
   grid-auto-flow: column;
@@ -535,5 +1021,65 @@ if (import.meta.client) {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--fg-3);
+}
+
+/* External + Wikipedia ============================================ */
+.link-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-1);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  transition: all 0.12s;
+}
+.link-chip:hover {
+  background: var(--gold-soft);
+  color: var(--gold);
+  border-color: var(--gold-soft);
+}
+.link-chip :deep(svg) { color: currentColor; opacity: 0.7; }
+
+.wiki-details { margin-top: 10px; }
+.wiki-summary {
+  font-size: 11px;
+  color: var(--fg-3);
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.wiki-summary:hover { color: var(--fg-1); }
+.wiki-grid { margin-top: 6px; }
+
+/* Aliases ========================================================= */
+.alias-row {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.alias-label {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 8px;
+}
+.alias-list { color: var(--fg-2); }
+
+/* Responsive: stack hero poster + meta on narrow screens */
+@media (max-width: 700px) {
+  .hero-content { flex-direction: column; align-items: stretch; gap: 14px; padding-bottom: 22px; }
+  .hero-poster { width: 120px; height: 120px; }
+  .hero-floating-actions { bottom: 18px; right: 16px; }
+  .hero-floating-actions .hero-round { width: 38px; height: 38px; }
+  .hero-floating-actions .hero-round-primary { width: 48px; height: 48px; }
 }
 </style>

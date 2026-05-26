@@ -2,7 +2,7 @@ import { useAudioEngine } from '~/composables/useAudioEngine'
 
 // Track shape consumed by the player UI. `stream_url` is what the engine
 // actually hits — derived from the track row in the caller (Phase A list
-// endpoints set this to `/api/tracks/{id}/stream`).
+// endpoints set this to `/api/music/tracks/{id}/stream`).
 export interface Track {
   id: number
   title: string
@@ -13,14 +13,28 @@ export interface Track {
   track_file_id?: number
   album_id?: number
   artist_id?: number
+  artist_slug?: string
+  album_slug?: string
   poster?: string
   loved?: boolean
+  // Origin label for the scrobble's `source` field — 'queue' | 'radio' |
+  // 'album' | 'playlist' | 'search' | 'browse' | 'similar' | ''. Free-form;
+  // analytics on /api/me/listening-stats can group by this.
+  source?: string
+  // True when this row is a live ICY stream (internet radio). The player
+  // disables shuffle/repeat/prev/next and shows a "LIVE" badge for these.
+  isStream?: boolean
   // Per-track replay-gain inputs. When present, engine.setActiveNormalization
   // applies a gain so playback hits the engine's -18 LUFS target. NULL or
   // missing => track plays at the file's native level.
   integrated_lufs?: number | null
   true_peak_db?: number | null
 }
+
+// Last.fm-style scrobble threshold: a track counts as "played" once the user
+// has heard at least this many seconds, OR the track has ended (whichever
+// comes first). The backend uses the same idea for /api/me/play-events.
+const SCROBBLE_MIN_SECONDS = 30
 
 export function usePlayer() {
   const playing = useState('player_playing', () => false)
@@ -35,6 +49,9 @@ export function usePlayer() {
   const queueOpen = useState('player_queue_open', () => false)
   const lyricsOpen = useState('player_lyrics_open', () => false)
   const engineWired = useState('player_engine_wired', () => false)
+  // Tracks the last track ID we already scrobbled this session so the 30s
+  // watcher + handleEnded don't double-fire for the same play.
+  const scrobbledTrackId = useState<number | null>('player_scrobbled_track', () => null)
 
   // Engine creation touches AudioContext, which the browser refuses to
   // instantiate before a user gesture. Defer it to the first play() call so
@@ -56,8 +73,35 @@ export function usePlayer() {
       // re-uses the same path.
       const settings = useAudioSettings()
       settings.registerEngineBridge(() => applyAudioSettingsToEngine(e, settings))
+
+      // Scrobble watcher: fires POST /api/me/play-events once per track when
+      // the listener has heard ≥30s. handleEnded covers the "track shorter
+      // than 30s but played to completion" case so short songs still count.
+      watch(position, (pos) => {
+        const t = currentTrack.value
+        if (!t || t.id <= 0) return
+        if (pos < SCROBBLE_MIN_SECONDS) return
+        if (scrobbledTrackId.value === t.id) return
+        scrobbledTrackId.value = t.id
+        void scrobbleTrack(t, pos, false)
+      })
     }
     return e
+  }
+
+  // Scrobble through the unified /api/me/playback endpoint. Music tracks land
+  // in the play_events history log server-side; videos go through the same
+  // helper but with entity_type 'movie'/'episode' (see useVideoPlayer).
+  async function scrobbleTrack(track: Track, listenedSeconds: number, completed: boolean) {
+    if (track.id <= 0) return
+    await recordPlayback({
+      entity_type: 'track',
+      entity_id: track.id,
+      position_seconds: listenedSeconds,
+      total_seconds: track.duration || 0,
+      completed,
+      source: track.source ?? '',
+    })
   }
 
   // The <audio> element can't carry an Authorization header, so the session
@@ -69,7 +113,7 @@ export function usePlayer() {
   // this browser will actually decode. /file/{id} URLs are bit-perfect and
   // don't need the caps decoration.
   function resolveStreamUrl(t: Track): string | undefined {
-    const base = t.stream_url ?? (t.id > 0 ? `/api/tracks/${t.id}/stream` : undefined)
+    const base = t.stream_url ?? (t.id > 0 ? `/api/music/tracks/${t.id}/stream` : undefined)
     if (!base) return undefined
 
     const params = new URLSearchParams()
@@ -94,6 +138,8 @@ export function usePlayer() {
     if (track) {
       currentTrack.value = track
       position.value = 0
+      // Reset the scrobble guard so the new track can fire its own event.
+      scrobbledTrackId.value = null
       if (track.duration && Number.isFinite(track.duration)) duration.value = track.duration
       const url = resolveStreamUrl(track)
       if (!url) return
@@ -188,6 +234,14 @@ export function usePlayer() {
   }
 
   async function handleEnded() {
+    // Short tracks (under SCROBBLE_MIN_SECONDS) never trigger the position
+    // watcher, but a completed playthrough still counts as a scrobble. Fire
+    // here if the watcher hasn't already.
+    const finished = currentTrack.value
+    if (finished && finished.id > 0 && scrobbledTrackId.value !== finished.id) {
+      scrobbledTrackId.value = finished.id
+      void scrobbleTrack(finished, position.value || finished.duration, true)
+    }
     if (repeatMode.value === 'one' && currentTrack.value) {
       await play(currentTrack.value)
       return
@@ -211,12 +265,123 @@ export function usePlayer() {
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
 
+  // --- Queue management (Played / Now Playing / Up Next semantics) ---
+  // Lifted from hibiki's player store so the right sidebar can render the
+  // three sections plus drag / remove. `currentIndex` is the index of the
+  // playing track in `queue`; -1 when nothing is playing. We derive it from
+  // `currentTrack.id` rather than storing both — single source of truth.
+  const currentIndex = computed(() => {
+    const t = currentTrack.value
+    if (!t) return -1
+    return queue.value.findIndex((x) => x.id === t.id)
+  })
+  const playedTracks = computed(() => {
+    const idx = currentIndex.value
+    return idx > 0 ? queue.value.slice(0, idx) : []
+  })
+  const upcomingTracks = computed(() => {
+    const idx = currentIndex.value
+    return idx >= 0 ? queue.value.slice(idx + 1) : []
+  })
+  const upcomingCount = computed(() => upcomingTracks.value.length)
+
+  // jumpTo plays the queue item at absolute index, treating the queue as
+  // the authoritative ordering. Used by the right-sidebar rows.
+  async function jumpTo(index: number) {
+    const t = queue.value[index]
+    if (!t) return
+    await play(t)
+  }
+
+  // removeFromQueue drops one upcoming track. Guard against removing the
+  // current or played items — the sidebar only exposes the up-next bucket
+  // anyway, but the guard keeps callers honest.
+  function removeFromQueue(index: number) {
+    if (index <= currentIndex.value) return
+    if (index >= queue.value.length) return
+    queue.value.splice(index, 1)
+  }
+
+  // moveInQueue reorders an upcoming track. Same guards as remove.
+  function moveInQueue(from: number, to: number) {
+    if (from <= currentIndex.value || to <= currentIndex.value) return
+    if (from >= queue.value.length || to >= queue.value.length) return
+    if (from === to) return
+    const next = queue.value.slice()
+    const [item] = next.splice(from, 1)
+    if (item) next.splice(to, 0, item)
+    queue.value = next
+  }
+
+  // addToQueue appends one or more tracks to the end of the queue. When the
+  // queue is empty the first added track becomes "now playing" so the user
+  // gets immediate feedback. De-dupes by track id against the up-next slice
+  // so spamming "Add to Queue" doesn't pile up duplicates.
+  async function addToQueue(tracks: Track | Track[]) {
+    const list = Array.isArray(tracks) ? tracks : [tracks]
+    if (!list.length) return
+    if (!queue.value.length) {
+      queue.value = list
+      await play(list[0]!)
+      return
+    }
+    const upcomingIds = new Set(upcomingTracks.value.map((t) => t.id))
+    const fresh = list.filter((t) => !upcomingIds.has(t.id))
+    if (!fresh.length) return
+    queue.value = [...queue.value, ...fresh]
+  }
+
+  // playNext inserts one or more tracks immediately after the currently-
+  // playing one (or at the head if nothing's playing). Mirrors Spotify /
+  // Apple Music "Play Next". Same de-dupe behavior as addToQueue.
+  async function playNext(tracks: Track | Track[]) {
+    const list = Array.isArray(tracks) ? tracks : [tracks]
+    if (!list.length) return
+    if (!queue.value.length) {
+      queue.value = list
+      await play(list[0]!)
+      return
+    }
+    const upcomingIds = new Set(upcomingTracks.value.map((t) => t.id))
+    const fresh = list.filter((t) => !upcomingIds.has(t.id))
+    if (!fresh.length) return
+    const idx = currentIndex.value
+    const insertAt = idx < 0 ? 0 : idx + 1
+    const next = queue.value.slice()
+    next.splice(insertAt, 0, ...fresh)
+    queue.value = next
+  }
+
+  // clearUpcoming empties everything after the current track. Used by the
+  // sidebar's "Clear" button on the Up Next header.
+  function clearUpcoming() {
+    const idx = currentIndex.value
+    if (idx < 0) {
+      queue.value = []
+      return
+    }
+    queue.value = queue.value.slice(0, idx + 1)
+  }
+
+  // stop unloads the engine + clears state. Used by the playbar long-press.
+  function stop() {
+    if (engineWired.value) ensureEngine().stop()
+    playing.value = false
+    currentTrack.value = null
+    queue.value = []
+    position.value = 0
+    duration.value = 0
+  }
+
   return {
     playing, currentTrack, position, duration, volume, muted,
     shuffled, repeatMode, queue, queueOpen, lyricsOpen,
-    play, pause, togglePlay, seek, setVolume, toggleMute,
+    currentIndex, playedTracks, upcomingTracks, upcomingCount,
+    play, pause, togglePlay, seek, setVolume, toggleMute, stop,
     toggleShuffle, cycleRepeat, nextTrack, prevTrack,
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
+    jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
+    addToQueue, playNext,
   }
 }
 

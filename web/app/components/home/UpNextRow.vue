@@ -17,28 +17,26 @@
         class="un-tile"
         :style="{ width: '168px' }"
       >
-        <!-- Poster: clicking plays the next episode directly -->
+        <!-- Poster: clicking plays the next episode directly. The MediaCard
+             paints the overlay; we wrap the entire tile in a button so the
+             whole card is the play target and the overlay info reflects what
+             will start. -->
         <button
           class="un-poster"
           :aria-label="`Play ${item.title} ${item.episode_label}`"
           @click="$emit('play', item)"
         >
-          <Poster
+          <MediaCard
             :idx="i"
             :src="usePosterUrl(item.id)"
             :title="item.title"
-            :aspect="'2/3'"
+            :subtitle="item.episode_label"
+            aspect="2/3"
           />
           <div class="un-play-overlay">
             <div class="un-play-btn"><Icon name="play" :size="18" /></div>
           </div>
         </button>
-        <div class="un-meta">
-          <!-- Series title: link to the series page -->
-          <NuxtLink :to="seriesUrl(item)" class="un-title">{{ item.title }}</NuxtLink>
-          <!-- Episode line: link to the episode page -->
-          <NuxtLink :to="episodeUrl(item)" class="un-sub">{{ item.episode_label }}</NuxtLink>
-        </div>
       </div>
     </div>
   </section>
@@ -53,6 +51,9 @@ export interface UpNextItem {
   episode_number: number
   episode_label: string
   play_file_id: number
+  // Episode primary key — let the watch route surface "S01E03 · Episode
+  // title" in the activity panel via entity_type=episode + entity_id.
+  episode_id?: number
 }
 
 defineProps<{ items: UpNextItem[] }>()
@@ -63,14 +64,6 @@ const scrollEl = ref<HTMLElement>()
 function scrollBy(dir: number) {
   if (!scrollEl.value) return
   scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
-}
-
-function seriesUrl(item: UpNextItem) {
-  return `/tv/${item.slug}`
-}
-
-function episodeUrl(item: UpNextItem) {
-  return `/tv/${item.slug}/season/${item.season_number}/episode/${item.episode_number}`
 }
 </script>
 
@@ -113,9 +106,9 @@ function episodeUrl(item: UpNextItem) {
   padding: 0;
   border: 0;
   border-radius: var(--r-md);
-  overflow: hidden;
   background: transparent;
   cursor: pointer;
+  text-align: left;
 }
 .un-play-overlay {
   position: absolute; inset: 0;
@@ -124,6 +117,8 @@ function episodeUrl(item: UpNextItem) {
   opacity: 0;
   transition: opacity 0.15s;
   pointer-events: none;
+  border-radius: var(--r-md);
+  z-index: 4;
 }
 .un-poster:hover .un-play-overlay,
 .un-poster:focus-visible .un-play-overlay { opacity: 1; }
@@ -134,32 +129,4 @@ function episodeUrl(item: UpNextItem) {
   display: flex; align-items: center; justify-content: center;
   color: #fff;
 }
-
-.un-meta {
-  padding: 8px 2px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.un-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg-0);
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.un-title:hover { color: var(--gold); }
-.un-sub {
-  font-size: 11px;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.un-sub:hover { color: var(--fg-1); }
 </style>

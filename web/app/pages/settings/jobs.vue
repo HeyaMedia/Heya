@@ -1,155 +1,144 @@
-<template>
-  <div>
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">Job Queue</h2>
-        <p class="page-desc">Monitor, retry, and manage queued background jobs</p>
-      </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary btn-sm" @click="rescueStuck" :disabled="rescuing">
-          <Icon name="lightning" :size="13" />
-          Rescue stuck
-        </button>
-        <button class="btn btn-secondary btn-sm" @click="clearCompleted" :disabled="clearing">
-          <Icon name="trash" :size="13" />
-          Clear completed
-        </button>
-        <button class="btn btn-sm btn-danger" @click="clearAll" :disabled="clearingAll">
-          <Icon name="trash" :size="13" />
-          Clear queue
-        </button>
-        <button class="btn btn-secondary btn-sm" @click="refresh">
-          <Icon name="refresh" :size="13" />
-          Refresh
-        </button>
-      </div>
-    </div>
-
-    <!-- Summary pills -->
-    <div v-if="jobSummary.length" class="job-pills">
-      <button
-        v-for="s in jobSummary"
-        :key="s.state"
-        class="job-pill"
-        :class="[s.state, { active: jobFilter === s.state }]"
-        @click="jobFilter = jobFilter === s.state ? '' : s.state"
-      >
-        <span class="job-pill-count">{{ s.count }}</span>
-        <span class="job-pill-label">{{ s.state }}</span>
-      </button>
-      <button v-if="jobFilter" class="job-pill clear-filter" @click="jobFilter = ''">
-        <Icon name="close" :size="10" />
-        Clear filter
-      </button>
-    </div>
-
-    <!-- Job list -->
-    <div v-if="jobs.length" class="job-table">
-      <div class="job-table-head">
-        <span class="col-state">State</span>
-        <span class="col-kind">Kind</span>
-        <span class="col-queue">Queue</span>
-        <span class="col-attempt">Attempt</span>
-        <span class="col-time">Created</span>
-        <span class="col-actions">Actions</span>
-      </div>
-      <div v-for="j in jobs" :key="j.id" class="job-row" :class="{ expanded: expandedJob === j.id }" @click="expandedJob = expandedJob === j.id ? null : j.id">
-        <span class="col-state">
-          <span class="state-dot" :class="j.state" />
-          {{ j.state }}
-        </span>
-        <span class="col-kind job-kind">{{ j.kind }}</span>
-        <span class="col-queue job-queue">{{ j.queue }}</span>
-        <span class="col-attempt">{{ j.attempt }}/{{ j.max_attempts }}</span>
-        <span class="col-time job-time">{{ timeAgo(j.created_at) }}</span>
-        <span class="col-actions" @click.stop>
-          <button
-            v-if="['discarded', 'cancelled', 'retryable'].includes(j.state)"
-            class="action-btn-sm"
-            @click="retryJob(j.id)"
-            title="Retry"
-          >
-            <Icon name="refresh" :size="12" />
-          </button>
-          <button
-            v-if="['available', 'retryable', 'scheduled'].includes(j.state)"
-            class="action-btn-sm danger"
-            @click="cancelJob(j.id)"
-            title="Cancel"
-          >
-            <Icon name="close" :size="12" />
-          </button>
-        </span>
-
-        <!-- Expanded details -->
-        <div v-if="expandedJob === j.id" class="job-detail" @click.stop>
-          <div class="detail-grid">
-            <span class="detail-key">ID</span>
-            <span class="detail-val mono">{{ j.id }}</span>
-            <span class="detail-key">Created</span>
-            <span class="detail-val">{{ formatDate(j.created_at) }}</span>
-            <span v-if="j.attempted_at" class="detail-key">Last attempt</span>
-            <span v-if="j.attempted_at" class="detail-val">{{ formatDate(j.attempted_at) }}</span>
-            <span v-if="j.finalized_at" class="detail-key">Finalized</span>
-            <span v-if="j.finalized_at" class="detail-val">{{ formatDate(j.finalized_at) }}</span>
-          </div>
-          <div v-if="j.args && j.args !== '{}'" class="detail-args">
-            <span class="detail-key">Args</span>
-            <pre class="args-json">{{ formatArgs(j.args) }}</pre>
-          </div>
-          <div v-if="j.errors" class="detail-errors">
-            <span class="detail-key">Errors</span>
-            <pre class="error-text">{{ j.errors }}</pre>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div v-else class="empty-hint">
-      <Icon name="check" :size="14" />
-      {{ jobFilter ? 'No jobs matching filter' : 'Job queue is empty' }}
-    </div>
-
-    <div v-if="jobTotal > jobs.length" class="pagination">
-      <button class="btn btn-secondary btn-sm" :disabled="jobOffset === 0" @click="jobOffset -= 50; fetchJobs()">Previous</button>
-      <span class="page-info">{{ jobOffset + 1 }}–{{ Math.min(jobOffset + 50, jobTotal) }} of {{ jobTotal }}</span>
-      <button class="btn btn-secondary btn-sm" :disabled="jobOffset + 50 >= jobTotal" @click="jobOffset += 50; fetchJobs()">Next</button>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-interface JobRow {
-  id: number
-  state: string
-  kind: string
-  queue: string
-  args: string
-  attempt: number
-  max_attempts: number
-  created_at: string
-  attempted_at?: string
-  finalized_at?: string
-  errors?: string
-}
+definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-interface JobSummary { state: string; count: number }
+import type { components } from '#open-fetch-schemas/heya'
+type JobRow = components['schemas']['JobRow']
+type SummaryRow = components['schemas']['JobSummaryRow']
+
+const { $heya } = useNuxtApp()
+const { confirm } = useConfirm()
 
 const jobs = ref<JobRow[]>([])
-const jobTotal = ref(0)
-const jobSummary = ref<JobSummary[]>([])
-const jobFilter = ref('')
-const jobOffset = ref(0)
-const clearing = ref(false)
-const clearingAll = ref(false)
-const rescuing = ref(false)
-const expandedJob = ref<number | null>(null)
+const total = ref(0)
+const summary = ref<SummaryRow[]>([])
+const filter = ref<string>('')
+const offset = ref(0)
+const limit = 50
+const expanded = ref<number | null>(null)
+const loading = ref(true)
+const busy = ref<'' | 'rescue' | 'completed' | 'all'>('')
+const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const tick = ref(0)
+setInterval(() => { tick.value++ }, 1000)
 
-function timeAgo(dateStr: string) {
-  const sec = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+async function fetchJobs() {
+  try {
+    const query: Record<string, any> = { limit, offset: offset.value }
+    if (filter.value) query.state = filter.value
+    const res = await $heya('/api/jobs', { query })
+    jobs.value = res.jobs ?? []
+    total.value = res.total
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Failed to load jobs.' }
+  }
+}
+
+async function fetchSummary() {
+  try {
+    summary.value = await $heya('/api/jobs/summary')
+  } catch {}
+}
+
+// First load shows the spinner; subsequent refreshes silently update so
+// the table doesn't flash empty every time WS fires a queue event.
+async function refresh() {
+  await Promise.all([fetchJobs(), fetchSummary()])
+}
+
+async function retryJob(id: number) {
+  try {
+    await $heya('/api/jobs/{id}/retry', { method: 'POST', path: { id } })
+    flash.value = { kind: 'ok', text: `Job #${id} requeued.` }
+    refresh()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Retry failed.' }
+  }
+}
+
+async function cancelJob(id: number) {
+  try {
+    await $heya('/api/jobs/{id}/cancel', { method: 'POST', path: { id } })
+    flash.value = { kind: 'ok', text: `Job #${id} cancelled.` }
+    refresh()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Cancel failed.' }
+  }
+}
+
+async function rescueStuck() {
+  busy.value = 'rescue'
+  try {
+    await $heya('/api/jobs/rescue', { method: 'POST' })
+    flash.value = { kind: 'ok', text: 'Stuck jobs requeued.' }
+    refresh()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Rescue failed.' }
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function clearCompleted() {
+  busy.value = 'completed'
+  try {
+    await $heya('/api/jobs/completed', { method: 'DELETE' })
+    flash.value = { kind: 'ok', text: 'Cleared completed jobs.' }
+    refresh()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Clear failed.' }
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function clearAll() {
+  const ok = await confirm({
+    title: 'Delete every job?',
+    message: 'Every job in the queue will be removed — pending, running, completed, all of it. This cannot be undone.',
+    destructive: true,
+    confirmLabel: 'Delete all',
+  })
+  if (!ok) return
+  busy.value = 'all'
+  try {
+    await $heya('/api/jobs', { method: 'DELETE' })
+    flash.value = { kind: 'ok', text: 'Queue wiped.' }
+    refresh()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Wipe failed.' }
+  } finally {
+    busy.value = ''
+  }
+}
+
+watch(filter, () => { offset.value = 0; fetchJobs() })
+
+function summaryCount(state: string): number {
+  return summary.value.find(s => s.state === state)?.count ?? 0
+}
+
+const tileTones = computed(() => ({
+  running:    summaryCount('running')    > 0 ? 'good' : 'neutral',
+  available:  summaryCount('available')  > 0 ? 'warn' : 'neutral',
+  retryable:  summaryCount('retryable')  > 0 ? 'warn' : 'neutral',
+  discarded:  summaryCount('discarded')  > 0 ? 'bad'  : 'neutral',
+  cancelled:  summaryCount('cancelled')  > 0 ? 'bad'  : 'neutral',
+  completed:  'neutral',
+} as const))
+
+function timeAgoAt(iso: string | null | undefined, now: number): string {
+  if (!iso) return '—'
+  const sec = Math.floor((now - new Date(iso).getTime()) / 1000)
+  if (sec < 1) return 'just now'
   if (sec < 60) return `${sec}s ago`
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
   return `${Math.floor(sec / 86400)}d ago`
+}
+// Bound to `tick` so it re-evaluates each second without remounting the cell.
+function timeAgo(iso?: string | null): string {
+  void tick.value
+  return timeAgoAt(iso, Date.now())
 }
 
 function formatDate(d: string) {
@@ -160,199 +149,351 @@ function formatArgs(raw: string) {
   try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
 }
 
-async function fetchJobs() {
-  try {
-    const { $heya } = useNuxtApp()
-    const query: Record<string, any> = { limit: 50, offset: jobOffset.value }
-    if (jobFilter.value) query.state = jobFilter.value
-    const res = await $heya('/api/jobs', { query }) as { jobs: JobRow[]; total: number }
-    jobs.value = res.jobs
-    jobTotal.value = res.total
-  } catch {}
-}
+const startIdx = computed(() => total.value === 0 ? 0 : offset.value + 1)
+const endIdx   = computed(() => Math.min(offset.value + limit, total.value))
 
-async function fetchJobSummary() {
-  try {
-    const { $heya } = useNuxtApp()
-    jobSummary.value = await $heya('/api/jobs/summary') as JobSummary[]
-  } catch {}
-}
-
-async function retryJob(id: number) {
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/jobs/{id}/retry', { method: 'POST', path: { id } })
-    refresh()
-  } catch {}
-}
-
-async function cancelJob(id: number) {
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/jobs/{id}/cancel', { method: 'POST', path: { id } })
-    refresh()
-  } catch {}
-}
-
-async function rescueStuck() {
-  rescuing.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/jobs/rescue', { method: 'POST' })
-    refresh()
-  } catch {}
-  rescuing.value = false
-}
-
-async function clearCompleted() {
-  clearing.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/jobs/completed', { method: 'DELETE' })
-    refresh()
-  } catch {}
-  clearing.value = false
-}
-
-async function clearAll() {
-  if (!confirm('Delete ALL jobs including pending and running? This cannot be undone.')) return
-  clearingAll.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/jobs', { method: 'DELETE' })
-    refresh()
-  } catch {}
-  clearingAll.value = false
-}
-
-function refresh() { fetchJobs(); fetchJobSummary() }
-
-let refreshTimer: ReturnType<typeof setTimeout> | null = null
+let debounce: ReturnType<typeof setTimeout> | null = null
 function debouncedRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(refresh, 500)
+  if (debounce) clearTimeout(debounce)
+  debounce = setTimeout(refresh, 400)
 }
 
-watch(jobFilter, () => { jobOffset.value = 0; fetchJobs() })
-
+// Hoist the subscription out of onMounted: lifecycle hooks must register
+// during synchronous setup, not inside an async-or-not onMounted body.
 const { on } = useEventBus()
+const unsubs = [
+  on('queue.status',   debouncedRefresh),
+  on('scan.started',   debouncedRefresh),
+  on('scan.completed', debouncedRefresh),
+]
+onUnmounted(() => {
+  unsubs.forEach(fn => fn())
+  if (debounce) clearTimeout(debounce)
+})
 
-onMounted(() => {
-  refresh()
+// Polling fallback for WS drops + reconnect catchup. immediate=false because
+// onMounted below already does the first fetch and toggles `loading`.
+const { connected: wsConnected } = useLiveFallback(refresh, {
+  pollWhileOffline: 5000,
+  immediate: false,
+})
 
-  const unsubs = [
-    on('queue.status', debouncedRefresh),
-    on('scan.started', debouncedRefresh),
-    on('scan.completed', debouncedRefresh),
-  ]
-
-  onUnmounted(() => {
-    unsubs.forEach(fn => fn())
-    if (refreshTimer) clearTimeout(refreshTimer)
-  })
+onMounted(async () => {
+  await refresh()
+  loading.value = false
 })
 </script>
 
+<template>
+  <div>
+    <header class="sv2-page-head">
+      <h2 class="sv2-page-title">Jobs</h2>
+      <p class="sv2-page-desc">
+        River background queue — every scan, ffprobe, image fetch and analyse
+        runs through here. Auto-refreshes on queue events.
+      </p>
+    </header>
+
+    <div class="tiles">
+      <MetricTile label="Running"    :value="summaryCount('running')"    icon="pulse"   :tone="tileTones.running" />
+      <MetricTile label="Available"  :value="summaryCount('available')"  icon="list"    :tone="tileTones.available" />
+      <MetricTile label="Retryable"  :value="summaryCount('retryable')"  icon="refresh" :tone="tileTones.retryable" />
+      <MetricTile label="Discarded"  :value="summaryCount('discarded')"  icon="warning" :tone="tileTones.discarded" />
+      <MetricTile label="Cancelled"  :value="summaryCount('cancelled')"  icon="close"   :tone="tileTones.cancelled" />
+      <MetricTile label="Completed"  :value="summaryCount('completed')"  icon="check"   :tone="tileTones.completed" />
+    </div>
+
+    <SettingsSection title="Queue" icon="list">
+      <template #actions>
+        <LiveDot :connected="wsConnected" :label="wsConnected ? 'Live' : 'Polling · WS offline'" />
+        <button class="sv2-btn ghost" :disabled="busy === 'rescue'" @click="rescueStuck">
+          <Icon name="lightning" :size="12" />
+          {{ busy === 'rescue' ? 'Rescuing…' : 'Rescue stuck' }}
+        </button>
+        <button class="sv2-btn ghost" :disabled="busy === 'completed'" @click="clearCompleted">
+          <Icon name="trash" :size="12" />
+          {{ busy === 'completed' ? 'Clearing…' : 'Clear completed' }}
+        </button>
+        <button class="sv2-btn danger" :disabled="busy === 'all'" @click="clearAll">
+          <Icon name="trash" :size="12" />
+          {{ busy === 'all' ? 'Wiping…' : 'Wipe queue' }}
+        </button>
+        <button class="sv2-btn ghost" @click="refresh">
+          <Icon name="refresh" :size="12" />
+          Refresh
+        </button>
+      </template>
+
+      <div class="filter-row">
+        <button
+          v-for="s in summary"
+          :key="s.state"
+          class="filter-pill"
+          :class="[s.state, { active: filter === s.state }]"
+          @click="filter = filter === s.state ? '' : s.state"
+        >
+          <span class="filter-count">{{ s.count }}</span>
+          <span class="filter-label">{{ s.state }}</span>
+        </button>
+        <button v-if="filter" class="filter-pill clear" @click="filter = ''">
+          <Icon name="close" :size="10" /> Clear filter
+        </button>
+      </div>
+
+      <div v-if="loading" class="empty-state"><Icon name="spinner" :size="14" /> Loading…</div>
+      <div v-else-if="jobs.length === 0" class="empty-state">
+        <Icon name="check" :size="14" />
+        {{ filter ? `No ${filter} jobs.` : 'Queue is empty.' }}
+      </div>
+
+      <div v-else class="job-table">
+        <div class="thead">
+          <span class="col-state">State</span>
+          <span class="col-kind">Kind</span>
+          <span class="col-queue">Queue</span>
+          <span class="col-attempt">Attempt</span>
+          <span class="col-time">Created</span>
+          <span class="col-actions" />
+        </div>
+        <div
+          v-for="j in jobs"
+          :key="j.id"
+          class="job-row"
+          :class="{ expanded: expanded === j.id }"
+          @click="expanded = expanded === j.id ? null : j.id"
+        >
+          <span class="col-state">
+            <span class="state-dot" :class="j.state" />
+            {{ j.state }}
+          </span>
+          <span class="col-kind mono">{{ j.kind }}</span>
+          <span class="col-queue mono dim">{{ j.queue }}</span>
+          <span class="col-attempt mono">{{ j.attempt }}/{{ j.max_attempts }}</span>
+          <span class="col-time mono dim">{{ timeAgo(j.created_at) }}</span>
+          <span class="col-actions" @click.stop>
+            <button
+              v-if="['discarded', 'cancelled', 'retryable'].includes(j.state)"
+              class="row-btn"
+              :title="`Retry job #${j.id}`"
+              @click="retryJob(j.id)"
+            >
+              <Icon name="refresh" :size="11" />
+            </button>
+            <button
+              v-if="['available', 'retryable', 'scheduled'].includes(j.state)"
+              class="row-btn danger"
+              :title="`Cancel job #${j.id}`"
+              @click="cancelJob(j.id)"
+            >
+              <Icon name="close" :size="11" />
+            </button>
+          </span>
+
+          <div v-if="expanded === j.id" class="detail" @click.stop>
+            <div class="detail-grid">
+              <span class="dkey">ID</span>
+              <span class="dval mono">{{ j.id }}</span>
+              <span class="dkey">Created</span>
+              <span class="dval">{{ formatDate(j.created_at) }}</span>
+              <template v-if="j.attempted_at">
+                <span class="dkey">Last attempt</span>
+                <span class="dval">{{ formatDate(j.attempted_at) }}</span>
+              </template>
+              <template v-if="j.finalized_at">
+                <span class="dkey">Finalized</span>
+                <span class="dval">{{ formatDate(j.finalized_at) }}</span>
+              </template>
+            </div>
+            <div v-if="j.args && j.args !== '{}'" class="detail-block">
+              <span class="dkey">Args</span>
+              <pre class="json-block">{{ formatArgs(j.args) }}</pre>
+            </div>
+            <div v-if="j.errors" class="detail-block">
+              <span class="dkey">Errors</span>
+              <pre class="err-block">{{ j.errors }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="total > limit" class="pager">
+        <button class="sv2-btn ghost" :disabled="offset === 0" @click="offset -= limit; fetchJobs()">Previous</button>
+        <span class="page-info">{{ startIdx }}–{{ endIdx }} of {{ total }}</span>
+        <button class="sv2-btn ghost" :disabled="offset + limit >= total" @click="offset += limit; fetchJobs()">Next</button>
+      </div>
+    </SettingsSection>
+
+    <div v-if="flash" class="sv2-flash" :class="flash.kind">
+      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
+      {{ flash.text }}
+    </div>
+  </div>
+</template>
+
 <style scoped>
-.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
-.page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.page-desc { font-size: 13px; color: var(--fg-3); margin: 6px 0 0; }
-.header-actions { display: flex; gap: 6px; }
-.btn-sm { height: 34px; padding: 0 14px; font-size: 12px; }
+.sv2-page-head { margin-bottom: 28px; }
+.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
 
-/* Summary pills */
-.job-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-.job-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 12px; border-radius: 100px;
-  font-size: 11px; font-family: var(--font-mono);
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--fg-2); cursor: pointer; transition: all 0.12s ease;
-  text-transform: capitalize;
-}
-.job-pill:hover { border-color: var(--border-strong); color: var(--fg-1); }
-.job-pill.active { border-color: var(--gold); color: var(--gold); background: var(--gold-soft); }
-.job-pill-count { font-weight: 700; }
-.job-pill-label { font-weight: 500; }
-.job-pill.running .job-pill-count { color: var(--good); }
-.job-pill.available .job-pill-count { color: var(--gold); }
-.job-pill.discarded .job-pill-count, .job-pill.cancelled .job-pill-count { color: var(--bad); }
-.job-pill.completed .job-pill-count { color: var(--fg-3); }
-.job-pill.clear-filter { font-size: 10px; gap: 4px; color: var(--fg-3); text-transform: none; }
-
-/* Job table */
-.job-table { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
-.job-table-head, .job-row {
+.tiles {
   display: grid;
-  grid-template-columns: 100px 1fr 80px 70px 90px 70px;
-  gap: 8px; padding: 8px 16px; font-size: 12px; align-items: center;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 28px;
 }
-.job-table-head {
-  font-size: 10px; font-weight: 600; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--fg-3); border-bottom: 1px solid var(--border); padding: 10px 16px;
-}
-.job-row { border-bottom: 1px solid var(--border); color: var(--fg-1); cursor: pointer; }
-.job-row:last-child { border-bottom: none; }
-.job-row:hover { background: rgba(255, 255, 255, 0.02); }
-.job-row.expanded { background: rgba(255, 255, 255, 0.02); }
 
-.state-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; }
+.filter-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 14px;
+}
+.filter-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 999px;
+  font-size: 11px; font-family: var(--font-mono);
+  background: var(--bg-2); border: 1px solid var(--border);
+  color: var(--fg-2); cursor: pointer;
+  text-transform: capitalize;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.filter-pill:hover { border-color: var(--border-strong); color: var(--fg-1); }
+.filter-pill.active { border-color: var(--gold); color: var(--gold); background: var(--gold-soft); }
+.filter-count { font-weight: 700; }
+.filter-pill.running   .filter-count { color: var(--good); }
+.filter-pill.available .filter-count { color: var(--gold); }
+.filter-pill.discarded .filter-count,
+.filter-pill.cancelled .filter-count { color: var(--bad); }
+.filter-pill.completed .filter-count { color: var(--fg-3); }
+.filter-pill.clear { font-size: 10px; gap: 4px; color: var(--fg-3); text-transform: none; }
+
+.empty-state {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--fg-3); font-size: 12.5px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.job-table {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.thead, .job-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 90px 70px 100px 64px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 14px;
+  font-size: 12px;
+}
+.thead {
+  background: var(--bg-1);
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--fg-3);
+  border-bottom: 1px solid var(--border);
+  padding: 9px 14px;
+}
+.job-row { border-bottom: 1px solid var(--border); cursor: pointer; color: var(--fg-1); }
+.job-row:last-child { border-bottom: 0; }
+.job-row:hover, .job-row.expanded { background: rgba(255,255,255,0.02); }
+
+.col-state { text-transform: capitalize; font-weight: 500; display: flex; align-items: center; }
+.state-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; }
 .state-dot.running { background: var(--good); }
 .state-dot.available, .state-dot.retryable, .state-dot.scheduled { background: var(--gold); }
 .state-dot.completed { background: var(--fg-4); }
 .state-dot.discarded, .state-dot.cancelled { background: var(--bad); }
 
-.col-state { text-transform: capitalize; font-weight: 500; white-space: nowrap; }
-.job-kind { font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.job-queue { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
-.col-attempt { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
-.job-time { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.mono { font-family: var(--font-mono); font-size: 11px; }
+.dim  { color: var(--fg-3); }
+.col-kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.action-btn-sm {
-  width: 26px; height: 26px; border-radius: var(--r-xs);
+.col-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.row-btn {
+  width: 24px; height: 24px;
+  border-radius: var(--r-xs);
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--fg-3); border: 1px solid transparent; transition: all 0.12s ease;
+  color: var(--fg-3); border: 1px solid transparent;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.action-btn-sm:hover { color: var(--fg-0); background: rgba(255, 255, 255, 0.06); border-color: var(--border); }
-.action-btn-sm.danger:hover { color: var(--bad); background: rgba(217, 107, 107, 0.08); border-color: rgba(217, 107, 107, 0.2); }
+.row-btn:hover { color: var(--fg-0); background: rgba(255,255,255,0.05); border-color: var(--border); }
+.row-btn.danger:hover { color: var(--bad); background: rgba(217,107,107,0.08); border-color: rgba(217,107,107,0.25); }
 
-/* Expanded detail */
-.job-detail {
+.detail {
   grid-column: 1 / -1;
   padding: 12px 0 8px;
   border-top: 1px solid var(--border);
   margin-top: 6px;
+  cursor: default;
 }
-
 .detail-grid {
-  display: grid; grid-template-columns: 100px 1fr; gap: 4px 12px;
-  font-size: 12px; margin-bottom: 8px;
+  display: grid; grid-template-columns: 110px 1fr; gap: 4px 14px;
+  font-size: 12px; margin-bottom: 10px;
 }
-.detail-key { color: var(--fg-3); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 2px; }
-.detail-val { color: var(--fg-1); }
-.detail-val.mono { font-family: var(--font-mono); }
+.dkey { color: var(--fg-3); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 2px; }
+.dval { color: var(--fg-1); }
+.dval.mono { font-family: var(--font-mono); }
 
-.detail-args, .detail-errors { margin-top: 8px; }
-.args-json {
+.detail-block { margin-top: 8px; }
+.json-block {
   font-family: var(--font-mono); font-size: 11px; color: var(--fg-2);
-  background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-sm);
-  padding: 8px 12px; margin: 4px 0 0; overflow-x: auto; white-space: pre;
+  background: var(--bg-0); border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 12px; margin: 4px 0 0;
+  overflow-x: auto; white-space: pre;
 }
-.error-text {
+.err-block {
   font-family: var(--font-mono); font-size: 11px; color: var(--bad);
-  background: rgba(217, 107, 107, 0.06); border: 1px solid rgba(217, 107, 107, 0.15);
-  border-radius: var(--r-sm); padding: 8px 12px; margin: 4px 0 0;
+  background: rgba(217,107,107,0.06); border: 1px solid rgba(217,107,107,0.15);
+  border-radius: var(--r-sm);
+  padding: 8px 12px; margin: 4px 0 0;
   overflow-x: auto; white-space: pre-wrap;
 }
 
-.pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; }
+.pager {
+  display: flex; align-items: center; justify-content: center;
+  gap: 12px; margin-top: 14px;
+}
 .page-info { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
 
-.empty-hint {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--fg-3); font-size: 13px;
-  padding: 14px 16px; background: var(--bg-2);
-  border: 1px dashed var(--border); border-radius: var(--r-md);
+.sv2-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
+.sv2-btn.ghost {
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
+.sv2-btn.ghost:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--fg-0);
+}
+.sv2-btn.danger {
+  border: 1px solid rgba(217,107,107,0.30);
+  background: rgba(217,107,107,0.06);
+  color: var(--bad);
+}
+.sv2-btn.danger:hover:not(:disabled) {
+  background: rgba(217,107,107,0.12);
+}
+.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sv2-flash {
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.sv2-flash.ok { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
+.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

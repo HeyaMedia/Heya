@@ -14,6 +14,12 @@ export interface HeyaPlayerState {
   fullscreen: boolean
   error: string | null
 
+  // Monotonic counter that increments on every `seeked` event. Consumers can
+  // watch this to react to seeks without subscribing to DOM events directly.
+  // (Watching state.currentTime fires on every timeupdate, which is too noisy
+  // — seekTick fires only when the user actually jumps.)
+  seekTick: number
+
   // Diagnostics — updated as HLS fragments load and as the video element
   // reports playback quality. Zero until the first sample arrives.
   downloadBps: number       // EWMA of bytes/sec across recent fragment loads
@@ -41,6 +47,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     muted: false,
     fullscreen: false,
     error: null,
+    seekTick: 0,
     downloadBps: 0,
     lastFragBytes: 0,
     lastFragMs: 0,
@@ -77,35 +84,29 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     }
   }
 
-  function bindEvents() {
+  useEventListener(videoRef, 'timeupdate', syncState)
+  useEventListener(videoRef, 'durationchange', syncState)
+  useEventListener(videoRef, 'volumechange', syncState)
+  useEventListener(videoRef, 'play', () => { state.playing = true; state.paused = false; state.loading = false })
+  useEventListener(videoRef, 'pause', () => { state.playing = false; state.paused = true })
+  useEventListener(videoRef, 'ended', () => { state.ended = true; state.playing = false })
+  useEventListener(videoRef, 'waiting', () => { state.buffering = true })
+  useEventListener(videoRef, 'canplay', () => { state.buffering = false; state.loading = false })
+  useEventListener(videoRef, 'playing', () => { state.buffering = false; state.loading = false; state.playing = true; state.paused = false })
+  useEventListener(videoRef, 'progress', syncState)
+  useEventListener(videoRef, 'seeked', () => { state.seekTick += 1; syncState() })
+  useEventListener(videoRef, 'error', () => {
     const v = videoRef.value
-    if (!v) return
-    v.addEventListener('timeupdate', syncState)
-    v.addEventListener('durationchange', syncState)
-    v.addEventListener('volumechange', syncState)
-    v.addEventListener('play', () => { state.playing = true; state.paused = false; state.loading = false })
-    v.addEventListener('pause', () => { state.playing = false; state.paused = true })
-    v.addEventListener('ended', () => { state.ended = true; state.playing = false })
-    v.addEventListener('waiting', () => { state.buffering = true })
-    v.addEventListener('canplay', () => { state.buffering = false; state.loading = false })
-    v.addEventListener('playing', () => { state.buffering = false; state.loading = false; state.playing = true; state.paused = false })
-    v.addEventListener('progress', syncState)
-    v.addEventListener('error', () => {
-      const e = v.error
-      if (!e) return
-      const codes: Record<number, string> = { 1: 'Aborted', 2: 'Network error', 3: 'Decode error', 4: 'Source not supported' }
-      state.error = `${codes[e.code] || 'Error'}${e.message ? ` — ${e.message}` : ''}`
-    })
-  }
-
-  let eventsBound = false
+    const e = v?.error
+    if (!e) return
+    const codes: Record<number, string> = { 1: 'Aborted', 2: 'Network error', 3: 'Decode error', 4: 'Source not supported' }
+    state.error = `${codes[e.code] || 'Error'}${e.message ? ` — ${e.message}` : ''}`
+  })
 
   function loadSource(src: string, token?: string) {
     destroyHLS()
     const v = videoRef.value
     if (!v) return
-
-    if (!eventsBound) { bindEvents(); eventsBound = true }
 
     state.error = null
     state.loading = true
@@ -195,8 +196,9 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     },
   }
 
+  useEventListener(document, 'fullscreenchange', () => { state.fullscreen = !!document.fullscreenElement })
+
   onMounted(() => {
-    document.addEventListener('fullscreenchange', () => { state.fullscreen = !!document.fullscreenElement })
     // Sample dropped/decoded frame counters at 1 Hz. Cheap call; only fires
     // while the player is mounted.
     metricsInterval = setInterval(sampleQuality, 1000)

@@ -28,7 +28,7 @@ function formatDate(d: string) {
 <template>
   <div class="epc" :class="{ 'epc-watched': watched }">
     <div class="epc-still" @click.prevent="hasFile ? emit('play') : undefined">
-      <img :src="stillUrl" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+      <NuxtImg :src="stillUrl" :width="500" :quality="80" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
       <div class="epc-gradient" />
 
       <button v-if="typeof watched === 'boolean'" class="epc-check" :class="{ active: watched }" @click.prevent.stop="emit('toggleWatched')" title="Toggle watched">

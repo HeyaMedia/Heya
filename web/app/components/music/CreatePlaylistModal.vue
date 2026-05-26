@@ -1,13 +1,16 @@
 <template>
-  <Teleport to="body">
-    <Transition name="cpm">
-      <div v-if="open" class="cpm-overlay" @click.self="$emit('close')">
-        <div class="cpm-modal">
+  <DialogRoot :open="open" @update:open="onOpenUpdate">
+    <DialogPortal>
+      <Transition name="cpm">
+        <DialogOverlay v-if="open" class="cpm-overlay" />
+      </Transition>
+      <Transition name="cpm">
+        <DialogContent v-if="open" class="cpm-modal" @open-auto-focus.prevent="focusName">
           <header class="cpm-header">
-            <h3>Create Playlist</h3>
-            <button class="btn-icon" @click="$emit('close')" title="Close">
+            <DialogTitle as="h3">Create Playlist</DialogTitle>
+            <DialogClose class="btn-icon" aria-label="Close">
               <Icon name="close" :size="18" />
-            </button>
+            </DialogClose>
           </header>
 
           <form class="cpm-form" @submit.prevent="submit">
@@ -35,19 +38,21 @@
             </label>
             <div v-if="error" class="cpm-error">{{ error }}</div>
             <div class="cpm-actions">
-              <button type="button" class="btn" @click="$emit('close')">Cancel</button>
+              <DialogClose as="button" type="button" class="btn">Cancel</DialogClose>
               <button type="submit" class="btn btn-primary" :disabled="busy || !name.trim()">
                 {{ busy ? 'Creating…' : 'Create' }}
               </button>
             </div>
           </form>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+        </DialogContent>
+      </Transition>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <script setup lang="ts">
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogClose } from 'reka-ui'
+
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; created: [id: number] }>()
 
@@ -59,14 +64,23 @@ const error = ref('')
 const busy = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
 
-// Reset state + focus the name field every time the modal opens.
+function onOpenUpdate(v: boolean) {
+  if (!v) emit('close')
+}
+
+function focusName() {
+  // Override the default first-focusable behavior so the textarea isn't
+  // picked when description happens to be re-tabbable first.
+  nameInput.value?.focus()
+}
+
+// Reset state every time the modal opens. Focus is handled by DialogContent.
 watch(() => props.open, (open) => {
   if (open) {
     name.value = ''
     description.value = ''
     error.value = ''
     busy.value = false
-    nextTick(() => nameInput.value?.focus())
   }
 })
 
@@ -84,13 +98,6 @@ async function submit() {
     busy.value = false
   }
 }
-
-// Esc closes.
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.open) emit('close')
-}
-onMounted(() => { window.addEventListener('keydown', onKey) })
-onBeforeUnmount(() => { window.removeEventListener('keydown', onKey) })
 </script>
 
 <style scoped>
@@ -98,9 +105,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey) })
   position: fixed; inset: 0; z-index: 220;
   background: rgba(0,0,0,0.6);
   backdrop-filter: blur(8px);
-  display: flex; align-items: center; justify-content: center;
 }
 .cpm-modal {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 221;
   width: 440px;
   max-width: 92vw;
   background: var(--bg-2);

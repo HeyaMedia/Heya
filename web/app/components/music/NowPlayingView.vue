@@ -15,7 +15,7 @@
           <!-- Left: artwork + meta -->
           <div class="np-art-col">
             <div class="np-art-frame">
-              <img v-if="coverUrl" :src="coverUrl" :alt="`${title} cover`" class="np-art-img" draggable="false" />
+              <NuxtImg v-if="coverUrl" :src="coverUrl" :width="800" :quality="80" :alt="`${title} cover`" class="np-art-img" draggable="false" />
               <div v-else class="np-art-placeholder">
                 <Icon name="music" :size="64" />
               </div>
@@ -91,14 +91,30 @@
             </button>
           </div>
           <div class="np-sidekicks">
+            <div v-if="track" class="np-rate" @click.stop>
+              <StarRating
+                :model-value="ratings.get(track.id) ?? 0"
+                size="md"
+                @update:model-value="(v) => onRate(track!.id, v)"
+              />
+            </div>
             <button
-              class="np-icon"
-              :class="{ active: loved.isLoved(track?.id ?? -1) }"
               v-if="track"
-              @click="loved.toggle(track.id)"
-              :title="loved.isLoved(track.id) ? 'Remove from Loved' : 'Add to Loved'"
+              class="np-icon"
+              @click="startTrackRadio"
+              :disabled="radio.starting.value"
+              title="Start radio from this track"
             >
-              <Icon :name="loved.isLoved(track.id) ? 'heartfill' : 'heart'" :size="18" />
+              <Icon name="radio" :size="18" />
+            </button>
+            <button
+              v-if="track"
+              class="np-icon"
+              @click="startDJMixHere"
+              :disabled="radio.starting.value"
+              title="DJ mix (harmonically-compatible tracks)"
+            >
+              <Icon name="shuffle" :size="18" />
             </button>
             <button class="np-icon" @click="toggleQueue" title="Queue">
               <Icon name="queue" :size="18" />
@@ -130,10 +146,32 @@ const {
   nextTrack, prevTrack, formatTime, toggleQueue,
 } = usePlayer()
 
-const loved = useLovedTracks()
-if (import.meta.client) loved.ensureLoaded()
+const trackRatings = useTrackRatings()
+const ratings = trackRatings.ratings
+async function onRate(trackId: number, v: number) {
+  try { await trackRatings.set(trackId, v) } catch { /* rollback handled */ }
+}
 
+const radio = useRadio()
+
+async function startTrackRadio() {
+  const t = track.value
+  if (!t || t.id <= 0) return
+  // Pass the seed as the first queue item so radio-from-NowPlaying continues
+  // with the current track, then the diversified KNN tail.
+  await radio.startRadio({ kind: 'track', track_id: t.id }, t)
+}
+
+async function startDJMixHere() {
+  const t = track.value
+  if (!t || t.id <= 0) return
+  await radio.startDJMix(t.id, t)
+}
 const track = computed(() => currentTrack.value)
+// Prime rating once track is defined.
+watch(track, (t) => {
+  if (t?.id && t.id > 0) trackRatings.load(t.id).catch(() => 0)
+}, { immediate: true })
 const title = computed(() => track.value?.title ?? '')
 const artist = computed(() => track.value?.artist ?? '')
 const album = computed(() => track.value?.album ?? '')
@@ -179,14 +217,16 @@ function bindLyricRef(el: HTMLElement | null, i: number) {
 }
 
 async function loadLyrics(trackId: number | null | undefined) {
-  if (!trackId) { lyrics.value = null; return }
+  // Same guard as the QueuePanel — radio + podcast rows use negative ids
+  // and have no music-library lyrics. Skip the round trip.
+  if (!trackId || trackId <= 0) { lyrics.value = null; lastLoadedTrackId = trackId ?? null; return }
   if (lastLoadedTrackId === trackId) return
   lastLoadedTrackId = trackId
   lyricsLoading.value = true
   lyricRefs.value = []
   try {
     const { $heya } = useNuxtApp()
-    lyrics.value = await $heya('/api/tracks/{id}/lyrics', { path: { id: trackId } }) as LyricsResponse
+    lyrics.value = await $heya('/api/music/tracks/{id}/lyrics', { path: { id: trackId } }) as LyricsResponse
   } catch {
     lyrics.value = null
   } finally {
@@ -238,20 +278,13 @@ function seekToLine(timeMs: number) {
   seek(Math.max(0, Math.min(1, timeMs / 1000 / duration.value)))
 }
 
-// Esc to close.
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.open) {
-    // Inline-emit via the wrapping component pattern — Vue templates don't
-    // expose the emit from script easily, so dispatch a synthetic close.
-    closeViaEvent()
-  }
-}
 function closeViaEvent() {
   const el = document.querySelector('.np-close') as HTMLButtonElement | null
   el?.click()
 }
-onMounted(() => { window.addEventListener('keydown', onKey) })
-onBeforeUnmount(() => { window.removeEventListener('keydown', onKey) })
+useEventListener(window, 'keydown', (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && props.open) closeViaEvent()
+})
 </script>
 
 <style scoped>

@@ -1,340 +1,304 @@
-<template>
-  <div>
-    <div class="page-header">
-      <h2 class="page-title">Providers</h2>
-      <p class="page-desc">Configure external metadata and subtitle providers</p>
-    </div>
-
-    <!-- OpenSubtitles -->
-    <section class="section">
-      <h3 class="section-heading">
-        <Icon name="subtitles" :size="14" />
-        OpenSubtitles
-      </h3>
-
-      <div class="provider-form">
-        <div class="form-grid">
-          <div class="form-field form-full">
-            <label class="form-label">API Key</label>
-            <input v-model="os.apiKey" type="text" class="form-input" placeholder="Your OpenSubtitles API key" />
-            <span class="form-hint">Required. Get your API key from your opensubtitles.com profile &rarr; API Consumers</span>
-          </div>
-          <div class="form-field">
-            <label class="form-label">Username</label>
-            <input v-model="os.username" type="text" class="form-input" placeholder="OpenSubtitles username" />
-          </div>
-          <div class="form-field">
-            <label class="form-label">Password</label>
-            <input v-model="os.password" type="password" class="form-input" placeholder="OpenSubtitles password" />
-          </div>
-        </div>
-
-        <div class="form-actions">
-          <button class="btn btn-secondary" :disabled="!canTest || testing" @click="testConnection">
-            <Icon v-if="testing" name="loading" :size="14" />
-            <Icon v-else name="pulse" :size="14" />
-            {{ testing ? 'Testing...' : 'Test Connection' }}
-          </button>
-          <button class="btn btn-primary" :disabled="!canSave || saving" @click="saveCredentials">
-            <Icon name="check" :size="14" />
-            {{ saving ? 'Saving...' : 'Save' }}
-          </button>
-          <span v-if="saved" class="save-confirmation">Saved</span>
-          <span v-if="!canSave" class="form-hint">Fill in all fields to enable save</span>
-        </div>
-
-        <!-- Status card -->
-        <div v-if="testResult" class="status-card" :class="testResult.ok ? 'status-ok' : 'status-error'">
-          <div v-if="testResult.ok && testResult.user" class="status-body">
-            <div class="status-row">
-              <span class="status-label">Status</span>
-              <span class="status-val status-good">Connected</span>
-            </div>
-            <div class="status-row">
-              <span class="status-label">Account</span>
-              <span class="status-val">
-                {{ testResult.user.level }}
-                <span v-if="testResult.user.vip" class="vip-badge">VIP</span>
-              </span>
-            </div>
-            <div class="status-row">
-              <span class="status-label">Downloads</span>
-              <span class="status-val mono">{{ testResult.user.remaining_downloads }} / {{ testResult.user.allowed_downloads }} remaining</span>
-            </div>
-          </div>
-          <div v-else class="status-body">
-            <div class="status-row">
-              <span class="status-label">Status</span>
-              <span class="status-val status-bad">Connection failed</span>
-            </div>
-            <div v-if="testResult.error" class="status-row">
-              <span class="status-label">Error</span>
-              <span class="status-val mono">{{ testResult.error }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Future providers -->
-    <section class="section">
-      <h3 class="section-heading">
-        <Icon name="globe" :size="14" />
-        Other Providers
-      </h3>
-      <div class="future-cards">
-        <div class="future-card">
-          <div class="future-icon"><Icon name="film" :size="20" /></div>
-          <div class="future-text">
-            <div class="future-title">TMDB</div>
-            <div class="future-desc">Movie & TV metadata</div>
-          </div>
-          <span class="future-badge">Coming soon</span>
-        </div>
-        <div class="future-card">
-          <div class="future-icon"><Icon name="tv" :size="20" /></div>
-          <div class="future-text">
-            <div class="future-title">TVDB</div>
-            <div class="future-desc">TV series metadata</div>
-          </div>
-          <span class="future-badge">Coming soon</span>
-        </div>
-      </div>
-    </section>
-  </div>
-</template>
-
 <script setup lang="ts">
-const os = reactive({
-  apiKey: '',
-  username: '',
-  password: '',
-})
+definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-const testing = ref(false)
+const { $heya } = useNuxtApp()
+
+type OSValue = {
+  api_key?: string
+  username?: string
+  password?: string
+}
+
+const os = reactive<OSValue>({ api_key: '', username: '', password: '' })
+const loading = ref(true)
 const saving = ref(false)
-const saved = ref(false)
+const testing = ref(false)
 const testResult = ref<{ ok: boolean; user?: any; error?: string } | null>(null)
+const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
-const canTest = computed(() => os.apiKey && os.username && os.password)
-const canSave = computed(() => os.apiKey && os.username && os.password)
+const canTest = computed(() => !!(os.api_key && os.username && os.password))
+const canSave = computed(() => !!(os.api_key && os.username && os.password))
 
-onMounted(async () => {
+async function load() {
   try {
-    const { $heya } = useNuxtApp()
-    const res = await $heya('/api/system-settings/{key}', {
-      path: { key: 'opensubtitles' },
-    }) as { key: string; value: any }
-    if (res.value) {
-      os.apiKey = res.value.api_key || ''
-      os.username = res.value.username || ''
-      os.password = res.value.password || ''
+    const res = await $heya('/api/system-settings/{key}', { path: { key: 'opensubtitles' } }) as any
+    const v = res?.value as OSValue | undefined
+    if (v) {
+      os.api_key  = v.api_key  ?? ''
+      os.username = v.username ?? ''
+      os.password = v.password ?? ''
     }
-  } catch { /* not configured yet */ }
-})
+  } catch { /* not configured yet */ } finally {
+    loading.value = false
+  }
+}
 
 async function testConnection() {
   testing.value = true
   testResult.value = null
   try {
-    const { $heya } = useNuxtApp()
     const res = await $heya('/api/opensubtitles/test', {
       method: 'POST',
-      body: { api_key: os.apiKey, username: os.username, password: os.password } as any,
+      body: { api_key: os.api_key, username: os.username, password: os.password } as any,
     }) as { ok: boolean; user?: any; error?: string }
     testResult.value = res
   } catch (e: any) {
-    testResult.value = { ok: false, error: e.message || 'Request failed' }
+    testResult.value = { ok: false, error: e?.message ?? 'Request failed' }
+  } finally {
+    testing.value = false
   }
-  testing.value = false
 }
 
-async function saveCredentials() {
+async function save() {
   saving.value = true
-  saved.value = false
+  flash.value = null
   try {
-    const { $heya } = useNuxtApp()
     await $heya('/api/system-settings/{key}', {
       method: 'PUT',
       path: { key: 'opensubtitles' },
-      body: { value: { api_key: os.apiKey, username: os.username, password: os.password } } as any,
+      body: { value: { api_key: os.api_key, username: os.username, password: os.password } } as any,
     })
-    saved.value = true
-    setTimeout(() => { saved.value = false }, 3000)
-  } catch { /* empty */ }
-  saving.value = false
+    flash.value = { kind: 'ok', text: 'OpenSubtitles credentials saved.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Save failed.' }
+  } finally {
+    saving.value = false
+  }
 }
+
+const UPSTREAM_SOURCES = [
+  { name: 'TMDB',        scope: 'movies + TV',          icon: 'film' },
+  { name: 'TVDB',        scope: 'TV episode data',      icon: 'tv' },
+  { name: 'MusicBrainz', scope: 'music catalog',        icon: 'music' },
+  { name: 'OpenLibrary', scope: 'books + authors',      icon: 'book' },
+  { name: 'Fanart.tv',   scope: 'art assets',           icon: 'image' },
+  { name: 'OMDb',        scope: 'aggregated ratings',   icon: 'pulse' },
+]
+
+onMounted(load)
 </script>
 
+<template>
+  <div>
+    <header class="sv2-page-head">
+      <h2 class="sv2-page-title">Providers</h2>
+      <p class="sv2-page-desc">
+        External metadata + subtitle services. The Heya Media aggregator
+        fronts everything except subtitles, which still need a per-user
+        OpenSubtitles account.
+      </p>
+    </header>
+
+    <SettingsSection title="Heya Media aggregator" icon="database"
+      description="The upstream metadata router. All movie / TV / music / book metadata reaches Heya through it — there are no direct outbound clients in this binary."
+      lockedBy="HEYA_MEDIA_*">
+      <KVTable :rows="[
+        { key: 'Base URL',  value: 'https://heya.media', mono: true, copy: true },
+        { key: 'Client',    value: 'internal/metadata/heyamedia', mono: true },
+        { key: 'Authentication', value: 'API key (env-managed)' },
+      ]" />
+      <div class="upstream-row">
+        <div v-for="s in UPSTREAM_SOURCES" :key="s.name" class="upstream-chip">
+          <Icon :name="s.icon" :size="13" />
+          <span class="up-name">{{ s.name }}</span>
+          <span class="up-scope">{{ s.scope }}</span>
+        </div>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection title="OpenSubtitles" icon="subtitles"
+      description="Subtitle downloads use your personal OpenSubtitles account so rate limits land where they should. API key + credentials are required.">
+      <template #actions>
+        <a
+          href="https://www.opensubtitles.com/en/profile"
+          target="_blank"
+          rel="noopener"
+          class="link-arrow"
+        >Get API key <Icon name="chevright" :size="11" /></a>
+      </template>
+
+      <div v-if="loading" class="loading-state">
+        <Icon name="spinner" :size="14" /> Loading saved credentials…
+      </div>
+
+      <template v-else>
+        <SettingsField label="API key"
+          description="Found under your opensubtitles.com profile → API Consumers.">
+          <input v-model="os.api_key" type="text" class="sv2-input" placeholder="Your OpenSubtitles API key" autocomplete="off" />
+        </SettingsField>
+        <SettingsField label="Username">
+          <input v-model="os.username" type="text" class="sv2-input" placeholder="opensubtitles username" autocomplete="username" />
+        </SettingsField>
+        <SettingsField label="Password">
+          <input v-model="os.password" type="password" class="sv2-input" placeholder="opensubtitles password" autocomplete="current-password" />
+        </SettingsField>
+
+        <div class="actions-bar">
+          <button class="sv2-btn ghost" :disabled="!canTest || testing" @click="testConnection">
+            <Icon :name="testing ? 'spinner' : 'pulse'" :size="13" />
+            {{ testing ? 'Testing…' : 'Test connection' }}
+          </button>
+          <button class="sv2-btn primary" :disabled="!canSave || saving" @click="save">
+            <Icon name="check" :size="13" />
+            {{ saving ? 'Saving…' : 'Save credentials' }}
+          </button>
+          <span class="actions-spacer" />
+          <span v-if="!canSave" class="hint-text">All three fields required.</span>
+        </div>
+
+        <div v-if="testResult" class="test-card" :class="testResult.ok ? 'ok' : 'err'">
+          <div class="test-row">
+            <span class="test-key">Status</span>
+            <StatusBadge :state="testResult.ok ? 'ok' : 'error'">
+              {{ testResult.ok ? 'Connected' : 'Failed' }}
+            </StatusBadge>
+          </div>
+          <template v-if="testResult.ok && testResult.user">
+            <div class="test-row">
+              <span class="test-key">Account</span>
+              <span class="test-val">
+                {{ testResult.user.level }}
+                <span v-if="testResult.user.vip" class="vip">VIP</span>
+              </span>
+            </div>
+            <div class="test-row">
+              <span class="test-key">Downloads</span>
+              <span class="test-val mono">
+                {{ testResult.user.remaining_downloads }} / {{ testResult.user.allowed_downloads }} remaining
+              </span>
+            </div>
+          </template>
+          <div v-else-if="testResult.error" class="test-row">
+            <span class="test-key">Error</span>
+            <span class="test-val mono err-text">{{ testResult.error }}</span>
+          </div>
+        </div>
+      </template>
+    </SettingsSection>
+
+    <div v-if="flash" class="sv2-flash" :class="flash.kind">
+      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
+      {{ flash.text }}
+    </div>
+  </div>
+</template>
+
 <style scoped>
-.page-header { margin-bottom: 32px; }
-.page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.page-desc { font-size: 13px; color: var(--fg-3); margin: 6px 0 0; }
+.sv2-page-head { margin-bottom: 28px; }
+.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
 
-.section { margin-bottom: 36px; }
-.section-heading {
+.loading-state {
   display: flex; align-items: center; gap: 8px;
-  font-size: 11px; font-weight: 600; color: var(--fg-3);
-  font-family: var(--font-mono); text-transform: uppercase;
-  letter-spacing: 0.1em; margin: 0 0 14px; padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
+  color: var(--fg-3); font-size: 12.5px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
 }
 
-.provider-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.upstream-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 12px;
 }
-
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+.upstream-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
 }
+.up-name { font-weight: 600; color: var(--fg-1); }
+.up-scope { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; }
 
-.form-full {
-  grid-column: 1 / -1;
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--fg-3);
-}
-
-.form-input {
-  height: 40px;
+.sv2-input {
+  width: 100%;
+  max-width: 460px;
+  padding: 9px 12px;
+  background: var(--bg-0);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--bg-3);
   color: var(--fg-0);
   font-size: 13px;
-  padding: 0 12px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.12s;
 }
-.form-input:focus {
-  border-color: var(--gold);
-}
+.sv2-input:focus { border-color: var(--gold); background: var(--bg-1); }
 
-.form-hint {
-  font-size: 11px;
-  color: var(--fg-4);
+.actions-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
+.actions-spacer { flex: 1; }
+.hint-text { font-size: 11.5px; color: var(--fg-4); font-style: italic; }
 
-.save-confirmation {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--good);
-}
-
-.form-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.status-card {
+.test-card {
+  margin-top: 14px;
+  padding: 14px 18px;
   border-radius: var(--r-md);
   border: 1px solid var(--border);
-  padding: 16px 20px;
 }
-.status-ok {
-  background: rgba(74, 222, 128, 0.06);
-  border-color: rgba(74, 222, 128, 0.2);
+.test-card.ok { background: rgba(111, 191, 124, 0.06); border-color: rgba(111, 191, 124, 0.25); }
+.test-card.err { background: rgba(217, 107, 107, 0.06); border-color: rgba(217, 107, 107, 0.25); }
+.test-row { display: flex; align-items: center; gap: 14px; padding: 4px 0; font-size: 13px; }
+.test-key {
+  width: 110px; flex-shrink: 0;
+  font-size: 10px; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-3); font-weight: 600;
 }
-.status-error {
-  background: rgba(217, 107, 107, 0.06);
-  border-color: rgba(217, 107, 107, 0.2);
-}
-
-.status-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
-
-.status-label {
-  width: 100px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-}
-
-.status-val {
-  color: var(--fg-1);
-}
-
-.status-good { color: var(--good); font-weight: 600; }
-.status-bad { color: var(--bad); font-weight: 600; }
-
-.mono {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.vip-badge {
-  display: inline-flex;
-  padding: 1px 6px;
+.test-val { color: var(--fg-1); }
+.test-val.mono { font-family: var(--font-mono); font-size: 12px; }
+.err-text { color: var(--bad); }
+.vip {
+  display: inline-flex; padding: 1px 6px;
   border-radius: 4px;
-  background: var(--gold-soft);
-  color: var(--gold-bright);
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  background: var(--gold-soft); color: var(--gold);
+  font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
   margin-left: 6px;
 }
 
-.future-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+.link-arrow {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 11px; color: var(--fg-3); text-decoration: none;
 }
+.link-arrow:hover { color: var(--gold); }
 
-.future-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
-  border-radius: var(--r-md);
-  border: 1px dashed var(--border);
-  background: rgba(255, 255, 255, 0.015);
+.sv2-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-
-.future-icon {
-  color: var(--fg-4);
+.sv2-btn.ghost {
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-2);
 }
-
-.future-text { flex: 1; }
-.future-title { font-size: 14px; font-weight: 500; color: var(--fg-2); }
-.future-desc { font-size: 11px; color: var(--fg-4); margin-top: 2px; }
-
-.future-badge {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--fg-4);
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
+.sv2-btn.ghost:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--fg-0);
 }
+.sv2-btn.primary {
+  background: var(--gold);
+  color: #1a1408;
+}
+.sv2-btn.primary:hover:not(:disabled) { background: var(--gold-deep); }
+.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sv2-flash {
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.sv2-flash.ok  { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
+.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

@@ -63,7 +63,13 @@ const loading = ref(true)
 
 async function confirmDelete() {
   if (!list.value) return
-  if (!confirm(`Delete "${list.value.name}"? This cannot be undone.`)) return
+  const ok = await useConfirm().confirm({
+    title: `Delete "${list.value.name}"?`,
+    message: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+    destructive: true,
+  })
+  if (!ok) return
   const { $heya } = useNuxtApp()
   await $heya('/api/me/lists/{id}', {
     method: 'DELETE',

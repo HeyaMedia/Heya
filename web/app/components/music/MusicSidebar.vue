@@ -9,52 +9,101 @@
         </NuxtLink>
       </li>
 
-      <!-- Library group: full browse across every music library -->
       <li>
-        <div class="ms-group-row">
-          <NuxtLink to="/music/artists" class="ms-nav-item flex-grow" :class="{ active: libraryActive }">
-            <Icon name="music" :size="20" />
-            <span>Library</span>
-          </NuxtLink>
-          <button class="ms-chev" @click="libraryOpen = !libraryOpen" :title="libraryOpen ? 'Collapse' : 'Expand'">
-            <Icon name="chevright" :size="12" :style="libraryOpen ? { transform: 'rotate(90deg)' } : undefined" />
-          </button>
-        </div>
-        <ul v-if="libraryOpen" class="ms-sub">
-          <li>
-            <NuxtLink to="/music/artists" class="ms-sub-item" :class="{ active: section === 'artists' }">Artists</NuxtLink>
-          </li>
-          <li>
-            <NuxtLink to="/music/albums" class="ms-sub-item" :class="{ active: section === 'albums' }">Albums</NuxtLink>
-          </li>
-        </ul>
+        <NuxtLink to="/music/search" class="ms-nav-item" :class="{ active: section === 'search' }">
+          <Icon name="search" :size="20" />
+          <span>Search</span>
+        </NuxtLink>
       </li>
 
-      <!-- My Media group: the user's favorites -->
+      <!-- Library — the full catalog. Clicking the row opens the Library
+           hub; the chevron toggles direct access to Artists / Albums / Songs. -->
       <li>
-        <div class="ms-group-row">
-          <NuxtLink to="/music/my/artists" class="ms-nav-item flex-grow" :class="{ active: myMediaActive }">
-            <Icon name="heart" :size="20" />
-            <span>My Media</span>
-          </NuxtLink>
-          <button class="ms-chev" @click="myMediaOpen = !myMediaOpen" :title="myMediaOpen ? 'Collapse' : 'Expand'">
-            <Icon name="chevright" :size="12" :style="myMediaOpen ? { transform: 'rotate(90deg)' } : undefined" />
-          </button>
-        </div>
-        <ul v-if="myMediaOpen" class="ms-sub">
-          <li>
-            <NuxtLink to="/music/my/artists" class="ms-sub-item" :class="{ active: section === 'my-artists' }">Artists</NuxtLink>
-          </li>
-          <li>
-            <NuxtLink to="/music/my/albums" class="ms-sub-item" :class="{ active: section === 'my-albums' }">Albums</NuxtLink>
-          </li>
-          <li>
-            <NuxtLink to="/music/loved" class="ms-sub-item" :class="{ active: section === 'loved' }">
-              <Icon name="heartfill" :size="11" class="ms-sub-icon" />
-              Loved Songs
+        <CollapsibleRoot v-model:open="libraryOpen">
+          <div class="ms-group-row">
+            <NuxtLink to="/music/library" class="ms-nav-item flex-grow" :class="{ active: libraryActive }">
+              <Icon name="music" :size="20" />
+              <span>Library</span>
             </NuxtLink>
-          </li>
-        </ul>
+            <CollapsibleTrigger class="ms-chev" :title="libraryOpen ? 'Collapse' : 'Expand'">
+              <Icon name="chevright" :size="12" />
+            </CollapsibleTrigger>
+          </div>
+          <CollapsibleContent class="ms-collapsible">
+            <ul class="ms-sub">
+              <li>
+                <NuxtLink to="/music/artists" class="ms-sub-item" :class="{ active: section === 'artists' }">Artists</NuxtLink>
+              </li>
+              <li>
+                <NuxtLink to="/music/albums" class="ms-sub-item" :class="{ active: section === 'albums' }">Albums</NuxtLink>
+              </li>
+              <li>
+                <NuxtLink to="/music/songs" class="ms-sub-item" :class="{ active: section === 'songs' }">Songs</NuxtLink>
+              </li>
+            </ul>
+          </CollapsibleContent>
+        </CollapsibleRoot>
+      </li>
+
+      <!-- My Music — the user's saved + rated content + sound profile. -->
+      <li>
+        <CollapsibleRoot v-model:open="myMusicOpen">
+          <div class="ms-group-row">
+            <NuxtLink to="/music/my" class="ms-nav-item flex-grow" :class="{ active: myMusicActive }">
+              <Icon name="user" :size="20" />
+              <span>My Music</span>
+            </NuxtLink>
+            <CollapsibleTrigger class="ms-chev" :title="myMusicOpen ? 'Collapse' : 'Expand'">
+              <Icon name="chevright" :size="12" />
+            </CollapsibleTrigger>
+          </div>
+          <CollapsibleContent class="ms-collapsible">
+            <ul class="ms-sub">
+              <li>
+                <NuxtLink to="/music/my/artists" class="ms-sub-item" :class="{ active: section === 'my-artists' }">Artists</NuxtLink>
+              </li>
+              <li>
+                <NuxtLink to="/music/my/albums" class="ms-sub-item" :class="{ active: section === 'my-albums' }">Albums</NuxtLink>
+              </li>
+              <li>
+                <NuxtLink to="/music/my/favorites" class="ms-sub-item" :class="{ active: section === 'my-favorites' }">My Favorites</NuxtLink>
+              </li>
+              <li>
+                <NuxtLink to="/music/stats" class="ms-sub-item" :class="{ active: section === 'stats' }">My Sound</NuxtLink>
+              </li>
+            </ul>
+          </CollapsibleContent>
+        </CollapsibleRoot>
+      </li>
+
+      <!-- Stations — replaces Browse. Hub aggregates auto-mixes, custom
+           stations (Library Radio, Deep Cuts, Time Travel, Random Album
+           Radio), the mix builder, and the mood/genre/tempo browse. -->
+      <li>
+        <CollapsibleRoot v-model:open="stationsOpen">
+          <div class="ms-group-row">
+            <NuxtLink to="/music/stations" class="ms-nav-item flex-grow" :class="{ active: stationsActive }">
+              <Icon name="compass" :size="20" />
+              <span>Stations</span>
+            </NuxtLink>
+            <CollapsibleTrigger class="ms-chev" :title="stationsOpen ? 'Collapse' : 'Expand'">
+              <Icon name="chevright" :size="12" />
+            </CollapsibleTrigger>
+          </div>
+          <CollapsibleContent class="ms-collapsible">
+            <ul class="ms-sub">
+              <li>
+                <NuxtLink to="/music/stations/mixes" class="ms-sub-item" :class="{ active: section === 'stations-mixes' }">Mixes</NuxtLink>
+              </li>
+              <li>
+                <NuxtLink to="/music/stations/builder" class="ms-sub-item" :class="{ active: section === 'stations-builder' }">Mix Builder</NuxtLink>
+              </li>
+              <li>
+                <NuxtLink to="/music/browse" class="ms-sub-item" :class="{ active: section?.startsWith('browse') }">Moods · Genres · Tempo</NuxtLink>
+              </li>
+            </ul>
+          </CollapsibleContent>
+        </CollapsibleRoot>
       </li>
 
       <li>
@@ -69,12 +118,6 @@
           <span>Internet Radio</span>
         </NuxtLink>
       </li>
-      <li>
-        <NuxtLink to="/music/search" class="ms-nav-item" :class="{ active: section === 'search' }">
-          <Icon name="search" :size="20" />
-          <span>Vibe Search</span>
-        </NuxtLink>
-      </li>
     </ul>
 
     <!-- Create Playlist CTA -->
@@ -83,13 +126,26 @@
       <span>Create Playlist</span>
     </button>
 
-    <!-- Playlist list -->
+    <!-- Playlist list — Loved Songs pinned as the first "system" playlist,
+         followed by user-created ones. Visually unified: same row shape, just
+         a gold heart tile instead of a cover image. -->
     <div class="ms-divider" />
     <div class="ms-section-label">Playlists</div>
     <ul class="ms-playlists">
+      <li>
+        <NuxtLink to="/music/loved" class="ms-pl-item" :class="{ active: section === 'loved' }">
+          <div class="ms-pl-cover ms-pl-cover-loved">
+            <Icon name="star" :size="20" weight="fill" />
+          </div>
+          <div class="ms-pl-meta">
+            <div class="ms-pl-name">Loved Songs</div>
+            <div class="ms-pl-count">Anything you've rated</div>
+          </div>
+        </NuxtLink>
+      </li>
       <li v-for="(pl, i) in playlists" :key="pl.id">
         <NuxtLink :to="`/music/playlist/${pl.id}`" class="ms-pl-item" :class="{ active: section === 'playlist-' + pl.id }">
-          <Poster :idx="i" :src="pl.cover_path || null" aspect="1/1" class="ms-pl-cover" />
+          <Poster :idx="i" :src="pl.cover_path || null" aspect="1/1" class="ms-pl-cover" :width="80" />
           <div class="ms-pl-meta">
             <div class="ms-pl-name">{{ pl.name }}</div>
             <div class="ms-pl-count">{{ pl.count }} tracks</div>
@@ -104,6 +160,8 @@
 </template>
 
 <script setup lang="ts">
+import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
+
 const props = defineProps<{
   section: string
   playlists: Array<{ id: number; name: string; count: number; cover_path?: string }>
@@ -115,14 +173,23 @@ defineEmits<{ 'create-playlist': [] }>()
 // collapse manually after — these are open by default if the user happens
 // to be inside the group.
 const libraryOpen = ref(true)
-const myMediaOpen = ref(true)
+const myMusicOpen = ref(true)
+const stationsOpen = ref(true)
 
-const libraryActive = computed(() => ['artists', 'albums'].includes(props.section))
-const myMediaActive = computed(() => ['my-artists', 'my-albums', 'loved'].includes(props.section))
+const librarySections = ['library', 'artists', 'albums', 'songs']
+const myMusicSections = ['my', 'my-artists', 'my-albums', 'my-favorites', 'stats']
+const stationsSections = ['stations', 'stations-mixes', 'stations-builder']
+
+const libraryActive = computed(() => librarySections.includes(props.section))
+const myMusicActive = computed(() => myMusicSections.includes(props.section))
+const stationsActive = computed(() =>
+  stationsSections.includes(props.section) || props.section?.startsWith('browse'),
+)
 
 watch(() => props.section, (s) => {
-  if (['artists', 'albums'].includes(s)) libraryOpen.value = true
-  if (['my-artists', 'my-albums', 'loved'].includes(s)) myMediaOpen.value = true
+  if (librarySections.includes(s)) libraryOpen.value = true
+  if (myMusicSections.includes(s)) myMusicOpen.value = true
+  if (stationsSections.includes(s) || s?.startsWith('browse')) stationsOpen.value = true
 })
 </script>
 
@@ -194,6 +261,31 @@ watch(() => props.section, (s) => {
 }
 .ms-chev:hover { color: var(--fg-0); background: rgba(255,255,255,0.04); }
 .ms-chev :deep(svg) { transition: transform 0.2s; }
+/* Rotate the chevron when the collapsible underneath is open. Reka stamps
+   data-state on the CollapsibleTrigger button, so a CSS rule is enough —
+   no manual :style binding needed. */
+.ms-chev[data-state="open"] :deep(svg) { transform: rotate(90deg); }
+
+/* Smooth open/close: reka exposes the resolved content height as a CSS
+   var on the CollapsibleContent element, so we can transition height
+   without measuring in JS. Without this the content snaps in/out. */
+.ms-collapsible {
+  overflow: hidden;
+}
+.ms-collapsible[data-state="open"] {
+  animation: ms-collapse-down 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ms-collapsible[data-state="closed"] {
+  animation: ms-collapse-up 0.18s cubic-bezier(0.4, 0, 1, 1);
+}
+@keyframes ms-collapse-down {
+  from { height: 0; opacity: 0; }
+  to   { height: var(--reka-collapsible-content-height); opacity: 1; }
+}
+@keyframes ms-collapse-up {
+  from { height: var(--reka-collapsible-content-height); opacity: 1; }
+  to   { height: 0; opacity: 0; }
+}
 
 .ms-sub {
   display: flex;
@@ -216,7 +308,6 @@ watch(() => props.section, (s) => {
 }
 .ms-sub-item:hover { background: rgba(255,255,255,0.04); color: var(--fg-0); }
 .ms-sub-item.active { color: var(--gold); background: var(--gold-soft); }
-.ms-sub-icon { color: var(--gold); }
 
 .ms-create {
   margin-top: 16px;
@@ -288,6 +379,11 @@ watch(() => props.section, (s) => {
   height: 40px;
   border-radius: var(--r-sm);
   flex-shrink: 0;
+}
+.ms-pl-cover-loved {
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--gold), color-mix(in oklab, var(--gold) 60%, #c8501c));
+  color: #fff;
 }
 .ms-pl-meta { flex: 1; min-width: 0; }
 .ms-pl-name {

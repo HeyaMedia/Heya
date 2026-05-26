@@ -11,11 +11,11 @@
     <!-- Cinematic header with backdrop -->
     <div class="me-header">
       <div class="me-backdrop-wrap">
-        <img v-if="headerBackdrop" :src="headerBackdrop" class="me-backdrop" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+        <img v-if="headerBackdrop" :src="headerBackdrop" class="me-backdrop" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="me-backdrop-fade" />
       </div>
       <div class="me-header-content">
-        <img v-if="headerPoster" :src="headerPoster" class="me-poster" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+        <img v-if="headerPoster" :src="headerPoster" class="me-poster" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="me-title-block">
           <div class="me-badges">
             <span class="me-type-badge">{{ headerBadge }}</span>
@@ -46,23 +46,24 @@
 
     <!-- Sidebar + content layout -->
     <div class="me-layout">
-      <nav class="me-sidebar">
-        <button
-          v-for="tab in visibleTabs"
-          :key="tab.key"
-          class="me-nav-item"
-          :class="{ active: activeTab === tab.key }"
-          @click="activeTab = tab.key"
-        >
-          <Icon :name="tab.icon" :size="16" />
-          <span>{{ tab.label }}</span>
-        </button>
+      <TabsRoot :model-value="activeTab" @update:model-value="(v) => typeof v === 'string' && (activeTab = v)" orientation="vertical" as="nav" class="me-sidebar">
+        <TabsList class="me-tabs-list" as="div">
+          <TabsTrigger
+            v-for="tab in visibleTabs"
+            :key="tab.key"
+            :value="tab.key"
+            class="me-nav-item"
+          >
+            <Icon :name="tab.icon" :size="16" />
+            <span>{{ tab.label }}</span>
+          </TabsTrigger>
+        </TabsList>
         <div class="me-nav-spacer" />
         <button class="me-save-btn" :disabled="!dirty" @click="save">
           <Icon name="check" :size="16" />
           Save Changes
         </button>
-      </nav>
+      </TabsRoot>
 
       <div class="me-content scroll">
         <template v-if="mode === 'media'">
@@ -172,6 +173,7 @@
 </template>
 
 <script setup lang="ts">
+import { TabsRoot, TabsList, TabsTrigger } from 'reka-ui'
 import type { MediaDetail, UpdateMediaMetadataRequest } from '~~/shared/types'
 
 const props = defineProps<{
@@ -689,12 +691,12 @@ watch([() => props.seasonId, () => props.episodeId], () => {
   color: var(--fg-1);
 }
 
-.me-nav-item.active {
+.me-nav-item[data-state="active"] {
   background: var(--gold-soft);
   color: var(--gold-bright);
 }
 
-.me-nav-item.active::before {
+.me-nav-item[data-state="active"]::before {
   content: '';
   position: absolute;
   left: 0;
@@ -704,6 +706,8 @@ watch([() => props.seasonId, () => props.episodeId], () => {
   border-radius: 2px;
   background: var(--gold);
 }
+
+.me-tabs-list { display: contents; }
 
 .me-nav-spacer {
   flex: 1;

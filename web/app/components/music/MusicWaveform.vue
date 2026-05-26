@@ -85,15 +85,8 @@ function draw() {
   }
 }
 
-let ro: ResizeObserver | null = null
-onMounted(() => {
-  draw()
-  ro = new ResizeObserver(() => draw())
-  if (wrap.value) ro.observe(wrap.value)
-})
-onBeforeUnmount(() => {
-  if (ro) ro.disconnect()
-})
+onMounted(draw)
+useResizeObserver(wrap, () => draw())
 
 watch(() => [props.peaks, props.progress], () => draw(), { flush: 'post' })
 
@@ -117,16 +110,7 @@ function onPointerMove(e: PointerEvent) {
   if (dragging.value) emit('seek', p)
 }
 
-function onPointerUp() {
-  dragging.value = false
-}
-
-onMounted(() => {
-  window.addEventListener('pointerup', onPointerUp)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('pointerup', onPointerUp)
-})
+useEventListener(window, 'pointerup', () => { dragging.value = false })
 </script>
 
 <style scoped>

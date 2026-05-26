@@ -78,30 +78,14 @@ function checkOverflow() {
   overflows.value = el.scrollWidth > el.clientWidth + 1
 }
 
-let ro: ResizeObserver | null = null
-let mo: MutationObserver | null = null
-
-watch(scroller, (el) => {
-  ro?.disconnect()
-  mo?.disconnect()
-  if (!el) return
-  checkOverflow()
-  ro = new ResizeObserver(checkOverflow)
-  ro.observe(el)
-  // Re-check when content mounts (lazy data loads, image sizes settle).
-  mo = new MutationObserver(checkOverflow)
-  mo.observe(el, { childList: true, subtree: true })
-})
+useResizeObserver(scroller, checkOverflow)
+useMutationObserver(scroller, checkOverflow, { childList: true, subtree: true })
+watch(scroller, (el) => { if (el) checkOverflow() })
 
 watch(expanded, () => {
   // When collapsing back, the scroller mounts fresh — observers latch on
   // via the scroller-ref watch above the next tick.
   nextTick(checkOverflow)
-})
-
-onBeforeUnmount(() => {
-  ro?.disconnect()
-  mo?.disconnect()
 })
 
 // Hint card-size to children that opt into it.
@@ -174,7 +158,11 @@ provide('msr:cardSize', props.cardSize)
   scrollbar-width: none;
 }
 .msr-scroller::-webkit-scrollbar { display: none; }
-.msr-scroller > :slotted(*) {
+/* Use :deep(*) instead of :slotted(*) so the sizing rule survives reka-ui's
+   slot cloning — AppContextMenu's <Slot>-with-as-child wraps swap the slot
+   child for a cloned VNode that loses Vue's :slotted() marker, so tiles
+   inside an AppContextMenu wrapper would otherwise lose their width. */
+.msr-scroller > :deep(*) {
   flex-shrink: 0;
   scroll-snap-align: start;
   width: v-bind('`${cardSize}px`');

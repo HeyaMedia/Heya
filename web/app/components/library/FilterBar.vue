@@ -11,30 +11,32 @@
           Filters
           <span v-if="activeCount > 0" class="filter-badge">{{ activeCount }}</span>
         </button>
-        <div class="sort-wrap" ref="sortWrap">
-          <button class="btn-ghost-sm" @click="sortOpen = !sortOpen">
+        <AppMenu trigger-class="btn-ghost-sm" :width="220" align="end">
+          <template #trigger>
             <Icon name="sort" :size="14" />
             {{ sortLabel }}
-          </button>
-          <div v-if="sortOpen" class="sort-menu">
-            <div
-              v-for="opt in sortOptions"
-              :key="opt.value"
-              class="sort-option"
-              :class="{ active: sort === opt.value }"
-              @click="$emit('sort', opt.value); sortOpen = false"
-            >
-              {{ opt.label }}
-            </div>
-          </div>
-        </div>
+          </template>
+          <DropdownMenuItem
+            v-for="opt in sortOptions"
+            :key="opt.value"
+            class="surface-item fb-sort-item"
+            :class="{ active: sort === opt.value }"
+            @select="$emit('sort', opt.value)"
+          >
+            {{ opt.label }}
+          </DropdownMenuItem>
+        </AppMenu>
         <div class="view-toggle">
-          <button class="btn-icon" :class="{ active: view === 'grid' }" @click="$emit('view', 'grid')">
-            <Icon name="grid" :size="16" />
-          </button>
-          <button class="btn-icon" :class="{ active: view === 'list' }" @click="$emit('view', 'list')">
-            <Icon name="list" :size="16" />
-          </button>
+          <AppTooltip label="Grid view">
+            <button class="btn-icon" :class="{ active: view === 'grid' }" aria-label="Grid view" @click="$emit('view', 'grid')">
+              <Icon name="grid" :size="16" />
+            </button>
+          </AppTooltip>
+          <AppTooltip label="List view">
+            <button class="btn-icon" :class="{ active: view === 'list' }" aria-label="List view" @click="$emit('view', 'list')">
+              <Icon name="list" :size="16" />
+            </button>
+          </AppTooltip>
         </div>
       </div>
     </div>
@@ -176,6 +178,7 @@
 
 <script setup lang="ts">
 import type { FilterState } from '~~/shared/types'
+import { DropdownMenuItem } from 'reka-ui'
 
 const props = defineProps<{
   title: string
@@ -195,8 +198,6 @@ const emits = defineEmits<{
 }>()
 
 const panelOpen = ref(false)
-const sortOpen = ref(false)
-const sortWrap = ref<HTMLElement>()
 
 const local = reactive<FilterState>({ ...props.filters })
 
@@ -381,11 +382,6 @@ function langName(code: string) {
   return LANG_NAMES[code] || code.toUpperCase()
 }
 
-onMounted(() => {
-  document.addEventListener('click', (e) => {
-    if (sortWrap.value && !sortWrap.value.contains(e.target as Node)) sortOpen.value = false
-  })
-})
 </script>
 
 <style scoped>
@@ -406,17 +402,6 @@ onMounted(() => {
   margin-left: 4px;
 }
 
-.sort-wrap { position: relative; }
-.sort-menu {
-  position: absolute; top: calc(100% + 6px); right: 0; min-width: 200px;
-  background: var(--bg-3); border: 1px solid var(--border-strong);
-  border-radius: var(--r-md); padding: 4px; z-index: 20; box-shadow: var(--shadow-2);
-}
-.sort-option {
-  padding: 8px 12px; font-size: 13px; border-radius: var(--r-sm); cursor: pointer; color: var(--fg-1);
-}
-.sort-option:hover { background: rgba(255,255,255,0.06); }
-.sort-option.active { color: var(--gold); }
 .view-toggle { display: flex; gap: 2px; }
 
 /* Filter pills */
@@ -489,4 +474,9 @@ onMounted(() => {
   cursor: pointer; color: var(--fg-1);
 }
 .typeahead-option:hover { background: rgba(255,255,255,0.06); }
+</style>
+
+<style>
+/* AppMenu portals the sort dropdown out of this component's scope. */
+.fb-sort-item.active { color: var(--gold); }
 </style>

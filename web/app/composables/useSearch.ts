@@ -78,7 +78,6 @@ export function useQuickSearch(debounceMs = 200) {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  let timer: ReturnType<typeof setTimeout> | null = null
   let seq = 0
 
   async function fetchNow(q: string) {
@@ -96,8 +95,9 @@ export function useQuickSearch(debounceMs = 200) {
     }
   }
 
+  const debouncedFetch = useDebounceFn(fetchNow, debounceMs)
+
   watch(query, (q) => {
-    if (timer) clearTimeout(timer)
     const trimmed = q.trim()
     if (!trimmed) {
       seq++
@@ -105,7 +105,7 @@ export function useQuickSearch(debounceMs = 200) {
       loading.value = false
       return
     }
-    timer = setTimeout(() => fetchNow(trimmed), debounceMs)
+    debouncedFetch(trimmed)
   })
 
   const isEmpty = computed(() => {
@@ -122,7 +122,6 @@ export function useQuickSearch(debounceMs = 200) {
   })
 
   function reset() {
-    if (timer) clearTimeout(timer)
     seq++
     query.value = ''
     data.value = null

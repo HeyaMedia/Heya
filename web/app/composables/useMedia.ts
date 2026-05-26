@@ -16,9 +16,13 @@ export function useBackdropUrl(mediaId: number | undefined) {
 // `data/...` filesystem path (the Nuxt router treats those as routes and
 // renders the SPA shell) or an upstream URL. The endpoint resolves both:
 // serves the local file when present, 302-redirects to upstream otherwise.
-export function useAlbumCoverUrl(albumId: number | undefined) {
-  if (!albumId) return null
-  return `/api/albums/${albumId}/cover`
+//
+// Takes (artist_slug, album_slug) since album slugs are scoped to an artist
+// — the two together address an album uniquely without leaking numeric IDs.
+// Every music list row carries both fields; pass them straight through.
+export function useAlbumCoverUrl(artistSlug: string | undefined, albumSlug: string | undefined) {
+  if (!artistSlug || !albumSlug) return null
+  return `/api/music/artists/${artistSlug}/albums/${albumSlug}/cover`
 }
 
 export function mediaTypeColor(type: string) {
@@ -49,10 +53,13 @@ export function slugify(title: string): string {
 }
 
 export function mediaUrl(item: { id: number; title: string; year?: string; media_type: string; slug?: string }): string {
+  // Music artists live under /music/artist/{slug} (siblings of /music/albums,
+  // /music/artists, etc.) — keep them out of the typeMap so the slash path
+  // doesn't collide with the page-level routes.
   const typeMap: Record<string, string> = {
     movie: 'movies',
     tv: 'tv',
-    music: 'music',
+    music: 'music/artist',
     book: 'books',
   }
   const prefix = typeMap[item.media_type] || 'media'

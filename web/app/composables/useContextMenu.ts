@@ -1,25 +1,20 @@
 import type { EnrichedMediaItem, ContextMenuItem, UserList } from '~~/shared/types'
 
-const menuState = reactive({
-  visible: false,
-  x: 0,
-  y: 0,
-  items: [] as ContextMenuItem[],
-})
+// Composes the standard "card right-click" menu shared between the Movies
+// and TV grid pages. The menu UI itself is now reka-driven (AppContextMenu);
+// this helper just builds the items array so the same set of actions stays
+// consistent across both grids.
+export interface CardContextOpts {
+  watchedSet: Set<number>
+  favoritedSet: Set<number>
+  userLists: UserList[]
+  onToggleWatched: (id: number, watched: boolean) => void
+  onToggleFavorite: (id: number, favorited: boolean) => void
+  onAddToList: (listId: number, mediaId: number) => void
+}
 
-export function useContextMenu() {
-  function showMenu(
-    event: MouseEvent,
-    item: EnrichedMediaItem,
-    opts: {
-      watchedSet: Set<number>
-      favoritedSet: Set<number>
-      userLists: UserList[]
-      onToggleWatched: (id: number, watched: boolean) => void
-      onToggleFavorite: (id: number, favorited: boolean) => void
-      onAddToList: (listId: number, mediaId: number) => void
-    },
-  ) {
+export function useCardContextItems() {
+  function buildItems(item: EnrichedMediaItem, opts: CardContextOpts): ContextMenuItem[] {
     const isWatched = opts.watchedSet.has(item.id)
     const isFavorited = opts.favoritedSet.has(item.id)
 
@@ -31,7 +26,7 @@ export function useContextMenu() {
         action: () => opts.onAddToList(l.id, item.id),
       }))
 
-    menuState.items = [
+    const items: ContextMenuItem[] = [
       {
         label: 'View Details',
         icon: 'info',
@@ -40,7 +35,7 @@ export function useContextMenu() {
       { separator: true, label: '' },
       {
         label: isWatched ? 'Mark Unwatched' : 'Mark Watched',
-        icon: isWatched ? 'eye' : 'eye',
+        icon: 'eye',
         action: () => opts.onToggleWatched(item.id, !isWatched),
       },
       {
@@ -48,19 +43,15 @@ export function useContextMenu() {
         icon: isFavorited ? 'heartfill' : 'heart',
         action: () => opts.onToggleFavorite(item.id, !isFavorited),
       },
-      ...(listSubmenu.length > 0
-        ? [{ separator: true, label: '' }, { label: 'Add to List', icon: 'plus', submenu: listSubmenu }]
-        : []),
     ]
 
-    menuState.x = event.clientX
-    menuState.y = event.clientY
-    menuState.visible = true
+    if (listSubmenu.length > 0) {
+      items.push({ separator: true, label: '' })
+      items.push({ label: 'Add to List', icon: 'plus', submenu: listSubmenu })
+    }
+
+    return items
   }
 
-  function closeMenu() {
-    menuState.visible = false
-  }
-
-  return { menuState, showMenu, closeMenu }
+  return { buildItems }
 }

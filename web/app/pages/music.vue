@@ -35,15 +35,27 @@ const currentSection = computed(() => {
   switch (second) {
     case 'artists':
     case 'albums':
+    case 'songs':
     case 'loved':
     case 'podcasts':
     case 'radio':
     case 'search':
+    case 'stats':
+    case 'library':
       return second
     case 'my':
+      if (!segs[2]) return 'my'
       if (segs[2] === 'artists') return 'my-artists'
       if (segs[2] === 'albums') return 'my-albums'
-      return ''
+      if (segs[2] === 'favorites') return 'my-favorites'
+      return 'my'
+    case 'stations':
+      if (!segs[2]) return 'stations'
+      if (segs[2] === 'mixes') return 'stations-mixes'
+      if (segs[2] === 'builder') return 'stations-builder'
+      return 'stations'
+    case 'browse':
+      return segs[2] ? `browse-${segs[2]}` : 'browse'
     case 'playlist':
       return segs[2] ? `playlist-${segs[2]}` : ''
     default:

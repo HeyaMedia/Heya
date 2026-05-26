@@ -34,13 +34,12 @@
         <template v-if="mediaType === 'tv'">
           <div class="mf-field">
             <label class="mf-label">Status</label>
-            <select v-model="form.status" class="mf-input">
-              <option value="">—</option>
-              <option value="Returning Series">Returning Series</option>
-              <option value="Ended">Ended</option>
-              <option value="Canceled">Canceled</option>
-              <option value="In Production">In Production</option>
-            </select>
+            <AppSelect
+              v-model="form.status"
+              :options="TV_STATUS_OPTIONS"
+              aria-label="Status"
+              placeholder="—"
+            />
           </div>
           <div class="mf-field">
             <label class="mf-label">Rating</label>
@@ -129,6 +128,14 @@
 
 <script setup lang="ts">
 import type { MediaType } from '~~/shared/types'
+import type { SelectOption } from '~/components/ui/AppSelect.vue'
+
+const TV_STATUS_OPTIONS: SelectOption[] = [
+  { value: 'Returning Series', label: 'Returning Series' },
+  { value: 'Ended', label: 'Ended' },
+  { value: 'Canceled', label: 'Canceled' },
+  { value: 'In Production', label: 'In Production' },
+]
 
 defineProps<{
   mediaType: MediaType

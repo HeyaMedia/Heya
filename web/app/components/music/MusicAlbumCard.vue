@@ -1,5 +1,5 @@
 <template>
-  <div class="album-card">
+  <CollapsibleRoot v-model:open="expanded" class="album-card">
     <div class="album-head">
       <NuxtLink :to="albumHref" class="album-cover-wrap">
         <Poster :idx="album.id" :src="coverUrl" aspect="1/1" class="album-cover" />
@@ -24,15 +24,15 @@
           <button class="btn btn-sm" @click="$emit('queue-album')">
             <Icon name="plus" :size="12" /> Queue
           </button>
-          <button class="btn btn-sm btn-ghost" @click="expanded = !expanded">
+          <CollapsibleTrigger class="btn btn-sm btn-ghost album-toggle">
             <Icon :name="expanded ? 'chevdown' : 'chevright'" :size="12" />
             {{ expanded ? 'Hide tracks' : 'Show tracks' }}
-          </button>
+          </CollapsibleTrigger>
         </div>
       </div>
     </div>
 
-    <div v-if="expanded" class="album-tracks">
+    <CollapsibleContent class="album-tracks">
       <div
         v-for="(t, i) in groupedTracks"
         :key="t.id"
@@ -53,12 +53,13 @@
         </div>
         <div class="track-dur mono">{{ formatTime(t.duration) }}</div>
       </div>
-    </div>
-  </div>
+    </CollapsibleContent>
+  </CollapsibleRoot>
 </template>
 
 <script setup lang="ts">
 import type { AlbumView, Artist, TrackFile, TrackView } from '~~/shared/types'
+import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
 
 const props = defineProps<{
   album: AlbumView
@@ -77,7 +78,7 @@ const { currentTrack, formatTime } = usePlayer()
 
 const expanded = ref(false)
 
-const coverUrl = computed(() => useAlbumCoverUrl(props.album.id))
+const coverUrl = computed(() => useAlbumCoverUrl(props.artistSlug, props.album.slug))
 
 const albumHref = computed(() => {
   if (!props.album.slug) return ''
@@ -175,6 +176,24 @@ function formatRunTime(seconds: number) {
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+/* Reka Collapsible exposes resolved height as a CSS var so we can animate
+   the reveal without measuring in JS. Same pattern as music sidebar +
+   PlaybackPrefs. */
+.album-tracks[data-state="open"] {
+  animation: album-fold-down 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.album-tracks[data-state="closed"] {
+  animation: album-fold-up 0.18s cubic-bezier(0.4, 0, 1, 1);
+}
+@keyframes album-fold-down {
+  from { height: 0; opacity: 0; }
+  to   { height: var(--reka-collapsible-content-height); opacity: 1; }
+}
+@keyframes album-fold-up {
+  from { height: var(--reka-collapsible-content-height); opacity: 1; }
+  to   { height: 0; opacity: 0; }
 }
 .track-row {
   display: grid;

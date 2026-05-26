@@ -1,230 +1,395 @@
+<script setup lang="ts">
+definePageMeta({ layout: 'settings', middleware: 'admin' })
+
+import type { components } from '#open-fetch-schemas/heya'
+type TaskResponse = components['schemas']['TaskResponse']
+type QueueStatus  = components['schemas']['MetadataQueueStatus']
+
+const { $heya } = useNuxtApp()
+const { taskProgress: liveTaskProgress } = useEventBus()
+
+const tasks = ref<TaskResponse[]>([])
+const queueStatus = ref<QueueStatus | null>(null)
+const itemsModalTask = ref<string | null>(null)
+const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const tick = ref(0)
+
+let queuePoll: ReturnType<typeof setInterval> | null = null
+let tasksPoll: ReturnType<typeof setInterval> | null = null
+let tickPoll: ReturnType<typeof setInterval> | null = null
+
+async function fetchTasks() {
+  try {
+    tasks.value = await $heya('/api/tasks') as unknown as TaskResponse[]
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Failed to load tasks.' }
+  }
+}
+
+async function fetchQueueStatus() {
+  try {
+    queueStatus.value = await $heya('/api/jobs/queue/metadata')
+  } catch {}
+}
+
+async function runTask(id: string) {
+  try {
+    await $heya('/api/tasks/{id}/run', { method: 'POST', path: { id: id as any } })
+    flash.value = { kind: 'ok', text: `Kicked off ${id}.` }
+    fetchTasks()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Failed to start task.' }
+  }
+}
+
+async function cancelTask(id: string) {
+  try {
+    await $heya('/api/tasks/{id}/cancel', { method: 'POST', path: { id: id as any } })
+    flash.value = { kind: 'ok', text: `Cancelled ${id}.` }
+    fetchTasks()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Failed to cancel task.' }
+  }
+}
+
+function configBody(t: TaskResponse, override: Partial<TaskResponse> = {}) {
+  return {
+    enabled:             override.enabled ?? t.enabled,
+    interval_hours:      override.interval_hours ?? t.interval_hours,
+    daily_start_time:    override.daily_start_time ?? t.daily_start_time,
+    daily_end_time:      override.daily_end_time ?? t.daily_end_time,
+    max_runtime_minutes: override.max_runtime_minutes ?? t.max_runtime_minutes,
+  } as any
+}
+
+async function toggleEnabled(t: TaskResponse) {
+  try {
+    await $heya('/api/tasks/{id}', {
+      method: 'PUT',
+      path: { id: t.id as any },
+      body: configBody(t, { enabled: !t.enabled }),
+    })
+    fetchTasks()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Toggle failed.' }
+  }
+}
+
+async function updateField(t: TaskResponse, patch: Partial<TaskResponse>) {
+  try {
+    await $heya('/api/tasks/{id}', {
+      method: 'PUT',
+      path: { id: t.id as any },
+      body: configBody(t, patch),
+    })
+    fetchTasks()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Update failed.' }
+  }
+}
+
+function taskIcon(id: string): string {
+  switch (id) {
+    case 'generate_trickplay':  return 'film'
+    case 'generate_thumbnails': return 'image'
+    case 'scan_libraries':      return 'folder'
+    case 'refresh_stale_items': return 'refresh'
+    case 'sonic_analysis':      return 'eq'
+    case 'music_loudness':      return 'pulse'
+    default:                    return 'timer'
+  }
+}
+
+function taskBadge(t: TaskResponse): { state: 'ok' | 'warn' | 'idle', label: string } {
+  if (t.state === 'running') return { state: 'ok',  label: 'Running' }
+  if (t.enabled)             return { state: 'warn', label: 'Scheduled' }
+  return { state: 'idle', label: 'Disabled' }
+}
+
+function resultBadge(result: string): { state: 'ok' | 'warn' | 'error' | 'idle', label: string } {
+  if (result === 'completed') return { state: 'ok',    label: 'completed' }
+  if (result === 'partial')   return { state: 'warn',  label: 'partial' }
+  if (result === 'stopped')   return { state: 'idle',  label: 'stopped' }
+  if (result === 'error')     return { state: 'error', label: 'error' }
+  return { state: 'idle', label: result || 'never' }
+}
+
+function timeAgo(dateStr?: string | null) {
+  // Bind to the per-second tick so cells re-evaluate in place without
+  // remounting the DOM element (the old `:key="tick"` pattern jittered
+  // the table layout each refresh).
+  void tick.value
+  if (!dateStr) return 'never'
+  const sec = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+  if (sec < 60) return `${sec}s ago`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
+  return `${Math.floor(sec / 86400)}d ago`
+}
+
+function formatDate(d?: string | null) {
+  if (!d) return ''
+  return new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatDuration(sec: number): string {
+  if (sec <= 0) return '—'
+  if (sec < 60) return `${sec}s`
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  return `${h}h ${m}m`
+}
+
+const WORKER_LABELS: Record<string, string> = {
+  analyze_track_facets:   'Analyzing',
+  scan_track_loudness:    'Loudness',
+  scan_album_loudness:    'Album loudness',
+  trickplay_file:         'Trickplay',
+  thumbnail_extra:        'Thumbnail',
+  process_file:           'Processing',
+  ffprobe:                'Probing',
+  detect_local_assets:    'Local assets',
+  metadata_match:         'Matching',
+  enrich_media_item:      'Enriching',
+  kickoff_library_scan:   'Scanning',
+  kickoff_refresh_stale:  'Refresh',
+  kickoff_music_loudness: 'Loudness',
+  kickoff_trickplay:      'Trickplay',
+  kickoff_thumbnails:     'Thumbnails',
+  kickoff_sonic_analysis: 'Sonic',
+}
+function workerLabel(kind?: string): string {
+  if (!kind) return ''
+  return WORKER_LABELS[kind] ?? kind
+}
+
+const queueTone = computed<'good' | 'warn' | 'neutral'>(() => {
+  if (!queueStatus.value) return 'neutral'
+  if (queueStatus.value.running) return 'good'
+  return queueStatus.value.pending > 0 ? 'warn' : 'neutral'
+})
+
+function bandCount(p: string): number {
+  return queueStatus.value?.pending_by_priority?.[p] ?? 0
+}
+
+onMounted(() => {
+  fetchTasks()
+  fetchQueueStatus()
+  queuePoll = setInterval(fetchQueueStatus, 2000)
+  tasksPoll = setInterval(fetchTasks, 5000)
+  tickPoll = setInterval(() => { tick.value++ }, 1000)
+})
+onBeforeUnmount(() => {
+  if (queuePoll) clearInterval(queuePoll)
+  if (tasksPoll) clearInterval(tasksPoll)
+  if (tickPoll) clearInterval(tickPoll)
+})
+</script>
+
 <template>
   <div>
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">Scheduled Tasks</h2>
-        <p class="page-desc">Configure automated tasks and recurring schedules</p>
-      </div>
-    </div>
+    <header class="sv2-page-head">
+      <h2 class="sv2-page-title">Scheduled tasks</h2>
+      <p class="sv2-page-desc">
+        Time-windowed automation. Each task can be enabled, scheduled within
+        a daily window, capped to a max runtime, and triggered manually.
+      </p>
+    </header>
 
-    <!-- Metadata Queue panel — live view of the unified enrich queue -->
-    <section v-if="queueStatus" class="section">
-      <h3 class="section-heading">
-        <Icon name="refresh" :size="14" />
-        Metadata queue
-        <span class="queue-subtle">unified enrich · MaxWorkers=1</span>
-      </h3>
+    <SettingsSection title="Metadata queue" icon="refresh"
+      description="The unified enrich queue, fed by every scan and the refresh task. Polls every 2 seconds.">
+      <template #actions>
+        <LiveDot connected label="Polling" />
+      </template>
 
       <div class="queue-panel">
-        <div class="queue-stats">
-          <div class="queue-stat">
-            <span class="queue-stat-num">{{ queueStatus.pending }}</span>
-            <span class="queue-stat-label">pending</span>
+        <div class="queue-left">
+          <div class="queue-pending">
+            <span class="qp-num">{{ queueStatus?.pending ?? 0 }}</span>
+            <span class="qp-label">pending</span>
           </div>
-          <div class="queue-priority-bands">
-            <div class="queue-band" :class="{ active: (queueStatus.pending_by_priority['1'] ?? 0) > 0 }">
-              <span class="band-label">P1 · watcher / view</span>
-              <span class="band-count">{{ queueStatus.pending_by_priority['1'] ?? 0 }}</span>
+          <div class="queue-bands">
+            <div class="qb" :class="{ active: bandCount('1') > 0 }">
+              <span class="qb-label">P1 · watcher / view</span>
+              <span class="qb-count">{{ bandCount('1') }}</span>
             </div>
-            <div class="queue-band" :class="{ active: (queueStatus.pending_by_priority['2'] ?? 0) > 0 }">
-              <span class="band-label">P2 · movies + tv</span>
-              <span class="band-count">{{ queueStatus.pending_by_priority['2'] ?? 0 }}</span>
+            <div class="qb" :class="{ active: bandCount('2') > 0 }">
+              <span class="qb-label">P2 · movies + TV</span>
+              <span class="qb-count">{{ bandCount('2') }}</span>
             </div>
-            <div class="queue-band" :class="{ active: (queueStatus.pending_by_priority['3'] ?? 0) > 0 }">
-              <span class="band-label">P3 · music + books</span>
-              <span class="band-count">{{ queueStatus.pending_by_priority['3'] ?? 0 }}</span>
+            <div class="qb" :class="{ active: bandCount('3') > 0 }">
+              <span class="qb-label">P3 · music + books</span>
+              <span class="qb-count">{{ bandCount('3') }}</span>
             </div>
           </div>
         </div>
 
-        <div v-if="queueStatus.running" class="queue-current">
-          <div class="queue-current-spinner">
-            <Icon name="loader" :size="14" />
-          </div>
-          <div class="queue-current-info">
-            <div class="queue-current-title">{{ queueStatus.running.item_title || queueStatus.running.kind }}</div>
-            <div class="queue-current-meta">
+        <div class="queue-current" v-if="queueStatus?.running">
+          <div class="qc-spin"><Icon name="loader" :size="14" /></div>
+          <div class="qc-info">
+            <div class="qc-title">{{ queueStatus.running.item_title || queueStatus.running.kind }}</div>
+            <div class="qc-meta">
               <span v-if="queueStatus.running.media_type">{{ queueStatus.running.media_type }}</span>
               <span v-if="queueStatus.running.source">· {{ queueStatus.running.source }}</span>
               <span>· P{{ queueStatus.running.priority }}</span>
-              <span v-if="queueStatus.running.started_at">· {{ timeAgo(queueStatus.running.started_at) }}</span>
+              <span>· {{ timeAgo(queueStatus.running.started_at) }}</span>
             </div>
           </div>
         </div>
         <div v-else class="queue-idle">
-          <Icon name="check" :size="14" />
-          Queue idle
+          <StatusBadge state="idle">idle</StatusBadge>
         </div>
 
-        <div class="queue-throughput">
-          <span class="throughput-num">{{ queueStatus.recent.completed_5min }}</span>
-          <span class="throughput-label">completed · last 5 min</span>
-          <span v-if="queueStatus.recent.avg_duration_sec > 0" class="throughput-avg">
-            avg {{ queueStatus.recent.avg_duration_sec.toFixed(1) }}s
+        <div class="queue-thru">
+          <span class="qt-num">{{ queueStatus?.recent.completed_5min ?? 0 }}</span>
+          <span class="qt-label">completed / 5 min</span>
+          <span v-if="(queueStatus?.recent.avg_duration_sec ?? 0) > 0" class="qt-avg">
+            avg {{ queueStatus!.recent.avg_duration_sec.toFixed(1) }}s
           </span>
         </div>
       </div>
-    </section>
+    </SettingsSection>
 
-    <!-- Scheduled Tasks -->
-    <section class="section">
-      <h3 class="section-heading">
-        <Icon name="timer" :size="14" />
-        Tasks
-      </h3>
-
-      <div v-if="tasks.length" class="task-list">
+    <SettingsSection title="Tasks" icon="timer"
+      description="Last run, next run, schedule window, and a manual trigger for each.">
+      <div v-if="tasks.length === 0" class="empty-state">
+        <Icon name="info" :size="14" /> No scheduled tasks found.
+      </div>
+      <div v-else class="task-list">
         <div v-for="t in tasks" :key="t.id" class="task-card">
-          <div class="task-header">
-            <div class="task-icon" :class="t.state === 'running' ? 'running' : 'idle'">
+          <div class="t-head">
+            <div class="t-icon" :class="t.state === 'running' ? 'on' : ''">
               <Icon :name="taskIcon(t.id)" :size="16" />
             </div>
-            <div class="task-info">
-              <div class="task-name">
+            <div class="t-info">
+              <div class="t-name">
                 {{ t.display_name }}
-                <span v-if="t.state === 'running'" class="state-badge running">Running</span>
-                <span v-else-if="t.enabled" class="state-badge scheduled">Scheduled</span>
-                <span v-else class="state-badge disabled">Disabled</span>
+                <StatusBadge :state="taskBadge(t).state">{{ taskBadge(t).label }}</StatusBadge>
               </div>
-              <div class="task-desc">{{ t.description }}</div>
+              <div class="t-desc">{{ t.description }}</div>
             </div>
-            <div class="task-actions">
-              <button
-                class="btn btn-secondary btn-sm"
-                @click="itemsModalTask = t.id"
-              >
+            <div class="t-actions">
+              <button class="sv2-btn ghost" @click="itemsModalTask = t.id">
                 <Icon name="list" :size="12" />
                 View items
               </button>
               <button
-                class="btn btn-secondary btn-sm"
-                :disabled="false"
+                class="sv2-btn"
+                :class="t.state === 'running' ? 'danger' : 'primary'"
                 @click="t.state === 'running' ? cancelTask(t.id) : runTask(t.id)"
               >
                 <Icon :name="t.state === 'running' ? 'close' : 'play'" :size="12" />
-                {{ t.state === 'running' ? 'Cancel' : 'Run Now' }}
+                {{ t.state === 'running' ? 'Cancel' : 'Run now' }}
               </button>
             </div>
           </div>
 
-          <!-- Stats -->
-          <div v-if="t.stats && t.stats.total > 0" class="task-stats">
-            <div class="stats-bar-track">
-              <!-- Stacked: complete (green) → failed (red) → pending (rest, gold) -->
-              <div class="stats-bar-fill stats-bar-complete" :style="{ width: (t.stats.complete / t.stats.total * 100) + '%' }" />
-              <div v-if="(t.stats.failed ?? 0) > 0" class="stats-bar-fill stats-bar-failed" :style="{ width: ((t.stats.failed ?? 0) / t.stats.total * 100) + '%' }" />
+          <div v-if="t.stats && t.stats.total > 0" class="t-stats">
+            <div class="stats-track">
+              <div class="stats-seg complete" :style="{ width: (t.stats.complete / t.stats.total * 100) + '%' }" />
+              <div v-if="(t.stats.failed ?? 0) > 0" class="stats-seg failed" :style="{ width: ((t.stats.failed ?? 0) / t.stats.total * 100) + '%' }" />
             </div>
             <div class="stats-label">
-              <span class="stats-complete">{{ t.stats.complete }}</span>
-              <span class="stats-text">complete</span>
+              <span class="ok">{{ t.stats.complete }}</span> complete
               <template v-if="(t.stats.failed ?? 0) > 0">
-                <span class="stats-sep">·</span>
-                <span class="stats-failed">{{ t.stats.failed }}</span>
-                <span class="stats-text">failed</span>
+                · <span class="bad">{{ t.stats.failed }}</span> failed
               </template>
               <template v-if="t.stats.pending > 0">
-                <span class="stats-sep">·</span>
-                <span class="stats-pending">{{ t.stats.pending }}</span>
-                <span class="stats-text">pending</span>
+                · <span class="pending">{{ t.stats.pending }}</span> pending
               </template>
-              <span class="stats-sep">/</span>
-              <span class="stats-total">{{ t.stats.total }}</span>
+              <span class="dim"> / {{ t.stats.total }}</span>
             </div>
           </div>
-          <div v-else-if="t.stats && t.stats.total === 0" class="task-stats">
-            <div class="stats-label"><span class="stats-text">No eligible items found</span></div>
+          <div v-else-if="t.stats && t.stats.total === 0" class="t-stats">
+            <div class="stats-label dim">No eligible items.</div>
           </div>
 
-          <!-- Progress bar -->
-          <div v-if="t.state === 'running' && t.progress" class="task-progress-section">
-            <div class="progress-bar-track">
-              <div
-                class="progress-bar-fill"
-                :class="{ indeterminate: t.id === 'scan_libraries' }"
-                :style="{ width: t.id === 'scan_libraries' ? '100%' : progressPct(t.progress) + '%' }"
-              />
+          <div v-if="t.state === 'running' && (t.runtime || liveTaskProgress[t.id])" class="t-live">
+            <div class="live-track">
+              <div class="live-fill" />
             </div>
-            <div class="progress-stats">
-              <span v-if="t.progress.current_item" class="progress-current">{{ t.progress.current_item }}</span>
-              <span class="progress-count">
-                {{ t.id === 'scan_libraries' ? `${t.progress.completed} files discovered` : `${t.progress.completed} / ${t.progress.total}` }}
+            <div class="live-meta">
+              <span v-if="liveTaskProgress[t.id]?.current_item" class="live-current">
+                {{ workerLabel(liveTaskProgress[t.id]?.item_kind) }}: {{ liveTaskProgress[t.id]?.current_item }}
               </span>
-              <span v-if="t.id !== 'scan_libraries' && t.progress.total > 0" class="progress-pct">{{ progressPct(t.progress) }}%</span>
+              <span class="live-count">
+                <template v-if="(liveTaskProgress[t.id]?.running ?? t.runtime?.running ?? 0) > 0">
+                  {{ liveTaskProgress[t.id]?.running ?? t.runtime?.running }} running
+                </template>
+                <template v-if="(liveTaskProgress[t.id]?.running ?? t.runtime?.running ?? 0) > 0 && (liveTaskProgress[t.id]?.pending ?? t.runtime?.pending ?? 0) > 0"> · </template>
+                <template v-if="(liveTaskProgress[t.id]?.pending ?? t.runtime?.pending ?? 0) > 0">
+                  {{ liveTaskProgress[t.id]?.pending ?? t.runtime?.pending }} pending
+                </template>
+              </span>
             </div>
           </div>
 
-          <!-- Last run + schedule config -->
-          <div class="task-details">
-            <div v-if="t.last_run_at" class="task-last-run">
-              <span class="detail-label">Last run</span>
-              <span class="detail-val">
+          <div class="t-detail">
+            <div v-if="t.last_run_at" class="d-row">
+              <span class="d-key">Last run</span>
+              <span class="d-val">
                 {{ timeAgo(t.last_run_at) }}
-                <span class="result-badge" :class="t.last_run_result">{{ t.last_run_result || 'never' }}</span>
-                <span v-if="t.last_run_items_total > 0" class="detail-sub">
+                <StatusBadge :state="resultBadge(t.last_run_result).state">{{ resultBadge(t.last_run_result).label }}</StatusBadge>
+                <span v-if="t.last_run_items_total > 0" class="d-sub">
                   {{ t.last_run_items_processed }}/{{ t.last_run_items_total }} items · {{ formatDuration(t.last_run_duration_sec) }}
-                  <template v-if="t.last_run_result === 'partial'"> · some failed</template>
                 </span>
               </span>
             </div>
-            <div v-if="t.next_run_at && t.enabled" class="task-next-run">
-              <span class="detail-label">Next run</span>
-              <span class="detail-val">{{ formatDate(t.next_run_at) }}</span>
+            <div v-if="t.next_run_at && t.enabled" class="d-row">
+              <span class="d-key">Next run</span>
+              <span class="d-val mono">{{ formatDate(t.next_run_at) }}</span>
             </div>
 
-            <div class="task-schedule">
-              <div class="schedule-row">
-                <label class="toggle-row">
-                  <span class="toggle-label">Enable schedule</span>
-                  <button class="toggle-switch" :class="{ on: t.enabled }" @click="toggleEnabled(t)">
-                    <span class="toggle-knob" />
-                  </button>
-                </label>
-              </div>
-              <div v-if="t.enabled" class="schedule-config">
-                <div class="config-field">
-                  <label class="field-label">Time window</label>
-                  <div class="time-inputs">
+            <div class="d-schedule">
+              <label class="toggle-row" @click="toggleEnabled(t)">
+                <span class="toggle-label">Enable schedule</span>
+                <button class="toggle-sw" :class="{ on: t.enabled }">
+                  <span class="toggle-knob" />
+                </button>
+              </label>
+              <div v-if="t.enabled" class="d-config">
+                <div class="cfg-field">
+                  <label class="cfg-label">Time window</label>
+                  <div class="cfg-time">
                     <input
                       type="time"
                       :value="t.daily_start_time"
-                      @change="updateField(t, 'daily_start_time', ($event.target as HTMLInputElement).value)"
-                      class="time-input"
+                      @change="updateField(t, { daily_start_time: ($event.target as HTMLInputElement).value })"
                     />
-                    <span class="time-sep">to</span>
+                    <span class="cfg-sep">to</span>
                     <input
                       type="time"
                       :value="t.daily_end_time"
-                      @change="updateField(t, 'daily_end_time', ($event.target as HTMLInputElement).value)"
-                      class="time-input"
+                      @change="updateField(t, { daily_end_time: ($event.target as HTMLInputElement).value })"
                     />
                   </div>
                 </div>
-                <div class="config-field">
-                  <label class="field-label">Max runtime</label>
-                  <div class="runtime-select">
-                    <select
-                      :value="t.max_runtime_minutes"
-                      @change="updateField(t, 'max_runtime_minutes', Number(($event.target as HTMLSelectElement).value))"
-                      class="select-input"
-                    >
-                      <option :value="30">30 min</option>
-                      <option :value="60">1 hour</option>
-                      <option :value="120">2 hours</option>
-                      <option :value="240">4 hours</option>
-                      <option :value="480">8 hours</option>
-                    </select>
-                  </div>
+                <div class="cfg-field">
+                  <label class="cfg-label">Max runtime</label>
+                  <select
+                    :value="t.max_runtime_minutes"
+                    @change="updateField(t, { max_runtime_minutes: Number(($event.target as HTMLSelectElement).value) })"
+                  >
+                    <option :value="30">30 min</option>
+                    <option :value="60">1 hour</option>
+                    <option :value="120">2 hours</option>
+                    <option :value="240">4 hours</option>
+                    <option :value="480">8 hours</option>
+                  </select>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-      <div v-else class="empty-hint">
-        <Icon name="info" :size="14" />
-        Loading scheduled tasks...
-      </div>
-    </section>
+    </SettingsSection>
+
+    <div v-if="flash" class="sv2-flash" :class="flash.kind">
+      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
+      {{ flash.text }}
+    </div>
 
     <TaskItemsModal
       v-if="itemsModalTask"
@@ -235,407 +400,234 @@
   </div>
 </template>
 
-<script setup lang="ts">
-import type { TaskProgressPayload } from '~/composables/useEventBus'
-
-interface TaskStatsPayload {
-  complete: number
-  pending: number
-  failed?: number
-  total: number
-}
-
-interface ScheduledTask {
-  id: string
-  display_name: string
-  description: string
-  category: string
-  enabled: boolean
-  interval_hours: number
-  daily_start_time: string
-  daily_end_time: string
-  max_runtime_minutes: number
-  last_run_at: string | null
-  last_run_result: string
-  last_run_duration_sec: number
-  last_run_items_processed: number
-  last_run_items_total: number
-  next_run_at: string | null
-  state: string
-  progress: TaskProgressPayload | null
-  stats: TaskStatsPayload | null
-}
-
-interface MetadataQueueRunning {
-  job_id: number
-  kind: string
-  priority: number
-  item_id?: number
-  item_title?: string
-  media_type?: string
-  source?: string
-  started_at?: string
-}
-
-interface MetadataQueueStatus {
-  pending: number
-  pending_by_priority: Record<string, number>
-  running?: MetadataQueueRunning
-  recent: { completed_5min: number, avg_duration_sec: number }
-}
-
-const tasks = ref<ScheduledTask[]>([])
-const itemsModalTask = ref<string | null>(null)
-const queueStatus = ref<MetadataQueueStatus | null>(null)
-let queuePoll: ReturnType<typeof setInterval> | null = null
-
-function taskIcon(id: string): string {
-  if (id === 'generate_trickplay') return 'film'
-  if (id === 'generate_thumbnails') return 'image'
-  if (id === 'scan_libraries') return 'folder'
-  if (id === 'refresh_stale_items') return 'refresh'
-  return 'timer'
-}
-
-function progressPct(p: TaskProgressPayload): number {
-  if (!p || p.total === 0) return 0
-  return Math.round((p.completed / p.total) * 100)
-}
-
-function timeAgo(dateStr: string | null) {
-  if (!dateStr) return 'never'
-  const sec = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
-  if (sec < 60) return `${sec}s ago`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  return `${Math.floor(sec / 86400)}d ago`
-}
-
-function formatDate(d: string | null) {
-  if (!d) return ''
-  return new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
-}
-
-function formatDuration(sec: number): string {
-  if (sec < 60) return `${sec}s`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  return `${h}h ${m}m`
-}
-
-async function fetchTasks() {
-  try {
-    const { $heya } = useNuxtApp()
-    tasks.value = await $heya('/api/tasks') as ScheduledTask[]
-  } catch {}
-}
-
-async function fetchQueueStatus() {
-  try {
-    const { $heya } = useNuxtApp()
-    queueStatus.value = await $heya('/api/jobs/queue/metadata') as MetadataQueueStatus
-  } catch {}
-}
-
-async function runTask(id: string) {
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/tasks/{id}/run', { method: 'POST', path: { id: id as any } })
-    fetchTasks()
-  } catch {}
-}
-
-async function cancelTask(id: string) {
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/tasks/{id}/cancel', { method: 'POST', path: { id: id as any } })
-    fetchTasks()
-  } catch {}
-}
-
-async function toggleEnabled(t: ScheduledTask) {
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/tasks/{id}', {
-      method: 'PUT',
-      path: { id: t.id as any },
-      body: {
-        enabled: !t.enabled,
-        interval_hours: t.interval_hours,
-        daily_start_time: t.daily_start_time,
-        daily_end_time: t.daily_end_time,
-        max_runtime_minutes: t.max_runtime_minutes,
-      } as any,
-    })
-    fetchTasks()
-  } catch {}
-}
-
-async function updateField(t: ScheduledTask, field: string, value: any) {
-  const body: any = {
-    enabled: t.enabled,
-    interval_hours: t.interval_hours,
-    daily_start_time: t.daily_start_time,
-    daily_end_time: t.daily_end_time,
-    max_runtime_minutes: t.max_runtime_minutes,
-  }
-  body[field] = value
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/tasks/{id}', { method: 'PUT', path: { id: t.id as any }, body: body as any })
-    fetchTasks()
-  } catch {}
-}
-
-const { taskProgress: liveTaskProgress } = useEventBus()
-
-watch(liveTaskProgress, () => {
-  for (const t of tasks.value) {
-    const live = liveTaskProgress.value[t.id]
-    if (live) {
-      t.state = live.state
-      t.progress = live
-    } else if (t.state === 'running') {
-      t.state = 'idle'
-      t.progress = null
-      fetchTasks()
-    }
-  }
-}, { deep: true })
-
-onMounted(() => {
-  fetchTasks()
-  fetchQueueStatus()
-  queuePoll = setInterval(fetchQueueStatus, 2000)
-})
-
-onBeforeUnmount(() => {
-  if (queuePoll) clearInterval(queuePoll)
-})
-</script>
-
 <style scoped>
-.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
-.page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.page-desc { font-size: 13px; color: var(--fg-3); margin: 6px 0 0; }
+.sv2-page-head { margin-bottom: 28px; }
+.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
 
-.section { margin-bottom: 36px; }
-.section-heading {
+.empty-state {
   display: flex; align-items: center; gap: 8px;
-  font-size: 11px; font-weight: 600; color: var(--fg-3);
-  font-family: var(--font-mono); text-transform: uppercase;
-  letter-spacing: 0.1em; margin: 0 0 14px; padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.section-desc { font-size: 12px; color: var(--fg-3); margin: -8px 0 14px; }
-
-/* Scheduled Tasks */
-.task-list { display: flex; flex-direction: column; gap: 12px; }
-.task-card {
-  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md);
-  padding: 18px 20px;
-}
-.task-header { display: flex; align-items: flex-start; gap: 14px; }
-.task-icon {
-  width: 38px; height: 38px; border-radius: var(--r-sm);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.task-icon.idle { background: var(--bg-3); color: var(--fg-3); }
-.task-icon.running { background: rgba(100, 200, 140, 0.12); color: var(--good); }
-.task-info { flex: 1; min-width: 0; }
-.task-name { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
-.task-desc { font-size: 12px; color: var(--fg-3); margin-top: 2px; }
-.task-actions { flex-shrink: 0; }
-.btn-sm { height: 34px; padding: 0 14px; font-size: 12px; }
-
-.state-badge {
-  font-size: 10px; font-weight: 600; font-family: var(--font-mono);
-  padding: 2px 8px; border-radius: 100px; text-transform: uppercase; letter-spacing: 0.04em;
-}
-.state-badge.running { background: rgba(100, 200, 140, 0.12); color: var(--good); }
-.state-badge.scheduled { background: var(--gold-soft); color: var(--gold); }
-.state-badge.disabled { background: var(--bg-3); color: var(--fg-4); }
-
-/* Stats bar */
-.task-stats { margin-top: 12px; }
-.stats-bar-track {
-  height: 4px; border-radius: 2px; background: var(--bg-0); overflow: hidden;
-  display: flex;
-}
-.stats-bar-fill { height: 100%; transition: width 0.3s ease; }
-.stats-bar-complete { background: var(--good); }
-.stats-bar-failed { background: var(--bad, #d6594a); }
-.stats-pending { font-weight: 600; color: var(--gold); }
-.stats-failed { font-weight: 600; color: var(--bad, #d6594a); }
-.stats-label {
-  display: flex; align-items: center; gap: 3px; margin-top: 5px;
-  font-size: 11px; font-family: var(--font-mono); color: var(--fg-3);
-}
-.stats-complete { font-weight: 600; color: var(--good); }
-.stats-sep { color: var(--fg-4); }
-.stats-total { font-weight: 500; color: var(--fg-2); }
-.stats-text { margin-left: 2px; }
-
-/* Progress */
-.task-progress-section { margin-top: 14px; }
-.progress-bar-track { height: 6px; border-radius: 3px; background: var(--bg-0); overflow: hidden; }
-.progress-bar-fill { height: 100%; border-radius: 3px; background: var(--gold); transition: width 0.3s ease; }
-.progress-bar-fill.indeterminate {
-  background: linear-gradient(90deg, transparent 0%, var(--gold) 50%, transparent 100%);
-  background-size: 200% 100%;
-  animation: indeterminate 1.5s ease-in-out infinite;
-}
-@keyframes indeterminate { 0% { background-position: -100% 0; } 100% { background-position: 200% 0; } }
-.progress-stats {
-  display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 11px;
-  font-family: var(--font-mono); color: var(--fg-3);
-}
-.progress-count { font-weight: 600; color: var(--fg-2); }
-.progress-current { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); }
-.progress-pct { font-weight: 700; color: var(--gold); }
-
-/* Task details */
-.task-details { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
-.task-last-run, .task-next-run {
-  display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px;
-}
-.detail-label {
-  font-size: 10px; font-weight: 600; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-4); width: 70px; flex-shrink: 0;
-}
-.detail-val { color: var(--fg-2); display: flex; align-items: center; gap: 6px; }
-.detail-sub { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; }
-
-.result-badge {
-  font-size: 9px; font-weight: 600; font-family: var(--font-mono);
-  padding: 1px 6px; border-radius: 100px; text-transform: uppercase;
-}
-.result-badge.completed { background: rgba(100, 200, 140, 0.12); color: var(--good); }
-.result-badge.partial { background: var(--gold-soft); color: var(--gold); }
-.result-badge.stopped { background: rgba(140, 160, 255, 0.1); color: rgb(140, 160, 255); }
-.result-badge.error { background: rgba(217, 107, 107, 0.1); color: var(--bad); }
-
-/* Schedule config */
-.task-schedule { margin-top: 10px; }
-.toggle-row {
-  display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;
-}
-.toggle-label { font-size: 12px; color: var(--fg-2); }
-.toggle-switch {
-  width: 36px; height: 20px; border-radius: 10px;
-  background: var(--bg-3); border: 1px solid var(--border);
-  position: relative; transition: all 0.15s ease; cursor: pointer;
-}
-.toggle-switch.on { background: var(--gold); border-color: var(--gold); }
-.toggle-knob {
-  width: 16px; height: 16px; border-radius: 50%;
-  background: white; position: absolute; top: 1px; left: 1px;
-  transition: transform 0.15s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-}
-.toggle-switch.on .toggle-knob { transform: translateX(16px); }
-
-.schedule-config { display: flex; gap: 20px; margin-top: 10px; flex-wrap: wrap; }
-.config-field { display: flex; flex-direction: column; gap: 4px; }
-.field-label {
-  font-size: 10px; font-weight: 600; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-4);
-}
-.time-inputs { display: flex; align-items: center; gap: 6px; }
-.time-sep { font-size: 11px; color: var(--fg-3); }
-.time-input, .select-input {
-  background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-xs);
-  padding: 4px 8px; font-size: 12px; font-family: var(--font-mono); color: var(--fg-1); outline: none;
-}
-.time-input:focus, .select-input:focus { border-color: var(--gold); }
-.select-input { cursor: pointer; }
-
-.empty-hint {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--fg-3); font-size: 13px;
-  padding: 14px 16px; background: var(--bg-2);
-  border: 1px dashed var(--border); border-radius: var(--r-md);
+  color: var(--fg-3); font-size: 12.5px;
+  padding: 14px 16px;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--r-md);
 }
 
-/* Metadata queue panel */
-.queue-subtle {
-  font-size: 11px; font-weight: 400; color: var(--fg-4);
-  font-family: var(--font-mono); margin-left: 8px;
-}
+/* queue panel */
 .queue-panel {
   display: grid;
-  grid-template-columns: 1fr 1.4fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
   gap: 18px;
   align-items: center;
-  background: var(--bg-1);
+  background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 14px 18px;
 }
-.queue-stats { display: flex; align-items: center; gap: 18px; }
-.queue-stat { display: flex; flex-direction: column; align-items: flex-start; }
-.queue-stat-num {
+.queue-left { display: flex; align-items: center; gap: 18px; }
+.queue-pending { display: flex; flex-direction: column; align-items: flex-start; }
+.qp-num {
   font-size: 28px; font-weight: 600; line-height: 1;
-  font-family: var(--font-mono); color: var(--fg-1);
+  font-family: var(--font-mono); color: var(--fg-0);
+  font-variant-numeric: tabular-nums;
 }
-.queue-stat-label {
+.qp-label {
   font-size: 10px; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-4);
   margin-top: 4px;
 }
-.queue-priority-bands { display: flex; flex-direction: column; gap: 4px; min-width: 140px; }
-.queue-band {
-  display: flex; align-items: center; justify-content: space-between;
-  font-family: var(--font-mono); font-size: 11px;
-  color: var(--fg-3);
-  padding: 2px 6px; border-radius: var(--r-xs);
-  background: var(--bg-2);
+
+.queue-bands {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 160px;
 }
-.queue-band.active { color: var(--fg-1); background: var(--bg-3); }
-.band-label { letter-spacing: 0.02em; }
-.band-count { font-weight: 600; }
+.qb {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 8px; border-radius: var(--r-xs);
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3); background: var(--bg-1);
+}
+.qb.active { color: var(--fg-0); background: var(--bg-3); }
+.qb-count { font-weight: 600; }
 
 .queue-current {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; background: var(--bg-2);
+  padding: 8px 12px; background: var(--bg-1);
   border: 1px solid var(--border); border-radius: var(--r-sm);
+  min-width: 0;
 }
-.queue-current-spinner {
-  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+.qc-spin {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
   color: var(--gold);
-  animation: queue-spin 1.2s linear infinite;
+  animation: qc-spin 1.2s linear infinite;
 }
-@keyframes queue-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.queue-current-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.queue-current-title {
-  font-size: 13px; color: var(--fg-1); font-weight: 500;
+@keyframes qc-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.qc-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.qc-title {
+  font-size: 13px; color: var(--fg-0); font-weight: 500;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.queue-current-meta {
+.qc-meta {
   font-size: 11px; font-family: var(--font-mono); color: var(--fg-4);
-  display: flex; gap: 4px;
+  display: flex; gap: 4px; flex-wrap: wrap;
 }
 
-.queue-idle {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--fg-3);
-  padding: 8px 12px;
-}
+.queue-idle { display: flex; align-items: center; justify-content: center; padding: 4px; }
 
-.queue-throughput {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
-  min-width: 110px;
-}
-.throughput-num {
+.queue-thru { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 130px; }
+.qt-num {
   font-size: 18px; font-weight: 600; line-height: 1;
   font-family: var(--font-mono); color: var(--fg-1);
 }
-.throughput-label {
-  font-size: 10px; font-family: var(--font-mono);
+.qt-label { font-size: 10px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-4); }
+.qt-avg { font-size: 11px; font-family: var(--font-mono); color: var(--fg-3); margin-top: 2px; }
+
+/* task cards */
+.task-list { display: flex; flex-direction: column; gap: 10px; }
+.task-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 16px 18px;
+}
+.t-head { display: flex; align-items: flex-start; gap: 14px; }
+.t-icon {
+  width: 38px; height: 38px;
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+  color: var(--fg-3);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.t-icon.on { background: rgba(111, 191, 124, 0.12); color: var(--good); }
+.t-info { flex: 1; min-width: 0; }
+.t-name {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 500; color: var(--fg-0);
+}
+.t-desc { font-size: 12px; color: var(--fg-3); margin-top: 2px; line-height: 1.4; }
+.t-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* stats bar */
+.t-stats { margin-top: 12px; }
+.stats-track {
+  height: 4px; border-radius: 2px;
+  background: var(--bg-0); overflow: hidden;
+  display: flex;
+}
+.stats-seg { height: 100%; transition: width 0.3s ease; }
+.stats-seg.complete { background: var(--good); }
+.stats-seg.failed { background: var(--bad); }
+.stats-label {
+  font-size: 11px; font-family: var(--font-mono);
+  color: var(--fg-3); margin-top: 6px;
+}
+.stats-label .ok { color: var(--good); font-weight: 600; }
+.stats-label .bad { color: var(--bad); font-weight: 600; }
+.stats-label .pending { color: var(--gold); font-weight: 600; }
+.stats-label .dim { color: var(--fg-4); }
+
+/* live progress */
+.t-live { margin-top: 12px; }
+.live-track {
+  height: 6px; border-radius: 3px;
+  background: var(--bg-0); overflow: hidden;
+}
+.live-fill {
+  height: 100%;
+  background: linear-gradient(90deg, transparent 0%, var(--gold) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: live-indeterminate 1.5s ease-in-out infinite;
+}
+@keyframes live-indeterminate { 0% { background-position: -100% 0; } 100% { background-position: 200% 0; } }
+.live-meta {
+  display: flex; align-items: center; gap: 12px; margin-top: 6px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+}
+.live-current { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-count { font-weight: 600; color: var(--fg-2); }
+
+/* detail / schedule */
+.t-detail { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.d-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.d-key {
+  width: 80px; flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-4);
+}
+.d-val { color: var(--fg-1); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.d-val.mono { font-family: var(--font-mono); font-size: 11.5px; }
+.d-sub { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; }
+
+.d-schedule { margin-top: 10px; }
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
+}
+.toggle-label { font-size: 12.5px; color: var(--fg-1); }
+.toggle-sw {
+  width: 36px; height: 20px; border-radius: 10px;
+  background: var(--bg-3); border: 1px solid var(--border);
+  position: relative; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.toggle-sw.on { background: var(--gold); border-color: var(--gold); }
+.toggle-knob {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: white; position: absolute; top: 1px; left: 1px;
+  transition: transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.toggle-sw.on .toggle-knob { transform: translateX(16px); }
+
+.d-config { display: flex; gap: 24px; margin-top: 10px; flex-wrap: wrap; }
+.cfg-field { display: flex; flex-direction: column; gap: 4px; }
+.cfg-label {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-4);
 }
-.throughput-avg {
-  font-size: 11px; font-family: var(--font-mono); color: var(--fg-3);
-  margin-top: 2px;
+.cfg-time { display: flex; align-items: center; gap: 6px; }
+.cfg-sep { font-size: 11px; color: var(--fg-3); }
+.cfg-field input, .cfg-field select {
+  background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-xs);
+  padding: 5px 9px; font-size: 12px; font-family: var(--font-mono); color: var(--fg-1);
+  outline: none;
 }
+.cfg-field input:focus, .cfg-field select:focus { border-color: var(--gold); }
+.cfg-field select { cursor: pointer; }
+
+/* buttons */
+.sv2-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.sv2-btn.ghost { border: 1px solid var(--border); background: var(--bg-1); color: var(--fg-2); }
+.sv2-btn.ghost:hover { border-color: var(--border-strong); color: var(--fg-0); }
+.sv2-btn.primary { background: var(--gold); color: #1a1408; }
+.sv2-btn.primary:hover { background: var(--gold-deep); }
+.sv2-btn.danger {
+  border: 1px solid rgba(217,107,107,0.30);
+  background: rgba(217,107,107,0.06);
+  color: var(--bad);
+}
+.sv2-btn.danger:hover { background: rgba(217,107,107,0.12); }
+
+.sv2-flash {
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.sv2-flash.ok { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
+.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

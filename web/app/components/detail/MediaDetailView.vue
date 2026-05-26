@@ -7,26 +7,30 @@
     <!-- Hero: backdrop + poster + info merged -->
     <div class="hero-section">
       <div class="hero-bg">
-        <img
+        <NuxtImg
           v-if="backdropA"
           :src="backdropA"
+          :width="1920"
+          :quality="80"
           class="hero-bg-img"
           :class="{ visible: showA }"
-          @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
         />
-        <img
+        <NuxtImg
           v-if="backdropB"
           :src="backdropB"
+          :width="1920"
+          :quality="80"
           class="hero-bg-img"
           :class="{ visible: !showA }"
-          @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
         />
         <div class="hero-bg-fade" />
       </div>
 
       <div class="hero-content">
         <div class="hero-poster">
-          <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" />
+          <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" :width="600" />
           <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
@@ -134,40 +138,40 @@
 
     <div class="detail-body-below">
       <!-- Cast & Crew (tabbed) -->
-      <div v-if="detail.cast?.length || detail.crew?.length" class="detail-section">
+      <TabsRoot v-if="detail.cast?.length || detail.crew?.length" v-model="peopleTab" class="detail-section">
         <div class="section-row-head" style="margin-bottom: 0">
-          <div class="tab-bar" style="margin-bottom: 0">
-            <button class="tab-btn" :class="{ active: peopleTab === 'cast' }" @click="peopleTab = 'cast'">
+          <TabsList class="tab-bar" style="margin-bottom: 0">
+            <TabsTrigger value="cast" class="tab-btn">
               Cast <span class="tab-count">{{ detail.cast?.length || 0 }}</span>
-            </button>
-            <button class="tab-btn" :class="{ active: peopleTab === 'crew' }" @click="peopleTab = 'crew'">
+            </TabsTrigger>
+            <TabsTrigger value="crew" class="tab-btn">
               Crew <span class="tab-count">{{ detail.crew?.length || 0 }}</span>
-            </button>
-          </div>
+            </TabsTrigger>
+          </TabsList>
           <div v-if="peopleTab === 'cast'" style="display: flex; gap: 8px">
             <button class="scroll-arrow" @click="scrollEl('castScroll', -1)"><Icon name="chevleft" :size="16" /></button>
             <button class="scroll-arrow" @click="scrollEl('castScroll', 1)"><Icon name="chevright" :size="16" /></button>
           </div>
         </div>
 
-        <div v-if="peopleTab === 'cast'" class="hscroll" ref="castScroll" style="margin-top: 16px">
+        <TabsContent value="cast" class="hscroll" ref="castScroll" style="margin-top: 16px">
           <NuxtLink
             v-for="c in detail.cast"
             :key="c.id"
             :to="personUrl(c)"
             class="cast-card"
           >
-            <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
-              <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-              <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
-            </div>
-            <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-            <div class="cast-name">{{ c.name }}</div>
-            <div class="cast-role">{{ c.character }}</div>
+            <MediaCard
+              :idx="c.id"
+              :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+              aspect="2/3"
+              :title="c.name"
+              :subtitle="c.character"
+            />
           </NuxtLink>
-        </div>
+        </TabsContent>
 
-        <div v-if="peopleTab === 'crew'" style="margin-top: 16px">
+        <TabsContent value="crew" style="margin-top: 16px">
           <div v-for="dept in crewByDepartment" :key="dept.name" style="margin-bottom: 24px">
             <div class="section-title" style="font-size: 11px; margin-bottom: 10px">{{ dept.name }}</div>
             <div class="crew-dept-grid">
@@ -177,35 +181,32 @@
                 :to="personUrl(c)"
                 class="crew-card"
               >
-                <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="crew-photo-wrap">
-                  <img :src="`/api/person/${c.id}/image`" class="crew-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-                  <button class="zoom-btn round crew-zoom" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="8" /></button>
-                </div>
-                <div v-else class="crew-initials">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-                <div>
-                  <div class="crew-name">{{ c.name }}</div>
-                  <div class="crew-job">{{ c.job }}</div>
-                </div>
+                <MediaCard
+                  :idx="c.id"
+                  :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+                  aspect="2/3"
+                  :title="c.name"
+                  :subtitle="c.job"
+                />
               </NuxtLink>
             </div>
           </div>
-        </div>
-      </div>
+        </TabsContent>
+      </TabsRoot>
 
       <!-- Content tabs: Videos / Extras / Seasons -->
-      <div v-if="contentTabs.length" class="detail-section">
+      <TabsRoot v-if="contentTabs.length" v-model="contentTab" class="detail-section">
         <div class="section-row-head" style="margin-bottom: 0">
-          <div class="tab-bar" style="margin-bottom: 0">
-            <button
+          <TabsList class="tab-bar" style="margin-bottom: 0">
+            <TabsTrigger
               v-for="t in contentTabs"
               :key="t.id"
+              :value="t.id"
               class="tab-btn"
-              :class="{ active: contentTab === t.id }"
-              @click="contentTab = t.id"
             >
               {{ t.label }} <span class="tab-count">{{ t.count }}</span>
-            </button>
-          </div>
+            </TabsTrigger>
+          </TabsList>
           <div v-if="contentTab === 'videos'" style="display: flex; gap: 8px">
             <button class="scroll-arrow" @click="scrollContentLeft"><Icon name="chevleft" :size="16" /></button>
             <button class="scroll-arrow" @click="scrollContentRight"><Icon name="chevright" :size="16" /></button>
@@ -215,26 +216,31 @@
           </div>
         </div>
 
-        <div v-if="contentTab === 'videos'" style="margin-top: 16px">
+        <TabsContent value="videos" style="margin-top: 16px">
           <div :class="contentExpanded ? 'expanded-grid videos-expanded' : 'hscroll'" ref="videosScroll">
             <a
-              v-for="v in detail.videos"
+              v-for="(v, i) in detail.videos"
               :key="v.id"
               :href="`https://www.youtube.com/watch?v=${v.video_key}`"
               target="_blank"
               class="video-card"
             >
-              <div class="video-thumb">
-                <img :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-                <div class="video-play"><Icon name="play" :size="20" /></div>
-              </div>
-              <div class="video-name">{{ v.name }}</div>
-              <div class="video-type">{{ v.video_type }}</div>
+              <MediaCard
+                :idx="i"
+                :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
+                aspect="16/9"
+                :title="v.name"
+                :badge-tl="v.video_type"
+              >
+                <template #badges>
+                  <div class="video-play"><Icon name="play" :size="20" /></div>
+                </template>
+              </MediaCard>
             </a>
           </div>
-        </div>
+        </TabsContent>
 
-        <div v-if="contentTab === 'extras'" style="margin-top: 16px">
+        <TabsContent value="extras" style="margin-top: 16px">
           <div v-for="group in groupedExtras" :key="group.type" style="margin-bottom: 20px">
             <div class="section-row-head" style="margin-bottom: 8px">
               <div class="section-title" style="font-size: 11px">{{ formatExtraType(group.type) }} ({{ group.items.length }})</div>
@@ -251,25 +257,26 @@
             <div :class="extrasExpanded[group.type] ? 'fold-grid extras-expanded' : 'hscroll'" :ref="(el: any) => setScrollRef(`extras-${group.type}`, el)">
               <div v-for="e in group.items" :key="e.id" class="extra-card">
                 <div class="extra-thumb">
-                  <img v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" alt="" class="extra-thumb-img" loading="lazy" />
+                  <NuxtImg v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" :width="400" :quality="80" alt="" class="extra-thumb-img" loading="lazy" />
                   <Icon v-else name="play" :size="20" />
                 </div>
                 <div class="extra-title">{{ e.title }}</div>
               </div>
             </div>
           </div>
-        </div>
+        </TabsContent>
 
-        <div v-if="contentTab === 'seasons'" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; margin-top: 16px">
+        <TabsContent value="seasons" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; margin-top: 16px">
           <div v-for="s in detail.seasons" :key="s.id" class="card-tile">
-            <Poster :idx="s.season_number" aspect="2/3" :title="s.title" />
-            <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ s.title }}</div>
-              <div class="grid-tile-sub">{{ s.aired_episodes }} episodes</div>
-            </div>
+            <MediaCard
+              :idx="s.season_number"
+              aspect="2/3"
+              :title="s.title"
+              :subtitle="`${s.aired_episodes} episodes`"
+            />
           </div>
-        </div>
-      </div>
+        </TabsContent>
+      </TabsRoot>
 
       <!-- More Like This (horizontal scroll) -->
       <div v-if="detail.recommendations?.length" class="detail-section">
@@ -289,56 +296,42 @@
             class="rec-tile"
             :class="{ dimmed: !r.local_media_item_id }"
           >
-            <Poster
+            <MediaCard
               :idx="r.id"
               :src="recPosterUrl(r)"
               aspect="2/3"
               :title="r.title"
-            />
-            <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ r.title }}</div>
-              <div class="grid-tile-sub">
-                {{ r.release_date?.slice(0, 4) || '?' }}
-                <span v-if="r.local_media_item_id" class="rec-in-library">In library</span>
-              </div>
-            </div>
+              :subtitle="r.release_date?.slice(0, 4) || '?'"
+            >
+              <template v-if="r.local_media_item_id" #badges>
+                <div class="rec-in-library-badge">In library</div>
+              </template>
+            </MediaCard>
           </component>
         </div>
       </div>
     </div>
 
     <!-- List modal -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="showListModal" class="modal-overlay" @click.self="showListModal = false">
-          <div class="modal-card">
-            <div class="modal-header">
-              <h3>Add to List</h3>
-              <button class="btn-icon" @click="showListModal = false"><Icon name="close" :size="16" /></button>
-            </div>
-            <div class="modal-body">
-              <div v-if="!showCreateList">
-                <button v-for="l in userLists" :key="l.id" class="list-option" :class="{ active: l.contains }" @click="toggleListItem(l)">
-                  <Icon :name="l.contains ? 'check' : 'plus'" :size="14" />
-                  <span>{{ l.name }}</span>
-                  <span class="list-option-count">{{ l.item_count }}</span>
-                </button>
-                <div v-if="!userLists.length" style="padding: 16px 0; color: var(--fg-3); font-size: 13px; text-align: center">No lists yet</div>
-                <button class="list-create-btn" @click="showCreateList = true"><Icon name="plus" :size="14" /> Create new list</button>
-              </div>
-              <div v-else>
-                <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
-                <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
-                <div style="display: flex; gap: 8px; margin-top: 12px">
-                  <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
-                  <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
-                </div>
-              </div>
-            </div>
-          </div>
+    <AppDialog v-model="showListModal" title="Add to List" size="sm">
+      <div v-if="!showCreateList">
+        <button v-for="l in userLists" :key="l.id" class="list-option" :class="{ active: l.contains }" @click="toggleListItem(l)">
+          <Icon :name="l.contains ? 'check' : 'plus'" :size="14" />
+          <span>{{ l.name }}</span>
+          <span class="list-option-count">{{ l.item_count }}</span>
+        </button>
+        <div v-if="!userLists.length" style="padding: 16px 0; color: var(--fg-3); font-size: 13px; text-align: center">No lists yet</div>
+        <button class="list-create-btn" @click="showCreateList = true"><Icon name="plus" :size="14" /> Create new list</button>
+      </div>
+      <div v-else>
+        <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
+        <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
+        <div style="display: flex; gap: 8px; margin-top: 12px">
+          <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
+          <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
         </div>
-      </Transition>
-    </Teleport>
+      </div>
+    </AppDialog>
   </div>
 
   <div v-else class="scroll" style="height: 100%; display: flex; align-items: center; justify-content: center">
@@ -358,6 +351,7 @@
 
 <script setup lang="ts">
 import type { MediaDetail, MediaExtra } from '~~/shared/types'
+import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
 
 const props = defineProps<{ mediaId: number }>()
 const lightbox = useLightbox()
@@ -772,12 +766,7 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .collection-badge strong { color: var(--fg-0); font-weight: 500; }
 .collection-badge:hover strong { color: var(--gold); }
 
-/* Modal */
-.modal-overlay { position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
-.modal-card { background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg); width: 380px; max-width: 90vw; max-height: 80vh; overflow: auto; }
-.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
-.modal-header h3 { font-size: 16px; font-weight: 600; margin: 0; }
-.modal-body { padding: 12px 20px 20px; }
+/* AppDialog supplies the chrome — only the rows/inputs need styling. */
 .modal-input { width: 100%; padding: 10px 14px; background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--fg-0); font-size: 14px; outline: none; }
 .modal-input:focus { border-color: var(--gold); }
 .list-option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: var(--r-sm); font-size: 13px; color: var(--fg-1); transition: background 0.12s; text-align: left; }
@@ -786,8 +775,6 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .list-option-count { margin-left: auto; font-size: 10px; font-family: var(--font-mono); color: var(--fg-4); }
 .list-create-btn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; margin-top: 4px; border-top: 1px solid var(--border); font-size: 13px; color: var(--fg-2); transition: color 0.12s; }
 .list-create-btn:hover { color: var(--gold); }
-.modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
-.modal-enter-from, .modal-leave-to { opacity: 0; }
 
 /* Backdrop indicators */
 .bd-indicators {
@@ -848,40 +835,12 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
   border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s;
 }
 .tab-btn:hover { color: var(--fg-0); }
-.tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+.tab-btn[data-state="active"] { color: var(--gold); border-bottom-color: var(--gold); }
 .tab-count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-left: 6px; }
 
-.cast-card {
-  width: 100px; flex-shrink: 0;
-  text-align: center; text-decoration: none; color: inherit; cursor: pointer;
-}
-.cast-card:hover .cast-name { color: var(--gold); }
-.cast-photo { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; margin: 0 auto; display: block; }
-.cast-avatar {
-  width: 76px; height: 76px; border-radius: 50%;
-  background: linear-gradient(135deg, var(--bg-4), var(--bg-3));
-  display: flex; align-items: center; justify-content: center; margin: 0 auto 8px;
-  font-size: 16px; font-weight: 600; color: var(--fg-2);
-}
-.cast-name { font-size: 12px; font-weight: 500; color: var(--fg-0); transition: color 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cast-role { font-size: 10px; color: var(--fg-3); margin-top: 2px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
-.crew-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 12px; border-radius: var(--r-sm);
-  text-decoration: none; color: inherit; transition: background 0.12s;
-}
-.crew-card:hover { background: rgba(255,255,255,0.04); }
-.crew-card:hover .crew-name { color: var(--gold); }
-.crew-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; display: block; }
-.crew-initials {
-  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
-  background: var(--bg-3); display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 600; color: var(--fg-3);
-}
-.crew-name { font-size: 13px; font-weight: 500; color: var(--fg-0); transition: color 0.15s; }
-.crew-job { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
+.cast-card { width: 100px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
+.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px; }
+.crew-card { text-decoration: none; color: inherit; display: block; }
 
 .hscroll { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
 .hscroll::-webkit-scrollbar { display: none; }
@@ -900,14 +859,17 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
   to { max-height: 2000px; opacity: 1; }
 }
 
-.video-card { width: 240px; flex-shrink: 0; text-decoration: none; color: inherit; }
-.video-card:hover .video-name { color: var(--gold); }
-.video-thumb { position: relative; aspect-ratio: 16/9; border-radius: var(--r-md); overflow: hidden; background: var(--bg-3); }
-.video-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.video-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.15s; }
+.video-card { width: 240px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
+/* Hover play overlay sits in MediaCard's badges slot. Covers the full thumb
+   and reveals on hover, sitting above the gradient via z-index. */
+.video-play {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.3);
+  opacity: 0; transition: opacity 0.15s;
+  pointer-events: none; color: #fff;
+}
 .video-card:hover .video-play { opacity: 1; }
-.video-name { font-size: 12px; font-weight: 500; margin-top: 8px; color: var(--fg-0); transition: color 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.video-type { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; }
 
 .extra-card {
   display: flex; align-items: center; gap: 12px; padding: 10px; min-width: 260px; flex-shrink: 0;
@@ -924,10 +886,13 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .rec-tile { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; }
 .rec-tile.dimmed { opacity: 0.5; }
 .rec-tile:not(.dimmed):hover { transform: translateY(-3px); }
-.rec-in-library {
-  display: inline-block; font-size: 9px; font-weight: 700;
-  color: var(--good); text-transform: uppercase; letter-spacing: 0.06em;
-  margin-left: 4px;
+.rec-in-library-badge {
+  position: absolute; top: 8px; right: 8px; z-index: 3;
+  font-size: 9px; font-weight: 700; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 3px 8px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px);
+  color: var(--good); pointer-events: none;
 }
 
 .scroll-arrow {

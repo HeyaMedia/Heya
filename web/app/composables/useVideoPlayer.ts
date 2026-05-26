@@ -1,4 +1,5 @@
 import type { StreamInfoResponse } from '~~/shared/types'
+import type { PlaybackEntityType } from '~/composables/usePlaybackEvents'
 
 export interface PlayerState {
   fileId: number
@@ -17,7 +18,18 @@ export interface PlayerState {
   showNerdInfo: boolean
 }
 
-export function useVideoPlayer(fileId: Ref<number>, mediaItemId: Ref<number | null>) {
+export function useVideoPlayer(
+  fileId: Ref<number>,
+  mediaItemId: Ref<number | null>,
+  // entityType + entityId tell recordPlayback which row to update in
+  // user_watch_progress: ("movie", media_item_id) for movies, ("episode",
+  // episode_id) for episodes. Optional — when missing we default to
+  // ("movie", media_item_id) for backwards compatibility, but that path
+  // mis-stores TV progress against the series media_item and breaks the
+  // CW endpoint's episode-detail join. Always pass these when known.
+  entityType?: Ref<string>,
+  entityId?: Ref<number>,
+) {
   const state = reactive<PlayerState>({
     fileId: fileId.value,
     mediaItemId: mediaItemId.value,
@@ -34,8 +46,6 @@ export function useVideoPlayer(fileId: Ref<number>, mediaItemId: Ref<number | nu
     error: null,
     showNerdInfo: false,
   })
-
-  let progressInterval: ReturnType<typeof setInterval> | null = null
 
   async function loadStreamInfo() {
     try {
@@ -54,34 +64,38 @@ export function useVideoPlayer(fileId: Ref<number>, mediaItemId: Ref<number | nu
     state.loading = false
   }
 
-  async function reportProgress() {
-    if (!mediaItemId.value || state.currentTime < 1) return
-    try {
-      const { $heya } = useNuxtApp()
-      await $heya('/api/me/watch/{media_item_id}/progress', {
-        method: 'POST',
-        path: { media_item_id: mediaItemId.value },
-        body: {
-          // TODO: plumb episode/audiobook awareness from VideoPlayer props so
-          // this isn't hardcoded. Server description says it defaults to 'movie'.
-          entity_type: 'movie',
-          progress_seconds: Math.floor(state.currentTime),
-          total_seconds: Math.floor(state.duration),
-        },
-      })
-    } catch {}
-  }
-
-  function startProgressReporting() {
-    stopProgressReporting()
-    progressInterval = setInterval(reportProgress, 10_000)
-  }
-
-  function stopProgressReporting() {
-    if (progressInterval) {
-      clearInterval(progressInterval)
-      progressInterval = null
-    }
+  // emitProgress is the single point of emission for video watch progress.
+  // Caller provides the *live* position+duration values (we don't trust the
+  // local PlayerState here — it's a stale shadow of the HeyaPlayer state,
+  // which is the real source of truth for currentTime). `completed` defaults
+  // to "within 30s of the end" — mirrors the server-side rule so the cache
+  // doesn't have to recompute it.
+  //
+  // entityType/entityId default to ('movie', media_item_id) when not
+  // supplied — works for movies but wrong for TV (it'd store progress
+  // against the series media_item, hiding episode info in the CW row).
+  // VideoPlayer.vue passes both for TV so progress lands as
+  // ('episode', episode_id) and the CW JOIN picks up season + ep title.
+  async function emitProgress(positionSeconds: number, durationSeconds: number, completed?: boolean) {
+    // Narrow the type — recordPlayback's PlaybackEntityType is a tagged
+    // union, but our entityType comes from a free-form ref. Anything
+    // outside the known set falls back to 'movie' for back-compat.
+    const raw = (entityType?.value || 'movie') as PlaybackEntityType
+    const effectiveType: PlaybackEntityType =
+      raw === 'episode' || raw === 'track' ? raw : 'movie'
+    const effectiveId = entityId?.value || mediaItemId.value || 0
+    if (!effectiveId) return
+    const position = Math.floor(positionSeconds)
+    const total = Math.floor(durationSeconds)
+    if (position < 1) return // ignore the very start; nothing meaningful to record yet
+    const isCompleted = completed ?? (total > 0 && position >= total - 30)
+    await recordPlayback({
+      entity_type: effectiveType,
+      entity_id: effectiveId,
+      position_seconds: position,
+      total_seconds: total,
+      completed: isCompleted,
+    })
   }
 
   function subtitleUrl(index: number) {
@@ -102,17 +116,10 @@ export function useVideoPlayer(fileId: Ref<number>, mediaItemId: Ref<number | nu
     return 0
   }
 
-  onUnmounted(() => {
-    reportProgress()
-    stopProgressReporting()
-  })
-
   return {
     state,
     loadStreamInfo,
-    reportProgress,
-    startProgressReporting,
-    stopProgressReporting,
+    emitProgress,
     subtitleUrl,
     loadResumePosition,
   }

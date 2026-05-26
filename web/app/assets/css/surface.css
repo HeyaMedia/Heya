@@ -1,0 +1,137 @@
+/* ────────────────────────────────────────────────────────────────────
+ * Surface
+ *
+ * Shared visual identity for floating panels — menus, comboboxes,
+ * dialogs, popovers. One source of truth for the cinematic glass look
+ * so anything that floats above the page looks like part of the same
+ * design system.
+ *
+ * Apply via .surface on the floating element itself; the rest are
+ * opt-in subclasses for common children (items, dividers, sections).
+ * ──────────────────────────────────────────────────────────────────── */
+
+.surface {
+  /* 92% opaque base — keeps the glass tint but never lets bright content
+     (album-art hero, splash images) wash out muted text. Earlier 62% looked
+     ethereal but failed contrast on light backgrounds. */
+  background: color-mix(in oklab, var(--bg-2) 92%, transparent);
+  backdrop-filter: blur(24px) saturate(160%) brightness(108%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%) brightness(108%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  z-index: 200;
+  /* When reka positions us, use its computed origin so the scale-in
+     animation expands from the corner nearest the trigger. */
+  transform-origin: var(--reka-dropdown-menu-content-transform-origin,
+                    var(--reka-popper-transform-origin,
+                    top center));
+  will-change: transform, opacity;
+  /* Lift the secondary text tone inside any surface. The global --fg-3
+     (#5d5b56) was painted for full-opacity dark backgrounds and disappears
+     against the translucent surface when bright art shows through. Bumping
+     to fg-2 (#8d8a82) keeps the hierarchy without losing legibility. */
+  --fg-3: var(--fg-2);
+}
+
+/* Animation hooks. Reka stamps data-state on the floating element when
+   it opens/closes; Vue <Transition> consumers can also key off these. */
+.surface[data-state="open"] {
+  animation: surface-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.surface[data-state="closed"] {
+  animation: surface-out 0.12s cubic-bezier(0.4, 0, 1, 1);
+}
+
+@keyframes surface-in {
+  from { opacity: 0; transform: scale(0.94) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes surface-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.97) translateY(-2px); }
+}
+
+/* ── Inner building blocks ──────────────────────────────────────── */
+
+.surface-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px 10px;
+}
+
+.surface-section { padding: 10px 14px; }
+.surface-section + .surface-section { border-top: 1px solid var(--border); }
+
+.surface-section-label {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-3);
+  margin-bottom: 8px;
+}
+
+.surface-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+  margin: 4px 0;
+}
+
+.surface-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--fg-1);
+  text-decoration: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.surface-item[data-highlighted],
+.surface-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-0);
+}
+.surface-item[data-disabled] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.surface-item-icon { flex-shrink: 0; opacity: 0.75; }
+
+.surface-item-destructive { color: var(--bad); }
+.surface-item-destructive[data-highlighted],
+.surface-item-destructive:hover {
+  background: rgba(255, 80, 80, 0.06);
+  color: var(--bad);
+}
+
+.surface-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.surface-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--fg-3);
+  font-size: 12px;
+}

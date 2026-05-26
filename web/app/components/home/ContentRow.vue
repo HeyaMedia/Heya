@@ -20,19 +20,14 @@
         :style="{ width: `${tileWidth || 168}px`, flexShrink: 0 }"
         @click="item.available !== false && $emit('tile', item)"
       >
-        <div style="position: relative">
-          <Poster
-            :idx="i"
-            :src="usePosterUrl(item.id)"
-            :title="item.title"
-            :aspect="aspect || '2/3'"
-          />
-          <div v-if="item.available === false" class="missing-badge">Missing</div>
-        </div>
-        <div class="grid-tile-meta">
-          <div class="grid-tile-title">{{ item.title }}</div>
-          <div class="grid-tile-sub">{{ item.year || item.sub }}</div>
-        </div>
+        <MediaCard
+          :idx="i"
+          :src="item.poster_src ?? usePosterUrl(item.id)"
+          :title="item.title"
+          :subtitle="item.year || item.sub"
+          :aspect="aspect || '2/3'"
+          :missing="item.available === false"
+        />
       </div>
     </div>
   </section>
@@ -44,7 +39,9 @@ import type { MediaItem } from '~~/shared/types'
 defineProps<{
   title: string
   subtitle?: string
-  items: (MediaItem & { sub?: string })[]
+  // `poster_src` overrides the default `/api/media/{id}/image/poster` lookup —
+  // needed for album rows whose covers live under a different endpoint.
+  items: (MediaItem & { sub?: string; poster_src?: string })[]
   tileWidth?: number
   aspect?: string
   more?: string
@@ -103,12 +100,4 @@ function scrollBy(dir: number) {
   color: var(--fg-0);
 }
 .unavailable { opacity: 0.4; cursor: default !important; }
-.unavailable:hover .grid-tile-title { color: inherit !important; }
-.missing-badge {
-  position: absolute; top: 8px; right: 8px;
-  font-size: 9px; font-weight: 700; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  padding: 3px 8px; border-radius: 100px;
-  background: rgba(217,107,107,0.85); color: #fff;
-}
 </style>

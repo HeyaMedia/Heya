@@ -14,19 +14,29 @@
       </div>
     </div>
 
-    <div v-else-if="items.length" class="grid-posters">
-      <NuxtLink
-        v-for="(item, i) in items"
-        :key="item.id"
-        :to="mediaUrl(item)"
-        class="grid-tile card-tile"
+    <div v-else-if="items.length" ref="gridWrap" class="grid-virt">
+      <RecycleScroller
+        :items="gridRows"
+        :item-size="rowHeight"
+        key-field="key"
+        page-mode
+        v-slot="{ item: row, index: rowIdx }"
       >
-        <Poster :idx="i" :src="usePosterUrl(item.id)" aspect="2/3" :title="item.title" />
-        <div class="grid-tile-meta">
-          <div class="grid-tile-title">{{ item.title }}</div>
-          <div class="grid-tile-sub">{{ item.year }} · {{ mediaTypeLabel(item.media_type) }}</div>
+        <div class="grid-row" :style="{ gridTemplateColumns: `repeat(${gridCols}, 1fr)` }">
+          <NuxtLink
+            v-for="(item, colIdx) in row.items"
+            :key="item.id"
+            :to="mediaUrl(item)"
+            class="grid-tile card-tile"
+          >
+            <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item.id)" aspect="2/3" :title="item.title" />
+            <div class="grid-tile-meta">
+              <div class="grid-tile-title">{{ item.title }}</div>
+              <div class="grid-tile-sub">{{ item.year }} · {{ mediaTypeLabel(item.media_type) }}</div>
+            </div>
+          </NuxtLink>
         </div>
-      </NuxtLink>
+      </RecycleScroller>
     </div>
 
     <div v-if="!loading && total > items.length" class="load-more-wrap">
@@ -48,8 +58,11 @@ const route = useRoute()
 const name = computed(() => route.params.name as string)
 const displayName = computed(() => decodeURIComponent(name.value).replace(/-/g, ' '))
 
+const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<MediaItem[]>([])
 const total = ref(0)
+
+const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, items)
 const loading = ref(true)
 const loadingMore = ref(false)
 const PAGE_SIZE = 60
@@ -101,4 +114,6 @@ watch(name, async () => {
 .genre-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); }
 .genre-empty { padding: 60px 0; text-align: center; color: var(--fg-3); font-size: 14px; }
 .load-more-wrap { text-align: center; padding: 24px 0 80px; }
+.grid-virt { /* container for usePosterGrid */ }
+.grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
 </style>

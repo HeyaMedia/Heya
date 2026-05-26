@@ -1,26 +1,28 @@
 <template>
-  <Teleport to="body">
-    <div class="modal-overlay" @click.self="$emit('close')">
-      <div class="modal-panel">
+  <DialogRoot :open="true" @update:open="(v) => v ? null : $emit('close')">
+    <DialogPortal>
+      <DialogOverlay class="modal-overlay" />
+      <DialogContent class="modal-panel">
         <div class="modal-header">
-          <h3 class="modal-title">{{ taskName }}</h3>
-          <button class="modal-close" @click="$emit('close')">
+          <DialogTitle class="modal-title">{{ taskName }}</DialogTitle>
+          <DialogClose class="modal-close" aria-label="Close">
             <Icon name="close" :size="16" />
-          </button>
+          </DialogClose>
         </div>
 
-        <div class="modal-tabs">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            class="tab-btn"
-            :class="{ active: activeTab === tab.key }"
-            @click="switchTab(tab.key)"
-          >
-            {{ tab.label }}
-            <span class="tab-count">{{ tab.count }}</span>
-          </button>
-        </div>
+        <TabsRoot :model-value="activeTab" @update:model-value="switchTab" class="modal-tabs-wrap">
+          <TabsList class="modal-tabs">
+            <TabsTrigger
+              v-for="tab in tabs"
+              :key="tab.key"
+              :value="tab.key"
+              class="tab-btn"
+            >
+              {{ tab.label }}
+              <span class="tab-count">{{ tab.count }}</span>
+            </TabsTrigger>
+          </TabsList>
+        </TabsRoot>
 
         <div class="modal-body">
           <div v-if="loading && !items.length" class="loading-hint">Loading...</div>
@@ -47,12 +49,14 @@
           <span class="page-info">{{ offset + 1 }}–{{ Math.min(offset + pageSize, total) }} of {{ total }}</span>
           <button class="btn btn-secondary btn-sm" :disabled="offset + pageSize >= total" @click="nextPage">Next</button>
         </div>
-      </div>
-    </div>
-  </Teleport>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <script setup lang="ts">
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogClose, TabsRoot, TabsList, TabsTrigger } from 'reka-ui'
+
 interface TaskItem {
   id: number
   name: string
@@ -123,7 +127,8 @@ async function fetchItems() {
   loading.value = false
 }
 
-function switchTab(tab: string) {
+function switchTab(tab: string | number | (string | number)[] | undefined) {
+  if (typeof tab !== 'string') return
   activeTab.value = tab
   offset.value = 0
   fetchItems()
@@ -139,23 +144,20 @@ function nextPage() {
   fetchItems()
 }
 
-onMounted(() => {
-  fetchItems()
-  document.body.style.overflow = 'hidden'
-})
-
-onUnmounted(() => {
-  document.body.style.overflow = ''
-})
+onMounted(fetchItems)
+// DialogContent's body scroll lock replaces the manual document.body.style.overflow toggle.
 </script>
 
 <style scoped>
 .modal-overlay {
   position: fixed; inset: 0; z-index: 1000;
   background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
-  display: flex; align-items: center; justify-content: center;
 }
 .modal-panel {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1001;
   background: var(--bg-2); border: 1px solid var(--border);
   border-radius: var(--r-lg); width: 720px; max-width: 90vw;
   max-height: 80vh; display: flex; flex-direction: column;
@@ -185,7 +187,7 @@ onUnmounted(() => {
   cursor: pointer; transition: all 0.12s ease;
 }
 .tab-btn:hover { color: var(--fg-1); background: rgba(255,255,255,0.04); }
-.tab-btn.active { color: var(--gold); background: var(--gold-soft); border-color: rgba(230,185,74,0.2); }
+.tab-btn[data-state="active"] { color: var(--gold); background: var(--gold-soft); border-color: rgba(230,185,74,0.2); }
 .tab-count {
   font-family: var(--font-mono); font-size: 11px; font-weight: 700;
 }

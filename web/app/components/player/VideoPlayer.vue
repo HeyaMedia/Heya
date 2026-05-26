@@ -1,8 +1,20 @@
 <script setup lang="ts">
 import AkariSub from 'akarisub'
+import { DropdownMenuItem } from 'reka-ui'
 import type { StreamAudio, StreamSubtitle, QualityOption, PlaybackPreference } from '~~/shared/types'
 
-const props = defineProps<{ fileId: number; mediaItemId: number | null; title?: string }>()
+const props = defineProps<{
+  fileId: number
+  mediaItemId: number | null
+  title?: string
+  startTime?: number
+  // entity_type / entity_id — tells the now-playing session which kind of
+  // thing we're playing so the activity panel can format "S01E03 · Episode"
+  // for TV instead of just the series title. Defaults to "movie" + the
+  // mediaItemId when empty.
+  entityType?: string
+  entityId?: number
+}>()
 const emit = defineEmits<{ close: [] }>()
 
 const { token } = useAuth()
@@ -10,7 +22,13 @@ const videoEl = ref<HTMLVideoElement>()
 const { state, controls, loadSource, destroyHLS } = useHeyaPlayer(videoEl)
 const fileIdRef = computed(() => props.fileId)
 const mediaItemIdRef = computed(() => props.mediaItemId)
-const { state: streamState, loadStreamInfo, subtitleUrl } = useVideoPlayer(fileIdRef, mediaItemIdRef)
+// entityType / entityId for the watch-progress payload — passing these
+// means TV progress lands as ('episode', episode_id) instead of being
+// mis-attributed to ('movie', series_media_item_id), which was breaking
+// the CW row's episode-detail rendering and the Resume label detection.
+const entityTypeRef = computed(() => props.entityType || 'movie')
+const entityIdRef = computed(() => props.entityId || props.mediaItemId || 0)
+const { state: streamState, loadStreamInfo, subtitleUrl, emitProgress } = useVideoPlayer(fileIdRef, mediaItemIdRef, entityTypeRef, entityIdRef)
 const { settings, load: loadSettings, playbackForLibrary } = useUserSettings()
 const { loaded: hasTrickplay, load: loadTrickplay, getThumbnail } = useTrickplay(fileIdRef)
 
@@ -233,6 +251,19 @@ async function init() {
     }
   }
 
+  // Before loading the source (which auto-plays on canplay), check whether
+  // we have saved progress and need to ask the user. We block here until
+  // the user picks — that way no frame of video plays under the modal.
+  // The user's pick decides what startTime we honor when we finally load.
+  await checkResume()
+
+  startPlayback()
+}
+
+// Kicks off the actual source load + autoplay. Called after the resume
+// decision is finalized (either no resume needed, or the user picked).
+function startPlayback() {
+  const { $heya } = useNuxtApp()
   const action = streamState.streamInfo?.playback?.action
   const needsNonDefaultAudio = activeAudioIdx.value > 0
   if (action === 'direct_play' && !needsNonDefaultAudio) {
@@ -241,6 +272,21 @@ async function init() {
   } else {
     usingHLS.value = true
     loadSource(buildHLSUrl(), token.value!)
+  }
+
+  // Seek to whatever startTime is set — that's either the URL ?t= override
+  // OR the resume position the user picked OR 0 (start over / no resume).
+  // Listener is one-shot; install AFTER loadSource so canplay is fresh.
+  const target = pendingSeekTo.value
+  if (target > 0) {
+    const v = videoEl.value
+    if (v) {
+      const onReady = () => {
+        v.currentTime = target
+        v.removeEventListener('canplay', onReady)
+      }
+      v.addEventListener('canplay', onReady)
+    }
   }
 
   if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initASS())
@@ -343,6 +389,14 @@ function selectQuality(quality: string) {
 }
 
 function closeMenus() { showSubMenu.value = false; showAudioMenu.value = false; showQualityMenu.value = false }
+
+// Mutually-exclusive menu opens — opening any one closes the other two.
+// Reka's own dismissable-layer already handles click-outside cleanup in a
+// real browser, but explicit watchers are safer (and let keyboard-driven
+// opens via Enter close the previous menu too).
+watch(showAudioMenu, (v) => { if (v) { showSubMenu.value = false; showQualityMenu.value = false } })
+watch(showSubMenu, (v) => { if (v) { showAudioMenu.value = false; showQualityMenu.value = false } })
+watch(showQualityMenu, (v) => { if (v) { showAudioMenu.value = false; showSubMenu.value = false } })
 function audioLabel(a: StreamAudio) {
   const p: string[] = []
   if (a.language) p.push(a.language.toUpperCase())
@@ -396,9 +450,152 @@ function cancelUpNext() {
 }
 
 watch(() => state.ended, (ended) => {
-  if (ended && upNext.value?.has_next && upNext.value.file_id) {
-    startUpNextCountdown()
+  if (ended) {
+    // Emit one last progress with completed=true. After this the player
+    // either rolls into Up Next (TV) or sits at the end (movies).
+    emitProgress(state.currentTime, knownDuration.value, true)
+    if (upNext.value?.has_next && upNext.value.file_id) {
+      startUpNextCountdown()
+    }
   }
+})
+
+// --- Watch progress reporting ---
+// Runs only while the video is actively playing (5s cadence). On pause the
+// interval clears AND we emit once to capture the pause position. On seek
+// (state.seekTick increments) we emit immediately so the resume point is
+// accurate even mid-seek-spree.
+const PROGRESS_INTERVAL_MS = 5000
+let progressTimer: ReturnType<typeof setInterval> | null = null
+
+function fireProgress(completed = false) {
+  emitProgress(state.currentTime, knownDuration.value, completed || undefined)
+}
+
+watch(() => state.playing, (playing) => {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
+  if (playing) {
+    progressTimer = setInterval(() => fireProgress(), PROGRESS_INTERVAL_MS)
+  } else {
+    // Pausing — capture position once. Skipped during the initial render
+    // pass since paused=true is the default and emitProgress bails when
+    // currentTime < 1.
+    fireProgress()
+  }
+})
+
+// Seek emits an immediate update — the user's saved resume position should
+// reflect where they actually are, not where the next 5s tick lands.
+watch(() => state.seekTick, () => { fireProgress() })
+
+// --- Now-Playing presence ---
+// Heartbeats the session every 10s so the activity panel can show what
+// everyone's watching. Server prunes after 30s of silence — handles
+// closed-tab cases the beforeunload hook can't catch (navigator throttles
+// it). Each beat carries the live position + transcode info the FE got
+// from the stream-info response.
+const nowPlaying = useNowPlayingSession()
+
+const currentSessionPayload = computed(() => {
+  // Pull transcode info from the streamInfo response — playback.action +
+  // first video/audio track + container/dimensions. Server-supplied so the
+  // FE can't lie about it (the server told us in the first place).
+  const info = streamState.streamInfo
+  const playback = info?.playback
+  const firstVid = info?.video?.[0]
+  const firstAud = info?.audio?.[0]
+  return {
+    fileId: props.fileId,
+    mediaItemId: props.mediaItemId,
+    entityType: props.entityType || 'movie',
+    entityId: props.entityId || props.mediaItemId || 0,
+    positionSeconds: state.currentTime,
+    totalSeconds: knownDuration.value,
+    paused: state.paused,
+    playbackAction: playback?.action ?? '',
+    videoCodec: firstVid?.codec ?? '',
+    audioCodec: firstAud?.codec ?? '',
+    container: info?.container ?? '',
+    width: firstVid?.width ?? 0,
+    height: firstVid?.height ?? 0,
+    // info.bit_rate is bits/sec from the container probe; convert to kbps.
+    bitrateKbps: info?.bit_rate ? Math.round(info.bit_rate / 1000) : 0,
+  }
+})
+
+// Start the heartbeat loop on mount, end on unmount. The getter returns
+// live payload on each 10s tick — position/paused stay fresh.
+onMounted(() => {
+  nowPlaying.start(() => currentSessionPayload.value)
+})
+
+// --- In-player Resume prompt ---
+// Before the source loads, check whether the user has saved progress for
+// this item. If so AND no `?t=` query forces a specific seek, show an
+// in-player dialog asking Resume vs Start over. checkResume() returns a
+// Promise that resolves once the user has picked — init() awaits it
+// before kicking off loadSource so no frame plays under the modal.
+const resumeOpen = ref(false)
+const resumePosition = ref(0)
+// pendingSeekTo carries the target offset into startPlayback. Set to
+// props.startTime as a baseline (URL `?t=`) and overridden by the user's
+// resume choice when the modal flow runs.
+const pendingSeekTo = ref(props.startTime ?? 0)
+let resumePickResolver: (() => void) | null = null
+
+async function checkResume(): Promise<void> {
+  // Explicit ?t= override (deep links) bypasses the modal entirely.
+  if (props.startTime && props.startTime > 0) {
+    pendingSeekTo.value = props.startTime
+    return
+  }
+  if (!props.mediaItemId) return
+
+  let entry: { progress_seconds: number } | undefined
+  try {
+    const { $heya } = useNuxtApp()
+    const items = (await $heya('/api/me/watch/continue')) as Array<{
+      entity_type: string
+      entity_id: number
+      media_item_id: number
+      progress_seconds: number
+      file_id?: number
+    }>
+    const wantType = props.entityType || 'movie'
+    const wantId = props.entityId || (wantType === 'movie' ? props.mediaItemId : 0)
+    entry = items.find(it => it.entity_type === wantType && it.entity_id === wantId)
+  } catch {
+    // Can't reach the API — fall through to default-play.
+  }
+
+  if (!entry || entry.progress_seconds <= 30) {
+    return
+  }
+
+  resumePosition.value = entry.progress_seconds
+  resumeOpen.value = true
+  // Block init until the user picks. resumePickResolver fires from
+  // onResumePick which also sets pendingSeekTo to the chosen target.
+  await new Promise<void>(resolve => { resumePickResolver = resolve })
+}
+
+function onResumePick(seek: boolean) {
+  pendingSeekTo.value = seek ? resumePosition.value : 0
+  resumeOpen.value = false
+  if (resumePickResolver) { resumePickResolver(); resumePickResolver = null }
+}
+
+// Immediate heartbeat on pause-state change so the activity panel reacts
+// without waiting for the next 10s tick. (The 5s progress emit already
+// handles position; this catches pause/resume specifically.)
+watch(() => state.paused, () => {
+  if (props.mediaItemId) nowPlaying.heartbeat(currentSessionPayload.value)
+})
+
+onUnmounted(() => {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
+  fireProgress()
+  nowPlaying.end()
 })
 
 function handleClose() { cancelUpNext(); destroyHLS(); destroyASS(); if (document.fullscreenElement) document.exitFullscreen(); emit('close') }
@@ -449,8 +646,9 @@ function volIcon() {
   return 'speakerhigh'
 }
 
-onMounted(() => { init(); window.addEventListener('keydown', handleKeydown) })
-onUnmounted(() => { window.removeEventListener('keydown', handleKeydown); destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hideTimer) })
+useEventListener(window, 'keydown', handleKeydown)
+onMounted(init)
+onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hideTimer) })
 </script>
 
 <template>
@@ -469,6 +667,27 @@ onUnmounted(() => { window.removeEventListener('keydown', handleKeydown); destro
       <!-- Buffering -->
       <div v-if="state.buffering" class="p-center" style="pointer-events: none">
         <div class="spinner-lg" />
+      </div>
+
+      <!-- In-player resume prompt — shown on mount when saved progress
+           exists for this item and no ?t= override is set. -->
+      <div v-if="resumeOpen" class="resume-overlay">
+        <div class="resume-card surface">
+          <div class="resume-kind">Pick up where you left off</div>
+          <div class="resume-title">{{ props.title || 'Continue watching' }}</div>
+          <div class="resume-progress">
+            <div class="resume-progress-bar"><div class="resume-progress-fill" :style="{ width: knownDuration > 0 ? Math.min(100, Math.round((resumePosition / knownDuration) * 100)) + '%' : '0%' }" /></div>
+            <div class="resume-progress-label mono">{{ formatTime(resumePosition) }} / {{ formatTime(knownDuration) }}</div>
+          </div>
+          <div class="resume-actions">
+            <button class="btn btn-secondary" @click="onResumePick(false)">
+              <Icon name="rewind" :size="14" /> Start over
+            </button>
+            <button class="btn btn-primary" @click="onResumePick(true)">
+              <Icon name="play" :size="14" /> Resume at {{ formatTime(resumePosition) }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Controls -->
@@ -521,63 +740,101 @@ onUnmounted(() => { window.removeEventListener('keydown', handleKeydown); destro
             <div style="flex: 1" />
 
             <!-- Audio -->
-            <div v-if="audioTracks.length >= 1" class="menu-anchor">
-              <button class="c-btn" :class="{ active: showAudioMenu }" @click.stop="showAudioMenu = !showAudioMenu; showSubMenu = false; showQualityMenu = false">
+            <AppMenu
+              v-if="audioTracks.length >= 1"
+              v-model="showAudioMenu"
+              :width="240"
+              align="end"
+              :side-offset="10"
+              trigger-class="c-btn vp-trigger"
+              trigger-title="Audio track"
+            >
+              <template #trigger>
                 <Icon name="translate" :size="18" />
-              </button>
-              <Transition name="pop">
-                <div v-if="showAudioMenu" class="popup" @click.stop>
-                  <div class="popup-title">Audio</div>
-                  <button v-for="(a, i) in audioTracks" :key="a.index" class="popup-item" :class="{ active: i === activeAudioIdx }" @click="selectAudio(i)">
-                    <Icon v-if="i === activeAudioIdx" name="check" :size="14" />
-                    <span>{{ audioLabel(a) }}</span>
-                  </button>
-                </div>
-              </Transition>
-            </div>
+              </template>
+              <div class="surface-section-label vp-menu-title">Audio</div>
+              <DropdownMenuItem
+                v-for="(a, i) in audioTracks"
+                :key="a.index"
+                class="surface-item vp-item"
+                :class="{ active: i === activeAudioIdx }"
+                @select="selectAudio(i)"
+              >
+                <Icon v-if="i === activeAudioIdx" name="check" :size="14" class="vp-item-check" />
+                <span>{{ audioLabel(a) }}</span>
+              </DropdownMenuItem>
+            </AppMenu>
 
             <!-- Subs -->
-            <div v-if="subtitleTracks.length" class="menu-anchor">
-              <button class="c-btn" :class="{ active: showSubMenu || activeSubIdx >= 0 }" @click.stop="showSubMenu = !showSubMenu; showAudioMenu = false; showQualityMenu = false">
+            <AppMenu
+              v-if="subtitleTracks.length"
+              v-model="showSubMenu"
+              :width="260"
+              align="end"
+              :side-offset="10"
+              :trigger-class="{ 'c-btn': true, 'vp-trigger': true, active: activeSubIdx >= 0 }"
+              trigger-title="Subtitles"
+            >
+              <template #trigger>
                 <Icon name="subtitles" :size="18" />
-              </button>
-              <Transition name="pop">
-                <div v-if="showSubMenu" class="popup" @click.stop>
-                  <div class="popup-title">Subtitles</div>
-                  <button class="popup-item" :class="{ active: activeSubIdx === -1 }" @click="disableSubs()">
-                    <Icon v-if="activeSubIdx === -1" name="check" :size="14" />
-                    <span>Off</span>
-                  </button>
-                  <button v-for="(s, i) in subtitleTracks" :key="s.index" class="popup-item" :class="{ active: i === activeSubIdx }" @click="selectSub(i)">
-                    <Icon v-if="i === activeSubIdx" name="check" :size="14" />
-                    <span>{{ s.title || s.language?.toUpperCase() || `Track ${s.index}` }}</span>
-                    <span v-if="s.codec === 'ass' || s.codec === 'ssa'" class="sub-tag">ASS</span>
-                  </button>
-                </div>
-              </Transition>
-            </div>
+              </template>
+              <div class="surface-section-label vp-menu-title">Subtitles</div>
+              <DropdownMenuItem
+                class="surface-item vp-item"
+                :class="{ active: activeSubIdx === -1 }"
+                @select="disableSubs()"
+              >
+                <Icon v-if="activeSubIdx === -1" name="check" :size="14" class="vp-item-check" />
+                <span>Off</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                v-for="(s, i) in subtitleTracks"
+                :key="s.index"
+                class="surface-item vp-item"
+                :class="{ active: i === activeSubIdx }"
+                @select="selectSub(i)"
+              >
+                <Icon v-if="i === activeSubIdx" name="check" :size="14" class="vp-item-check" />
+                <span>{{ s.title || s.language?.toUpperCase() || `Track ${s.index}` }}</span>
+                <span v-if="s.codec === 'ass' || s.codec === 'ssa'" class="sub-tag">ASS</span>
+              </DropdownMenuItem>
+            </AppMenu>
 
             <!-- Quality -->
-            <div v-if="usingHLS && availableQualities.length > 0" class="menu-anchor">
-              <button class="c-btn" :class="{ active: showQualityMenu }" @click.stop="showQualityMenu = !showQualityMenu; showSubMenu = false; showAudioMenu = false">
+            <AppMenu
+              v-if="usingHLS && availableQualities.length > 0"
+              v-model="showQualityMenu"
+              :width="240"
+              align="end"
+              :side-offset="10"
+              trigger-class="c-btn vp-trigger"
+              trigger-title="Quality"
+            >
+              <template #trigger>
                 <Icon name="eq" :size="18" />
                 <span class="quality-badge">{{ qualityLabel }}</span>
-              </button>
-              <Transition name="pop">
-                <div v-if="showQualityMenu" class="popup" @click.stop>
-                  <div class="popup-title">Quality</div>
-                  <button class="popup-item" :class="{ active: activeQuality === 'auto' }" @click="selectQuality('auto')">
-                    <Icon v-if="activeQuality === 'auto'" name="check" :size="14" />
-                    <span>Auto (Original)</span>
-                  </button>
-                  <button v-for="q in availableQualities" :key="q.height" class="popup-item" :class="{ active: activeQuality === q.label }" @click="selectQuality(q.label)">
-                    <Icon v-if="activeQuality === q.label" name="check" :size="14" />
-                    <span>{{ q.label }}</span>
-                    <span class="quality-bitrate">{{ q.height }}p</span>
-                  </button>
-                </div>
-              </Transition>
-            </div>
+              </template>
+              <div class="surface-section-label vp-menu-title">Quality</div>
+              <DropdownMenuItem
+                class="surface-item vp-item"
+                :class="{ active: activeQuality === 'auto' }"
+                @select="selectQuality('auto')"
+              >
+                <Icon v-if="activeQuality === 'auto'" name="check" :size="14" class="vp-item-check" />
+                <span>Auto (Original)</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                v-for="q in availableQualities"
+                :key="q.height"
+                class="surface-item vp-item"
+                :class="{ active: activeQuality === q.label }"
+                @select="selectQuality(q.label)"
+              >
+                <Icon v-if="activeQuality === q.label" name="check" :size="14" class="vp-item-check" />
+                <span>{{ q.label }}</span>
+                <span class="quality-bitrate">{{ q.height }}p</span>
+              </DropdownMenuItem>
+            </AppMenu>
 
             <button class="c-btn" @click="controls.toggleFullscreen()">
               <Icon :name="state.fullscreen ? 'shrink' : 'expand'" :size="18" />
@@ -636,6 +893,72 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .p-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); font-size: 14px; gap: 8px; z-index: 20; }
 .spinner { width: 28px; height: 28px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--gold, #e6b94a); border-radius: 50%; animation: spin 0.7s linear infinite; }
 .spinner-lg { width: 44px; height: 44px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--gold, #e6b94a); border-radius: 50%; animation: spin 0.7s linear infinite; }
+
+/* Resume overlay — full-surface dimmer with a centered card. Mounts only
+   while resumeOpen is true; the video element is paused while it's up. */
+.resume-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+.resume-card {
+  min-width: 420px;
+  max-width: 90vw;
+  padding: 24px;
+  border-radius: var(--r-lg);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.resume-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 6px;
+}
+.resume-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg-0);
+  margin-bottom: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resume-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.resume-progress-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.resume-progress-fill {
+  height: 100%;
+  background: var(--gold);
+  border-radius: 999px;
+}
+.resume-progress-label {
+  font-size: 11px;
+  color: var(--fg-3);
+  align-self: flex-end;
+}
+.resume-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
 @keyframes spin { to { transform: rotate(360deg) } }
 
 :deep(.AkariSub) { z-index: 2 !important; }
@@ -684,22 +1007,12 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .time { font-size: 12px; font-family: var(--font-mono, monospace); color: rgba(255,255,255,0.7); margin-left: 10px; white-space: nowrap; }
 .time-sep { color: rgba(255,255,255,0.3); margin: 0 2px; }
 
-/* Menus */
-.menu-anchor { position: relative; }
-.popup { position: absolute; bottom: 48px; right: 0; min-width: 220px; max-height: calc(100vh - 140px); overflow-y: auto; background: rgba(12,12,16,0.95); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 0; box-shadow: 0 12px 40px rgba(0,0,0,0.5); z-index: 20; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
-.popup-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(255,255,255,0.35); padding: 8px 14px 6px; }
-.popup-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 14px; font-size: 13px; color: rgba(255,255,255,0.7); transition: all 0.1s; text-align: left; }
-.popup-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
-.popup-item.active { color: var(--gold, #e6b94a); }
-.sub-tag { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: rgba(200,130,255,0.12); color: rgb(200,130,255); margin-left: auto; }
+/* Menus — AppMenu supplies overlay/positioning/animation via .surface.
+   Trigger-button chrome reuses the .c-btn styling already defined above;
+   .vp-trigger is just a marker for any future per-instance tweaks. */
 .quality-badge { font-size: 9px; font-weight: 700; font-family: var(--font-mono, monospace); color: rgba(255,255,255,0.6); margin-left: -2px; }
-.c-btn.active .quality-badge { color: var(--gold, #e6b94a); }
-.quality-bitrate { font-size: 10px; color: rgba(255,255,255,0.3); margin-left: auto; font-family: var(--font-mono, monospace); }
-
-.pop-enter-active { transition: all 0.15s cubic-bezier(0.2, 0, 0, 1); }
-.pop-leave-active { transition: all 0.1s ease-in; }
-.pop-enter-from { opacity: 0; transform: translateY(8px) scale(0.96); }
-.pop-leave-to { opacity: 0; transform: translateY(4px); }
+.c-btn.active .quality-badge,
+.c-btn[data-state="open"] .quality-badge { color: var(--gold, #e6b94a); }
 
 /* Info panel — no dimming, positioned top-right, doesn't block video */
 .info-panel-wrap { position: absolute; top: 56px; right: 16px; z-index: 50; pointer-events: none; }
@@ -745,4 +1058,40 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .upnext-leave-to { opacity: 0; transform: translateY(8px); }
 
 @media (max-width: 768px) { .vol-group { display: none; } .upnext-overlay { bottom: 80px; right: 12px; } }
+</style>
+
+<!--
+  AppMenu portals the audio/subs/quality menus out of this component's
+  scoped DOM, so the per-item styles have to live unscoped to reach the
+  rendered elements.
+-->
+<style>
+.vp-menu-title { padding: 8px 14px 6px; }
+
+.vp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+.vp-item.active { color: var(--gold, #e6b94a); }
+.vp-item-check { color: var(--gold, #e6b94a); flex-shrink: 0; }
+
+.vp-item .sub-tag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(200, 130, 255, 0.12);
+  color: rgb(200, 130, 255);
+  margin-left: auto;
+}
+.vp-item .quality-bitrate {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+}
 </style>

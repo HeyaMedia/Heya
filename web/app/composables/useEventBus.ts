@@ -74,13 +74,25 @@ export interface StatsPayload {
   queue_running: number
 }
 
+// task.progress carries two complementary signals on the same event:
+//   - The periodic emitter in internal/eventhub/periodic.go fires one
+//     event per task every 2s with {pending, running, state}, leaving
+//     current_item empty.
+//   - The per-worker emitter (worker.TaskProgressBroadcaster) fires on
+//     demand with {current_item, item_kind}, leaving counts at zero.
+// The merge logic in useEventBus stores both halves in the same dict
+// entry, so consumers always see the latest counts + the latest item.
 export interface TaskProgressPayload {
   task_id: string
   state: string
-  total: number
-  completed: number
-  current_item: string
-  started_at?: string
+  pending?: number
+  running?: number
+  current_item?: string
+  item_kind?: string
+  // current_stage is a finer "within the current item" label —
+  // currently only populated by analyze_track_facets (one event per
+  // pipeline stage). Lets the UI show item + stage on two lines.
+  current_stage?: string
 }
 
 type EventHandler = (event: WsEvent) => void
@@ -206,13 +218,40 @@ function handleEvent(
       break
     }
     case 'task.progress': {
+      // Two emitter sources land on the same event: the 2s periodic
+      // ticker carries pending+running counts (no current_item), and
+      // per-worker emissions carry current_item+item_kind (no counts).
+      // Merge into the existing entry so we keep the latest of both.
       const p = event.payload as TaskProgressPayload
       if (p.state === 'idle') {
         const next = { ...taskProgress.value }
         delete next[p.task_id]
         taskProgress.value = next
       } else {
-        taskProgress.value = { ...taskProgress.value, [p.task_id]: p }
+        const prev = taskProgress.value[p.task_id] ?? { task_id: p.task_id, state: 'running' }
+        const merged: TaskProgressPayload = {
+          ...prev,
+          state: p.state,
+        }
+        // Counts come from the periodic emitter — only present on its
+        // events. If undefined here, keep the previous count.
+        if (p.pending !== undefined) merged.pending = p.pending
+        if (p.running !== undefined) merged.running = p.running
+        // current_item comes from per-worker emits — only present there.
+        if (p.current_item) {
+          merged.current_item = p.current_item
+          merged.item_kind = p.item_kind
+        }
+        // current_stage is the sub-step (Discogs heads, CLAP audio,
+        // …) from per-stage emits; only sonic_analysis fires these.
+        // Reset to undefined if the current item changed so the
+        // stage label doesn't bleed from one track to the next.
+        if (p.current_stage !== undefined) {
+          merged.current_stage = p.current_stage
+        } else if (p.current_item && p.current_item !== prev.current_item) {
+          merged.current_stage = undefined
+        }
+        taskProgress.value = { ...taskProgress.value, [p.task_id]: merged }
       }
       break
     }

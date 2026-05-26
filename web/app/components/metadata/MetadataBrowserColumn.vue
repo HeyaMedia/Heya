@@ -21,7 +21,7 @@
           v-if="item.poster"
           :src="item.poster"
           class="mbc-poster"
-          @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
         />
         <div class="mbc-text">
           <div class="mbc-label">{{ item.label }}</div>

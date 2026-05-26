@@ -50,10 +50,24 @@ export function useAuth() {
   async function fetchUser() {
     if (!token.value) return
     try {
-      const { $heya } = useNuxtApp()
-      user.value = await $heya('/api/auth/me')
+      // Use raw $fetch so this works during plugin boot — the openFetch
+      // bearer-token hook is registered in plugins/heyaApi.client.ts which
+      // runs *after* plugins/auth.ts alphabetically, so a $heya() call here
+      // would race and ship without an Authorization header, get 401, and
+      // be silently swallowed below. login() and register() take the same
+      // shortcut for the same reason.
+      user.value = await $fetch<User>('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token.value}` },
+      })
     } catch {
-      logout()
+      // Intentionally silent. Logout-on-error here was too aggressive
+      // and booted the user out for any transient blip (backend bouncing
+      // during dev, network hiccups, gateway timeouts). The openFetch
+      // `onResponseError:heya` hook (plugins/heyaApi.client.ts) already
+      // calls logout() on a genuine 401 — that's the only signal that
+      // means "your token is invalid, please log back in". For everything
+      // else, the next successful call will fill `user` and the user
+      // keeps using the app uninterrupted.
     }
   }
 

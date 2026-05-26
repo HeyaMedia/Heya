@@ -14,11 +14,13 @@
         <div class="feed-icon" :class="item.type">
           <Icon :name="iconFor(item.type)" :size="14" />
         </div>
-        <img
+        <NuxtImg
           v-if="item.image_url"
           :src="item.image_url"
+          :width="120"
+          :quality="80"
           class="feed-poster"
-          @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
         />
         <div class="feed-text">
           <div class="feed-title">{{ item.title }}</div>

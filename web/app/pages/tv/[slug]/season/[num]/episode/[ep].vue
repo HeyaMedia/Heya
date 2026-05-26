@@ -7,7 +7,7 @@
     <!-- Compact hero (matches season page) -->
     <div class="hero-compact">
       <div class="hero-bg">
-        <img v-if="stillUrl" :src="stillUrl" class="hero-bg-img visible" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+        <NuxtImg v-if="stillUrl" :src="stillUrl" :width="1920" :quality="80" class="hero-bg-img visible" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="hero-bg-fade" />
       </div>
 
@@ -119,6 +119,7 @@
 
 <script setup lang="ts">
 import type { MediaDetail, StreamInfoResponse } from '~~/shared/types'
+import { useQuery } from '@tanstack/vue-query'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
@@ -132,8 +133,18 @@ const currentSeasonNum = computed(() => {
 
 const currentEpNum = computed(() => parseInt(epParam.value) || 1)
 
-const detail = ref<MediaDetail | null>(null)
-const loading = ref(true)
+// Shared MediaDetail cache key with the series + season pages so navigating
+// down a TV tree is instant after the first fetch.
+const { $heya } = useNuxtApp()
+const detailQuery = useQuery({
+  queryKey: ['media', 'detail', slug],
+  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: slug.value as never } })) as MediaDetail,
+  staleTime: 1000 * 60 * 5,
+  retry: false,
+})
+const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
+const loading = computed(() => detailQuery.isPending.value)
+watch(detailQuery.error, (err) => { if (err) navigateTo(`/tv/${slug.value}`) })
 const watchedEpisodes = ref<Set<number>>(new Set())
 const streamInfo = ref<StreamInfoResponse | null>(null)
 const showMetadataEditor = ref(false)
@@ -262,16 +273,10 @@ async function loadStreamInfo() {
   } catch {}
 }
 
-onMounted(async () => {
-  try {
-    const { $heya } = useNuxtApp()
-    detail.value = await $heya('/api/media/{id}', {
-      path: { id: slug.value as any },
-    }) as MediaDetail
-    await Promise.all([loadWatchState(), loadStreamInfo()])
-  } catch { navigateTo(`/tv/${slug.value}`) }
-  loading.value = false
-})
+// When detail data arrives, load watch state + stream info in parallel.
+watch(detail, async (d) => {
+  if (d) await Promise.all([loadWatchState(), loadStreamInfo()])
+}, { immediate: true })
 
 watch([numParam, epParam], async () => {
   streamInfo.value = null

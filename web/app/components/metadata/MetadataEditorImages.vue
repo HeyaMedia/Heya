@@ -12,7 +12,7 @@
       <div class="mei-grid">
         <div v-for="asset in group.assets" :key="asset.id" class="mei-card" :class="{ 'mei-card-wide': wideTypes.has(asset.asset_type) }">
           <div class="mei-img-wrap" :style="{ aspectRatio: wideTypes.has(asset.asset_type) ? '16/9' : '2/3' }">
-            <img :src="imageUrl(asset)" class="mei-img" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
+            <img :src="imageUrl(asset)" class="mei-img" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
             <div v-if="asset.sort_order === 0" class="mei-primary-badge">Primary</div>
             <div class="mei-overlay">
               <button v-if="asset.sort_order !== 0" class="mei-btn" title="Set as primary" @click="setPrimary(asset)">
@@ -40,60 +40,54 @@
     </div>
 
     <!-- Find modal -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="findModalType" class="mei-modal-overlay" @click.self="findModalType = null">
-          <div class="mei-modal">
-            <div class="mei-modal-head">
-              <h3 class="mei-modal-title">Find {{ (findModalType && typeLabels[findModalType]) || findModalType }}</h3>
-              <button class="mei-modal-close" @click="findModalType = null"><Icon name="close" :size="16" /></button>
-            </div>
-            <div v-if="!findLoading && availableProviders.length > 1" class="mei-provider-bar">
-              <button
-                class="mei-provider-pill"
-                :class="{ active: findProviderFilter === 'all' }"
-                @click="findProviderFilter = 'all'"
-              >All</button>
-              <button
-                v-for="prov in availableProviders"
-                :key="prov"
-                class="mei-provider-pill"
-                :class="{ active: findProviderFilter === prov }"
-                @click="findProviderFilter = prov"
-              >{{ prov }}</button>
-            </div>
-            <div class="mei-modal-body scroll">
-              <div v-if="findLoading" class="mei-modal-empty">
-                <Icon name="loading" :size="18" />
-                Searching providers...
-              </div>
-              <div v-else-if="!findGrouped.length" class="mei-modal-empty">No images found</div>
-              <div v-for="lang in findGrouped" :key="lang.code" class="mei-lang-group">
-                <div class="mei-lang-head">
-                  <span class="mei-lang-label">{{ lang.label }}</span>
-                  <span class="mei-lang-count">{{ lang.items.length }}</span>
-                </div>
-                <div class="mei-lang-grid">
-                  <div
-                    v-for="(art, i) in lang.items"
-                    :key="i"
-                    class="mei-find-card"
-                    :class="{ 'mei-find-card-wide': wideTypes.has(findModalType!) }"
-                    @click="downloadArt(art)"
-                  >
-                    <div class="mei-find-img-wrap" :style="{ aspectRatio: wideTypes.has(findModalType!) ? '16/9' : '2/3' }">
-                      <img :src="art.url" class="mei-find-img" />
-                      <div v-if="art.source" class="mei-find-source">{{ art.source }}</div>
-                      <div class="mei-find-dl"><Icon name="plus" :size="16" /></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+    <AppDialog
+      :model-value="!!findModalType"
+      :title="findModalType ? `Find ${(typeLabels[findModalType] || findModalType)}` : ''"
+      size="xl"
+      content-class="mei-find-dialog"
+      @update:model-value="(v) => v ? null : findModalType = null"
+    >
+      <div v-if="!findLoading && availableProviders.length > 1" class="mei-provider-bar">
+        <button
+          class="mei-provider-pill"
+          :class="{ active: findProviderFilter === 'all' }"
+          @click="findProviderFilter = 'all'"
+        >All</button>
+        <button
+          v-for="prov in availableProviders"
+          :key="prov"
+          class="mei-provider-pill"
+          :class="{ active: findProviderFilter === prov }"
+          @click="findProviderFilter = prov"
+        >{{ prov }}</button>
+      </div>
+      <div v-if="findLoading" class="mei-modal-empty">
+        <Icon name="loading" :size="18" />
+        Searching providers...
+      </div>
+      <div v-else-if="!findGrouped.length" class="mei-modal-empty">No images found</div>
+      <div v-for="lang in findGrouped" :key="lang.code" class="mei-lang-group">
+        <div class="mei-lang-head">
+          <span class="mei-lang-label">{{ lang.label }}</span>
+          <span class="mei-lang-count">{{ lang.items.length }}</span>
+        </div>
+        <div class="mei-lang-grid">
+          <div
+            v-for="(art, i) in lang.items"
+            :key="i"
+            class="mei-find-card"
+            :class="{ 'mei-find-card-wide': wideTypes.has(findModalType!) }"
+            @click="downloadArt(art)"
+          >
+            <div class="mei-find-img-wrap" :style="{ aspectRatio: wideTypes.has(findModalType!) ? '16/9' : '2/3' }">
+              <img :src="art.url" class="mei-find-img" />
+              <div v-if="art.source" class="mei-find-source">{{ art.source }}</div>
+              <div class="mei-find-dl"><Icon name="plus" :size="16" /></div>
             </div>
           </div>
         </div>
-      </Transition>
-    </Teleport>
+      </div>
+    </AppDialog>
   </div>
 </template>
 
@@ -223,7 +217,12 @@ async function setPrimary(asset: any) {
 }
 
 async function deleteAsset(asset: any) {
-  if (!confirm('Delete this image?')) return
+  const ok = await useConfirm().confirm({
+    title: 'Delete image?',
+    confirmLabel: 'Delete',
+    destructive: true,
+  })
+  if (!ok) return
   try {
     const { $heya } = useNuxtApp()
     await $heya('/api/media/{id}/assets/{asset_id}', {
@@ -426,70 +425,8 @@ async function uploadFile(e: Event) {
   gap: 8px;
 }
 
-/* ── Find modal ── */
-.mei-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mei-modal {
-  width: 90vw;
-  max-width: 900px;
-  max-height: 85vh;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: var(--shadow-3);
-}
-
-.mei-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.mei-modal-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--fg-0);
-  margin: 0;
-}
-
-.mei-modal-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--fg-2);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.12s;
-}
-.mei-modal-close:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--fg-0);
-}
-
-.mei-modal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-}
+/* AppDialog supplies overlay/panel/header chrome — the rules below
+   style the contents (provider pills, language groups, image cards). */
 
 .mei-modal-empty {
   display: flex;
@@ -615,12 +552,4 @@ async function uploadFile(e: Event) {
   opacity: 1;
 }
 
-.modal-enter-active,
-.modal-leave-active {
-  transition: all 0.2s ease;
-}
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
 </style>

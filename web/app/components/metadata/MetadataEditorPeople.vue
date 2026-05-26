@@ -13,7 +13,7 @@
               v-if="c.profile_path"
               :src="c.profile_path.startsWith('http') ? c.profile_path : `/api/person/${c.id}/image`"
               class="mep-photo"
-              @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+              @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
             />
             <div v-else class="mep-photo mep-photo-empty">
               <Icon name="user" :size="14" />

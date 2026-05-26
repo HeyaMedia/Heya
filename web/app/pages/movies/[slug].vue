@@ -7,15 +7,15 @@
     <!-- Hero with crossfade backdrops -->
     <div class="hero-section">
       <div class="hero-bg">
-        <img v-if="backdropA" :src="backdropA" class="hero-bg-img" :class="{ visible: showA }" />
-        <img v-if="backdropB" :src="backdropB" class="hero-bg-img" :class="{ visible: !showA }" />
+        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: showA }" />
+        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: !showA }" />
         <div class="hero-bg-fade" />
       </div>
 
       <div class="hero-content">
         <div class="hero-left">
           <div class="hero-poster">
-            <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" />
+            <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" :width="600" />
             <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
           </div>
 
@@ -48,7 +48,9 @@
           </div>
 
           <div class="detail-actions">
-            <button v-if="playableFileId" class="btn btn-primary" @click="play"><Icon name="play" :size="16" /> Play</button>
+            <button v-if="playableFileId" class="btn btn-primary" @click="play">
+              <Icon name="play" :size="16" /> {{ resumeInProgress ? 'Resume' : 'Play' }}
+            </button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No File</button>
             <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
             <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
@@ -125,16 +127,16 @@
 
     <div class="detail-body-below">
       <!-- Cast & Crew -->
-      <div v-if="detail.cast?.length || detail.crew?.length" class="detail-section">
+      <TabsRoot v-if="detail.cast?.length || detail.crew?.length" v-model="peopleTab" class="detail-section">
         <div class="section-row-head" style="margin-bottom: 0">
-          <div class="tab-bar" style="margin-bottom: 0">
-            <button class="tab-btn" :class="{ active: peopleTab === 'cast' }" @click="peopleTab = 'cast'">
+          <TabsList class="tab-bar" style="margin-bottom: 0">
+            <TabsTrigger value="cast" class="tab-btn">
               Cast <span class="tab-count">{{ detail.cast?.length || 0 }}</span>
-            </button>
-            <button class="tab-btn" :class="{ active: peopleTab === 'crew' }" @click="peopleTab = 'crew'">
+            </TabsTrigger>
+            <TabsTrigger value="crew" class="tab-btn">
               Crew <span class="tab-count">{{ detail.crew?.length || 0 }}</span>
-            </button>
-          </div>
+            </TabsTrigger>
+          </TabsList>
           <div v-if="peopleTab === 'cast' && castOverflows" class="scroll-controls">
             <button class="scroll-ctrl-btn" @click="scrollCast('left')"><Icon name="chevleft" :size="14" /></button>
             <button class="scroll-ctrl-btn" @click="scrollCast('right')"><Icon name="chevright" :size="14" /></button>
@@ -144,52 +146,50 @@
           </div>
         </div>
 
-        <div v-if="peopleTab === 'cast'" style="margin-top: 16px">
+        <TabsContent value="cast" style="margin-top: 16px">
           <!-- Scroll mode -->
           <div v-if="!castExpanded" ref="castScrollEl" class="hscroll">
             <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-              <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
-                <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-                <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
-              </div>
-              <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-              <div class="cast-name">{{ c.name }}</div>
-              <div class="cast-role">{{ c.character }}</div>
+              <MediaCard
+                :idx="c.id"
+                :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+                aspect="2/3"
+                :title="c.name"
+                :subtitle="c.character"
+              />
             </NuxtLink>
           </div>
           <!-- Expanded grid mode -->
           <div v-else class="cast-grid">
             <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-              <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="cast-photo-wrap">
-                <img :src="`/api/person/${c.id}/image`" class="cast-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-                <button class="zoom-btn round" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="10" /></button>
-              </div>
-              <div v-else class="cast-avatar">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-              <div class="cast-name">{{ c.name }}</div>
-              <div class="cast-role">{{ c.character }}</div>
+              <MediaCard
+                :idx="c.id"
+                :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+                aspect="2/3"
+                :title="c.name"
+                :subtitle="c.character"
+              />
             </NuxtLink>
           </div>
-        </div>
+        </TabsContent>
 
-        <div v-if="peopleTab === 'crew'" style="margin-top: 16px">
+        <TabsContent value="crew" style="margin-top: 16px">
           <div v-for="dept in crewByDepartment" :key="dept.name" class="crew-dept">
             <div class="crew-dept-label">{{ dept.name }}</div>
             <div class="crew-dept-grid">
               <NuxtLink v-for="c in dept.members" :key="`${c.id}-${c.job}`" :to="personUrl(c)" class="crew-card">
-                <div v-if="c.profile_path && !c.profile_path.startsWith('http')" class="crew-photo-wrap">
-                  <img :src="`/api/person/${c.id}/image`" class="crew-photo" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-                  <button class="zoom-btn round crew-zoom" @click.stop.prevent="lightbox.open(`/api/person/${c.id}/image`)"><Icon name="expand" :size="8" /></button>
-                </div>
-                <div v-else class="crew-initials">{{ c.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}</div>
-                <div class="crew-text">
-                  <div class="crew-name">{{ c.name }}</div>
-                  <div class="crew-job">{{ c.job }}</div>
-                </div>
+                <MediaCard
+                  :idx="c.id"
+                  :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+                  aspect="2/3"
+                  :title="c.name"
+                  :subtitle="c.job"
+                />
               </NuxtLink>
             </div>
           </div>
-        </div>
-      </div>
+        </TabsContent>
+      </TabsRoot>
 
       <!-- Extras -->
       <div v-if="groupedExtras.length" class="detail-section">
@@ -212,7 +212,7 @@
           <div :class="extrasExpanded[group.type] ? 'extras-grid' : 'hscroll'" :ref="(el: any) => setExtrasRef(group.type, el)">
             <div v-for="e in group.items" :key="e.id" class="extra-card">
               <div class="extra-thumb">
-                <img v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" alt="" class="extra-thumb-img" loading="lazy" />
+                <NuxtImg v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" :width="400" :quality="80" alt="" class="extra-thumb-img" loading="lazy" />
                 <Icon v-else name="play" :size="20" />
               </div>
               <div class="extra-meta">
@@ -228,38 +228,40 @@
       <div v-if="detail.videos?.length" class="detail-section">
         <div class="section-row-head"><h3 class="section-title-lg">Videos</h3></div>
         <div class="hscroll">
-          <button v-for="v in detail.videos" :key="v.id" class="video-card" @click="openVideo(v.video_key, v.name)">
-            <div class="video-thumb">
-              <img :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`" @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'" />
-              <div class="video-play"><Icon name="play" :size="20" /></div>
-            </div>
-            <div class="video-name">{{ v.name }}</div>
-            <div class="video-type">{{ v.video_type }}</div>
+          <button v-for="(v, i) in detail.videos" :key="v.id" class="video-card" @click="openVideo(v.video_key, v.name)">
+            <MediaCard
+              :idx="i"
+              :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
+              aspect="16/9"
+              :title="v.name"
+              :badge-tl="v.video_type"
+            >
+              <template #badges>
+                <div class="video-play"><Icon name="play" :size="20" /></div>
+              </template>
+            </MediaCard>
           </button>
         </div>
       </div>
 
       <!-- Video modal -->
-      <Teleport to="body">
-        <Transition name="modal">
-          <div v-if="videoModal" class="modal-overlay" @click.self="videoModal = null">
-            <div class="video-modal-card">
-              <div class="video-modal-header">
-                <span class="video-modal-title">{{ videoModal.title }}</span>
-                <button class="btn-icon" @click="videoModal = null"><Icon name="close" :size="16" /></button>
-              </div>
-              <div class="video-modal-body">
-                <iframe
-                  :src="`https://www.youtube-nocookie.com/embed/${videoModal.key}?autoplay=1&rel=0`"
-                  frameborder="0"
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  allowfullscreen
-                />
-              </div>
-            </div>
-          </div>
-        </Transition>
-      </Teleport>
+      <AppDialog
+        :model-value="!!videoModal"
+        :title="videoModal?.title"
+        size="lg"
+        prevent-auto-focus
+        content-class="video-dialog"
+        @update:model-value="(v) => v ? null : videoModal = null"
+      >
+        <iframe
+          v-if="videoModal"
+          class="video-dialog-iframe"
+          :src="`https://www.youtube-nocookie.com/embed/${videoModal.key}?autoplay=1&rel=0`"
+          frameborder="0"
+          allow="autoplay; encrypted-media; picture-in-picture"
+          allowfullscreen
+        />
+      </AppDialog>
 
       <!-- Recommendations -->
       <div v-if="detail.recommendations?.length" class="detail-section">
@@ -275,20 +277,24 @@
         </div>
         <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
           <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, year: '', media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
-            <Poster :idx="r.id" :src="recPosterUrl(r)" aspect="2/3" :title="r.title" />
-            <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ r.title }}</div>
-              <div v-if="r.vote_average" class="rec-rating"><Icon name="star" :size="9" /> {{ formatVote(r.vote_average) }}</div>
-            </div>
+            <MediaCard
+              :idx="r.id"
+              :src="recPosterUrl(r)"
+              aspect="2/3"
+              :title="r.title"
+              :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+            />
           </NuxtLink>
         </div>
         <div v-else class="rec-grid">
           <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, year: '', media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
-            <Poster :idx="r.id" :src="recPosterUrl(r)" aspect="2/3" :title="r.title" />
-            <div class="grid-tile-meta">
-              <div class="grid-tile-title">{{ r.title }}</div>
-              <div v-if="r.vote_average" class="rec-rating"><Icon name="star" :size="9" /> {{ formatVote(r.vote_average) }}</div>
-            </div>
+            <MediaCard
+              :idx="r.id"
+              :src="recPosterUrl(r)"
+              aspect="2/3"
+              :title="r.title"
+              :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+            />
           </NuxtLink>
         </div>
       </div>
@@ -296,43 +302,31 @@
     </div>
 
     <!-- List modal -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="showListModal" class="modal-overlay" @click.self="showListModal = false">
-          <div class="modal-card">
-            <div class="modal-header">
-              <h3>Add to List</h3>
-              <button class="btn-icon" @click="showListModal = false"><Icon name="close" :size="16" /></button>
-            </div>
-            <div class="modal-body">
-              <div v-if="!showCreateList">
-                <button
-                  v-for="l in userLists" :key="l.id"
-                  class="list-option" :class="{ active: l.contains }"
-                  @click="toggleListItem(l)"
-                >
-                  <Icon :name="l.contains ? 'check' : 'plus'" :size="14" />
-                  <span>{{ l.name }}</span>
-                  <span class="list-option-count">{{ l.item_count }}</span>
-                </button>
-                <div v-if="!userLists.length" style="padding: 16px 0; color: var(--fg-3); font-size: 13px; text-align: center">No lists yet</div>
-                <button class="list-create-btn" @click="showCreateList = true">
-                  <Icon name="plus" :size="14" /> Create new list
-                </button>
-              </div>
-              <div v-else>
-                <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
-                <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
-                <div style="display: flex; gap: 8px; margin-top: 12px">
-                  <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
-                  <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
-                </div>
-              </div>
-            </div>
-          </div>
+    <AppDialog v-model="showListModal" title="Add to List" size="sm">
+      <div v-if="!showCreateList">
+        <button
+          v-for="l in userLists" :key="l.id"
+          class="list-option" :class="{ active: l.contains }"
+          @click="toggleListItem(l)"
+        >
+          <Icon :name="l.contains ? 'check' : 'plus'" :size="14" />
+          <span>{{ l.name }}</span>
+          <span class="list-option-count">{{ l.item_count }}</span>
+        </button>
+        <div v-if="!userLists.length" style="padding: 16px 0; color: var(--fg-3); font-size: 13px; text-align: center">No lists yet</div>
+        <button class="list-create-btn" @click="showCreateList = true">
+          <Icon name="plus" :size="14" /> Create new list
+        </button>
+      </div>
+      <div v-else>
+        <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
+        <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
+        <div style="display: flex; gap: 8px; margin-top: 12px">
+          <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
+          <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
         </div>
-      </Transition>
-    </Teleport>
+      </div>
+    </AppDialog>
 
     <MetadataEditorModal
       v-if="detail"
@@ -345,14 +339,35 @@
 
 <script setup lang="ts">
 import type { MediaDetail, MediaExtra, StreamInfoResponse } from '~~/shared/types'
+import { useQuery } from '@tanstack/vue-query'
+import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
 const lightbox = useLightbox()
 
-const detail = ref<MediaDetail | null>(null)
+// Main media detail — cached across remounts so back-navigation from /watch
+// or another movie page is instant. Reactive key on slug means a new movie
+// URL re-fetches naturally.
+const { $heya } = useNuxtApp()
+const detailQuery = useQuery({
+  queryKey: ['media', 'detail', slug],
+  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: slug.value as never } })) as MediaDetail,
+  staleTime: 1000 * 60 * 5,
+  retry: false,
+})
+const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
+const loading = computed(() => detailQuery.isPending.value)
+
+// Redirect on confirmed failure rather than every transient error.
+watch(detailQuery.error, (err) => { if (err) navigateTo('/movies') })
+
+// Drives the Play button label switch — shows "Resume" when there's saved
+// progress on this movie's media_item, "Play" otherwise.
+const movieEntityId = computed(() => detail.value?.media_item.id ?? 0)
+const { inProgress: resumeInProgress } = useWatchResume('movie', movieEntityId)
+
 const streamInfo = ref<StreamInfoResponse | null>(null)
-const loading = ref(true)
 const peopleTab = ref<'cast' | 'crew'>('cast')
 const castExpanded = ref(false)
 const castScrollEl = ref<HTMLElement | null>(null)
@@ -584,6 +599,8 @@ function play() {
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
     title: detail.value.preferred_title || detail.value.media_item.title,
+    entity_type: 'movie',
+    entity_id: String(detail.value.media_item.id),
   })
   navigateTo(`/watch/${playableFileId.value}?${params}`)
 }
@@ -712,25 +729,23 @@ async function loadStreamInfo() {
   } catch { /* empty */ }
 }
 
-onMounted(async () => {
-  try {
-    const { $heya } = useNuxtApp()
-    detail.value = await $heya('/api/media/{id}', {
-      path: { id: slug.value as any },
-    }) as MediaDetail
-    await nextTick()
-    backdropA.value = getBackdropUrl(0)
-    backdropB.value = getBackdropUrl(0)
-    if (backdropAssets.value.length > 1) {
-      startCarouselTimer()
-    }
-    loadState()
-    loadStreamInfo()
-    checkCastOverflow()
-    checkRecsOverflow()
-  } catch { navigateTo('/movies') }
-  loading.value = false
-})
+// When detail data arrives (or changes via slug), reinitialize all the
+// side effects that depend on it: backdrop carousel, state, stream info,
+// overflow detection.
+watch(detail, async (d) => {
+  if (!d) return
+  await nextTick()
+  backdropA.value = getBackdropUrl(0)
+  backdropB.value = getBackdropUrl(0)
+  if (bdTimeout) clearTimeout(bdTimeout)
+  if (backdropAssets.value.length > 1) {
+    startCarouselTimer()
+  }
+  loadState()
+  loadStreamInfo()
+  checkCastOverflow()
+  checkRecsOverflow()
+}, { immediate: true })
 
 onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 </script>
@@ -868,7 +883,7 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .tab-bar { display: flex; gap: 4px; }
 .tab-btn { padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; color: var(--fg-2); background: none; border: none; cursor: pointer; transition: all 0.15s; }
 .tab-btn:hover { background: rgba(255,255,255,0.04); }
-.tab-btn.active { background: var(--bg-3); color: var(--fg-0); font-weight: 600; }
+.tab-btn[data-state="active"] { background: var(--bg-3); color: var(--fg-0); font-weight: 600; }
 .tab-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); margin-left: 4px; }
 
 /* Scroll controls (top-right of section header) */
@@ -886,42 +901,21 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .hscroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
 .hscroll::-webkit-scrollbar { display: none; }
 
-/* Cast cards */
-.cast-card { width: 120px; flex-shrink: 0; text-decoration: none; color: inherit; text-align: center; }
-.cast-card:hover .cast-name { color: var(--gold); }
-.cast-photo { width: 90px; height: 90px; border-radius: 50%; object-fit: cover; display: block; }
-.cast-avatar { width: 90px; height: 90px; border-radius: 50%; margin: 0 auto; background: linear-gradient(135deg, var(--bg-4), var(--bg-3)); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 600; color: var(--fg-2); }
-.cast-name { font-size: 12px; font-weight: 500; margin-top: 8px; transition: color 0.15s; }
-.cast-role { font-size: 10px; color: var(--fg-3); margin-top: 2px; }
-
-/* Cast expanded grid */
+/* Cast cards — portrait headshot tiles with name/character overlaid via
+   MediaCard so they match the rest of the card vocabulary. */
+.cast-card { width: 120px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
 .cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }
 .cast-grid .cast-card { width: auto; }
 
-/* Crew */
+/* Crew — same treatment as cast, grouped by department. */
 .crew-dept { margin-bottom: 20px; }
 .crew-dept-label {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3);
   margin-bottom: 8px; padding-left: 2px;
 }
-.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px; }
-.crew-card {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border-radius: var(--r-md);
-  text-decoration: none; color: inherit;
-  transition: background 0.15s;
-}
-.crew-card:hover { background: rgba(255,255,255,0.04); }
-.crew-photo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; display: block; }
-.crew-initials {
-  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
-  background: var(--bg-4); display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 600; color: var(--fg-2);
-}
-.crew-text { min-width: 0; }
-.crew-name { font-size: 13px; font-weight: 500; }
-.crew-job { font-size: 11px; color: var(--fg-3); }
+.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }
+.crew-card { text-decoration: none; color: inherit; display: block; }
 
 /* Extras */
 .extras-group { margin-top: 18px; }
@@ -947,50 +941,33 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
   width: 280px; flex-shrink: 0; text-align: left;
   background: none; border: none; cursor: pointer; color: inherit; padding: 0;
 }
-.video-card:hover .video-name { color: var(--gold); }
-.video-thumb { position: relative; aspect-ratio: 16/9; border-radius: var(--r-md); overflow: hidden; background: var(--bg-3); }
-.video-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.video-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); opacity: 0; transition: opacity 0.15s; color: #fff; }
+.video-play {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.15s;
+  color: #fff; pointer-events: none;
+}
 .video-card:hover .video-play { opacity: 1; }
-.video-name { font-size: 12px; font-weight: 500; margin-top: 8px; transition: color 0.15s; }
-.video-type { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); text-transform: uppercase; }
 
-/* Video modal */
-.video-modal-card {
-  background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
-  width: 900px; max-width: 95vw; overflow: hidden;
+/* Video dialog — content-class hook on AppDialog. The dialog body
+   already provides scrolling/padding; we override to drop padding so
+   the iframe fills the panel edge-to-edge, and keep a 16:9 aspect. */
+.video-dialog .app-dialog-body { padding: 0; }
+.video-dialog-iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+  border: 0;
 }
-.video-modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--border);
-}
-.video-modal-title { font-size: 14px; font-weight: 500; color: var(--fg-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.video-modal-body { aspect-ratio: 16/9; }
-.video-modal-body iframe { width: 100%; height: 100%; display: block; }
 
 /* Recs */
-.rec-card { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; }
-.rec-card:hover .grid-tile-title { color: var(--gold); }
-.rec-card.rec-external { cursor: default; }
-.rec-rating { font-size: 10px; color: var(--gold); display: inline-flex; align-items: center; gap: 2px; margin-top: 1px; }
+.rec-card { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
+.rec-card.rec-external { cursor: default; opacity: 0.65; }
 .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 18px; }
 .rec-grid .rec-card { width: auto; }
 
-/* Modal */
-.modal-overlay {
-  position: fixed; inset: 0; z-index: 9000;
-  background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;
-}
-.modal-card {
-  background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
-  width: 380px; max-width: 90vw; max-height: 80vh; overflow: auto;
-}
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px; border-bottom: 1px solid var(--border);
-}
-.modal-header h3 { font-size: 16px; font-weight: 600; margin: 0; }
-.modal-body { padding: 12px 20px 20px; }
+/* AppDialog supplies the dialog chrome — only the row + input styles
+   below are still consumed by the list-add panel. */
 .modal-input {
   width: 100%; padding: 10px 14px; background: var(--bg-3); border: 1px solid var(--border);
   border-radius: var(--r-md); color: var(--fg-0); font-size: 14px; outline: none;
@@ -1012,9 +989,6 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
   font-size: 13px; color: var(--fg-2); transition: color 0.12s;
 }
 .list-create-btn:hover { color: var(--gold); }
-
-.modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
-.modal-enter-from, .modal-leave-to { opacity: 0; }
 
 @media (max-width: 1200px) {
   .hero-content { grid-template-columns: 240px minmax(0, 1fr); }

@@ -32,7 +32,7 @@
                 v-if="item.poster_path"
                 :src="`/api/media/${item.id}/image/poster`"
                 class="mtb-thumb"
-                @error="(e: Event) => (e.target as HTMLImageElement).style.display = 'none'"
+                @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
               />
               <span class="mtb-row-label">{{ item.title }}</span>
               <span class="mtb-row-year">{{ item.year }}</span>

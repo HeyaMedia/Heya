@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { PlaybackPreference, MediaLanguagesResponse } from '~~/shared/types'
-import type { DropdownOption } from '~/components/ui/Dropdown.vue'
+import type { SelectOption } from '~/components/ui/AppSelect.vue'
+import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
 
 const props = defineProps<{ mediaItemId: number; alwaysOpen?: boolean }>()
 
@@ -27,28 +28,52 @@ function langLabel(code: string) {
   return LANG_LABELS[code] || code.toUpperCase()
 }
 
-const SUB_MODE_OPTIONS: DropdownOption[] = [
-  { value: '', label: 'Use default' },
+// Reka's Select treats an empty string as "no value" and falls back to the
+// placeholder rather than rendering the matching item. Use a non-empty
+// "default" sentinel for the zero-state row across all three selects; the
+// loader/saver normalises this back to '' before talking to the API.
+const DEFAULT_VALUE = 'default'
+
+const SUB_MODE_OPTIONS: SelectOption[] = [
+  { value: DEFAULT_VALUE, label: 'Use default' },
   { value: 'auto', label: 'Auto' },
   { value: 'always', label: 'Always on' },
   { value: 'forced_only', label: 'Forced only' },
   { value: 'off', label: 'Off' },
 ]
 
-const audioOptions = computed<DropdownOption[]>(() => {
-  const list: DropdownOption[] = [{ value: '', label: 'Default' }]
+const audioOptions = computed<SelectOption[]>(() => {
+  const list: SelectOption[] = [{ value: DEFAULT_VALUE, label: 'Default' }]
   for (const l of languages.value?.audio_languages || []) {
     list.push({ value: l.code, label: langLabel(l.code), meta: l.count > 1 ? String(l.count) : undefined })
   }
   return list
 })
 
-const subOptions = computed<DropdownOption[]>(() => {
-  const list: DropdownOption[] = [{ value: '', label: 'Default' }]
+const subOptions = computed<SelectOption[]>(() => {
+  const list: SelectOption[] = [{ value: DEFAULT_VALUE, label: 'Default' }]
   for (const l of languages.value?.subtitle_languages || []) {
     list.push({ value: l.code, label: langLabel(l.code), meta: l.count > 1 ? String(l.count) : undefined })
   }
   return list
+})
+
+const toApi = (v: string) => v === DEFAULT_VALUE ? '' : v
+const fromApi = (v: string) => v === '' ? DEFAULT_VALUE : v
+
+// Local v-model values that use the sentinel; the watch above keeps them in
+// sync with the API-shaped pref object. We wire them to AppSelect.
+const audioLang = computed({
+  get: () => fromApi(pref.value.audio_language),
+  set: v => { pref.value.audio_language = toApi(v) },
+})
+const subLang = computed({
+  get: () => fromApi(pref.value.subtitle_language),
+  set: v => { pref.value.subtitle_language = toApi(v) },
+})
+const subMode = computed({
+  get: () => fromApi(pref.value.subtitle_mode),
+  set: v => { pref.value.subtitle_mode = toApi(v) },
 })
 
 const hasAudioOptions = computed(() => (languages.value?.audio_languages?.length ?? 0) > 0)
@@ -94,42 +119,51 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div v-if="!loading && languages && (hasAudioOptions || hasSubOptions)" class="pp" :class="{ 'pp-inline': alwaysOpen }">
-    <button v-if="!alwaysOpen" class="pp-toggle" @click="expanded = !expanded">
+  <CollapsibleRoot
+    v-if="!loading && languages && (hasAudioOptions || hasSubOptions)"
+    v-model:open="expanded"
+    class="pp"
+    :class="{ 'pp-inline': alwaysOpen }"
+    :disabled="alwaysOpen"
+  >
+    <CollapsibleTrigger v-if="!alwaysOpen" class="pp-toggle">
       <Icon name="translate" :size="14" />
       <span>Audio &amp; Subtitles</span>
       <span v-if="hasCustomPref" class="pp-custom-badge">Custom</span>
-      <Icon name="chevdown" :size="12" :style="{ transform: expanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
-    </button>
+      <Icon name="chevdown" :size="12" class="pp-toggle-chev" />
+    </CollapsibleTrigger>
 
-    <Transition name="fold">
-      <div v-if="expanded" class="pp-body" :class="{ 'pp-body-inline': alwaysOpen }">
+    <CollapsibleContent class="pp-collapsible">
+      <div class="pp-body" :class="{ 'pp-body-inline': alwaysOpen }">
         <div v-if="hasAudioOptions" class="pp-row">
           <label class="pp-label">Audio</label>
-          <Dropdown
-            v-model="pref.audio_language"
+          <AppSelect
+            v-model="audioLang"
             :options="audioOptions"
             aria-label="Audio language"
+            :custom-baseline="DEFAULT_VALUE"
             @change="savePref"
           />
         </div>
 
         <div v-if="hasSubOptions" class="pp-row">
           <label class="pp-label">Subtitles</label>
-          <Dropdown
-            v-model="pref.subtitle_language"
+          <AppSelect
+            v-model="subLang"
             :options="subOptions"
             aria-label="Subtitle language"
+            :custom-baseline="DEFAULT_VALUE"
             @change="savePref"
           />
         </div>
 
         <div class="pp-row">
           <label class="pp-label">Sub mode</label>
-          <Dropdown
-            v-model="pref.subtitle_mode"
+          <AppSelect
+            v-model="subMode"
             :options="SUB_MODE_OPTIONS"
             aria-label="Subtitle mode"
+            :custom-baseline="DEFAULT_VALUE"
             @change="savePref"
           />
         </div>
@@ -138,8 +172,8 @@ onMounted(loadData)
           <Icon name="close" :size="11" /> Reset to defaults
         </button>
       </div>
-    </Transition>
-  </div>
+    </CollapsibleContent>
+  </CollapsibleRoot>
 </template>
 
 <style scoped>
@@ -159,6 +193,29 @@ onMounted(loadData)
 }
 .pp-toggle:hover { background: rgba(255,255,255,0.02); }
 .pp-toggle > :last-child { margin-left: auto; color: var(--fg-3); }
+.pp-toggle-chev { transition: transform 0.2s; }
+.pp-toggle[data-state="open"] .pp-toggle-chev { transform: rotate(180deg); }
+
+/* CollapsibleContent reveal — reka exposes `--reka-collapsible-content-height`
+   as a CSS var on the content element so we can animate to the resolved
+   height without measuring in JS. Same pattern as the music sidebar. */
+.pp-collapsible {
+  overflow: hidden;
+}
+.pp-collapsible[data-state="open"] {
+  animation: pp-fold-down 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pp-collapsible[data-state="closed"] {
+  animation: pp-fold-up 0.18s cubic-bezier(0.4, 0, 1, 1);
+}
+@keyframes pp-fold-down {
+  from { height: 0; opacity: 0; }
+  to   { height: var(--reka-collapsible-content-height); opacity: 1; }
+}
+@keyframes pp-fold-up {
+  from { height: var(--reka-collapsible-content-height); opacity: 1; }
+  to   { height: 0; opacity: 0; }
+}
 
 .pp-custom-badge {
   font-size: 9px; font-weight: 700; font-family: var(--font-mono);
@@ -198,10 +255,6 @@ onMounted(loadData)
 }
 .pp-reset:hover { color: var(--bad); }
 
-.fold-enter-active { transition: all 0.2s ease-out; }
-.fold-leave-active { transition: all 0.15s ease-in; }
-.fold-enter-from { opacity: 0; max-height: 0; }
-.fold-leave-to { opacity: 0; max-height: 0; }
 
 .pp-inline { border: none; margin-top: 0; }
 .pp-body-inline { border-top: none; padding: 0; }

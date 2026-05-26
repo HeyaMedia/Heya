@@ -129,22 +129,19 @@ const query = computed(() => (route.query.q as string) || '')
 const activeType = computed(() => (route.query.type as string) || '')
 
 const localQuery = ref(query.value)
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(query, (q) => { localQuery.value = q })
 
-watch(localQuery, (q) => {
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => {
-    const trimmed = q.trim()
-    if (trimmed !== query.value) {
-      router.replace({ path: '/search', query: trimmed ? { q: trimmed } : {} })
-    }
-  }, 300)
-})
+const commitDebounced = useDebounceFn((q: string) => {
+  const trimmed = q.trim()
+  if (trimmed !== query.value) {
+    router.replace({ path: '/search', query: trimmed ? { q: trimmed } : {} })
+  }
+}, 300)
+
+watch(localQuery, (q) => { commitDebounced(q) })
 
 function commitQuery() {
-  if (debounceTimer) clearTimeout(debounceTimer)
   const trimmed = localQuery.value.trim()
   if (trimmed !== query.value) {
     router.replace({ path: '/search', query: trimmed ? { q: trimmed } : {} })
