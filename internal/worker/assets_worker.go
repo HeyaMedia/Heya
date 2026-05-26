@@ -73,8 +73,9 @@ var (
 
 type DetectLocalAssetsWorker struct {
 	river.WorkerDefaults[DetectLocalAssetsArgs]
-	DB      *pgxpool.Pool
-	DataDir string
+	DB       *pgxpool.Pool
+	DataDir  string
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[DetectLocalAssetsArgs]) error {
@@ -84,6 +85,8 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	mediaItemID := job.Args.MediaItemID
 	dir := vfs.Dir(filePath)
 	base := strings.TrimSuffix(vfs.Base(filePath), filepath.Ext(vfs.Base(filePath)))
+
+	w.Progress.SetCurrentByKind(DetectLocalAssetsArgs{}.Kind(), vfs.Base(filePath))
 
 	showDir := dir
 	if strings.HasPrefix(strings.ToLower(vfs.Base(dir)), "season") {
@@ -214,7 +217,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	}
 
 	if job.Args.QueueEnrich {
-		client.Insert(ctx, EnrichmentArgs{
+		_, _ = client.Insert(ctx, FetchArtworkArgs{
 			MediaItemID: mediaItemID,
 			MediaType:   mediaType,
 		}, &river.InsertOpts{Priority: 3})

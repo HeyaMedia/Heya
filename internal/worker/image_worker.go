@@ -23,12 +23,19 @@ type DownloadImageWorker struct {
 	Downloader *images.Downloader
 	HeyaMedia  *heyamedia.Client
 	Hub        EventPublisher
+	Progress   *TaskProgressBroadcaster
 }
 
 func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
 	if job.Args.URL == "" {
 		return nil
 	}
+
+	label := job.Args.AssetType
+	if job.Args.Label != "" {
+		label = job.Args.AssetType + " (" + job.Args.Label + ")"
+	}
+	w.Progress.SetCurrentByKind(DownloadImageArgs{}.Kind(), label)
 
 	if job.Args.EntityType == "person" {
 		return w.downloadPersonImage(ctx, job)

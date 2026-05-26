@@ -12,6 +12,15 @@ SELECT * FROM media_items WHERE slug = $1;
 -- name: UpdateMediaItemSlug :exec
 UPDATE media_items SET slug = $2 WHERE id = $1;
 
+-- name: UpdateMediaItemHeyaSlug :exec
+-- Writes the canonical heya.media slug back onto the media_item.
+-- Called by the enrich workers after GetDetail returns — the slug is
+-- a stable lookup key for future re-fetches (heya.media supports
+-- slug:<slug> as an artist lookup ID alongside mbid:<id> and the
+-- per-provider variants). Distinct from `slug` which is our own
+-- user-facing URL identifier.
+UPDATE media_items SET heya_slug = $2, updated_at = now() WHERE id = $1;
+
 -- name: MediaItemSlugExists :one
 SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND id != $2) as exists;
 

@@ -24,6 +24,11 @@ type Config struct {
 	TranscodeCacheDir   Field[string]
 	TranscodeCacheMaxGB Field[int]
 	Tailscale           TailscaleConfig
+	// Podcast Index API credentials. Sign up at https://api.podcastindex.org
+	// — free tier covers personal-use traffic comfortably. When empty the
+	// /api/podcasts trending+search endpoints will surface a clear error.
+	PodcastIndexKey    Field[string] `json:"-"` // never exposed via API
+	PodcastIndexSecret Field[string] `json:"-"`
 }
 
 // TailscaleConfig holds the env-sourced tailscale knobs. Enabled/HTTPS/Funnel
@@ -58,6 +63,8 @@ func Load() *Config {
 		HWAccel:             envString("HEYA_HWACCEL", "auto"),
 		TranscodeCacheDir:   envString("HEYA_TRANSCODE_CACHE_DIR", dataDir.Value+"/transcode"),
 		TranscodeCacheMaxGB: envInt("HEYA_TRANSCODE_CACHE_MAX_GB", 50),
+		PodcastIndexKey:     envString("HEYA_PODCAST_INDEX_KEY", ""),
+		PodcastIndexSecret:  envString("HEYA_PODCAST_INDEX_SECRET", ""),
 		Tailscale: TailscaleConfig{
 			Enabled:  envBool("HEYA_TAILSCALE_ENABLED", false),
 			Hostname: envString("HEYA_TAILSCALE_HOSTNAME", "heya"),

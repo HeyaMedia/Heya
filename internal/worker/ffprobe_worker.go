@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -142,10 +143,12 @@ func populateNumericFields(info *MediaInfo) {
 
 type FFProbeWorker struct {
 	river.WorkerDefaults[FFProbeArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) error {
+	w.Progress.SetCurrentByKind(FFProbeArgs{}.Kind(), filepath.Base(job.Args.FilePath))
 	probeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -15,10 +16,11 @@ import (
 
 type MetadataMatchWorker struct {
 	river.WorkerDefaults[MetadataMatchArgs]
-	DB      *pgxpool.Pool
-	Matcher MatchService
-	Heya    *heyamedia.HeyaProvider
-	Hub     EventPublisher
+	DB       *pgxpool.Pool
+	Matcher  MatchService
+	Heya     *heyamedia.HeyaProvider
+	Hub      EventPublisher
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataMatchArgs]) error {
@@ -32,6 +34,8 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 	if file.Status == sqlc.FileStatusMatched {
 		return nil
 	}
+
+	w.Progress.SetCurrentByKind(MetadataMatchArgs{}.Kind(), filepath.Base(file.Path))
 
 	var parsed parser.ParsedStorageEntry
 	if err := json.Unmarshal(file.ParseResult, &parsed); err != nil {

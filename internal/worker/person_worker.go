@@ -20,6 +20,7 @@ type PersonFetchWorker struct {
 	river.WorkerDefaults[PersonFetchArgs]
 	DB        *pgxpool.Pool
 	HeyaMedia *heyamedia.Client
+	Progress  *TaskProgressBroadcaster
 }
 
 func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetchArgs]) error {
@@ -35,10 +36,19 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		return nil
 	}
 
-	// 2. If already enriched, skip.
+	// 2. If already enriched, skip — unless the new external_credits
+	//    table is empty for this person. That's the backfill path for
+	//    people who were enriched before the cast/crew/known-for columns
+	//    started flowing; the next PersonFetch tick picks them up once
+	//    and they don't re-enter the worker after.
 	if existing.HeyaEnrichedAt.Valid {
-		return nil
+		creds, _ := q.ListPersonExternalCredits(ctx, job.Args.PersonID)
+		if len(creds) > 0 {
+			return nil
+		}
 	}
+
+	w.Progress.SetCurrentByKind(PersonFetchArgs{}.Kind(), existing.Name)
 
 	// 3. Get TMDB ID from job args (already provided).
 	tmdbID := int(job.Args.TmdbID)
@@ -145,6 +155,15 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		})
 	}
 
+	// 9b. Replace external credits (cast + crew + known_for_titles). We
+	// nuke + reinsert rather than upsert one-by-one because upstream may
+	// drop entries between enrichment runs, and stale rows would clutter
+	// the "Known For" tab forever.
+	_ = q.DeletePersonExternalCredits(ctx, job.Args.PersonID)
+	storeExternalCredits(ctx, q, job.Args.PersonID, "cast", pay.Cast)
+	storeExternalCredits(ctx, q, job.Args.PersonID, "crew", pay.Crew)
+	storeExternalCredits(ctx, q, job.Args.PersonID, "known_for", pay.KnownForTitles)
+
 	// 10. Generate slug if not set.
 	if existing.Slug == "" {
 		personSlug := slug.GenerateUnique(ctx, pay.Name, "", job.Args.PersonID,
@@ -179,6 +198,51 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		Msg("person metadata fetched from heya")
 
 	return nil
+}
+
+// storeExternalCredits writes a person's cast/crew/known-for credits from
+// the upstream payload. Each row carries the union of external IDs we
+// receive so the FE LEFT JOIN against media_items can resolve the
+// "already in library" link without a roundtrip per row.
+func storeExternalCredits(ctx context.Context, q *sqlc.Queries, personID int64, kind string, credits []heyamedia.HeyaCredit) {
+	for i, c := range credits {
+		ids := map[string]string{}
+		if c.TmdbID > 0 {
+			ids["tmdb"] = fmt.Sprintf("%d", c.TmdbID)
+		}
+		if c.TvdbID > 0 {
+			ids["tvdb"] = fmt.Sprintf("%d", c.TvdbID)
+		}
+		if c.ImdbID != "" {
+			ids["imdb"] = c.ImdbID
+		}
+		idsJSON, _ := json.Marshal(ids)
+
+		// `order` from upstream is the cast billing position when present;
+		// fall back to source iteration order so the FE keeps a stable
+		// rendering even when upstream order is zero.
+		order := c.Order
+		if order == 0 {
+			order = i
+		}
+
+		_ = q.UpsertPersonExternalCredit(ctx, sqlc.UpsertPersonExternalCreditParams{
+			PersonID:     personID,
+			Kind:         kind,
+			MediaKind:    c.Kind,
+			Title:        c.Title,
+			Year:         int32(c.Year),
+			Character:    c.Character,
+			Job:          c.Job,
+			Department:   c.Department,
+			EpisodeCount: int32(c.EpisodeCount),
+			DisplayOrder: int32(order),
+			Slug:         c.Slug,
+			PosterUrl:    c.PosterURL,
+			ExternalIds:  idsJSON,
+			Source:       c.Source,
+		})
+	}
 }
 
 // personGenderToInt converts the string gender from the Heya API to an int:

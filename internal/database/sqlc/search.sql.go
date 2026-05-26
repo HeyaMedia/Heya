@@ -532,6 +532,7 @@ func (q *Queries) SearchPeopleCount(ctx context.Context, lower string) (int64, e
 const searchTracks = `-- name: SearchTracks :many
 SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits,
        a.title AS album_title,
+       a.slug AS album_slug,
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
        mi.title AS artist_name,
@@ -579,6 +580,7 @@ type SearchTracksRow struct {
 	Explicit          bool        `json:"explicit"`
 	ArtistCredits     []byte      `json:"artist_credits"`
 	AlbumTitle        string      `json:"album_title"`
+	AlbumSlug         string      `json:"album_slug"`
 	AlbumCoverPath    string      `json:"album_cover_path"`
 	ArtistMediaItemID int64       `json:"artist_media_item_id"`
 	ArtistName        string      `json:"artist_name"`
@@ -612,6 +614,7 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.Explicit,
 			&i.ArtistCredits,
 			&i.AlbumTitle,
+			&i.AlbumSlug,
 			&i.AlbumCoverPath,
 			&i.ArtistMediaItemID,
 			&i.ArtistName,

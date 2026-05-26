@@ -6,7 +6,8 @@ import (
 	"strconv"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/scheduler"
+	"github.com/karbowiak/heya/internal/sonicanalysis"
+	"github.com/karbowiak/heya/internal/worker"
 )
 
 // TaskStats holds completion counts for a scheduled task.
@@ -46,12 +47,54 @@ func (a *App) ListScheduledTasks(ctx context.Context) ([]sqlc.ScheduledTask, err
 	return q.ListScheduledTasks(ctx)
 }
 
-// GetAllTaskProgress returns the current progress for all running tasks.
-func (a *App) GetAllTaskProgress() map[scheduler.TaskID]*scheduler.TaskProgress {
-	if a.scheduler == nil {
-		return nil
+// TaskRuntimeState describes the live state of one scheduled task —
+// what's pending/running in River for its kinds. Replaces the old
+// in-memory ProgressTracker snapshot now that work happens entirely in
+// fanned-out River jobs.
+type TaskRuntimeState struct {
+	State   string `json:"state"`   // idle | running
+	Pending int    `json:"pending"` // count across kinds in available/scheduled/retryable
+	Running int    `json:"running"` // count across kinds in state=running
+}
+
+// GetAllTaskRuntimeState queries river_job for each scheduled task's
+// associated kinds and returns a per-task summary. A task is "running"
+// iff at least one of its kinds has a row in available/running/
+// retryable/scheduled. Replaces the old GetAllTaskProgress which
+// surfaced an in-process ProgressTracker snapshot.
+func (a *App) GetAllTaskRuntimeState(ctx context.Context) map[string]TaskRuntimeState {
+	taskIDs := []string{
+		"scan_libraries",
+		"refresh_stale_items",
+		"scan_music_loudness",
+		"generate_trickplay",
+		"generate_thumbnails",
+		"analyze_music_facets",
 	}
-	return a.scheduler.GetAllProgress()
+	out := make(map[string]TaskRuntimeState, len(taskIDs))
+	for _, id := range taskIDs {
+		kinds := worker.TaskKinds(id)
+		if len(kinds) == 0 {
+			continue
+		}
+		var pending, running int
+		err := a.db.QueryRow(ctx, `
+			SELECT
+				count(*) FILTER (WHERE state IN ('available', 'scheduled', 'retryable')),
+				count(*) FILTER (WHERE state = 'running')
+			FROM river_job
+			WHERE kind = ANY($1::text[])
+		`, kinds).Scan(&pending, &running)
+		if err != nil {
+			continue
+		}
+		state := "idle"
+		if pending > 0 || running > 0 {
+			state = "running"
+		}
+		out[id] = TaskRuntimeState{State: state, Pending: pending, Running: running}
+	}
+	return out
 }
 
 // QueryTaskStats gathers completion statistics for each known task type.
@@ -153,13 +196,24 @@ func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 		}
 	}
 
+	// Universe: tracks with a primary file whose duration is within the
+	// analyzer's cap. Mirrors the scheduler's NextTrackForAnalysis filter
+	// (both tracks.duration AND every track_files.duration must be ≤ cap;
+	// duration=0 means unknown and passes) so the Tasks UI counter agrees
+	// with what the scheduler will actually pick up. Without the per-file
+	// check, a track with empty upstream metadata (tracks.duration=0) but a
+	// real 1h file_files.duration would sneak through.
 	var facetsTotal, facetsDone int
 	row = a.db.QueryRow(ctx, `
 		SELECT
 			(SELECT count(*) FROM tracks t
-			 JOIN track_files tf ON tf.track_id = t.id),
-			(SELECT count(*) FROM track_facets)
-	`)
+			 JOIN track_files tf ON tf.track_id = t.id
+			 WHERE t.duration <= $1 AND tf.duration <= $1),
+			(SELECT count(*) FROM track_facets tfa
+			 JOIN tracks t ON t.id = tfa.track_id
+			 JOIN track_files tf ON tf.track_id = t.id
+			 WHERE t.duration <= $1 AND tf.duration <= $1)
+	`, sonicanalysis.MaxAnalysisDurationSeconds)
 	if row.Scan(&facetsTotal, &facetsDone) == nil {
 		stats["analyze_music_facets"] = TaskStats{
 			Complete: facetsDone,
@@ -197,32 +251,29 @@ func (a *App) UpdateScheduledTask(ctx context.Context, taskID string, enabled bo
 	})
 }
 
-// TriggerTask triggers a scheduled task to run immediately. For scan_libraries
-// it also enqueues all libraries.
+// TriggerTask inserts the kickoff job for one scheduled task ID. The
+// kickoff worker is responsible for fanning out the actual per-item
+// work. UniqueByArgs on the kickoff jobs short-circuits if one is
+// already queued or running, so repeated clicks coalesce.
 func (a *App) TriggerTask(ctx context.Context, taskID string) error {
 	if a.scheduler == nil {
 		return ErrSchedulerUnavailable
 	}
-
-	if taskID == string(scheduler.TaskScanLibraries) && a.scanTask != nil {
-		q := sqlc.New(a.db)
-		libs, err := q.ListLibraries(ctx)
-		if err == nil {
-			for _, lib := range libs {
-				a.scanTask.Enqueue(lib.ID, false)
-			}
-		}
-	}
-
-	return a.scheduler.TriggerNow(scheduler.TaskID(taskID))
+	return a.scheduler.TriggerNow(ctx, taskID)
 }
 
-// CancelTask cancels a currently running scheduled task.
-func (a *App) CancelTask(taskID string) error {
-	if a.scheduler == nil {
-		return ErrSchedulerUnavailable
+// CancelTask cancels every queued / running River job associated with
+// the given scheduled task: its kickoff + every per-item work kind it
+// fans out into (see worker.TaskKinds). Queued rows are flipped to
+// state='cancelled' via SQL; running ones are signalled via River so
+// the worker's ctx fires Done.
+func (a *App) CancelTask(ctx context.Context, taskID string) error {
+	kinds := worker.TaskKinds(taskID)
+	if len(kinds) == 0 {
+		return nil
 	}
-	return a.scheduler.Cancel(scheduler.TaskID(taskID))
+	_, err := a.CancelJobsByKind(ctx, kinds)
+	return err
 }
 
 // QueryTrickplayItems returns trickplay generation items with pagination.
@@ -602,24 +653,34 @@ func (a *App) QueryLoudnessItems(ctx context.Context, status string, limit, offs
 }
 
 // QueryFacetsItems returns tracks paginated by sonic-analysis state. A track
-// is "complete" when its track_facets row exists.
+// is "complete" when its track_facets row exists. Mirrors the scheduler's
+// NextTrackForAnalysis duration filter so the modal only lists tracks we'd
+// actually analyze — anything longer than MaxAnalysisDurationSeconds is
+// invisible to both the count and the listing.
 func (a *App) QueryFacetsItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
+	maxDuration := sonicanalysis.MaxAnalysisDurationSeconds
+
 	var total, complete int
 	err := a.db.QueryRow(ctx, `
 		SELECT
-			(SELECT count(*) FROM tracks t JOIN track_files tf ON tf.track_id = t.id),
-			(SELECT count(*) FROM track_facets)
-	`).Scan(&total, &complete)
+			(SELECT count(*) FROM tracks t
+			 JOIN track_files tf ON tf.track_id = t.id
+			 WHERE t.duration <= $1 AND tf.duration <= $1),
+			(SELECT count(*) FROM track_facets tfa
+			 JOIN tracks t ON t.id = tfa.track_id
+			 JOIN track_files tf ON tf.track_id = t.id
+			 WHERE t.duration <= $1 AND tf.duration <= $1)
+	`, maxDuration).Scan(&total, &complete)
 	if err != nil {
 		return nil, err
 	}
 
-	statusFilter := ""
+	statusFilter := "WHERE t.duration <= $3 AND tf.duration <= $3"
 	switch status {
 	case "complete":
-		statusFilter = "WHERE tfa.track_id IS NOT NULL"
+		statusFilter += " AND tfa.track_id IS NOT NULL"
 	case "pending":
-		statusFilter = "WHERE tfa.track_id IS NULL"
+		statusFilter += " AND tfa.track_id IS NULL"
 	}
 
 	rows, err := a.db.Query(ctx, `
@@ -630,7 +691,7 @@ func (a *App) QueryFacetsItems(ctx context.Context, status string, limit, offset
 		`+statusFilter+`
 		ORDER BY (tfa.track_id IS NULL) DESC, t.title ASC
 		LIMIT $1 OFFSET $2
-	`, limit, offset)
+	`, limit, offset, maxDuration)
 	if err != nil {
 		return nil, err
 	}

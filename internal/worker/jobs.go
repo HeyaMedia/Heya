@@ -33,7 +33,7 @@ func (ProcessFileArgs) Kind() string { return "process_file" }
 func (ProcessFileArgs) InsertOpts() river.InsertOpts {
 	// Default to bulk-scan priority; watcher path overrides to PriorityWatcher
 	// at insert-time so single-file changes jump ahead of any in-flight scan.
-	return river.InsertOpts{Queue: "process", MaxAttempts: 3, Priority: PriorityScan, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "process_file", MaxAttempts: 3, Priority: PriorityScan, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 type MetadataMatchArgs struct {
@@ -44,7 +44,7 @@ type MetadataMatchArgs struct {
 
 func (MetadataMatchArgs) Kind() string { return "metadata_match" }
 func (MetadataMatchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, Priority: PriorityMatch, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "metadata_match", MaxAttempts: 3, Priority: PriorityMatch, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 type PersonFetchArgs struct {
@@ -56,7 +56,7 @@ type PersonFetchArgs struct {
 func (PersonFetchArgs) Kind() string { return "person_fetch" }
 func (PersonFetchArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "metadata",
+		Queue:       "person_fetch",
 		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  river.UniqueOpts{ByArgs: true},
@@ -76,7 +76,7 @@ type DownloadImageArgs struct {
 
 func (DownloadImageArgs) Kind() string { return "download_image" }
 func (DownloadImageArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "images", MaxAttempts: 5, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "download_image", MaxAttempts: 5, Priority: PriorityEnrichment}
 }
 
 type FFProbeArgs struct {
@@ -86,7 +86,7 @@ type FFProbeArgs struct {
 
 func (FFProbeArgs) Kind() string { return "ffprobe" }
 func (FFProbeArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "process", MaxAttempts: 3, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "ffprobe", MaxAttempts: 3, Priority: PriorityEnrichment}
 }
 
 type PendingImage struct {
@@ -109,17 +109,28 @@ type DetectLocalAssetsArgs struct {
 
 func (DetectLocalAssetsArgs) Kind() string { return "detect_local_assets" }
 func (DetectLocalAssetsArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "process", MaxAttempts: 3, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "detect_local_assets", MaxAttempts: 3, Priority: PriorityEnrichment}
 }
 
-type EnrichmentArgs struct {
+// FetchArtworkArgs runs the secondary artwork pass — a follow-up call
+// to heya.FetchArtwork that returns the full artwork catalogue (up to
+// 5 backdrops + the alternates that didn't make MediaDetail.Pending
+// Images). enrich_media_item fans out the *primary* poster/backdrop
+// from GetDetail via detect_local_assets → download_image; this
+// worker is the long-tail pass for items the user actually opens.
+//
+// Triggered by detect_local_assets (when QueueEnrich is set on the
+// args) and by metadata_editor after a user changes the match.
+// Cheap enough that we don't enqueue from refresh paths — those go
+// through enrich_media_item which calls detect_local_assets.
+type FetchArtworkArgs struct {
 	MediaItemID int64  `json:"media_item_id"`
 	MediaType   string `json:"media_type"`
 }
 
-func (EnrichmentArgs) Kind() string { return "enrichment" }
-func (EnrichmentArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, Priority: PriorityEnrichment}
+func (FetchArtworkArgs) Kind() string { return "fetch_artwork" }
+func (FetchArtworkArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "fetch_artwork", MaxAttempts: 3, Priority: PriorityEnrichment}
 }
 
 // EnrichMediaItemArgs is the unified enrich job — replaces MetadataFetchArgs,
@@ -149,8 +160,9 @@ func (EnrichMediaItemArgs) Kind() string { return "enrich_media_item" }
 func (EnrichMediaItemArgs) InsertOpts() river.InsertOpts {
 	// Default priority is the middle band (movies/TV). service.EnqueueEnrich
 	// overrides per-insert with the correct priority for the (source,
-	// media_type) combination.
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 3, Priority: 2}
+	// media_type) combination. Priority bands within this queue:
+	// P1=watcher/view, P2=movies+tv, P3=music+books, P4=analysis.
+	return river.InsertOpts{Queue: "enrich_media_item", MaxAttempts: 3, Priority: 2}
 }
 
 type SaveNFOArgs struct {
@@ -162,7 +174,7 @@ type SaveNFOArgs struct {
 
 func (SaveNFOArgs) Kind() string { return "save_nfo" }
 func (SaveNFOArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "save_nfo", MaxAttempts: 2, Priority: PriorityEnrichment}
 }
 
 type SaveImagesArgs struct {
@@ -174,7 +186,7 @@ type SaveImagesArgs struct {
 
 func (SaveImagesArgs) Kind() string { return "save_images" }
 func (SaveImagesArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "save_images", MaxAttempts: 2, Priority: PriorityEnrichment}
 }
 
 type RatingsFetchArgs struct {
@@ -184,7 +196,7 @@ type RatingsFetchArgs struct {
 
 func (RatingsFetchArgs) Kind() string { return "ratings_fetch" }
 func (RatingsFetchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "ratings", MaxAttempts: 3, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "ratings_fetch", MaxAttempts: 3, Priority: PriorityEnrichment}
 }
 
 type TranscodeArgs struct {
@@ -204,7 +216,7 @@ type SoftDeleteArgs struct {
 
 func (SoftDeleteArgs) Kind() string { return "soft_delete" }
 func (SoftDeleteArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{Queue: "soft_delete", MaxAttempts: 3}
 }
 
 type ForceRefreshMetadataArgs struct {
@@ -213,7 +225,7 @@ type ForceRefreshMetadataArgs struct {
 
 func (ForceRefreshMetadataArgs) Kind() string { return "force_refresh_metadata" }
 func (ForceRefreshMetadataArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "force_refresh_metadata", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 type ForceRefreshImagesArgs struct {
@@ -222,7 +234,27 @@ type ForceRefreshImagesArgs struct {
 
 func (ForceRefreshImagesArgs) Kind() string { return "force_refresh_images" }
 func (ForceRefreshImagesArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "images", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "force_refresh_images", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+}
+
+// ScanLibraryDiskArgs walks every path of a library and persists per-path
+// byte totals into library_disk_usage. The walk is bounded by the library
+// path tree; on a 10TB library this can take a few minutes, which is why it
+// runs as a background job rather than inline in the Storage page request.
+// UniqueByArgs means click-spamming "Scan disk usage" while one is queued
+// or running is a no-op.
+type ScanLibraryDiskArgs struct {
+	LibraryID int64 `json:"library_id"`
+}
+
+func (ScanLibraryDiskArgs) Kind() string { return "scan_library_disk" }
+func (ScanLibraryDiskArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "scan_library_disk",
+		MaxAttempts: 1,
+		Priority:    PriorityAnalysis,
+		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+	}
 }
 
 // SaveMusicNFOArgs writes artist.nfo + album.nfo files for one artist's
@@ -235,7 +267,7 @@ type SaveMusicNFOArgs struct {
 
 func (SaveMusicNFOArgs) Kind() string { return "save_music_nfo" }
 func (SaveMusicNFOArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "saver", MaxAttempts: 2, Priority: PriorityEnrichment, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "save_music_nfo", MaxAttempts: 2, Priority: PriorityEnrichment, UniqueOpts: river.UniqueOpts{ByArgs: true}}
 }
 
 // ScanTrackLoudnessArgs runs an ebur128 pass on a single audio file and
@@ -249,7 +281,7 @@ type ScanTrackLoudnessArgs struct {
 func (ScanTrackLoudnessArgs) Kind() string { return "scan_track_loudness" }
 func (ScanTrackLoudnessArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "loudness",
+		Queue:       "scan_track_loudness",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
 		UniqueOpts:  river.UniqueOpts{ByArgs: true},
@@ -268,7 +300,7 @@ type ScanAlbumLoudnessArgs struct {
 func (ScanAlbumLoudnessArgs) Kind() string { return "scan_album_loudness" }
 func (ScanAlbumLoudnessArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "loudness",
+		Queue:       "scan_album_loudness",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
 		UniqueOpts:  river.UniqueOpts{ByArgs: true},

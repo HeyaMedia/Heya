@@ -2,10 +2,9 @@ package server
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 
+	"github.com/karbowiak/heya/internal/imageserve"
 	"github.com/karbowiak/heya/internal/metadata/studios"
 	"github.com/karbowiak/heya/internal/service"
 )
@@ -31,7 +30,7 @@ func handleMediaImage(app *service.App) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		serveFile(w, r, path)
+		app.ImageResizer().Serve(w, r, path, imageserve.ParseQuery(r.URL.Query()))
 	}
 }
 
@@ -48,7 +47,7 @@ func handlePersonImage(app *service.App) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		serveFile(w, r, path)
+		app.ImageResizer().Serve(w, r, path, imageserve.ParseQuery(r.URL.Query()))
 	}
 }
 
@@ -72,19 +71,9 @@ func handleStudioImage(app *service.App) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		serveFile(w, r, logoPath)
+		// Studio logos are typically SVG/PNG — skip resize for SVG (imaging
+		// can't decode them). The resizer's passthrough on no params keeps
+		// this transparent.
+		app.ImageResizer().Serve(w, r, logoPath, imageserve.ParseQuery(r.URL.Query()))
 	}
-}
-
-func serveFile(w http.ResponseWriter, r *http.Request, path string) {
-	f, err := os.Open(path)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-
-	stat, _ := f.Stat()
-	w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
-	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
 }

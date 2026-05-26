@@ -23,7 +23,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, email, password_hash, is_admin)
 VALUES ($1, $2, $3, $4)
-RETURNING id, username, email, password_hash, is_admin, settings, created_at, updated_at
+RETURNING id, username, email, password_hash, is_admin, settings, created_at, updated_at, favorites_threshold
 `
 
 type CreateUserParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FavoritesThreshold,
 	)
 	return i, err
 }
@@ -64,7 +65,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at FROM users WHERE email = $1
+SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at, favorites_threshold FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -79,12 +80,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FavoritesThreshold,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at FROM users WHERE id = $1
+SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at, favorites_threshold FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -99,12 +101,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FavoritesThreshold,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at FROM users WHERE username = $1
+SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at, favorites_threshold FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -119,6 +122,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FavoritesThreshold,
 	)
 	return i, err
 }
@@ -135,7 +139,7 @@ func (q *Queries) GetUserSettings(ctx context.Context, id int64) ([]byte, error)
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at FROM users ORDER BY created_at ASC
+SELECT id, username, email, password_hash, is_admin, settings, created_at, updated_at, favorites_threshold FROM users ORDER BY created_at ASC
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -156,6 +160,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.Settings,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.FavoritesThreshold,
 		); err != nil {
 			return nil, err
 		}
@@ -171,7 +176,7 @@ const updateUser = `-- name: UpdateUser :one
 UPDATE users
 SET username = $2, email = $3, is_admin = $4, updated_at = now()
 WHERE id = $1
-RETURNING id, username, email, password_hash, is_admin, settings, created_at, updated_at
+RETURNING id, username, email, password_hash, is_admin, settings, created_at, updated_at, favorites_threshold
 `
 
 type UpdateUserParams struct {
@@ -198,6 +203,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FavoritesThreshold,
 	)
 	return i, err
 }

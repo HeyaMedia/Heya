@@ -2,6 +2,7 @@ package heyamedia
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -36,19 +37,51 @@ func (p *HeyaProvider) Name() string { return "heya" }
 // Provider-ID conventions
 // ---------------------------------------------------------------------------
 
+// BuildLookupIDs returns every usable provider-id heya.media would
+// accept for the given media item, in fallback priority order. Slug
+// goes first when present (most stable, doesn't depend on any one
+// upstream populating an external_id), then MBID / TMDB / etc. per
+// providerOrderForKind.
+//
+// Used by the enrich worker to walk the chain on 404 — heya.media's
+// slug lookups return 404 with no on-demand enrichment available, so
+// we have to fall back to a provider-keyed lookup that *can* trigger
+// upstream enrichment.
+func BuildLookupIDs(kind metadata.MediaKind, externalIDs map[string]string, heyaSlug string) []string {
+	apiKind := heyaKind(kind)
+	if apiKind == "" {
+		return nil
+	}
+	var ids []string
+	if heyaSlug != "" {
+		ids = append(ids, "heya:"+apiKind+":slug:"+heyaSlug)
+	}
+	for _, key := range providerOrderForKind(apiKind) {
+		if v := externalIDs[key]; v != "" {
+			ids = append(ids, "heya:"+apiKind+":"+canonicalProviderKey(key)+":"+v)
+		}
+	}
+	return ids
+}
+
 // BuildLookupID returns a heya provider ID of the form
 // "heya:<apiKind>:<provider>:<value>" — the canonical key for the
-// /api/v1/{kind}/{id} endpoint. Picks the highest-priority external ID
-// the heya.media server accepts for the given kind. Returns "" when no
-// usable identifier is available.
+// /api/v1/{kind}/{id} endpoint. Picks the highest-priority identifier
+// available: heya_slug first (most stable, doesn't depend on any single
+// upstream provider populating an external_id), then the per-provider
+// keys (mbid, tmdb, …) in apiKind-specific priority. Returns "" when
+// no usable identifier is available.
 //
-// heya.media no longer exposes a slug-fetch endpoint, so the heya_slug
-// we keep in our DB is for our own URL routing only — it's not a refetch
-// key.
-func BuildLookupID(kind metadata.MediaKind, externalIDs map[string]string) string {
+// heya.media accepts a bare slug as the path id (e.g. /api/v1/artist/
+// nogizaka46-2011), so for slug lookups we transparently strip the
+// "slug:" prefix in fetchKindIDDetail before calling the API.
+func BuildLookupID(kind metadata.MediaKind, externalIDs map[string]string, heyaSlug string) string {
 	apiKind := heyaKind(kind)
 	if apiKind == "" {
 		return ""
+	}
+	if heyaSlug != "" {
+		return "heya:" + apiKind + ":slug:" + heyaSlug
 	}
 	for _, key := range providerOrderForKind(apiKind) {
 		if v := externalIDs[key]; v != "" {
@@ -279,12 +312,42 @@ func (p *HeyaProvider) SearchArtistBest(ctx context.Context, name string) (*Sear
 
 // GetDetail resolves a heya providerID ("heya:<kind>:<provider>:<value>")
 // into the full enriched MediaDetail.
+// GetDetailFallback tries each providerID in order, retrying on 404.
+// Caller orders by preference (typically slug → mbid → other providers
+// via BuildLookupIDs). The first non-404 result wins — either a
+// successful detail or a hard error worth surfacing. Returns the last
+// 404 if every ID misses, so the caller's failure message points at a
+// real attempted lookup rather than an empty list.
+func (p *HeyaProvider) GetDetailFallback(ctx context.Context, providerIDs []string, opts *metadata.FetchOptions) (*metadata.MediaDetail, string, error) {
+	var lastErr error
+	for _, id := range providerIDs {
+		detail, err := p.GetDetail(ctx, id, opts)
+		if err == nil {
+			return detail, id, nil
+		}
+		lastErr = err
+		if !IsNotFound(err) {
+			return nil, id, err
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("heya: no provider ids to try")
+	}
+	return nil, "", lastErr
+}
+
 func (p *HeyaProvider) GetDetail(ctx context.Context, providerID string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {
 	apiKind, provider, value, ok := parseProviderID(providerID)
 	if !ok {
 		return nil, fmt.Errorf("heya: invalid provider id %q (expected heya:<kind>:<provider>:<value>)", providerID)
 	}
+	// slug:<slug> goes on the wire as bare <slug> — heya.media accepts
+	// /api/v1/<kind>/<slug> directly. Every other provider stays as
+	// "<provider>:<value>" so the upstream knows which catalog to query.
 	id := provider + ":" + value
+	if provider == "slug" {
+		id = value
+	}
 	return p.fetchKindIDDetail(ctx, apiKind, id)
 }
 
@@ -585,6 +648,34 @@ type HeyaPersonPayload struct {
 	ExternalIDs        map[string]string `json:"external_ids"`
 	Popularity         float64           `json:"popularity"`
 	Homepage           string            `json:"homepage"`
+	// External credits — the Heya metadata aggregator surfaces what a
+	// person has acted in (`Cast`), crewed on (`Crew`), and a curated
+	// highlight set (`KnownForTitles`). These cover titles regardless of
+	// whether we have them in the local library; the FE pairs them with
+	// the local `media_cast` / `media_crew` joins to render an "in
+	// library" vs "known for" view.
+	Cast           []HeyaCredit `json:"cast,omitempty"`
+	Crew           []HeyaCredit `json:"crew,omitempty"`
+	KnownForTitles []HeyaCredit `json:"known_for_titles,omitempty"`
+}
+
+// HeyaCredit mirrors clients/heyamedia/openapi.json::Credit. All fields are
+// optional upstream — empty values are the empty zero value, not pointers.
+type HeyaCredit struct {
+	Title        string `json:"title"`
+	Year         int    `json:"year,omitempty"`
+	Character    string `json:"character,omitempty"`
+	Job          string `json:"job,omitempty"`
+	Department   string `json:"department,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Slug         string `json:"slug,omitempty"`
+	TmdbID       int    `json:"tmdb_id,omitempty"`
+	TvdbID       int    `json:"tvdb_id,omitempty"`
+	ImdbID       string `json:"imdb_id,omitempty"`
+	PosterURL    string `json:"poster_url,omitempty"`
+	EpisodeCount int    `json:"episode_count,omitempty"`
+	Order        int    `json:"order,omitempty"`
+	Source       string `json:"source,omitempty"`
 }
 
 // HeyaArtworkItem is the legacy profile-image shape used by the person
@@ -627,8 +718,33 @@ func (p *HeyaProvider) GetPersonDetail(ctx context.Context, tmdbID int) (*HeyaPe
 // Utilities
 // ---------------------------------------------------------------------------
 
-// upstreamErr renders a stable error message for non-2xx responses,
-// including a short snippet of the response body if any.
+// UpstreamError is the typed error returned by failing heya.media calls.
+// Callers that want to retry on specific HTTP statuses (e.g. fall back
+// from a slug-based lookup to MBID-based on 404) can errors.As() it.
+type UpstreamError struct {
+	Path    string
+	Status  int
+	Snippet string
+}
+
+func (e *UpstreamError) Error() string {
+	if e.Snippet != "" {
+		return fmt.Sprintf("heya %s: HTTP %d: %s", e.Path, e.Status, e.Snippet)
+	}
+	return fmt.Sprintf("heya %s: HTTP %d", e.Path, e.Status)
+}
+
+// IsNotFound reports whether err originated as an HTTP 404 from
+// heya.media. Used by enrich workers to know when to fall back to
+// an alternate lookup ID (slug → MBID, MBID → name search).
+func IsNotFound(err error) bool {
+	var u *UpstreamError
+	if errors.As(err, &u) {
+		return u.Status == 404
+	}
+	return false
+}
+
 func upstreamErr(path string, status int, body []byte) error {
 	snippet := ""
 	if len(body) > 0 {
@@ -636,9 +752,9 @@ func upstreamErr(path string, status int, body []byte) error {
 		if len(body) < max {
 			max = len(body)
 		}
-		snippet = ": " + string(body[:max])
+		snippet = string(body[:max])
 	}
-	return fmt.Errorf("heya %s: HTTP %d%s", path, status, snippet)
+	return &UpstreamError{Path: path, Status: status, Snippet: snippet}
 }
 
 // Small helpers shared with mappers.go.

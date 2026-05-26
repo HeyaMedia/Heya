@@ -12,11 +12,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func pickRefreshProvider(mediaType string, externalIDsJSON []byte) (string, string) {
+func pickRefreshProvider(mediaType string, externalIDsJSON []byte, heyaSlug string) (string, string) {
 	var ids map[string]string
 	json.Unmarshal(externalIDsJSON, &ids)
 
-	if pid := heyamedia.BuildLookupID(metadata.MediaKind(mediaType), ids); pid != "" {
+	if pid := heyamedia.BuildLookupID(metadata.MediaKind(mediaType), ids, heyaSlug); pid != "" {
 		return "heya", pid
 	}
 	return "", ""
@@ -24,14 +24,17 @@ func pickRefreshProvider(mediaType string, externalIDsJSON []byte) (string, stri
 
 type ForceRefreshMetadataWorker struct {
 	river.WorkerDefaults[ForceRefreshMetadataArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *ForceRefreshMetadataWorker) Work(ctx context.Context, job *river.Job[ForceRefreshMetadataArgs]) error {
 	q := sqlc.New(w.DB)
-	if _, err := q.GetLibraryByID(ctx, job.Args.LibraryID); err != nil {
+	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	if err != nil {
 		return nil
 	}
+	w.Progress.SetCurrentByKind(ForceRefreshMetadataArgs{}.Kind(), lib.Name)
 
 	enqueued, err := enqueueForceForLibrary(ctx, w.DB, job.Args.LibraryID)
 	if err != nil {
@@ -43,7 +46,8 @@ func (w *ForceRefreshMetadataWorker) Work(ctx context.Context, job *river.Job[Fo
 
 type ForceRefreshImagesWorker struct {
 	river.WorkerDefaults[ForceRefreshImagesArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[ForceRefreshImagesArgs]) error {
@@ -52,6 +56,7 @@ func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[Forc
 	if err != nil {
 		return nil
 	}
+	w.Progress.SetCurrentByKind(ForceRefreshImagesArgs{}.Kind(), lib.Name)
 
 	// Wipe the existing remote-sourced assets so the enrich pass actually
 	// re-downloads. Music albums use cover_path on the album row; other
@@ -93,7 +98,7 @@ func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[Forc
 // anymore.
 func enqueueForceForLibrary(ctx context.Context, db *pgxpool.Pool, libraryID int64) (int, error) {
 	rows, err := db.Query(ctx,
-		`SELECT mi.id, mi.media_type, mi.external_ids
+		`SELECT mi.id, mi.media_type, mi.external_ids, mi.heya_slug
 		 FROM media_items mi
 		 WHERE mi.library_id = $1`,
 		libraryID,
@@ -108,14 +113,15 @@ func enqueueForceForLibrary(ctx context.Context, db *pgxpool.Pool, libraryID int
 		var itemID int64
 		var mediaType string
 		var externalIDsJSON []byte
-		if err := rows.Scan(&itemID, &mediaType, &externalIDsJSON); err != nil {
+		var heyaSlug string
+		if err := rows.Scan(&itemID, &mediaType, &externalIDsJSON, &heyaSlug); err != nil {
 			continue
 		}
 
 		// Skip items the enrich worker would just fail on. The matcher
 		// stamps external_ids during the search stub, so this should only
 		// catch genuinely unmatched stubs.
-		if _, providerID := pickRefreshProvider(mediaType, externalIDsJSON); providerID == "" && sqlc.MediaType(mediaType) != sqlc.MediaTypeMusic {
+		if _, providerID := pickRefreshProvider(mediaType, externalIDsJSON, heyaSlug); providerID == "" && sqlc.MediaType(mediaType) != sqlc.MediaTypeMusic {
 			continue
 		}
 

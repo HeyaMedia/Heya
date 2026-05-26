@@ -17,13 +17,93 @@ type MusicListPage[T any] struct {
 }
 
 func clampMusicPage(limit, offset int32) (int32, int32) {
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
 	if offset < 0 {
 		offset = 0
 	}
 	return limit, offset
+}
+
+// GetMusicArtistBySlug returns one artist by its media-item slug. Same row
+// shape as ListMusicArtists so FE consumers don't need to branch when binding
+// header data.
+func (a *App) GetMusicArtistBySlug(ctx context.Context, slug string) (*sqlc.GetMusicArtistBySlugRow, error) {
+	q := sqlc.New(a.db)
+	row, err := q.GetMusicArtistBySlug(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// GetSimilarArtistsBySlug is the slug-addressed flavor of GetSimilarArtists.
+// Resolves the slug → artist via GetMusicArtistBySlug (one extra row read,
+// not hot path) so handlers don't have to duplicate the lookup boilerplate.
+func (a *App) GetSimilarArtistsBySlug(ctx context.Context, slug string) ([]SimilarArtistRow, error) {
+	row, err := a.GetMusicArtistBySlug(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	return a.GetSimilarArtists(ctx, row.ID)
+}
+
+// SimilarMusicArtistsBySlug — slug flavor of SimilarMusicArtists.
+func (a *App) SimilarMusicArtistsBySlug(ctx context.Context, slug string, limit int32) ([]sqlc.SimilarArtistsRow, error) {
+	row, err := a.GetMusicArtistBySlug(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	return a.SimilarMusicArtists(ctx, row.ID, limit)
+}
+
+// ListAlbumsByArtistSlug returns one artist's albums, paginated.
+func (a *App) ListAlbumsByArtistSlug(ctx context.Context, slug string, limit, offset int32) (*MusicListPage[sqlc.ListAlbumsByArtistSlugRow], error) {
+	limit, offset = clampMusicPage(limit, offset)
+	q := sqlc.New(a.db)
+	items, err := q.ListAlbumsByArtistSlug(ctx, sqlc.ListAlbumsByArtistSlugParams{Slug: slug, Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, fmt.Errorf("listing albums for artist %q: %w", slug, err)
+	}
+	total, _ := q.CountAlbumsByArtistSlug(ctx, slug)
+	return &MusicListPage[sqlc.ListAlbumsByArtistSlugRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+// MusicTrackDetail is the one-shot read shape for /api/music/tracks/{id}.
+// Bundles the track + its files + the album/artist context the FE needs to
+// render headers and breadcrumbs without follow-up fetches.
+type MusicTrackDetail struct {
+	sqlc.GetTrackDetailByIDRow
+	Files []sqlc.TrackFile `json:"files"`
+}
+
+// GetMusicTrackDetail returns a track + its files + album/artist context. The
+// caller still hits /facets / /waveform / /lyrics separately when needed —
+// those are sized differently and have their own cache TTLs.
+func (a *App) GetMusicTrackDetail(ctx context.Context, trackID int64) (*MusicTrackDetail, error) {
+	q := sqlc.New(a.db)
+	row, err := q.GetTrackDetailByID(ctx, trackID)
+	if err != nil {
+		return nil, err
+	}
+	files, _ := q.ListTrackFilesByTrack(ctx, trackID)
+	if files == nil {
+		files = []sqlc.TrackFile{}
+	}
+	return &MusicTrackDetail{GetTrackDetailByIDRow: row, Files: files}, nil
+}
+
+// ListTracksByArtistSlug returns one artist's tracks (flat, all albums), paginated.
+func (a *App) ListTracksByArtistSlug(ctx context.Context, slug string, limit, offset int32) (*MusicListPage[sqlc.ListTracksByArtistSlugRow], error) {
+	limit, offset = clampMusicPage(limit, offset)
+	q := sqlc.New(a.db)
+	items, err := q.ListTracksByArtistSlug(ctx, sqlc.ListTracksByArtistSlugParams{Slug: slug, Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, fmt.Errorf("listing tracks for artist %q: %w", slug, err)
+	}
+	total, _ := q.CountTracksByArtistSlug(ctx, slug)
+	return &MusicListPage[sqlc.ListTracksByArtistSlugRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
 }
 
 // ListMusicArtists returns artists across every music library, paginated.
@@ -58,7 +138,7 @@ func (a *App) ListMusicAlbums(ctx context.Context, limit, offset int32) (*MusicL
 type MusicAlbumDetail struct {
 	Album       sqlc.Album  `json:"album"`
 	Tracks      []TrackView `json:"tracks"`
-	Artist      sqlc.Artist `json:"artist"`
+	Artist      ArtistView  `json:"artist"`
 	ArtistSlug  string      `json:"artist_slug"`
 	MediaItemID int64       `json:"media_item_id"`
 }
@@ -75,6 +155,34 @@ func (a *App) GetAlbumDetail(ctx context.Context, artistSlug, albumSlug string) 
 	if err != nil {
 		return nil, fmt.Errorf("album not found: %w", err)
 	}
+	return a.assembleAlbumDetail(ctx, q, album)
+}
+
+// ResolveAlbumIDBySlugs looks up an album ID by (artist_slug, album_slug).
+// Used by the slug-addressed album sub-endpoints (cover, sonic-similar) so
+// callers can stay on the canonical URL form without redundant route variants.
+func (a *App) ResolveAlbumIDBySlugs(ctx context.Context, artistSlug, albumSlug string) (int64, error) {
+	q := sqlc.New(a.db)
+	album, err := q.GetAlbumByArtistAndSlug(ctx, sqlc.GetAlbumByArtistAndSlugParams{
+		Slug:   artistSlug,
+		Slug_2: albumSlug,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("album not found: %w", err)
+	}
+	return album.ID, nil
+}
+
+// SimilarMusicAlbumsBySlugs — slug-addressed sonic-similar lookup for albums.
+func (a *App) SimilarMusicAlbumsBySlugs(ctx context.Context, artistSlug, albumSlug string, limit int32) ([]sqlc.SimilarAlbumsRow, error) {
+	id, err := a.ResolveAlbumIDBySlugs(ctx, artistSlug, albumSlug)
+	if err != nil {
+		return nil, err
+	}
+	return a.SimilarMusicAlbums(ctx, id, limit)
+}
+
+func (a *App) assembleAlbumDetail(ctx context.Context, q *sqlc.Queries, album sqlc.Album) (*MusicAlbumDetail, error) {
 	artist, err := q.GetArtistByID(ctx, album.ArtistID)
 	if err != nil {
 		return nil, fmt.Errorf("artist not found: %w", err)
@@ -94,7 +202,7 @@ func (a *App) GetAlbumDetail(ctx context.Context, artistSlug, albumSlug string) 
 	return &MusicAlbumDetail{
 		Album:       album,
 		Tracks:      views,
-		Artist:      artist,
+		Artist:      BuildArtistView(artist),
 		ArtistSlug:  mediaItem.Slug,
 		MediaItemID: mediaItem.ID,
 	}, nil

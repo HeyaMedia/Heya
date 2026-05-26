@@ -111,9 +111,12 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, of
 	return JobListResult{Jobs: jobs, Total: total}, nil
 }
 
-// MetadataQueueStatus is a snapshot of the unified `metadata` enrich queue:
+// MetadataQueueStatus is a snapshot of the `enrich_media_item` queue:
 // pending counts by priority band, the currently-running job (if any) with
-// its target item resolved, and a recent throughput window.
+// its target item resolved, and a recent throughput window. Naming kept as
+// "MetadataQueueStatus" so the existing FE panel keeps consuming the same
+// shape — the underlying River queue moved during the per-kind queue split
+// but the panel still shows the enrich pipeline's progress.
 type MetadataQueueStatus struct {
 	Pending           int                   `json:"pending"`
 	PendingByPriority map[int]int           `json:"pending_by_priority"`
@@ -122,7 +125,7 @@ type MetadataQueueStatus struct {
 }
 
 // MetadataQueueRunning describes the one job currently executing on the
-// metadata queue (MaxWorkers=1, so there's at most one).
+// enrich_media_item queue (MaxWorkers=1, so there's at most one).
 type MetadataQueueRunning struct {
 	JobID     int64     `json:"job_id"`
 	Kind      string    `json:"kind"`
@@ -153,7 +156,7 @@ func (a *App) MetadataQueueStatus(ctx context.Context) (MetadataQueueStatus, err
 	rows, err := a.db.Query(ctx, `
 		SELECT priority, count(*)
 		FROM river_job
-		WHERE queue = 'metadata' AND state IN ('available', 'scheduled', 'retryable')
+		WHERE queue = 'enrich_media_item' AND state IN ('available', 'scheduled', 'retryable')
 		GROUP BY priority
 	`)
 	if err != nil {
@@ -182,7 +185,7 @@ func (a *App) MetadataQueueStatus(ctx context.Context) (MetadataQueueStatus, err
 	err = a.db.QueryRow(ctx, `
 		SELECT id, kind, args::text, priority, attempted_at
 		FROM river_job
-		WHERE queue = 'metadata' AND state = 'running'
+		WHERE queue = 'enrich_media_item' AND state = 'running'
 		ORDER BY attempted_at ASC
 		LIMIT 1
 	`).Scan(&jobID, &kind, &argsJSON, &priority, &startedAt)
@@ -227,7 +230,7 @@ func (a *App) MetadataQueueStatus(ctx context.Context) (MetadataQueueStatus, err
 			count(*),
 			COALESCE(avg(extract(epoch from finalized_at - attempted_at)), 0)
 		FROM river_job
-		WHERE queue = 'metadata' AND state = 'completed'
+		WHERE queue = 'enrich_media_item' AND state = 'completed'
 		  AND finalized_at > now() - interval '5 minutes'
 	`).Scan(&done, &avgSec); err == nil {
 		out.Recent.Completed5Min = done
@@ -282,6 +285,31 @@ func (a *App) CancelJob(ctx context.Context, id int64) error {
 	return nil
 }
 
+// RescueOrphanedJobsAtStartup releases every river_job stuck in
+// state='running' from a previous process. Called before
+// app.StartWorkers — no worker in *this* process has started yet, so
+// every state='running' row is definitionally an orphan from a prior
+// boot (process killed mid-job, air reload, OS OOM, etc.) and safe to
+// flip back to available.
+//
+// River's own periodic rescuer would eventually catch these via
+// RescueStuckJobsAfter (10min), but that's long enough to make
+// MaxWorkers=N look violated in the UI after every dev reload.
+// Doing it eagerly at boot keeps the running-job snapshot honest.
+//
+// Returns the count rescued so the caller can log it (zero on a clean
+// boot, non-zero after an unclean shutdown).
+func (a *App) RescueOrphanedJobsAtStartup(ctx context.Context) (int64, error) {
+	tag, err := a.db.Exec(ctx,
+		`UPDATE river_job
+		   SET state = 'available', attempted_at = NULL, attempted_by = NULL
+		 WHERE state = 'running'`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // RescueStuckJobs rescues jobs that have been running for more than 30 seconds.
 // It returns the total number of rescued jobs and the number whose retry counts
 // were reset because they had exhausted their max attempts.
@@ -328,6 +356,61 @@ func (a *App) ClearAllJobs(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// CancelJobsByKind cancels every River job whose kind matches one of the
+// provided kinds. It runs in two passes:
+//
+//  1. SQL UPDATE: every available/scheduled/retryable job for those kinds is
+//     immediately marked cancelled — they'll never be picked up.
+//  2. River JobCancel: for any currently-running job, ask River to mark it
+//     for cancellation. River sends LISTEN/NOTIFY to the producer and the
+//     worker's ctx fires Done. Workers that respect ctx.Done() exit
+//     promptly; ones that don't will run to natural completion (River
+//     can't preempt a goroutine, only signal it).
+//
+// Used by the tasks-page Cancel button: cancelling a "task" now means
+// cancelling every queued + running job across the kinds that task
+// fans out into.
+func (a *App) CancelJobsByKind(ctx context.Context, kinds []string) (int64, error) {
+	if len(kinds) == 0 {
+		return 0, nil
+	}
+
+	// Pass 1: bulk-cancel queued/scheduled/retryable rows.
+	tag, err := a.db.Exec(ctx,
+		`UPDATE river_job
+		    SET state = 'cancelled', finalized_at = now()
+		  WHERE state IN ('available', 'retryable', 'scheduled')
+		    AND kind = ANY($1::text[])`, kinds)
+	if err != nil {
+		return 0, err
+	}
+	cancelled := tag.RowsAffected()
+
+	// Pass 2: signal running jobs via River so the worker's ctx is
+	// cancelled (LISTEN/NOTIFY → producer → job ctx.Done). Best-effort —
+	// a worker that ignores ctx will run to completion regardless.
+	if a.river != nil {
+		rows, err := a.db.Query(ctx,
+			`SELECT id FROM river_job
+			  WHERE state = 'running'
+			    AND kind = ANY($1::text[])`, kinds)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var jobID int64
+				if err := rows.Scan(&jobID); err != nil {
+					continue
+				}
+				if _, jcErr := a.river.JobCancel(ctx, jobID); jcErr == nil {
+					cancelled++
+				}
+			}
+		}
+	}
+
+	return cancelled, nil
 }
 
 // CancelLibraryJobs cancels all pending jobs whose args contain the given library ID.

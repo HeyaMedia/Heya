@@ -26,7 +26,8 @@ func releaseDirOf(filePath string) string {
 
 type SaveMusicNFOWorker struct {
 	river.WorkerDefaults[SaveMusicNFOArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicNFOArgs]) error {
@@ -40,6 +41,8 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 	if err != nil {
 		return err
 	}
+
+	w.Progress.SetCurrentByKind(SaveMusicNFOArgs{}.Kind(), artist.Name)
 
 	albums, err := q.ListAlbumsByArtist(ctx, artist.ID)
 	if err != nil {

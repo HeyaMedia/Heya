@@ -47,21 +47,73 @@ SELECT waveform FROM track_facets WHERE track_id = $1;
 -- Pick the next track that either has no facets row yet, or whose facets row
 -- is older than the configured analyzer_version. Tracks must have a usable
 -- primary file (file_path != '') so the analyzer can actually read audio.
+-- Skip tracks longer than sqlc.arg(max_duration_seconds) — long-form content
+-- (DJ sets, podcasts, lectures) blows the analysis budget for noisy facets.
+-- Duration is checked against BOTH sources we have: tracks.duration (from
+-- upstream metadata, often 0 for orphan files) and track_files.duration
+-- (ffprobe at scan time, ground truth). If either source says "too long",
+-- skip. duration=0 means "unknown" and passes — we only reject on positive
+-- evidence the track is over the cap, so missing metadata never silently
+-- kills a song-length track.
 -- Deterministic order (id ASC) so the scheduler resumes predictably.
 SELECT t.id, t.title, t.album_id, a.artist_id, t.file_path
 FROM tracks t
 JOIN albums a ON a.id = t.album_id
 LEFT JOIN track_facets tf ON tf.track_id = t.id
 WHERE t.file_path != ''
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $1)
+  AND t.duration <= sqlc.arg(max_duration_seconds)::int
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > sqlc.arg(max_duration_seconds)::int
+  )
+  AND (tf.track_id IS NULL OR tf.analyzer_version < sqlc.arg(analyzer_version)::int)
 ORDER BY t.id ASC
 LIMIT 1;
 
+-- name: GetTrackForAnalysis :one
+-- Resolve a specific track for the analyze_track_facets River worker.
+-- Same shape as NextTrackForAnalysis plus the resolved artist name so
+-- the progress label can read "Artist - Track" instead of a bare title.
+-- No eligibility filter — the worker bails on empty file_path itself.
+SELECT t.id, t.title, t.album_id, a.artist_id, ar.name AS artist_name, t.file_path
+FROM tracks t
+JOIN albums  a  ON a.id = t.album_id
+JOIN artists ar ON ar.id = a.artist_id
+WHERE t.id = $1;
+
+-- name: ListPendingAnalysisTracks :many
+-- Fan-out source for kickoff_sonic_analysis. Returns up to `limit_count`
+-- track IDs whose facets row is missing or older than the requested
+-- analyzer_version. Mirrors NextTrackForAnalysis' eligibility filter so
+-- the kickoff doesn't enqueue jobs the worker would just skip.
+SELECT t.id
+FROM tracks t
+LEFT JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.file_path != ''
+  AND t.duration <= sqlc.arg(max_duration_seconds)::int
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > sqlc.arg(max_duration_seconds)::int
+  )
+  AND (tf.track_id IS NULL OR tf.analyzer_version < sqlc.arg(analyzer_version)::int)
+ORDER BY t.id ASC
+LIMIT sqlc.arg(limit_count)::int;
+
 -- name: CountPendingAnalysis :one
+-- Mirrors NextTrackForAnalysis' eligibility filter so the Tasks UI counter
+-- agrees with what the scheduler will actually pick up.
 SELECT count(*)::int FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
 WHERE t.file_path != ''
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $1);
+  AND t.duration <= sqlc.arg(max_duration_seconds)::int
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > sqlc.arg(max_duration_seconds)::int
+  )
+  AND (tf.track_id IS NULL OR tf.analyzer_version < sqlc.arg(analyzer_version)::int);
 
 -- name: CountAnalyzedTracks :one
 SELECT count(*)::int FROM track_facets WHERE analyzer_version >= $1;
@@ -128,32 +180,248 @@ ON CONFLICT (album_id) DO UPDATE SET
     track_count    = EXCLUDED.track_count,
     updated_at     = now();
 
--- name: SimilarTracksByTrack :many
--- Top-N tracks closest to the seed track by cosine on track_embedding.
--- Excludes the seed itself. Caller passes the seed's vector after fetching
--- it; this avoids an extra subquery + lets the planner use the HNSW index
--- on the literal parameter.
-SELECT t.id, t.title, t.album_id, a.artist_id, t.file_path,
+-- name: SimilarTracksByTrackRich :many
+-- Rich KNN: same cosine ordering as SimilarTracksByTrack but joins
+-- album + artist context so the caller gets a self-contained track row
+-- (no follow-up lookups). Used by the Instant Radio endpoint.
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
        (tf.track_embedding <=> $1)::real AS distance
 FROM track_facets tf
-JOIN tracks t ON t.id = tf.track_id
-JOIN albums a ON a.id = t.album_id
-WHERE tf.track_id != $2
-  AND tf.track_embedding IS NOT NULL
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE tf.track_embedding IS NOT NULL
+  AND NOT (tf.track_id = ANY(sqlc.arg(exclude_ids)::bigint[]))
 ORDER BY tf.track_embedding <=> $1
-LIMIT $3;
+LIMIT sqlc.arg(track_limit);
 
--- name: SimilarTracksByText :many
--- Top-N tracks closest to a CLAP text embedding (caller computes the text
--- vector via TextSearcher). Searches in the audio↔text shared CLAP space.
-SELECT t.id, t.title, t.album_id, a.artist_id, t.file_path,
+-- name: CountTracksByMood :one
+-- Count tracks scoring above a threshold for one mood tag (e.g. 'mood_happy').
+-- Powers the Browse > Moods tile counts.
+SELECT count(*)::bigint
+FROM track_facets
+WHERE (mood_tags->>sqlc.arg(mood_key)::text)::real > sqlc.arg(threshold)::real;
+
+-- name: ListTracksByMood :many
+-- High-scoring tracks for one mood tag, paginated, with album+artist context.
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       ((tf.mood_tags->>sqlc.arg(mood_key)::text)::real) AS score
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE (tf.mood_tags->>sqlc.arg(mood_key)::text)::real > sqlc.arg(threshold)::real
+ORDER BY (tf.mood_tags->>sqlc.arg(mood_key)::text)::real DESC, t.id ASC
+LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
+
+-- name: ListGenreBuckets :many
+-- Distinct top-level genres from track_facets.top_genres (array of {name,score})
+-- with a track count per genre. Score filter weeds out the long tail of
+-- low-confidence labels. We deliberately inline (elem->>'name') / (elem->>'score')
+-- twice instead of pushing them through a derived table — sqlc's planner can't
+-- resolve LATERAL-aliased columns and would refuse to generate this query.
+SELECT (elem->>'name')::text     AS genre_name,
+       count(*)::bigint          AS track_count
+FROM track_facets tf
+CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+WHERE (elem->>'score')::real >= sqlc.arg(min_score)::real
+GROUP BY (elem->>'name')
+HAVING count(*) >= sqlc.arg(min_tracks)::bigint
+ORDER BY track_count DESC, (elem->>'name') ASC
+LIMIT sqlc.arg(bucket_limit);
+
+-- name: ListTracksByGenre :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       ((elem->>'score')::real) AS score
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+WHERE (elem->>'name') = sqlc.arg(genre_name)::text
+  AND (elem->>'score')::real >= sqlc.arg(min_score)::real
+ORDER BY (elem->>'score')::real DESC, t.id ASC
+LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
+
+-- name: CountTracksByTempoBand :one
+-- Count tracks whose BPM falls in [min, max). Half-open so adjacent bands
+-- partition cleanly with no double-counting.
+SELECT count(*)::bigint
+FROM track_facets
+WHERE bpm IS NOT NULL
+  AND bpm >= sqlc.arg(min_bpm)::real
+  AND bpm <  sqlc.arg(max_bpm)::real;
+
+-- name: ListTracksByTempoBand :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       tf.bpm            AS bpm
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE tf.bpm IS NOT NULL
+  AND tf.bpm >= sqlc.arg(min_bpm)::real
+  AND tf.bpm <  sqlc.arg(max_bpm)::real
+ORDER BY tf.bpm ASC, t.id ASC
+LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
+
+-- name: MixToTracks :many
+-- DJ-style "mix to next track" picker. Constrains the result to tracks that
+-- mix smoothly with the seed:
+--
+--   - BPM within sqlc.arg(bpm_min)..bpm_max (caller picks the tolerance)
+--   - Key matches one of the Camelot-compatible (root, mode) pairs passed in
+--     `key_codes` as composite ints: code = root*2 + mode. The caller computes
+--     these from sonicanalysis.Key.CompatibleKeys().
+--   - Excludes the seed and any caller-supplied skip IDs.
+--
+-- Result ordered by cosine ASC on the seed's track_embedding, so the
+-- harmonically-compatible track that's also closest in feel comes first.
+-- Returns the rich track row shape (album + artist context + slugs).
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       tf.bpm            AS bpm,
+       tf.key_root       AS key_root,
+       tf.key_mode       AS key_mode,
+       (tf.track_embedding <=> sqlc.arg(track_embedding))::real AS distance
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE tf.track_embedding IS NOT NULL
+  AND tf.bpm IS NOT NULL
+  AND tf.bpm BETWEEN sqlc.arg(bpm_min)::real AND sqlc.arg(bpm_max)::real
+  AND tf.key_root IS NOT NULL
+  AND tf.key_mode IS NOT NULL
+  AND (tf.key_root::int * 2 + tf.key_mode::int) = ANY(sqlc.arg(key_codes)::int[])
+  AND NOT (tf.track_id = ANY(sqlc.arg(exclude_ids)::bigint[]))
+ORDER BY tf.track_embedding <=> sqlc.arg(track_embedding)
+LIMIT sqlc.arg(track_limit);
+
+-- name: PickTrackWithFacetsByArtistSlug :one
+-- Picks any track for the given artist that already has facets analyzed.
+-- Used as the radio seed when the user starts a station from an artist —
+-- "pick something from this artist's catalog to anchor the KNN".
+SELECT t.id AS track_id
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE mi.slug = $1
+  AND tf.track_embedding IS NOT NULL
+ORDER BY random()
+LIMIT 1;
+
+-- name: PickTrackWithFacetsByArtistID :one
+SELECT t.id AS track_id
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE al.artist_id = $1
+  AND tf.track_embedding IS NOT NULL
+ORDER BY random()
+LIMIT 1;
+
+-- name: PickTrackWithFacetsByAlbumID :one
+SELECT t.id AS track_id
+FROM tracks t
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.album_id = $1
+  AND tf.track_embedding IS NOT NULL
+ORDER BY random()
+LIMIT 1;
+
+-- name: SimilarTracksByTextRich :many
+-- Rich CLAP text→audio search. Returns the same row shape as
+-- SimilarTracksByTrackRich so the FE consumes search results and KNN
+-- expansions with one component.
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
        (tf.text_embedding <=> $1)::real AS distance
 FROM track_facets tf
-JOIN tracks t ON t.id = tf.track_id
-JOIN albums a ON a.id = t.album_id
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
 WHERE tf.text_embedding IS NOT NULL
 ORDER BY tf.text_embedding <=> $1
-LIMIT $2;
+LIMIT sqlc.arg(track_limit);
 
 -- name: SimilarArtists :many
 SELECT ar.id, ar.name, ar.media_item_id, mi.slug AS media_slug,
@@ -167,10 +435,18 @@ ORDER BY ac.sonic_centroid <=> $1
 LIMIT $3;
 
 -- name: SimilarAlbums :many
-SELECT al.id, al.title, al.artist_id, al.slug,
+-- artist_slug + album.slug together address the cover endpoint and the album
+-- detail page; carrying both saves the FE from joining against an artist row.
+SELECT al.id, al.title, al.artist_id, al.slug AS album_slug,
+       a.name           AS artist_name,
+       mi.slug          AS artist_slug,
+       al.cover_path    AS album_cover_path,
+       al.year          AS album_year,
        (alc.sonic_centroid <=> $1)::real AS distance
 FROM album_centroids alc
-JOIN albums al ON al.id = alc.album_id
+JOIN albums      al ON al.id = alc.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
 WHERE alc.album_id != $2
   AND alc.sonic_centroid IS NOT NULL
 ORDER BY alc.sonic_centroid <=> $1

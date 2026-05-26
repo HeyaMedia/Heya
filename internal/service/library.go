@@ -11,9 +11,9 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
+	"github.com/rs/zerolog/log"
 )
 
 var validMediaTypes = map[string]sqlc.MediaType{
@@ -159,8 +159,12 @@ func (a *App) ListMatchCandidates(ctx context.Context, fileID int64) ([]sqlc.Mat
 }
 
 func (a *App) EnqueueScanLibrary(id int64, force bool) {
-	a.scanTask.Enqueue(id, force)
-	a.scheduler.TriggerNow(scheduler.TaskScanLibraries)
+	if a.scheduler == nil {
+		return
+	}
+	if err := a.scheduler.EnqueueLibraryScan(a.lifetimeCtx, id, force); err != nil {
+		log.Warn().Err(err).Int64("library_id", id).Msg("EnqueueScanLibrary: insert kickoff failed")
+	}
 }
 
 func (a *App) EnqueueForceRefreshMetadata(ctx context.Context, libraryID int64) error {
@@ -171,6 +175,56 @@ func (a *App) EnqueueForceRefreshMetadata(ctx context.Context, libraryID int64) 
 func (a *App) EnqueueForceRefreshImages(ctx context.Context, libraryID int64) error {
 	_, err := a.river.Insert(ctx, worker.ForceRefreshImagesArgs{LibraryID: libraryID}, nil)
 	return err
+}
+
+// EnqueueScanLibraryDisk fans out one ScanLibraryDisk job per library, or
+// targets a single library when libraryID > 0. UniqueByArgs in the job
+// definition means a duplicate insert while one is queued/running is a no-op
+// — admins can hammer the button without piling on work.
+func (a *App) EnqueueScanLibraryDisk(ctx context.Context, libraryID int64) error {
+	if libraryID > 0 {
+		_, err := a.river.Insert(ctx, worker.ScanLibraryDiskArgs{LibraryID: libraryID}, nil)
+		return err
+	}
+	libs, err := a.ListLibraries(ctx)
+	if err != nil {
+		return err
+	}
+	for _, l := range libs {
+		if _, err := a.river.Insert(ctx, worker.ScanLibraryDiskArgs{LibraryID: l.ID}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// LibraryDiskUsage is the typed view returned to handlers. Mirrors the sqlc
+// row but exposes the timestamp as a regular time.Time.
+type LibraryDiskUsage struct {
+	LibraryID int64     `json:"library_id"`
+	Path      string    `json:"path"`
+	Bytes     int64     `json:"bytes"`
+	FileCount int64     `json:"file_count"`
+	ScannedAt time.Time `json:"scanned_at"`
+}
+
+func (a *App) ListLibraryDiskUsage(ctx context.Context) ([]LibraryDiskUsage, error) {
+	q := sqlc.New(a.db)
+	rows, err := q.ListLibraryDiskUsage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LibraryDiskUsage, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, LibraryDiskUsage{
+			LibraryID: r.LibraryID,
+			Path:      r.Path,
+			Bytes:     r.Bytes,
+			FileCount: r.FileCount,
+			ScannedAt: r.ScannedAt.Time,
+		})
+	}
+	return out, nil
 }
 
 func (a *App) ListDeletedFiles(ctx context.Context, libraryID int64, limit, offset int32) ([]sqlc.LibraryFile, error) {

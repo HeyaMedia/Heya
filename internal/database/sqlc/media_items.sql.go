@@ -854,6 +854,26 @@ func (q *Queries) UpdateMediaItemBackdropPath(ctx context.Context, arg UpdateMed
 	return err
 }
 
+const updateMediaItemHeyaSlug = `-- name: UpdateMediaItemHeyaSlug :exec
+UPDATE media_items SET heya_slug = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdateMediaItemHeyaSlugParams struct {
+	ID       int64  `json:"id"`
+	HeyaSlug string `json:"heya_slug"`
+}
+
+// Writes the canonical heya.media slug back onto the media_item.
+// Called by the enrich workers after GetDetail returns — the slug is
+// a stable lookup key for future re-fetches (heya.media supports
+// slug:<slug> as an artist lookup ID alongside mbid:<id> and the
+// per-provider variants). Distinct from `slug` which is our own
+// user-facing URL identifier.
+func (q *Queries) UpdateMediaItemHeyaSlug(ctx context.Context, arg UpdateMediaItemHeyaSlugParams) error {
+	_, err := q.db.Exec(ctx, updateMediaItemHeyaSlug, arg.ID, arg.HeyaSlug)
+	return err
+}
+
 const updateMediaItemPosterPath = `-- name: UpdateMediaItemPosterPath :exec
 UPDATE media_items SET poster_path = $2, updated_at = now() WHERE id = $1
 `

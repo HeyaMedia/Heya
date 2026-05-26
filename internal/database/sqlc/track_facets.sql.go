@@ -27,12 +27,67 @@ const countPendingAnalysis = `-- name: CountPendingAnalysis :one
 SELECT count(*)::int FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
 WHERE t.file_path != ''
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $1)
+  AND t.duration <= $1::int
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > $1::int
+  )
+  AND (tf.track_id IS NULL OR tf.analyzer_version < $2::int)
 `
 
-func (q *Queries) CountPendingAnalysis(ctx context.Context, analyzerVersion int32) (int32, error) {
-	row := q.db.QueryRow(ctx, countPendingAnalysis, analyzerVersion)
+type CountPendingAnalysisParams struct {
+	MaxDurationSeconds int32 `json:"max_duration_seconds"`
+	AnalyzerVersion    int32 `json:"analyzer_version"`
+}
+
+// Mirrors NextTrackForAnalysis' eligibility filter so the Tasks UI counter
+// agrees with what the scheduler will actually pick up.
+func (q *Queries) CountPendingAnalysis(ctx context.Context, arg CountPendingAnalysisParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingAnalysis, arg.MaxDurationSeconds, arg.AnalyzerVersion)
 	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countTracksByMood = `-- name: CountTracksByMood :one
+SELECT count(*)::bigint
+FROM track_facets
+WHERE (mood_tags->>$1::text)::real > $2::real
+`
+
+type CountTracksByMoodParams struct {
+	MoodKey   string  `json:"mood_key"`
+	Threshold float32 `json:"threshold"`
+}
+
+// Count tracks scoring above a threshold for one mood tag (e.g. 'mood_happy').
+// Powers the Browse > Moods tile counts.
+func (q *Queries) CountTracksByMood(ctx context.Context, arg CountTracksByMoodParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTracksByMood, arg.MoodKey, arg.Threshold)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countTracksByTempoBand = `-- name: CountTracksByTempoBand :one
+SELECT count(*)::bigint
+FROM track_facets
+WHERE bpm IS NOT NULL
+  AND bpm >= $1::real
+  AND bpm <  $2::real
+`
+
+type CountTracksByTempoBandParams struct {
+	MinBpm float32 `json:"min_bpm"`
+	MaxBpm float32 `json:"max_bpm"`
+}
+
+// Count tracks whose BPM falls in [min, max). Half-open so adjacent bands
+// partition cleanly with no double-counting.
+func (q *Queries) CountTracksByTempoBand(ctx context.Context, arg CountTracksByTempoBandParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTracksByTempoBand, arg.MinBpm, arg.MaxBpm)
+	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
 }
@@ -98,6 +153,41 @@ func (q *Queries) GetTrackFacets(ctx context.Context, trackID int64) (TrackFacet
 	return i, err
 }
 
+const getTrackForAnalysis = `-- name: GetTrackForAnalysis :one
+SELECT t.id, t.title, t.album_id, a.artist_id, ar.name AS artist_name, t.file_path
+FROM tracks t
+JOIN albums  a  ON a.id = t.album_id
+JOIN artists ar ON ar.id = a.artist_id
+WHERE t.id = $1
+`
+
+type GetTrackForAnalysisRow struct {
+	ID         int64  `json:"id"`
+	Title      string `json:"title"`
+	AlbumID    int64  `json:"album_id"`
+	ArtistID   int64  `json:"artist_id"`
+	ArtistName string `json:"artist_name"`
+	FilePath   string `json:"file_path"`
+}
+
+// Resolve a specific track for the analyze_track_facets River worker.
+// Same shape as NextTrackForAnalysis plus the resolved artist name so
+// the progress label can read "Artist - Track" instead of a bare title.
+// No eligibility filter — the worker bails on empty file_path itself.
+func (q *Queries) GetTrackForAnalysis(ctx context.Context, id int64) (GetTrackForAnalysisRow, error) {
+	row := q.db.QueryRow(ctx, getTrackForAnalysis, id)
+	var i GetTrackForAnalysisRow
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.AlbumID,
+		&i.ArtistID,
+		&i.ArtistName,
+		&i.FilePath,
+	)
+	return i, err
+}
+
 const getTrackWaveform = `-- name: GetTrackWaveform :one
 SELECT waveform FROM track_facets WHERE track_id = $1
 `
@@ -109,16 +199,513 @@ func (q *Queries) GetTrackWaveform(ctx context.Context, trackID int64) ([]float3
 	return waveform, err
 }
 
+const listGenreBuckets = `-- name: ListGenreBuckets :many
+SELECT (elem->>'name')::text     AS genre_name,
+       count(*)::bigint          AS track_count
+FROM track_facets tf
+CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+WHERE (elem->>'score')::real >= $1::real
+GROUP BY (elem->>'name')
+HAVING count(*) >= $2::bigint
+ORDER BY track_count DESC, (elem->>'name') ASC
+LIMIT $3
+`
+
+type ListGenreBucketsParams struct {
+	MinScore    float32 `json:"min_score"`
+	MinTracks   int64   `json:"min_tracks"`
+	BucketLimit int32   `json:"bucket_limit"`
+}
+
+type ListGenreBucketsRow struct {
+	GenreName  string `json:"genre_name"`
+	TrackCount int64  `json:"track_count"`
+}
+
+// Distinct top-level genres from track_facets.top_genres (array of {name,score})
+// with a track count per genre. Score filter weeds out the long tail of
+// low-confidence labels. We deliberately inline (elem->>'name') / (elem->>'score')
+// twice instead of pushing them through a derived table — sqlc's planner can't
+// resolve LATERAL-aliased columns and would refuse to generate this query.
+func (q *Queries) ListGenreBuckets(ctx context.Context, arg ListGenreBucketsParams) ([]ListGenreBucketsRow, error) {
+	rows, err := q.db.Query(ctx, listGenreBuckets, arg.MinScore, arg.MinTracks, arg.BucketLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGenreBucketsRow{}
+	for rows.Next() {
+		var i ListGenreBucketsRow
+		if err := rows.Scan(&i.GenreName, &i.TrackCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingAnalysisTracks = `-- name: ListPendingAnalysisTracks :many
+SELECT t.id
+FROM tracks t
+LEFT JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.file_path != ''
+  AND t.duration <= $1::int
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > $1::int
+  )
+  AND (tf.track_id IS NULL OR tf.analyzer_version < $2::int)
+ORDER BY t.id ASC
+LIMIT $3::int
+`
+
+type ListPendingAnalysisTracksParams struct {
+	MaxDurationSeconds int32 `json:"max_duration_seconds"`
+	AnalyzerVersion    int32 `json:"analyzer_version"`
+	LimitCount         int32 `json:"limit_count"`
+}
+
+// Fan-out source for kickoff_sonic_analysis. Returns up to `limit_count`
+// track IDs whose facets row is missing or older than the requested
+// analyzer_version. Mirrors NextTrackForAnalysis' eligibility filter so
+// the kickoff doesn't enqueue jobs the worker would just skip.
+func (q *Queries) ListPendingAnalysisTracks(ctx context.Context, arg ListPendingAnalysisTracksParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listPendingAnalysisTracks, arg.MaxDurationSeconds, arg.AnalyzerVersion, arg.LimitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTracksByGenre = `-- name: ListTracksByGenre :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       ((elem->>'score')::real) AS score
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+WHERE (elem->>'name') = $1::text
+  AND (elem->>'score')::real >= $2::real
+ORDER BY (elem->>'score')::real DESC, t.id ASC
+LIMIT $4 OFFSET $3
+`
+
+type ListTracksByGenreParams struct {
+	GenreName   string  `json:"genre_name"`
+	MinScore    float32 `json:"min_score"`
+	TrackOffset int32   `json:"track_offset"`
+	TrackLimit  int32   `json:"track_limit"`
+}
+
+type ListTracksByGenreRow struct {
+	TrackID        int64   `json:"track_id"`
+	TrackTitle     string  `json:"track_title"`
+	Duration       int32   `json:"duration"`
+	DiscNumber     int32   `json:"disc_number"`
+	TrackNumber    int32   `json:"track_number"`
+	AlbumID        int64   `json:"album_id"`
+	AlbumTitle     string  `json:"album_title"`
+	AlbumSlug      string  `json:"album_slug"`
+	AlbumCoverPath string  `json:"album_cover_path"`
+	AlbumYear      string  `json:"album_year"`
+	ArtistID       int64   `json:"artist_id"`
+	ArtistName     string  `json:"artist_name"`
+	ArtistSlug     string  `json:"artist_slug"`
+	Score          float32 `json:"score"`
+}
+
+func (q *Queries) ListTracksByGenre(ctx context.Context, arg ListTracksByGenreParams) ([]ListTracksByGenreRow, error) {
+	rows, err := q.db.Query(ctx, listTracksByGenre,
+		arg.GenreName,
+		arg.MinScore,
+		arg.TrackOffset,
+		arg.TrackLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTracksByGenreRow{}
+	for rows.Next() {
+		var i ListTracksByGenreRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.Score,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTracksByMood = `-- name: ListTracksByMood :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       ((tf.mood_tags->>$1::text)::real) AS score
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE (tf.mood_tags->>$1::text)::real > $2::real
+ORDER BY (tf.mood_tags->>$1::text)::real DESC, t.id ASC
+LIMIT $4 OFFSET $3
+`
+
+type ListTracksByMoodParams struct {
+	MoodKey     string  `json:"mood_key"`
+	Threshold   float32 `json:"threshold"`
+	TrackOffset int32   `json:"track_offset"`
+	TrackLimit  int32   `json:"track_limit"`
+}
+
+type ListTracksByMoodRow struct {
+	TrackID        int64   `json:"track_id"`
+	TrackTitle     string  `json:"track_title"`
+	Duration       int32   `json:"duration"`
+	DiscNumber     int32   `json:"disc_number"`
+	TrackNumber    int32   `json:"track_number"`
+	AlbumID        int64   `json:"album_id"`
+	AlbumTitle     string  `json:"album_title"`
+	AlbumSlug      string  `json:"album_slug"`
+	AlbumCoverPath string  `json:"album_cover_path"`
+	AlbumYear      string  `json:"album_year"`
+	ArtistID       int64   `json:"artist_id"`
+	ArtistName     string  `json:"artist_name"`
+	ArtistSlug     string  `json:"artist_slug"`
+	Score          float32 `json:"score"`
+}
+
+// High-scoring tracks for one mood tag, paginated, with album+artist context.
+func (q *Queries) ListTracksByMood(ctx context.Context, arg ListTracksByMoodParams) ([]ListTracksByMoodRow, error) {
+	rows, err := q.db.Query(ctx, listTracksByMood,
+		arg.MoodKey,
+		arg.Threshold,
+		arg.TrackOffset,
+		arg.TrackLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTracksByMoodRow{}
+	for rows.Next() {
+		var i ListTracksByMoodRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.Score,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTracksByTempoBand = `-- name: ListTracksByTempoBand :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       tf.bpm            AS bpm
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE tf.bpm IS NOT NULL
+  AND tf.bpm >= $1::real
+  AND tf.bpm <  $2::real
+ORDER BY tf.bpm ASC, t.id ASC
+LIMIT $4 OFFSET $3
+`
+
+type ListTracksByTempoBandParams struct {
+	MinBpm      float32 `json:"min_bpm"`
+	MaxBpm      float32 `json:"max_bpm"`
+	TrackOffset int32   `json:"track_offset"`
+	TrackLimit  int32   `json:"track_limit"`
+}
+
+type ListTracksByTempoBandRow struct {
+	TrackID        int64         `json:"track_id"`
+	TrackTitle     string        `json:"track_title"`
+	Duration       int32         `json:"duration"`
+	DiscNumber     int32         `json:"disc_number"`
+	TrackNumber    int32         `json:"track_number"`
+	AlbumID        int64         `json:"album_id"`
+	AlbumTitle     string        `json:"album_title"`
+	AlbumSlug      string        `json:"album_slug"`
+	AlbumCoverPath string        `json:"album_cover_path"`
+	AlbumYear      string        `json:"album_year"`
+	ArtistID       int64         `json:"artist_id"`
+	ArtistName     string        `json:"artist_name"`
+	ArtistSlug     string        `json:"artist_slug"`
+	Bpm            pgtype.Float4 `json:"bpm"`
+}
+
+func (q *Queries) ListTracksByTempoBand(ctx context.Context, arg ListTracksByTempoBandParams) ([]ListTracksByTempoBandRow, error) {
+	rows, err := q.db.Query(ctx, listTracksByTempoBand,
+		arg.MinBpm,
+		arg.MaxBpm,
+		arg.TrackOffset,
+		arg.TrackLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTracksByTempoBandRow{}
+	for rows.Next() {
+		var i ListTracksByTempoBandRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.Bpm,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mixToTracks = `-- name: MixToTracks :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
+       tf.bpm            AS bpm,
+       tf.key_root       AS key_root,
+       tf.key_mode       AS key_mode,
+       (tf.track_embedding <=> $1)::real AS distance
+FROM track_facets tf
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE tf.track_embedding IS NOT NULL
+  AND tf.bpm IS NOT NULL
+  AND tf.bpm BETWEEN $2::real AND $3::real
+  AND tf.key_root IS NOT NULL
+  AND tf.key_mode IS NOT NULL
+  AND (tf.key_root::int * 2 + tf.key_mode::int) = ANY($4::int[])
+  AND NOT (tf.track_id = ANY($5::bigint[]))
+ORDER BY tf.track_embedding <=> $1
+LIMIT $6
+`
+
+type MixToTracksParams struct {
+	TrackEmbedding pgvector.Vector `json:"track_embedding"`
+	BpmMin         float32         `json:"bpm_min"`
+	BpmMax         float32         `json:"bpm_max"`
+	KeyCodes       []int32         `json:"key_codes"`
+	ExcludeIds     []int64         `json:"exclude_ids"`
+	TrackLimit     int32           `json:"track_limit"`
+}
+
+type MixToTracksRow struct {
+	TrackID        int64         `json:"track_id"`
+	TrackTitle     string        `json:"track_title"`
+	Duration       int32         `json:"duration"`
+	DiscNumber     int32         `json:"disc_number"`
+	TrackNumber    int32         `json:"track_number"`
+	AlbumID        int64         `json:"album_id"`
+	AlbumTitle     string        `json:"album_title"`
+	AlbumSlug      string        `json:"album_slug"`
+	AlbumCoverPath string        `json:"album_cover_path"`
+	AlbumYear      string        `json:"album_year"`
+	ArtistID       int64         `json:"artist_id"`
+	ArtistName     string        `json:"artist_name"`
+	ArtistSlug     string        `json:"artist_slug"`
+	Bpm            pgtype.Float4 `json:"bpm"`
+	KeyRoot        pgtype.Int2   `json:"key_root"`
+	KeyMode        pgtype.Int2   `json:"key_mode"`
+	Distance       float32       `json:"distance"`
+}
+
+// DJ-style "mix to next track" picker. Constrains the result to tracks that
+// mix smoothly with the seed:
+//
+//   - BPM within sqlc.arg(bpm_min)..bpm_max (caller picks the tolerance)
+//   - Key matches one of the Camelot-compatible (root, mode) pairs passed in
+//     `key_codes` as composite ints: code = root*2 + mode. The caller computes
+//     these from sonicanalysis.Key.CompatibleKeys().
+//   - Excludes the seed and any caller-supplied skip IDs.
+//
+// Result ordered by cosine ASC on the seed's track_embedding, so the
+// harmonically-compatible track that's also closest in feel comes first.
+// Returns the rich track row shape (album + artist context + slugs).
+func (q *Queries) MixToTracks(ctx context.Context, arg MixToTracksParams) ([]MixToTracksRow, error) {
+	rows, err := q.db.Query(ctx, mixToTracks,
+		arg.TrackEmbedding,
+		arg.BpmMin,
+		arg.BpmMax,
+		arg.KeyCodes,
+		arg.ExcludeIds,
+		arg.TrackLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MixToTracksRow{}
+	for rows.Next() {
+		var i MixToTracksRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.Bpm,
+			&i.KeyRoot,
+			&i.KeyMode,
+			&i.Distance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextTrackForAnalysis = `-- name: NextTrackForAnalysis :one
 SELECT t.id, t.title, t.album_id, a.artist_id, t.file_path
 FROM tracks t
 JOIN albums a ON a.id = t.album_id
 LEFT JOIN track_facets tf ON tf.track_id = t.id
 WHERE t.file_path != ''
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $1)
+  AND t.duration <= $1::int
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > $1::int
+  )
+  AND (tf.track_id IS NULL OR tf.analyzer_version < $2::int)
 ORDER BY t.id ASC
 LIMIT 1
 `
+
+type NextTrackForAnalysisParams struct {
+	MaxDurationSeconds int32 `json:"max_duration_seconds"`
+	AnalyzerVersion    int32 `json:"analyzer_version"`
+}
 
 type NextTrackForAnalysisRow struct {
 	ID       int64  `json:"id"`
@@ -131,9 +718,17 @@ type NextTrackForAnalysisRow struct {
 // Pick the next track that either has no facets row yet, or whose facets row
 // is older than the configured analyzer_version. Tracks must have a usable
 // primary file (file_path != ”) so the analyzer can actually read audio.
+// Skip tracks longer than sqlc.arg(max_duration_seconds) — long-form content
+// (DJ sets, podcasts, lectures) blows the analysis budget for noisy facets.
+// Duration is checked against BOTH sources we have: tracks.duration (from
+// upstream metadata, often 0 for orphan files) and track_files.duration
+// (ffprobe at scan time, ground truth). If either source says "too long",
+// skip. duration=0 means "unknown" and passes — we only reject on positive
+// evidence the track is over the cap, so missing metadata never silently
+// kills a song-length track.
 // Deterministic order (id ASC) so the scheduler resumes predictably.
-func (q *Queries) NextTrackForAnalysis(ctx context.Context, analyzerVersion int32) (NextTrackForAnalysisRow, error) {
-	row := q.db.QueryRow(ctx, nextTrackForAnalysis, analyzerVersion)
+func (q *Queries) NextTrackForAnalysis(ctx context.Context, arg NextTrackForAnalysisParams) (NextTrackForAnalysisRow, error) {
+	row := q.db.QueryRow(ctx, nextTrackForAnalysis, arg.MaxDurationSeconds, arg.AnalyzerVersion)
 	var i NextTrackForAnalysisRow
 	err := row.Scan(
 		&i.ID,
@@ -143,6 +738,64 @@ func (q *Queries) NextTrackForAnalysis(ctx context.Context, analyzerVersion int3
 		&i.FilePath,
 	)
 	return i, err
+}
+
+const pickTrackWithFacetsByAlbumID = `-- name: PickTrackWithFacetsByAlbumID :one
+SELECT t.id AS track_id
+FROM tracks t
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.album_id = $1
+  AND tf.track_embedding IS NOT NULL
+ORDER BY random()
+LIMIT 1
+`
+
+func (q *Queries) PickTrackWithFacetsByAlbumID(ctx context.Context, albumID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, pickTrackWithFacetsByAlbumID, albumID)
+	var track_id int64
+	err := row.Scan(&track_id)
+	return track_id, err
+}
+
+const pickTrackWithFacetsByArtistID = `-- name: PickTrackWithFacetsByArtistID :one
+SELECT t.id AS track_id
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE al.artist_id = $1
+  AND tf.track_embedding IS NOT NULL
+ORDER BY random()
+LIMIT 1
+`
+
+func (q *Queries) PickTrackWithFacetsByArtistID(ctx context.Context, artistID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, pickTrackWithFacetsByArtistID, artistID)
+	var track_id int64
+	err := row.Scan(&track_id)
+	return track_id, err
+}
+
+const pickTrackWithFacetsByArtistSlug = `-- name: PickTrackWithFacetsByArtistSlug :one
+SELECT t.id AS track_id
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE mi.slug = $1
+  AND tf.track_embedding IS NOT NULL
+ORDER BY random()
+LIMIT 1
+`
+
+// Picks any track for the given artist that already has facets analyzed.
+// Used as the radio seed when the user starts a station from an artist —
+// "pick something from this artist's catalog to anchor the KNN".
+func (q *Queries) PickTrackWithFacetsByArtistSlug(ctx context.Context, slug string) (int64, error) {
+	row := q.db.QueryRow(ctx, pickTrackWithFacetsByArtistSlug, slug)
+	var track_id int64
+	err := row.Scan(&track_id)
+	return track_id, err
 }
 
 const refreshAlbumCentroid = `-- name: RefreshAlbumCentroid :exec
@@ -232,10 +885,16 @@ func (q *Queries) ResetTrackFacetsVersionForLibrary(ctx context.Context, library
 }
 
 const similarAlbums = `-- name: SimilarAlbums :many
-SELECT al.id, al.title, al.artist_id, al.slug,
+SELECT al.id, al.title, al.artist_id, al.slug AS album_slug,
+       a.name           AS artist_name,
+       mi.slug          AS artist_slug,
+       al.cover_path    AS album_cover_path,
+       al.year          AS album_year,
        (alc.sonic_centroid <=> $1)::real AS distance
 FROM album_centroids alc
-JOIN albums al ON al.id = alc.album_id
+JOIN albums      al ON al.id = alc.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
 WHERE alc.album_id != $2
   AND alc.sonic_centroid IS NOT NULL
 ORDER BY alc.sonic_centroid <=> $1
@@ -249,13 +908,19 @@ type SimilarAlbumsParams struct {
 }
 
 type SimilarAlbumsRow struct {
-	ID       int64   `json:"id"`
-	Title    string  `json:"title"`
-	ArtistID int64   `json:"artist_id"`
-	Slug     string  `json:"slug"`
-	Distance float32 `json:"distance"`
+	ID             int64   `json:"id"`
+	Title          string  `json:"title"`
+	ArtistID       int64   `json:"artist_id"`
+	AlbumSlug      string  `json:"album_slug"`
+	ArtistName     string  `json:"artist_name"`
+	ArtistSlug     string  `json:"artist_slug"`
+	AlbumCoverPath string  `json:"album_cover_path"`
+	AlbumYear      string  `json:"album_year"`
+	Distance       float32 `json:"distance"`
 }
 
+// artist_slug + album.slug together address the cover endpoint and the album
+// detail page; carrying both saves the FE from joining against an artist row.
 func (q *Queries) SimilarAlbums(ctx context.Context, arg SimilarAlbumsParams) ([]SimilarAlbumsRow, error) {
 	rows, err := q.db.Query(ctx, similarAlbums, arg.SonicCentroid, arg.AlbumID, arg.Limit)
 	if err != nil {
@@ -269,7 +934,11 @@ func (q *Queries) SimilarAlbums(ctx context.Context, arg SimilarAlbumsParams) ([
 			&i.ID,
 			&i.Title,
 			&i.ArtistID,
-			&i.Slug,
+			&i.AlbumSlug,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
 			&i.Distance,
 		); err != nil {
 			return nil, err
@@ -334,48 +1003,79 @@ func (q *Queries) SimilarArtists(ctx context.Context, arg SimilarArtistsParams) 
 	return items, nil
 }
 
-const similarTracksByText = `-- name: SimilarTracksByText :many
-SELECT t.id, t.title, t.album_id, a.artist_id, t.file_path,
+const similarTracksByTextRich = `-- name: SimilarTracksByTextRich :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
        (tf.text_embedding <=> $1)::real AS distance
 FROM track_facets tf
-JOIN tracks t ON t.id = tf.track_id
-JOIN albums a ON a.id = t.album_id
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
 WHERE tf.text_embedding IS NOT NULL
 ORDER BY tf.text_embedding <=> $1
 LIMIT $2
 `
 
-type SimilarTracksByTextParams struct {
+type SimilarTracksByTextRichParams struct {
 	TextEmbedding pgvector.Vector `json:"text_embedding"`
-	Limit         int32           `json:"limit"`
+	TrackLimit    int32           `json:"track_limit"`
 }
 
-type SimilarTracksByTextRow struct {
-	ID       int64   `json:"id"`
-	Title    string  `json:"title"`
-	AlbumID  int64   `json:"album_id"`
-	ArtistID int64   `json:"artist_id"`
-	FilePath string  `json:"file_path"`
-	Distance float32 `json:"distance"`
+type SimilarTracksByTextRichRow struct {
+	TrackID        int64   `json:"track_id"`
+	TrackTitle     string  `json:"track_title"`
+	Duration       int32   `json:"duration"`
+	DiscNumber     int32   `json:"disc_number"`
+	TrackNumber    int32   `json:"track_number"`
+	AlbumID        int64   `json:"album_id"`
+	AlbumTitle     string  `json:"album_title"`
+	AlbumSlug      string  `json:"album_slug"`
+	AlbumCoverPath string  `json:"album_cover_path"`
+	AlbumYear      string  `json:"album_year"`
+	ArtistID       int64   `json:"artist_id"`
+	ArtistName     string  `json:"artist_name"`
+	ArtistSlug     string  `json:"artist_slug"`
+	Distance       float32 `json:"distance"`
 }
 
-// Top-N tracks closest to a CLAP text embedding (caller computes the text
-// vector via TextSearcher). Searches in the audio↔text shared CLAP space.
-func (q *Queries) SimilarTracksByText(ctx context.Context, arg SimilarTracksByTextParams) ([]SimilarTracksByTextRow, error) {
-	rows, err := q.db.Query(ctx, similarTracksByText, arg.TextEmbedding, arg.Limit)
+// Rich CLAP text→audio search. Returns the same row shape as
+// SimilarTracksByTrackRich so the FE consumes search results and KNN
+// expansions with one component.
+func (q *Queries) SimilarTracksByTextRich(ctx context.Context, arg SimilarTracksByTextRichParams) ([]SimilarTracksByTextRichRow, error) {
+	rows, err := q.db.Query(ctx, similarTracksByTextRich, arg.TextEmbedding, arg.TrackLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SimilarTracksByTextRow{}
+	items := []SimilarTracksByTextRichRow{}
 	for rows.Next() {
-		var i SimilarTracksByTextRow
+		var i SimilarTracksByTextRichRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Title,
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
 			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
 			&i.ArtistID,
-			&i.FilePath,
+			&i.ArtistName,
+			&i.ArtistSlug,
 			&i.Distance,
 		); err != nil {
 			return nil, err
@@ -388,52 +1088,81 @@ func (q *Queries) SimilarTracksByText(ctx context.Context, arg SimilarTracksByTe
 	return items, nil
 }
 
-const similarTracksByTrack = `-- name: SimilarTracksByTrack :many
-SELECT t.id, t.title, t.album_id, a.artist_id, t.file_path,
+const similarTracksByTrackRich = `-- name: SimilarTracksByTrackRich :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug,
        (tf.track_embedding <=> $1)::real AS distance
 FROM track_facets tf
-JOIN tracks t ON t.id = tf.track_id
-JOIN albums a ON a.id = t.album_id
-WHERE tf.track_id != $2
-  AND tf.track_embedding IS NOT NULL
+JOIN tracks      t  ON t.id = tf.track_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE tf.track_embedding IS NOT NULL
+  AND NOT (tf.track_id = ANY($2::bigint[]))
 ORDER BY tf.track_embedding <=> $1
 LIMIT $3
 `
 
-type SimilarTracksByTrackParams struct {
+type SimilarTracksByTrackRichParams struct {
 	TrackEmbedding pgvector.Vector `json:"track_embedding"`
-	TrackID        int64           `json:"track_id"`
-	Limit          int32           `json:"limit"`
+	ExcludeIds     []int64         `json:"exclude_ids"`
+	TrackLimit     int32           `json:"track_limit"`
 }
 
-type SimilarTracksByTrackRow struct {
-	ID       int64   `json:"id"`
-	Title    string  `json:"title"`
-	AlbumID  int64   `json:"album_id"`
-	ArtistID int64   `json:"artist_id"`
-	FilePath string  `json:"file_path"`
-	Distance float32 `json:"distance"`
+type SimilarTracksByTrackRichRow struct {
+	TrackID        int64   `json:"track_id"`
+	TrackTitle     string  `json:"track_title"`
+	Duration       int32   `json:"duration"`
+	DiscNumber     int32   `json:"disc_number"`
+	TrackNumber    int32   `json:"track_number"`
+	AlbumID        int64   `json:"album_id"`
+	AlbumTitle     string  `json:"album_title"`
+	AlbumSlug      string  `json:"album_slug"`
+	AlbumCoverPath string  `json:"album_cover_path"`
+	AlbumYear      string  `json:"album_year"`
+	ArtistID       int64   `json:"artist_id"`
+	ArtistName     string  `json:"artist_name"`
+	ArtistSlug     string  `json:"artist_slug"`
+	Distance       float32 `json:"distance"`
 }
 
-// Top-N tracks closest to the seed track by cosine on track_embedding.
-// Excludes the seed itself. Caller passes the seed's vector after fetching
-// it; this avoids an extra subquery + lets the planner use the HNSW index
-// on the literal parameter.
-func (q *Queries) SimilarTracksByTrack(ctx context.Context, arg SimilarTracksByTrackParams) ([]SimilarTracksByTrackRow, error) {
-	rows, err := q.db.Query(ctx, similarTracksByTrack, arg.TrackEmbedding, arg.TrackID, arg.Limit)
+// Rich KNN: same cosine ordering as SimilarTracksByTrack but joins
+// album + artist context so the caller gets a self-contained track row
+// (no follow-up lookups). Used by the Instant Radio endpoint.
+func (q *Queries) SimilarTracksByTrackRich(ctx context.Context, arg SimilarTracksByTrackRichParams) ([]SimilarTracksByTrackRichRow, error) {
+	rows, err := q.db.Query(ctx, similarTracksByTrackRich, arg.TrackEmbedding, arg.ExcludeIds, arg.TrackLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SimilarTracksByTrackRow{}
+	items := []SimilarTracksByTrackRichRow{}
 	for rows.Next() {
-		var i SimilarTracksByTrackRow
+		var i SimilarTracksByTrackRichRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Title,
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
 			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
 			&i.ArtistID,
-			&i.FilePath,
+			&i.ArtistName,
+			&i.ArtistSlug,
 			&i.Distance,
 		); err != nil {
 			return nil, err

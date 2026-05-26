@@ -36,7 +36,7 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, binaryOp(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
 		wrapStream(handleTMDBImageProxy()))
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/albums/{id}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
+	huma.Register(api, binaryOp(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
 		wrapStream(handleAlbumCover(app)))
 
 	// --- Video streaming (HLS + direct play) ---
@@ -64,11 +64,19 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 		wrapStream(handleTrickplaySprite(app)))
 
 	// --- Music streaming (range-served audio bytes) ---
-	huma.Register(api, securedBinary(http.MethodGet, "/api/tracks/{id}/stream", "stream-track", "Best-quality playable audio for a track", "Music"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/stream", "stream-track", "Best-quality playable audio for a track", "Music"),
 		wrapStream(handleStreamTrack(app)))
 
-	huma.Register(api, securedBinary(http.MethodGet, "/api/tracks/{id}/file/{track_file_id}", "stream-track-file", "Specific track file (bit-perfect)", "Music"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/file/{track_file_id}", "stream-track-file", "Specific track file (bit-perfect)", "Music"),
 		wrapStream(handleStreamTrackFile(app)))
+
+	// --- Internet-radio stream proxy (long-lived, ICY metadata stripped) ---
+	huma.Register(api, securedBinary(http.MethodGet, "/api/radio/stream", "stream-radio", "Proxy an internet-radio stream URL", "Radio"),
+		wrapStream(handleRadioStream(app)))
+
+	// --- Podcast episode stream proxy (range-served audio from RSS enclosure) ---
+	huma.Register(api, securedBinary(http.MethodGet, "/api/podcasts/episode/stream", "stream-podcast-episode", "Proxy a podcast episode audio URL", "Podcasts"),
+		wrapStream(handlePodcastStream(app)))
 
 	// Multipart upload lives in metadata_editor_huma.go because it uses
 	// huma.MultipartFormFiles instead of wrapStream — proper typed binding

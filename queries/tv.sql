@@ -30,6 +30,12 @@ SELECT * FROM tv_seasons WHERE series_id = $1 ORDER BY season_number ASC;
 -- name: GetTVSeason :one
 SELECT * FROM tv_seasons WHERE series_id = $1 AND season_number = $2;
 
+-- name: GetTVSeasonByID :one
+SELECT * FROM tv_seasons WHERE id = $1;
+
+-- name: GetTVSeriesByID :one
+SELECT * FROM tv_series WHERE id = $1;
+
 -- name: CreateTVEpisode :one
 INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)

@@ -111,6 +111,7 @@ WHERE (
 -- name: SearchTracks :many
 SELECT t.*,
        a.title AS album_title,
+       a.slug AS album_slug,
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
        mi.title AS artist_name,

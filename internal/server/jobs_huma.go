@@ -7,7 +7,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -114,14 +113,11 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			progressMap := app.GetAllTaskProgress()
-			if progressMap == nil {
-				progressMap = make(map[scheduler.TaskID]*scheduler.TaskProgress)
-			}
+			runtime := app.GetAllTaskRuntimeState(ctx)
 			statsMap := app.QueryTaskStats(ctx)
 			result := make([]taskResponse, len(tasks))
 			for i, t := range tasks {
-				result[i] = taskToResponse(t, progressMap)
+				result[i] = taskToResponse(t, runtime)
 				if s, ok := statsMap[t.ID]; ok {
 					result[i].Stats = &s
 				}
@@ -146,7 +142,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
 		}) (*StatusOutput, error) {
-			if err := app.CancelTask(in.ID); err != nil {
+			if err := app.CancelTask(ctx, in.ID); err != nil {
 				if errors.Is(err, service.ErrSchedulerUnavailable) {
 					return nil, huma.Error503ServiceUnavailable(err.Error())
 				}
@@ -216,28 +212,37 @@ type clearedBody struct {
 	Cleared int64 `json:"cleared"`
 }
 
-type taskResponse struct {
-	ID                    string                  `json:"id"`
-	DisplayName           string                  `json:"display_name"`
-	Description           string                  `json:"description"`
-	Category              string                  `json:"category"`
-	Enabled               bool                    `json:"enabled"`
-	IntervalHours         int32                   `json:"interval_hours"`
-	DailyStartTime        string                  `json:"daily_start_time"`
-	DailyEndTime          string                  `json:"daily_end_time"`
-	MaxRuntimeMinutes     int32                   `json:"max_runtime_minutes"`
-	LastRunAt             *string                 `json:"last_run_at"`
-	LastRunResult         string                  `json:"last_run_result"`
-	LastRunDurationSec    int32                   `json:"last_run_duration_sec"`
-	LastRunItemsProcessed int32                   `json:"last_run_items_processed"`
-	LastRunItemsTotal     int32                   `json:"last_run_items_total"`
-	NextRunAt             *string                 `json:"next_run_at"`
-	State                 string                  `json:"state"`
-	Progress              *scheduler.TaskProgress `json:"progress"`
-	Stats                 *service.TaskStats      `json:"stats,omitempty"`
+// taskRuntime mirrors service.TaskRuntimeState into the JSON response
+// (pending + running counts derived from river_job for the task's
+// kinds). Replaces the old in-memory ProgressTracker payload.
+type taskRuntime struct {
+	State   string `json:"state"`
+	Pending int    `json:"pending"`
+	Running int    `json:"running"`
 }
 
-func taskToResponse(t sqlc.ScheduledTask, progressMap map[scheduler.TaskID]*scheduler.TaskProgress) taskResponse {
+type taskResponse struct {
+	ID                    string             `json:"id"`
+	DisplayName           string             `json:"display_name"`
+	Description           string             `json:"description"`
+	Category              string             `json:"category"`
+	Enabled               bool               `json:"enabled"`
+	IntervalHours         int32              `json:"interval_hours"`
+	DailyStartTime        string             `json:"daily_start_time"`
+	DailyEndTime          string             `json:"daily_end_time"`
+	MaxRuntimeMinutes     int32              `json:"max_runtime_minutes"`
+	LastRunAt             *string            `json:"last_run_at"`
+	LastRunResult         string             `json:"last_run_result"`
+	LastRunDurationSec    int32              `json:"last_run_duration_sec"`
+	LastRunItemsProcessed int32              `json:"last_run_items_processed"`
+	LastRunItemsTotal     int32              `json:"last_run_items_total"`
+	NextRunAt             *string            `json:"next_run_at"`
+	State                 string             `json:"state"`
+	Runtime               *taskRuntime       `json:"runtime,omitempty"`
+	Stats                 *service.TaskStats `json:"stats,omitempty"`
+}
+
+func taskToResponse(t sqlc.ScheduledTask, runtime map[string]service.TaskRuntimeState) taskResponse {
 	r := taskResponse{
 		ID:                    t.ID,
 		DisplayName:           t.DisplayName,
@@ -262,9 +267,9 @@ func taskToResponse(t sqlc.ScheduledTask, progressMap map[scheduler.TaskID]*sche
 		s := t.NextRunAt.Time.UTC().Format("2006-01-02T15:04:05Z")
 		r.NextRunAt = &s
 	}
-	if p, ok := progressMap[scheduler.TaskID(t.ID)]; ok && p != nil {
-		r.State = p.State
-		r.Progress = p
+	if rs, ok := runtime[t.ID]; ok {
+		r.State = rs.State
+		r.Runtime = &taskRuntime{State: rs.State, Pending: rs.Pending, Running: rs.Running}
 	}
 	return r
 }

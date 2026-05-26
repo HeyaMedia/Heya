@@ -28,7 +28,7 @@ func registerAuthRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error409Conflict(err.Error())
 			}
-			token, err := app.CreateSession(ctx, user.ID)
+			token, err := app.CreateAuthSession(ctx, user.ID, in.UserAgent, "")
 			if err != nil {
 				return nil, huma.Error500InternalServerError("failed to create session")
 			}
@@ -44,7 +44,7 @@ func registerAuthRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error401Unauthorized("invalid credentials")
 			}
-			token, err := app.CreateSession(ctx, user.ID)
+			token, err := app.CreateAuthSession(ctx, user.ID, in.UserAgent, "")
 			if err != nil {
 				return nil, huma.Error500InternalServerError("failed to create session")
 			}
@@ -67,7 +67,8 @@ func registerAuthRoutes(api huma.API, app *service.App) {
 }
 
 type registerInput struct {
-	Body struct {
+	UserAgent string `header:"User-Agent" required:"false" doc:"Captured into the session so the user can recognise this device on the My Sessions page"`
+	Body      struct {
 		Username string `json:"username" minLength:"1" maxLength:"64" example:"alice" doc:"Username"`
 		Email    string `json:"email" minLength:"1" maxLength:"254" format:"email" example:"alice@example.com" doc:"Email address"`
 		Password string `json:"password" minLength:"8" maxLength:"256" example:"hunter2hunter2" doc:"Password"`
@@ -75,7 +76,8 @@ type registerInput struct {
 }
 
 type loginInput struct {
-	Body struct {
+	UserAgent string `header:"User-Agent" required:"false" doc:"Captured into the session so the user can recognise this device on the My Sessions page"`
+	Body      struct {
 		Username string `json:"username" minLength:"1" maxLength:"64" example:"alice" doc:"Username"`
 		Password string `json:"password" minLength:"1" maxLength:"256" example:"hunter2hunter2" doc:"Password"`
 	}

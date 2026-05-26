@@ -75,6 +75,17 @@ SELECT * FROM artists
 WHERE lower(name) = lower($1) AND lower(disambiguation) = lower($2)
 LIMIT 1;
 
+-- name: GetArtistByNameAndDisambiguationExcludingID :one
+-- Used by the merge-detection path in RefreshMusicArtist when no MBID
+-- helped resolve a canonical sibling — falls back to "is there an
+-- existing row whose (name, disambig) already matches what we're about
+-- to write?" so the unique-constraint collision turns into a merge.
+SELECT * FROM artists
+WHERE lower(name) = lower($1)
+  AND lower(disambiguation) = lower($2)
+  AND id != sqlc.arg(exclude_id)
+LIMIT 1;
+
 -- name: UpdateArtist :one
 UPDATE artists
 SET musicbrainz_id = $2, name = $3, sort_name = $4, disambiguation = $5, biography = $6
@@ -258,6 +269,30 @@ SELECT COALESCE(MAX(file_path), '') AS file_path FROM tracks WHERE album_id = $1
 -- name: GetTrackByID :one
 SELECT * FROM tracks WHERE id = $1;
 
+-- name: GetTrackDetailByID :one
+-- One-shot track detail: track row + album + artist context. Pair with
+-- ListTrackFilesByTrack on the service side to attach per-file formats.
+SELECT t.id,
+       t.album_id,
+       t.disc_number,
+       t.track_number,
+       t.title,
+       t.duration,
+       t.lyrics_path,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.year           AS album_year,
+       al.cover_path     AS album_cover_path,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE t.id = $1
+LIMIT 1;
+
 -- name: GetTrackByLibraryFileID :one
 SELECT * FROM tracks WHERE library_file_id = $1;
 
@@ -322,6 +357,71 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music';
 
+-- name: GetMusicArtistBySlug :one
+-- Direct artist lookup by media-item slug. Same row shape as ListMusicArtists
+-- so the FE can render headers from either feed without branching.
+SELECT a.*,
+       mi.slug         AS slug,
+       mi.poster_path  AS poster_path,
+       (SELECT count(*) FROM albums  al WHERE al.artist_id = a.id)                              AS album_count,
+       (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE mi.slug = $1 AND l.media_type = 'music'
+LIMIT 1;
+
+-- name: ListAlbumsByArtistSlug :many
+-- Paginated album listing for one artist. Same row shape as ListMusicAlbums
+-- so the FE can reuse the album-row component without branching.
+SELECT al.*,
+       a.name           AS artist_name,
+       mi.slug          AS artist_slug,
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
+FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1
+ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
+LIMIT $2 OFFSET $3;
+
+-- name: CountAlbumsByArtistSlug :one
+SELECT count(*) FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1;
+
+-- name: ListTracksByArtistSlug :many
+-- Paginated flat-track listing for one artist. Same row shape as
+-- ListMusicTracks. Newest album first, then disc/track order within the album.
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1
+ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC,
+         t.disc_number ASC, t.track_number ASC
+LIMIT $2 OFFSET $3;
+
+-- name: CountTracksByArtistSlug :one
+SELECT count(*) FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1;
+
 -- name: ListMusicAlbums :many
 -- Merged listing of every album across every music library. Joins the artist
 -- so the Albums grid can render "Title — Artist" without a second round-trip.
@@ -349,7 +449,8 @@ WHERE l.media_type = 'music';
 -- name: ListMusicTracks :many
 -- Flat listing for the Songs tab. Carries everything the row needs:
 -- title, duration, album title, artist name, slugs for navigation, and the
--- album cover for the thumbnail.
+-- album cover for the thumbnail. album_slug + artist_slug together address
+-- the album cover endpoint without an ID lookup.
 SELECT t.id              AS track_id,
        t.title           AS track_title,
        t.duration        AS duration,
@@ -357,6 +458,7 @@ SELECT t.id              AS track_id,
        t.track_number    AS track_number,
        al.id             AS album_id,
        al.title          AS album_title,
+       al.slug           AS album_slug,
        al.cover_path     AS album_cover_path,
        al.year           AS album_year,
        a.id              AS artist_id,
@@ -507,6 +609,121 @@ JOIN LATERAL (
 JOIN library_files lf ON lf.id = primary_file.library_file_id
 WHERE t.album_id = $1
 ORDER BY t.disc_number, t.track_number;
+
+-- name: GetArtistByMusicBrainzIDExcludingID :one
+-- Used by RefreshMusicArtist to detect "we resolved the same MBID as an
+-- existing sibling row" so the matcher can merge instead of letting
+-- UpdateArtistEnrichedFields collide on uq_artists_name_disambig.
+SELECT *
+FROM artists
+WHERE musicbrainz_id = sqlc.arg(mbid)
+  AND id != sqlc.arg(exclude_id)
+LIMIT 1;
+
+-- name: ReparentAlbums :exec
+-- Move every album from src_id over to dst_id. Tracks follow via
+-- albums.artist_id (track_id is keyed on album_id, not artist_id).
+UPDATE albums SET artist_id = sqlc.arg(dst_id) WHERE albums.artist_id = sqlc.arg(src_id);
+
+-- name: ReparentSimilarLocalRefs :exec
+-- Re-point any "this dupe is a similar artist of X" pointer at the
+-- canonical row. The dupe's OWN similar-list rows are deleted by
+-- DeleteArtistDerivedChildren below — those get recomputed.
+UPDATE artist_similar_artists
+SET local_artist_id = sqlc.arg(dst_id)
+WHERE local_artist_id = sqlc.arg(src_id);
+
+-- name: DeleteArtistCentroid :exec
+DELETE FROM artist_centroids WHERE artist_id = sqlc.arg(src_id);
+
+-- name: DeleteArtistTopTracks :exec
+DELETE FROM artist_top_tracks WHERE artist_id = sqlc.arg(src_id);
+
+-- name: DeleteArtistSimilarArtists :exec
+DELETE FROM artist_similar_artists WHERE artist_id = sqlc.arg(src_id);
+
+-- name: MergeUserArtistRatings :exec
+-- Move user_artist_ratings from src_id to dst_id, keeping the higher
+-- rating on collision (closer to what the user actually meant when
+-- they rated the same artist twice under different rows).
+INSERT INTO user_artist_ratings (user_id, artist_id, rating)
+SELECT user_id, sqlc.arg(dst_id), rating
+FROM user_artist_ratings
+WHERE user_artist_ratings.artist_id = sqlc.arg(src_id)
+ON CONFLICT (user_id, artist_id) DO UPDATE
+SET rating     = GREATEST(user_artist_ratings.rating, EXCLUDED.rating),
+    updated_at = now();
+
+-- name: DeleteUserArtistRatingsByArtist :exec
+DELETE FROM user_artist_ratings WHERE artist_id = sqlc.arg(src_id);
+
+-- name: MergeArtistFavorites :exec
+-- Move "loved artist" entries. Dupes within (user_id, entity_type,
+-- entity_id) collapse to a no-op via the existing unique constraint.
+INSERT INTO user_favorites (user_id, entity_type, entity_id)
+SELECT user_id, 'artist', sqlc.arg(dst_id)
+FROM user_favorites
+WHERE entity_type = 'artist' AND user_favorites.entity_id = sqlc.arg(src_id)
+ON CONFLICT (user_id, entity_type, entity_id) DO NOTHING;
+
+-- name: DeleteArtistFavorites :exec
+DELETE FROM user_favorites WHERE entity_type = 'artist' AND entity_id = sqlc.arg(src_id);
+
+-- name: DeleteArtist :exec
+DELETE FROM artists WHERE id = sqlc.arg(id);
+
+-- name: ListArtistTopTracksRawByArtistID :many
+-- Raw artist_top_tracks rows. The service layer joins these against the
+-- artist's local tracks in Go so it can use kagome-backed romanization
+-- (kana/kanji → romaji) for the title fallback. SQL alone can't do that
+-- and pg_trgm matches CJK poorly, so the join lives in service code.
+SELECT rank, title, mbid, playcount, listeners, url
+FROM artist_top_tracks
+WHERE artist_id = sqlc.arg(artist_id)
+ORDER BY rank ASC
+LIMIT sqlc.arg(track_limit);
+
+-- name: ListTracksForArtistMatching :many
+-- Minimal track + album projection used by ListArtistTopTracksBySlug to
+-- build its in-memory match index. Duration falls back to the best
+-- track_file duration when the canonical column is 0.
+SELECT
+    t.id        AS track_id,
+    t.title     AS title,
+    t.recording_mbid AS recording_mbid,
+    COALESCE(
+        NULLIF(t.duration, 0),
+        (SELECT MAX(tf.duration) FROM track_files tf WHERE tf.track_id = t.id),
+        0
+    )::int      AS effective_duration,
+    al.id       AS album_id,
+    al.title    AS album_title,
+    al.slug     AS album_slug,
+    al.year     AS album_year,
+    al.cover_path AS cover_path
+FROM tracks t
+JOIN albums al ON al.id = t.album_id
+WHERE al.artist_id = sqlc.arg(artist_id);
+
+-- name: ListArtistSimilarLocalArtistsByArtistID :many
+-- Persisted Last.fm/ListenBrainz similar list, with local linkage already
+-- folded in by the matcher write-side. Used to avoid the heya.media round
+-- trip on every artist page render.
+SELECT
+    asa.rank,
+    asa.name,
+    asa.mbid,
+    asa.match_score,
+    asa.url,
+    asa.local_artist_id,
+    COALESCE(local_mi.slug, '')::text AS local_slug,
+    COALESCE(local_mi.id, 0)::bigint  AS local_media_item_id
+FROM artist_similar_artists asa
+LEFT JOIN artists      local_a  ON local_a.id  = asa.local_artist_id
+LEFT JOIN media_items  local_mi ON local_mi.id = local_a.media_item_id
+WHERE asa.artist_id = sqlc.arg(artist_id)
+ORDER BY asa.rank ASC
+LIMIT sqlc.arg(artist_limit);
 
 -- name: AllAlbumTracksHaveLoudness :one
 -- Used by ScanTrackLoudnessWorker to decide whether to enqueue the

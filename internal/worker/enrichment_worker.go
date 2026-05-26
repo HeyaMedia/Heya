@@ -13,19 +13,27 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type EnrichmentWorker struct {
-	river.WorkerDefaults[EnrichmentArgs]
-	DB   *pgxpool.Pool
-	Heya *heyamedia.HeyaProvider
+// FetchArtworkWorker (formerly EnrichmentWorker) runs the secondary
+// artwork pass — fetches the full artwork catalogue from heya.media
+// and fans out DownloadImageArgs for additional backdrops + alternate
+// posters/logos beyond what the primary enrich populated. See the doc
+// on FetchArtworkArgs for the trigger paths.
+type FetchArtworkWorker struct {
+	river.WorkerDefaults[FetchArtworkArgs]
+	DB       *pgxpool.Pool
+	Heya     *heyamedia.HeyaProvider
+	Progress *TaskProgressBroadcaster
 }
 
-func (w *EnrichmentWorker) Work(ctx context.Context, job *river.Job[EnrichmentArgs]) error {
+func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtworkArgs]) error {
 	q := sqlc.New(w.DB)
 
 	item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 	if err != nil {
 		return nil
 	}
+
+	w.Progress.SetCurrentByKind(FetchArtworkArgs{}.Kind(), item.Title)
 
 	var externalIDs map[string]string
 	if err := decodeJSON(item.ExternalIds, &externalIDs); err != nil {

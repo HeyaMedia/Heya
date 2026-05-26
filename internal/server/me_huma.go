@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 )
@@ -16,25 +18,24 @@ import (
 //
 // /api/me/loved + /api/me/playlists live in music_huma.go (also consolidated).
 func registerMeRoutes(api huma.API, app *service.App) {
-	// --- Watch progress + continue/recent ---
-	huma.Register(api, secured(op(http.MethodPost, "/api/me/watch/{media_item_id}/progress", "update-watch-progress", "Update playback progress for a media item", "Me")),
+	// --- Unified playback emission ---
+	// One endpoint for video AND music. The server dispatches based on
+	// entity_type — movies/episodes upsert into user_watch_progress (resume
+	// state) and tracks append to play_events (history log). The two stores
+	// stay separate because their semantics genuinely differ (current state
+	// vs. event log); only the wire shape is unified.
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/playback", "record-playback", "Record a playback event (video progress / music scrobble)", "Me")),
 		func(ctx context.Context, in *struct {
-			MediaItemID int64 `path:"media_item_id" minimum:"1"`
-			Body        struct {
-				EntityType string `json:"entity_type" maxLength:"32" doc:"What kind of item is being scrubbed (defaults to 'movie')"`
-				Progress   int32  `json:"progress_seconds" minimum:"0"`
-				Total      int32  `json:"total_seconds" minimum:"0"`
+			Body service.PlaybackEvent
+		}) (*JSONOutput[okBody], error) {
+			if err := app.RecordPlayback(ctx, userFrom(ctx).ID, in.Body); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
 			}
-		}) (*JSONOutput[sqlc.UserWatchProgress], error) {
-			entry, err := app.UpdateWatchProgress(ctx, userFrom(ctx).ID, in.Body.EntityType, in.MediaItemID, in.Body.Progress, in.Body.Total)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return &JSONOutput[sqlc.UserWatchProgress]{Body: entry}, nil
+			return noStoreJSON(okBody{Ok: true}), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/watch/continue", "continue-watching", "Items the user can resume", "Me")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListContinueWatchingRow], error) {
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ContinueWatchingEnrichedRow], error) {
 			items, err := app.ListContinueWatching(ctx, userFrom(ctx).ID)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
@@ -219,6 +220,90 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[service.UserSettings]{Body: in.Body}, nil
 		})
 
+	// --- Password change ---
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/password", "change-password", "Change your password", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				CurrentPassword string `json:"current_password" minLength:"1" maxLength:"256" doc:"Current password (verified before swap)"`
+				NewPassword     string `json:"new_password" minLength:"8" maxLength:"256" doc:"New password — minimum 8 chars"`
+			}
+		}) (*JSONOutput[okBody], error) {
+			err := app.ChangePassword(ctx, userFrom(ctx).ID, in.Body.CurrentPassword, in.Body.NewPassword)
+			if err == service.ErrWrongPassword {
+				return nil, huma.Error401Unauthorized("current password is incorrect")
+			}
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to change password")
+			}
+			return noStoreJSON(okBody{Ok: true}), nil
+		})
+
+	// --- Auth sessions (devices you're signed in on) ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/auth-sessions", "list-auth-sessions", "List browser/CLI sessions for the current user", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.AuthSessionView], error) {
+			sessions, err := app.ListAuthSessions(ctx, userFrom(ctx).ID, auth.TokenFromContext(ctx))
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to list sessions")
+			}
+			return noStoreJSON(sessions), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/me/auth-sessions/{id}", "revoke-auth-session", "Sign out a specific device", "Me")),
+		func(ctx context.Context, in *struct {
+			ID int64 `path:"id" minimum:"1"`
+		}) (*JSONOutput[okBody], error) {
+			if err := app.RevokeAuthSession(ctx, userFrom(ctx).ID, in.ID); err != nil {
+				return nil, huma.Error500InternalServerError("failed to revoke session")
+			}
+			return noStoreJSON(okBody{Ok: true}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/auth-sessions/revoke-others", "revoke-other-auth-sessions", "Sign out every other device", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[okBody], error) {
+			if err := app.RevokeOtherAuthSessions(ctx, userFrom(ctx).ID, auth.TokenFromContext(ctx)); err != nil {
+				return nil, huma.Error500InternalServerError("failed to revoke other sessions")
+			}
+			return noStoreJSON(okBody{Ok: true}), nil
+		})
+
+	// --- Personal API tokens ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/api-tokens", "list-api-tokens", "List your personal API tokens", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ApiTokenView], error) {
+			tokens, err := app.ListApiTokens(ctx, userFrom(ctx).ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to list tokens")
+			}
+			return noStoreJSON(tokens), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/api-tokens", "create-api-token", "Mint a new API token", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Name          string `json:"name" minLength:"1" maxLength:"64" example:"Backup script" doc:"Human label so you can recognise the token"`
+				ExpiresInDays int    `json:"expires_in_days" minimum:"0" maximum:"3650" doc:"0 means never expires"`
+			}
+		}) (*JSONOutput[service.CreateApiTokenResult], error) {
+			var dur time.Duration
+			if in.Body.ExpiresInDays > 0 {
+				dur = time.Duration(in.Body.ExpiresInDays) * 24 * time.Hour
+			}
+			result, err := app.CreateApiToken(ctx, userFrom(ctx).ID, in.Body.Name, dur)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to create token")
+			}
+			return noStoreJSON(result), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/me/api-tokens/{id}", "revoke-api-token", "Revoke an API token", "Me")),
+		func(ctx context.Context, in *struct {
+			ID int64 `path:"id" minimum:"1"`
+		}) (*JSONOutput[okBody], error) {
+			if err := app.RevokeApiToken(ctx, userFrom(ctx).ID, in.ID); err != nil {
+				return nil, huma.Error500InternalServerError("failed to revoke token")
+			}
+			return noStoreJSON(okBody{Ok: true}), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/media-state", "get-media-state", "Watched + favorited IDs snapshot", "Me")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[mediaStateBody], error) {
 			state, _ := app.GetUserMediaState(ctx, userFrom(ctx).ID)
@@ -379,6 +464,13 @@ type playbackPrefBody struct {
 	AudioLanguage    string `json:"audio_language"`
 	SubtitleLanguage string `json:"subtitle_language"`
 	SubtitleMode     string `json:"subtitle_mode"`
+}
+
+// okBody is a plain `{ok: true}` ack for fire-and-forget endpoints. Named
+// so the generated TS / OpenAPI schema gets a sensible label instead of the
+// anonymous-struct mangled name.
+type okBody struct {
+	Ok bool `json:"ok"`
 }
 
 // Reuse the existing helpers from list_handlers.go: userListView, listRowToView,

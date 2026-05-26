@@ -28,7 +28,8 @@ import (
 // worker. CPU-bound, runs on the dedicated `loudness` queue at MaxWorkers=1.
 type ScanTrackLoudnessWorker struct {
 	river.WorkerDefaults[ScanTrackLoudnessArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanTrackLoudnessArgs]) error {
@@ -53,6 +54,8 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 	if lf.DeletedAt.Valid {
 		return nil
 	}
+
+	w.Progress.SetCurrentByKind(ScanTrackLoudnessArgs{}.Kind(), filepath.Base(lf.Path))
 
 	// Cap wall-clock for ebur128. 20× real-time on a modern CPU for FLAC,
 	// so a 10-minute track lands in ~30s; 5 min covers worst-case lossy.
@@ -98,7 +101,8 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 // r128gain.
 type ScanAlbumLoudnessWorker struct {
 	river.WorkerDefaults[ScanAlbumLoudnessArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanAlbumLoudnessArgs]) error {
@@ -115,6 +119,10 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 	if len(rows) == 0 {
 		// All tracks soft-deleted or no track_files; nothing to measure.
 		return nil
+	}
+
+	if album, err := q.GetAlbumByID(ctx, job.Args.AlbumID); err == nil {
+		w.Progress.SetCurrentByKind(ScanAlbumLoudnessArgs{}.Kind(), album.Title)
 	}
 
 	// Pre-flight: ebur128's concat demuxer can't read SMB paths through our

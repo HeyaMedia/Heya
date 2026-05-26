@@ -2,19 +2,30 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 
+	"github.com/karbowiak/heya/internal/imageserve"
 	"github.com/karbowiak/heya/internal/service"
 )
 
-// handleAlbumCover serves the local cover.jpg for an album, falling back to
-// a redirect when the album's cover_path still points at an upstream URL
-// (heya.media / Deezer CDN) — that happens when no local sidecar / embedded
-// art was found at refresh time. Browsers handle the 302 transparently for
-// `<img src>` so the consumer doesn't need to branch.
+// handleAlbumCover serves the local cover.jpg for an album addressed by
+// (artist_slug, album_slug). Falls back to a 302 when the album's cover_path
+// still points at an upstream URL (heya.media / Deezer CDN) — that happens
+// when no local sidecar / embedded art was found at refresh time. Browsers
+// handle the 302 transparently for `<img src>` so the consumer doesn't need
+// to branch.
+//
+// Path is /api/music/artists/{artist_slug}/albums/{album_slug}/cover so the
+// album-cover URL stays human-readable in the network panel and aligns with
+// the rest of the music surface (everything else addressable by slug uses it).
 func handleAlbumCover(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		artistSlug := r.PathValue("artist_slug")
+		albumSlug := r.PathValue("album_slug")
+		if artistSlug == "" || albumSlug == "" {
+			http.NotFound(w, r)
+			return
+		}
+		id, err := app.ResolveAlbumIDBySlugs(r.Context(), artistSlug, albumSlug)
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -34,6 +45,6 @@ func handleAlbumCover(app *service.App) http.HandlerFunc {
 			http.Redirect(w, r, path, http.StatusFound)
 			return
 		}
-		serveFile(w, r, path)
+		app.ImageResizer().Serve(w, r, path, imageserve.ParseQuery(r.URL.Query()))
 	}
 }

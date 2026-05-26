@@ -264,6 +264,55 @@ func (q *Queries) GetTVSeason(ctx context.Context, arg GetTVSeasonParams) (TvSea
 	return i, err
 }
 
+const getTVSeasonByID = `-- name: GetTVSeasonByID :one
+SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids FROM tv_seasons WHERE id = $1
+`
+
+func (q *Queries) GetTVSeasonByID(ctx context.Context, id int64) (TvSeason, error) {
+	row := q.db.QueryRow(ctx, getTVSeasonByID, id)
+	var i TvSeason
+	err := row.Scan(
+		&i.ID,
+		&i.SeriesID,
+		&i.SeasonNumber,
+		&i.Title,
+		&i.Overview,
+		&i.PosterPath,
+		&i.AirDate,
+		&i.EndDate,
+		&i.Status,
+		&i.AiredEpisodes,
+		&i.ExternalIds,
+	)
+	return i, err
+}
+
+const getTVSeriesByID = `-- name: GetTVSeriesByID :one
+SELECT id, media_item_id, status, genres, rating, first_air_date, last_air_date, original_name, original_language, number_of_seasons, number_of_episodes, popularity, spoken_languages, origin_country FROM tv_series WHERE id = $1
+`
+
+func (q *Queries) GetTVSeriesByID(ctx context.Context, id int64) (TvSeries, error) {
+	row := q.db.QueryRow(ctx, getTVSeriesByID, id)
+	var i TvSeries
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.Status,
+		&i.Genres,
+		&i.Rating,
+		&i.FirstAirDate,
+		&i.LastAirDate,
+		&i.OriginalName,
+		&i.OriginalLanguage,
+		&i.NumberOfSeasons,
+		&i.NumberOfEpisodes,
+		&i.Popularity,
+		&i.SpokenLanguages,
+		&i.OriginCountry,
+	)
+	return i, err
+}
+
 const getTVSeriesByMediaItemID = `-- name: GetTVSeriesByMediaItemID :one
 SELECT id, media_item_id, status, genres, rating, first_air_date, last_air_date, original_name, original_language, number_of_seasons, number_of_episodes, popularity, spoken_languages, origin_country FROM tv_series WHERE media_item_id = $1
 `

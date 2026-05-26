@@ -37,7 +37,8 @@ type EnrichMediaItemWorker struct {
 	// DataDir is the root for cached artwork copies (data/images/...). The
 	// music enrich path reads local poster/backdrop/logo from the artist
 	// folder and copies them here before falling back to heya.media URLs.
-	DataDir string
+	DataDir  string
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichMediaItemArgs]) error {
@@ -56,6 +57,7 @@ func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichM
 		return nil
 	}
 
+	w.Progress.SetCurrentByKind(EnrichMediaItemArgs{}.Kind(), item.Title)
 	_ = q.MarkEnrichAttempted(ctx, item.ID)
 
 	switch item.MediaType {
@@ -77,8 +79,8 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		externalIDs = map[string]string{}
 	}
 
-	providerID := heyamedia.BuildLookupID(kind, externalIDs)
-	if providerID == "" {
+	providerIDs := heyamedia.BuildLookupIDs(kind, externalIDs, item.HeyaSlug)
+	if len(providerIDs) == 0 {
 		return w.markFailed(ctx, q, item.ID, "no provider lookup id in external_ids")
 	}
 
@@ -93,9 +95,12 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
 	}
 
-	detail, err := w.Heya.GetDetail(ctx, providerID, fetchOpts)
+	detail, usedID, err := w.Heya.GetDetailFallback(ctx, providerIDs, fetchOpts)
 	if err != nil {
-		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("get detail: %v", err))
+		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("get detail (tried %d ids): %v", len(providerIDs), err))
+	}
+	if usedID != providerIDs[0] {
+		log.Info().Int64("item_id", item.ID).Str("used", usedID).Str("preferred", providerIDs[0]).Msg("enrich: fell back to non-preferred lookup id")
 	}
 
 	// Base: type-specific row (movies / tv_series / books) + seasons for TV.
@@ -104,6 +109,18 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	_ = q.MarkEnrichBaseDone(ctx, item.ID)
 	if kind == metadata.KindTV {
 		_ = q.MarkEnrichStructureDone(ctx, item.ID)
+	}
+
+	// Persist heya.media's canonical slug. It's a stable lookup key
+	// (heya.media accepts slug:<slug> alongside mbid:<id>) and lets
+	// future refreshes / cross-service joins skip the search step.
+	if detail.HeyaSlug != "" && detail.HeyaSlug != item.HeyaSlug {
+		if err := q.UpdateMediaItemHeyaSlug(ctx, sqlc.UpdateMediaItemHeyaSlugParams{
+			ID:       item.ID,
+			HeyaSlug: detail.HeyaSlug,
+		}); err != nil {
+			log.Warn().Err(err).Int64("item_id", item.ID).Msg("update heya_slug failed")
+		}
 	}
 
 	// People + extras come from the same StoreRichMetadata call. We stamp

@@ -20,6 +20,18 @@ import (
 // determined by the code, not by configuration.
 const AnalyzerVersion int32 = 1
 
+// MaxAnalysisDurationSeconds caps which tracks the sonic-analysis
+// pipeline will pick up. Tracks longer than this (DJ sets, podcasts,
+// lectures, mixes, full live recordings) get skipped — the
+// embedding/key/BPM models are trained on song-length material and
+// produce noisy facets on long-form content, and the GPU minutes are
+// better spent on the long tail of unanalyzed songs. A track with
+// duration=0 (unknown) is still picked, on the assumption that
+// metadata just hasn't landed yet. Mirrored into the Tasks UI so the
+// pending count and items list show only tracks we'd actually
+// analyze.
+const MaxAnalysisDurationSeconds int32 = 900
+
 // AnalyzerState is the lifecycle phase of an Analyzer. Stored as
 // int32 in atomic.Int32 for cheap concurrent state checks.
 type AnalyzerState int32
@@ -217,16 +229,52 @@ func (a *Analyzer) Unload() {
 	a.state.Store(int32(StateUnloaded))
 }
 
-// Analyze runs the full per-track pipeline. Returns ErrAnalyzerNotReady
-// if state != Ready.
+// AnalyzeStage names each step the pipeline runs through, in the order
+// they're invoked. Pass a ProgressFunc to AnalyzeWithProgress to receive
+// a callback as each stage starts — useful for UI live-status indicators.
+type AnalyzeStage string
+
+const (
+	StageDecode16k       AnalyzeStage = "decode 16kHz"
+	StageDiscogsHeads    AnalyzeStage = "Discogs embeddings"
+	StageEffnetBase      AnalyzeStage = "EffNet base + genre"
+	StageClassifierHeads AnalyzeStage = "classifier heads"
+	StageBPMKey          AnalyzeStage = "BPM + key"
+	StageDecode48k       AnalyzeStage = "decode 48kHz"
+	StageClapAudio       AnalyzeStage = "CLAP audio embed"
+	StageWaveform        AnalyzeStage = "waveform"
+)
+
+// ProgressFunc receives stage start notifications during Analyze.
+// Implementations should be cheap — they run on the analysis goroutine
+// and any latency stretches per-track wall time. Nil-safe (pass nil
+// when no progress reporting is needed).
+type ProgressFunc func(stage AnalyzeStage)
+
+// Analyze is the legacy entry point — runs the full pipeline with no
+// progress reporting. AnalyzeWithProgress is the same thing with a
+// stage callback.
 func (a *Analyzer) Analyze(ctx context.Context, audioPath string) (*Facets, error) {
+	return a.AnalyzeWithProgress(ctx, audioPath, nil)
+}
+
+// AnalyzeWithProgress runs the full per-track pipeline, calling
+// `progress` at the top of each stage. Returns ErrAnalyzerNotReady if
+// state != Ready.
+func (a *Analyzer) AnalyzeWithProgress(ctx context.Context, audioPath string, progress ProgressFunc) (*Facets, error) {
 	if a.State() != StateReady {
 		return nil, ErrAnalyzerNotReady
 	}
 	start := time.Now()
+	emit := func(s AnalyzeStage) {
+		if progress != nil {
+			progress(s)
+		}
+	}
 
 	// Stage 1: 16 kHz decode + mel-spec — shared by Discogs heads,
 	// base EffNet, classifiers, BPM, key.
+	emit(StageDecode16k)
 	pcm16, err := decodePCM(ctx, audioPath, melSampleRate)
 	if err != nil {
 		return nil, fmt.Errorf("decode 16k: %w", err)
@@ -238,6 +286,7 @@ func (a *Analyzer) Analyze(ctx context.Context, audioPath string) (*Facets, erro
 	}
 
 	// Stage 2: Discogs specialized heads (track / artist / release).
+	emit(StageDiscogsHeads)
 	heads := map[string][]float32{}
 	for _, h := range a.bundle.heads.Heads() {
 		sess := a.bundle.heads.sessions[h]
@@ -250,27 +299,32 @@ func (a *Analyzer) Analyze(ctx context.Context, audioPath string) (*Facets, erro
 
 	// Stage 3: base EffNet — gives genre softmax + 1280-dim embeddings
 	// for the classifier heads.
+	emit(StageEffnetBase)
 	genre, embed, err := a.bundle.base.Run(patches, nPatches)
 	if err != nil {
 		return nil, fmt.Errorf("effnet base: %w", err)
 	}
 	topGenres := topGenresFromSoftmax(genre, nPatches, 5)
 
+	emit(StageClassifierHeads)
 	moodTags, err := a.bundle.classifiers.Tag(embed, nPatches)
 	if err != nil {
 		return nil, fmt.Errorf("classifier heads: %w", err)
 	}
 
 	// Stage 4: BPM + key share the same 16 kHz PCM (no second decode).
+	emit(StageBPMKey)
 	bpm, bpmConf, _ := detectBPMFromPCM(pcm16)
 	keyRes, _ := detectKeyFromPCM(pcm16)
 
 	// Stage 5: CLAP audio — needs its own 48 kHz decode.
+	emit(StageDecode48k)
 	pcm48, err := decodePCM(ctx, audioPath, clapSampleRate)
 	if err != nil {
 		return nil, fmt.Errorf("decode 48k: %w", err)
 	}
 	clapMel := clapMelSpec(pcm48)
+	emit(StageClapAudio)
 	clapEmbed, err := a.bundle.clapAudio.Embed(clapMel)
 	if err != nil {
 		return nil, fmt.Errorf("clap audio embed: %w", err)
@@ -282,6 +336,7 @@ func (a *Analyzer) Analyze(ctx context.Context, audioPath string) (*Facets, erro
 	// in the track_files pipeline (ScanTrackLoudnessWorker) which runs
 	// at probe time and is what the audio engine consumes for replay
 	// gain. Skipping the duplicate ebur128 call saves ~1-2s per track.
+	emit(StageWaveform)
 	waveform, err := computeWaveform(ctx, audioPath, waveformDefaultN)
 	if err != nil {
 		return nil, fmt.Errorf("waveform: %w", err)

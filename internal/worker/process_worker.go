@@ -14,7 +14,8 @@ import (
 
 type ProcessFileWorker struct {
 	river.WorkerDefaults[ProcessFileArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFileArgs]) error {
@@ -30,6 +31,7 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 		return err
 	}
 
+	w.Progress.SetCurrentByKind(ProcessFileArgs{}.Kind(), filepath.Base(file.Path))
 	log.Debug().Int64("file_id", file.ID).Str("path", file.Path).Msg("processing file")
 
 	client := river.ClientFromContext[pgx.Tx](ctx)

@@ -16,8 +16,9 @@ import (
 
 type RatingsFetchWorker struct {
 	river.WorkerDefaults[RatingsFetchArgs]
-	DB   *pgxpool.Pool
-	Heya *heyamedia.HeyaProvider
+	DB       *pgxpool.Pool
+	Heya     *heyamedia.HeyaProvider
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFetchArgs]) error {
@@ -27,6 +28,8 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 	if err != nil {
 		return nil
 	}
+
+	w.Progress.SetCurrentByKind(RatingsFetchArgs{}.Kind(), item.Title)
 
 	var externalIDs map[string]string
 	if err := json.Unmarshal(item.ExternalIds, &externalIDs); err != nil {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,9 +14,13 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
+	"github.com/karbowiak/heya/internal/imageserve"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	"github.com/karbowiak/heya/internal/podcastindex"
+	"github.com/karbowiak/heya/internal/radiobrowser"
 	"github.com/karbowiak/heya/internal/scheduler"
+	"github.com/karbowiak/heya/internal/sessions"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/tailscale"
 	"github.com/karbowiak/heya/internal/transcoder"
@@ -37,37 +42,48 @@ type App struct {
 	transcodeCache *transcoder.CacheManager
 	audioSessions  *transcoder.AudioSessionManager
 	hub            *eventhub.Hub
-	scheduler      *scheduler.Runner
-	scanTask       *scheduler.ScanLibrariesTask
+	scheduler      *scheduler.Trigger
 	tailscale      *tailscale.Server
 	textSearcher   *sonicanalysis.TextSearcher
 	modelFetcher   *sonicanalysis.ModelFetcher
 	analyzer       *sonicanalysis.Analyzer
+	sonicHolder    *sonicanalysis.Holder
+	imageResizer   *imageserve.Resizer
 	envLibraries   map[int64]EnvManagedLibrary
+	radioBrowser   *radiobrowser.Client
+	podcastIndex   *podcastindex.Client
+	sessions       *sessions.Store
 
 	// Lifetime context cancelled by Close(). Used for fire-and-forget
 	// goroutines (model fetches, tailscale Enable/Logout) that must outlive
 	// the request that triggered them but should not survive shutdown.
 	lifetimeCtx    context.Context
 	lifetimeCancel context.CancelFunc
+
+	// Wall-clock start time, captured once in New. Drives the uptime metric
+	// surfaced via /api/admin/system.
+	startedAt time.Time
 }
+
+// StartedAt returns the wall-clock time at which the App was constructed.
+func (a *App) StartedAt() time.Time { return a.startedAt }
 
 // Accessor methods for handler packages that need App internals.
 
-func (a *App) SessionLookup() auth.SessionLookup               { return sqlc.New(a.db) }
-func (a *App) TranscoderSessions() *transcoder.SessionManager  { return a.transcoder }
-func (a *App) TranscoderCache() *transcoder.CacheManager       { return a.transcodeCache }
-func (a *App) AudioSessions() *transcoder.AudioSessionManager  { return a.audioSessions }
-func (a *App) EventHub() *eventhub.Hub                         { return a.hub }
-func (a *App) ConfigSnapshot() *config.Config                  { return a.config }
-func (a *App) WatcherManager() *watcher.Manager                { return a.watcher }
-func (a *App) TaskScheduler() *scheduler.Runner                { return a.scheduler }
-func (a *App) Metadata() *heyamedia.HeyaProvider               { return a.heya }
-func (a *App) DBPool() *pgxpool.Pool                           { return a.db }
-func (a *App) RiverClient() *river.Client[pgx.Tx]              { return a.river }
-func (a *App) ScanLibrariesTask() *scheduler.ScanLibrariesTask { return a.scanTask }
+func (a *App) SessionLookup() auth.SessionLookup              { return sqlc.New(a.db) }
+func (a *App) TranscoderSessions() *transcoder.SessionManager { return a.transcoder }
+func (a *App) TranscoderCache() *transcoder.CacheManager      { return a.transcodeCache }
+func (a *App) AudioSessions() *transcoder.AudioSessionManager { return a.audioSessions }
+func (a *App) EventHub() *eventhub.Hub                        { return a.hub }
+func (a *App) ConfigSnapshot() *config.Config                 { return a.config }
+func (a *App) WatcherManager() *watcher.Manager               { return a.watcher }
+func (a *App) TaskScheduler() *scheduler.Trigger              { return a.scheduler }
+func (a *App) Metadata() *heyamedia.HeyaProvider              { return a.heya }
+func (a *App) DBPool() *pgxpool.Pool                          { return a.db }
+func (a *App) RiverClient() *river.Client[pgx.Tx]             { return a.river }
+func (a *App) Sessions() *sessions.Store                      { return a.sessions }
 
-func (a *App) SetScheduler(r *scheduler.Runner) { a.scheduler = r }
+func (a *App) SetScheduler(s *scheduler.Trigger) { a.scheduler = s }
 
 func (a *App) Tailscale() *tailscale.Server      { return a.tailscale }
 func (a *App) SetTailscale(ts *tailscale.Server) { a.tailscale = ts }
@@ -75,6 +91,8 @@ func (a *App) SetTailscale(ts *tailscale.Server) { a.tailscale = ts }
 func (a *App) TextSearcher() *sonicanalysis.TextSearcher { return a.textSearcher }
 func (a *App) ModelFetcher() *sonicanalysis.ModelFetcher { return a.modelFetcher }
 func (a *App) SonicAnalyzer() *sonicanalysis.Analyzer    { return a.analyzer }
+func (a *App) SonicHolder() *sonicanalysis.Holder        { return a.sonicHolder }
+func (a *App) ImageResizer() *imageserve.Resizer         { return a.imageResizer }
 
 // LifetimeContext returns a context cancelled when the App shuts down (via
 // Close). Hand it to fire-and-forget goroutines that need to outlive the
@@ -137,6 +155,32 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		audioSessions = transcoder.NewAudioSessionManager(tcCache)
 	}
 
+	// Sonic-analysis Holder is built before worker.Setup so we can hand
+	// it to the analyze_track_facets worker. The Holder owns the full
+	// analysis bundle — Discogs specialized heads, EffNet base,
+	// classifier heads, and the CLAP audio encoder (~hundreds of MB
+	// resident together). Idle-unload kicks in 5 min after the last
+	// lease releases, returning all the model memory at once. The CLAP
+	// *text* encoder lives separately in TextSearcher since it serves
+	// the search-sonic text-prompt endpoint, not per-track analysis.
+	modelsDir := cfg.DataDir.Value + "/models"
+	bootSettings := DefaultSonicAnalysisSettings()
+	saCfg := sonicanalysis.Config{
+		ModelsDir:   modelsDir,
+		Accelerator: sonicanalysis.Accelerator(bootSettings.Accelerator),
+	}
+	sonicHolder := sonicanalysis.NewHolder(saCfg, 5*time.Minute)
+
+	// Watcher hook + sonic enabled gate are both built in two passes:
+	// worker.Setup wires the kickoff workers with indirection wrappers,
+	// then after the App is fully constructed we assign the concrete
+	// targets. We can't do that directly because workers can't be
+	// re-wired after AddWorker — see lazyWatcher / lazyEnabled below.
+	var watcherPauser worker.WatcherPauser        // assigned after watcher.NewManager
+	var sonicEnabledFn func(context.Context) bool // assigned after App construction
+
+	progress := worker.NewTaskProgressBroadcaster(hub)
+
 	riverClient, err := worker.Setup(ctx, worker.Config{
 		DB:             db,
 		DataDir:        cfg.DataDir.Value,
@@ -147,37 +191,45 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		TranscodeCache: tcCache,
 		HWAccel:        hwAccelProvider,
 		Hub:            hub,
+		SonicHolder:    sonicHolder,
+		SonicEnabled: func(ctx context.Context) bool {
+			if sonicEnabledFn == nil {
+				return false
+			}
+			return sonicEnabledFn(ctx)
+		},
+		Watcher:  lazyWatcher{ptr: &watcherPauser},
+		Progress: progress,
 	})
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 
-	scanTask := &scheduler.ScanLibrariesTask{DB: db, River: riverClient, Hub: hub}
-
 	wm := watcher.NewManager(db, riverClient, func(libraryID int64, force bool) {
-		scanTask.Enqueue(libraryID, force)
+		_, _ = riverClient.Insert(ctx, worker.KickoffLibraryScanArgs{LibraryID: libraryID, Force: force}, nil)
 	})
+	watcherPauser = wm
 
-	scanTask.Watcher = wm
+	// Reverse-wire SonicEnabled now that we'll have an App with the
+	// system_settings accessor. Assignment happens before any worker
+	// fires (StartWorkers is called later from cmd/serve), so the
+	// kickoff sees a fully-initialised closure on first invocation.
+	_ = sonicEnabledFn // keep variable address stable while we capture it; assigned below
 
-	// Sonic-analysis pipeline. Always constructed so the API + CLI
-	// can read state regardless of whether the scheduler is enabled.
-	// ModelsDir is server-level (lives under DataDir). All other
-	// knobs (accelerator, current_version, fetch-on-boot) come from
-	// the system_settings row and are tweakable from the UI without
-	// restarting the server. Models load lazily on first Analyze/
-	// Embed call so a fresh boot with no models on disk doesn't
-	// crash startup.
-	modelsDir := cfg.DataDir.Value + "/models"
-	bootSettings := DefaultSonicAnalysisSettings()
-	saCfg := sonicanalysis.Config{
-		ModelsDir:   modelsDir,
-		Accelerator: sonicanalysis.Accelerator(bootSettings.Accelerator),
-	}
+	// Auxiliary sonic-analysis surfaces — text-only search + the model
+	// fetcher used by the Settings page. The Holder + Analyzer above
+	// own the per-track analysis path. saCfg + modelsDir were
+	// initialised in the worker.Setup block; reuse them here.
 	textSearcher := sonicanalysis.NewTextSearcher(saCfg)
 	modelFetcher := sonicanalysis.NewModelFetcher(modelsDir, "")
 	analyzer := sonicanalysis.NewAnalyzer(saCfg)
+
+	resizer, err := imageserve.New(cfg.DataDir.Value + "/images/resized")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("init image resizer: %w", err)
+	}
 
 	// Lifetime context independent of the bootstrap ctx — bootstrap finishes
 	// quickly but the App lives for the whole process. Cancelled by Close().
@@ -195,13 +247,24 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		transcodeCache: tcCache,
 		audioSessions:  audioSessions,
 		hub:            hub,
-		scanTask:       scanTask,
 		textSearcher:   textSearcher,
 		modelFetcher:   modelFetcher,
 		analyzer:       analyzer,
+		sonicHolder:    sonicHolder,
+		imageResizer:   resizer,
+		radioBrowser:   radiobrowser.New(),
+		podcastIndex:   podcastindex.New(cfg.PodcastIndexKey.Value, cfg.PodcastIndexSecret.Value),
+		sessions:       sessions.New(lifetimeCtx, hub),
 		lifetimeCtx:    lifetimeCtx,
 		lifetimeCancel: lifetimeCancel,
+		startedAt:      time.Now(),
 	}
+
+	// Wire the SonicEnabled closure now that the App can answer the
+	// system_settings query. Worker.Setup captured a closure pointing
+	// at sonicEnabledFn; assigning here makes that closure live before
+	// any kickoff fires.
+	sonicEnabledFn = app.SonicAnalysisEnabled
 
 	// Overlay persisted UI settings onto the config snapshot. Env-sourced
 	// fields are preserved; only default-sourced fields get DB values.
@@ -279,6 +342,29 @@ func (a *App) ReconfigureSonicAnalysisAnalyzer(ctx context.Context) error {
 // the analyzer is mid-batch; the caller should defer the rebuild
 // until next idle.
 var ErrSonicBusy = errors.New("sonicanalysis: analyzer is busy; settings will apply on next idle")
+
+// lazyWatcher resolves a watcher.Manager indirectly so the
+// KickoffLibraryScanWorker (constructed inside worker.Setup) can
+// pause/resume the watcher (constructed afterwards). Pause/Resume on
+// the zero-value indirection are no-ops, which is the correct
+// behaviour during the bootstrap window before the watcher exists.
+type lazyWatcher struct {
+	ptr *worker.WatcherPauser
+}
+
+func (l lazyWatcher) Pause(libraryID int64) {
+	if l.ptr == nil || *l.ptr == nil {
+		return
+	}
+	(*l.ptr).Pause(libraryID)
+}
+
+func (l lazyWatcher) Resume(libraryID int64) {
+	if l.ptr == nil || *l.ptr == nil {
+		return
+	}
+	(*l.ptr).Resume(libraryID)
+}
 
 func (a *App) StartWorkers(ctx context.Context) error {
 	return a.river.Start(ctx)

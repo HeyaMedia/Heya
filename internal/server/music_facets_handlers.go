@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 )
@@ -42,10 +45,48 @@ func collectSonicAnalysisStatus(app *service.App) map[string]any {
 			"state": a.State().String(),
 		}
 	}
+	// Holder is the per-track-worker model lessor — separate object from
+	// the standalone analyzer above. Its state covers refcount and
+	// idle-unload scheduling, which is what the diagnostic panel cares
+	// about ("model loaded for N seconds, will unload at HH:MM").
+	if h := app.SonicHolder(); h != nil {
+		st := h.Status()
+		holderInfo := map[string]any{
+			"state":            st.State.String(),
+			"accelerator":      string(st.Accelerator),
+			"refs":             st.Refs,
+			"idle_timeout_sec": st.IdleTimeoutSec,
+			"total_borrows":    st.TotalBorrows,
+		}
+		if st.LoadedAt != nil {
+			holderInfo["loaded_at"] = st.LoadedAt.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		if st.IdleUnloadAt != nil {
+			holderInfo["idle_unload_at"] = st.IdleUnloadAt.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		if st.LastBorrowAt != nil {
+			holderInfo["last_borrow_at"] = st.LastBorrowAt.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		out["holder"] = holderInfo
+	}
 	if ts := app.TextSearcher(); ts != nil {
 		out["text_searcher"] = map[string]any{
 			"ready": ts.Ready(),
 		}
+	}
+	// Library coverage — tracks analyzed at the current AnalyzerVersion
+	// vs tracks still pending. Mirrors the count surfaced on the Tasks
+	// page so the two views agree.
+	q := sqlc.New(app.DBPool())
+	ctx := context.Background()
+	analyzed, _ := q.CountAnalyzedTracks(ctx, sonicanalysis.AnalyzerVersion)
+	pending, _ := q.CountPendingAnalysis(ctx, sqlc.CountPendingAnalysisParams{
+		MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+		AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+	})
+	out["coverage"] = map[string]any{
+		"analyzed": analyzed,
+		"pending":  pending,
 	}
 	return out
 }

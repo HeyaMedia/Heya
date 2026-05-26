@@ -232,7 +232,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 	case sqlc.MediaTypeMusic:
 		artist, artistErr := q.GetArtistByMediaItemID(ctx, item.ID)
 		if artistErr == nil {
-			result["artist"] = artist
+			result["artist"] = BuildArtistView(artist)
 			result["albums"] = buildAlbumViews(ctx, q, artist.ID)
 		}
 	case sqlc.MediaTypeBook:
@@ -683,7 +683,75 @@ func (a *App) GetPerson(ctx context.Context, idOrSlug string) (map[string]any, e
 		result["profiles"] = profiles
 	}
 
+	// External credits (cast/crew/known-for from the upstream metadata
+	// aggregator). Split by `kind` so the FE doesn't have to filter, and
+	// drop rows where the local library already has the title — those are
+	// already represented in cast_credits/crew_credits above and would
+	// otherwise show as duplicates in the "Known For" tab. The
+	// MatchedMediaItemID column comes from a LEFT JOIN; sqlc infers it
+	// as int64 (zero-on-miss) since the SELECT can't see the join is
+	// outer, so we check `!= 0` rather than a typed `.Valid`.
+	ext, _ := q.ListPersonExternalCredits(ctx, person.ID)
+
+	// Backfill kicker: if we have no external credits AND we have a
+	// tmdb_id, queue a PersonFetch in the background. The worker's own
+	// short-circuit logic (skip when external creds exist) keeps this
+	// from looping — once the worker fills the rows, future visits stop
+	// re-enqueueing.
+	if len(ext) == 0 && a.river != nil {
+		if tmdbID := personTmdbID(person.ExternalIds); tmdbID > 0 {
+			_, _ = a.river.Insert(ctx, worker.PersonFetchArgs{PersonID: person.ID, TmdbID: int32(tmdbID)}, nil)
+		}
+	}
+
+	if len(ext) > 0 {
+		var extCast, extCrew, extKnownFor []sqlc.ListPersonExternalCreditsRow
+		for _, r := range ext {
+			if r.MatchedMediaItemID != 0 {
+				continue
+			}
+			switch r.Kind {
+			case "cast":
+				extCast = append(extCast, r)
+			case "crew":
+				extCrew = append(extCrew, r)
+			case "known_for":
+				extKnownFor = append(extKnownFor, r)
+			}
+		}
+		if len(extCast) > 0 {
+			result["external_cast"] = extCast
+		}
+		if len(extCrew) > 0 {
+			result["external_crew"] = extCrew
+		}
+		if len(extKnownFor) > 0 {
+			result["external_known_for"] = extKnownFor
+		}
+	}
+
 	return result, nil
+}
+
+// personTmdbID pulls the upstream TMDB id out of the `people.external_ids`
+// JSONB blob. Stored either as a numeric or a string depending on which
+// path wrote it; tolerate both. Returns 0 when missing or unparseable.
+func personTmdbID(extIDs []byte) int {
+	if len(extIDs) == 0 {
+		return 0
+	}
+	var m map[string]any
+	if err := json.Unmarshal(extIDs, &m); err != nil {
+		return 0
+	}
+	switch v := m["tmdb"].(type) {
+	case string:
+		n, _ := strconv.Atoi(v)
+		return n
+	case float64:
+		return int(v)
+	}
+	return 0
 }
 
 // ListUnmatched returns unmatched library files with their match candidates.

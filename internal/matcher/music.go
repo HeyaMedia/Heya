@@ -15,6 +15,7 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/slug"
+	"github.com/karbowiak/heya/internal/titlematch"
 	"github.com/rs/zerolog/log"
 )
 
@@ -456,6 +457,17 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		Bool("from_nfo", albumNFO != nil).
 		Msg("matched music release")
 
+	// Trailing-edge debounce. The match worker's IsNew=true path enqueues
+	// an immediate enrich for newly-created artists; for files landing
+	// under an artist whose initial enrich already finished, the enrich
+	// worker's idempotency gate would otherwise skip the re-fetch — so we
+	// upsert a debounce row instead, and the periodic sweeper fires a
+	// forced enrich once the library has been quiet for the debounce
+	// window.
+	if matched > 0 && artist.MediaItemID > 0 {
+		m.maybeDebounceEnrich(ctx, artist.MediaItemID, "matcher.music")
+	}
+
 	return matched, unmatched, errored, artistID
 }
 
@@ -605,9 +617,16 @@ func findEmbeddedAlbum(enriched *metadata.MediaDetail, title, year, mbid string)
 		return nil
 	}
 	if mbid != "" {
+		// MusicBrainz tags can carry either the release MBID (specific
+		// pressing) or the release-group MBID (the abstract work).
+		// Compare against all three keys — release, release-group, and
+		// the legacy "mbid" alias — so a Vorbis tag of either flavor
+		// finds the upstream record.
 		for i := range enriched.Albums {
 			a := &enriched.Albums[i]
-			if a.ExternalIDs["mb_release"] == mbid || a.ExternalIDs["mbid"] == mbid {
+			if a.ExternalIDs["mb_release"] == mbid ||
+				a.ExternalIDs["mb_release_group"] == mbid ||
+				a.ExternalIDs["mbid"] == mbid {
 				return a
 			}
 		}
@@ -615,6 +634,11 @@ func findEmbeddedAlbum(enriched *metadata.MediaDetail, title, year, mbid string)
 	if title == "" {
 		return nil
 	}
+
+	// Strict pass: exact case-fold equality, optionally pinned to year.
+	// Year only contributes when both sides have one — upstream sometimes
+	// omits year on singles, and we don't want a year-tied match to drop
+	// the right album.
 	normTitle := strings.ToLower(title)
 	yearInt, _ := strconv.Atoi(year)
 	for i := range enriched.Albums {
@@ -629,7 +653,47 @@ func findEmbeddedAlbum(enriched *metadata.MediaDetail, title, year, mbid string)
 			return a
 		}
 	}
+
+	// Fuzzy pass: same FuzzyEqual the top-tracks rail uses. Catches
+	// parenthetical drift ("Title" vs "Title (Special Edition)"),
+	// quote-mark variants ("Stay Gold (From 'BEYBLADE X')" vs
+	// "Stay Gold (from BEYBLADE X)"), and kana/romaji asymmetries.
+	// Scoped to one artist's catalog at the call site so substring
+	// fallbacks don't bleed across artists.
+	for i := range enriched.Albums {
+		a := &enriched.Albums[i]
+		if titlematch.FuzzyEqual(a.Title, title) {
+			return a
+		}
+	}
 	return nil
+}
+
+// resolveAlbumType collapses an upstream (primary_type, secondary_types)
+// pair into a single album_type string. MusicBrainz emits primary as
+// "Album" plus secondaries like ["Compilation"] / ["Soundtrack"] /
+// ["Remix"] / ["Live"] on the same release group — the secondary is the
+// useful one for shelf grouping. When secondaries are absent the
+// primary stands. Empty result means "don't overwrite the existing DB
+// value" (the caller's CASE WHEN logic preserves it).
+func resolveAlbumType(primary string, secondaries []string) string {
+	for _, s := range secondaries {
+		switch strings.ToLower(s) {
+		case "compilation":
+			return "compilation"
+		case "soundtrack":
+			return "soundtrack"
+		case "remix":
+			return "remix"
+		case "live":
+			return "live"
+		case "demo":
+			return "demo"
+		case "audio drama", "audiobook", "spokenword":
+			return "other"
+		}
+	}
+	return strings.ToLower(primary)
 }
 
 // findEmbeddedTrack picks the embedded track matching disc+position. Returns

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -12,11 +13,14 @@ import (
 
 type SoftDeleteWorker struct {
 	river.WorkerDefaults[SoftDeleteArgs]
-	DB  *pgxpool.Pool
-	Hub EventPublisher
+	DB       *pgxpool.Pool
+	Hub      EventPublisher
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *SoftDeleteWorker) Work(ctx context.Context, job *river.Job[SoftDeleteArgs]) error {
+	w.Progress.SetCurrentByKind(SoftDeleteArgs{}.Kind(), fmt.Sprintf("library %d (%d paths)", job.Args.LibraryID, len(job.Args.Paths)))
+
 	q := sqlc.New(w.DB)
 
 	err := q.SoftDeleteLibraryFilesByPath(ctx, sqlc.SoftDeleteLibraryFilesByPathParams{

@@ -355,6 +355,12 @@ type Creator struct {
 	ExternalIds []byte `json:"external_ids"`
 }
 
+type DebouncedEnrich struct {
+	MediaItemID int64              `json:"media_item_id"`
+	FireAt      pgtype.Timestamptz `json:"fire_at"`
+	RequestedBy string             `json:"requested_by"`
+}
+
 type EpisodeOverview struct {
 	ID        int64  `json:"id"`
 	EpisodeID int64  `json:"episode_id"`
@@ -396,6 +402,14 @@ type Library struct {
 	CreatedBy    int64              `json:"created_by"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LibraryDiskUsage struct {
+	LibraryID int64              `json:"library_id"`
+	Path      string             `json:"path"`
+	Bytes     int64              `json:"bytes"`
+	FileCount int64              `json:"file_count"`
+	ScannedAt pgtype.Timestamptz `json:"scanned_at"`
 }
 
 type LibraryFile struct {
@@ -638,6 +652,25 @@ type PersonBiography struct {
 	Biography string `json:"biography"`
 }
 
+type PersonExternalCredit struct {
+	ID           int64              `json:"id"`
+	PersonID     int64              `json:"person_id"`
+	Kind         string             `json:"kind"`
+	MediaKind    string             `json:"media_kind"`
+	Title        string             `json:"title"`
+	Year         int32              `json:"year"`
+	Character    string             `json:"character"`
+	Job          string             `json:"job"`
+	Department   string             `json:"department"`
+	EpisodeCount int32              `json:"episode_count"`
+	DisplayOrder int32              `json:"display_order"`
+	Slug         string             `json:"slug"`
+	PosterUrl    string             `json:"poster_url"`
+	ExternalIds  []byte             `json:"external_ids"`
+	Source       string             `json:"source"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type PersonProfile struct {
 	ID        int64          `json:"id"`
 	PersonID  int64          `json:"person_id"`
@@ -648,6 +681,16 @@ type PersonProfile struct {
 	Height    int32          `json:"height"`
 	Score     pgtype.Numeric `json:"score"`
 	SortOrder int32          `json:"sort_order"`
+}
+
+type PlayEvent struct {
+	ID              int64              `json:"id"`
+	UserID          int64              `json:"user_id"`
+	TrackID         int64              `json:"track_id"`
+	PlayedAt        pgtype.Timestamptz `json:"played_at"`
+	ListenedSeconds int32              `json:"listened_seconds"`
+	Completed       bool               `json:"completed"`
+	Source          string             `json:"source"`
 }
 
 type ProductionCompany struct {
@@ -679,11 +722,16 @@ type ScheduledTask struct {
 }
 
 type Session struct {
-	ID        int64              `json:"id"`
-	UserID    int64              `json:"user_id"`
-	Token     string             `json:"token"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID         int64              `json:"id"`
+	UserID     int64              `json:"user_id"`
+	Token      string             `json:"token"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	Kind       string             `json:"kind"`
+	Name       pgtype.Text        `json:"name"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+	UserAgent  pgtype.Text        `json:"user_agent"`
+	Ip         pgtype.Text        `json:"ip"`
 }
 
 type SystemSetting struct {
@@ -811,14 +859,31 @@ type TvSeriesNetwork struct {
 }
 
 type User struct {
-	ID           int64              `json:"id"`
-	Username     string             `json:"username"`
-	Email        string             `json:"email"`
-	PasswordHash string             `json:"password_hash"`
-	IsAdmin      bool               `json:"is_admin"`
-	Settings     []byte             `json:"settings"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID                 int64              `json:"id"`
+	Username           string             `json:"username"`
+	Email              string             `json:"email"`
+	PasswordHash       string             `json:"password_hash"`
+	IsAdmin            bool               `json:"is_admin"`
+	Settings           []byte             `json:"settings"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	FavoritesThreshold int16              `json:"favorites_threshold"`
+}
+
+type UserAlbumRating struct {
+	UserID    int64              `json:"user_id"`
+	AlbumID   int64              `json:"album_id"`
+	Rating    int16              `json:"rating"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserArtistRating struct {
+	UserID    int64              `json:"user_id"`
+	ArtistID  int64              `json:"artist_id"`
+	Rating    int16              `json:"rating"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserFavorite struct {
@@ -875,6 +940,70 @@ type UserPlaylistTrack struct {
 	TrackID    int64              `json:"track_id"`
 	Position   int32              `json:"position"`
 	AddedAt    pgtype.Timestamptz `json:"added_at"`
+}
+
+type UserPodcastProgress struct {
+	ID              int64              `json:"id"`
+	UserID          int64              `json:"user_id"`
+	FeedUrl         string             `json:"feed_url"`
+	EpisodeGuid     string             `json:"episode_guid"`
+	Title           string             `json:"title"`
+	ArtworkUrl      string             `json:"artwork_url"`
+	AudioUrl        string             `json:"audio_url"`
+	ProgressSeconds int32              `json:"progress_seconds"`
+	TotalSeconds    int32              `json:"total_seconds"`
+	Completed       bool               `json:"completed"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserPodcastSubscription struct {
+	ID            int64              `json:"id"`
+	UserID        int64              `json:"user_id"`
+	FeedUrl       string             `json:"feed_url"`
+	Title         string             `json:"title"`
+	Author        string             `json:"author"`
+	ArtworkUrl    string             `json:"artwork_url"`
+	LastEpisodeAt pgtype.Timestamptz `json:"last_episode_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserRadioFavorite struct {
+	ID          int64              `json:"id"`
+	UserID      int64              `json:"user_id"`
+	Stationuuid string             `json:"stationuuid"`
+	Name        string             `json:"name"`
+	Url         string             `json:"url"`
+	Favicon     string             `json:"favicon"`
+	Homepage    string             `json:"homepage"`
+	Country     string             `json:"country"`
+	Countrycode string             `json:"countrycode"`
+	Language    string             `json:"language"`
+	Tags        string             `json:"tags"`
+	Codec       string             `json:"codec"`
+	Bitrate     int32              `json:"bitrate"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserRadioRecent struct {
+	ID          int64              `json:"id"`
+	UserID      int64              `json:"user_id"`
+	Stationuuid string             `json:"stationuuid"`
+	Name        string             `json:"name"`
+	Url         string             `json:"url"`
+	Favicon     string             `json:"favicon"`
+	Country     string             `json:"country"`
+	Tags        string             `json:"tags"`
+	Codec       string             `json:"codec"`
+	Bitrate     int32              `json:"bitrate"`
+	PlayedAt    pgtype.Timestamptz `json:"played_at"`
+}
+
+type UserTrackRating struct {
+	UserID    int64              `json:"user_id"`
+	TrackID   int64              `json:"track_id"`
+	Rating    int16              `json:"rating"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserWatchProgress struct {

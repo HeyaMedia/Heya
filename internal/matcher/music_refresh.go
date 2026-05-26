@@ -63,12 +63,62 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 	res.BackdropURL = detail.BackdropURL
 	res.ArtistImages = detail.ArtistImages
 
+	// Persist the canonical heya.media slug on the parent media_item.
+	// Stable lookup key for future refreshes — heya.media accepts
+	// slug:<slug> as an artist lookup id alongside mbid:<id> and
+	// per-provider keys.
+	if detail.HeyaSlug != "" {
+		item, err := m.q.GetMediaItemByID(ctx, artist.MediaItemID)
+		if err == nil && item.HeyaSlug != detail.HeyaSlug {
+			if err := m.q.UpdateMediaItemHeyaSlug(ctx, sqlc.UpdateMediaItemHeyaSlugParams{
+				ID:       artist.MediaItemID,
+				HeyaSlug: detail.HeyaSlug,
+			}); err != nil {
+				log.Warn().Err(err).Int64("media_item_id", artist.MediaItemID).Msg("update heya_slug failed")
+			}
+		}
+	}
+
 	// Artist row: only overwrite fields when the new value is non-empty
 	// (UpdateArtistEnrichedFields handles that at the SQL level).
 	newMBID := artist.MusicbrainzID
 	if newMBID == "" {
 		newMBID = detail.ExternalIDs["mbid"]
 	}
+
+	// Pre-update merge: if the enrich resolved this artist to something
+	// that's already claimed by another local row, fold this row's
+	// children into the canonical one. Otherwise the UpdateArtist call
+	// below would collide on uq_artists_name_disambig (the
+	// HANABIE / 花冷え。 case, where both folders matched separately at
+	// scan time and only enrich learns they're the same artist).
+	//
+	// `postName` / `postDisambig` are what the UpdateArtistEnrichedFields
+	// CASE-WHEN logic will actually write — empty upstream values
+	// preserve the existing row's columns. We need to match against
+	// those (not raw detail.*) because upstream sometimes returns
+	// `disambiguation=null` for apple/discogs/deezer-keyed lookups,
+	// which preserves the local "metalcore band" disambig and trips
+	// the unique constraint against a sibling that's already canonical.
+	postName := detail.ArtistName
+	if postName == "" {
+		postName = artist.Name
+	}
+	postDisambig := detail.ArtistDisambiguation
+	if postDisambig == "" {
+		postDisambig = artist.Disambiguation
+	}
+	if canonical := m.findCanonicalSibling(ctx, artistID, newMBID, postName, postDisambig); canonical != nil {
+		if mergeErr := m.mergeArtistInto(ctx, canonical.ID, artistID); mergeErr != nil {
+			return res, fmt.Errorf("merge artist %d into %d: %w", artistID, canonical.ID, mergeErr)
+		}
+		// Continue the refresh on the canonical row — children now live
+		// there, including the freshly-reparented albums.
+		res.ArtistID = canonical.ID
+		artist = *canonical
+		artistID = canonical.ID
+	}
+
 	if err := m.q.UpdateArtistEnrichedFields(ctx, sqlc.UpdateArtistEnrichedFieldsParams{
 		ID:      artistID,
 		Column2: newMBID,
@@ -140,9 +190,17 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		if newYear == "" && embedded.Year > 0 {
 			newYear = strconv.Itoa(embedded.Year)
 		}
+		// Album type resolution. Two cases worth handling:
+		//   1. Most local rows start at the default 'album' — adopt the
+		//      upstream type when it has anything to say.
+		//   2. MusicBrainz often emits primary='Album' with secondaries
+		//      like ['Compilation'] / ['Soundtrack'] — resolveAlbumType
+		//      collapses the pair down to the more-specific bucket.
 		newType := dbAlbum.AlbumType
-		if (newType == "" || newType == "album") && embedded.Type != "" {
-			newType = embedded.Type
+		if upstreamType := resolveAlbumType(embedded.Type, embedded.SecondaryTypes); upstreamType != "" {
+			if newType == "" || newType == "album" {
+				newType = upstreamType
+			}
 		}
 		coverURL := dbAlbum.CoverPath
 		if coverURL == "" {

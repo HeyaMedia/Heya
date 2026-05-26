@@ -51,6 +51,20 @@ func (q *Queries) AllAlbumTracksHaveLoudness(ctx context.Context, albumID int64)
 	return done, err
 }
 
+const countAlbumsByArtistSlug = `-- name: CountAlbumsByArtistSlug :one
+SELECT count(*) FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1
+`
+
+func (q *Queries) CountAlbumsByArtistSlug(ctx context.Context, slug string) (int64, error) {
+	row := q.db.QueryRow(ctx, countAlbumsByArtistSlug, slug)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMusicAlbums = `-- name: CountMusicAlbums :one
 SELECT count(*) FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
@@ -91,6 +105,21 @@ WHERE l.media_type = 'music'
 
 func (q *Queries) CountMusicTracks(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countMusicTracks)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTracksByArtistSlug = `-- name: CountTracksByArtistSlug :one
+SELECT count(*) FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1
+`
+
+func (q *Queries) CountTracksByArtistSlug(ctx context.Context, slug string) (int64, error) {
+	row := q.db.QueryRow(ctx, countTracksByArtistSlug, slug)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -343,6 +372,60 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		&i.ArtistCredits,
 	)
 	return i, err
+}
+
+const deleteArtist = `-- name: DeleteArtist :exec
+DELETE FROM artists WHERE id = $1
+`
+
+func (q *Queries) DeleteArtist(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteArtist, id)
+	return err
+}
+
+const deleteArtistCentroid = `-- name: DeleteArtistCentroid :exec
+DELETE FROM artist_centroids WHERE artist_id = $1
+`
+
+func (q *Queries) DeleteArtistCentroid(ctx context.Context, srcID int64) error {
+	_, err := q.db.Exec(ctx, deleteArtistCentroid, srcID)
+	return err
+}
+
+const deleteArtistFavorites = `-- name: DeleteArtistFavorites :exec
+DELETE FROM user_favorites WHERE entity_type = 'artist' AND entity_id = $1
+`
+
+func (q *Queries) DeleteArtistFavorites(ctx context.Context, srcID int64) error {
+	_, err := q.db.Exec(ctx, deleteArtistFavorites, srcID)
+	return err
+}
+
+const deleteArtistSimilarArtists = `-- name: DeleteArtistSimilarArtists :exec
+DELETE FROM artist_similar_artists WHERE artist_id = $1
+`
+
+func (q *Queries) DeleteArtistSimilarArtists(ctx context.Context, srcID int64) error {
+	_, err := q.db.Exec(ctx, deleteArtistSimilarArtists, srcID)
+	return err
+}
+
+const deleteArtistTopTracks = `-- name: DeleteArtistTopTracks :exec
+DELETE FROM artist_top_tracks WHERE artist_id = $1
+`
+
+func (q *Queries) DeleteArtistTopTracks(ctx context.Context, srcID int64) error {
+	_, err := q.db.Exec(ctx, deleteArtistTopTracks, srcID)
+	return err
+}
+
+const deleteUserArtistRatingsByArtist = `-- name: DeleteUserArtistRatingsByArtist :exec
+DELETE FROM user_artist_ratings WHERE artist_id = $1
+`
+
+func (q *Queries) DeleteUserArtistRatingsByArtist(ctx context.Context, srcID int64) error {
+	_, err := q.db.Exec(ctx, deleteUserArtistRatingsByArtist, srcID)
+	return err
 }
 
 const getAlbumByArtistAndSlug = `-- name: GetAlbumByArtistAndSlug :one
@@ -685,6 +768,58 @@ func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID st
 	return i, err
 }
 
+const getArtistByMusicBrainzIDExcludingID = `-- name: GetArtistByMusicBrainzIDExcludingID :one
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags
+FROM artists
+WHERE musicbrainz_id = $1
+  AND id != $2
+LIMIT 1
+`
+
+type GetArtistByMusicBrainzIDExcludingIDParams struct {
+	Mbid      string `json:"mbid"`
+	ExcludeID int64  `json:"exclude_id"`
+}
+
+// Used by RefreshMusicArtist to detect "we resolved the same MBID as an
+// existing sibling row" so the matcher can merge instead of letting
+// UpdateArtistEnrichedFields collide on uq_artists_name_disambig.
+func (q *Queries) GetArtistByMusicBrainzIDExcludingID(ctx context.Context, arg GetArtistByMusicBrainzIDExcludingIDParams) (Artist, error) {
+	row := q.db.QueryRow(ctx, getArtistByMusicBrainzIDExcludingID, arg.Mbid, arg.ExcludeID)
+	var i Artist
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.MusicbrainzID,
+		&i.Name,
+		&i.SortName,
+		&i.Disambiguation,
+		&i.Biography,
+		&i.SearchVector,
+		&i.DiscographyEnrichedAt,
+		&i.CoverArtEnrichedAt,
+		&i.Listeners,
+		&i.Playcount,
+		&i.Popularity,
+		&i.Annotation,
+		&i.Urls,
+		&i.WikipediaLinks,
+		&i.Profiles,
+		&i.Aliases,
+		&i.Groups,
+		&i.Members,
+		&i.ArtistType,
+		&i.BeginDate,
+		&i.BeginYear,
+		&i.EndDate,
+		&i.Ended,
+		&i.Deathday,
+		&i.Birthplace,
+		&i.Tags,
+	)
+	return i, err
+}
+
 const getArtistByNameAndDisambiguation = `-- name: GetArtistByNameAndDisambiguation :one
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags FROM artists
 WHERE lower(name) = lower($1) AND lower(disambiguation) = lower($2)
@@ -728,6 +863,150 @@ func (q *Queries) GetArtistByNameAndDisambiguation(ctx context.Context, arg GetA
 		&i.Deathday,
 		&i.Birthplace,
 		&i.Tags,
+	)
+	return i, err
+}
+
+const getArtistByNameAndDisambiguationExcludingID = `-- name: GetArtistByNameAndDisambiguationExcludingID :one
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags FROM artists
+WHERE lower(name) = lower($1)
+  AND lower(disambiguation) = lower($2)
+  AND id != $3
+LIMIT 1
+`
+
+type GetArtistByNameAndDisambiguationExcludingIDParams struct {
+	Lower     string `json:"lower"`
+	Lower_2   string `json:"lower_2"`
+	ExcludeID int64  `json:"exclude_id"`
+}
+
+// Used by the merge-detection path in RefreshMusicArtist when no MBID
+// helped resolve a canonical sibling — falls back to "is there an
+// existing row whose (name, disambig) already matches what we're about
+// to write?" so the unique-constraint collision turns into a merge.
+func (q *Queries) GetArtistByNameAndDisambiguationExcludingID(ctx context.Context, arg GetArtistByNameAndDisambiguationExcludingIDParams) (Artist, error) {
+	row := q.db.QueryRow(ctx, getArtistByNameAndDisambiguationExcludingID, arg.Lower, arg.Lower_2, arg.ExcludeID)
+	var i Artist
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.MusicbrainzID,
+		&i.Name,
+		&i.SortName,
+		&i.Disambiguation,
+		&i.Biography,
+		&i.SearchVector,
+		&i.DiscographyEnrichedAt,
+		&i.CoverArtEnrichedAt,
+		&i.Listeners,
+		&i.Playcount,
+		&i.Popularity,
+		&i.Annotation,
+		&i.Urls,
+		&i.WikipediaLinks,
+		&i.Profiles,
+		&i.Aliases,
+		&i.Groups,
+		&i.Members,
+		&i.ArtistType,
+		&i.BeginDate,
+		&i.BeginYear,
+		&i.EndDate,
+		&i.Ended,
+		&i.Deathday,
+		&i.Birthplace,
+		&i.Tags,
+	)
+	return i, err
+}
+
+const getMusicArtistBySlug = `-- name: GetMusicArtistBySlug :one
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags,
+       mi.slug         AS slug,
+       mi.poster_path  AS poster_path,
+       (SELECT count(*) FROM albums  al WHERE al.artist_id = a.id)                              AS album_count,
+       (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE mi.slug = $1 AND l.media_type = 'music'
+LIMIT 1
+`
+
+type GetMusicArtistBySlugRow struct {
+	ID                    int64              `json:"id"`
+	MediaItemID           int64              `json:"media_item_id"`
+	MusicbrainzID         string             `json:"musicbrainz_id"`
+	Name                  string             `json:"name"`
+	SortName              string             `json:"sort_name"`
+	Disambiguation        string             `json:"disambiguation"`
+	Biography             string             `json:"biography"`
+	SearchVector          interface{}        `json:"search_vector"`
+	DiscographyEnrichedAt pgtype.Timestamptz `json:"discography_enriched_at"`
+	CoverArtEnrichedAt    pgtype.Timestamptz `json:"cover_art_enriched_at"`
+	Listeners             int64              `json:"listeners"`
+	Playcount             int64              `json:"playcount"`
+	Popularity            int32              `json:"popularity"`
+	Annotation            string             `json:"annotation"`
+	Urls                  []byte             `json:"urls"`
+	WikipediaLinks        []byte             `json:"wikipedia_links"`
+	Profiles              []byte             `json:"profiles"`
+	Aliases               []string           `json:"aliases"`
+	Groups                []byte             `json:"groups"`
+	Members               []byte             `json:"members"`
+	ArtistType            string             `json:"artist_type"`
+	BeginDate             string             `json:"begin_date"`
+	BeginYear             int32              `json:"begin_year"`
+	EndDate               string             `json:"end_date"`
+	Ended                 bool               `json:"ended"`
+	Deathday              string             `json:"deathday"`
+	Birthplace            string             `json:"birthplace"`
+	Tags                  []string           `json:"tags"`
+	Slug                  string             `json:"slug"`
+	PosterPath            string             `json:"poster_path"`
+	AlbumCount            int64              `json:"album_count"`
+	TrackCount            int64              `json:"track_count"`
+}
+
+// Direct artist lookup by media-item slug. Same row shape as ListMusicArtists
+// so the FE can render headers from either feed without branching.
+func (q *Queries) GetMusicArtistBySlug(ctx context.Context, slug string) (GetMusicArtistBySlugRow, error) {
+	row := q.db.QueryRow(ctx, getMusicArtistBySlug, slug)
+	var i GetMusicArtistBySlugRow
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.MusicbrainzID,
+		&i.Name,
+		&i.SortName,
+		&i.Disambiguation,
+		&i.Biography,
+		&i.SearchVector,
+		&i.DiscographyEnrichedAt,
+		&i.CoverArtEnrichedAt,
+		&i.Listeners,
+		&i.Playcount,
+		&i.Popularity,
+		&i.Annotation,
+		&i.Urls,
+		&i.WikipediaLinks,
+		&i.Profiles,
+		&i.Aliases,
+		&i.Groups,
+		&i.Members,
+		&i.ArtistType,
+		&i.BeginDate,
+		&i.BeginYear,
+		&i.EndDate,
+		&i.Ended,
+		&i.Deathday,
+		&i.Birthplace,
+		&i.Tags,
+		&i.Slug,
+		&i.PosterPath,
+		&i.AlbumCount,
+		&i.TrackCount,
 	)
 	return i, err
 }
@@ -872,6 +1151,70 @@ func (q *Queries) GetTrackByLibraryFileID(ctx context.Context, libraryFileID pgt
 		&i.PreviewUrl,
 		&i.Explicit,
 		&i.ArtistCredits,
+	)
+	return i, err
+}
+
+const getTrackDetailByID = `-- name: GetTrackDetailByID :one
+SELECT t.id,
+       t.album_id,
+       t.disc_number,
+       t.track_number,
+       t.title,
+       t.duration,
+       t.lyrics_path,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.year           AS album_year,
+       al.cover_path     AS album_cover_path,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE t.id = $1
+LIMIT 1
+`
+
+type GetTrackDetailByIDRow struct {
+	ID             int64  `json:"id"`
+	AlbumID        int64  `json:"album_id"`
+	DiscNumber     int32  `json:"disc_number"`
+	TrackNumber    int32  `json:"track_number"`
+	Title          string `json:"title"`
+	Duration       int32  `json:"duration"`
+	LyricsPath     string `json:"lyrics_path"`
+	AlbumTitle     string `json:"album_title"`
+	AlbumSlug      string `json:"album_slug"`
+	AlbumYear      string `json:"album_year"`
+	AlbumCoverPath string `json:"album_cover_path"`
+	ArtistID       int64  `json:"artist_id"`
+	ArtistName     string `json:"artist_name"`
+	ArtistSlug     string `json:"artist_slug"`
+}
+
+// One-shot track detail: track row + album + artist context. Pair with
+// ListTrackFilesByTrack on the service side to attach per-file formats.
+func (q *Queries) GetTrackDetailByID(ctx context.Context, id int64) (GetTrackDetailByIDRow, error) {
+	row := q.db.QueryRow(ctx, getTrackDetailByID, id)
+	var i GetTrackDetailByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.AlbumID,
+		&i.DiscNumber,
+		&i.TrackNumber,
+		&i.Title,
+		&i.Duration,
+		&i.LyricsPath,
+		&i.AlbumTitle,
+		&i.AlbumSlug,
+		&i.AlbumYear,
+		&i.AlbumCoverPath,
+		&i.ArtistID,
+		&i.ArtistName,
+		&i.ArtistSlug,
 	)
 	return i, err
 }
@@ -1051,6 +1394,127 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 	return items, nil
 }
 
+const listAlbumsByArtistSlug = `-- name: ListAlbumsByArtistSlug :many
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits,
+       a.name           AS artist_name,
+       mi.slug          AS artist_slug,
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
+FROM albums al
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1
+ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
+LIMIT $2 OFFSET $3
+`
+
+type ListAlbumsByArtistSlugParams struct {
+	Slug   string `json:"slug"`
+	Limit  int32  `json:"limit"`
+	Offset int32  `json:"offset"`
+}
+
+type ListAlbumsByArtistSlugRow struct {
+	ID                 int64              `json:"id"`
+	ArtistID           int64              `json:"artist_id"`
+	Title              string             `json:"title"`
+	Slug               string             `json:"slug"`
+	Year               string             `json:"year"`
+	MusicbrainzID      string             `json:"musicbrainz_id"`
+	AlbumType          string             `json:"album_type"`
+	Genres             []string           `json:"genres"`
+	CoverPath          string             `json:"cover_path"`
+	ReleaseDate        pgtype.Date        `json:"release_date"`
+	Label              string             `json:"label"`
+	Country            string             `json:"country"`
+	Barcode            string             `json:"barcode"`
+	TotalTracks        int32              `json:"total_tracks"`
+	TotalDiscs         int32              `json:"total_discs"`
+	Tags               []string           `json:"tags"`
+	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector       interface{}        `json:"search_vector"`
+	CatalogNo          string             `json:"catalog_no"`
+	Explicit           bool               `json:"explicit"`
+	OriginalTitle      string             `json:"original_title"`
+	SecondaryTypes     []string           `json:"secondary_types"`
+	Styles             []string           `json:"styles"`
+	Language           string             `json:"language"`
+	DurationSeconds    int32              `json:"duration_seconds"`
+	Isrcs              []string           `json:"isrcs"`
+	Rating             pgtype.Numeric     `json:"rating"`
+	Popularity         int32              `json:"popularity"`
+	Listeners          int64              `json:"listeners"`
+	Playcount          int64              `json:"playcount"`
+	ExternalIds        []byte             `json:"external_ids"`
+	ArtistCredits      []byte             `json:"artist_credits"`
+	ArtistName         string             `json:"artist_name"`
+	ArtistSlug         string             `json:"artist_slug"`
+	TrackCount         int64              `json:"track_count"`
+}
+
+// Paginated album listing for one artist. Same row shape as ListMusicAlbums
+// so the FE can reuse the album-row component without branching.
+func (q *Queries) ListAlbumsByArtistSlug(ctx context.Context, arg ListAlbumsByArtistSlugParams) ([]ListAlbumsByArtistSlugRow, error) {
+	rows, err := q.db.Query(ctx, listAlbumsByArtistSlug, arg.Slug, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlbumsByArtistSlugRow{}
+	for rows.Next() {
+		var i ListAlbumsByArtistSlugRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArtistID,
+			&i.Title,
+			&i.Slug,
+			&i.Year,
+			&i.MusicbrainzID,
+			&i.AlbumType,
+			&i.Genres,
+			&i.CoverPath,
+			&i.ReleaseDate,
+			&i.Label,
+			&i.Country,
+			&i.Barcode,
+			&i.TotalTracks,
+			&i.TotalDiscs,
+			&i.Tags,
+			&i.IntegratedLufs,
+			&i.TruePeakDb,
+			&i.LoudnessRangeDb,
+			&i.LoudnessAnalyzedAt,
+			&i.SearchVector,
+			&i.CatalogNo,
+			&i.Explicit,
+			&i.OriginalTitle,
+			&i.SecondaryTypes,
+			&i.Styles,
+			&i.Language,
+			&i.DurationSeconds,
+			&i.Isrcs,
+			&i.Rating,
+			&i.Popularity,
+			&i.Listeners,
+			&i.Playcount,
+			&i.ExternalIds,
+			&i.ArtistCredits,
+			&i.ArtistName,
+			&i.ArtistSlug,
+			&i.TrackCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAlbumsPendingLoudness = `-- name: ListAlbumsPendingLoudness :many
 SELECT al.id, al.title
 FROM albums al
@@ -1091,6 +1555,125 @@ func (q *Queries) ListAlbumsPendingLoudness(ctx context.Context, limit int32) ([
 	for rows.Next() {
 		var i ListAlbumsPendingLoudnessRow
 		if err := rows.Scan(&i.ID, &i.Title); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listArtistSimilarLocalArtistsByArtistID = `-- name: ListArtistSimilarLocalArtistsByArtistID :many
+SELECT
+    asa.rank,
+    asa.name,
+    asa.mbid,
+    asa.match_score,
+    asa.url,
+    asa.local_artist_id,
+    COALESCE(local_mi.slug, '')::text AS local_slug,
+    COALESCE(local_mi.id, 0)::bigint  AS local_media_item_id
+FROM artist_similar_artists asa
+LEFT JOIN artists      local_a  ON local_a.id  = asa.local_artist_id
+LEFT JOIN media_items  local_mi ON local_mi.id = local_a.media_item_id
+WHERE asa.artist_id = $1
+ORDER BY asa.rank ASC
+LIMIT $2
+`
+
+type ListArtistSimilarLocalArtistsByArtistIDParams struct {
+	ArtistID    int64 `json:"artist_id"`
+	ArtistLimit int32 `json:"artist_limit"`
+}
+
+type ListArtistSimilarLocalArtistsByArtistIDRow struct {
+	Rank             int32          `json:"rank"`
+	Name             string         `json:"name"`
+	Mbid             string         `json:"mbid"`
+	MatchScore       pgtype.Numeric `json:"match_score"`
+	Url              string         `json:"url"`
+	LocalArtistID    pgtype.Int8    `json:"local_artist_id"`
+	LocalSlug        string         `json:"local_slug"`
+	LocalMediaItemID int64          `json:"local_media_item_id"`
+}
+
+// Persisted Last.fm/ListenBrainz similar list, with local linkage already
+// folded in by the matcher write-side. Used to avoid the heya.media round
+// trip on every artist page render.
+func (q *Queries) ListArtistSimilarLocalArtistsByArtistID(ctx context.Context, arg ListArtistSimilarLocalArtistsByArtistIDParams) ([]ListArtistSimilarLocalArtistsByArtistIDRow, error) {
+	rows, err := q.db.Query(ctx, listArtistSimilarLocalArtistsByArtistID, arg.ArtistID, arg.ArtistLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArtistSimilarLocalArtistsByArtistIDRow{}
+	for rows.Next() {
+		var i ListArtistSimilarLocalArtistsByArtistIDRow
+		if err := rows.Scan(
+			&i.Rank,
+			&i.Name,
+			&i.Mbid,
+			&i.MatchScore,
+			&i.Url,
+			&i.LocalArtistID,
+			&i.LocalSlug,
+			&i.LocalMediaItemID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listArtistTopTracksRawByArtistID = `-- name: ListArtistTopTracksRawByArtistID :many
+SELECT rank, title, mbid, playcount, listeners, url
+FROM artist_top_tracks
+WHERE artist_id = $1
+ORDER BY rank ASC
+LIMIT $2
+`
+
+type ListArtistTopTracksRawByArtistIDParams struct {
+	ArtistID   int64 `json:"artist_id"`
+	TrackLimit int32 `json:"track_limit"`
+}
+
+type ListArtistTopTracksRawByArtistIDRow struct {
+	Rank      int32  `json:"rank"`
+	Title     string `json:"title"`
+	Mbid      string `json:"mbid"`
+	Playcount int64  `json:"playcount"`
+	Listeners int64  `json:"listeners"`
+	Url       string `json:"url"`
+}
+
+// Raw artist_top_tracks rows. The service layer joins these against the
+// artist's local tracks in Go so it can use kagome-backed romanization
+// (kana/kanji → romaji) for the title fallback. SQL alone can't do that
+// and pg_trgm matches CJK poorly, so the join lives in service code.
+func (q *Queries) ListArtistTopTracksRawByArtistID(ctx context.Context, arg ListArtistTopTracksRawByArtistIDParams) ([]ListArtistTopTracksRawByArtistIDRow, error) {
+	rows, err := q.db.Query(ctx, listArtistTopTracksRawByArtistID, arg.ArtistID, arg.TrackLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArtistTopTracksRawByArtistIDRow{}
+	for rows.Next() {
+		var i ListArtistTopTracksRawByArtistIDRow
+		if err := rows.Scan(
+			&i.Rank,
+			&i.Title,
+			&i.Mbid,
+			&i.Playcount,
+			&i.Listeners,
+			&i.Url,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1398,6 +1981,7 @@ SELECT t.id              AS track_id,
        t.track_number    AS track_number,
        al.id             AS album_id,
        al.title          AS album_title,
+       al.slug           AS album_slug,
        al.cover_path     AS album_cover_path,
        al.year           AS album_year,
        a.id              AS artist_id,
@@ -1427,6 +2011,7 @@ type ListMusicTracksRow struct {
 	TrackNumber    int32  `json:"track_number"`
 	AlbumID        int64  `json:"album_id"`
 	AlbumTitle     string `json:"album_title"`
+	AlbumSlug      string `json:"album_slug"`
 	AlbumCoverPath string `json:"album_cover_path"`
 	AlbumYear      string `json:"album_year"`
 	ArtistID       int64  `json:"artist_id"`
@@ -1436,7 +2021,8 @@ type ListMusicTracksRow struct {
 
 // Flat listing for the Songs tab. Carries everything the row needs:
 // title, duration, album title, artist name, slugs for navigation, and the
-// album cover for the thumbnail.
+// album cover for the thumbnail. album_slug + artist_slug together address
+// the album cover endpoint without an ID lookup.
 func (q *Queries) ListMusicTracks(ctx context.Context, arg ListMusicTracksParams) ([]ListMusicTracksRow, error) {
 	rows, err := q.db.Query(ctx, listMusicTracks, arg.Limit, arg.Offset)
 	if err != nil {
@@ -1454,6 +2040,7 @@ func (q *Queries) ListMusicTracks(ctx context.Context, arg ListMusicTracksParams
 			&i.TrackNumber,
 			&i.AlbumID,
 			&i.AlbumTitle,
+			&i.AlbumSlug,
 			&i.AlbumCoverPath,
 			&i.AlbumYear,
 			&i.ArtistID,
@@ -1895,6 +2482,150 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 	return items, nil
 }
 
+const listTracksByArtistSlug = `-- name: ListTracksByArtistSlug :many
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug
+FROM tracks t
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.slug = $1
+ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC,
+         t.disc_number ASC, t.track_number ASC
+LIMIT $2 OFFSET $3
+`
+
+type ListTracksByArtistSlugParams struct {
+	Slug   string `json:"slug"`
+	Limit  int32  `json:"limit"`
+	Offset int32  `json:"offset"`
+}
+
+type ListTracksByArtistSlugRow struct {
+	TrackID        int64  `json:"track_id"`
+	TrackTitle     string `json:"track_title"`
+	Duration       int32  `json:"duration"`
+	DiscNumber     int32  `json:"disc_number"`
+	TrackNumber    int32  `json:"track_number"`
+	AlbumID        int64  `json:"album_id"`
+	AlbumTitle     string `json:"album_title"`
+	AlbumCoverPath string `json:"album_cover_path"`
+	AlbumYear      string `json:"album_year"`
+	ArtistID       int64  `json:"artist_id"`
+	ArtistName     string `json:"artist_name"`
+	ArtistSlug     string `json:"artist_slug"`
+}
+
+// Paginated flat-track listing for one artist. Same row shape as
+// ListMusicTracks. Newest album first, then disc/track order within the album.
+func (q *Queries) ListTracksByArtistSlug(ctx context.Context, arg ListTracksByArtistSlugParams) ([]ListTracksByArtistSlugRow, error) {
+	rows, err := q.db.Query(ctx, listTracksByArtistSlug, arg.Slug, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTracksByArtistSlugRow{}
+	for rows.Next() {
+		var i ListTracksByArtistSlugRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTracksForArtistMatching = `-- name: ListTracksForArtistMatching :many
+SELECT
+    t.id        AS track_id,
+    t.title     AS title,
+    t.recording_mbid AS recording_mbid,
+    COALESCE(
+        NULLIF(t.duration, 0),
+        (SELECT MAX(tf.duration) FROM track_files tf WHERE tf.track_id = t.id),
+        0
+    )::int      AS effective_duration,
+    al.id       AS album_id,
+    al.title    AS album_title,
+    al.slug     AS album_slug,
+    al.year     AS album_year,
+    al.cover_path AS cover_path
+FROM tracks t
+JOIN albums al ON al.id = t.album_id
+WHERE al.artist_id = $1
+`
+
+type ListTracksForArtistMatchingRow struct {
+	TrackID           int64  `json:"track_id"`
+	Title             string `json:"title"`
+	RecordingMbid     string `json:"recording_mbid"`
+	EffectiveDuration int32  `json:"effective_duration"`
+	AlbumID           int64  `json:"album_id"`
+	AlbumTitle        string `json:"album_title"`
+	AlbumSlug         string `json:"album_slug"`
+	AlbumYear         string `json:"album_year"`
+	CoverPath         string `json:"cover_path"`
+}
+
+// Minimal track + album projection used by ListArtistTopTracksBySlug to
+// build its in-memory match index. Duration falls back to the best
+// track_file duration when the canonical column is 0.
+func (q *Queries) ListTracksForArtistMatching(ctx context.Context, artistID int64) ([]ListTracksForArtistMatchingRow, error) {
+	rows, err := q.db.Query(ctx, listTracksForArtistMatching, artistID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTracksForArtistMatchingRow{}
+	for rows.Next() {
+		var i ListTracksForArtistMatchingRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.Title,
+			&i.RecordingMbid,
+			&i.EffectiveDuration,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumYear,
+			&i.CoverPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markArtistCoverArtEnriched = `-- name: MarkArtistCoverArtEnriched :exec
 UPDATE artists SET cover_art_enriched_at = now() WHERE id = $1
 `
@@ -1910,6 +2641,84 @@ UPDATE artists SET discography_enriched_at = now() WHERE id = $1
 
 func (q *Queries) MarkArtistDiscographyEnriched(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markArtistDiscographyEnriched, id)
+	return err
+}
+
+const mergeArtistFavorites = `-- name: MergeArtistFavorites :exec
+INSERT INTO user_favorites (user_id, entity_type, entity_id)
+SELECT user_id, 'artist', $1
+FROM user_favorites
+WHERE entity_type = 'artist' AND user_favorites.entity_id = $2
+ON CONFLICT (user_id, entity_type, entity_id) DO NOTHING
+`
+
+type MergeArtistFavoritesParams struct {
+	DstID int64 `json:"dst_id"`
+	SrcID int64 `json:"src_id"`
+}
+
+// Move "loved artist" entries. Dupes within (user_id, entity_type,
+// entity_id) collapse to a no-op via the existing unique constraint.
+func (q *Queries) MergeArtistFavorites(ctx context.Context, arg MergeArtistFavoritesParams) error {
+	_, err := q.db.Exec(ctx, mergeArtistFavorites, arg.DstID, arg.SrcID)
+	return err
+}
+
+const mergeUserArtistRatings = `-- name: MergeUserArtistRatings :exec
+INSERT INTO user_artist_ratings (user_id, artist_id, rating)
+SELECT user_id, $1, rating
+FROM user_artist_ratings
+WHERE user_artist_ratings.artist_id = $2
+ON CONFLICT (user_id, artist_id) DO UPDATE
+SET rating     = GREATEST(user_artist_ratings.rating, EXCLUDED.rating),
+    updated_at = now()
+`
+
+type MergeUserArtistRatingsParams struct {
+	DstID int64 `json:"dst_id"`
+	SrcID int64 `json:"src_id"`
+}
+
+// Move user_artist_ratings from src_id to dst_id, keeping the higher
+// rating on collision (closer to what the user actually meant when
+// they rated the same artist twice under different rows).
+func (q *Queries) MergeUserArtistRatings(ctx context.Context, arg MergeUserArtistRatingsParams) error {
+	_, err := q.db.Exec(ctx, mergeUserArtistRatings, arg.DstID, arg.SrcID)
+	return err
+}
+
+const reparentAlbums = `-- name: ReparentAlbums :exec
+UPDATE albums SET artist_id = $1 WHERE albums.artist_id = $2
+`
+
+type ReparentAlbumsParams struct {
+	DstID int64 `json:"dst_id"`
+	SrcID int64 `json:"src_id"`
+}
+
+// Move every album from src_id over to dst_id. Tracks follow via
+// albums.artist_id (track_id is keyed on album_id, not artist_id).
+func (q *Queries) ReparentAlbums(ctx context.Context, arg ReparentAlbumsParams) error {
+	_, err := q.db.Exec(ctx, reparentAlbums, arg.DstID, arg.SrcID)
+	return err
+}
+
+const reparentSimilarLocalRefs = `-- name: ReparentSimilarLocalRefs :exec
+UPDATE artist_similar_artists
+SET local_artist_id = $1
+WHERE local_artist_id = $2
+`
+
+type ReparentSimilarLocalRefsParams struct {
+	DstID pgtype.Int8 `json:"dst_id"`
+	SrcID pgtype.Int8 `json:"src_id"`
+}
+
+// Re-point any "this dupe is a similar artist of X" pointer at the
+// canonical row. The dupe's OWN similar-list rows are deleted by
+// DeleteArtistDerivedChildren below — those get recomputed.
+func (q *Queries) ReparentSimilarLocalRefs(ctx context.Context, arg ReparentSimilarLocalRefsParams) error {
+	_, err := q.db.Exec(ctx, reparentSimilarLocalRefs, arg.DstID, arg.SrcID)
 	return err
 }
 

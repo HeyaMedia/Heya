@@ -291,6 +291,37 @@ func mapPersonDoc(body *gen.PersonDocBody) *HeyaPersonResponse {
 		ExternalIDs:        mapStr(pay.ExternalIds),
 		Popularity:         floatPtr(pay.Popularity),
 		Homepage:           strPtr(pay.Homepage),
+		Cast:               mapCredits(pay.Cast),
+		Crew:               mapCredits(pay.Crew),
+		KnownForTitles:     mapCredits(pay.KnownForTitles),
+	}
+	return out
+}
+
+// mapCredits translates the generated []gen.Credit into the legacy
+// []HeyaCredit shape used by person_worker.go.
+func mapCredits(items *[]gen.Credit) []HeyaCredit {
+	if items == nil || len(*items) == 0 {
+		return nil
+	}
+	out := make([]HeyaCredit, 0, len(*items))
+	for _, c := range *items {
+		out = append(out, HeyaCredit{
+			Title:        c.Title,
+			Year:         intPtr64AsInt(c.Year),
+			Character:    strPtr(c.Character),
+			Job:          strPtr(c.Job),
+			Department:   strPtr(c.Department),
+			Kind:         strPtr(c.Kind),
+			Slug:         strPtr(c.Slug),
+			TmdbID:       intPtr64AsInt(c.TmdbId),
+			TvdbID:       intPtr64AsInt(c.TvdbId),
+			ImdbID:       strPtr(c.ImdbId),
+			PosterURL:    strPtr(c.PosterUrl),
+			EpisodeCount: intPtr64AsInt(c.EpisodeCount),
+			Order:        intPtr64AsInt(c.Order),
+			Source:       strPtr(c.Source),
+		})
 	}
 	return out
 }

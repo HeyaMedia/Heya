@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -13,6 +15,16 @@ import (
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/rs/zerolog/log"
 )
+
+// debouncedEnrichWindow is the trailing-edge debounce delay applied to
+// child-content additions (new albums/tracks under an artist, new
+// seasons/episodes under a series). 30s covers a downloader dropping
+// a box-set without firing one heya.media fetch per release.
+const debouncedEnrichWindow = 30 * time.Second
+
+// enrichStatusComplete mirrors worker.enrichStatusComplete. Lives here
+// so the matcher can compare without importing the worker package.
+const enrichStatusComplete = "complete"
 
 type MatchInfo struct {
 	ProviderName string
@@ -259,7 +271,41 @@ func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result m
 		MediaItemID: pgInt8(mediaItemID),
 	})
 
+	// Trailing-edge debounce. For media types that grow children over
+	// time (TV: new seasons/episodes), an existing-and-complete parent
+	// otherwise leaves the new content unenriched — the enrich worker's
+	// idempotency gate skips re-fetches when status='complete'. The
+	// sweeper picks this row up after the debounce window and runs a
+	// forced enrich, which pulls fresh upstream data including any new
+	// seasons/episodes. See [internal/worker/debounce_sweep_worker.go].
+	if !isNew && kind == metadata.KindTV {
+		m.maybeDebounceEnrich(ctx, mediaItemID, "matcher.tv")
+	}
+
 	return info, nil
+}
+
+// maybeDebounceEnrich upserts a debounced_enriches row when the
+// media_item is in enrichment_status='complete'. No-op otherwise (the
+// initial enrich is still pending and will fire via the IsNew=true
+// path). Errors are logged but never abort the caller's match.
+func (m *Matcher) maybeDebounceEnrich(ctx context.Context, mediaItemID int64, requestedBy string) {
+	mi, err := m.q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		log.Debug().Err(err).Int64("media_item_id", mediaItemID).Msg("debounce: media_item lookup failed")
+		return
+	}
+	if mi.EnrichmentStatus != enrichStatusComplete {
+		return
+	}
+	fireAt := pgtype.Timestamptz{Time: time.Now().Add(debouncedEnrichWindow), Valid: true}
+	if err := m.q.UpsertDebouncedEnrich(ctx, sqlc.UpsertDebouncedEnrichParams{
+		MediaItemID: mediaItemID,
+		FireAt:      fireAt,
+		RequestedBy: requestedBy,
+	}); err != nil {
+		log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("upsert debounced_enrich failed")
+	}
 }
 
 // stubDetailFromSearch projects a heya.media search hit into the minimum

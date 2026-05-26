@@ -12,7 +12,8 @@ import (
 
 type SaveNFOWorker struct {
 	river.WorkerDefaults[SaveNFOArgs]
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
 }
 
 func (w *SaveNFOWorker) Work(ctx context.Context, job *river.Job[SaveNFOArgs]) error {
@@ -22,6 +23,8 @@ func (w *SaveNFOWorker) Work(ctx context.Context, job *river.Job[SaveNFOArgs]) e
 	if err != nil {
 		return nil
 	}
+
+	w.Progress.SetCurrentByKind(SaveNFOArgs{}.Kind(), item.Title)
 
 	mediaDir := saver.MediaDir(job.Args.FilePath)
 

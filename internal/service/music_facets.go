@@ -43,32 +43,11 @@ type KeyView struct {
 	Clarity float32 `json:"clarity"`
 }
 
-// TrackResult is one row of a similarity / search response.
-type TrackResult struct {
-	ID       int64   `json:"id"`
-	Title    string  `json:"title"`
-	AlbumID  int64   `json:"album_id"`
-	ArtistID int64   `json:"artist_id"`
-	FilePath string  `json:"file_path"`
-	Distance float32 `json:"distance"`
-}
-
-// ArtistResult / AlbumResult mirror their sqlc.Similar* rows.
-type ArtistResult struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	MediaItemID int64   `json:"media_item_id"`
-	MediaSlug   string  `json:"media_slug"`
-	Distance    float32 `json:"distance"`
-}
-
-type AlbumResult struct {
-	ID       int64   `json:"id"`
-	Title    string  `json:"title"`
-	ArtistID int64   `json:"artist_id"`
-	Slug     string  `json:"slug"`
-	Distance float32 `json:"distance"`
-}
+// Sonic-similarity / search result row types are sourced directly from the
+// sqlc rich-row generated types — see music_facets / music_radio service
+// methods. We used to wrap them in service-layer mirror structs but the rich
+// rows already carry slugs + album/artist context the FE needs, so the
+// extra indirection just rotted with every shape change.
 
 // ErrNoFacets is returned when the requested track has no
 // track_facets row yet (analysis pending).
@@ -100,9 +79,11 @@ func (a *App) TrackWaveform(ctx context.Context, trackID int64) ([]float32, erro
 	return wf, nil
 }
 
-// SimilarMusicTracks returns the top-N most sonically similar tracks
-// to the given seed track. Uses the seed's track_embedding for KNN.
-func (a *App) SimilarMusicTracks(ctx context.Context, seedTrackID int64, limit int32) ([]TrackResult, error) {
+// SimilarMusicTracks returns the top-N most sonically similar tracks to the
+// given seed track. Uses the seed's track_embedding for KNN. Returns the
+// rich row shape (with album+artist context) so the FE doesn't need to
+// resolve slugs separately to play / link the result.
+func (a *App) SimilarMusicTracks(ctx context.Context, seedTrackID int64, limit int32) ([]sqlc.SimilarTracksByTrackRichRow, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -114,27 +95,76 @@ func (a *App) SimilarMusicTracks(ctx context.Context, seedTrackID int64, limit i
 		}
 		return nil, fmt.Errorf("seed facets: %w", err)
 	}
-	rows, err := q.SimilarTracksByTrack(ctx, sqlc.SimilarTracksByTrackParams{
+	rows, err := q.SimilarTracksByTrackRich(ctx, sqlc.SimilarTracksByTrackRichParams{
 		TrackEmbedding: seed.TrackEmbedding,
-		TrackID:        seedTrackID,
-		Limit:          limit,
+		ExcludeIds:     []int64{seedTrackID},
+		TrackLimit:     limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("similar tracks: %w", err)
 	}
-	out := make([]TrackResult, len(rows))
-	for i, r := range rows {
-		out[i] = TrackResult{
-			ID: r.ID, Title: r.Title, AlbumID: r.AlbumID, ArtistID: r.ArtistID,
-			FilePath: r.FilePath, Distance: r.Distance,
-		}
-	}
-	return out, nil
+	return rows, nil
 }
 
-// SimilarMusicArtists returns the top-N most sonically similar
-// artists to the given seed artist. Uses the artist centroid for KNN.
-func (a *App) SimilarMusicArtists(ctx context.Context, seedArtistID int64, limit int32) ([]ArtistResult, error) {
+// BPM tolerance (± seconds-per-beat) for the DJ-mix endpoint. ±5 is a
+// common comfortable mix range for DJs — within this a typical 2-deck setup
+// can pitch-match without obvious audio artifacts. Constant rather than a
+// per-request parameter because exposing it lets callers ask for absurdly
+// wide windows that defeat the "harmonically compatible" framing.
+const djMixBPMTolerance = 5.0
+
+// BuildDJMix returns harmonically-compatible tracks for the seed: same
+// Camelot wheel position, the relative key (A↔B), or ±1 wheel positions,
+// all within ±djMixBPMTolerance BPM, ordered by embedding distance.
+//
+// Different from Instant Radio: radio expands by sonic similarity alone,
+// mix-to constrains to keys that will sound good back-to-back in a DJ set.
+func (a *App) BuildDJMix(ctx context.Context, seedTrackID int64, limit int32) ([]sqlc.MixToTracksRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	q := sqlc.New(a.db)
+	seed, err := q.GetTrackFacets(ctx, seedTrackID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNoFacets
+		}
+		return nil, fmt.Errorf("seed facets: %w", err)
+	}
+	if !seed.Bpm.Valid || !seed.KeyRoot.Valid || !seed.KeyMode.Valid {
+		return nil, fmt.Errorf("seed track is missing bpm or key — cannot mix")
+	}
+
+	seedKey := sonicanalysis.Key{
+		Root: sonicanalysis.PitchClass(seed.KeyRoot.Int16),
+		Mode: sonicanalysis.KeyMode(seed.KeyMode.Int16),
+	}
+	compatible := seedKey.CompatibleKeys()
+	if len(compatible) == 0 {
+		return nil, fmt.Errorf("seed key out of range")
+	}
+	codes := make([]int32, 0, len(compatible))
+	for _, k := range compatible {
+		codes = append(codes, int32(k.Root)*2+int32(k.Mode))
+	}
+
+	rows, err := q.MixToTracks(ctx, sqlc.MixToTracksParams{
+		TrackEmbedding: seed.TrackEmbedding,
+		BpmMin:         seed.Bpm.Float32 - djMixBPMTolerance,
+		BpmMax:         seed.Bpm.Float32 + djMixBPMTolerance,
+		KeyCodes:       codes,
+		ExcludeIds:     []int64{seedTrackID},
+		TrackLimit:     limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mix-to: %w", err)
+	}
+	return rows, nil
+}
+
+// SimilarMusicArtists returns the top-N most sonically similar artists to the
+// given seed artist. Row already carries `media_slug` for the FE.
+func (a *App) SimilarMusicArtists(ctx context.Context, seedArtistID int64, limit int32) ([]sqlc.SimilarArtistsRow, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -154,19 +184,13 @@ func (a *App) SimilarMusicArtists(ctx context.Context, seedArtistID int64, limit
 	if err != nil {
 		return nil, fmt.Errorf("similar artists: %w", err)
 	}
-	out := make([]ArtistResult, len(rows))
-	for i, r := range rows {
-		out[i] = ArtistResult{
-			ID: r.ID, Name: r.Name, MediaItemID: r.MediaItemID,
-			MediaSlug: r.MediaSlug, Distance: r.Distance,
-		}
-	}
-	return out, nil
+	return rows, nil
 }
 
-// SimilarMusicAlbums returns the top-N most sonically similar albums
-// to the given seed album. Uses the album centroid for KNN.
-func (a *App) SimilarMusicAlbums(ctx context.Context, seedAlbumID int64, limit int32) ([]AlbumResult, error) {
+// SimilarMusicAlbums returns the top-N most sonically similar albums to the
+// given seed album. Row carries artist_slug + album_slug so the FE can link
+// to the album detail / cover endpoints directly.
+func (a *App) SimilarMusicAlbums(ctx context.Context, seedAlbumID int64, limit int32) ([]sqlc.SimilarAlbumsRow, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -186,19 +210,13 @@ func (a *App) SimilarMusicAlbums(ctx context.Context, seedAlbumID int64, limit i
 	if err != nil {
 		return nil, fmt.Errorf("similar albums: %w", err)
 	}
-	out := make([]AlbumResult, len(rows))
-	for i, r := range rows {
-		out[i] = AlbumResult{
-			ID: r.ID, Title: r.Title, ArtistID: r.ArtistID, Slug: r.Slug, Distance: r.Distance,
-		}
-	}
-	return out, nil
+	return rows, nil
 }
 
 // SearchMusicByText runs a CLAP text→audio KNN over all analyzed
-// tracks. Returns up to `limit` tracks ordered by cosine ascending
-// (lower distance = better match).
-func (a *App) SearchMusicByText(ctx context.Context, text string, limit int32) ([]TrackResult, error) {
+// tracks. Returns the rich row shape (album+artist context with slugs)
+// so search results can link / play without follow-up lookups.
+func (a *App) SearchMusicByText(ctx context.Context, text string, limit int32) ([]sqlc.SimilarTracksByTextRichRow, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, errors.New("search text is empty")
 	}
@@ -212,21 +230,14 @@ func (a *App) SearchMusicByText(ctx context.Context, text string, limit int32) (
 	if err != nil {
 		return nil, fmt.Errorf("clap text embed: %w", err)
 	}
-	rows, err := sqlc.New(a.db).SimilarTracksByText(ctx, sqlc.SimilarTracksByTextParams{
+	rows, err := sqlc.New(a.db).SimilarTracksByTextRich(ctx, sqlc.SimilarTracksByTextRichParams{
 		TextEmbedding: pgvector.NewVector(embed),
-		Limit:         limit,
+		TrackLimit:    limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("text search: %w", err)
 	}
-	out := make([]TrackResult, len(rows))
-	for i, r := range rows {
-		out[i] = TrackResult{
-			ID: r.ID, Title: r.Title, AlbumID: r.AlbumID, ArtistID: r.ArtistID,
-			FilePath: r.FilePath, Distance: r.Distance,
-		}
-	}
-	return out, nil
+	return rows, nil
 }
 
 // facetsViewFromRow maps the raw sqlc row to a JSON-friendly view,

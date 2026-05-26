@@ -208,7 +208,7 @@ func op(method, path, opID, summary string, tag string) huma.Operation {
 // Pagination is embedded in list inputs. Defaults match the historical
 // behaviour of the manual parseInt32/parsePage helpers.
 type Pagination struct {
-	Limit  int32 `query:"limit" minimum:"1" maximum:"500" default:"50" example:"50" doc:"Max results"`
+	Limit  int32 `query:"limit" minimum:"1" maximum:"1000" default:"50" example:"50" doc:"Max results"`
 	Offset int32 `query:"offset" minimum:"0" default:"0" example:"0" doc:"Results offset"`
 }
 

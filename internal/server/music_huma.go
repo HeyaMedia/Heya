@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -54,7 +55,44 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return cachedJSON(data, 120), nil
+			return cachedJSON(data, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}", "get-music-artist", "Artist detail by slug", "Music")),
+		func(ctx context.Context, in *struct {
+			Slug string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"miles-davis"`
+		}) (*JSONOutput[*sqlc.GetMusicArtistBySlugRow], error) {
+			row, err := app.GetMusicArtistBySlug(ctx, in.Slug)
+			if err != nil {
+				return nil, huma.Error404NotFound("artist not found")
+			}
+			return cachedJSON(row, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}/albums", "list-artist-albums", "Albums by artist (paginated)", "Music")),
+		func(ctx context.Context, in *struct {
+			Slug string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"miles-davis"`
+			Pagination
+		}) (*JSONOutput[*service.MusicListPage[sqlc.ListAlbumsByArtistSlugRow]], error) {
+			limit := defaultPositive(in.Limit, 100)
+			page, err := app.ListAlbumsByArtistSlug(ctx, in.Slug, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(page, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}/tracks", "list-artist-tracks", "Tracks by artist (paginated)", "Music")),
+		func(ctx context.Context, in *struct {
+			Slug string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"miles-davis"`
+			Pagination
+		}) (*JSONOutput[*service.MusicListPage[sqlc.ListTracksByArtistSlugRow]], error) {
+			limit := defaultPositive(in.Limit, 200)
+			page, err := app.ListTracksByArtistSlug(ctx, in.Slug, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(page, 30), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}", "get-music-album", "Album detail by artist+album slug", "Music")),
@@ -72,13 +110,27 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return cachedJSON(detail, 30), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{id}/similar", "similar-artists", "Artists similar by metadata", "Music")),
-		func(ctx context.Context, in *IDPath) (*JSONOutput[[]service.SimilarArtistRow], error) {
-			rows, err := app.GetSimilarArtists(ctx, in.ID)
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}/similar", "similar-artists", "Artists similar by metadata (Last.fm / ListenBrainz)", "Music")),
+		func(ctx context.Context, in *struct {
+			Slug string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"miles-davis"`
+		}) (*JSONOutput[[]service.SimilarArtistRow], error) {
+			rows, err := app.GetSimilarArtistsBySlug(ctx, in.Slug)
 			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, huma.Error404NotFound("artist not found")
 			}
 			return cachedJSON(rows, 30), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}/top-tracks", "artist-top-tracks", "Artist's Last.fm top tracks rail, with local linkage when owned", "Music")),
+		func(ctx context.Context, in *struct {
+			Slug  string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"ado"`
+			Limit int32  `query:"limit" minimum:"1" maximum:"50" default:"25"`
+		}) (*JSONOutput[topTracksBody], error) {
+			rows, err := app.ListArtistTopTracksBySlug(ctx, in.Slug, in.Limit)
+			if err != nil {
+				return nil, huma.Error404NotFound("artist not found")
+			}
+			return cachedJSON(topTracksBody{Items: rows}, 60), nil
 		})
 
 	// --- Loved tracks/artists/albums (per-user) ---
@@ -148,6 +200,31 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		})
 
 	// --- Playlists ---
+	// --- Per-user listening history + taste profile ---
+	// Scrobble events themselves flow through the unified /api/me/playback
+	// endpoint (registered in me_huma.go); the reads below are music-specific
+	// views of that history.
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/recently-played", "list-recently-played", "User's recently-played tracks (deduped)", "Me")),
+		func(ctx context.Context, in *Pagination) (*JSONOutput[recentlyPlayedBody], error) {
+			limit := defaultPositive(in.Limit, 50)
+			rows, err := app.ListRecentlyPlayed(ctx, userFrom(ctx).ID, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(recentlyPlayedBody{Items: rows}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/listening-stats", "get-listening-stats", "User's taste profile: top genres, mood averages, tempo histogram", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[*service.ListeningStats], error) {
+			stats, err := app.ListeningStatsForUser(ctx, userFrom(ctx).ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			// Stats drift slowly relative to a single play; a short cache lets
+			// the FE flick between panels without re-aggregating.
+			return cachedJSON(stats, 60), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/playlists", "list-playlists", "List user's playlists", "Me")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[playlistsListBody], error) {
 			rows, err := app.ListUserPlaylists(ctx, userFrom(ctx).ID)
@@ -218,29 +295,38 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return nil, nil
 		})
 
-	// --- Per-track reads (lyrics + files; streaming stays on stdlib mux) ---
-	huma.Register(api, secured(op(http.MethodGet, "/api/tracks/{id}/files", "list-track-files", "Available formats for a track", "Music")),
+	// --- Per-track reads (detail + lyrics + files; streaming lives in binary_huma.go) ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}", "get-music-track", "Track detail with files + album/artist context", "Music")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[*service.MusicTrackDetail], error) {
+			detail, err := app.GetMusicTrackDetail(ctx, in.ID)
+			if err != nil {
+				return nil, huma.Error404NotFound("track not found")
+			}
+			return cachedJSON(detail, 300), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}/files", "list-track-files", "Available formats for a track", "Music")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[[]sqlc.TrackFile], error) {
 			files, err := app.ListTrackFiles(ctx, in.ID)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return cachedJSON(files, 60), nil
+			return cachedJSON(files, 300), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/tracks/{id}/lyrics", "get-track-lyrics", "Parsed lyrics (synced or plain)", "Music")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}/lyrics", "get-track-lyrics", "Parsed lyrics (synced or plain)", "Music")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[LyricsResponse], error) {
 			body, err := readTrackLyrics(ctx, app, in.ID)
 			if err != nil {
 				return nil, huma.Error404NotFound(err.Error())
 			}
-			return cachedJSON(parseLyrics(body), 60), nil
+			return cachedJSON(parseLyrics(body), 300), nil
 		})
 
 	// --- Sonic analysis reads ---
 	// These results are stable once analysis completes — cache aggressively so
 	// the FE doesn't re-fetch huge embedding payloads on every nav.
-	huma.Register(api, secured(op(http.MethodGet, "/api/tracks/{id}/facets", "get-track-facets", "Per-track ML/DSP facets", "Music")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}/facets", "get-track-facets", "Per-track ML/DSP facets", "Music")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[*service.FacetsView], error) {
 			facets, err := app.TrackFacets(ctx, in.ID)
 			if err != nil {
@@ -252,7 +338,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return cachedJSON(facets, 300), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/tracks/{id}/waveform", "get-track-waveform", "Decimated waveform peaks", "Music")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}/waveform", "get-track-waveform", "Decimated waveform peaks", "Music")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[waveformBody], error) {
 			wf, err := app.TrackWaveform(ctx, in.ID)
 			if err != nil {
@@ -264,11 +350,26 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return cachedJSON(waveformBody{Waveform: wf}, 300), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/tracks/{id}/sonic-similar", "sonic-similar-tracks", "Tracks similar to a seed by audio embedding", "Music")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}/mix-to", "mix-to-tracks", "DJ-style harmonically-compatible tracks (Camelot ±1, BPM ±5)", "Music")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"30"`
+		}) (*JSONOutput[mixToBody], error) {
+			rows, err := app.BuildDJMix(ctx, in.ID, in.Limit)
+			if err != nil {
+				if errors.Is(err, service.ErrNoFacets) {
+					return nil, huma.Error404NotFound("seed track has no facets")
+				}
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return cachedJSON(mixToBody{Items: rows}, 300), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}/sonic-similar", "sonic-similar-tracks", "Tracks similar to a seed by audio embedding", "Music")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
-		}) (*JSONOutput[itemsBody], error) {
+		}) (*JSONOutput[trackResultsBody], error) {
 			rows, err := app.SimilarMusicTracks(ctx, in.ID, in.Limit)
 			if err != nil {
 				if errors.Is(err, service.ErrNoFacets) {
@@ -276,44 +377,135 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 				}
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return cachedJSON(itemsBody{Items: rows}, 300), nil
+			return cachedJSON(trackResultsBody{Items: rows}, 300), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{id}/sonic-similar", "sonic-similar-artists", "Artists similar by sonic centroid", "Music")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}/sonic-similar", "sonic-similar-artists", "Artists similar by sonic centroid", "Music")),
 		func(ctx context.Context, in *struct {
-			IDPath
-			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
-		}) (*JSONOutput[itemsBody], error) {
-			rows, err := app.SimilarMusicArtists(ctx, in.ID, in.Limit)
+			Slug  string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"miles-davis"`
+			Limit int32  `query:"limit" minimum:"1" maximum:"100" default:"20"`
+		}) (*JSONOutput[artistResultsBody], error) {
+			rows, err := app.SimilarMusicArtistsBySlug(ctx, in.Slug, in.Limit)
 			if err != nil {
 				if errors.Is(err, service.ErrNoFacets) {
 					return nil, huma.Error404NotFound("seed artist has no centroid")
 				}
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, huma.Error404NotFound("artist not found")
 			}
-			return cachedJSON(itemsBody{Items: rows}, 300), nil
+			return cachedJSON(artistResultsBody{Items: rows}, 300), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/albums/{id}/sonic-similar", "sonic-similar-albums", "Albums similar by sonic centroid", "Music")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/sonic-similar", "sonic-similar-albums", "Albums similar by sonic centroid", "Music")),
 		func(ctx context.Context, in *struct {
-			IDPath
-			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
-		}) (*JSONOutput[itemsBody], error) {
-			rows, err := app.SimilarMusicAlbums(ctx, in.ID, in.Limit)
+			ArtistSlug string `path:"artist_slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"miles-davis"`
+			AlbumSlug  string `path:"album_slug"  pattern:"^[a-z0-9-]+$" maxLength:"200" example:"kind-of-blue"`
+			Limit      int32  `query:"limit" minimum:"1" maximum:"100" default:"20"`
+		}) (*JSONOutput[albumResultsBody], error) {
+			rows, err := app.SimilarMusicAlbumsBySlugs(ctx, in.ArtistSlug, in.AlbumSlug, in.Limit)
 			if err != nil {
 				if errors.Is(err, service.ErrNoFacets) {
 					return nil, huma.Error404NotFound("seed album has no centroid")
 				}
+				return nil, huma.Error404NotFound("album not found")
+			}
+			return cachedJSON(albumResultsBody{Items: rows}, 300), nil
+		})
+
+	// --- Browse-by-facet tiles + drilldown listings ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/moods", "browse-music-moods", "Mood-tile buckets (Happy, Party, …)", "Music")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[moodBucketsBody], error) {
+			rows, err := app.ListMoodBuckets(ctx)
+			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return cachedJSON(itemsBody{Items: rows}, 300), nil
+			return cachedJSON(moodBucketsBody{Items: rows}, 300), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/moods/{mood}/tracks", "list-tracks-by-mood", "Tracks scoring high on a mood", "Music")),
+		func(ctx context.Context, in *struct {
+			Mood string `path:"mood" pattern:"^[a-z_]+$" maxLength:"40" example:"mood_happy"`
+			Pagination
+		}) (*JSONOutput[moodTracksBody], error) {
+			rows, err := app.ListTracksByMood(ctx, in.Mood, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return cachedJSON(moodTracksBody{Items: rows}, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/genres", "browse-music-genres", "Genre-tile buckets ranked by track count", "Music")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[genreBucketsBody], error) {
+			rows, err := app.ListGenreBuckets(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(genreBucketsBody{Items: rows}, 300), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/genres/{name}/tracks", "list-tracks-by-genre", "Tracks tagged with a genre", "Music")),
+		func(ctx context.Context, in *struct {
+			Name string `path:"name" maxLength:"160" example:"Electronic---Techno"`
+			Pagination
+		}) (*JSONOutput[genreTracksBody], error) {
+			rows, err := app.ListTracksByGenre(ctx, in.Name, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return cachedJSON(genreTracksBody{Items: rows}, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/tempo", "browse-music-tempo", "BPM-band tile buckets", "Music")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[tempoBucketsBody], error) {
+			rows, err := app.ListTempoBuckets(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(tempoBucketsBody{Items: rows}, 300), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/tempo/{band}/tracks", "list-tracks-by-tempo", "Tracks in a BPM band", "Music")),
+		func(ctx context.Context, in *struct {
+			Band string `path:"band" pattern:"^[0-9]+-[0-9]+$" maxLength:"20" example:"110-130"`
+			Pagination
+		}) (*JSONOutput[tempoTracksBody], error) {
+			minBPM, maxBPM, ok := app.LookupTempoBand(in.Band)
+			if !ok {
+				return nil, huma.Error404NotFound("unknown tempo band")
+			}
+			rows, err := app.ListTracksByTempoBand(ctx, minBPM, maxBPM, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(tempoTracksBody{Items: rows}, 60), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/music/radio", "build-music-radio", "Build an Instant Radio queue from a seed", "Music")),
+		func(ctx context.Context, in *struct {
+			Body service.RadioRequest
+		}) (*JSONOutput[*service.RadioResponse], error) {
+			resp, err := app.BuildRadio(ctx, in.Body)
+			if err != nil {
+				if errors.Is(err, service.ErrNoRadioSeed) {
+					return nil, huma.Error404NotFound("no analyzed track available for that seed yet")
+				}
+				if errors.Is(err, service.ErrNoFacets) {
+					return nil, huma.Error404NotFound("seed track has no facets")
+				}
+				if errors.Is(err, sonicanalysis.ErrTextSearcherUnavailable) {
+					return nil, huma.Error503ServiceUnavailable("text-seeded radio unavailable: CLAP model not loaded")
+				}
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			// Radio results are personal + ephemeral — each press of "play radio"
+			// should resolve fresh against the current library state.
+			return noStoreJSON(resp), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/search-sonic", "search-music-sonic", "Free-text music vibe search (CLAP)", "Music")),
 		func(ctx context.Context, in *struct {
 			Q     string `query:"q" minLength:"1" doc:"Free-form audio vibe prompt"`
 			Limit int32  `query:"limit" minimum:"1" maximum:"100" default:"20"`
-		}) (*JSONOutput[itemsBody], error) {
+		}) (*JSONOutput[trackTextSearchBody], error) {
 			if in.Q == "" {
 				return nil, huma.Error400BadRequest("q is required")
 			}
@@ -324,12 +516,252 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 				}
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return cachedJSON(itemsBody{Items: rows}, 60), nil
+			return cachedJSON(trackTextSearchBody{Items: rows}, 60), nil
 		})
+
+	// --- Quick Stations ---
+	// Library Radio / Deep Cuts / Time Travel / Random Album all return the
+	// same StationResponse shape so the FE renders them with one component.
+	// Every station is no-store: each tap should reroll fresh.
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/stations/library-radio", "stations-library-radio", "Random tracks from across the library", "Music")),
+		func(ctx context.Context, in *struct {
+			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"30"`
+		}) (*JSONOutput[*service.StationResponse], error) {
+			resp, err := app.LibraryRadio(ctx, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(resp), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/stations/deep-cuts", "stations-deep-cuts", "Tracks the user has barely played", "Music")),
+		func(ctx context.Context, in *struct {
+			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"30"`
+		}) (*JSONOutput[*service.StationResponse], error) {
+			resp, err := app.DeepCuts(ctx, userFrom(ctx).ID, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(resp), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/stations/time-travel", "stations-time-travel", "Random tracks from a year range", "Music")),
+		func(ctx context.Context, in *struct {
+			MinYear int32 `query:"min_year" minimum:"1900" maximum:"2100" default:"1990"`
+			MaxYear int32 `query:"max_year" minimum:"1900" maximum:"2100" default:"1999"`
+			Limit   int32 `query:"limit"    minimum:"1"    maximum:"100"  default:"30"`
+		}) (*JSONOutput[*service.StationResponse], error) {
+			resp, err := app.TimeTravel(ctx, in.MinYear, in.MaxYear, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(resp), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/stations/random-album", "stations-random-album", "One random album, end-to-end", "Music")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[*service.StationResponse], error) {
+			resp, err := app.RandomAlbum(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(resp), nil
+		})
+
+	// --- Track ratings ---
+	// 5-star UI with half-step precision = 1..10 integer underneath. Setting
+	// rating=0 deletes the row (clears the rating).
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/tracks/{id}", "get-track-rating", "Get user's rating for a track (0 when unrated)", "Me")),
+		func(ctx context.Context, in *struct {
+			ID int64 `path:"id" minimum:"1"`
+		}) (*JSONOutput[ratingBody], error) {
+			r, err := app.GetUserTrackRating(ctx, userFrom(ctx).ID, in.ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: int(r)}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/ratings/tracks/{id}", "set-track-rating", "Rate a track (1..10; 0 clears)", "Me")),
+		func(ctx context.Context, in *struct {
+			ID   int64 `path:"id" minimum:"1"`
+			Body ratingBody
+		}) (*JSONOutput[ratingBody], error) {
+			if err := app.SetUserTrackRating(ctx, userFrom(ctx).ID, in.ID, int16(in.Body.Rating)); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: in.Body.Rating}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/tracks", "list-rated-tracks", "Paginated tracks the user has rated", "Me")),
+		func(ctx context.Context, in *struct {
+			MinRating int16 `query:"min_rating" minimum:"1" maximum:"10" default:"1" doc:"Filter to ratings at or above N (1..10)"`
+			Pagination
+		}) (*JSONOutput[*service.UserRatedTracksPage], error) {
+			limit := defaultPositive(in.Limit, 100)
+			page, err := app.ListUserRatedTracks(ctx, userFrom(ctx).ID, in.MinRating, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(page), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/ratings/tracks/batch", "batch-track-ratings", "Bulk lookup of ratings for a list of track IDs", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				TrackIDs []int64 `json:"track_ids" doc:"List of track IDs to look up"`
+			}
+		}) (*JSONOutput[batchRatingsBody], error) {
+			m, err := app.RatingsForTracks(ctx, userFrom(ctx).ID, in.Body.TrackIDs)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			out := make(map[string]int, len(m))
+			for id, r := range m {
+				out[strconv.FormatInt(id, 10)] = int(r)
+			}
+			return noStoreJSON(batchRatingsBody{Ratings: out}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/threshold", "get-favorites-threshold", "Where the favorites bar sits on the 1..10 scale", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[ratingBody], error) {
+			t, err := app.GetFavoritesThreshold(ctx, userFrom(ctx).ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: int(t)}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/ratings/threshold", "set-favorites-threshold", "Move the favorites threshold (1..10)", "Me")),
+		func(ctx context.Context, in *struct {
+			Body ratingBody
+		}) (*JSONOutput[ratingBody], error) {
+			if err := app.SetFavoritesThreshold(ctx, userFrom(ctx).ID, int16(in.Body.Rating)); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: in.Body.Rating}), nil
+		})
+
+	// --- Album + Artist ratings: mirror the track surface so the FE can
+	// reuse one rating widget + composable across all three kinds. ---
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/albums/{id}", "get-album-rating", "Get user's rating for an album", "Me")),
+		func(ctx context.Context, in *struct {
+			ID int64 `path:"id" minimum:"1"`
+		}) (*JSONOutput[ratingBody], error) {
+			r, err := app.GetUserAlbumRating(ctx, userFrom(ctx).ID, in.ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: int(r)}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/ratings/albums/{id}", "set-album-rating", "Rate an album (1..10; 0 clears)", "Me")),
+		func(ctx context.Context, in *struct {
+			ID   int64 `path:"id" minimum:"1"`
+			Body ratingBody
+		}) (*JSONOutput[ratingBody], error) {
+			if err := app.SetUserAlbumRating(ctx, userFrom(ctx).ID, in.ID, int16(in.Body.Rating)); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: in.Body.Rating}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/ratings/albums/batch", "batch-album-ratings", "Bulk lookup of album ratings", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				AlbumIDs []int64 `json:"album_ids"`
+			}
+		}) (*JSONOutput[batchRatingsBody], error) {
+			m, err := app.RatingsForAlbums(ctx, userFrom(ctx).ID, in.Body.AlbumIDs)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			out := make(map[string]int, len(m))
+			for id, r := range m {
+				out[strconv.FormatInt(id, 10)] = int(r)
+			}
+			return noStoreJSON(batchRatingsBody{Ratings: out}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/albums", "list-rated-albums", "Paginated rated albums", "Me")),
+		func(ctx context.Context, in *struct {
+			MinRating int16 `query:"min_rating" minimum:"1" maximum:"10" default:"1"`
+			Pagination
+		}) (*JSONOutput[*service.UserRatedAlbumsPage], error) {
+			limit := defaultPositive(in.Limit, 100)
+			page, err := app.ListUserRatedAlbums(ctx, userFrom(ctx).ID, in.MinRating, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(page), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/artists/{id}", "get-artist-rating", "Get user's rating for an artist", "Me")),
+		func(ctx context.Context, in *struct {
+			ID int64 `path:"id" minimum:"1"`
+		}) (*JSONOutput[ratingBody], error) {
+			r, err := app.GetUserArtistRating(ctx, userFrom(ctx).ID, in.ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: int(r)}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/ratings/artists/{id}", "set-artist-rating", "Rate an artist (1..10; 0 clears)", "Me")),
+		func(ctx context.Context, in *struct {
+			ID   int64 `path:"id" minimum:"1"`
+			Body ratingBody
+		}) (*JSONOutput[ratingBody], error) {
+			if err := app.SetUserArtistRating(ctx, userFrom(ctx).ID, in.ID, int16(in.Body.Rating)); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(ratingBody{Rating: in.Body.Rating}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/ratings/artists/batch", "batch-artist-ratings", "Bulk lookup of artist ratings", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				ArtistIDs []int64 `json:"artist_ids"`
+			}
+		}) (*JSONOutput[batchRatingsBody], error) {
+			m, err := app.RatingsForArtists(ctx, userFrom(ctx).ID, in.Body.ArtistIDs)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			out := make(map[string]int, len(m))
+			for id, r := range m {
+				out[strconv.FormatInt(id, 10)] = int(r)
+			}
+			return noStoreJSON(batchRatingsBody{Ratings: out}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/artists", "list-rated-artists", "Paginated rated artists", "Me")),
+		func(ctx context.Context, in *struct {
+			MinRating int16 `query:"min_rating" minimum:"1" maximum:"10" default:"1"`
+			Pagination
+		}) (*JSONOutput[*service.UserRatedArtistsPage], error) {
+			limit := defaultPositive(in.Limit, 100)
+			page, err := app.ListUserRatedArtists(ctx, userFrom(ctx).ID, in.MinRating, limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(page), nil
+		})
+}
+
+type ratingBody struct {
+	Rating int `json:"rating" minimum:"0" maximum:"10"`
+}
+
+type batchRatingsBody struct {
+	Ratings map[string]int `json:"ratings" doc:"Map of track_id (as string) → rating 1..10. Tracks the user hasn't rated are omitted entirely."`
 }
 
 type lovedBody struct {
 	Loved bool `json:"loved"`
+}
+
+type topTracksBody struct {
+	Items []service.ArtistTopTrackRow `json:"items"`
 }
 
 type idsBody struct {
@@ -350,8 +782,60 @@ type waveformBody struct {
 	Waveform any `json:"waveform"`
 }
 
-type itemsBody struct {
-	Items any `json:"items"`
+// Typed response envelopes for the sonic-similarity + sonic-search endpoints.
+// Each one is just `{ items: [...] }` but with the row type spelled out so the
+// generated TS client preserves the shape instead of falling back to `any`.
+// Bodies use sqlc-generated row types directly — the rich queries already
+// carry slugs + album/artist context, so an extra mirror struct would just
+// duplicate the field list.
+type trackResultsBody struct {
+	Items []sqlc.SimilarTracksByTrackRichRow `json:"items"`
+}
+
+type trackTextSearchBody struct {
+	Items []sqlc.SimilarTracksByTextRichRow `json:"items"`
+}
+
+type artistResultsBody struct {
+	Items []sqlc.SimilarArtistsRow `json:"items"`
+}
+
+type albumResultsBody struct {
+	Items []sqlc.SimilarAlbumsRow `json:"items"`
+}
+
+// mixToBody is the typed envelope for /api/music/tracks/{id}/mix-to. Shape
+// matches the other similarity endpoints (`{items: [...]}`) so the FE row
+// component can render any of them.
+type mixToBody struct {
+	Items []sqlc.MixToTracksRow `json:"items"`
+}
+
+// Browse-by-facet envelopes. Each tile-list endpoint returns one of these;
+// the row types are owned by the service package so the FE sees the full
+// shape via the generated TS client.
+type moodBucketsBody struct {
+	Items []service.MoodBucket `json:"items"`
+}
+type genreBucketsBody struct {
+	Items []service.GenreBucket `json:"items"`
+}
+type tempoBucketsBody struct {
+	Items []service.TempoBucket `json:"items"`
+}
+
+type moodTracksBody struct {
+	Items []sqlc.ListTracksByMoodRow `json:"items"`
+}
+type genreTracksBody struct {
+	Items []sqlc.ListTracksByGenreRow `json:"items"`
+}
+type tempoTracksBody struct {
+	Items []sqlc.ListTracksByTempoBandRow `json:"items"`
+}
+
+type recentlyPlayedBody struct {
+	Items []sqlc.ListRecentlyPlayedTracksRow `json:"items"`
 }
 
 func pluralOf(entity string) string {

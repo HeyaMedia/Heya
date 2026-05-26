@@ -7,6 +7,7 @@ import (
 
 	ipadict "github.com/ikawaha/kagome-dict/ipa"
 	"github.com/ikawaha/kagome/v2/tokenizer"
+	"github.com/mozillazg/go-unidecode"
 	"github.com/rs/zerolog/log"
 )
 
@@ -49,15 +50,32 @@ func getJPTokenizer() *tokenizer.Tokenizer {
 	return jpTokenizer
 }
 
-// Transliterate converts Japanese text in `s` to Hepburn romaji. Mixed
-// content is fine — Latin/digit/punctuation pass through unchanged,
-// only kana/kanji runs get romanized. Returns the original string when
-// no Japanese characters are present (cheap early-out so non-JP titles
-// don't pay the kagome init cost).
+// Transliterate converts non-ASCII text in `s` to ASCII. Strategy:
+//
+//   - All-ASCII input → returned as-is (no work, no allocation).
+//   - Has Japanese (kana / kanji / katakana) → kagome morphological
+//     analyzer for compound readings (花冷え。 → "hanabie。",
+//     乃木坂46 → "nogizaka46"). Mixed JP + Latin / digits works fine;
+//     non-JP runes pass through the kana tables unchanged.
+//   - Has other non-ASCII (Cyrillic / Chinese-only / Korean / Thai /
+//     Arabic / Greek / Devanagari / etc.) → Unidecode's per-script
+//     romanization. Sensible output for every script the library
+//     knows: Шехеразада → "Sheherazada", 北京 → "Bei Jing ",
+//     안녕 → "An Nyeong".
+//
+// Used by slug generation and by internal/titlematch for cross-script
+// fuzzy matching against upstream metadata.
 func Transliterate(s string) string {
-	if !hasJapanese(s) {
+	if isASCII(s) {
 		return s
 	}
+	if hasJapanese(s) {
+		return japaneseTransliterate(s)
+	}
+	return unidecode.Unidecode(s)
+}
+
+func japaneseTransliterate(s string) string {
 	t := getJPTokenizer()
 	if t == nil {
 		return kanaToRomajiOnly(s)
@@ -83,6 +101,23 @@ func Transliterate(s string) string {
 	return kanaToRomajiOnly(kata.String())
 }
 
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// hasJapanese reports whether `s` contains hiragana, katakana, or Han
+// characters. Han is included even though it's ambiguous (Chinese also
+// uses Han) because the user's library is overwhelmingly Japanese, and
+// kagome's compound-reading lookup is what gets "乃木坂46" → "nogizaka46"
+// right rather than per-character "nai mu ban 46". Pure Chinese
+// artists pay a wrong-language cost in their slug (北京 reads as Japanese
+// "pekin", not Pinyin "bei-jing"), but the slug stays functional ASCII —
+// fixable later with per-track language tagging if needed.
 func hasJapanese(s string) bool {
 	for _, r := range s {
 		if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {

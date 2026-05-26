@@ -2,11 +2,12 @@ package auth
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -56,7 +57,11 @@ func (m *mockSessionLookup) GetSessionByToken(_ context.Context, token string) (
 	if token == m.session.Token {
 		return m.session, nil
 	}
-	return sqlc.Session{}, fmt.Errorf("not found")
+	// Mirror sqlc's actual behaviour: a `:one` query that returns no rows
+	// surfaces as pgx.ErrNoRows, not a generic error. The middleware uses
+	// errors.Is(err, pgx.ErrNoRows) to distinguish "session not found"
+	// (401) from "DB unreachable" (503), so the mock has to be honest.
+	return sqlc.Session{}, pgx.ErrNoRows
 }
 
 func (m *mockSessionLookup) GetUserByID(_ context.Context, id int64) (sqlc.User, error) {
@@ -66,7 +71,11 @@ func (m *mockSessionLookup) GetUserByID(_ context.Context, id int64) (sqlc.User,
 	if id == m.user.ID {
 		return m.user, nil
 	}
-	return sqlc.User{}, fmt.Errorf("not found")
+	return sqlc.User{}, pgx.ErrNoRows
+}
+
+func (m *mockSessionLookup) TouchSession(_ context.Context, _ string) error {
+	return nil
 }
 
 func TestMiddlewareValidToken(t *testing.T) {
@@ -121,6 +130,24 @@ func TestMiddlewareInvalidToken(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+// A DB-error during session lookup (postgres down, query timeout, etc.)
+// must NOT be reported as 401 — the FE would log the user out for a
+// transient backend blip. Returning 503 keeps the session intact so the
+// next request can succeed once the backend recovers.
+func TestMiddlewareDBErrorReturns503(t *testing.T) {
+	mock := &mockSessionLookup{err: errors.New("connection refused")}
+	handler := Middleware(mock)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not reach handler")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer anything")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 }
 
 func TestMiddlewareCookieToken(t *testing.T) {

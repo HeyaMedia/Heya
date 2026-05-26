@@ -112,6 +112,80 @@ func (k Key) CamelotCode() string {
 	return camelotMinor[k.Root]
 }
 
+// camelotToKey is the reverse of (k Key).CamelotCode — given a wheel
+// position like "8A" or "12B", produces the (root, mode) it maps to.
+// Built once at init from camelotMajor / camelotMinor.
+var camelotToKey map[string]Key
+
+func init() {
+	camelotToKey = make(map[string]Key, 24)
+	for root := PitchClass(0); root < 12; root++ {
+		camelotToKey[camelotMajor[root]] = Key{Root: root, Mode: KeyModeMajor}
+		camelotToKey[camelotMinor[root]] = Key{Root: root, Mode: KeyModeMinor}
+	}
+}
+
+// CompatibleKeys returns the Camelot-harmonically-compatible keys for k:
+//
+//   - k itself
+//   - the relative key (same wheel number, flipped A↔B)
+//   - the two adjacent wheel positions on the same letter (±1, wrapped 1↔12)
+//
+// Used by the DJ-mix endpoint to constrain "what plays next" to keys that
+// mix smoothly with the seed. Returns nil for an out-of-range / missing key.
+func (k Key) CompatibleKeys() []Key {
+	code := k.CamelotCode()
+	if code == "" {
+		return nil
+	}
+	// Codes are "<n><letter>" with n in [1,12] and letter in {A, B}.
+	// Parse: letter is the last byte; n is the prefix.
+	if len(code) < 2 {
+		return nil
+	}
+	letter := code[len(code)-1]
+	other := byte('A')
+	if letter == 'A' {
+		other = 'B'
+	}
+	nStr := code[:len(code)-1]
+	var n int
+	for _, ch := range nStr {
+		if ch < '0' || ch > '9' {
+			return nil
+		}
+		n = n*10 + int(ch-'0')
+	}
+	if n < 1 || n > 12 {
+		return nil
+	}
+	wrap := func(x int) int {
+		// Camelot wheel is 1..12; wrap on either edge.
+		if x < 1 {
+			return 12
+		}
+		if x > 12 {
+			return 1
+		}
+		return x
+	}
+	codes := []string{
+		fmt.Sprintf("%d%c", n, letter),         // self
+		fmt.Sprintf("%d%c", n, other),          // relative (A↔B)
+		fmt.Sprintf("%d%c", wrap(n-1), letter), // semitone down
+		fmt.Sprintf("%d%c", wrap(n+1), letter), // semitone up
+	}
+	out := make([]Key, 0, len(codes))
+	seen := make(map[Key]bool, len(codes))
+	for _, c := range codes {
+		if key, ok := camelotToKey[c]; ok && !seen[key] {
+			seen[key] = true
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
 // MoodTagName is the canonical name for a classifier-head output.
 // Strings match the keys in track_facets.mood_tags JSON.
 type MoodTagName string

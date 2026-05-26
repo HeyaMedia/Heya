@@ -538,11 +538,11 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 
 	tx, txErr := a.db.Begin(ctx)
 	if txErr == nil {
-		a.river.InsertTx(ctx, tx, worker.EnrichmentArgs{
+		_, _ = a.river.InsertTx(ctx, tx, worker.FetchArtworkArgs{
 			MediaItemID: mediaItemID,
 			MediaType:   string(item.MediaType),
 		}, nil)
-		tx.Commit(ctx)
+		_ = tx.Commit(ctx)
 	}
 
 	return nil
@@ -697,14 +697,14 @@ func (a *App) DownloadAsset(ctx context.Context, mediaItemID int64, url, assetTy
 	if txErr != nil {
 		return fmt.Errorf("begin tx: %w", txErr)
 	}
-	a.river.InsertTx(ctx, tx, worker.DownloadImageArgs{
+	_, _ = a.river.InsertTx(ctx, tx, worker.DownloadImageArgs{
 		MediaItemID: mediaItemID,
 		URL:         url,
 		AssetType:   assetType,
 		MediaType:   string(item.MediaType),
 		SortOrder:   sortOrder,
 	}, nil)
-	tx.Commit(ctx)
+	_ = tx.Commit(ctx)
 
 	return nil
 }
