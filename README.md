@@ -65,14 +65,17 @@ declaratively for Docker / k8s.
 
 Then add a library via the UI (Settings → Libraries) or CLI
 (`./bin/heya library add …`) and Heya will scan, match, and start populating
-metadata. Day-to-day development runs `./bin/heya dev` instead, which spawns
-both the Go API (with air hot-reload) and the Nuxt dev server.
+metadata. Day-to-day development runs `make dev`, which starts Caddy on
+`:8080` as the front door, Nuxt on `:3000`, and Go (`heya serve`,
+hot-reloaded by air) on `:3050`. Caddy stays up across air rebuilds, so
+the browser's HMR socket and in-flight WS connections never see the
+backends churn. Requires `brew install caddy`.
 
 ## CLI quick reference
 
 ```bash
 ./bin/heya serve                  # start the HTTP server
-./bin/heya dev                    # Go API + Nuxt dev concurrently
+make dev                          # Caddy :8080 (→ Nuxt :3000 + Go :3050) — open :8080
 ./bin/heya dashboard              # full-screen TUI: queue, scans, watchers
 ./bin/heya library list           # show libraries
 ./bin/heya library scan <id>      # trigger a scan
@@ -98,10 +101,13 @@ CLAUDE.md           # Contributor / agent guide — toolchain rules, conventions
 
 ## Contributing
 
-See [`CLAUDE.md`](CLAUDE.md) for the toolchain rules (bun only, hooks, sqlc,
-lefthook), commit conventions, and dev workflows. The pre-commit gate
-(`bunx vue-tsc --noEmit`, `gofmt`, `golangci-lint`, `go build`, sqlc-drift)
-runs automatically once you `lefthook install` — see CLAUDE.md for setup.
+[`CLAUDE.md`](CLAUDE.md) is the entry point — toolchain rules (bun only),
+hard conventions, and pointers into `docs/`. The day-to-day dev workflow
+(building, hitting the API, type-checking, hooks, CI) lives in
+[`docs/development.md`](docs/development.md). The pre-commit gate
+(`bunx vue-tsc --noEmit`, `gofmt`, `golangci-lint`, `go build`, sqlc-drift,
+openapi-drift) runs automatically once you `lefthook install` — setup steps
+are in [`docs/development.md`](docs/development.md#git-hooks-lefthook).
 
 ## License
 

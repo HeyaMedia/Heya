@@ -37,6 +37,72 @@ External:
   • SMB shares (optional)      — library sources
 ```
 
+## Repo layout
+
+```
+cmd/heya/           # CLI entrypoint (cobra)
+clients/            # Generated HeyaMedia OpenAPI client (oapi-codegen)
+internal/
+  auth/             # bcrypt + session tokens (PG-backed)
+  config/           # Env-only config loader (.env + .env.local), Field[T] provenance
+  database/         # pgxpool + sqlc-generated queries
+    sqlc/           # GENERATED — do not hand-edit
+  eventhub/         # WebSocket event bus (real-time UI updates)
+  images/           # poster/backdrop fetcher
+  matcher/          # filename → media-item matching
+  metadata/         # provider clients (heya.media aggregator + NFO)
+  nfo/              # NFO file parser
+  parser/           # ~/Private/yarr port — filename parser w/ 2700+ test cases
+  podcastindex/     # Podcast Index API client + RSS parser
+  radiobrowser/     # radio-browser.info client + ICY metadata
+  saver/            # writes images/assets to data/
+  scanner/          # filesystem scan + fsnotify watcher
+  scheduler/        # 60s trigger loop that inserts kickoff River jobs when scheduled_tasks rows come due
+  server/           # net/http handlers (Huma v2 + stdlib router)
+  service/          # shared business layer used by CLI + HTTP
+  slug/             # URL slug generation
+  sonicanalysis/    # ML/DSP music analyzer (key, BPM, mood, CLAP embeddings)
+  tailscale/        # tsnet wrapper — embeds a Tailscale node in the binary
+  testutil/         # shared test helpers
+  transcoder/       # ffmpeg HLS pipeline + decision matrix
+  trickplay/        # scrubbing thumbnails (BIF/sprite generation)
+  ui/               # lipgloss-based CLI UI (TUI dashboard, prompts)
+  vfs/              # SMB + local filesystem abstraction
+  watcher/          # filesystem change watching
+  worker/           # River background jobs
+migrations/         # goose SQL migrations (numbered 00001_*)
+queries/            # sqlc input — SQL queries compiled to typed Go
+web/
+  app/              # Nuxt 4 SPA source
+    components/
+      detail/       # Shared hero blocks (MediaSynopsis, MediaCrewSummary,
+                    # MediaKeywords, MediaStreamInfo, MediaRatings,
+                    # MediaPlaybackPanel, PlaybackPrefs, EpisodeCard, …)
+      metadata/     # MetadataEditor + dialog/manager
+      ui/           # Generic App* primitives — see docs/ui.md
+      player/       # VideoPlayer (HLS + akarisub ASS rendering)
+    pages/          # File-routed; movies/, tv/, music/, books/, settings/
+    composables/    # useApi, useMedia, useUserState, useClientCaps, …
+    layouts/        # default + auth layouts
+    plugins/
+    utils/
+  public/logos/     # Rating-provider brand SVGs (CC0 — simple-icons + Wikimedia)
+  shared/types/     # TypeScript types mirroring the Go API responses
+  shared/api.openapi.json # Generated spec — see docs/api-client.md
+  embed.go          # //go:embed dist/* — bundles the SPA into the Go binary
+  dist/             # Built SPA assets (committed empty, populated by build)
+testdata/           # Real-world filename fixtures for parser tests
+tools/eye/          # Headless-Chrome UI debugger — see docs/eye.md
+data/               # Runtime: posters, backdrops, postgres volume
+docs/               # This directory
+.env.example        # Catalogue of every supported env var (defaults + comments)
+docker-compose.yml  # Postgres 17 on :5440
+sqlc.yaml           # Codegen config
+.air.toml           # Hot-reload config for `make dev` (runs heya serve on :3050)
+Caddyfile.dev       # Dev front door — Caddy on :8080, fronts Nuxt + Go
+lefthook.yml        # Pre-commit hooks — see docs/development.md
+```
+
 ## Design choices
 
 ### CLI-first
@@ -53,8 +119,7 @@ The Nuxt frontend is built with `nuxi generate` (SPA mode, `ssr: false`),
 copied into `web/dist/`, and embedded into the Go binary via
 `//go:embed all:dist`. Deploying Heya is one binary — no Node process to run
 or babysit, no reverse proxy needed. The same pattern Jellyfin, Navidrome,
-Emby, and friends use. See the user-facing trade-off discussion in
-[CLAUDE.md](../CLAUDE.md#code-style).
+Emby, and friends use.
 
 ### Postgres for everything
 
@@ -104,11 +169,27 @@ fixtures under `internal/transcoder/testdata/`.
 
 River jobs cover anything that mustn't block an HTTP response: filesystem
 scans, metadata fetches, image downloads, trickplay/thumbnail generation,
-asset persistence. The scheduler (`internal/scheduler/`) enqueues recurring
-work (periodic library re-scan, trickplay backfill, stale metadata refresh).
+asset persistence. The scheduler (`internal/scheduler/`) is a 60 s trigger
+loop — when a `scheduled_tasks` row is enabled, in window, and due, it
+inserts a `kickoff_*` River job; the kickoff worker walks candidates and
+fans out one work job per item.
+
+Concurrency rules of thumb (full table in [`pipeline.md`](./pipeline.md#queue-config)):
+
+- One queue per worker kind — keeps cancellation simple and isolates each
+  upstream's rate-limit budget.
+- Scanner pipeline is `MaxWorkers=1` end-to-end (protects the source FS).
+- Enrich queue is `MaxWorkers=1` per kind, with priority bands
+  (P1 = watcher/view, P2 = movies+TV, P3 = music+books, P4 = analysis).
+- Only `download_image` runs at `MaxWorkers=4` — it hits provider CDNs, not
+  the source FS.
+- River caps priority at 1..4; need ≥5 bands → another queue, not another
+  priority.
 
 Real-time progress for those jobs streams to the UI via the WebSocket event
-bus (`internal/eventhub/`).
+bus (`internal/eventhub/`). The full match → enrich pipeline (including
+HeyaMedia client structure, orphan-job rescue, and the progress event shape)
+is documented in [`pipeline.md`](./pipeline.md).
 
 ## Tests
 
