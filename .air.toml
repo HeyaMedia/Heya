@@ -1,6 +1,10 @@
 [build]
   cmd = "go build -o ./tmp/heya ./cmd/heya"
-  full_bin = "./tmp/heya serve"
+  # Dev topology: Caddy on :8080 fronts both Nuxt (:3000) and heya serve
+  # (:3050). Air only restarts the Go binary; Caddy and Nuxt stay alive so
+  # the browser never sees the front door go away. Prod is unaffected —
+  # `heya serve` defaults to HEYA_PORT=8080 when this env var isn't set.
+  full_bin = "HEYA_PORT=3050 ./tmp/heya serve"
   delay = 1000
   exclude_dir = ["tmp", "web", "node_modules", "testdata", "fulldata", "data", "bin", ".git"]
   # heya.yaml is the live runtime config. UI/CLI writes to it (Tailscale

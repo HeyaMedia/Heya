@@ -55,6 +55,17 @@ var serveCmd = &cobra.Command{
 		}
 		defer app.Close()
 
+		// Rescue any jobs left in state='running' by a previous process
+		// (e.g. an `air` hot-reload killed the worker mid-job). Without
+		// this, those rows sit "running" until River's periodic rescuer
+		// catches them after RescueStuckJobsAfter (10min) — long enough
+		// to look like real concurrency violations in the UI.
+		if n, err := app.RescueOrphanedJobsAtStartup(appCtx); err != nil {
+			log.Warn().Err(err).Msg("startup orphan-rescue failed")
+		} else if n > 0 {
+			log.Info().Int64("rescued", n).Msg("released orphaned jobs from previous process")
+		}
+
 		if err := app.StartWorkers(appCtx); err != nil {
 			return err
 		}
@@ -68,22 +79,11 @@ var serveCmd = &cobra.Command{
 		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
 		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
 
-		taskRunner := scheduler.NewRunner(app.DBPool(), app.EventHub(), cfg.DataDir.Value)
-		taskRunner.Register(&scheduler.GenerateTrickplayTask{DB: app.DBPool(), DataDir: cfg.DataDir.Value})
-		taskRunner.Register(&scheduler.GenerateThumbnailsTask{DB: app.DBPool(), DataDir: cfg.DataDir.Value})
-		taskRunner.Register(app.ScanLibrariesTask())
-		taskRunner.Register(&scheduler.RefreshStaleItemsTask{DB: app.DBPool(), River: app.RiverClient()})
-		taskRunner.Register(&scheduler.ScanMusicLoudnessTask{DB: app.DBPool(), River: app.RiverClient()})
-		if a := app.SonicAnalyzer(); a != nil {
-			taskRunner.Register(&scheduler.AnalyzeMusicTask{
-				DB:       app.DBPool(),
-				Analyzer: a,
-				Fetcher:  app.ModelFetcher(),
-				Enabled:  app.SonicAnalysisEnabled,
-			})
-		}
-		app.SetScheduler(taskRunner)
-		taskRunner.Start(appCtx)
+		// Scheduler is now a thin 60s trigger loop. All actual work
+		// runs as River jobs (kickoff_* + per-item workers).
+		taskTrigger := scheduler.NewTrigger(app.DBPool(), app.RiverClient())
+		app.SetScheduler(taskTrigger)
+		taskTrigger.Start(appCtx)
 
 		// Kick off the model fetcher in the background. No-op when
 		// sonic-analysis is disabled in config.

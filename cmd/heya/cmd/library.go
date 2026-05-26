@@ -110,7 +110,7 @@ var libraryListCmd = &cobra.Command{
 var libraryScanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan a library for media files",
-	Long:  "Discovers files and enqueues them for processing. Use 'heya queue process' to run the queue, or 'heya serve'/'heya dev' will process automatically.",
+	Long:  "Discovers files and enqueues them for processing. Use 'heya queue process' to run the queue, or 'heya serve' will process automatically.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, _ := cmd.Flags().GetInt64("id")
 		all, _ := cmd.Flags().GetBool("all")
@@ -151,7 +151,7 @@ var libraryScanCmd = &cobra.Command{
 		}
 
 		fmt.Println()
-		ui.Println(ui.Dim("Jobs will be processed by 'heya serve' / 'heya dev', or run 'heya queue process'."))
+		ui.Println(ui.Dim("Jobs will be processed by 'heya serve', or run 'heya queue process'."))
 
 		return nil
 	},

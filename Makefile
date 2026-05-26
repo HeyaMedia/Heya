@@ -1,6 +1,6 @@
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev gen-api-client gen-heyamedia-client docker docker-run
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-proxy dev-go dev-web gen-api-client gen-heyamedia-client docker docker-run
 
 # Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
 # bumps occasionally break field shapes and we want clients to match.
@@ -22,8 +22,29 @@ build-go:
 run: build-go
 	./bin/heya serve
 
-dev: build-go
-	./bin/heya dev
+# Dev: Caddy on :8080 fronts Nuxt (:3000) and heya serve (:3050). Air only
+# rebuilds the Go binary — Caddy and Nuxt stay alive across restarts, so
+# the browser's HMR socket and any in-flight WS connection never see the
+# front door go away. Open http://localhost:8080. Ctrl+C kills all three.
+#
+# Caddy is the prerequisite: `brew install caddy`.
+dev:
+	@command -v caddy >/dev/null 2>&1 || { echo "caddy not found — install with: brew install caddy"; exit 1; }
+	@trap 'kill 0' INT TERM; \
+		caddy run --config Caddyfile.dev --adapter caddyfile & \
+		go run github.com/air-verse/air@latest & \
+		(cd web && bun run dev) & \
+		wait
+
+# Same trio as `make dev`, split if you want separate terminals.
+dev-proxy:
+	caddy run --config Caddyfile.dev --adapter caddyfile
+
+dev-go:
+	go run github.com/air-verse/air@latest
+
+dev-web:
+	cd web && bun run dev
 
 test:
 	go test ./...

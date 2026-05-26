@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,11 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
+	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -55,7 +59,10 @@ var analyzeStatusCmd = &cobra.Command{
 		settings := app.SonicAnalysisSettings(ctx)
 		version := sonicanalysis.AnalyzerVersion
 
-		pending, err := q.CountPendingAnalysis(ctx, version)
+		pending, err := q.CountPendingAnalysis(ctx, sqlc.CountPendingAnalysisParams{
+			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+			AnalyzerVersion:    version,
+		})
 		if err != nil {
 			return fmt.Errorf("count pending: %w", err)
 		}
@@ -117,7 +124,11 @@ var analyzeRunCmd = &cobra.Command{
 	Short: "Run one analyzer pass now (ignores window)",
 	Long: `Loads models, processes pending tracks one at a time, refreshes
 centroids, then unloads. Honors --once for a single track, or runs
-until pending == 0 or the context is cancelled.`,
+until pending == 0 or the context is cancelled.
+
+This command runs end-to-end in-process — independent of River. Use
+'heya queue process' to drain whatever the scheduled kickoff has
+already fanned out into River.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		once, _ := cmd.Flags().GetBool("once")
 
@@ -136,50 +147,103 @@ until pending == 0 or the context is cancelled.`,
 			Accelerator: sonicanalysis.Accelerator(settings.Accelerator),
 		})
 
-		task := &scheduler.AnalyzeMusicTask{
-			DB:       app.DBPool(),
-			Analyzer: analyzer,
-		}
-
-		total, _ := task.CountPending(ctx)
+		q := sqlc.New(app.DBPool())
+		total, _ := q.CountPendingAnalysis(ctx, sqlc.CountPendingAnalysisParams{
+			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+			AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+		})
 		if total == 0 {
 			fmt.Println("nothing to analyze.")
 			return nil
 		}
-		if once {
-			total = 1
+		fmt.Printf("analyzing %d tracks (--once: %v)...\n", total, once)
+
+		if err := analyzer.Load(ctx); err != nil {
+			return fmt.Errorf("analyzer load: %w", err)
 		}
-		fmt.Printf("analyzing %d tracks...\n", total)
+		defer analyzer.Unload()
 
-		progress := scheduler.NewProgressTracker(scheduler.TaskAnalyzeMusicFacets, total)
+		affectedArtists := map[int64]struct{}{}
+		affectedAlbums := map[int64]struct{}{}
+		processed, failed := 0, 0
+		currentVersion := sonicanalysis.AnalyzerVersion
 
-		runCtx := ctx
-		if once {
-			var stop context.CancelFunc
-			runCtx, stop = context.WithCancel(ctx)
-			go func() {
-				for {
-					snap := progress.Snapshot()
-					if snap.Completed+snap.Failed >= 1 {
-						stop()
-						return
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(100 * time.Millisecond):
-					}
-				}
-			}()
-			defer stop()
+		for ctx.Err() == nil {
+			next, err := q.NextTrackForAnalysis(ctx, sqlc.NextTrackForAnalysisParams{
+				MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+				AnalyzerVersion:    currentVersion,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("next track: %w", err)
+			}
+			facets, analyzeErr := analyzer.Analyze(ctx, next.FilePath)
+			if analyzeErr != nil {
+				log.Warn().Err(analyzeErr).Int64("track_id", next.ID).Msg("analyze failed")
+				// Stub-write so we don't re-pick this track.
+				_ = q.UpsertTrackFacets(ctx, sqlc.UpsertTrackFacetsParams{
+					TrackID:         next.ID,
+					AnalyzerVersion: currentVersion,
+				})
+				failed++
+				continue
+			}
+			if err := persistCLIFacets(ctx, q, next.ID, facets, currentVersion); err != nil {
+				log.Warn().Err(err).Int64("track_id", next.ID).Msg("persist failed")
+				failed++
+				continue
+			}
+			affectedArtists[next.ArtistID] = struct{}{}
+			affectedAlbums[next.AlbumID] = struct{}{}
+			processed++
+			if once {
+				break
+			}
 		}
 
-		err = task.Run(runCtx, progress)
-		snap := progress.Snapshot()
-		fmt.Printf("done. completed=%d failed=%d total=%d\n",
-			snap.Completed-snap.Failed, snap.Failed, snap.Total)
-		return err
+		for artistID := range affectedArtists {
+			_ = q.RefreshArtistCentroid(ctx, artistID)
+		}
+		for albumID := range affectedAlbums {
+			_ = q.RefreshAlbumCentroid(ctx, albumID)
+		}
+
+		fmt.Printf("done. completed=%d failed=%d total=%d\n", processed, failed, processed+failed)
+		return nil
 	},
+}
+
+// persistCLIFacets writes one track_facets row from the analyze run
+// CLI. Mirrors what AnalyzeTrackFacetsWorker does on the server side —
+// kept here so the CLI doesn't drag in a River client dependency just
+// to call the worker.
+func persistCLIFacets(ctx context.Context, q *sqlc.Queries, trackID int64, f *sonicanalysis.Facets, currentVersion int32) error {
+	topGenresJSON, err := json.Marshal(f.TopGenres)
+	if err != nil {
+		return fmt.Errorf("marshal top_genres: %w", err)
+	}
+	moodTagsJSON, err := json.Marshal(f.MoodTags)
+	if err != nil {
+		return fmt.Errorf("marshal mood_tags: %w", err)
+	}
+	return q.UpsertTrackFacets(ctx, sqlc.UpsertTrackFacetsParams{
+		TrackID:          trackID,
+		TrackEmbedding:   pgvector.NewVector(f.TrackEmbed),
+		ArtistEmbedding:  pgvector.NewVector(f.ArtistEmbed),
+		ReleaseEmbedding: pgvector.NewVector(f.ReleaseEmbed),
+		TextEmbedding:    pgvector.NewVector(f.TextEmbed),
+		Bpm:              pgtype.Float4{Float32: float32(f.BPM), Valid: true},
+		BpmConfidence:    pgtype.Float4{Float32: float32(f.BPMConfidence), Valid: true},
+		KeyRoot:          pgtype.Int2{Int16: int16(f.Key.Root), Valid: true},
+		KeyMode:          pgtype.Int2{Int16: int16(f.Key.Mode), Valid: true},
+		KeyClarity:       pgtype.Float4{Float32: float32(f.KeyClarity), Valid: true},
+		TopGenres:        topGenresJSON,
+		MoodTags:         moodTagsJSON,
+		Waveform:         f.Waveform,
+		AnalyzerVersion:  currentVersion,
+	})
 }
 
 var analyzeResetCmd = &cobra.Command{
