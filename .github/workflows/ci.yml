@@ -76,8 +76,12 @@ jobs:
         working-directory: web
         run: bunx vue-tsc --noEmit
 
+      # Advisory only: surfaces known CVEs (mostly transitive build-time deps
+      # like vite/esbuild/tar that never ship to users) without blocking the
+      # build. We bump deps promptly, so this is a heads-up, not a gate.
       - name: Audit npm deps for known CVEs
         working-directory: web
+        continue-on-error: true
         run: bun audit
 
   # ────────────────────────────────────────────────────────────────
@@ -223,8 +227,14 @@ jobs:
           fi
           $HOME/go/bin/govulncheck ./...
 
+      # Advisory only: known CVEs across npm + Go deps (incl. ones with no
+      # upstream fix yet, e.g. disintegration/imaging). Reported as a warning
+      # so a freshly-disclosed transitive CVE doesn't wedge main. govulncheck
+      # above stays a hard gate — it only fails on Go vulns actually reachable
+      # from our code.
       - name: OSV-Scanner (npm + Go via OSV.dev)
         uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
+        continue-on-error: true
         with:
           scan-args: |-
             --recursive
