@@ -292,9 +292,9 @@ func (a *App) CancelJob(ctx context.Context, id int64) error {
 // flip back to available.
 //
 // River's own periodic rescuer would eventually catch these via
-// RescueStuckJobsAfter (30min), but that's long enough to make
-// MaxWorkers=N look violated in the UI after every dev reload.
-// Doing it eagerly at boot keeps the running-job snapshot honest.
+// RescueStuckJobsAfter (queueops.RescueStuckAfter), but that's far too
+// long to make MaxWorkers=N look violated in the UI after every dev
+// reload. Doing it eagerly at boot keeps the running-job snapshot honest.
 //
 // Returns the count rescued so the caller can log it (zero on a clean
 // boot, non-zero after an unclean shutdown).
@@ -302,9 +302,11 @@ func (a *App) RescueOrphanedJobsAtStartup(ctx context.Context) (int64, error) {
 	return queueops.RescueOrphanedRunning(ctx, a.db)
 }
 
-// RescueStuckJobs rescues jobs that have been running for more than 30 minutes.
-// It returns the total number of rescued jobs and the number whose retry counts
-// were reset because they had exhausted their max attempts.
+// RescueStuckJobs rescues jobs that have been running past
+// queueops.RescueStuckAfter (i.e. beyond their context deadline, so
+// genuinely stuck rather than merely slow). It returns the total number of
+// rescued jobs and the number whose retry counts were reset because they had
+// exhausted their max attempts.
 func (a *App) RescueStuckJobs(ctx context.Context) (rescued, retriesReset int64, err error) {
 	return queueops.RescueStuckRunning(ctx, a.db)
 }

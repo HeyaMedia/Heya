@@ -13,6 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/riverqueue/river"
@@ -214,32 +215,20 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		},
 		// Per-job context deadline. River's default JobTimeout is 1
 		// MINUTE — it silently wraps every Work(ctx) in a 60s
-		// context.WithTimeout. That's wrong for essentially every heavy
-		// job here: a library scan over SMB walks tens of thousands of
-		// files, artist enrich blocks up to the HeyaMedia client's
-		// 5-minute HTTP timeout, the sonic model bundle fetch can run 30
-		// minutes, and loudness/transcode/trickplay/disk-walk jobs
-		// routinely run several minutes. Under the default those all died
-		// with "context deadline exceeded" at the 60s mark (originally
-		// observed as a failed large SMB scan). 6h is a generous ceiling
-		// that no legitimate single job should hit; the real bounds live
-		// where they belong — per-HTTP-client timeouts for network work,
-		// ffmpeg/walk semantics for media/FS work.
-		//
-		// Must stay strictly below RescueStuckJobsAfter (River requires
-		// rescue > timeout): the rescuer keys off wall-clock running time
-		// and can't tell a still-working job from a crashed one, so a job
-		// that outlives the rescue window gets re-run while alive. Keeping
-		// rescue = JobTimeout + 1h (River's own default margin) means a
-		// job is cancelled by its timeout before it ever looks "stuck".
-		JobTimeout: 6 * time.Hour,
+		// context.WithTimeout, which killed essentially every heavy job
+		// here (SMB library scans, the 30-minute sonic model fetch,
+		// loudness/transcode/trickplay/disk-walk) with "context deadline
+		// exceeded". queueops.JobTimeout (6h) is a generous ceiling no
+		// legitimate single job should hit; real bounds live where they
+		// belong — per-HTTP-client timeouts, ffmpeg/walk semantics.
+		JobTimeout: queueops.JobTimeout,
 		// Backstop for jobs whose worker died mid-run (process died, OS
-		// killed it, etc.) — River reassigns them after this window. Held
-		// at JobTimeout + 1h so it always exceeds the longest a healthy
-		// job can run (a job past its 6h timeout has had its context
-		// cancelled and is genuinely stuck), avoiding duplicate execution
-		// of jobs that are slow but still working.
-		RescueStuckJobsAfter: 7 * time.Hour,
+		// killed it, etc.). Held at queueops.RescueStuckAfter (= JobTimeout
+		// + 1h) so it always exceeds the longest a healthy job can run: a
+		// job past its timeout has had its context cancelled and is
+		// genuinely stuck, so rescuing it can't duplicate a live worker.
+		// Shared with the manual RescueStuckRunning sweep so the two agree.
+		RescueStuckJobsAfter: queueops.RescueStuckAfter,
 		Workers:              workers,
 	})
 	if err != nil {

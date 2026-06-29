@@ -2,9 +2,32 @@ package queueops
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// Queue-lifetime tunables, shared so the River client config and the manual
+// rescue sweeps below can't drift apart.
+const (
+	// JobTimeout is the per-job context deadline River applies to every
+	// Work(ctx) (wired into the river.Config in internal/worker). River's
+	// own default is 1 minute, which silently killed long jobs — SMB library
+	// scans, the 30-minute sonic model fetch, transcode/loudness/disk-walk —
+	// with "context deadline exceeded". 6h is a generous ceiling no legitimate
+	// single job should reach.
+	JobTimeout = 6 * time.Hour
+
+	// RescueStuckAfter is how long a job must sit in state='running' before
+	// it's treated as genuinely stuck (worker crashed or wedged) rather than
+	// merely slow. It MUST exceed JobTimeout: past its timeout a healthy job
+	// has had its context cancelled, so anything still 'running' beyond this
+	// window is dead. Anything shorter would rescue — and thus duplicate — a
+	// job that's slow but still actively working. Used by both River's
+	// automatic rescuer (RescueStuckJobsAfter) and the manual RescueStuckRunning
+	// sweep so "stuck" means the same thing on-demand as on the periodic tick.
+	RescueStuckAfter = JobTimeout + time.Hour
 )
 
 type DB interface {
@@ -197,13 +220,18 @@ func RescueOrphanedRunning(ctx context.Context, db DB) (int64, error) {
 }
 
 func RescueStuckRunning(ctx context.Context, db DB) (rescued int64, retriesReset int64, err error) {
+	// Only sweep jobs past RescueStuckAfter — i.e. beyond their context
+	// deadline and therefore genuinely stuck. A shorter window would flip a
+	// live, slow-but-working job (e.g. a large SMB scan) back to 'available'
+	// and run it a second time.
+	stuckSecs := RescueStuckAfter.Seconds()
 	tag1, err := db.Exec(ctx, `
 		UPDATE river_job
 		   SET state = 'available', attempted_at = NULL, attempted_by = NULL
 		 WHERE state = 'running'
-		   AND attempted_at < now() - interval '30 minutes'
+		   AND attempted_at < now() - make_interval(secs => $1)
 		   AND attempt < max_attempts
-	`)
+	`, stuckSecs)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -212,9 +240,9 @@ func RescueStuckRunning(ctx context.Context, db DB) (rescued int64, retriesReset
 		   SET state = 'available', attempted_at = NULL, attempted_by = NULL,
 		       attempt = GREATEST(attempt - 1, 0)
 		 WHERE state = 'running'
-		   AND attempted_at < now() - interval '30 minutes'
+		   AND attempted_at < now() - make_interval(secs => $1)
 		   AND attempt >= max_attempts
-	`)
+	`, stuckSecs)
 	if err != nil {
 		return 0, 0, err
 	}
