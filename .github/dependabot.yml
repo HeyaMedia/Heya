@@ -15,6 +15,14 @@ updates:
     commit-message:
       prefix: deps
       include: scope
+    ignore:
+      # onnxruntime_go is version-locked to the ORT shared library shipped in
+      # the Dockerfiles: the onnxruntime-openvino wheel pins ORT 1.24.1 (C API
+      # 24 = binding v1.27.x). A newer binding calls GetApi(>24) and fails to
+      # init against the 1.24.1 lib ("Error setting ORT API base: 2"), which
+      # breaks sonic-analysis. Bump by hand only, in lockstep with
+      # ONNXRUNTIME_VERSION in the Dockerfiles. See docs/deployment.md.
+      - dependency-name: "github.com/yalue/onnxruntime_go"
     groups:
       # Bundle minor + patch bumps into one PR per group; majors stay separate
       # so breaking changes still get individual review.

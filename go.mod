@@ -25,7 +25,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/sugarme/tokenizer v0.3.0
-	github.com/yalue/onnxruntime_go v1.31.0
+	github.com/yalue/onnxruntime_go v1.27.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0
 	gonum.org/v1/gonum v0.17.0
