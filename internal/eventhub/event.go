@@ -5,19 +5,20 @@ import "time"
 type EventType string
 
 const (
-	EventLog           EventType = "log"
-	EventScanStarted   EventType = "scan.started"
-	EventScanCompleted EventType = "scan.completed"
-	EventMediaAdded    EventType = "media.added"
-	EventMediaUpdated  EventType = "media.updated"
-	EventMediaRemoved  EventType = "media.removed"
-	EventMediaWatched  EventType = "media.watched"
-	EventQueueStatus   EventType = "queue.status"
-	EventActiveJobs    EventType = "active_jobs"
-	EventStatsUpdated  EventType = "stats.updated"
-	EventScanProgress  EventType = "scan.progress"
-	EventTaskProgress  EventType = "task.progress"
-	EventTailscale     EventType = "tailscale.status"
+	EventLog            EventType = "log"
+	EventScanStarted    EventType = "scan.started"
+	EventScanCompleted  EventType = "scan.completed"
+	EventMediaAdded     EventType = "media.added"
+	EventMediaUpdated   EventType = "media.updated"
+	EventMediaRemoved   EventType = "media.removed"
+	EventMediaWatched   EventType = "media.watched"
+	EventLibraryDeleted EventType = "library.deleted"
+	EventQueueStatus    EventType = "queue.status"
+	EventActiveJobs     EventType = "active_jobs"
+	EventStatsUpdated   EventType = "stats.updated"
+	EventScanProgress   EventType = "scan.progress"
+	EventTaskProgress   EventType = "task.progress"
+	EventTailscale      EventType = "tailscale.status"
 	// Radio ICY metadata — fired by the radio stream proxy each time an
 	// upstream station sends a fresh `StreamTitle=...` block. FE consumers
 	// (Playbar / QueueRow) overlay these on the "Now Playing" card while a
@@ -66,6 +67,16 @@ type MediaPayload struct {
 	LibraryID   int64  `json:"library_id,omitempty"`
 	Title       string `json:"title,omitempty"`
 	MediaType   string `json:"media_type,omitempty"`
+}
+
+// LibraryPayload is the body for library lifecycle events (currently just
+// library.deleted). Deleting a library cascades server-side across an entire
+// media type, so the FE uses this to blow away its cached catalog data;
+// MediaType is carried for consumers that want to scope the invalidation.
+type LibraryPayload struct {
+	LibraryID int64  `json:"library_id"`
+	Name      string `json:"name,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
 }
 
 type WatchPayload struct {

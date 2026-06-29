@@ -4,7 +4,7 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 import type { Library, LibrarySettings } from '~~/shared/types'
 import type { LibraryScanProgress } from '~/composables/useEventBus'
 
-const { $heya } = useNuxtApp()
+const { $heya, $queryClient } = useNuxtApp()
 const { confirm } = useConfirm()
 const { scanProgress } = useEventBus()
 
@@ -215,6 +215,11 @@ async function deleteLib(lib: Library) {
   try {
     await $heya('/api/libraries/{id}', { method: 'DELETE', path: { id: lib.id } })
     libraries.value = libraries.value.filter(l => l.id !== lib.id)
+    // Drop cached catalog data now, without waiting for the library.deleted
+    // WS round-trip — the deleted library's media is gone everywhere and the
+    // global listener (plugins/cache-invalidation.client.ts) handles other
+    // tabs / CLI deletes.
+    $queryClient.invalidateQueries()
     flash.value = { kind: 'ok', text: 'Library deleted.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Delete failed.' }

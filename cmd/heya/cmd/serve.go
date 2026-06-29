@@ -77,6 +77,9 @@ var serveCmd = &cobra.Command{
 
 		bridgeLogToHub(appCtx, logRing, app.EventHub())
 		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
+		// Bridge events published from other processes (e.g. a `heya library
+		// remove` CLI call) onto this process's live hub → WebSocket clients.
+		app.EventHub().StartCrossProcessRelay(appCtx, app.DBPool())
 		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
 
 		// Scheduler is now a thin 60s trigger loop. All actual work

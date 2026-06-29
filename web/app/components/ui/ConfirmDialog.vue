@@ -37,15 +37,26 @@ import {
 
 const { state, _resolve } = useConfirm()
 
-// reka emits update:open(false) on overlay click, ESC, and both action
-// buttons. We bind explicit handlers on the Cancel/Action buttons so we
-// can distinguish confirm from cancel; the open-change handler is just
-// the fallback for ESC/overlay dismissals.
+// reka's AlertDialogAction/Cancel render a DialogClose, which binds its own
+// click handler (rootContext.onOpenChange(false)) on the SAME button. Vue
+// merges that with our @click into [closeFn, ourHandler] and runs closeFn
+// FIRST — so by the time onConfirm/onCancel runs, update:open(false) has
+// already fired. We therefore can't resolve inside onOpenChange directly
+// (we'd always resolve false). Instead: the @click handlers record the
+// choice, and onOpenChange resolves on a microtask, after the synchronous
+// click handler has run. ESC / overlay dismissals never set `result`, so
+// they correctly default to a cancel.
+let result = false
+function onConfirm() { result = true }
+function onCancel() { result = false }
+
 function onOpenChange(v: boolean) {
-  if (!v && state.value.open) _resolve(false)
+  if (v || !state.value.open) return
+  queueMicrotask(() => {
+    _resolve(result)
+    result = false
+  })
 }
-function onConfirm() { _resolve(true) }
-function onCancel() { _resolve(false) }
 </script>
 
 <style scoped>

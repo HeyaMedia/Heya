@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -124,7 +125,33 @@ func (a *App) GetLibrarySettings(ctx context.Context, id int64) (metadata.Librar
 
 func (a *App) DeleteLibrary(ctx context.Context, id int64) error {
 	q := sqlc.New(a.db)
-	return q.DeleteLibrary(ctx, id)
+	// Capture identity before the row (and its ON DELETE CASCADE) is gone, so
+	// the WS event can carry the media_type. A missing row is fine — the
+	// DELETE is a no-op and we still broadcast the (harmless) invalidation.
+	lib, _ := q.GetLibraryByID(ctx, id)
+	if err := q.DeleteLibrary(ctx, id); err != nil {
+		return err
+	}
+	// Tell connected browsers to drop their cached catalog data. The delete
+	// cascades across an entire media type (items, files, the music
+	// artist→album→track chain, home rails, mixes, recommendations), which no
+	// page-local FE invalidation can cover.
+	//
+	// We go via Postgres NOTIFY, not a direct hub.Emit, because the WebSocket
+	// clients live in the `heya serve` process — and DeleteLibrary also runs
+	// from a `heya library remove` CLI call, which is a separate, cacheless,
+	// one-shot process whose own hub has no subscribers. NOTIFY pokes the
+	// running server, whose relay (StartCrossProcessRelay) re-emits onto the
+	// live hub. Best-effort: if nothing is serving, there are no browsers to
+	// update anyway.
+	if err := eventhub.Notify(ctx, a.db, eventhub.EventLibraryDeleted, eventhub.LibraryPayload{
+		LibraryID: id,
+		Name:      lib.Name,
+		MediaType: string(lib.MediaType),
+	}); err != nil {
+		log.Warn().Err(err).Int64("library_id", id).Msg("DeleteLibrary: cache-invalidation notify failed")
+	}
+	return nil
 }
 
 func (a *App) MatchLibrary(ctx context.Context, id int64) (matcher.MatchResult, error) {

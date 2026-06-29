@@ -25,6 +25,16 @@ export interface MediaPayload {
   media_type?: string
 }
 
+// library.deleted — fired by the backend after a library (and its cascade)
+// is removed. Consumed globally by plugins/cache-invalidation.client.ts,
+// which drops the vue-query catalog cache. The payload is informational; the
+// handler invalidates regardless of which library/type it was.
+export interface LibraryDeletedPayload {
+  library_id: number
+  name?: string
+  media_type?: string
+}
+
 export interface WatchPayload {
   user_id: number
   media_item_id: number
