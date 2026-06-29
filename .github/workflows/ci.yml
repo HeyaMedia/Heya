@@ -21,7 +21,7 @@ jobs:
     name: Frontend (vue-tsc + audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
@@ -87,7 +87,7 @@ jobs:
     name: Go (lint + build + sqlc drift)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -162,7 +162,7 @@ jobs:
     env:
       DATABASE_URL: postgres://heya:heya@localhost:5440/heya?sslmode=disable
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -202,7 +202,7 @@ jobs:
     name: Security (govulncheck + OSV)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Go
         uses: actions/setup-go@v6

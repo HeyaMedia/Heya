@@ -34,7 +34,7 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       image: ${{ steps.img.outputs.image }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # GHCR refs must be lowercase, but github.repository can be mixed-case
       # (e.g. HeyaMedia/Heya). metadata-action lowercases its own tag output,
@@ -98,7 +98,7 @@ jobs:
       matrix:
         variant: [cuda, openvino]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
