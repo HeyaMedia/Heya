@@ -250,7 +250,7 @@ function seasonLink(s: any) {
 function episodeStillUrl(ep: any) {
   if (!detail.value) return ''
   const label = `s${String(currentSeasonNum.value).padStart(2, '0')}e${String(ep.episode_number).padStart(2, '0')}`
-  return `/api/media/${detail.value.media_item.id}/image/backdrop?label=${label}`
+  return `/api/media/${detail.value.media_item.id}/image/still?label=${label}`
 }
 
 function episodeFileId(ep: any): number | null {

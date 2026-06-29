@@ -72,7 +72,7 @@ function scrollBy(dir: number) {
 function thumbUrl(item: ContinueWatchingItem): string {
   if (item.entity_type === 'episode' && item.season_number && item.episode_number) {
     const label = `s${String(item.season_number).padStart(2, '0')}e${String(item.episode_number).padStart(2, '0')}`
-    return `/api/media/${item.media_item_id}/image/backdrop?label=${label}`
+    return `/api/media/${item.media_item_id}/image/still?label=${label}`
   }
   return `/api/media/${item.media_item_id}/image/backdrop`
 }

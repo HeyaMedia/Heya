@@ -309,7 +309,7 @@ func buildPendingImages(detail *metadata.MediaDetail) []PendingImage {
 		for _, ep := range season.Episodes {
 			if ep.StillURL != "" {
 				pending = append(pending, PendingImage{
-					URL: ep.StillURL, AssetType: "backdrop",
+					URL: ep.StillURL, AssetType: "still",
 					Label: fmt.Sprintf("s%02de%02d", season.Number, ep.Number), SortOrder: 2000 + season.Number*100 + ep.Number, Priority: 3,
 				})
 			}

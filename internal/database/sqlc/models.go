@@ -26,6 +26,7 @@ const (
 	AssetTypeSubtitle AssetType = "subtitle"
 	AssetTypeLyrics   AssetType = "lyrics"
 	AssetTypeNfo      AssetType = "nfo"
+	AssetTypeStill    AssetType = "still"
 )
 
 func (e *AssetType) Scan(src interface{}) error {

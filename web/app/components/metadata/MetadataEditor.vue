@@ -290,7 +290,7 @@ const headerBackdrop = computed(() => {
   if (mode.value === 'episode' && activeEpisode.value) {
     const ep = activeEpisode.value
     const label = `s${String(ep.season.season_number).padStart(2, '0')}e${String(ep.episode.episode_number).padStart(2, '0')}`
-    return `/api/media/${props.mediaId}/image/backdrop?label=${label}`
+    return `/api/media/${props.mediaId}/image/still?label=${label}`
   }
   return `/api/media/${props.mediaId}/image/backdrop`
 })
@@ -312,7 +312,9 @@ const filteredDetailForImages = computed(() => {
       if (!a.label) return true
       if (a.label === 'custom') return true
       if (/^season-\d+$/.test(a.label)) return false
-      if (/^s\d{2}e\d{2}$/.test(a.label)) return false
+      // Episode-still labels are s%02de%02d — two-OR-MORE digits per number
+      // (e.g. s01e100 for episode >= 100), so match \d+ not \d{2}.
+      if (/^s\d+e\d+$/.test(a.label)) return false
       return true
     })
   }
