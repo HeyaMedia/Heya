@@ -15,6 +15,27 @@ import (
 
 const maxImageBytes = 25 << 20
 
+// StatusError is returned by Download when the server answers with a non-200
+// status. Permanent reports whether a retry is pointless: a 4xx (other than
+// 408 Request Timeout and 429 Too Many Requests) means the image simply isn't
+// available upstream. That's the common, expected case for episode stills and
+// some person headshots — heya.media hands out a URL it can't actually serve —
+// so callers swallow it instead of retrying and spamming the logs.
+type StatusError struct {
+	Code int
+	URL  string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("HTTP %d downloading %s", e.Code, e.URL)
+}
+
+func (e *StatusError) Permanent() bool {
+	return e.Code >= 400 && e.Code < 500 &&
+		e.Code != http.StatusRequestTimeout &&
+		e.Code != http.StatusTooManyRequests
+}
+
 type Downloader struct {
 	dataDir string
 	client  *http.Client
@@ -59,7 +80,7 @@ func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirNam
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
+		return "", &StatusError{Code: resp.StatusCode, URL: url}
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "image/") {
 		return "", fmt.Errorf("unexpected image content type %q downloading %s", ct, url)

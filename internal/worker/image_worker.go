@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -61,6 +62,17 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 
 	localPath, err := w.Downloader.Download(ctx, job.Args.URL, job.Args.MediaType, dirName, filename)
 	if err != nil {
+		if imageUnavailable(err) {
+			// Upstream has no such image — expected for the bulk of episode
+			// stills. Don't retry (it won't appear) and don't warn-spam.
+			log.Debug().
+				Int64("item_id", job.Args.MediaItemID).
+				Str("media_type", job.Args.MediaType).
+				Str("asset_type", job.Args.AssetType).
+				Str("url", job.Args.URL).
+				Msg("image unavailable upstream")
+			return nil
+		}
 		log.Warn().Err(err).
 			Int64("item_id", job.Args.MediaItemID).
 			Str("media_type", job.Args.MediaType).
@@ -211,6 +223,10 @@ func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *rive
 
 	localPath, err := w.Downloader.Download(ctx, job.Args.URL, "person", personDir, "profile.jpg")
 	if err != nil {
+		if imageUnavailable(err) {
+			log.Debug().Int64("person_id", job.Args.PersonID).Str("url", job.Args.URL).Msg("person image unavailable upstream")
+			return nil
+		}
 		log.Warn().Err(err).Str("url", job.Args.URL).Msg("person image download failed")
 		return err
 	}
@@ -224,4 +240,13 @@ func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *rive
 
 	log.Debug().Int64("person_id", job.Args.PersonID).Str("path", localPath).Msg("person headshot downloaded")
 	return nil
+}
+
+// imageUnavailable reports whether a download error means the image simply
+// isn't there upstream (a permanent 4xx) rather than a transient failure worth
+// retrying. heya.media routinely advertises episode-still and headshot URLs it
+// can't serve, so these 404s are expected and must not trigger River retries.
+func imageUnavailable(err error) bool {
+	var se *images.StatusError
+	return errors.As(err, &se) && se.Permanent()
 }
