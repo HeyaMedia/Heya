@@ -37,6 +37,13 @@ func (f Field[T]) Entry() SourceEntry {
 	return SourceEntry{Source: f.Source, EnvVar: f.EnvVar}
 }
 
+func (f Field[T]) EnvLock() (envVar string, locked bool) {
+	if f.Source != SourceEnv {
+		return "", false
+	}
+	return f.EnvVar, true
+}
+
 func envString(envVar, def string) Field[string] {
 	if v, ok := os.LookupEnv(envVar); ok {
 		return Field[string]{Value: v, Source: SourceEnv, EnvVar: envVar}
@@ -58,9 +65,10 @@ func envBool(envVar string, def bool) Field[bool] {
 func envInt(envVar string, def int) Field[int] {
 	if v, ok := os.LookupEnv(envVar); ok {
 		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err == nil {
-			return Field[int]{Value: n, Source: SourceEnv, EnvVar: envVar}
+		if err != nil {
+			n = def
 		}
+		return Field[int]{Value: n, Source: SourceEnv, EnvVar: envVar}
 	}
 	return Field[int]{Value: def, Source: SourceDefault}
 }

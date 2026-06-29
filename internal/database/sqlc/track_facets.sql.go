@@ -316,6 +316,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
 WHERE (elem->>'name') = $1::text
   AND (elem->>'score')::real >= $2::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY (elem->>'score')::real DESC, t.id ASC
 LIMIT $4 OFFSET $3
 `
@@ -405,6 +406,7 @@ JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
 WHERE (tf.mood_tags->>$1::text)::real > $2::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY (tf.mood_tags->>$1::text)::real DESC, t.id ASC
 LIMIT $4 OFFSET $3
 `
@@ -497,6 +499,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 WHERE tf.bpm IS NOT NULL
   AND tf.bpm >= $1::real
   AND tf.bpm <  $2::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY tf.bpm ASC, t.id ASC
 LIMIT $4 OFFSET $3
 `
@@ -595,6 +598,7 @@ WHERE tf.track_embedding IS NOT NULL
   AND tf.key_mode IS NOT NULL
   AND (tf.key_root::int * 2 + tf.key_mode::int) = ANY($4::int[])
   AND NOT (tf.track_id = ANY($5::bigint[]))
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY tf.track_embedding <=> $1
 LIMIT $6
 `

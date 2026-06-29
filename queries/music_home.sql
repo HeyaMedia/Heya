@@ -19,7 +19,8 @@ WITH artist_plays AS (
            mi.poster_path       AS poster_path,
            pe.played_at         AS last_played_at,
            (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
-           (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+           (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
+           EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
     FROM play_events pe
     JOIN tracks      t  ON t.id  = pe.track_id
     JOIN albums      al ON al.id = t.album_id
@@ -50,6 +51,7 @@ WHERE l.media_type = 'music'
   AND al.release_date IS NOT NULL
   AND EXTRACT(MONTH FROM al.release_date) = EXTRACT(MONTH FROM CURRENT_DATE)
   AND EXTRACT(DAY   FROM al.release_date) = EXTRACT(DAY   FROM CURRENT_DATE)
+  AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
 ORDER BY al.release_date DESC
 LIMIT $1;
 
@@ -94,6 +96,7 @@ WITH artist_play_counts AS (
     JOIN artists a  ON a.id  = al.artist_id
     JOIN media_items mi ON mi.id = a.media_item_id
     WHERE pe.user_id = sqlc.arg(user_id)
+      AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
     GROUP BY a.id, a.name, mi.id, mi.slug
 )
 SELECT artist_id, artist_name, media_item_id, artist_slug, play_count
@@ -112,6 +115,7 @@ FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
 WHERE al.artist_id = $1
+  AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
 LIMIT $2;
 
@@ -153,6 +157,7 @@ JOIN media_items  mi ON mi.id = a.media_item_id
 JOIN libraries    l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND sqlc.arg(genre)::text = ANY(al.genres)
+  AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
 ORDER BY a.name ASC
 LIMIT $1;
 
@@ -177,6 +182,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 WHERE pe.user_id = $1
   AND pe.played_at >= sqlc.arg(start_at)
   AND pe.played_at <  sqlc.arg(end_at)
+  AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
 GROUP BY al.id, al.title, al.slug, al.cover_path, al.year,
          a.id, a.name, mi.slug
 ORDER BY play_count DESC, al.id DESC
@@ -200,6 +206,7 @@ WITH artist_last_played AS (
     JOIN artists     a  ON a.id  = al.artist_id
     JOIN media_items mi ON mi.id = a.media_item_id
     WHERE pe.user_id = sqlc.arg(user_id)
+      AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
     GROUP BY a.id, a.name, mi.id, mi.slug
     HAVING max(pe.played_at) < sqlc.arg(cutoff_at)
        AND count(*) >= sqlc.arg(min_plays)
@@ -220,6 +227,7 @@ WITH user_labels AS (
     JOIN albums al  ON al.id = t.album_id
     WHERE pe.user_id = sqlc.arg(user_id)
       AND al.label IS NOT NULL AND al.label != ''
+      AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
     GROUP BY al.label
 )
 SELECT label, play_count
@@ -246,6 +254,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lower(al.label) = lower(sqlc.arg(label)::text)
+  AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
 LIMIT $1;
 
@@ -267,6 +276,7 @@ WITH ranked AS (
     JOIN media_items mi ON mi.id = a.media_item_id
     WHERE pe.user_id = sqlc.arg(user_id)
       AND pe.played_at >= sqlc.arg(since_at)
+      AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
     GROUP BY a.id, a.name, mi.id, mi.slug
 )
 SELECT artist_id, artist_name, media_item_id, artist_slug, play_count, last_played_at
@@ -298,6 +308,7 @@ JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
 WHERE mi.slug = sqlc.arg(slug)
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY user_play_count DESC, al.year DESC NULLS LAST,
          t.disc_number ASC, t.track_number ASC
 LIMIT sqlc.arg(track_limit);
@@ -329,6 +340,7 @@ WITH ranked AS (
     JOIN artists     a  ON a.id  = al.artist_id
     JOIN media_items mi ON mi.id = a.media_item_id
     WHERE a.id = ANY(sqlc.arg(artist_ids)::bigint[])
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 )
 SELECT track_id, track_title, duration, disc_number, track_number,
        album_id, album_title, album_slug, album_cover_path, album_year,

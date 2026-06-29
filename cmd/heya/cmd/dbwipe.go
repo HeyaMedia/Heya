@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +20,10 @@ var dbWipeCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		db, err := pgxpool.New(ctx, cfg.DatabaseURL.Value)
+		db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
+			MaxConns: int32(cfg.DatabaseMaxConns.Value),
+			MinConns: int32(cfg.DatabaseMinConns.Value),
+		})
 		if err != nil {
 			return err
 		}
@@ -39,11 +42,20 @@ var dbWipeCmd = &cobra.Command{
 			"people", "keywords", "production_companies", "collections",
 		}
 
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
 		for _, t := range tables {
-			_, err := db.Exec(ctx, "DELETE FROM "+t)
+			_, err := tx.Exec(ctx, "DELETE FROM "+t)
 			if err != nil {
-				ui.Warn("Failed to wipe %s: %v", t, err)
+				return fmt.Errorf("wipe %s: %w", t, err)
 			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
 		}
 
 		ui.Success("All media data wiped. User accounts preserved.")

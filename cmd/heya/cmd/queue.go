@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/rs/zerolog/log"
@@ -73,7 +73,10 @@ var queueStatusCmd = &cobra.Command{
 	Short: "Show job queue status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		db, err := pgxpool.New(ctx, cfg.DatabaseURL.Value)
+		db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
+			MaxConns: int32(cfg.DatabaseMaxConns.Value),
+			MinConns: int32(cfg.DatabaseMinConns.Value),
+		})
 		if err != nil {
 			return err
 		}
@@ -113,7 +116,10 @@ var queueClearCmd = &cobra.Command{
 		allFlag, _ := cmd.Flags().GetBool("all")
 
 		ctx := context.Background()
-		db, err := pgxpool.New(ctx, cfg.DatabaseURL.Value)
+		db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
+			MaxConns: int32(cfg.DatabaseMaxConns.Value),
+			MinConns: int32(cfg.DatabaseMinConns.Value),
+		})
 		if err != nil {
 			return err
 		}

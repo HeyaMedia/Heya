@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -100,7 +101,8 @@ func downloadFile(ctx context.Context, url, dest string) bool {
 	}
 	req.Header.Set("User-Agent", "Heya/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}

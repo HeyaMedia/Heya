@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediafile"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -31,8 +33,8 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 		return err
 	}
 
-	w.Progress.SetCurrentByKind(ProcessFileArgs{}.Kind(), filepath.Base(file.Path))
-	log.Debug().Int64("file_id", file.ID).Str("path", file.Path).Msg("processing file")
+	w.Progress.SetCurrent(ProcessFileArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(file.Path))
+	log.Debug().Int64("file_id", file.ID).Str("path", vfs.RedactPath(file.Path)).Msg("processing file")
 
 	client := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -41,17 +43,23 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 	// reads directly via filesystem walks — sending them through ffprobe
 	// just produces "exit status 1" noise in the logs.
 	if isFFProbeable(file.Path) {
-		_, _ = client.Insert(ctx, FFProbeArgs{
-			LibraryFileID: file.ID,
-			FilePath:      file.Path,
-		}, nil)
+		if _, err := client.Insert(ctx, FFProbeArgs{
+			LibraryFileID:   file.ID,
+			FilePath:        file.Path,
+			ScheduledTaskID: job.Args.ScheduledTaskID,
+		}, nil); err != nil {
+			return fmt.Errorf("enqueue ffprobe: %w", err)
+		}
 	}
 
-	client.Insert(ctx, MetadataMatchArgs{
-		LibraryFileID: file.ID,
-		LibraryID:     lib.ID,
-		MediaType:     string(lib.MediaType),
-	}, nil)
+	if _, err := client.Insert(ctx, MetadataMatchArgs{
+		LibraryFileID:   file.ID,
+		LibraryID:       lib.ID,
+		MediaType:       string(lib.MediaType),
+		ScheduledTaskID: job.Args.ScheduledTaskID,
+	}, nil); err != nil {
+		return fmt.Errorf("enqueue metadata match: %w", err)
+	}
 
 	return nil
 }
@@ -60,12 +68,5 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 // read. Companion sidecars (.lrc, .nfo, .srt, .ass, .vtt, .jpg) and ebook
 // formats (.epub, .pdf) get a false here.
 func isFFProbeable(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".webm", ".ts", ".mpg", ".mpeg":
-		return true
-	case ".flac", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".opus", ".wma", ".alac", ".aiff", ".aif":
-		return true
-	}
-	return false
+	return mediafile.IsProbeable(path)
 }

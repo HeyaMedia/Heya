@@ -1,6 +1,6 @@
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-proxy dev-go dev-web gen-api-client gen-heyamedia-client docker docker-run
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyamedia-client docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
 
 # Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
 # bumps occasionally break field shapes and we want clients to match.
@@ -22,26 +22,26 @@ build-go:
 run: build-go
 	./bin/heya serve
 
-# Dev: Caddy on :8080 fronts Nuxt (:3000) and heya serve (:3050). Air only
-# rebuilds the Go binary — Caddy and Nuxt stay alive across restarts, so
-# the browser's HMR socket and any in-flight WS connection never see the
-# front door go away. Open http://localhost:8080. Ctrl+C kills all three.
+# Dev: `heya dev-proxy` on :8080 is the stable front door — it fronts Nuxt
+# (:3000) + the air-run backend (:3050) and owns the Tailscale node, so air
+# rebuilds of the backend never drop the front door, the tailnet node, or the
+# browser's HMR/WS sockets. mprocs supervises all three and tears them down
+# cleanly on quit (q / Ctrl+C). The preflight reclaims :8080/:3050/:3000 from
+# anything a previous hard kill left orphaned. Open http://localhost:8080.
 #
-# Caddy is the prerequisite: `brew install caddy`.
+# mprocs is the prerequisite: `brew install mprocs`.
 dev:
-	@command -v caddy >/dev/null 2>&1 || { echo "caddy not found — install with: brew install caddy"; exit 1; }
-	@trap 'kill 0' INT TERM; \
-		caddy run --config Caddyfile.dev --adapter caddyfile & \
-		go run github.com/air-verse/air@latest & \
-		(cd web && bun run dev) & \
-		wait
+	@command -v mprocs >/dev/null 2>&1 || { echo "mprocs not found — install with: brew install mprocs"; exit 1; }
+	@mkdir -p tmp  # gitignored; the proxy + air both build into it — create it before mprocs spawns them
+	@for p in 8080 3050 3000; do pids=$$(lsof -ti tcp:$$p 2>/dev/null); [ -n "$$pids" ] && kill $$pids 2>/dev/null || true; done
+	mprocs
 
-# Same trio as `make dev`, split if you want separate terminals.
-dev-proxy:
-	caddy run --config Caddyfile.dev --adapter caddyfile
+# Same trio as `make dev`, split across terminals if you want separate control.
+dev-front:
+	mkdir -p tmp && go build -o tmp/heya-dev ./cmd/heya && exec tmp/heya-dev dev-proxy
 
 dev-go:
-	go run github.com/air-verse/air@latest
+	mkdir -p tmp && go run github.com/air-verse/air@latest
 
 dev-web:
 	cd web && bun run dev
@@ -122,14 +122,39 @@ gen-heyamedia-client:
 
 # Build the production container locally. Multi-stage: bun frontend ->
 # go backend -> minideb runtime with jellyfin-ffmpeg + libonnxruntime.
-# Tag is `heya:dev` so it doesn't collide with whatever ghcr.io pulls
-# when you `docker pull` later.
+# Tag is `heya:base` — the main image and the FROM base for the GPU variants.
 #
-# --platform=linux/amd64 because jellyfin-ffmpeg's apt repo only ships
-# amd64 .debs. On Apple Silicon this means QEMU emulation (slow), on
-# Linux amd64 it's a no-op. CI on GHCR runners matches natively.
+# Builds for the host arch by default — fast and native (no QEMU) on both
+# Apple Silicon and Linux amd64. The Dockerfile is arch-agnostic (it derives
+# the per-arch bits from dpkg), so override PLATFORM to cross-build a single
+# arch, e.g. `make docker PLATFORM=linux/amd64`. NOTE: the Nuxt prerender step
+# is much slower under bun on amd64 than arm64 — an amd64 build can take several
+# extra minutes at `bun run build`; this is a bun node-compat quirk, not a hang.
+#
+# The base image already does Intel + AMD **video transcode** via VAAPI/QSV —
+# just pass the GPU at run time (see docker-run-gpu). The GPU **ONNX** variants
+# (sonic-analysis) are separate, smaller layers FROM this base:
+PLATFORM ?=
 docker:
-	docker build --platform=linux/amd64 -t heya:dev .
+	docker build $(if $(PLATFORM),--platform=$(PLATFORM),) -t heya:base .
+
+# GPU ONNX variants — built FROM heya:base, amd64 only. Build the base first.
+#   heya:cuda      NVIDIA  — CUDA/TensorRT ONNX EP + NVENC transcode (run: --gpus all)
+#   heya:openvino  Intel   — OpenVINO ONNX EP for Arc/iGPU + QSV/VAAPI (run: --device /dev/dri)
+docker-cuda:
+	docker build --platform=linux/amd64 -f Dockerfile.cuda \
+		--build-arg BASE_IMAGE=heya:base -t heya:cuda .
+
+docker-openvino:
+	docker build --platform=linux/amd64 -f Dockerfile.openvino \
+		--build-arg BASE_IMAGE=heya:base -t heya:openvino .
+
+# Build + push the base as one multi-arch manifest (what CI does on a tag).
+# Requires a buildx builder with QEMU; multi-platform images can't be loaded
+# into the local docker engine, so this pushes — set IMAGE to your registry ref.
+IMAGE ?= heya:base
+docker-multiarch:
+	docker buildx build --platform=linux/amd64,linux/arm64 -t $(IMAGE) --push .
 
 # Run the locally-built image against the docker-compose postgres on the
 # host. Bind-mounts ./data so the Tailscale state + transcode cache survive.
@@ -138,4 +163,16 @@ docker-run:
 		-p 8080:8080 \
 		-v $(PWD)/data:/data \
 		-e HEYA_DATABASE_URL='postgres://heya:heya@host.docker.internal:5440/heya?sslmode=disable' \
-		heya:dev
+		heya:base
+
+# Run with the host GPU exposed for hardware transcode (Intel/AMD via /dev/dri).
+# Adds the render group so the non-root paths can reach the device too.
+docker-run-gpu:
+	docker run --rm -it \
+		-p 8080:8080 \
+		-v $(PWD)/data:/data \
+		--device /dev/dri:/dev/dri \
+		--group-add "$$(getent group render | cut -d: -f3)" \
+		-e HEYA_HWACCEL=vaapi \
+		-e HEYA_DATABASE_URL='postgres://heya:heya@host.docker.internal:5440/heya?sslmode=disable' \
+		heya:base

@@ -93,6 +93,10 @@ func (c *Client) ensureToken(ctx context.Context) error {
 }
 
 func (c *Client) doGet(ctx context.Context, path string) (*http.Response, error) {
+	return c.doGetRetry(ctx, path, true)
+}
+
+func (c *Client) doGetRetry(ctx context.Context, path string, retryUnauthorized bool) (*http.Response, error) {
 	if err := c.ensureToken(ctx); err != nil {
 		return nil, err
 	}
@@ -112,7 +116,7 @@ func (c *Client) doGet(ctx context.Context, path string) (*http.Response, error)
 		return nil, err
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized {
+	if resp.StatusCode == http.StatusUnauthorized && retryUnauthorized {
 		_ = resp.Body.Close()
 		c.mu.Lock()
 		c.token = ""
@@ -120,13 +124,17 @@ func (c *Client) doGet(ctx context.Context, path string) (*http.Response, error)
 		if err := c.Login(ctx); err != nil {
 			return nil, err
 		}
-		return c.doGet(ctx, path)
+		return c.doGetRetry(ctx, path, false)
 	}
 
 	return resp, nil
 }
 
 func (c *Client) doPost(ctx context.Context, path string, body any) (*http.Response, error) {
+	return c.doPostRetry(ctx, path, body, true)
+}
+
+func (c *Client) doPostRetry(ctx context.Context, path string, body any, retryUnauthorized bool) (*http.Response, error) {
 	if err := c.ensureToken(ctx); err != nil {
 		return nil, err
 	}
@@ -148,7 +156,7 @@ func (c *Client) doPost(ctx context.Context, path string, body any) (*http.Respo
 		return nil, err
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized {
+	if resp.StatusCode == http.StatusUnauthorized && retryUnauthorized {
 		_ = resp.Body.Close()
 		c.mu.Lock()
 		c.token = ""
@@ -156,7 +164,7 @@ func (c *Client) doPost(ctx context.Context, path string, body any) (*http.Respo
 		if err := c.Login(ctx); err != nil {
 			return nil, err
 		}
-		return c.doPost(ctx, path, body)
+		return c.doPostRetry(ctx, path, body, false)
 	}
 
 	return resp, nil

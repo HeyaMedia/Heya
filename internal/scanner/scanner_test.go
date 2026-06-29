@@ -508,6 +508,28 @@ func TestScanEmptyDirectory(t *testing.T) {
 	assert.Equal(t, 0, result.New)
 }
 
+func TestScanReturnsErrorWhenRootFails(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	dir := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+	createTestFile(t, dir, "Movie A (2024)/Movie A (2024).mkv", 100)
+
+	lib := createTestLibrary(t, q, dir, sqlc.MediaTypeMovie)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	lib.Paths = []string{dir, missing}
+
+	s := scanner.New(pool)
+	result, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scan incomplete")
+	assert.Equal(t, 1, result.Discovered)
+	assert.Equal(t, 1, result.New)
+	assert.Equal(t, 0, result.Deleted)
+}
+
 func TestScanNonMediaFilesIgnored(t *testing.T) {
 	pool := setupPool(t)
 	ctx := context.Background()

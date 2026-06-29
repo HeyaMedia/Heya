@@ -5,8 +5,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/taskdefs"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/rs/zerolog/log"
 )
 
@@ -18,12 +21,77 @@ import (
 // so a second "Run Now" click while one is queued or running is a
 // no-op rather than a stacked re-run.
 
+// uniqueWhileActive deduplicates a kickoff only while an identical one is
+// still queued, scheduled, retrying, or running. River's default ByState
+// for ByArgs uniqueness *also* includes JobStateCompleted, which means a
+// finished kickoff keeps blocking re-inserts until the job-cleaner
+// maintenance process removes the completed row (~24h retention). That
+// made a manual "Scan" / "Run Now" silently no-op for hours after a
+// successful run. Dropping JobStateCompleted restores the intended
+// behavior: coalesce in-flight clicks, but always re-runnable once done.
+// River requires Available/Pending/Running/Scheduled; Retryable is kept
+// because a scan mid-retry is still in flight.
+func uniqueWhileActive() river.UniqueOpts {
+	return river.UniqueOpts{
+		ByArgs: true,
+		ByState: []rivertype.JobState{
+			rivertype.JobStateAvailable,
+			rivertype.JobStatePending,
+			rivertype.JobStateRunning,
+			rivertype.JobStateRetryable,
+			rivertype.JobStateScheduled,
+		},
+	}
+}
+
+// clearStaleUniqueJobStates rewrites the unique-state bitmask of every job
+// inserted under the OLD default ByArgs bitmask (which included the
+// `completed` state) to match uniqueWhileActive(), which all unique jobs now
+// use.
+//
+// Without it, a job that completed *before* this build deployed keeps its
+// completed row in river_job_unique_idx and blocks an identical re-insert
+// until River's job cleaner ages it out (~24h retention) — so the fix
+// wouldn't bite until the next day.
+//
+// The fix is to clear *only* the completed bit (position 5, matching
+// River's river_job_state_in_bitmask). The old default bitmask is exactly
+// the uniqueWhileActive() bitmask plus that bit, so `set_bit(..., 5, 0)`
+// rewrites an old row into precisely what the new code would have inserted:
+//   - a still-active pre-fix job keeps its available/pending/running/
+//     scheduled bits, so it stays in the index and DOESN'T lose in-flight
+//     uniqueness during cleanup (a plain NULL would have — letting a
+//     duplicate stack mid-deploy);
+//   - a completed pre-fix job drops out of the index and unblocks;
+//   - an active job that completes *after* deploy now carries the new
+//     bitmask, so it won't re-block either.
+//
+// Kind-agnostic on purpose: now that no Heya job dedups against `completed`,
+// a set completed bit unambiguously marks a pre-fix row. New inserts clear
+// it, so this is idempotent and self-limiting — after one pass nothing
+// matches. Jobs with no uniqueness have NULL unique_states and are skipped.
+func clearStaleUniqueJobStates(ctx context.Context, db *pgxpool.Pool) error {
+	tag, err := db.Exec(ctx, `
+		UPDATE river_job
+		SET unique_states = set_bit(unique_states, 5, 0)
+		WHERE unique_states IS NOT NULL
+		  AND get_bit(unique_states, 5) = 1`)
+	if err != nil {
+		return err
+	}
+	if n := tag.RowsAffected(); n > 0 {
+		log.Info().Int64("rows", n).Msg("migrated pre-fix jobs to uniqueWhileActive bitmask")
+	}
+	return nil
+}
+
 // KickoffLibraryScanArgs replaces scheduler.ScanLibrariesTask. Walks
 // every library (or a specific one when LibraryID > 0) via the scanner,
 // fans out one ProcessFile job per discovered pending file.
 type KickoffLibraryScanArgs struct {
-	LibraryID int64 `json:"library_id,omitempty"` // 0 = all libraries
-	Force     bool  `json:"force,omitempty"`
+	LibraryID       int64  `json:"library_id,omitempty"` // 0 = all libraries
+	Force           bool   `json:"force,omitempty"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (KickoffLibraryScanArgs) Kind() string { return "kickoff_library_scan" }
@@ -31,35 +99,39 @@ func (KickoffLibraryScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "kickoff_library_scan",
 		MaxAttempts: 1,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
 // KickoffRefreshStaleArgs replaces scheduler.RefreshStaleItemsTask.
 // Finds every media_item past its library's MetadataRefreshDays window
 // and enqueues an enrich_media_item job per item.
-type KickoffRefreshStaleArgs struct{}
+type KickoffRefreshStaleArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
 
 func (KickoffRefreshStaleArgs) Kind() string { return "kickoff_refresh_stale" }
 func (KickoffRefreshStaleArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "kickoff_refresh_stale",
 		MaxAttempts: 1,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
 // KickoffMusicLoudnessArgs replaces scheduler.ScanMusicLoudnessTask.
 // Enqueues scan_track_loudness for tracks missing LUFS and
 // scan_album_loudness for albums whose tracks have all been measured.
-type KickoffMusicLoudnessArgs struct{}
+type KickoffMusicLoudnessArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
 
 func (KickoffMusicLoudnessArgs) Kind() string { return "kickoff_music_loudness" }
 func (KickoffMusicLoudnessArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "kickoff_music_loudness",
 		MaxAttempts: 1,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -67,14 +139,16 @@ func (KickoffMusicLoudnessArgs) InsertOpts() river.InsertOpts {
 // Finds library_files with has_trickplay=false on a library where
 // enable_trickplay is set, and enqueues one trickplay_file job per
 // candidate.
-type KickoffTrickplayArgs struct{}
+type KickoffTrickplayArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
 
 func (KickoffTrickplayArgs) Kind() string { return "kickoff_trickplay" }
 func (KickoffTrickplayArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "kickoff_trickplay",
 		MaxAttempts: 1,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -82,14 +156,16 @@ func (KickoffTrickplayArgs) InsertOpts() river.InsertOpts {
 // Finds media_extras missing thumbnail_path on a library where
 // generate_thumbnails is set, and enqueues one thumbnail_extra job
 // per extra.
-type KickoffThumbnailsArgs struct{}
+type KickoffThumbnailsArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
 
 func (KickoffThumbnailsArgs) Kind() string { return "kickoff_thumbnails" }
 func (KickoffThumbnailsArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "kickoff_thumbnails",
 		MaxAttempts: 1,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -98,83 +174,35 @@ func (KickoffThumbnailsArgs) InsertOpts() river.InsertOpts {
 // enqueues one analyze_track_facets job per candidate. The kickoff bails
 // fast when sonic analysis is disabled in settings — the per-track jobs
 // still run if the user re-enables and re-triggers.
-type KickoffSonicAnalysisArgs struct{}
+type KickoffSonicAnalysisArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
 
 func (KickoffSonicAnalysisArgs) Kind() string { return "kickoff_sonic_analysis" }
 func (KickoffSonicAnalysisArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "kickoff_sonic_analysis",
 		MaxAttempts: 1,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
-// kickoffTaskIDs maps each kickoff job kind to the scheduled_tasks.id
-// it represents. Used by the kickoff workers to stamp last_run_* and by
-// the cancel-task handler to derive the set of kinds to cancel.
-var kickoffTaskIDs = map[string]string{
-	"kickoff_library_scan":   "scan_libraries",
-	"kickoff_refresh_stale":  "refresh_stale_items",
-	"kickoff_music_loudness": "scan_music_loudness",
-	"kickoff_trickplay":      "generate_trickplay",
-	"kickoff_thumbnails":     "generate_thumbnails",
-	"kickoff_sonic_analysis": "analyze_music_facets",
-}
-
-// TaskKinds returns every River kind associated with a task — the
-// kickoff plus the work workers it fans out into. Used by
-// service.CancelJobsByKind for /api/tasks/{id}/cancel, the tasks-page
-// status query, and the progress broadcaster's reverse lookup.
-//
-// Two groups of task IDs:
-//
-//   - Scheduled tasks (rows in scheduled_tasks): scan_libraries,
-//     refresh_stale_items, scan_music_loudness, generate_trickplay,
-//     generate_thumbnails, analyze_music_facets. Driven by the cron
-//     trigger. Listed on /api/tasks. Cancellable via the UI.
-//   - Synthetic buckets (no DB row): transcoding, artwork, nfo_writes,
-//     external_lookups, refresh_actions, cleanup. Group ad-hoc workers
-//     (download_image, transcode, etc.) so they show up as labelled
-//     cards in the Activity dropdown instead of nameless counts. Not
-//     listed on /api/tasks (the page lists scheduled rows only) and
-//     not cancellable from the tasks page enum.
 func TaskKinds(taskID string) []string {
-	switch taskID {
-	// Scheduled tasks.
-	case "scan_libraries":
-		return []string{"kickoff_library_scan", "process_file", "ffprobe", "detect_local_assets", "metadata_match"}
-	case "refresh_stale_items":
-		return []string{"kickoff_refresh_stale", "enrich_media_item"}
-	case "scan_music_loudness":
-		return []string{"kickoff_music_loudness", "scan_track_loudness", "scan_album_loudness"}
-	case "generate_trickplay":
-		return []string{"kickoff_trickplay", "trickplay_file"}
-	case "generate_thumbnails":
-		return []string{"kickoff_thumbnails", "thumbnail_extra"}
-	case "analyze_music_facets":
-		return []string{"kickoff_sonic_analysis", "analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"}
-	// Synthetic buckets.
-	case "transcoding":
-		return []string{"transcode"}
-	case "artwork":
-		return []string{"download_image", "fetch_artwork", "save_images"}
-	case "nfo_writes":
-		return []string{"save_nfo", "save_music_nfo"}
-	case "external_lookups":
-		return []string{"person_fetch", "ratings_fetch"}
-	case "refresh_actions":
-		return []string{"force_refresh_metadata", "force_refresh_images"}
-	case "cleanup":
-		return []string{"soft_delete"}
-	}
-	return nil
+	return taskdefs.TaskKinds(taskID)
 }
 
-// computeNextRun returns the next occurrence of dailyStartTime after
-// now. Mirrors the old scheduler.Runner.computeNextRun behaviour so the
-// scheduling cadence doesn't change with the kickoff cutover.
-func computeNextRun(dailyStartTime string) time.Time {
-	now := time.Now()
+func computeNextRun(startedAt time.Time, intervalHours int32, dailyStartTime, dailyEndTime string) time.Time {
+	if intervalHours < 1 {
+		intervalHours = 24
+	}
+	candidate := startedAt.Add(time.Duration(intervalHours) * time.Hour)
+	if inTaskWindow(candidate, dailyStartTime, dailyEndTime) {
+		return candidate
+	}
+	return nextTaskWindowStartAfter(candidate, dailyStartTime)
+}
+
+func nextTaskWindowStartAfter(now time.Time, dailyStartTime string) time.Time {
 	start, err := time.Parse("15:04", dailyStartTime)
 	if err != nil {
 		return now.Add(24 * time.Hour)
@@ -186,6 +214,24 @@ func computeNextRun(dailyStartTime string) time.Time {
 	return next
 }
 
+func inTaskWindow(now time.Time, startStr, endStr string) bool {
+	start, err := time.Parse("15:04", startStr)
+	if err != nil {
+		return false
+	}
+	end, err := time.Parse("15:04", endStr)
+	if err != nil {
+		return false
+	}
+	nowM := now.Hour()*60 + now.Minute()
+	startM := start.Hour()*60 + start.Minute()
+	endM := end.Hour()*60 + end.Minute()
+	if endM > startM {
+		return nowM >= startM && nowM < endM
+	}
+	return nowM >= startM || nowM < endM
+}
+
 // finishKickoff updates the scheduled_tasks row that owns the given
 // kickoff kind. Called by every kickoff worker on completion (success
 // or failure) so the tasks page reflects when the kickoff last fired
@@ -193,12 +239,18 @@ func computeNextRun(dailyStartTime string) time.Time {
 //
 // items is the count of work jobs successfully enqueued; if itemsFailed
 // > 0 the result is "partial".
-func finishKickoff(ctx context.Context, q *sqlc.Queries, kind string, startedAt time.Time, items, itemsFailed int, runErr error) {
-	taskID, ok := kickoffTaskIDs[kind]
-	if !ok {
+func finishKickoff(ctx context.Context, q *sqlc.Queries, taskID string, startedAt time.Time, items, itemsFailed int, runErr error) {
+	if taskID == "" {
 		return
 	}
-	dbTask, err := q.GetScheduledTask(ctx, taskID)
+	writeCtx := ctx
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		writeCtx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+	}
+	completedAt := time.Now()
+	dbTask, err := q.GetScheduledTask(writeCtx, taskID)
 	if err != nil {
 		log.Warn().Err(err).Str("task", taskID).Msg("kickoff: load scheduled_tasks row failed")
 		return
@@ -214,12 +266,12 @@ func finishKickoff(ctx context.Context, q *sqlc.Queries, kind string, startedAt 
 		result = "partial"
 	}
 
-	nextRun := computeNextRun(dbTask.DailyStartTime)
-	if err := q.UpdateScheduledTaskRun(ctx, sqlc.UpdateScheduledTaskRunParams{
+	nextRun := computeNextRun(completedAt, dbTask.IntervalHours, dbTask.DailyStartTime, dbTask.DailyEndTime)
+	if err := q.UpdateScheduledTaskRun(writeCtx, sqlc.UpdateScheduledTaskRunParams{
 		ID:                    taskID,
 		LastRunAt:             pgtype.Timestamptz{Time: startedAt, Valid: true},
 		LastRunResult:         result,
-		LastRunDurationSec:    int32(time.Since(startedAt).Seconds()),
+		LastRunDurationSec:    int32(completedAt.Sub(startedAt).Seconds()),
 		LastRunItemsProcessed: int32(items - itemsFailed),
 		LastRunItemsTotal:     int32(items),
 		NextRunAt:             pgtype.Timestamptz{Time: nextRun, Valid: true},

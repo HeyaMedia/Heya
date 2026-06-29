@@ -24,27 +24,29 @@ const (
 )
 
 type ProcessFileArgs struct {
-	LibraryFileID int64  `json:"library_file_id"`
-	LibraryID     int64  `json:"library_id"`
-	FilePath      string `json:"file_path"`
+	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
+	LibraryID       int64  `json:"library_id"`
+	FilePath        string `json:"file_path"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (ProcessFileArgs) Kind() string { return "process_file" }
 func (ProcessFileArgs) InsertOpts() river.InsertOpts {
 	// Default to bulk-scan priority; watcher path overrides to PriorityWatcher
 	// at insert-time so single-file changes jump ahead of any in-flight scan.
-	return river.InsertOpts{Queue: "process_file", MaxAttempts: 3, Priority: PriorityScan, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "process_file", MaxAttempts: 3, Priority: PriorityScan, UniqueOpts: uniqueWhileActive()}
 }
 
 type MetadataMatchArgs struct {
-	LibraryFileID int64  `json:"library_file_id"`
-	LibraryID     int64  `json:"library_id"`
-	MediaType     string `json:"media_type"`
+	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
+	LibraryID       int64  `json:"library_id"`
+	MediaType       string `json:"media_type"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (MetadataMatchArgs) Kind() string { return "metadata_match" }
 func (MetadataMatchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata_match", MaxAttempts: 3, Priority: PriorityMatch, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "metadata_match", MaxAttempts: 3, Priority: PriorityMatch, UniqueOpts: uniqueWhileActive()}
 }
 
 type PersonFetchArgs struct {
@@ -59,7 +61,7 @@ func (PersonFetchArgs) InsertOpts() river.InsertOpts {
 		Queue:       "person_fetch",
 		MaxAttempts: 3,
 		Priority:    PriorityScan,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -80,8 +82,9 @@ func (DownloadImageArgs) InsertOpts() river.InsertOpts {
 }
 
 type FFProbeArgs struct {
-	LibraryFileID int64  `json:"library_file_id"`
-	FilePath      string `json:"file_path"`
+	LibraryFileID   int64  `json:"library_file_id"`
+	FilePath        string `json:"file_path"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (FFProbeArgs) Kind() string { return "ffprobe" }
@@ -98,13 +101,14 @@ type PendingImage struct {
 }
 
 type DetectLocalAssetsArgs struct {
-	MediaItemID   int64          `json:"media_item_id"`
-	LibraryFileID int64          `json:"library_file_id"`
-	FilePath      string         `json:"file_path"`
-	MediaType     string         `json:"media_type"`
-	PendingImages []PendingImage `json:"pending_images,omitempty"`
-	QueueEnrich   bool           `json:"queue_enrich,omitempty"`
-	LibraryID     int64          `json:"library_id,omitempty"`
+	MediaItemID     int64          `json:"media_item_id"`
+	LibraryFileID   int64          `json:"library_file_id"`
+	FilePath        string         `json:"file_path"`
+	MediaType       string         `json:"media_type"`
+	PendingImages   []PendingImage `json:"pending_images,omitempty"`
+	QueueEnrich     bool           `json:"queue_enrich,omitempty"`
+	LibraryID       int64          `json:"library_id,omitempty"`
+	ScheduledTaskID string         `json:"scheduled_task_id,omitempty"`
 }
 
 func (DetectLocalAssetsArgs) Kind() string { return "detect_local_assets" }
@@ -147,9 +151,10 @@ func (FetchArtworkArgs) InsertOpts() river.InsertOpts {
 // "Refreshing 17/200 (Calvin Harris)" progress events without consulting
 // River's job table.
 type EnrichMediaItemArgs struct {
-	ItemID int64  `json:"item_id"`
-	Source string `json:"source,omitempty"`
-	Force  bool   `json:"force,omitempty"`
+	ItemID          int64  `json:"item_id"`
+	Source          string `json:"source,omitempty"`
+	Force           bool   `json:"force,omitempty"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 
 	BatchLibraryID int64 `json:"batch_library_id,omitempty"`
 	BatchTotal     int   `json:"batch_total,omitempty"`
@@ -225,7 +230,11 @@ type ForceRefreshMetadataArgs struct {
 
 func (ForceRefreshMetadataArgs) Kind() string { return "force_refresh_metadata" }
 func (ForceRefreshMetadataArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "force_refresh_metadata", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	// uniqueWhileActive (not the default ByArgs bitmask): this is the
+	// per-library "Refresh metadata" button. The user must be able to
+	// re-run it after a previous refresh finished — dedup only while one
+	// is still in flight.
+	return river.InsertOpts{Queue: "force_refresh_metadata", MaxAttempts: 1, UniqueOpts: uniqueWhileActive()}
 }
 
 type ForceRefreshImagesArgs struct {
@@ -234,15 +243,18 @@ type ForceRefreshImagesArgs struct {
 
 func (ForceRefreshImagesArgs) Kind() string { return "force_refresh_images" }
 func (ForceRefreshImagesArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "force_refresh_images", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	// Re-runnable button — see ForceRefreshMetadataArgs.
+	return river.InsertOpts{Queue: "force_refresh_images", MaxAttempts: 1, UniqueOpts: uniqueWhileActive()}
 }
 
 // ScanLibraryDiskArgs walks every path of a library and persists per-path
 // byte totals into library_disk_usage. The walk is bounded by the library
 // path tree; on a 10TB library this can take a few minutes, which is why it
 // runs as a background job rather than inline in the Storage page request.
-// UniqueByArgs means click-spamming "Scan disk usage" while one is queued
-// or running is a no-op.
+// uniqueWhileActive means click-spamming "Scan disk usage" while one is
+// queued or running is a no-op, but the walk stays re-runnable once the
+// previous one has finished (the default ByArgs bitmask would keep
+// deduping against the completed row until River's job cleaner removes it).
 type ScanLibraryDiskArgs struct {
 	LibraryID int64 `json:"library_id"`
 }
@@ -253,7 +265,7 @@ func (ScanLibraryDiskArgs) InsertOpts() river.InsertOpts {
 		Queue:       "scan_library_disk",
 		MaxAttempts: 1,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -267,7 +279,7 @@ type SaveMusicNFOArgs struct {
 
 func (SaveMusicNFOArgs) Kind() string { return "save_music_nfo" }
 func (SaveMusicNFOArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "save_music_nfo", MaxAttempts: 2, Priority: PriorityEnrichment, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	return river.InsertOpts{Queue: "save_music_nfo", MaxAttempts: 2, Priority: PriorityEnrichment, UniqueOpts: uniqueWhileActive()}
 }
 
 // ScanTrackLoudnessArgs runs an ebur128 pass on a single audio file and
@@ -275,7 +287,8 @@ func (SaveMusicNFOArgs) InsertOpts() river.InsertOpts {
 // back to its track_files row. CPU-bound, runs on its own `loudness` queue
 // at MaxWorkers=1 so it can't starve the rest of the pipeline.
 type ScanTrackLoudnessArgs struct {
-	TrackFileID int64 `json:"track_file_id"`
+	TrackFileID     int64  `json:"track_file_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (ScanTrackLoudnessArgs) Kind() string { return "scan_track_loudness" }
@@ -284,7 +297,7 @@ func (ScanTrackLoudnessArgs) InsertOpts() river.InsertOpts {
 		Queue:       "scan_track_loudness",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -294,7 +307,8 @@ func (ScanTrackLoudnessArgs) InsertOpts() river.InsertOpts {
 // wrong since LUFS is logarithmic). Enqueued by ScanTrackLoudnessWorker when
 // every track in the album has finished individually.
 type ScanAlbumLoudnessArgs struct {
-	AlbumID int64 `json:"album_id"`
+	AlbumID         int64  `json:"album_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (ScanAlbumLoudnessArgs) Kind() string { return "scan_album_loudness" }
@@ -303,6 +317,6 @@ func (ScanAlbumLoudnessArgs) InsertOpts() river.InsertOpts {
 		Queue:       "scan_album_loudness",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"time"
 
 	smb2 "github.com/cloudsoda/go-smb2"
 )
@@ -22,7 +23,11 @@ func openSMB(rawURL string) (*Source, error) {
 	}
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
-	conn, err := net.Dial("tcp", addr)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var dialerNet net.Dialer
+	conn, err := dialerNet.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to %s: %w", addr, err)
 	}
@@ -34,7 +39,6 @@ func openSMB(rawURL string) (*Source, error) {
 		},
 	}
 
-	ctx := context.Background()
 	session, err := dialer.DialConn(ctx, conn, addr)
 	if err != nil {
 		conn.Close()
@@ -65,7 +69,7 @@ func openSMB(rawURL string) (*Source, error) {
 
 	return &Source{
 		FS:       fsys,
-		RootPath: rawURL,
+		RootPath: RedactPath(rawURL),
 		Close: func() error {
 			smbc.share.Umount()
 			smbc.session.Logoff()

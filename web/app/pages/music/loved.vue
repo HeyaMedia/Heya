@@ -23,19 +23,20 @@
       <AppContextMenu
         v-for="(t, i) in rows"
         :key="t.track_id"
-        :items="actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug })"
+        :items="actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })"
       >
       <li
         class="ml-row"
-        :class="{ playing: currentTrack?.id === t.track_id }"
-        @click="playFrom(i)"
+        :class="{ playing: currentTrack?.id === t.track_id, 'ml-row-missing': t.available === false }"
+        @click="t.available !== false && playFrom(i)"
       >
         <div class="ml-idx">{{ i + 1 }}</div>
         <div class="ml-art">
           <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
           <template v-else>
             <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
-            <div class="ml-play"><Icon name="play" :size="13" /></div>
+            <div v-if="t.available !== false" class="ml-play"><Icon name="play" :size="13" /></div>
+            <div v-else class="ml-play ml-play-missing" title="Missing on disk"><Icon name="trash" :size="13" /></div>
           </template>
         </div>
         <div class="ml-title-col">
@@ -83,6 +84,7 @@ interface RatedTrackRow {
   artist_name: string
   artist_slug: string
   rating: number
+  available?: boolean
 }
 
 const { play, queue, currentTrack, playing, formatTime } = usePlayer()
@@ -127,13 +129,17 @@ function toPlayable(row: RatedTrackRow): Track {
     artist_id: row.artist_id,
     poster: useAlbumCoverUrl(row.artist_slug, row.album_slug) ?? undefined,
     source: 'loved',
+    available: row.available,
   }
 }
 
 async function playFrom(i: number) {
-  const built = rows.value.map(toPlayable)
+  const clicked = rows.value[i]
+  if (!clicked || clicked.available === false) return
+  const built = rows.value.filter((r) => r.available !== false).map(toPlayable)
+  if (!built.length) return
   queue.value = built
-  await play(built[i]!)
+  await play(built.find((b) => b.id === clicked.track_id) ?? built[0]!)
 }
 </script>
 
@@ -194,6 +200,9 @@ async function playFrom(i: number) {
   opacity: 0; transition: opacity 0.15s;
 }
 .ml-row:hover .ml-play { opacity: 1; }
+.ml-play-missing { opacity: 1; color: #d96b6b; }
+.ml-row-missing { opacity: 0.5; cursor: default; }
+.ml-row-missing:hover { background: transparent; }
 
 .ml-title-col { min-width: 0; }
 .ml-title-cell {

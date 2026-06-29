@@ -2,13 +2,17 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
+
+var ErrRegistrationClosed = errors.New("registration is closed")
 
 func (a *App) CreateUser(ctx context.Context, username, email, password string, isAdmin bool) (sqlc.User, error) {
 	hash, err := auth.HashPassword(password)
@@ -39,6 +43,46 @@ func (a *App) CreateUser(ctx context.Context, username, email, password string, 
 	return user, nil
 }
 
+func (a *App) RegisterFirstUser(ctx context.Context, username, email, password string) (sqlc.User, error) {
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return sqlc.User{}, fmt.Errorf("hashing password: %w", err)
+	}
+
+	tx, err := a.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return sqlc.User{}, fmt.Errorf("begin registration: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, "LOCK TABLE users IN EXCLUSIVE MODE"); err != nil {
+		return sqlc.User{}, fmt.Errorf("lock users: %w", err)
+	}
+
+	q := sqlc.New(tx)
+	count, err := q.CountUsers(ctx)
+	if err != nil {
+		return sqlc.User{}, fmt.Errorf("counting users: %w", err)
+	}
+	if count > 0 {
+		return sqlc.User{}, ErrRegistrationClosed
+	}
+
+	user, err := q.CreateUser(ctx, sqlc.CreateUserParams{
+		Username:     username,
+		Email:        email,
+		PasswordHash: hash,
+		IsAdmin:      true,
+	})
+	if err != nil {
+		return sqlc.User{}, fmt.Errorf("creating user: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return sqlc.User{}, fmt.Errorf("commit registration: %w", err)
+	}
+	return user, nil
+}
+
 func (a *App) Authenticate(ctx context.Context, username, password string) (sqlc.User, error) {
 	q := sqlc.New(a.db)
 
@@ -66,7 +110,7 @@ func (a *App) CreateAuthSession(ctx context.Context, userID int64, userAgent, ip
 	q := sqlc.New(a.db)
 	_, err = q.CreateSession(ctx, sqlc.CreateSessionParams{
 		UserID:    userID,
-		Token:     token,
+		TokenHash: auth.TokenHash(token),
 		ExpiresAt: pgTimestamptz(time.Now().Add(30 * 24 * time.Hour)),
 		Kind:      "session",
 		Name:      pgText(""),
@@ -82,7 +126,7 @@ func (a *App) CreateAuthSession(ctx context.Context, userID int64, userAgent, ip
 
 func (a *App) DeleteSession(ctx context.Context, token string) error {
 	q := sqlc.New(a.db)
-	return q.DeleteSession(ctx, token)
+	return q.DeleteSession(ctx, auth.TokenHash(token))
 }
 
 // ChangePassword verifies the current password before swapping the hash.
@@ -131,6 +175,7 @@ func (a *App) ListAuthSessions(ctx context.Context, userID int64, currentToken s
 	if err != nil {
 		return nil, err
 	}
+	currentHash := auth.TokenHash(currentToken)
 	out := make([]AuthSessionView, 0, len(rows))
 	for _, s := range rows {
 		view := AuthSessionView{
@@ -139,7 +184,7 @@ func (a *App) ListAuthSessions(ctx context.Context, userID int64, currentToken s
 			LastSeenAt: s.LastSeenAt.Time,
 			UserAgent:  s.UserAgent.String,
 			IP:         s.Ip.String,
-			Current:    s.Token == currentToken,
+			Current:    s.TokenHash == currentHash,
 		}
 		if s.ExpiresAt.Valid {
 			t := s.ExpiresAt.Time
@@ -161,8 +206,8 @@ func (a *App) RevokeAuthSession(ctx context.Context, userID, sessionID int64) er
 func (a *App) RevokeOtherAuthSessions(ctx context.Context, userID int64, currentToken string) error {
 	q := sqlc.New(a.db)
 	return q.DeleteUserOtherSessions(ctx, sqlc.DeleteUserOtherSessionsParams{
-		UserID: userID,
-		Token:  currentToken,
+		UserID:    userID,
+		TokenHash: auth.TokenHash(currentToken),
 	})
 }
 
@@ -225,7 +270,7 @@ func (a *App) CreateApiToken(ctx context.Context, userID int64, name string, exp
 	q := sqlc.New(a.db)
 	row, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
 		UserID:    userID,
-		Token:     token,
+		TokenHash: auth.TokenHash(token),
 		ExpiresAt: expiresAt,
 		Kind:      "api_token",
 		Name:      pgText(name),

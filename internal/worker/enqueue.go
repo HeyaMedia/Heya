@@ -71,20 +71,20 @@ func PriorityFor(source EnrichSource, mediaType sqlc.MediaType) int {
 // media_items + library settings — callers only have to know the item ID,
 // media type (for priority), and the source.
 func EnqueueEnrich(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource) error {
-	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, 0, 0, 0)
+	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, "", 0, 0, 0)
 }
 
 // EnqueueEnrichForce is the force-refresh variant. Sets Force=true on the
 // job so the worker bypasses its "already complete" idempotency gate.
 func EnqueueEnrichForce(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource) error {
-	return enqueueEnrich(ctx, rc, itemID, mediaType, source, true, 0, 0, 0)
+	return enqueueEnrich(ctx, rc, itemID, mediaType, source, true, "", 0, 0, 0)
 }
 
 // EnqueueEnrichBatch is the music post-scan fan-out variant. The extra
 // batch context lets the worker emit "Refreshing 17/200 (Calvin Harris)"
 // progress events without consulting River's job table.
 func EnqueueEnrichBatch(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource, batchLibraryID int64, batchTotal, batchPosition int) error {
-	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, batchLibraryID, batchTotal, batchPosition)
+	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, "", batchLibraryID, batchTotal, batchPosition)
 }
 
 // EnqueueEnrichTx variant for callers inside a river worker that already
@@ -95,18 +95,19 @@ func EnqueueEnrichTx(ctx context.Context, itemID int64, mediaType sqlc.MediaType
 	if rc == nil {
 		return fmt.Errorf("EnqueueEnrichTx: no river client in context")
 	}
-	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, 0, 0, 0)
+	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, "", 0, 0, 0)
 }
 
-func enqueueEnrich(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource, force bool, batchLibraryID int64, batchTotal, batchPosition int) error {
+func enqueueEnrich(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource, force bool, scheduledTaskID string, batchLibraryID int64, batchTotal, batchPosition int) error {
 	priority := PriorityFor(source, mediaType)
 	_, err := rc.Insert(ctx, EnrichMediaItemArgs{
-		ItemID:         itemID,
-		Source:         string(source),
-		Force:          force,
-		BatchLibraryID: batchLibraryID,
-		BatchTotal:     batchTotal,
-		BatchPosition:  batchPosition,
+		ItemID:          itemID,
+		Source:          string(source),
+		Force:           force,
+		ScheduledTaskID: scheduledTaskID,
+		BatchLibraryID:  batchLibraryID,
+		BatchTotal:      batchTotal,
+		BatchPosition:   batchPosition,
 	}, &river.InsertOpts{Priority: priority})
 	return err
 }

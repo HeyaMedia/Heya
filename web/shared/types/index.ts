@@ -295,12 +295,16 @@ export interface MusicArtistRow extends Artist {
   poster_path: string
   album_count: number
   track_count: number
+  /** False when every file under the artist was removed from disk. */
+  available: boolean
 }
 
 export interface MusicAlbumRow extends Album {
   artist_name: string
   artist_slug: string
   track_count: number
+  /** False when every track file in the album was removed from disk. */
+  available: boolean
 }
 
 export interface MusicTrackRow {

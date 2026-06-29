@@ -54,14 +54,15 @@
       >
       <li
         class="ms-row ms-row-track"
-        :class="{ playing: nowPlayingId === t.track_id }"
-        @dblclick="playFrom(i)"
-        @click="playFrom(i)"
+        :class="{ playing: nowPlayingId === t.track_id, 'ms-row-missing': t.available === false }"
+        @dblclick="t.available !== false && playFrom(i)"
+        @click="t.available !== false && playFrom(i)"
       >
         <div class="ms-c-idx">{{ globalIndex(i) }}</div>
         <div class="ms-c-art">
           <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
-          <div class="ms-art-play"><Icon name="play" :size="14" /></div>
+          <div v-if="t.available !== false" class="ms-art-play"><Icon name="play" :size="14" /></div>
+          <div v-else class="ms-art-missing" title="Missing on disk"><Icon name="trash" :size="14" /></div>
         </div>
         <div class="ms-c-title">
           <div class="ms-title">{{ t.track_title }}</div>
@@ -161,6 +162,7 @@ function rowToTrackEntity(t: TrackRow) {
     artist_id: t.artist_id,
     artist_slug: t.artist_slug,
     album_slug: t.album_slug,
+    available: t.available,
   }
 }
 
@@ -178,6 +180,7 @@ interface TrackRow {
   artist_id: number
   artist_name: string
   artist_slug: string
+  available?: boolean
 }
 
 interface PageBody {
@@ -243,22 +246,29 @@ function formatDuration(sec: number): string {
 }
 
 async function playFrom(startIdx: number) {
-  const built: Track[] = rows.value.map((t) => ({
-    id: t.track_id,
-    title: t.track_title,
-    artist: t.artist_name,
-    album: t.album_title,
-    duration: t.duration,
-    stream_url: `/api/music/tracks/${t.track_id}/stream`,
-    album_id: t.album_id,
-    artist_id: t.artist_id,
-    artist_slug: t.artist_slug,
-    album_slug: t.album_slug,
-    poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
-    source: 'songs',
-  }))
+  const clicked = rows.value[startIdx]
+  if (!clicked || clicked.available === false) return
+  // Queue only playable tracks; a removed-on-disk file can't enter the queue.
+  const built: Track[] = rows.value
+    .filter((t) => t.available !== false)
+    .map((t) => ({
+      id: t.track_id,
+      title: t.track_title,
+      artist: t.artist_name,
+      album: t.album_title,
+      duration: t.duration,
+      stream_url: `/api/music/tracks/${t.track_id}/stream`,
+      album_id: t.album_id,
+      artist_id: t.artist_id,
+      artist_slug: t.artist_slug,
+      album_slug: t.album_slug,
+      poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
+      source: 'songs',
+      available: t.available,
+    }))
+  if (!built.length) return
   queue.value = built
-  await play(built[startIdx]!)
+  await play(built.find((b) => b.id === clicked.track_id) ?? built[0]!)
 }
 </script>
 
@@ -334,6 +344,14 @@ async function playFrom(startIdx: number) {
   opacity: 0;
   transition: opacity 0.15s;
 }
+.ms-art-missing {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55);
+  color: #d96b6b;
+}
+.ms-row-missing { opacity: 0.5; cursor: default; }
+.ms-row-missing:hover { background: transparent; }
 
 .ms-list { display: flex; flex-direction: column; gap: 1px; }
 .ms-row-track {

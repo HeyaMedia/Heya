@@ -12,14 +12,14 @@ import (
 )
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (user_id, token, expires_at, kind, name, user_agent, ip)
+INSERT INTO sessions (user_id, token_hash, expires_at, kind, name, user_agent, ip)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, user_id, token, expires_at, created_at, kind, name, last_seen_at, user_agent, ip
+RETURNING id, user_id, token_hash, expires_at, created_at, kind, name, last_seen_at, user_agent, ip
 `
 
 type CreateSessionParams struct {
 	UserID    int64              `json:"user_id"`
-	Token     string             `json:"token"`
+	TokenHash string             `json:"token_hash"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	Kind      string             `json:"kind"`
 	Name      pgtype.Text        `json:"name"`
@@ -30,7 +30,7 @@ type CreateSessionParams struct {
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, createSession,
 		arg.UserID,
-		arg.Token,
+		arg.TokenHash,
 		arg.ExpiresAt,
 		arg.Kind,
 		arg.Name,
@@ -41,7 +41,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
-		&i.Token,
+		&i.TokenHash,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.Kind,
@@ -63,11 +63,11 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
 }
 
 const deleteSession = `-- name: DeleteSession :exec
-DELETE FROM sessions WHERE token = $1
+DELETE FROM sessions WHERE token_hash = $1
 `
 
-func (q *Queries) DeleteSession(ctx context.Context, token string) error {
-	_, err := q.db.Exec(ctx, deleteSession, token)
+func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := q.db.Exec(ctx, deleteSession, tokenHash)
 	return err
 }
 
@@ -86,19 +86,19 @@ const deleteUserOtherSessions = `-- name: DeleteUserOtherSessions :exec
 DELETE FROM sessions
 WHERE user_id = $1
   AND kind = 'session'
-  AND token <> $2
+  AND token_hash <> $2
 `
 
 type DeleteUserOtherSessionsParams struct {
-	UserID int64  `json:"user_id"`
-	Token  string `json:"token"`
+	UserID    int64  `json:"user_id"`
+	TokenHash string `json:"token_hash"`
 }
 
 // "Sign out of every other device" — keep only the session backing the
 // current request, drop the rest. Scope to kind='session' so a user's
 // long-lived API tokens aren't affected.
 func (q *Queries) DeleteUserOtherSessions(ctx context.Context, arg DeleteUserOtherSessionsParams) error {
-	_, err := q.db.Exec(ctx, deleteUserOtherSessions, arg.UserID, arg.Token)
+	_, err := q.db.Exec(ctx, deleteUserOtherSessions, arg.UserID, arg.TokenHash)
 	return err
 }
 
@@ -128,18 +128,18 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 }
 
 const getSessionByToken = `-- name: GetSessionByToken :one
-SELECT id, user_id, token, expires_at, created_at, kind, name, last_seen_at, user_agent, ip FROM sessions
-WHERE token = $1
+SELECT id, user_id, token_hash, expires_at, created_at, kind, name, last_seen_at, user_agent, ip FROM sessions
+WHERE token_hash = $1
   AND (expires_at IS NULL OR expires_at > now())
 `
 
-func (q *Queries) GetSessionByToken(ctx context.Context, token string) (Session, error) {
-	row := q.db.QueryRow(ctx, getSessionByToken, token)
+func (q *Queries) GetSessionByToken(ctx context.Context, tokenHash string) (Session, error) {
+	row := q.db.QueryRow(ctx, getSessionByToken, tokenHash)
 	var i Session
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
-		&i.Token,
+		&i.TokenHash,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.Kind,
@@ -157,6 +157,7 @@ SELECT s.id, s.user_id, s.kind, s.name, s.expires_at, s.created_at,
        u.username, u.is_admin
 FROM sessions s
 JOIN users u ON u.id = s.user_id
+WHERE s.expires_at IS NULL OR s.expires_at > now()
 ORDER BY s.last_seen_at DESC
 `
 
@@ -209,9 +210,10 @@ func (q *Queries) ListAllSessionsForAdmin(ctx context.Context) ([]ListAllSession
 }
 
 const listUserSessionsByKind = `-- name: ListUserSessionsByKind :many
-SELECT id, user_id, token, expires_at, created_at, kind, name, last_seen_at, user_agent, ip
+SELECT id, user_id, token_hash, expires_at, created_at, kind, name, last_seen_at, user_agent, ip
 FROM sessions
 WHERE user_id = $1 AND kind = $2
+  AND (expires_at IS NULL OR expires_at > now())
 ORDER BY last_seen_at DESC
 `
 
@@ -233,7 +235,7 @@ func (q *Queries) ListUserSessionsByKind(ctx context.Context, arg ListUserSessio
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
-			&i.Token,
+			&i.TokenHash,
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.Kind,
@@ -255,14 +257,14 @@ func (q *Queries) ListUserSessionsByKind(ctx context.Context, arg ListUserSessio
 const touchSession = `-- name: TouchSession :exec
 UPDATE sessions
 SET last_seen_at = now()
-WHERE token = $1
+WHERE token_hash = $1
   AND last_seen_at < now() - interval '60 seconds'
 `
 
 // Bump last_seen_at on the session backing a request. Throttle is in SQL
 // (no-op UPDATE when the row was touched in the last minute) so the
 // middleware can fire-and-forget without holding any in-memory state.
-func (q *Queries) TouchSession(ctx context.Context, token string) error {
-	_, err := q.db.Exec(ctx, touchSession, token)
+func (q *Queries) TouchSession(ctx context.Context, tokenHash string) error {
+	_, err := q.db.Exec(ctx, touchSession, tokenHash)
 	return err
 }

@@ -63,6 +63,23 @@ Funnel lets anyone on the public internet reach Heya at the same MagicDNS name. 
 
 tsnet stores the node identity (machine key, cert cache, etc.) under `data/tailscale/` by default. The directory is mode `0700`. Wipe it (or `heya tailscale logout`) to force re-onboarding under a different identity.
 
+## Development
+
+Tailscale works in `make dev` the same DB-backed way it does in prod — only the *plumbing* differs.
+
+In dev the stack is split across three processes (see [development.md](./development.md#daily-dev)): the air-restarted backend on `:3050` and the stable `heya dev-proxy` front door on `:8080`. The backend restarts on every code save, so it can't own the tsnet node — a flapping listener would drop the tailnet connection on each rebuild. Instead the node lives in the long-lived `dev-proxy` process, and the backend drives it remotely over a localhost unix control socket (default `tmp/heya-dev-ts.sock`, override with `HEYA_DEV_TS_CONTROL`).
+
+The backend stays the brain. Settings → Tailscale writes `system_settings` (DB), the config layer merges env > DB > default, and the backend calls `Server.Enable` over the control socket to drive the node. `Server.Enable` is idempotent, so the backend re-asserts the desired state on every air restart and the node stays up. Status and login-URL events flow back over the WebSocket to the UI exactly as in prod, so the DB-backed toggle works live.
+
+Give the dev node a **distinct identity** so it never clobbers a real prod node — in `.env.local`:
+
+```bash
+HEYA_TAILSCALE_HOSTNAME=heya-dev
+HEYA_TAILSCALE_STATE_DIR=./data/tailscale-dev
+```
+
+Then either set `HEYA_TAILSCALE_ENABLED=true` to bring it up at boot (the UI shows it env-locked), or leave it unset and toggle it from Settings (DB-backed). Prod is unaffected — `heya serve` (no flag) runs tsnet in-process as described above.
+
 ## CLI
 
 ```bash

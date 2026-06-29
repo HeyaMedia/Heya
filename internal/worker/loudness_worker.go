@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -55,7 +56,7 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 		return nil
 	}
 
-	w.Progress.SetCurrentByKind(ScanTrackLoudnessArgs{}.Kind(), filepath.Base(lf.Path))
+	w.Progress.SetCurrent(ScanTrackLoudnessArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(lf.Path))
 
 	// Cap wall-clock for ebur128. 20× real-time on a modern CPU for FLAC,
 	// so a 10-minute track lands in ~30s; 5 min covers worst-case lossy.
@@ -86,7 +87,9 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 		if err == nil && done {
 			client := river.ClientFromContext[pgx.Tx](ctx)
 			if client != nil {
-				_, _ = client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID}, nil)
+				if _, err := client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
+					return fmt.Errorf("enqueue album loudness: %w", err)
+				}
 			}
 		}
 	}
@@ -122,7 +125,7 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 	}
 
 	if album, err := q.GetAlbumByID(ctx, job.Args.AlbumID); err == nil {
-		w.Progress.SetCurrentByKind(ScanAlbumLoudnessArgs{}.Kind(), album.Title)
+		w.Progress.SetCurrent(ScanAlbumLoudnessArgs{}.Kind(), job.Args.ScheduledTaskID, album.Title)
 	}
 
 	// Pre-flight: ebur128's concat demuxer can't read SMB paths through our
@@ -203,13 +206,8 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 // boundaries here — these run in parallel queues but all compete for the
 // same CPU/disk/heya.media bandwidth as loudness scanning.
 func snoozeIfMatchingPending(ctx context.Context, db *pgxpool.Pool) error {
-	const q = `
-		SELECT count(*) FROM river_job
-		WHERE state IN ('available', 'running', 'retryable', 'scheduled')
-		  AND kind IN ('process_file', 'metadata_match', 'metadata_fetch', 'refresh_music_artist')
-	`
-	var n int64
-	if err := db.QueryRow(ctx, q).Scan(&n); err != nil {
+	n, err := queueops.CountActiveByKinds(ctx, db, []string{"process_file", "metadata_match", "metadata_fetch", "refresh_music_artist"})
+	if err != nil {
 		// Don't block loudness work on a transient DB hiccup — better to
 		// run loudness than to wedge the queue entirely.
 		return nil

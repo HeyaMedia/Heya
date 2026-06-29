@@ -25,6 +25,8 @@ const props = withDefaults(defineProps<{
   noPlay?: boolean
   /** 0..100 — renders a progress bar along the bottom edge of the art. */
   progressPct?: number
+  /** Renders a trashcan badge and greys + dims the art (missing on disk). */
+  missing?: boolean
 }>(), {
   src: '',
   alt: '',
@@ -34,6 +36,7 @@ const props = withDefaults(defineProps<{
   variant: 'square',
   noPlay: false,
   progressPct: 0,
+  missing: false,
 })
 
 const emit = defineEmits<{ play: [] }>()
@@ -45,7 +48,8 @@ function onImgError(e: Event) {
 </script>
 
 <template>
-  <div class="mc" :class="[`mc-${variant}`]">
+  <div class="mc" :class="[`mc-${variant}`, { 'mc-missing': missing }]">
+    <MediaMissingBadge v-if="missing" />
     <div class="mc-art">
       <img
         v-if="src"
@@ -66,7 +70,7 @@ function onImgError(e: Event) {
       <!-- Hover-only play button — centered, glassy, EpisodeCard pattern.
            Wrap is non-interactive (pointer-events: none) so only the circle
            captures clicks; everything else routes through the outer link. -->
-      <div v-if="!noPlay" class="mc-play-wrap">
+      <div v-if="!noPlay && !missing" class="mc-play-wrap">
         <button
           type="button"
           class="mc-play"
@@ -94,7 +98,11 @@ function onImgError(e: Event) {
 .mc {
   display: block;
   height: 100%;
+  position: relative;
 }
+/* Missing-on-disk: grey + dim the art, leaving the trash badge full colour. */
+.mc-missing .mc-art > img,
+.mc-missing .mc-fallback { filter: grayscale(1); opacity: 0.5; }
 
 .mc-art {
   position: relative;

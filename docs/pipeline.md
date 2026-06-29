@@ -70,7 +70,7 @@ In `internal/worker/worker.go`:
   hit provider CDNs (not the source FS). Everything else is 1.
 - River caps priority at **1..4 (hardcoded)**. Need ≥5 bands → introduce
   another queue, not another priority.
-- `RescueStuckJobsAfter: 10 * time.Minute` — backstop above the slowest
+- `RescueStuckJobsAfter: 30 * time.Minute` — backstop above the slowest
   legitimate job; lower numbers preempt slow-but-healthy artist enriches.
 - HeyaMedia HTTP client timeout: 5 minutes
   (`internal/metadata/heyamedia/client.go`) — worst-case ceiling per call,
@@ -107,14 +107,16 @@ Same pattern for all six scheduled tasks:
 | ---------------------- | --------------------------- | -------------------- |
 | `scan_libraries`       | `kickoff_library_scan`      | `process_file`       |
 | `refresh_stale_items`  | `kickoff_refresh_stale`     | `enrich_media_item`  |
-| `scan_music_loudness`  | `kickoff_loudness`          | `scan_music_loudness`|
+| `scan_music_loudness`  | `kickoff_music_loudness`    | `scan_track_loudness`|
 | `generate_trickplay`   | `kickoff_trickplay`         | `trickplay_file`     |
 | `generate_thumbnails`  | `kickoff_thumbnails`        | `thumbnail_extra`    |
-| `analyze_music_facets` | `kickoff_analyze_facets`    | `analyze_track_facets` |
+| `analyze_music_facets` | `kickoff_sonic_analysis`    | `analyze_track_facets` |
 
-`worker.TaskKinds(taskID)` returns the kinds (kickoff + per-item workers) a
-given task drives; `/api/tasks/{id}/cancel` uses it to cancel everything queued
-+ running for a task in one shot.
+`internal/taskdefs` is the single registry for the kinds (kickoff + per-item
+workers) each scheduled task drives. Kickoff workers stamp `scheduled_task_id`
+into every child job; `/api/tasks/{id}/cancel`, runtime counts, and max-runtime
+enforcement use that marker so watcher/manual/view jobs sharing the same worker
+kinds are left alone.
 
 **Trickplay + thumbnails are kickoff-driven only.** Never trigger them inline
 from the scan pipeline. Trickplay defaults off per-library.
@@ -128,11 +130,11 @@ through `worker.Config.Progress`). Two channels merge into the same event type:
 - **Per-worker** — each work worker calls
   `progress.SetCurrentByKind(kind, label)` at the top of `Work()`. Carries
   `{task_id, state: "running", current_item, item_kind}`. `kind → task_id` is
-  resolved via the inverted `TaskKinds` table in `worker/progress.go`.
+  resolved via the inverted `internal/taskdefs` registry.
 - **Periodic** — `eventhub/periodic.go::taskProgressTicker` runs every 2 s and
   emits `{task_id, state, pending, running}` per scheduled task from a
-  `river_job` count grouped by the task's kinds (table duplicated in
-  `periodic.go::taskKindsByTask` to avoid the eventhub→worker import cycle).
+  `river_job` count scoped by `scheduled_task_id` for scheduled tasks, and by
+  kind for synthetic buckets.
 
 The FE merges in `useEventBus.ts::task.progress` — counts overwrite without
 touching `current_item` and vice versa, so the dict always carries the latest
@@ -147,7 +149,7 @@ running row is by definition an orphan from a prior unclean exit (air reload
 mid-job, OS kill, etc.).
 
 Without this, those rows sit until River's periodic rescuer catches them after
-`RescueStuckJobsAfter` (10 min), which is long enough to make MaxWorkers=N look
+`RescueStuckJobsAfter` (30 min), which is long enough to make MaxWorkers=N look
 violated after every dev hot-reload.
 
 Past bug: 4 `analyze_track_facets` rows appeared "concurrent" after rapid `air`

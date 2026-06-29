@@ -77,6 +77,19 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	}
 	log.Info().Msg("river migrations applied")
 
+	// One-time, idempotent: free pre-fix jobs from the unique index so the
+	// uniqueWhileActive() change takes effect on this deploy instead of a
+	// day later. Non-fatal and time-boxed — a slow/unreachable DB must not
+	// stall startup, and worst case is the old (slow) re-runnable behaviour
+	// until River's cleaner ages the rows out.
+	func() {
+		cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := clearStaleUniqueJobStates(cleanupCtx, cfg.DB); err != nil {
+			log.Warn().Err(err).Msg("clear stale unique_states: skipped")
+		}
+	}()
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &ProcessFileWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &MetadataMatchWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
@@ -206,7 +219,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		// ~120s under HeyaMedia rate-limit backoff, and album loudness
 		// can take a few minutes on long albums; 10 minutes covers both
 		// with margin while still giving reasonable crash-recovery.
-		RescueStuckJobsAfter: 10 * time.Minute,
+		RescueStuckJobsAfter: 30 * time.Minute,
 		Workers:              workers,
 	})
 	if err != nil {

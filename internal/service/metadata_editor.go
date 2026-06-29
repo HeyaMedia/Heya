@@ -58,161 +58,166 @@ func (a *App) ListLibraryMedia(ctx context.Context, libraryID int64, limit, offs
 
 // UpdateMediaMetadata patches a media item and its type-specific record.
 func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req UpdateMediaMetadataReq) error {
-	q := sqlc.New(a.db)
+	return a.withTx(ctx, func(q *sqlc.Queries) error {
 
-	item, err := q.GetMediaItemByID(ctx, mediaItemID)
-	if err != nil {
-		return fmt.Errorf("media item not found: %w", err)
-	}
+		item, err := q.GetMediaItemByID(ctx, mediaItemID)
+		if err != nil {
+			return fmt.Errorf("media item not found: %w", err)
+		}
 
-	title := item.Title
-	if req.Title != nil {
-		title = *req.Title
-	}
-	sortTitle := item.SortTitle
-	if req.SortTitle != nil {
-		sortTitle = *req.SortTitle
-	}
-	year := item.Year
-	if req.Year != nil {
-		year = *req.Year
-	}
-	desc := item.Description
-	if req.Description != nil {
-		desc = *req.Description
-	}
-	externalIDs := item.ExternalIds
-	if req.ExternalIDs != nil {
-		b, _ := json.Marshal(req.ExternalIDs)
-		externalIDs = b
-	}
-	tagline := item.Tagline
-	if req.Tagline != nil {
-		tagline = *req.Tagline
-	}
-	origTitle := item.OriginalTitle
-	if req.OriginalTitle != nil {
-		origTitle = *req.OriginalTitle
-	}
-	origLang := item.OriginalLanguage
-	if req.OriginalLanguage != nil {
-		origLang = *req.OriginalLanguage
-	}
-	status := item.Status
-	if req.Status != nil {
-		status = *req.Status
-	}
+		title := item.Title
+		if req.Title != nil {
+			title = *req.Title
+		}
+		sortTitle := item.SortTitle
+		if req.SortTitle != nil {
+			sortTitle = *req.SortTitle
+		}
+		year := item.Year
+		if req.Year != nil {
+			year = *req.Year
+		}
+		desc := item.Description
+		if req.Description != nil {
+			desc = *req.Description
+		}
+		externalIDs := item.ExternalIds
+		if req.ExternalIDs != nil {
+			b, _ := json.Marshal(req.ExternalIDs)
+			externalIDs = b
+		}
+		tagline := item.Tagline
+		if req.Tagline != nil {
+			tagline = *req.Tagline
+		}
+		origTitle := item.OriginalTitle
+		if req.OriginalTitle != nil {
+			origTitle = *req.OriginalTitle
+		}
+		origLang := item.OriginalLanguage
+		if req.OriginalLanguage != nil {
+			origLang = *req.OriginalLanguage
+		}
+		status := item.Status
+		if req.Status != nil {
+			status = *req.Status
+		}
 
-	_, err = q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-		ID:               mediaItemID,
-		Title:            title,
-		SortTitle:        sortTitle,
-		Year:             year,
-		Description:      desc,
-		PosterPath:       item.PosterPath,
-		BackdropPath:     item.BackdropPath,
-		ExternalIds:      externalIDs,
-		Tagline:          tagline,
-		OriginalTitle:    origTitle,
-		OriginalLanguage: origLang,
-		Status:           status,
-		ProviderKind:     item.ProviderKind,
-		HeyaSlug:         item.HeyaSlug,
+		_, err = q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+			ID:               mediaItemID,
+			Title:            title,
+			SortTitle:        sortTitle,
+			Year:             year,
+			Description:      desc,
+			PosterPath:       item.PosterPath,
+			BackdropPath:     item.BackdropPath,
+			ExternalIds:      externalIDs,
+			Tagline:          tagline,
+			OriginalTitle:    origTitle,
+			OriginalLanguage: origLang,
+			Status:           status,
+			ProviderKind:     item.ProviderKind,
+			HeyaSlug:         item.HeyaSlug,
+		})
+		if err != nil {
+			return fmt.Errorf("updating media item: %w", err)
+		}
+
+		switch item.MediaType {
+		case sqlc.MediaTypeMovie:
+			movie, mErr := q.GetMovieByMediaItemID(ctx, mediaItemID)
+			if mErr == nil {
+				tagline := movie.Tagline
+				if req.Tagline != nil {
+					tagline = *req.Tagline
+				}
+				genres := movie.Genres
+				if req.Genres != nil {
+					genres = req.Genres
+				}
+				releaseDate := movie.ReleaseDate
+				if req.ReleaseDate != nil {
+					releaseDate = pgDateFromStr(*req.ReleaseDate)
+				}
+				origTitle := movie.OriginalTitle
+				if req.OriginalTitle != nil {
+					origTitle = *req.OriginalTitle
+				}
+				origLang := movie.OriginalLanguage
+				if req.OriginalLanguage != nil {
+					origLang = *req.OriginalLanguage
+				}
+				runtime := movie.RuntimeMinutes
+				if req.RuntimeMinutes != nil {
+					runtime = *req.RuntimeMinutes
+				}
+				if _, err := q.UpdateMovie(ctx, sqlc.UpdateMovieParams{
+					ID:               movie.ID,
+					RuntimeMinutes:   runtime,
+					Tagline:          tagline,
+					Genres:           genres,
+					Rating:           movie.Rating,
+					ReleaseDate:      releaseDate,
+					OriginalTitle:    origTitle,
+					OriginalLanguage: origLang,
+					Budget:           movie.Budget,
+					Revenue:          movie.Revenue,
+					Popularity:       movie.Popularity,
+					SpokenLanguages:  movie.SpokenLanguages,
+					OriginCountry:    movie.OriginCountry,
+				}); err != nil {
+					return fmt.Errorf("updating movie metadata: %w", err)
+				}
+			}
+		case sqlc.MediaTypeTv:
+			series, sErr := q.GetTVSeriesByMediaItemID(ctx, mediaItemID)
+			if sErr == nil {
+				status := series.Status
+				if req.Status != nil {
+					status = *req.Status
+				}
+				genres := series.Genres
+				if req.Genres != nil {
+					genres = req.Genres
+				}
+				firstAir := series.FirstAirDate
+				if req.FirstAirDate != nil {
+					firstAir = pgDateFromStr(*req.FirstAirDate)
+				}
+				lastAir := series.LastAirDate
+				if req.LastAirDate != nil {
+					lastAir = pgDateFromStr(*req.LastAirDate)
+				}
+				origName := series.OriginalName
+				if req.OriginalName != nil {
+					origName = *req.OriginalName
+				}
+				origLang := series.OriginalLanguage
+				if req.OriginalLanguage != nil {
+					origLang = *req.OriginalLanguage
+				}
+				if _, err := q.UpdateTVSeries(ctx, sqlc.UpdateTVSeriesParams{
+					ID:               series.ID,
+					Status:           status,
+					Genres:           genres,
+					Rating:           series.Rating,
+					FirstAirDate:     firstAir,
+					LastAirDate:      lastAir,
+					OriginalName:     origName,
+					OriginalLanguage: origLang,
+					NumberOfSeasons:  series.NumberOfSeasons,
+					NumberOfEpisodes: series.NumberOfEpisodes,
+					Popularity:       series.Popularity,
+					SpokenLanguages:  series.SpokenLanguages,
+					OriginCountry:    series.OriginCountry,
+				}); err != nil {
+					return fmt.Errorf("updating tv metadata: %w", err)
+				}
+			}
+		}
+
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("updating media item: %w", err)
-	}
-
-	switch item.MediaType {
-	case sqlc.MediaTypeMovie:
-		movie, mErr := q.GetMovieByMediaItemID(ctx, mediaItemID)
-		if mErr == nil {
-			tagline := movie.Tagline
-			if req.Tagline != nil {
-				tagline = *req.Tagline
-			}
-			genres := movie.Genres
-			if req.Genres != nil {
-				genres = req.Genres
-			}
-			releaseDate := movie.ReleaseDate
-			if req.ReleaseDate != nil {
-				releaseDate = pgDateFromStr(*req.ReleaseDate)
-			}
-			origTitle := movie.OriginalTitle
-			if req.OriginalTitle != nil {
-				origTitle = *req.OriginalTitle
-			}
-			origLang := movie.OriginalLanguage
-			if req.OriginalLanguage != nil {
-				origLang = *req.OriginalLanguage
-			}
-			runtime := movie.RuntimeMinutes
-			if req.RuntimeMinutes != nil {
-				runtime = *req.RuntimeMinutes
-			}
-			q.UpdateMovie(ctx, sqlc.UpdateMovieParams{
-				ID:               movie.ID,
-				RuntimeMinutes:   runtime,
-				Tagline:          tagline,
-				Genres:           genres,
-				Rating:           movie.Rating,
-				ReleaseDate:      releaseDate,
-				OriginalTitle:    origTitle,
-				OriginalLanguage: origLang,
-				Budget:           movie.Budget,
-				Revenue:          movie.Revenue,
-				Popularity:       movie.Popularity,
-				SpokenLanguages:  movie.SpokenLanguages,
-				OriginCountry:    movie.OriginCountry,
-			})
-		}
-	case sqlc.MediaTypeTv:
-		series, sErr := q.GetTVSeriesByMediaItemID(ctx, mediaItemID)
-		if sErr == nil {
-			status := series.Status
-			if req.Status != nil {
-				status = *req.Status
-			}
-			genres := series.Genres
-			if req.Genres != nil {
-				genres = req.Genres
-			}
-			firstAir := series.FirstAirDate
-			if req.FirstAirDate != nil {
-				firstAir = pgDateFromStr(*req.FirstAirDate)
-			}
-			lastAir := series.LastAirDate
-			if req.LastAirDate != nil {
-				lastAir = pgDateFromStr(*req.LastAirDate)
-			}
-			origName := series.OriginalName
-			if req.OriginalName != nil {
-				origName = *req.OriginalName
-			}
-			origLang := series.OriginalLanguage
-			if req.OriginalLanguage != nil {
-				origLang = *req.OriginalLanguage
-			}
-			q.UpdateTVSeries(ctx, sqlc.UpdateTVSeriesParams{
-				ID:               series.ID,
-				Status:           status,
-				Genres:           genres,
-				Rating:           series.Rating,
-				FirstAirDate:     firstAir,
-				LastAirDate:      lastAir,
-				OriginalName:     origName,
-				OriginalLanguage: origLang,
-				NumberOfSeasons:  series.NumberOfSeasons,
-				NumberOfEpisodes: series.NumberOfEpisodes,
-				Popularity:       series.Popularity,
-				SpokenLanguages:  series.SpokenLanguages,
-				OriginCountry:    series.OriginCountry,
-			})
-		}
-	}
-
-	return nil
 }
 
 // UpdateEpisode patches a TV episode record.

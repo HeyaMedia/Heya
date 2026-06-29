@@ -44,7 +44,10 @@ var analyzeStatusCmd = &cobra.Command{
 	Short: "Show analyzer + fetcher state and pending count",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		db, err := database.Connect(ctx, cfg.DatabaseURL.Value)
+		db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
+			MaxConns: int32(cfg.DatabaseMaxConns.Value),
+			MinConns: int32(cfg.DatabaseMinConns.Value),
+		})
 		if err != nil {
 			return err
 		}
@@ -252,7 +255,10 @@ var analyzeResetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		libraryID, _ := cmd.Flags().GetInt64("library")
 		ctx := context.Background()
-		db, err := database.Connect(ctx, cfg.DatabaseURL.Value)
+		db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
+			MaxConns: int32(cfg.DatabaseMaxConns.Value),
+			MinConns: int32(cfg.DatabaseMinConns.Value),
+		})
 		if err != nil {
 			return err
 		}

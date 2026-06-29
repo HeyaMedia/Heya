@@ -17,7 +17,7 @@ import (
 // params are treated as "not supported" — better to over-transcode than to
 // send bytes the browser silently fails on.
 func parseAudioCaps(r *http.Request) transcoder.AudioCaps {
-	get := func(k string) bool { return r.URL.Query().Get(k) == "1" }
+	get := func(k string) bool { return queryFlag(r.URL.Query().Get(k)) }
 	return transcoder.AudioCaps{
 		FLAC:   get("supports_flac_native") || get("supports_flac"),
 		ALAC:   get("supports_alac"),

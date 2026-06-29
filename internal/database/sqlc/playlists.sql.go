@@ -116,7 +116,8 @@ SELECT t.id            AS track_id,
        a.name          AS artist_name,
        mi.slug         AS artist_slug,
        upt.position    AS position,
-       upt.added_at    AS added_at
+       upt.added_at    AS added_at,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM user_playlist_tracks upt
 JOIN tracks      t  ON t.id  = upt.track_id
 JOIN albums      al ON al.id = t.album_id
@@ -142,6 +143,7 @@ type ListPlaylistTracksRow struct {
 	ArtistSlug     string             `json:"artist_slug"`
 	Position       int32              `json:"position"`
 	AddedAt        pgtype.Timestamptz `json:"added_at"`
+	Available      bool               `json:"available"`
 }
 
 // Tracks in the playlist with full album + artist join so the playlist page
@@ -171,6 +173,7 @@ func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]L
 			&i.ArtistSlug,
 			&i.Position,
 			&i.AddedAt,
+			&i.Available,
 		); err != nil {
 			return nil, err
 		}

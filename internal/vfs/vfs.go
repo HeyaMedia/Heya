@@ -44,6 +44,7 @@ func IsSMBPath(path string) bool {
 
 func Dir(path string) string {
 	if IsSMBPath(path) {
+		path = trimSMBTrailingSlash(path)
 		lastSlash := strings.LastIndex(path, "/")
 		if lastSlash <= len("smb://") {
 			return path
@@ -55,6 +56,7 @@ func Dir(path string) string {
 
 func Base(path string) string {
 	if IsSMBPath(path) {
+		path = trimSMBTrailingSlash(path)
 		lastSlash := strings.LastIndex(path, "/")
 		if lastSlash < 0 {
 			return path
@@ -71,11 +73,39 @@ func Join(parts ...string) string {
 	if IsSMBPath(parts[0]) {
 		result := strings.TrimSuffix(parts[0], "/")
 		for _, p := range parts[1:] {
+			p = strings.Trim(p, "/")
+			if p == "" {
+				continue
+			}
 			result += "/" + p
 		}
 		return result
 	}
 	return filepath.Join(parts...)
+}
+
+func RedactPath(path string) string {
+	if !IsSMBPath(path) {
+		return path
+	}
+	u, err := url.Parse(path)
+	if err != nil || u.User == nil {
+		return path
+	}
+	username := u.User.Username()
+	if _, ok := u.User.Password(); ok {
+		u.User = url.UserPassword(username, "xxxxx")
+	} else {
+		u.User = url.User(username)
+	}
+	return u.String()
+}
+
+func trimSMBTrailingSlash(path string) string {
+	for len(path) > len("smb://") && strings.HasSuffix(path, "/") {
+		path = strings.TrimSuffix(path, "/")
+	}
+	return path
 }
 
 type SMBConfig struct {
@@ -98,6 +128,9 @@ func ParseSMBURL(rawURL string) (*SMBConfig, error) {
 	}
 
 	host := u.Hostname()
+	if host == "" {
+		return nil, fmt.Errorf("SMB URL must include a host: smb://host/share[/path]")
+	}
 	port := u.Port()
 	if port == "" {
 		port = "445"

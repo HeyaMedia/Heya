@@ -5,38 +5,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/taskdefs"
 )
 
 func (h *Hub) StartPeriodicEmitters(ctx context.Context, db *pgxpool.Pool) {
 	go h.activityTicker(ctx, db)
 	go h.statsTicker(ctx, db)
 	go h.taskProgressTicker(ctx, db)
-}
-
-// taskKindsByTask is the duplicate of worker.TaskKinds maintained here
-// so the periodic emitter can compute per-task counts without an import
-// cycle (eventhub is upstream of worker). Keep in sync with the
-// definitive list in internal/worker/kickoff_jobs.go::TaskKinds.
-//
-// Includes both the 6 scheduled tasks AND the 6 synthetic buckets
-// (transcoding, artwork, nfo_writes, external_lookups, refresh_actions,
-// cleanup) that group ad-hoc workers so they get pending/running
-// counts in the Activity dropdown too.
-var taskKindsByTask = map[string][]string{
-	// Scheduled tasks.
-	"scan_libraries":       {"kickoff_library_scan", "process_file", "ffprobe", "detect_local_assets", "metadata_match"},
-	"refresh_stale_items":  {"kickoff_refresh_stale", "enrich_media_item"},
-	"scan_music_loudness":  {"kickoff_music_loudness", "scan_track_loudness", "scan_album_loudness"},
-	"generate_trickplay":   {"kickoff_trickplay", "trickplay_file"},
-	"generate_thumbnails":  {"kickoff_thumbnails", "thumbnail_extra"},
-	"analyze_music_facets": {"kickoff_sonic_analysis", "analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"},
-	// Synthetic buckets.
-	"transcoding":      {"transcode"},
-	"artwork":          {"download_image", "fetch_artwork", "save_images"},
-	"nfo_writes":       {"save_nfo", "save_music_nfo"},
-	"external_lookups": {"person_fetch", "ratings_fetch"},
-	"refresh_actions":  {"force_refresh_metadata", "force_refresh_images"},
-	"cleanup":          {"soft_delete"},
 }
 
 // taskProgressTicker runs every 2s and emits one task.progress event
@@ -59,27 +35,27 @@ func (h *Hub) taskProgressTicker(ctx context.Context, db *pgxpool.Pool) {
 			if !h.HasSubscribers() {
 				continue
 			}
-			for taskID, kinds := range taskKindsByTask {
-				var pending, running int
-				err := db.QueryRow(ctx, `
-					SELECT
-						count(*) FILTER (WHERE state IN ('available', 'scheduled', 'retryable')),
-						count(*) FILTER (WHERE state = 'running')
-					FROM river_job
-					WHERE kind = ANY($1::text[])
-				`, kinds).Scan(&pending, &running)
+			for _, def := range taskdefs.All() {
+				var counts queueops.RuntimeCounts
+				var err error
+				kinds := taskdefs.TaskKinds(def.ID)
+				if def.Synthetic {
+					counts, err = queueops.CountByKinds(ctx, db, kinds)
+				} else {
+					counts, err = queueops.CountScheduledTask(ctx, db, def.ID, kinds)
+				}
 				if err != nil {
 					continue
 				}
 				state := "idle"
-				if pending > 0 || running > 0 {
+				if counts.Pending > 0 || counts.Running > 0 {
 					state = "running"
 				}
 				h.Emit(EventTaskProgress, TaskProgressPayload{
-					TaskID:  taskID,
+					TaskID:  def.ID,
 					State:   state,
-					Pending: pending,
-					Running: running,
+					Pending: counts.Pending,
+					Running: counts.Running,
 				})
 			}
 		}
@@ -98,19 +74,24 @@ func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
 				continue
 			}
 
-			var pending, running int
-			row := db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'available' OR state = 'retryable'), count(*) FILTER (WHERE state = 'running') FROM river_job")
-			if err := row.Scan(&pending, &running); err != nil {
+			counts, err := queueops.CountActiveExcludingKind(ctx, db, "debounce_sweep")
+			if err != nil {
 				continue
 			}
-			h.Emit(EventQueueStatus, QueueStatusPayload{Pending: pending, Running: running})
+			h.Emit(EventQueueStatus, QueueStatusPayload{Pending: counts.Pending, Running: counts.Running})
 
 			// 50 is enough to cover every queue running at once
 			// (~28 distinct queues today, each MaxWorkers=1 except
 			// download_image at 4) with headroom. The UI lists them
 			// grouped by kind, so a high cap is cheap.
-			rows, err := db.Query(ctx,
-				"SELECT id, kind, queue, attempted_at, args::text FROM river_job WHERE state = 'running' ORDER BY attempted_at DESC LIMIT 50")
+			rows, err := db.Query(ctx, `
+				SELECT id, kind, queue, attempted_at, args::text
+				FROM river_job
+				WHERE state = 'running'
+				  AND kind <> 'debounce_sweep'
+				ORDER BY attempted_at DESC
+				LIMIT 50
+			`)
 			if err != nil {
 				continue
 			}
@@ -129,7 +110,7 @@ func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
 			rows.Close()
 			h.Emit(EventActiveJobs, ActiveJobsPayload{Jobs: jobs})
 
-			if pending > 0 || running > 0 {
+			if counts.Pending > 0 || counts.Running > 0 {
 				h.emitScanProgress(ctx, db)
 			}
 		}
@@ -199,8 +180,10 @@ func (h *Hub) statsTicker(ctx context.Context, db *pgxpool.Pool) {
 			db.QueryRow(ctx, "SELECT count(*) FROM people").Scan(&s.TotalPeople)
 			db.QueryRow(ctx, "SELECT count(*) FROM library_files").Scan(&s.TotalFiles)
 
-			row := db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'available' OR state = 'retryable'), count(*) FILTER (WHERE state = 'running') FROM river_job")
-			row.Scan(&s.QueuePending, &s.QueueRunning)
+			if counts, err := queueops.CountActive(ctx, db); err == nil {
+				s.QueuePending = counts.Pending
+				s.QueueRunning = counts.Running
+			}
 
 			h.Emit(EventStatsUpdated, s)
 		}

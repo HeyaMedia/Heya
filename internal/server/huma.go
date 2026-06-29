@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,8 +87,8 @@ func userFrom(ctx context.Context) sqlc.User {
 // authMiddleware enforces the per-operation "bearer" security scheme. Routes
 // without a Security entry are treated as public. Token extraction matches
 // the legacy auth.Middleware: Authorization header, session_token cookie, or
-// ?token= query (the last form is required for <video src> / <img src> tags
-// that can't carry custom headers).
+// ?token= query on browser-native transports that can't carry custom headers
+// (media elements and WebSockets).
 //
 // `sessions` may be nil — in that case every secured operation returns 401
 // without ever touching a database. The spec-dump CLI and humatest fixtures
@@ -100,23 +101,19 @@ func authMiddleware(api huma.API, sessions auth.SessionLookup) func(huma.Context
 		}
 
 		token := extractHumaToken(ctx)
-		if token == "" || sessions == nil {
-			_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
+		resolved, err := auth.ResolveSession(ctx.Context(), sessions, token)
+		if err != nil {
+			if errors.Is(err, auth.ErrInvalidSession) {
+				_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
+			} else {
+				_ = huma.WriteErr(api, ctx, http.StatusServiceUnavailable, "session lookup failed")
+			}
 			return
 		}
 
-		session, err := sessions.GetSessionByToken(ctx.Context(), token)
-		if err != nil {
-			_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		user, err := sessions.GetUserByID(ctx.Context(), session.UserID)
-		if err != nil {
-			_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-
-		ctx = huma.WithValue(ctx, userCtxKey, user)
+		ctx = huma.WithValue(ctx, userCtxKey, resolved.User)
+		ctx = huma.WithContext(ctx, auth.ContextWithToken(ctx.Context(), resolved.Token))
+		auth.TouchSessionAsync(sessions, resolved.Token)
 		next(ctx)
 	}
 }
@@ -170,10 +167,35 @@ func extractHumaToken(ctx huma.Context) string {
 			}
 		}
 	}
-	if t := ctx.Query("token"); t != "" {
+	if t := ctx.Query("token"); t != "" && allowsQueryToken(ctx.Operation()) {
 		return t
 	}
 	return ""
+}
+
+func allowsQueryToken(op *huma.Operation) bool {
+	if op == nil {
+		return false
+	}
+	switch {
+	case op.Path == "/api/stream/{file_id}":
+		return true
+	case strings.HasPrefix(op.Path, "/api/stream/{file_id}/hls/"):
+		return true
+	case op.Path == "/api/stream/{file_id}/subtitles/{index}":
+		return true
+	case strings.HasPrefix(op.Path, "/api/stream/{file_id}/trickplay/"):
+		return true
+	case op.Path == "/api/ws":
+		return true
+	case op.Path == "/api/radio/stream":
+		return true
+	case op.Path == "/api/podcasts/episode/stream":
+		return true
+	case strings.HasPrefix(op.Path, "/api/music/tracks/") && (strings.HasSuffix(op.Path, "/stream") || strings.Contains(op.Path, "/file/")):
+		return true
+	}
+	return false
 }
 
 // secured returns a copy of op with bearer auth required.

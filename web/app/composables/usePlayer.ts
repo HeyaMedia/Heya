@@ -29,6 +29,9 @@ export interface Track {
   // missing => track plays at the file's native level.
   integrated_lufs?: number | null
   true_peak_db?: number | null
+  // False when the track's file is gone from disk. The player refuses to play
+  // or enqueue these; list pages should pre-filter, but this is the backstop.
+  available?: boolean
 }
 
 // Last.fm-style scrobble threshold: a track counts as "played" once the user
@@ -136,6 +139,8 @@ export function usePlayer() {
   async function play(track?: Track) {
     const e = ensureEngine()
     if (track) {
+      // Never play a track whose file was removed from disk.
+      if (track.available === false) return
       currentTrack.value = track
       position.value = 0
       // Reset the scrobble guard so the new track can fire its own event.
@@ -318,7 +323,7 @@ export function usePlayer() {
   // gets immediate feedback. De-dupes by track id against the up-next slice
   // so spamming "Add to Queue" doesn't pile up duplicates.
   async function addToQueue(tracks: Track | Track[]) {
-    const list = Array.isArray(tracks) ? tracks : [tracks]
+    const list = (Array.isArray(tracks) ? tracks : [tracks]).filter((t) => t.available !== false)
     if (!list.length) return
     if (!queue.value.length) {
       queue.value = list
@@ -335,7 +340,7 @@ export function usePlayer() {
   // playing one (or at the head if nothing's playing). Mirrors Spotify /
   // Apple Music "Play Next". Same de-dupe behavior as addToQueue.
   async function playNext(tracks: Track | Track[]) {
-    const list = Array.isArray(tracks) ? tracks : [tracks]
+    const list = (Array.isArray(tracks) ? tracks : [tracks]).filter((t) => t.available !== false)
     if (!list.length) return
     if (!queue.value.length) {
       queue.value = list

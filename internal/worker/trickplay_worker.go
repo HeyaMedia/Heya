@@ -27,7 +27,8 @@ import (
 // The worker re-validates these conditions before running, so a stale
 // job that's been queued since the file was deleted is a safe no-op.
 type TrickplayFileArgs struct {
-	LibraryFileID int64 `json:"library_file_id"`
+	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (TrickplayFileArgs) Kind() string { return "trickplay_file" }
@@ -36,7 +37,7 @@ func (TrickplayFileArgs) InsertOpts() river.InsertOpts {
 		Queue:       "trickplay",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -64,7 +65,7 @@ func (w *TrickplayFileWorker) Work(ctx context.Context, job *river.Job[Trickplay
 		return nil
 	}
 
-	w.Progress.SetCurrentByKind(TrickplayFileArgs{}.Kind(), filepath.Base(file.Path))
+	w.Progress.SetCurrent(TrickplayFileArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(file.Path))
 
 	var info struct {
 		Duration float64 `json:"duration"`
@@ -105,7 +106,8 @@ func (w *TrickplayFileWorker) Work(ctx context.Context, job *river.Job[Trickplay
 // (deleted-scene/featurette/etc.). One job per extra row so the
 // kickoff_thumbnails fan-out is cancellable per item.
 type ThumbnailExtraArgs struct {
-	ExtraID int64 `json:"extra_id"`
+	ExtraID         int64  `json:"extra_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (ThumbnailExtraArgs) Kind() string { return "thumbnail_extra" }
@@ -114,7 +116,7 @@ func (ThumbnailExtraArgs) InsertOpts() river.InsertOpts {
 		Queue:       "thumbnails",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -144,7 +146,7 @@ func (w *ThumbnailExtraWorker) Work(ctx context.Context, job *river.Job[Thumbnai
 	if label == "" {
 		label = filepath.Base(row.FilePath)
 	}
-	w.Progress.SetCurrentByKind(ThumbnailExtraArgs{}.Kind(), label)
+	w.Progress.SetCurrent(ThumbnailExtraArgs{}.Kind(), job.Args.ScheduledTaskID, label)
 
 	dir := filepath.Join(w.DataDir, "images", "extras", fmt.Sprintf("%d", row.MediaItemID))
 	if err := os.MkdirAll(dir, 0o750); err != nil {

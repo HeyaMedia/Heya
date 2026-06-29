@@ -44,6 +44,7 @@ type KickoffLibraryScanWorker struct {
 
 func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[KickoffLibraryScanArgs]) error {
 	startedAt := time.Now()
+	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -52,14 +53,14 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 	if job.Args.LibraryID > 0 {
 		lib, gErr := q.GetLibraryByID(ctx, job.Args.LibraryID)
 		if gErr != nil {
-			finishKickoff(ctx, q, "kickoff_library_scan", startedAt, 0, 0, gErr)
+			finishKickoff(ctx, q, taskID, startedAt, 0, 0, gErr)
 			return gErr
 		}
 		libs = []sqlc.Library{lib}
 	} else {
 		libs, err = q.ListLibraries(ctx)
 		if err != nil {
-			finishKickoff(ctx, q, "kickoff_library_scan", startedAt, 0, 0, err)
+			finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 			return err
 		}
 		sortLibrariesByMediaPriority(libs)
@@ -71,7 +72,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 
 	for _, lib := range libs {
 		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, "kickoff_library_scan", startedAt, enqueued, failed, err)
+			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
 
@@ -96,11 +97,19 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 		if scanErr != nil {
 			log.Error().Err(scanErr).Int64("library_id", lib.ID).Msg("kickoff_library_scan: scan error")
 			failed++
-			continue
+			// A cancelled scan leaves the discovered set incomplete, so don't
+			// act on partial results. But a partial-root failure (e.g. one
+			// removed root) still ran discovery + deletion detection for the
+			// healthy roots — fall through so newly-found files get processed
+			// and the soft-deletes still emit their refresh event.
+			if ctx.Err() != nil {
+				continue
+			}
 		}
 
-		n := enqueuePendingFiles(ctx, q, rc, lib.ID)
+		n, enqueueFailed := enqueuePendingFiles(ctx, q, rc, lib.ID, taskID)
 		enqueued += n
+		failed += enqueueFailed
 
 		log.Info().
 			Int64("library_id", lib.ID).
@@ -122,7 +131,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 		}
 	}
 
-	finishKickoff(ctx, q, "kickoff_library_scan", startedAt, enqueued, failed, nil)
+	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
 	return nil
 }
 
@@ -145,7 +154,7 @@ func sortLibrariesByMediaPriority(libs []sqlc.Library) {
 	})
 }
 
-func enqueuePendingFiles(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64) int {
+func enqueuePendingFiles(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string) (int, int) {
 	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
 		LibraryID: libraryID,
 		Status:    sqlc.FileStatusPending,
@@ -154,21 +163,29 @@ func enqueuePendingFiles(ctx context.Context, q *sqlc.Queries, rc *river.Client[
 	})
 	if err != nil {
 		log.Error().Err(err).Int64("library_id", libraryID).Msg("kickoff_library_scan: list pending failed")
-		return 0
+		return 0, 1
 	}
 	if rc == nil {
-		return 0
+		return 0, len(files)
 	}
-	for _, f := range files {
+	enqueued, failed := 0, 0
+	for i, f := range files {
+		if err := ctx.Err(); err != nil {
+			return enqueued, failed + len(files) - i
+		}
 		if _, err := rc.Insert(ctx, ProcessFileArgs{
-			LibraryFileID: f.ID,
-			LibraryID:     libraryID,
-			FilePath:      f.Path,
+			LibraryFileID:   f.ID,
+			LibraryID:       libraryID,
+			FilePath:        f.Path,
+			ScheduledTaskID: taskID,
 		}, nil); err != nil {
 			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue process_file failed")
+			failed++
+			continue
 		}
+		enqueued++
 	}
-	return len(files)
+	return enqueued, failed
 }
 
 func emit(hub EventPublisher, t eventhub.EventType, p any) {
@@ -190,6 +207,7 @@ type KickoffRefreshStaleWorker struct {
 
 func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[KickoffRefreshStaleArgs]) error {
 	startedAt := time.Now()
+	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -201,7 +219,7 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 		ORDER BY mi.metadata_refreshed_at ASC NULLS FIRST
 	`)
 	if err != nil {
-		finishKickoff(ctx, q, "kickoff_refresh_stale", startedAt, 0, 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
 	defer rows.Close()
@@ -239,11 +257,11 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 	failed := 0
 	for _, it := range items {
 		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, "kickoff_refresh_stale", startedAt, enqueued, failed, err)
+			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
 		w.Progress.Set("refresh_stale_items", "kickoff_refresh_stale", it.Title)
-		if err := EnqueueEnrich(ctx, rc, it.ID, it.MediaType, EnrichSourceScheduled); err != nil {
+		if err := enqueueEnrich(ctx, rc, it.ID, it.MediaType, EnrichSourceScheduled, false, taskID, 0, 0, 0); err != nil {
 			log.Warn().Err(err).Int64("item_id", it.ID).Msg("kickoff_refresh_stale: enqueue failed")
 			failed++
 			continue
@@ -254,7 +272,7 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 	if enqueued > 0 {
 		log.Info().Int("enqueued", enqueued).Msg("kickoff_refresh_stale: enqueued enrich jobs")
 	}
-	finishKickoff(ctx, q, "kickoff_refresh_stale", startedAt, enqueued, failed, nil)
+	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
 	return nil
 }
 
@@ -278,28 +296,29 @@ type KickoffMusicLoudnessWorker struct {
 
 func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[KickoffMusicLoudnessArgs]) error {
 	startedAt := time.Now()
+	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
 	tracks, err := q.ListTrackFilesPendingLoudness(ctx, kickoffLoudnessTrackBatch)
 	if err != nil {
-		finishKickoff(ctx, q, "kickoff_music_loudness", startedAt, 0, 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
 	albums, err := q.ListAlbumsPendingLoudness(ctx, kickoffLoudnessAlbumBatch)
 	if err != nil {
-		finishKickoff(ctx, q, "kickoff_music_loudness", startedAt, 0, 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
 
 	enqueued, failed := 0, 0
 	for _, row := range tracks {
 		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, "kickoff_music_loudness", startedAt, enqueued, failed, err)
+			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
 		w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Path)
-		if _, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: row.ID}, nil); err != nil {
+		if _, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: row.ID, ScheduledTaskID: taskID}, nil); err != nil {
 			log.Warn().Err(err).Int64("track_file_id", row.ID).Msg("kickoff_music_loudness: enqueue track failed")
 			failed++
 			continue
@@ -308,11 +327,11 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 	}
 	for _, row := range albums {
 		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, "kickoff_music_loudness", startedAt, enqueued, failed, err)
+			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
 		w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Title)
-		if _, err := rc.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: row.ID}, nil); err != nil {
+		if _, err := rc.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: row.ID, ScheduledTaskID: taskID}, nil); err != nil {
 			log.Warn().Err(err).Int64("album_id", row.ID).Msg("kickoff_music_loudness: enqueue album failed")
 			failed++
 			continue
@@ -323,7 +342,7 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 	if enqueued > 0 {
 		log.Info().Int("enqueued", enqueued).Msg("kickoff_music_loudness: jobs enqueued")
 	}
-	finishKickoff(ctx, q, "kickoff_music_loudness", startedAt, enqueued, failed, nil)
+	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
 	return nil
 }
 
@@ -339,6 +358,7 @@ type KickoffTrickplayWorker struct {
 
 func (w *KickoffTrickplayWorker) Work(ctx context.Context, job *river.Job[KickoffTrickplayArgs]) error {
 	startedAt := time.Now()
+	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -354,7 +374,7 @@ func (w *KickoffTrickplayWorker) Work(ctx context.Context, job *river.Job[Kickof
 		  AND l.settings->>'enable_trickplay' = 'true'
 	`)
 	if err != nil {
-		finishKickoff(ctx, q, "kickoff_trickplay", startedAt, 0, 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
 	defer rows.Close()
@@ -367,11 +387,11 @@ func (w *KickoffTrickplayWorker) Work(ctx context.Context, job *river.Job[Kickof
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, "kickoff_trickplay", startedAt, enqueued, failed, err)
+			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
 		w.Progress.Set("generate_trickplay", "kickoff_trickplay", filepathBase(path))
-		if _, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: id}, nil); err != nil {
+		if _, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: id, ScheduledTaskID: taskID}, nil); err != nil {
 			log.Warn().Err(err).Int64("library_file_id", id).Msg("kickoff_trickplay: enqueue failed")
 			failed++
 			continue
@@ -379,7 +399,7 @@ func (w *KickoffTrickplayWorker) Work(ctx context.Context, job *river.Job[Kickof
 		enqueued++
 	}
 
-	finishKickoff(ctx, q, "kickoff_trickplay", startedAt, enqueued, failed, nil)
+	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
 	return nil
 }
 
@@ -406,6 +426,7 @@ type KickoffThumbnailsWorker struct {
 
 func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[KickoffThumbnailsArgs]) error {
 	startedAt := time.Now()
+	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -419,7 +440,7 @@ func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[Kicko
 		  AND l.settings->>'generate_thumbnails' = 'true'
 	`)
 	if err != nil {
-		finishKickoff(ctx, q, "kickoff_thumbnails", startedAt, 0, 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
 	defer rows.Close()
@@ -432,7 +453,7 @@ func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[Kicko
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, "kickoff_thumbnails", startedAt, enqueued, failed, err)
+			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
 		label := title
@@ -440,7 +461,7 @@ func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[Kicko
 			label = filepathBase(fpath)
 		}
 		w.Progress.Set("generate_thumbnails", "kickoff_thumbnails", label)
-		if _, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: id}, nil); err != nil {
+		if _, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: id, ScheduledTaskID: taskID}, nil); err != nil {
 			log.Warn().Err(err).Int64("extra_id", id).Msg("kickoff_thumbnails: enqueue failed")
 			failed++
 			continue
@@ -448,7 +469,7 @@ func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[Kicko
 		enqueued++
 	}
 
-	finishKickoff(ctx, q, "kickoff_thumbnails", startedAt, enqueued, failed, nil)
+	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
 	return nil
 }
 
@@ -476,11 +497,12 @@ type KickoffSonicAnalysisWorker struct {
 
 func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[KickoffSonicAnalysisArgs]) error {
 	startedAt := time.Now()
+	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
 
 	if w.Enabled != nil && !w.Enabled(ctx) {
 		log.Info().Msg("kickoff_sonic_analysis: skipped — disabled in settings")
-		finishKickoff(ctx, q, "kickoff_sonic_analysis", startedAt, 0, 0, nil)
+		finishKickoff(ctx, q, taskID, startedAt, 0, 0, nil)
 		return nil
 	}
 
@@ -491,7 +513,7 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 		LimitCount:         sonicKickoffBatch,
 	})
 	if err != nil {
-		finishKickoff(ctx, q, "kickoff_sonic_analysis", startedAt, 0, 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
 
@@ -499,10 +521,10 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 	w.Progress.Set("analyze_music_facets", "kickoff_sonic_analysis", "queueing tracks…")
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, "kickoff_sonic_analysis", startedAt, enqueued, failed, err)
+			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
-		if _, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: id}, nil); err != nil {
+		if _, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: id, ScheduledTaskID: taskID}, nil); err != nil {
 			log.Warn().Err(err).Int64("track_id", id).Msg("kickoff_sonic_analysis: enqueue failed")
 			failed++
 			continue
@@ -510,6 +532,6 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 		enqueued++
 	}
 
-	finishKickoff(ctx, q, "kickoff_sonic_analysis", startedAt, enqueued, failed, nil)
+	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
 	return nil
 }

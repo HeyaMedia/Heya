@@ -1,6 +1,7 @@
 package saver
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -261,15 +262,8 @@ func parseExternalIDs(data []byte) map[string]string {
 		return nil
 	}
 	m := map[string]string{}
-	for _, part := range strings.Split(strings.Trim(string(data), "{}\""), ",") {
-		kv := strings.SplitN(part, ":", 2)
-		if len(kv) == 2 {
-			k := strings.Trim(kv[0], "\" ")
-			v := strings.Trim(kv[1], "\" ")
-			if k != "" && v != "" {
-				m[k] = v
-			}
-		}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
 	}
 	return m
 }

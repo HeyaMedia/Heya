@@ -6,26 +6,47 @@ Day-to-day workflows for building, running, and debugging Heya.
 
 ```bash
 make db-up                 # start Postgres on :5440
-make dev                   # Caddy :8080 + Nuxt :3000 + Go (air) :3050 — open :8080
+make dev                   # mprocs: dev-proxy :8080 + Go (air) :3050 + Nuxt :3000 — open :8080
 ```
 
-Prerequisite: `brew install caddy`.
+Prerequisite: `brew install mprocs`. `make dev` runs a preflight that reclaims
+ports `:8080`/`:3050`/`:3000` from any orphaned previous run, then launches
+mprocs (config in `mprocs.yaml`) with three procs: `proxy`, `api`, `web`.
+Quitting mprocs (`q` / Ctrl+C) tears all three down cleanly; press `r` on a
+pane to restart just that process.
 
 Or split into three terminals for independent control:
 
 ```bash
-make dev-proxy             # Caddy on :8080 (reads Caddyfile.dev)
-make dev-go                # air → heya serve on :3050
+make dev-front             # heya dev-proxy on :8080 (the front door)
+make dev-go                # air → heya serve --dev-backend on :3050
 make dev-web               # bun run dev on :3000
 ```
 
-**Topology.** Caddy on `:8080` is the front door. It forwards `/api/*` (HTTP
-+ WebSocket at `/api/ws`) to `heya serve` on `:3050` and everything else to
-Nuxt on `:3000`. Caddy stays alive across air rebuilds and Nuxt restarts,
-so the browser's HMR socket and any in-flight WS connection never see the
-backends churn. The previous "Go fronts Nuxt" / "Nuxt fronts Go" setups
-both had the front-door process restart on every rebuild, which is what
-caused the ECONNRESET cascade; pulling Caddy out front fixes it for good.
+**Topology.** Three processes:
+
+- `heya dev-proxy` — the stable front door on `:8080`. A stdlib
+  `httputil.ReverseProxy` that forwards `/api/*` (HTTP + the `/api/ws`
+  WebSocket, which upgrades natively) to the backend on `:3050`, and everything
+  else to Nuxt/Vite on `:3000`.
+- `heya serve --dev-backend` on `:3050` — API + WS only, hot-reloaded by air.
+- Nuxt/Vite on `:3000` — HMR.
+
+The front door is a **separate Go process on purpose**. Go has no in-process
+hot reload, so the backend must restart on every code save (air's job). But
+tsnet must own a *stable* listener that doesn't flap on saves — so Tailscale
+lives in the `dev-proxy` process, which never restarts on a code/Vue edit.
+Because the front door stays put across air rebuilds and Nuxt restarts, the
+browser's HMR socket and any in-flight WS connection never see the backend
+churn. The previous "Go fronts Nuxt" / "Nuxt fronts Go" setups both had the
+front-door process restart on every rebuild, which is what caused the
+ECONNRESET cascade; that's now solved because the front door never restarts on
+a code save. Editing proxy/tailscale code → press `r` on the `proxy` pane in
+mprocs (or it rebuilds via `make dev-front`).
+
+Tailscale works in dev too — the DB-backed Settings toggle drives the tsnet
+node that lives in the `dev-proxy` process. See
+[tailscale.md](./tailscale.md#development).
 
 Don't run `go build -o ./bin/heya ./cmd/heya` by hand during dev — `air` rebuilds on save. `go build ./...` is fine as a compile-check.
 
@@ -65,11 +86,11 @@ via `-q key=value` (repeatable, URL-encoded). Pretty-prints JSON responses by
 default; `--raw` streams bytes verbatim. Non-2xx → status + body to stderr,
 exit 1.
 
-**Dev-mode caveat**: in dev, Caddy routes `/api/*` to Go and everything else
-to Nuxt. A typo like `/api/nonexisten` reaches Go, which 404s with JSON —
-that's the easy case. But if you mistype the prefix (`/ap/foo`), Caddy
-routes the request to Nuxt, which returns the SPA HTML shell with HTTP 200.
-If you see `<!DOCTYPE html>` instead of JSON, check your prefix.
+**Dev-mode caveat**: in dev, the dev-proxy front door routes `/api/*` to Go and
+everything else to Nuxt. A typo like `/api/nonexisten` reaches Go, which 404s
+with JSON — that's the easy case. But if you mistype the prefix (`/ap/foo`),
+the dev-proxy routes the request to Nuxt, which returns the SPA HTML shell with
+HTTP 200. If you see `<!DOCTYPE html>` instead of JSON, check your prefix.
 
 ## Database
 

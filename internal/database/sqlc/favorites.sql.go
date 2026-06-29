@@ -505,7 +505,8 @@ SELECT t.id           AS track_id,
        a.id           AS artist_id,
        a.name         AS artist_name,
        mi.slug        AS artist_slug,
-       uf.created_at  AS loved_at
+       uf.created_at  AS loved_at,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM user_favorites uf
 JOIN tracks      t  ON t.id  = uf.entity_id
 JOIN albums      al ON al.id = t.album_id
@@ -537,6 +538,7 @@ type ListUserLovedTracksRow struct {
 	ArtistName     string             `json:"artist_name"`
 	ArtistSlug     string             `json:"artist_slug"`
 	LovedAt        pgtype.Timestamptz `json:"loved_at"`
+	Available      bool               `json:"available"`
 }
 
 // Flat list of the user's loved tracks across every music library, joined
@@ -565,6 +567,7 @@ func (q *Queries) ListUserLovedTracks(ctx context.Context, arg ListUserLovedTrac
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.LovedAt,
+			&i.Available,
 		); err != nil {
 			return nil, err
 		}

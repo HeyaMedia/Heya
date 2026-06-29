@@ -52,13 +52,16 @@
           page-mode
           v-slot="{ item: t, index: i }"
         >
-          <div class="list-row pl-cols" @click="playFrom(i)">
+          <div class="list-row pl-cols" :class="{ 'pl-missing': t.available === false }" @click="t.available !== false && playFrom(i)">
             <div class="pl-num mono">{{ i + 1 }}</div>
             <div class="pl-title-cell">
               <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
-              <Poster v-else :idx="t.track_id" :src="useAlbumCoverUrl(t.artist_slug, t.album_slug)" aspect="1/1" class="pl-thumb" />
+              <Poster v-else :idx="t.track_id" :src="useAlbumCoverUrl(t.artist_slug, t.album_slug)" aspect="1/1" class="pl-thumb" :class="{ 'poster--missing': t.available === false }" />
               <div class="pl-title-text">
-                <div class="pl-title" :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}">{{ t.track_title }}</div>
+                <div class="pl-title" :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}">
+                  {{ t.track_title }}
+                  <Icon v-if="t.available === false" name="trash" :size="11" class="pl-missing-icon" />
+                </div>
                 <div class="pl-artist">{{ t.artist_name }}</div>
               </div>
             </div>
@@ -99,6 +102,7 @@ interface PlaylistTrackRow {
   artist_slug: string
   position: number
   added_at: string
+  available?: boolean
 }
 interface PlaylistDetailResponse {
   playlist: {
@@ -157,11 +161,14 @@ function toPlayable(row: PlaylistTrackRow): Track {
     album_id: row.album_id,
     artist_id: row.artist_id,
     poster: useAlbumCoverUrl(row.artist_slug, row.album_slug) ?? undefined,
+    available: row.available,
   }
 }
 
+function isPlayable(row: PlaylistTrackRow) { return row.available !== false }
+
 async function playAll(shuffle: boolean) {
-  let pl = tracks.value.map(toPlayable)
+  let pl = tracks.value.filter(isPlayable).map(toPlayable)
   if (shuffle) pl = [...pl].sort(() => Math.random() - 0.5)
   if (!pl.length) return
   queue.value = pl
@@ -169,9 +176,9 @@ async function playAll(shuffle: boolean) {
 }
 
 async function playFrom(idx: number) {
-  queue.value = tracks.value.map(toPlayable)
   const target = tracks.value[idx]
-  if (!target) return
+  if (!target || !isPlayable(target)) return
+  queue.value = tracks.value.filter(isPlayable).map(toPlayable)
   await play(toPlayable(target))
 }
 
@@ -305,6 +312,8 @@ function formatDate(iso: string) {
 .pl-thumb { width: 40px; height: 40px; border-radius: 4px; flex-shrink: 0; }
 .pl-title-text { min-width: 0; }
 .pl-title { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.pl-missing { opacity: 0.5; cursor: default; }
+.pl-missing-icon { color: #d96b6b; vertical-align: -1px; margin-left: 4px; }
 .pl-artist { font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pl-album { font-size: 13px; color: var(--fg-2); overflow: hidden; }
 .pl-album-link { color: inherit; text-decoration: none; }

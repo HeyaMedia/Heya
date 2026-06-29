@@ -11,19 +11,16 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
 
 var (
-	imageExts    = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
-	subtitleExts = map[string]bool{".srt": true, ".ass": true, ".ssa": true, ".sub": true, ".vtt": true}
-	videoExts    = map[string]bool{".mkv": true, ".mp4": true, ".avi": true, ".mov": true, ".m4v": true, ".wmv": true}
-	lyricsExts   = map[string]bool{".lrc": true}
-
 	imageAssetMap = map[string]sqlc.AssetType{
 		"poster":    sqlc.AssetTypePoster,
 		"primary":   sqlc.AssetTypePoster,
@@ -83,26 +80,53 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	filePath := job.Args.FilePath
 	mediaType := job.Args.MediaType
 	mediaItemID := job.Args.MediaItemID
-	dir := vfs.Dir(filePath)
-	base := strings.TrimSuffix(vfs.Base(filePath), filepath.Ext(vfs.Base(filePath)))
-
-	w.Progress.SetCurrentByKind(DetectLocalAssetsArgs{}.Kind(), vfs.Base(filePath))
-
-	showDir := dir
-	if strings.HasPrefix(strings.ToLower(vfs.Base(dir)), "season") {
-		showDir = vfs.Dir(dir)
+	item, err := q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return nil
+	}
+	if filePath == "" && job.Args.LibraryFileID > 0 {
+		if file, err := q.GetLibraryFileByID(ctx, job.Args.LibraryFileID); err == nil {
+			filePath = file.Path
+		}
+	}
+	if filePath == "" {
+		files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: mediaItemID, Valid: true})
+		if err == nil && len(files) > 0 {
+			filePath = files[0].Path
+		}
 	}
 
+	current := item.Title
+	if filePath != "" {
+		current = vfs.Base(filePath)
+	}
+	w.Progress.SetCurrent(DetectLocalAssetsArgs{}.Kind(), job.Args.ScheduledTaskID, current)
+
 	dirName := fmt.Sprintf("%d", mediaItemID)
-	if item, err := q.GetMediaItemByID(ctx, mediaItemID); err == nil && item.Slug != "" {
+	if item.Slug != "" {
 		dirName = item.Slug
 	}
 	cacheDir := filepath.Join(w.DataDir, "images", mediaType, dirName)
 	os.MkdirAll(cacheDir, 0o755)
 
-	source, err := vfs.Open(showDir)
-	if err != nil {
-		log.Warn().Err(err).Str("dir", showDir).Msg("cannot open show directory for assets")
+	var source *vfs.Source
+	dir := ""
+	base := ""
+	showDir := ""
+	if filePath != "" {
+		dir = vfs.Dir(filePath)
+		base = strings.TrimSuffix(vfs.Base(filePath), filepath.Ext(vfs.Base(filePath)))
+		showDir = dir
+		if strings.HasPrefix(strings.ToLower(vfs.Base(dir)), "season") {
+			showDir = vfs.Dir(dir)
+		}
+		var openErr error
+		source, openErr = vfs.Open(showDir)
+		if openErr != nil {
+			log.Warn().Err(openErr).Str("dir", showDir).Msg("cannot open show directory for assets")
+		}
+	} else {
+		log.Debug().Int64("media_item_id", mediaItemID).Msg("skipping local asset detection: no library file path")
 	}
 
 	if source != nil {
@@ -111,7 +135,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		w.detectExtras(ctx, q, mediaItemID, source.FS, showDir)
 	}
 
-	if !vfs.IsSMBPath(dir) {
+	if filePath != "" && !vfs.IsSMBPath(dir) {
 		w.detectSiblingAssets(ctx, q, mediaItemID, dir, base)
 	} else if source != nil {
 		relDir := vfs.Base(dir)
@@ -144,11 +168,6 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 				break
 			}
 		}
-	}
-
-	item, err := q.GetMediaItemByID(ctx, mediaItemID)
-	if err != nil {
-		return nil
 	}
 
 	newPoster := item.PosterPath
@@ -205,7 +224,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		if hasAsset[key] {
 			continue
 		}
-		client.Insert(ctx, DownloadImageArgs{
+		if _, err := client.Insert(ctx, DownloadImageArgs{
 			MediaItemID: mediaItemID,
 			EntityType:  "media",
 			URL:         img.URL,
@@ -213,14 +232,18 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 			MediaType:   mediaType,
 			Label:       img.Label,
 			SortOrder:   img.SortOrder,
-		}, &river.InsertOpts{Priority: img.Priority})
+		}, &river.InsertOpts{Priority: img.Priority}); err != nil {
+			return fmt.Errorf("enqueue download image: %w", err)
+		}
 	}
 
 	if job.Args.QueueEnrich {
-		_, _ = client.Insert(ctx, FetchArtworkArgs{
+		if _, err := client.Insert(ctx, FetchArtworkArgs{
 			MediaItemID: mediaItemID,
 			MediaType:   mediaType,
-		}, &river.InsertOpts{Priority: 3})
+		}, &river.InsertOpts{Priority: 3}); err != nil {
+			return fmt.Errorf("enqueue fetch artwork: %w", err)
+		}
 	}
 
 	return nil
@@ -246,7 +269,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 		}
 		name := e.Name()
 		ext := strings.ToLower(filepath.Ext(name))
-		if !imageExts[ext] {
+		if !mediafile.IsImageExt(ext) {
 			continue
 		}
 
@@ -350,7 +373,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 		nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
 		fullPath := filepath.Join(dir, name)
 
-		if subtitleExts[ext] && strings.HasPrefix(nameNoExt, baseName) {
+		if mediafile.IsSubtitleExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
 			lang := extractLanguageCode(nameNoExt, baseName)
 			info, _ := e.Info()
 			size := int64(0)
@@ -367,7 +390,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 			})
 		}
 
-		if lyricsExts[ext] && strings.HasPrefix(nameNoExt, baseName) {
+		if mediafile.IsLyricsExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeLyrics,
@@ -376,7 +399,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sq
 			})
 		}
 
-		if imageExts[ext] && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
+		if mediafile.IsImageExt(ext) && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
 			if hasThumb {
 				continue
 			}
@@ -401,7 +424,7 @@ func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Quer
 		if !e.IsDir() {
 			name := e.Name()
 			ext := strings.ToLower(filepath.Ext(name))
-			if !videoExts[ext] {
+			if !mediafile.IsVideoExt(ext) {
 				continue
 			}
 			nameLower := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
@@ -442,7 +465,7 @@ func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Quer
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(ee.Name()))
-			if !videoExts[ext] {
+			if !mediafile.IsVideoExt(ext) {
 				continue
 			}
 			title := strings.TrimSuffix(ee.Name(), filepath.Ext(ee.Name()))
@@ -486,7 +509,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 		nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
 		fullPath := vfs.Join(dir, name)
 
-		if subtitleExts[ext] && strings.HasPrefix(nameNoExt, baseName) {
+		if mediafile.IsSubtitleExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
 			lang := extractLanguageCode(nameNoExt, baseName)
 			info, _ := e.Info()
 			size := int64(0)
@@ -503,7 +526,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 			})
 		}
 
-		if lyricsExts[ext] && strings.HasPrefix(nameNoExt, baseName) {
+		if mediafile.IsLyricsExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeLyrics,
@@ -512,7 +535,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 			})
 		}
 
-		if imageExts[ext] && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
+		if mediafile.IsImageExt(ext) && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
 			if hasThumb {
 				continue
 			}

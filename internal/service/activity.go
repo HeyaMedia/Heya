@@ -21,7 +21,9 @@ type ActivityItem struct {
 // GetActivityFeed returns recent media additions and scan completions from
 // the last 7 days, sorted by timestamp descending, limited to 30 items.
 func (a *App) GetActivityFeed(ctx context.Context) []ActivityItem {
-	var items []ActivityItem
+	// Non-nil so the JSON encodes as [] not null — the FE feed does
+	// items.length and a null payload crashes the dashboard render.
+	items := make([]ActivityItem, 0)
 
 	if mediaRows, err := a.db.Query(ctx, `
 		SELECT mi.id, mi.title, mi.media_type, mi.slug, mi.created_at

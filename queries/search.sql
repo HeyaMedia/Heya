@@ -115,7 +115,8 @@ SELECT t.*,
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
        mi.title AS artist_name,
-       mi.slug AS artist_slug
+       mi.slug AS artist_slug,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM tracks t
 JOIN albums a ON a.id = t.album_id
 JOIN artists ar ON ar.id = a.artist_id

@@ -9,12 +9,14 @@ import (
 
 // allHeyaEnvKeys is the canonical list every test starts from a known state on.
 var allHeyaEnvKeys = []string{
-	"HEYA_DATABASE_URL", "HEYA_HOST", "HEYA_PORT", "HEYA_LOG_LEVEL",
+	"HEYA_DATABASE_URL", "HEYA_DB_MAX_CONNS", "HEYA_DB_MIN_CONNS",
+	"HEYA_HOST", "HEYA_PORT", "HEYA_LOG_LEVEL",
 	"HEYA_LOG_FORMAT", "HEYA_DATA_DIR", "HEYA_MEDIA_URL", "HEYA_HWACCEL",
 	"HEYA_TRANSCODE_CACHE_DIR", "HEYA_TRANSCODE_CACHE_MAX_GB",
 	"HEYA_TAILSCALE_ENABLED", "HEYA_TAILSCALE_HOSTNAME",
 	"HEYA_TAILSCALE_STATE_DIR", "HEYA_TAILSCALE_HTTPS",
 	"HEYA_TAILSCALE_FUNNEL", "HEYA_TAILSCALE_AUTHKEY",
+	"HEYA_PODCAST_INDEX_KEY", "HEYA_PODCAST_INDEX_SECRET",
 }
 
 // clearHeyaEnv unsets every HEYA_ env var for the duration of the test.
@@ -91,4 +93,14 @@ func TestSources(t *testing.T) {
 	assert.Equal(t, "HEYA_HOST", sources["infra.host"].EnvVar)
 	assert.Equal(t, SourceDefault, sources["infra.port"].Source)
 	assert.Empty(t, sources["infra.port"].EnvVar)
+}
+
+func TestSourceRegistryKeysAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, field := range sourceFields {
+		if seen[field.key] {
+			t.Fatalf("duplicate source key %q", field.key)
+		}
+		seen[field.key] = true
+	}
 }

@@ -5,8 +5,12 @@
 # This keeps GHCR free of half-baked SHAs and means `latest` only moves
 # when a real version cuts.
 #
-# Image: ghcr.io/<owner>/<repo> (lowercased by docker/metadata-action).
-# Auth: GITHUB_TOKEN — no manual secrets needed.
+# Three images per release, all from ghcr.io/<owner>/<repo>:
+#   :<ver>            base — CPU ONNX + Intel/AMD VAAPI/QSV transcode (amd64+arm64)
+#   :<ver>-cuda       NVIDIA — CUDA/TensorRT ONNX + NVENC transcode (amd64)
+#   :<ver>-openvino   Intel  — OpenVINO ONNX (Arc/iGPU) + QSV/VAAPI (amd64)
+# The GPU variants are built FROM the base by digest, so they always match the
+# exact base just pushed. Auth: GITHUB_TOKEN — no manual secrets needed.
 
 name: Container
 
@@ -23,15 +27,29 @@ concurrency:
   cancel-in-progress: false   # tag builds should always run to completion
 
 jobs:
-  build-and-push:
-    name: Build + push to GHCR
+  base:
+    name: base (amd64 + arm64)
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.img.outputs.image }}
     steps:
       - uses: actions/checkout@v6
 
+      # GHCR refs must be lowercase, but github.repository can be mixed-case
+      # (e.g. HeyaMedia/Heya). metadata-action lowercases its own tag output,
+      # but the variant jobs build a base ref by hand (image@digest), so we
+      # need an explicitly lowercased name to hand them.
+      - name: Lowercase image ref
+        id: img
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      # Registers binfmt handlers so the amd64 runner can execute arm64
+      # build steps under emulation. Required for the linux/arm64 leg.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -39,30 +57,90 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derives image tags from the git tag:
-      #   v1.2.3  -> 1.2.3, 1.2, 1, latest
-      # Also stamps OCI metadata (source repo, revision, title).
+      # Derives image tags from the git tag: v1.2.3 -> 1.2.3, 1.2, 1, latest.
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ steps.img.outputs.image }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      - name: Build and push
+      - name: Build and push base
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64
+          # Both arches from the one Dockerfile (it derives per-arch bits from
+          # dpkg). The arm64 leg builds under QEMU; gha cache keeps repeat tag
+          # builds cheap. NOTE: the Nuxt prerender is much slower under bun on
+          # amd64 than arm64 — the amd64 leg's `bun run build` takes a few extra
+          # minutes; that's a bun node-compat quirk, not a hang.
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # GitHub Actions cache backend — survives across tag builds, keyed
-          # by Dockerfile + dep manifests via buildx's content-addressed
-          # layer hashes. Cuts cold-build time from ~10min to ~2min.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Distinct scope per image — base + both variants run in the same
+          # workflow; a shared (default) gha scope would have them overwrite
+          # each other's cache.
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
+
+  variants:
+    name: ${{ matrix.variant }} (amd64)
+    needs: base
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [cuda, openvino]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same version tags as base, suffixed -cuda / -openvino. Use the base
+      # job's already-lowercased image ref so the suffixed tags + the FROM ref
+      # below are valid GHCR names regardless of the repo's casing.
+      # onlatest=true is REQUIRED: the suffix flavor defaults to onlatest=false,
+      # which would leave the `latest` tag UNsuffixed — both variants would then
+      # publish a bare `:latest` and clobber the base image. With it, latest ->
+      # latest-cuda / latest-openvino.
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.base.outputs.image }}
+          flavor: suffix=-${{ matrix.variant }},onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      # FROM the exact base digest just pushed — amd64 only (the GPU runtimes
+      # are x86_64). Reuses the base's already-built layers, so this is a thin,
+      # fast build (no frontend/Go recompile). The base ref must be lowercase
+      # (GHCR requirement) — needs.base.outputs.image is already lowercased.
+      - name: Build and push ${{ matrix.variant }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.${{ matrix.variant }}
+          platforms: linux/amd64
+          build-args: |
+            BASE_IMAGE=${{ needs.base.outputs.image }}@${{ needs.base.outputs.digest }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}

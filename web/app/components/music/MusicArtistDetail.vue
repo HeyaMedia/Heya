@@ -67,19 +67,20 @@
       </div>
       <!-- Floating round actions -->
       <div class="hero-floating-actions">
-        <button class="hero-round hero-round-primary" @click="playAll(false)" title="Play">
+        <span v-if="!artistPlayable" class="hero-missing"><Icon name="trash" :size="13" /> Missing on disk</span>
+        <button class="hero-round hero-round-primary" :disabled="!artistPlayable" @click="playAll(false)" title="Play">
           <Icon name="play" :size="22" />
         </button>
-        <button class="hero-round" @click="playAll(true)" title="Shuffle">
+        <button class="hero-round" :disabled="!artistPlayable" @click="playAll(true)" title="Shuffle">
           <Icon name="shuffle" :size="18" />
         </button>
-        <button class="hero-round" @click="addAllToQueue" title="Add to queue">
+        <button class="hero-round" :disabled="!artistPlayable" @click="addAllToQueue" title="Add to queue">
           <Icon name="plus" :size="18" />
         </button>
         <button
           class="hero-round"
           @click="startArtistRadio"
-          :disabled="radio.starting.value"
+          :disabled="radio.starting.value || !artistPlayable"
           title="Start radio from this artist"
         >
           <Icon name="radio" :size="18" />
@@ -103,10 +104,13 @@
           v-for="(t, idx) in topTracks.slice(0, ttExpanded ? topTracks.length : 8)"
           :key="`tt-${t.local_track_id}-${idx}`"
           class="tt-row"
+          :class="{ 'tt-row-missing': !isTopTrackPlayable(t) }"
         >
           <div class="tt-leader">
-            <span class="tt-rank">{{ idx + 1 }}</span>
+            <span v-if="isTopTrackPlayable(t)" class="tt-rank">{{ idx + 1 }}</span>
+            <Icon v-else name="trash" :size="12" class="tt-missing-icon" :title="`${t.title} — missing on disk`" />
             <button
+              v-if="isTopTrackPlayable(t)"
               class="tt-hover-play"
               type="button"
               @click="playTopTrack(t)"
@@ -188,10 +192,12 @@
           :key="album.id"
           :to="`/music/artist/${route.params.slug}/${album.slug}`"
           class="discog-tile card-tile"
+          :class="{ 'discog-missing': !albumPlayable(album) }"
         >
           <div class="discog-art-wrap">
             <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="discog-art" />
-            <button class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
+            <MediaMissingBadge v-if="!albumPlayable(album)" />
+            <button v-if="albumPlayable(album)" class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
               <Icon name="play" :size="14" />
             </button>
           </div>
@@ -391,7 +397,7 @@ const topTracks = computed<ArtistTopTrackRow[]>(() => {
   return out
 })
 
-const hasPlayableTopTracks = computed(() => topTracks.value.length > 0)
+const hasPlayableTopTracks = computed(() => topTracks.value.some(isTopTrackPlayable))
 
 const artist = computed<Artist | null>(() => detail.value?.artist ?? null)
 watch(artist, (a) => {
@@ -406,6 +412,21 @@ watch(topTracks, (rows) => {
 })
 
 const albums = computed<AlbumView[]>(() => detail.value?.albums ?? [])
+
+// Playability — a track needs a live file (TrackView.files is server-filtered
+// to live files), an album needs a playable track, the artist needs a playable
+// album. Missing items still render but can't be played.
+function isTrackPlayable(t: TrackView) { return t.files.length > 0 }
+function albumPlayable(al: AlbumView) { return al.tracks.some(isTrackPlayable) }
+const artistPlayable = computed(() => albums.value.some(albumPlayable))
+const playableTrackIds = computed(() => {
+  const s = new Set<number>()
+  for (const al of albums.value) for (const t of al.tracks) if (isTrackPlayable(t)) s.add(t.id)
+  return s
+})
+function isTopTrackPlayable(t: ArtistTopTrackRow) {
+  return !!t.local_track_id && playableTrackIds.value.has(t.local_track_id)
+}
 
 const artistPosterUrl = computed(() => {
   if (!detail.value?.media_item) return null
@@ -529,7 +550,7 @@ function trackFromAlbum(album: AlbumView, t: TrackView): Track {
 }
 
 async function playAlbum(album: AlbumView, shuffle: boolean) {
-  let tracks = album.tracks.map((t) => trackFromAlbum(album, t))
+  let tracks = album.tracks.filter(isTrackPlayable).map((t) => trackFromAlbum(album, t))
   if (shuffle) tracks = [...tracks].sort(() => Math.random() - 0.5)
   if (!tracks.length) return
   queue.value = tracks
@@ -539,7 +560,7 @@ async function playAlbum(album: AlbumView, shuffle: boolean) {
 async function playAll(shuffle: boolean) {
   let tracks: Track[] = []
   for (const al of albums.value) {
-    for (const t of al.tracks) tracks.push(trackFromAlbum(al, t))
+    for (const t of al.tracks) if (isTrackPlayable(t)) tracks.push(trackFromAlbum(al, t))
   }
   if (shuffle) tracks = [...tracks].sort(() => Math.random() - 0.5)
   if (!tracks.length) return
@@ -550,7 +571,7 @@ async function playAll(shuffle: boolean) {
 function addAllToQueue() {
   const tracks: Track[] = []
   for (const al of albums.value) {
-    for (const t of al.tracks) tracks.push(trackFromAlbum(al, t))
+    for (const t of al.tracks) if (isTrackPlayable(t)) tracks.push(trackFromAlbum(al, t))
   }
   queue.value = [...queue.value, ...tracks]
 }
@@ -570,14 +591,14 @@ function topTrackToTrack(t: ArtistTopTrackRow): Track {
 }
 
 async function playTopTrack(t: ArtistTopTrackRow) {
-  if (!t.local_track_id) return
+  if (!isTopTrackPlayable(t)) return
   const built = topTrackToTrack(t)
   queue.value = [built]
   await play(built)
 }
 
 async function playTopAll(shuffle: boolean) {
-  let owned = topTracks.value.filter((t) => t.local_track_id).map(topTrackToTrack)
+  let owned = topTracks.value.filter(isTopTrackPlayable).map(topTrackToTrack)
   if (!owned.length) return
   if (shuffle) owned = [...owned].sort(() => Math.random() - 0.5)
   queue.value = owned
@@ -781,6 +802,13 @@ if (import.meta.client) {
   box-shadow: 0 10px 24px var(--gold-glow);
 }
 .hero-round-primary:hover { background: var(--gold-bright); }
+.hero-round:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+.hero-missing {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: #d96b6b; margin-right: 6px;
+}
 
 /* Popular Tracks ================================================== */
 .top-tracks {}
@@ -837,6 +865,8 @@ if (import.meta.client) {
 .tt-row:hover { background: rgba(255,255,255,0.04); }
 .tt-row:hover .tt-rank { opacity: 0; }
 .tt-row:hover .tt-hover-play { opacity: 1; }
+.tt-row-missing { opacity: 0.55; }
+.tt-missing-icon { color: #d96b6b; }
 .tt-leader {
   position: relative;
   display: flex;
@@ -947,6 +977,7 @@ if (import.meta.client) {
 .discog-tile { text-decoration: none; color: inherit; display: block; }
 .discog-art-wrap { position: relative; }
 .discog-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
+.discog-missing .discog-art { filter: grayscale(1); opacity: 0.55; }
 .discog-play {
   position: absolute;
   right: 8px;

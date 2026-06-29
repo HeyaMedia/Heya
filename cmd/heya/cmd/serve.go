@@ -95,17 +95,29 @@ var serveCmd = &cobra.Command{
 			server.WithBaseContext(appCtx),
 		)
 
-		// Wire the Tailscale manager with the same handler as the LAN
-		// listener, so toggling it on at runtime serves the same routes.
+		// Wire the Tailscale manager. In prod it's an in-process tsnet node
+		// serving the same handler as the LAN listener, so toggling it on at
+		// runtime serves the same routes. With --dev-backend the node instead
+		// lives in the stable `heya dev-proxy` front-door (so it survives air
+		// rebuilds) and we drive it over a localhost control socket — the
+		// DB-backed enable/disable flow through the handlers is identical.
+		devBackend, _ := cmd.Flags().GetBool("dev-backend")
 		tsLogger := log.With().Str("subsystem", "tailscale").Logger()
-		tsServer := tsnetwrap.New(srv.Handler, tsLogger, func(st tsnetwrap.Status) {
+		onTSStatus := func(st tsnetwrap.Status) {
 			app.EventHub().Emit(eventhub.EventTailscale, st)
-		})
-		app.SetTailscale(tsServer)
+		}
+		var tsManager tsnetwrap.Manager
+		if devBackend {
+			tsManager = tsnetwrap.NewRemoteClient(devTSControlSocket(), tsLogger, onTSStatus)
+			tsLogger.Info().Str("socket", devTSControlSocket()).Msg("dev-backend: driving tailscale via dev-proxy control socket")
+		} else {
+			tsManager = tsnetwrap.New(srv.Handler, tsLogger, onTSStatus)
+		}
+		app.SetTailscale(tsManager)
 
 		if cfg.Tailscale.Enabled.Value {
 			go func() {
-				if err := tsServer.Enable(appCtx, tsnetwrap.Config{
+				if err := tsManager.Enable(appCtx, tsnetwrap.Config{
 					Enabled:  true,
 					Hostname: cfg.Tailscale.Hostname.Value,
 					AuthKey:  cfg.Tailscale.AuthKey.Value,
@@ -203,6 +215,22 @@ var serveCmd = &cobra.Command{
 		os.Exit(0)
 		return nil
 	},
+}
+
+func init() {
+	serveCmd.Flags().Bool("dev-backend", false,
+		"Dev mode: serve the API on this port only and drive Tailscale via the `heya dev-proxy` control socket instead of an in-process node (used by `make dev`)")
+}
+
+// devTSControlSocket is the localhost unix socket the `heya dev-proxy`
+// front-door listens on for tailscale control and the --dev-backend server
+// dials. Both processes run from the repo root, so the default relative path
+// lines up; override with HEYA_DEV_TS_CONTROL if needed.
+func devTSControlSocket() string {
+	if v := os.Getenv("HEYA_DEV_TS_CONTROL"); v != "" {
+		return v
+	}
+	return "tmp/heya-dev-ts.sock"
 }
 
 // waitWithDeadline returns when wg.Wait() completes or when the deadline

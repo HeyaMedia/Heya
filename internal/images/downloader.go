@@ -13,6 +13,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const maxImageBytes = 25 << 20
+
 type Downloader struct {
 	dataDir string
 	client  *http.Client
@@ -59,15 +61,28 @@ func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirNam
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
 	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "image/") {
+		return "", fmt.Errorf("unexpected image content type %q downloading %s", ct, url)
+	}
 
-	f, err := os.Create(localPath)
+	tmp, err := os.CreateTemp(dir, "."+filename+"-*")
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		os.Remove(localPath)
+	n, err := io.Copy(tmp, io.LimitReader(resp.Body, maxImageBytes+1))
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return "", err
+	}
+	if n > maxImageBytes {
+		return "", fmt.Errorf("image exceeds %d bytes: %s", maxImageBytes, url)
+	}
+	if err := os.Rename(tmpPath, localPath); err != nil {
 		return "", err
 	}
 

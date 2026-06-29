@@ -1,0 +1,95 @@
+# syntax=docker/dockerfile:1.7
+#
+# Heya — Intel OpenVINO variant. Built FROM the main image; adds the OpenVINO
+# ONNX Runtime execution provider for sonic-analysis on Intel iGPU / Arc GPUs
+# (tested target: Arc A380 / DG2), plus the Intel GPU user-mode compute stack.
+# VAAPI/QSV video transcoding already works from the base via /dev/dri.
+#
+#   docker build -t heya:base .
+#   docker build -f Dockerfile.openvino --build-arg BASE_IMAGE=heya:base -t heya:openvino .
+#
+# amd64 ONLY — OpenVINO runtime + the onnxruntime-openvino wheel are x86_64.
+#
+# ONNX Runtime here comes from the official `onnxruntime-openvino` wheel — the
+# only prebuilt ORT+OpenVINO distribution (no MS/Intel C/C++ archive exists).
+# It pins ORT 1.24.1, which is exactly why the whole repo targets
+# onnxruntime_go v1.27.0 (ORT API 24): the single heya binary's C API must
+# match every variant's libonnxruntime. Keep all three in lockstep.
+#
+# Run — grant the Intel render node + the host's render group:
+#   docker run --device /dev/dri:/dev/dri --group-add "$(getent group render | cut -d: -f3)" \
+#     -p 8080:8080 -v $PWD/data:/data -e HEYA_DATABASE_URL=... heya:openvino
+
+ARG BASE_IMAGE=heya:base
+
+# ────────────────────────────────────────────────────────────────
+# Stage 1 — extract ORT + OpenVINO provider + bundled OV runtime from the wheel
+# ────────────────────────────────────────────────────────────────
+# The wheel ships, all under onnxruntime/capi/, a Python-free libonnxruntime.so
+# (usable from cgo), libonnxruntime_providers_{openvino,shared}.so, AND the full
+# bundled OpenVINO runtime (libopenvino*, libtbb, intel_gpu/cpu/auto plugins).
+# Co-locating the whole capi/ set lets each lib resolve its siblings via $ORIGIN.
+FROM debian:trixie-slim AS ov-libs
+ARG ONNXRUNTIME_OPENVINO_VERSION=1.24.1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates python3-pip unzip && rm -rf /var/lib/apt/lists/*
+RUN python3 -m pip download --no-deps --no-cache-dir \
+        "onnxruntime-openvino==${ONNXRUNTIME_OPENVINO_VERSION}" -d /tmp/whl && \
+    mkdir -p /staging && \
+    unzip -o /tmp/whl/onnxruntime_openvino-*.whl 'onnxruntime/capi/*' -d /tmp/ov && \
+    cp -P /tmp/ov/onnxruntime/capi/*.so* /staging/ && \
+    cd /staging && \
+    # The wheel ships only libonnxruntime.so.X.Y.Z — add the SONAME + linker
+    # symlinks defaultOnnxLib() + ldconfig expect.
+    ln -sf "libonnxruntime.so.${ONNXRUNTIME_OPENVINO_VERSION}" libonnxruntime.so.1 && \
+    ln -sf "libonnxruntime.so.${ONNXRUNTIME_OPENVINO_VERSION}" libonnxruntime.so
+
+# ────────────────────────────────────────────────────────────────
+# Stage 2 — final: main image + OpenVINO ORT + Intel GPU runtime
+# ────────────────────────────────────────────────────────────────
+FROM ${BASE_IMAGE} AS runtime
+
+# Intel GPU user-mode stack for the Arc / DG2 OpenVINO GPU plugin. trixie ships
+# the kernel i915 driver + libze1 (Level Zero loader) but NOT the Intel compute
+# runtime / IGC / a new-enough GMM — pull those as .debs from Intel's GitHub
+# releases (built for Ubuntu 24.04; install on trixie via glibc forward-compat).
+# libigdgmm12 22.10 is mandatory: libze-intel-gpu1 needs >= 22.9, newer than
+# trixie's packaged 22.7.x.
+ARG INTEL_COMPUTE_RUNTIME=26.22.38646.4
+ARG INTEL_IGC=v2.36.3
+ARG INTEL_IGC_BUILD=2.36.3+21719
+ARG INTEL_GMM_VERSION=22.10.0
+RUN install_packages ca-certificates curl ocl-icd-libopencl1 libze1 && \
+    cd /tmp && \
+    igc="https://github.com/intel/intel-graphics-compiler/releases/download/${INTEL_IGC}" && \
+    cr="https://github.com/intel/compute-runtime/releases/download/${INTEL_COMPUTE_RUNTIME}" && \
+    curl -fsSLO "${igc}/intel-igc-core-2_${INTEL_IGC_BUILD}_amd64.deb" && \
+    curl -fsSLO "${igc}/intel-igc-opencl-2_${INTEL_IGC_BUILD}_amd64.deb" && \
+    curl -fsSLO "${cr}/intel-opencl-icd_${INTEL_COMPUTE_RUNTIME}-0_amd64.deb" && \
+    curl -fsSLO "${cr}/libze-intel-gpu1_${INTEL_COMPUTE_RUNTIME}-0_amd64.deb" && \
+    curl -fsSLO "${cr}/libigdgmm12_${INTEL_GMM_VERSION}_amd64.deb" && \
+    # dpkg -i resolves the inter-.deb deps when all are present together; -f
+    # backfills any base system dep. Then drop curl again.
+    (dpkg -i ./*.deb || apt-get update && apt-get install -f -y) && \
+    rm -f ./*.deb && \
+    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# Replace the base CPU onnxruntime with the OpenVINO-enabled build + its
+# co-located OpenVINO runtime. defaultOnnxLib() resolves the same path, so the
+# providers (found via $ORIGIN, next to libonnxruntime.so) load with no Go-side
+# change. ldconfig refreshes the SONAME cache.
+RUN rm -f /usr/lib/x86_64-linux-gnu/libonnxruntime.so*
+COPY --from=ov-libs /staging/. /usr/lib/x86_64-linux-gnu/
+RUN ldconfig
+
+# OpenVINO EP, GPU device by default. Falls back to the OpenVINO CPU plugin
+# when no Intel GPU is present, so the image still boots without /dev/dri.
+# cache_dir lives under /data so the GPU plugin's compiled-kernel cache (the
+# expensive first-inference JIT, tens of seconds across the model set) survives
+# container restarts and is reused — set it on the persisted data volume.
+ENV HEYA_SONIC_ACCELERATOR=openvino \
+    HEYA_SONIC_OPENVINO_DEVICE=GPU \
+    HEYA_SONIC_OPENVINO_CACHE_DIR=/data/openvino-cache
+
+ENTRYPOINT ["/usr/local/bin/heya"]
+CMD ["serve"]

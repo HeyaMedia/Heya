@@ -536,7 +536,8 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.f
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
        mi.title AS artist_name,
-       mi.slug AS artist_slug
+       mi.slug AS artist_slug,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM tracks t
 JOIN albums a ON a.id = t.album_id
 JOIN artists ar ON ar.id = a.artist_id
@@ -585,6 +586,7 @@ type SearchTracksRow struct {
 	ArtistMediaItemID int64       `json:"artist_media_item_id"`
 	ArtistName        string      `json:"artist_name"`
 	ArtistSlug        string      `json:"artist_slug"`
+	Available         bool        `json:"available"`
 }
 
 func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]SearchTracksRow, error) {
@@ -619,6 +621,7 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.ArtistMediaItemID,
 			&i.ArtistName,
 			&i.ArtistSlug,
+			&i.Available,
 		); err != nil {
 			return nil, err
 		}

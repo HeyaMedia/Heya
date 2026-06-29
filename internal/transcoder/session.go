@@ -287,6 +287,18 @@ func (s *TranscodeSession) needsNewHead(idx int) bool {
 	return dist > seekThresholdSegs
 }
 
+func (s *TranscodeSession) setHeadCurrent(head *Head, seg int) {
+	s.mu.Lock()
+	head.CurrentSeg = seg
+	s.mu.Unlock()
+}
+
+func (s *TranscodeSession) headCurrent(head *Head) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return head.CurrentSeg
+}
+
 // killHead must be called with s.mu held. It detaches the head pointer,
 // drops the mutex while waiting for the head goroutine to finish, then
 // re-acquires the mutex. Dropping the mutex is essential to avoid deadlocks
@@ -391,7 +403,7 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 
 	log.Info().
 		Str("key", s.Key).
-		Str("file", s.FilePath).
+		Str("file", vfs.RedactPath(s.FilePath)).
 		Int("start_seg", head.StartSeg).
 		Float64("start_time", opts.StartTime).
 		Int("audio", opts.AudioTrack).
@@ -427,7 +439,7 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 			}
 			log.Warn().Err(cmdErr).Str("key", s.Key).Int("exit_code", exitCode).Msg(label + " failed")
 		} else {
-			log.Info().Str("key", s.Key).Int("last_seg", head.CurrentSeg).Msg(label + " finished")
+			log.Info().Str("key", s.Key).Int("last_seg", s.headCurrent(head)).Msg(label + " finished")
 		}
 	}
 
@@ -463,7 +475,7 @@ func (s *TranscodeSession) runHeadTS(ctx context.Context, head *Head, cmd *exec.
 			continue
 		}
 
-		head.CurrentSeg = segIdx
+		s.setHeadCurrent(head, segIdx)
 		s.markSegmentReady(segIdx)
 
 		if segIdx > head.StartSeg && s.segmentAlreadyDone(segIdx+1) {
@@ -578,7 +590,7 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 			}
 			// "next exists → previous is flushed"
 			s.markSegmentReady(idx - 1)
-			head.CurrentSeg = idx - 1
+			s.setHeadCurrent(head, idx-1)
 			if idx-1 > head.StartSeg && s.segmentAlreadyDone(idx+1) {
 				log.Info().Str("key", s.Key).Int("seg", idx-1).Msg("head reached completed territory, stopping")
 				s.setStopReason(StopReasonCompleted)
@@ -641,9 +653,11 @@ func (s *TranscodeSession) reconcileSegmentsFromFS(head *Head) {
 	for i := head.StartSeg; i <= cutoff && i < s.TotalSegs; i++ {
 		s.markSegmentReady(i)
 	}
+	s.mu.Lock()
 	if maxIdx > head.CurrentSeg {
 		head.CurrentSeg = maxIdx
 	}
+	s.mu.Unlock()
 }
 
 // markSegmentReady is safe to call concurrently and without holding s.mu.
@@ -721,20 +735,34 @@ type SessionManager struct {
 	hwAccel *HwAccelProvider // resolves lazily on first HWAccel() call
 	builder CommandBuilder
 
-	mu       sync.Mutex
-	sessions map[string]*TranscodeSession
+	mu          sync.Mutex
+	sessions    map[string]*TranscodeSession
+	cleanupStop chan struct{}
+	cleanupOnce sync.Once
 }
 
 func NewSessionManager(cache *CacheManager, hwAccel *HwAccelProvider, builder CommandBuilder) *SessionManager {
 	cache.Clear()
 	sm := &SessionManager{
-		cache:    cache,
-		hwAccel:  hwAccel,
-		builder:  builder,
-		sessions: make(map[string]*TranscodeSession),
+		cache:       cache,
+		hwAccel:     hwAccel,
+		builder:     builder,
+		sessions:    make(map[string]*TranscodeSession),
+		cleanupStop: make(chan struct{}),
 	}
 	go sm.cleanupLoop()
 	return sm
+}
+
+func (m *SessionManager) Close() {
+	m.cleanupOnce.Do(func() { close(m.cleanupStop) })
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, s := range m.sessions {
+		s.Kill()
+		_ = os.RemoveAll(s.OutputDir)
+		delete(m.sessions, key)
+	}
 }
 
 // Builder returns the CommandBuilder used by this session manager.
@@ -842,7 +870,7 @@ func (m *SessionManager) GetOrCreate(fileID int64, filePath string, opts Transco
 
 	log.Info().
 		Str("key", key).
-		Str("file", filePath).
+		Str("file", vfs.RedactPath(filePath)).
 		Int("total_segs", totalSegs).
 		Float64("duration", duration).
 		Bool("fmp4", opts.UseFMP4).
@@ -855,7 +883,12 @@ func (m *SessionManager) GetOrCreate(fileID int64, filePath string, opts Transco
 func (m *SessionManager) cleanupLoop() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ticker.C:
+		case <-m.cleanupStop:
+			return
+		}
 		m.mu.Lock()
 		for key, s := range m.sessions {
 			s.mu.Lock()
@@ -890,8 +923,15 @@ func OpenSMBReader(smbPath string) (io.Reader, io.Closer, error) {
 		return nil, nil, fmt.Errorf("open smb file: %w", err)
 	}
 
+	reader, ok := f.(io.Reader)
+	if !ok {
+		_ = f.Close()
+		_ = source.Close()
+		return nil, nil, fmt.Errorf("smb file does not implement io.Reader: %s", smbPath)
+	}
+
 	closer := &multiCloser{closeFuncs: []func() error{f.Close, source.Close}}
-	return f.(io.Reader), closer, nil
+	return reader, closer, nil
 }
 
 type multiCloser struct {

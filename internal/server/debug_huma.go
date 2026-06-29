@@ -108,7 +108,7 @@ func wsOp(method, path, opID, summary, tag string) huma.Operation {
 
 // sseOp documents a text/event-stream response.
 func sseOp(method, path, opID, summary, tag string) huma.Operation {
-	o := secured(op(method, path, opID, summary, tag))
+	o := adminSecured(op(method, path, opID, summary, tag))
 	o.Responses = map[string]*huma.Response{
 		"200": {
 			Description: "Server-Sent Events stream — long-lived",

@@ -1,10 +1,13 @@
 [build]
   cmd = "go build -o ./tmp/heya ./cmd/heya"
-  # Dev topology: Caddy on :8080 fronts both Nuxt (:3000) and heya serve
-  # (:3050). Air only restarts the Go binary; Caddy and Nuxt stay alive so
-  # the browser never sees the front door go away. Prod is unaffected —
-  # `heya serve` defaults to HEYA_PORT=8080 when this env var isn't set.
-  full_bin = "HEYA_PORT=3050 ./tmp/heya serve"
+  # Dev topology: `heya dev-proxy` on :8080 is the stable front door (it
+  # fronts Nuxt :3000 + this backend :3050 and owns the Tailscale node).
+  # Air only restarts THIS backend; the front door and Nuxt stay alive, so
+  # the tailnet node + browser WS/HMR sockets never see the door go away.
+  # --dev-backend serves the API only and drives Tailscale over the
+  # front-door control socket. Prod is unaffected — `heya serve` (no flag)
+  # defaults to HEYA_PORT=8080 and runs tsnet in-process.
+  full_bin = "HEYA_PORT=3050 ./tmp/heya serve --dev-backend"
   delay = 1000
   exclude_dir = ["tmp", "web", "node_modules", "testdata", "fulldata", "data", "bin", ".git"]
   # heya.yaml is the live runtime config. UI/CLI writes to it (Tailscale
@@ -21,4 +24,10 @@
   time = false
 
 [misc]
-  clean_on_exit = true
+  # MUST stay false: `tmp/` is shared scratch — the `heya dev-proxy` front
+  # door also builds `tmp/heya-dev` and owns the live `tmp/heya-dev-ts.sock`
+  # control socket there. clean_on_exit=true would rm the whole dir when air
+  # exits or its pane restarts, wiping the running proxy's socket and breaking
+  # Tailscale control until the proxy restarts too. Air only overwrites its
+  # own `tmp/heya` on each build, so leaving the dir intact costs nothing.
+  clean_on_exit = false

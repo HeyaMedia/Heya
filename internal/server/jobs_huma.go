@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -48,10 +47,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/{id}/retry", "retry-job", "Retry a job", "Jobs")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if err := app.RetryJob(ctx, in.ID); err != nil {
-				if errors.Is(err, service.ErrJobNotRetryable) {
-					return nil, huma.Error404NotFound(err.Error())
-				}
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, humaServiceError(err)
 			}
 			return statusOK("retried"), nil
 		})
@@ -59,10 +55,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/{id}/cancel", "cancel-job", "Cancel a job", "Jobs")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if err := app.CancelJob(ctx, in.ID); err != nil {
-				if errors.Is(err, service.ErrJobNotCancellable) {
-					return nil, huma.Error404NotFound(err.Error())
-				}
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, humaServiceError(err)
 			}
 			return statusOK("cancelled"), nil
 		})
@@ -130,10 +123,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
 		}) (*StatusOutput, error) {
 			if err := app.TriggerTask(ctx, in.ID); err != nil {
-				if errors.Is(err, service.ErrSchedulerUnavailable) {
-					return nil, huma.Error503ServiceUnavailable(err.Error())
-				}
-				return nil, huma.Error409Conflict(err.Error())
+				return nil, humaServiceErrorStatus(err, http.StatusConflict)
 			}
 			return statusOK("started"), nil
 		})
@@ -143,10 +133,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
 		}) (*StatusOutput, error) {
 			if err := app.CancelTask(ctx, in.ID); err != nil {
-				if errors.Is(err, service.ErrSchedulerUnavailable) {
-					return nil, huma.Error503ServiceUnavailable(err.Error())
-				}
-				return nil, huma.Error409Conflict(err.Error())
+				return nil, humaServiceErrorStatus(err, http.StatusConflict)
 			}
 			return statusOK("cancelled"), nil
 		})

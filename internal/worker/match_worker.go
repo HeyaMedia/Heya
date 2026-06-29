@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -35,7 +36,7 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 		return nil
 	}
 
-	w.Progress.SetCurrentByKind(MetadataMatchArgs{}.Kind(), filepath.Base(file.Path))
+	w.Progress.SetCurrent(MetadataMatchArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(file.Path))
 
 	var parsed parser.ParsedStorageEntry
 	if err := json.Unmarshal(file.ParseResult, &parsed); err != nil {
@@ -72,7 +73,10 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 		// the rest. Only on first match — re-matches preserve existing
 		// enriched state.
 		if matchResult.IsNew {
-			if err := EnqueueEnrichTx(ctx, updated.MediaItemID.Int64, mediaType, EnrichSourceScan); err != nil {
+			client := river.ClientFromContext[pgx.Tx](ctx)
+			if client == nil {
+				log.Warn().Int64("media_id", updated.MediaItemID.Int64).Msg("enqueue enrich after match failed: no river client")
+			} else if err := enqueueEnrich(ctx, client, updated.MediaItemID.Int64, mediaType, EnrichSourceScan, false, job.Args.ScheduledTaskID, 0, 0, 0); err != nil {
 				log.Warn().Err(err).Int64("media_id", updated.MediaItemID.Int64).Msg("enqueue enrich after match failed")
 			}
 		}

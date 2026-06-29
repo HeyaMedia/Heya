@@ -2,13 +2,13 @@ package worker
 
 import (
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/taskdefs"
 )
 
 // TaskProgressBroadcaster is the thin glue between work workers and
-// the WebSocket. Workers call SetCurrentByKind / Set when they pick up
-// an item, the broadcaster resolves which scheduled task that kind
-// belongs to (via the inverted TaskKinds table) and fires a
-// task.progress event with the human-readable label.
+// the WebSocket. Workers call SetCurrent / Set when they pick up an item.
+// When a River job carries scheduled_task_id, the broadcaster uses that
+// explicit owner; otherwise it falls back to the unambiguous kind mapping.
 //
 // Counts (pending/running) are layered on by the periodic emitter in
 // eventhub/periodic.go — this type only handles the "currently working
@@ -30,14 +30,20 @@ func NewTaskProgressBroadcaster(hub EventPublisher) *TaskProgressBroadcaster {
 }
 
 // SetCurrentByKind emits a task.progress event with CurrentItem set,
-// resolving the owning task ID from the kind. No-op when the kind
-// isn't tracked (e.g. download_image, save_nfo — these aren't part of
-// any scheduled task's flow).
+// resolving the owning task ID from the kind. No-op when the kind is not
+// tracked or is shared by multiple scheduled tasks without an explicit task ID.
 func (b *TaskProgressBroadcaster) SetCurrentByKind(kind, item string) {
+	b.SetCurrent(kind, "", item)
+}
+
+// SetCurrent emits a task.progress event with CurrentItem set. scheduledTaskID
+// is preferred when present so shared child kinds (e.g. enrich_media_item) are
+// attributed to the task that fanned them out.
+func (b *TaskProgressBroadcaster) SetCurrent(kind, scheduledTaskID, item string) {
 	if b == nil || b.hub == nil {
 		return
 	}
-	taskID, ok := b.workToTask[kind]
+	taskID, ok := b.resolveTask(kind, scheduledTaskID)
 	if !ok {
 		return
 	}
@@ -69,10 +75,16 @@ func (b *TaskProgressBroadcaster) Set(taskID, kind, item string) {
 // surface the pipeline stage (Discogs heads, CLAP audio, etc.) on top
 // of the per-track event. The FE shows item + stage on separate lines.
 func (b *TaskProgressBroadcaster) SetStageByKind(kind, item, stage string) {
+	b.SetStage(kind, "", item, stage)
+}
+
+// SetStage is the same as SetCurrent but also sets a finer-grained sub-step
+// label.
+func (b *TaskProgressBroadcaster) SetStage(kind, scheduledTaskID, item, stage string) {
 	if b == nil || b.hub == nil {
 		return
 	}
-	taskID, ok := b.workToTask[kind]
+	taskID, ok := b.resolveTask(kind, scheduledTaskID)
 	if !ok {
 		return
 	}
@@ -85,45 +97,17 @@ func (b *TaskProgressBroadcaster) SetStageByKind(kind, item, stage string) {
 	})
 }
 
+func (b *TaskProgressBroadcaster) resolveTask(kind, scheduledTaskID string) (string, bool) {
+	if scheduledTaskID != "" && taskdefs.TaskOwnsKind(scheduledTaskID, kind) {
+		return scheduledTaskID, true
+	}
+	taskID, ok := b.workToTask[kind]
+	return taskID, ok
+}
+
 // buildWorkToTaskMap inverts the curated TaskKinds table so each work
 // kind maps back to its owning scheduled task ID. Computed once at
 // construction; the table is small and stable.
 func buildWorkToTaskMap() map[string]string {
-	out := map[string]string{}
-	for _, taskID := range scheduledTaskIDs {
-		for _, kind := range TaskKinds(taskID) {
-			// First task to claim a kind wins. TaskKinds() is curated
-			// so each kind is exclusive to one task — no collisions
-			// today.
-			if _, exists := out[kind]; !exists {
-				out[kind] = taskID
-			}
-		}
-	}
-	return out
-}
-
-// scheduledTaskIDs lists every task this binary knows about — both
-// the six scheduled-task IDs (rows in scheduled_tasks, kept in
-// lock-step with kickoffTaskIDs in kickoff_jobs.go and the enum in
-// jobs_huma.go) AND the synthetic buckets that group ad-hoc workers
-// for UI display. The name "scheduledTaskIDs" is a historical
-// artifact; it's actually the iteration source for the work→task
-// reverse-lookup map, which needs both kinds.
-var scheduledTaskIDs = []string{
-	// Scheduled tasks.
-	"scan_libraries",
-	"refresh_stale_items",
-	"scan_music_loudness",
-	"generate_trickplay",
-	"generate_thumbnails",
-	"analyze_music_facets",
-	// Synthetic buckets — no DB row, but every ad-hoc worker kind
-	// lives in one so its progress shows up as a labelled card.
-	"transcoding",
-	"artwork",
-	"nfo_writes",
-	"external_lookups",
-	"refresh_actions",
-	"cleanup",
+	return taskdefs.WorkToTask()
 }

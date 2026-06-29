@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // handleTMDBImageProxy serves images from image.tmdb.org through Heya so
@@ -51,7 +52,8 @@ func handleTMDBImageProxy() http.HandlerFunc {
 			http.Error(w, "upstream error", http.StatusBadGateway)
 			return
 		}
-		resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: see above
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req) //nolint:gosec // G704: see above
 		if err != nil {
 			http.Error(w, "upstream unreachable", http.StatusBadGateway)
 			return
@@ -60,6 +62,10 @@ func handleTMDBImageProxy() http.HandlerFunc {
 
 		if resp.StatusCode != http.StatusOK {
 			http.Error(w, "upstream "+resp.Status, resp.StatusCode)
+			return
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "image/") {
+			http.Error(w, "upstream returned non-image content", http.StatusBadGateway)
 			return
 		}
 

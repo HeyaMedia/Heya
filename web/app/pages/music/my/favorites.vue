@@ -50,16 +50,18 @@
       <AppContextMenu
         v-for="(t, i) in tracks"
         :key="`fav-${t.track_id}`"
-        :items="actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug })"
+        :items="actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })"
       >
       <li
         class="ms-fav-row"
-        @click="playFrom(i)"
+        :class="{ 'ms-fav-missing': t.available === false }"
+        @click="t.available !== false && playFrom(i)"
       >
         <div class="ms-fav-idx">{{ i + 1 }}</div>
         <div class="ms-fav-art">
           <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
-          <div class="ms-fav-play"><Icon name="play" :size="13" /></div>
+          <div v-if="t.available !== false" class="ms-fav-play"><Icon name="play" :size="13" /></div>
+          <div v-else class="ms-fav-play ms-fav-play-missing" title="Missing on disk"><Icon name="trash" :size="13" /></div>
         </div>
         <div class="ms-fav-meta-col">
           <div class="ms-fav-title-cell">{{ t.track_title }}</div>
@@ -103,6 +105,7 @@ interface RatedTrackRow {
   artist_name: string
   artist_slug: string
   rating: number
+  available?: boolean
 }
 interface ListBody { items: RatedTrackRow[]; total: number }
 
@@ -168,15 +171,19 @@ function formatDuration(sec: number): string {
 }
 
 async function playFrom(i: number) {
-  const built: Track[] = tracks.value.map((t) => ({
+  const clicked = tracks.value[i]
+  if (!clicked || clicked.available === false) return
+  const built: Track[] = tracks.value.filter((t) => t.available !== false).map((t) => ({
     id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration,
     stream_url: `/api/music/tracks/${t.track_id}/stream`,
     album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug,
     poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
     source: 'favorites',
+    available: t.available,
   }))
+  if (!built.length) return
   queue.value = built
-  await play(built[i]!)
+  await play(built.find((b) => b.id === clicked.track_id) ?? built[0]!)
 }
 </script>
 
@@ -282,6 +289,9 @@ async function playFrom(i: number) {
   transition: opacity 0.15s;
 }
 .ms-fav-row:hover .ms-fav-play { opacity: 1; }
+.ms-fav-play-missing { opacity: 1; color: #d96b6b; }
+.ms-fav-missing { opacity: 0.5; cursor: default; }
+.ms-fav-missing:hover { background: transparent; }
 .ms-fav-meta-col { min-width: 0; }
 .ms-fav-title-cell {
   font-size: 14px; font-weight: 500;

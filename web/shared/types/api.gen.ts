@@ -21,6 +21,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/db": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Database size, pool stats, version */
+        get: operations["admin-db"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/listeners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** HTTP / WS listener inventory */
+        get: operations["admin-listeners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/log-level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current global log level */
+        get: operations["admin-get-log-level"];
+        /** Set the global log level at runtime */
+        put: operations["admin-set-log-level"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** All sessions across every user */
+        get: operations["admin-list-sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke any session by id */
+        delete: operations["admin-revoke-session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/sonicanalysis/fetch": {
         parameters: {
             query?: never;
@@ -73,15 +159,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/albums/{id}/cover": {
+    "/api/admin/storage": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Album cover bytes (local file or 302 to upstream URL) */
-        get: operations["album-cover"];
+        /** Storage usage for the data dir and every library path */
+        get: operations["admin-storage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -90,21 +176,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/albums/{id}/sonic-similar": {
+    "/api/admin/storage/scan": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Albums similar by sonic centroid */
-        get: operations["sonic-similar-albums"];
+        get?: never;
+        put?: never;
+        /** Kick off a disk-usage walk of library paths */
+        post: operations["admin-storage-scan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Process + runtime metadata */
+        get: operations["admin-system"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every user account */
+        get: operations["admin-list-users"];
+        put?: never;
+        /** Create a new user */
+        post: operations["admin-create-user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a user (and cascade their sessions) */
+        delete: operations["admin-delete-user"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset a user's password (admin override) */
+        post: operations["admin-reset-user-password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Toggle a user's admin flag */
+        patch: operations["admin-set-user-role"];
         trace?: never;
     };
     "/api/auth/login": {
@@ -758,6 +930,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/api-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List your personal API tokens */
+        get: operations["list-api-tokens"];
+        put?: never;
+        /** Mint a new API token */
+        post: operations["create-api-token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/api-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke an API token */
+        delete: operations["revoke-api-token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/auth-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List browser/CLI sessions for the current user */
+        get: operations["list-auth-sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/auth-sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out every other device */
+        post: operations["revoke-other-auth-sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/auth-sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Sign out a specific device */
+        delete: operations["revoke-auth-session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/favorites": {
         parameters: {
             query?: never;
@@ -784,6 +1042,23 @@ export interface paths {
         };
         /** Check whether an entity is favorited */
         get: operations["check-favorite"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/listening-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** User's taste profile: top genres, mood averages, tempo histogram */
+        get: operations["get-listening-stats"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1053,6 +1328,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change your password */
+        put: operations["change-password"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a playback event (video progress / music scrobble) */
+        post: operations["record-playback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/playback/{media_id}": {
         parameters: {
             query?: never;
@@ -1126,6 +1435,353 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/podcasts/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Episodes the user can resume */
+        get: operations["podcasts-continue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/podcasts/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update episode resume position */
+        post: operations["record-podcast-progress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/podcasts/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** User's podcast subscriptions */
+        get: operations["list-podcast-subscriptions"];
+        put?: never;
+        /** Subscribe to a podcast feed */
+        post: operations["subscribe-podcast"];
+        /** Unsubscribe from a podcast feed */
+        delete: operations["unsubscribe-podcast"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/radio/favorites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** User's favorited stations */
+        get: operations["list-radio-favorites"];
+        put?: never;
+        /** Save a station to favorites */
+        post: operations["add-radio-favorite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/radio/favorites/{uuid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unfavorite a station */
+        delete: operations["remove-radio-favorite"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/radio/play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a station play (recents + upstream click) */
+        post: operations["record-radio-play"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/radio/recents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** User's recently-played stations (deduped) */
+        get: operations["list-radio-recents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/albums": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Paginated rated albums */
+        get: operations["list-rated-albums"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/albums/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk lookup of album ratings */
+        post: operations["batch-album-ratings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/albums/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get user's rating for an album */
+        get: operations["get-album-rating"];
+        /** Rate an album (1..10; 0 clears) */
+        put: operations["set-album-rating"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Paginated rated artists */
+        get: operations["list-rated-artists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/artists/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk lookup of artist ratings */
+        post: operations["batch-artist-ratings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/artists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get user's rating for an artist */
+        get: operations["get-artist-rating"];
+        /** Rate an artist (1..10; 0 clears) */
+        put: operations["set-artist-rating"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/threshold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Where the favorites bar sits on the 1..10 scale */
+        get: operations["get-favorites-threshold"];
+        /** Move the favorites threshold (1..10) */
+        put: operations["set-favorites-threshold"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Paginated tracks the user has rated */
+        get: operations["list-rated-tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/tracks/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk lookup of ratings for a list of track IDs */
+        post: operations["batch-track-ratings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/ratings/tracks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get user's rating for a track (0 when unrated) */
+        get: operations["get-track-rating"];
+        /** Rate a track (1..10; 0 clears) */
+        put: operations["set-track-rating"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/recently-played": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** User's recently-played tracks (deduped) */
+        get: operations["list-recently-played"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/sessions/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Heartbeat a live playback session */
+        post: operations["session-heartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Tear down a live playback session */
+        delete: operations["end-session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/settings": {
         parameters: {
             query?: never;
@@ -1189,23 +1845,6 @@ export interface paths {
         get: operations["recently-watched"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/me/watch/{media_item_id}/progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Update playback progress for a media item */
-        post: operations["update-watch-progress"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1623,14 +2262,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/music/artists/{id}/similar": {
+    "/api/music/artists/{artist_slug}/albums/{album_slug}/cover": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Artists similar by metadata */
+        /** Album cover bytes (local file or 302 to upstream URL) */
+        get: operations["album-cover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/artists/{artist_slug}/albums/{album_slug}/sonic-similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Albums similar by sonic centroid */
+        get: operations["sonic-similar-albums"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/artists/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Artist detail by slug */
+        get: operations["get-music-artist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/artists/{slug}/albums": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Albums by artist (paginated) */
+        get: operations["list-artist-albums"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/artists/{slug}/play-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Artist's tracks ordered by user play count desc (top hits first) */
+        get: operations["artist-play-queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/artists/{slug}/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Artists similar by metadata (Last.fm / ListenBrainz) */
         get: operations["similar-artists"];
         put?: never;
         post?: never;
@@ -1640,7 +2364,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/music/artists/{id}/sonic-similar": {
+    "/api/music/artists/{slug}/sonic-similar": {
         parameters: {
             query?: never;
             header?: never;
@@ -1649,6 +2373,142 @@ export interface paths {
         };
         /** Artists similar by sonic centroid */
         get: operations["sonic-similar-artists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/artists/{slug}/top-tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Artist's Last.fm top tracks rail, with local linkage when owned */
+        get: operations["artist-top-tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/artists/{slug}/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tracks by artist (paginated) */
+        get: operations["list-artist-tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/browse/genres": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Genre-tile buckets ranked by track count */
+        get: operations["browse-music-genres"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/browse/genres/{name}/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tracks tagged with a genre */
+        get: operations["list-tracks-by-genre"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/browse/moods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mood-tile buckets (Happy, Party, …) */
+        get: operations["browse-music-moods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/browse/moods/{mood}/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tracks scoring high on a mood */
+        get: operations["list-tracks-by-mood"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/browse/tempo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** BPM-band tile buckets */
+        get: operations["browse-music-tempo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/browse/tempo/{band}/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tracks in a BPM band */
+        get: operations["list-tracks-by-tempo"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1674,6 +2534,193 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/music/home/lapsed-artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Artists user used to play but hasn't in months */
+        get: operations["music-home-lapsed-artists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/mixes-for-you": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auto-generated mixes from recent listening */
+        get: operations["music-home-mixes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/more-by-artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Random artists from user history with their albums */
+        get: operations["music-home-more-by-artists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/more-from-label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Albums on a label user listens to */
+        get: operations["music-home-more-from-label"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/more-in-genre": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Artists in a rotating user-genre pick */
+        get: operations["music-home-more-in-genre"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/most-played-last-month": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Top-played albums in the previous calendar month */
+        get: operations["music-home-most-played-month"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/on-this-day": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Anniversary releases (release_date matches today) */
+        get: operations["music-home-on-this-day"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/recent-playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** User playlists ordered by last play */
+        get: operations["music-home-recent-playlists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/recently-added": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Newest album/EP/single additions */
+        get: operations["music-home-recently-added"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/home/recently-played-artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Distinct artists from recent plays */
+        get: operations["music-home-recent-artists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/radio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Build an Instant Radio queue from a seed */
+        post: operations["build-music-radio"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/music/search-sonic": {
         parameters: {
             query?: never;
@@ -1691,6 +2738,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/music/stations/deep-cuts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tracks the user has barely played */
+        get: operations["stations-deep-cuts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/stations/library-radio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Random tracks from across the library */
+        get: operations["stations-library-radio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/stations/random-album": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One random album, end-to-end */
+        get: operations["stations-random-album"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/stations/time-travel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Random tracks from a year range */
+        get: operations["stations-time-travel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/music/tracks": {
         parameters: {
             query?: never;
@@ -1700,6 +2815,159 @@ export interface paths {
         };
         /** All music tracks */
         get: operations["list-music-tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Track detail with files + album/artist context */
+        get: operations["get-music-track"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Per-track ML/DSP facets */
+        get: operations["get-track-facets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/file/{track_file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Specific track file (bit-perfect) */
+        get: operations["stream-track-file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Available formats for a track */
+        get: operations["list-track-files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/lyrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Parsed lyrics (synced or plain) */
+        get: operations["get-track-lyrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/mix-to": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** DJ-style harmonically-compatible tracks (Camelot ±1, BPM ±5) */
+        get: operations["mix-to-tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/sonic-similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tracks similar to a seed by audio embedding */
+        get: operations["sonic-similar-tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Best-quality playable audio for a track */
+        get: operations["stream-track"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/music/tracks/{id}/waveform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Decimated waveform peaks */
+        get: operations["get-track-waveform"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1844,6 +3112,176 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/podcasts/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Podcast-Index category list */
+        get: operations["podcasts-categories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/podcasts/episode/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proxy a podcast episode audio URL */
+        get: operations["stream-podcast-episode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/podcasts/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Parse a podcast RSS feed by URL */
+        get: operations["podcasts-feed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/podcasts/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search podcasts by name / author / description */
+        get: operations["podcasts-search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/podcasts/trending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trending podcasts (optionally per-category) */
+        get: operations["podcasts-trending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/radio/countries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** All countries with at least one station */
+        get: operations["radio-countries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/radio/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search radio stations */
+        get: operations["radio-search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/radio/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proxy an internet-radio stream URL */
+        get: operations["stream-radio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/radio/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Most popular station tags */
+        get: operations["radio-tags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/radio/top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Top stations (votes / clicks / lastchange) */
+        get: operations["radio-top"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recommendations": {
         parameters: {
             query?: never;
@@ -1904,6 +3342,23 @@ export interface paths {
         };
         /** Lightweight cross-bucket search for the omni-search popover */
         get: operations["search-quick"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Active playback sessions across all users */
+        get: operations["list-active-sessions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2355,125 +3810,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tracks/{id}/facets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Per-track ML/DSP facets */
-        get: operations["get-track-facets"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tracks/{id}/file/{track_file_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Specific track file (bit-perfect) */
-        get: operations["stream-track-file"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tracks/{id}/files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Available formats for a track */
-        get: operations["list-track-files"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tracks/{id}/lyrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Parsed lyrics (synced or plain) */
-        get: operations["get-track-lyrics"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tracks/{id}/sonic-similar": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Tracks similar to a seed by audio embedding */
-        get: operations["sonic-similar-tracks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tracks/{id}/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Best-quality playable audio for a track */
-        get: operations["stream-track"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tracks/{id}/waveform": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Decimated waveform peaks */
-        get: operations["get-track-waveform"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/transcode/cache": {
         parameters: {
             query?: never;
@@ -2546,6 +3882,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ActiveSessionsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ActiveSessionsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["Session"][] | null;
+        };
         ActivityItem: {
             image_url?: string;
             /** Format: int64 */
@@ -2568,24 +3913,280 @@ export interface components {
             /** Format: int64 */
             media_item_id: number;
         };
+        "Admin-create-userRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Admin-create-userRequest.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: email
+             * @example alice@example.com
+             */
+            email: string;
+            is_admin: boolean;
+            /** @example hunter2hunter2 */
+            password: string;
+            /** @example alice */
+            username: string;
+        };
+        "Admin-reset-user-passwordRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Admin-reset-user-passwordRequest.json
+             */
+            readonly $schema?: string;
+            new_password: string;
+        };
+        "Admin-set-log-levelRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Admin-set-log-levelRequest.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description New zerolog level
+             * @enum {string}
+             */
+            level: "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "panic" | "disabled";
+        };
+        "Admin-set-user-roleRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Admin-set-user-roleRequest.json
+             */
+            readonly $schema?: string;
+            is_admin: boolean;
+        };
+        "Admin-storage-scanRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Admin-storage-scanRequest.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description Scan a single library; omit to scan all
+             */
+            library_id?: number;
+        };
+        AdminDBBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AdminDBBody.json
+             */
+            readonly $schema?: string;
+            /** Format: int64 */
+            acquire_count: number;
+            /** Format: int64 */
+            acquire_duration_ms: number;
+            /** Format: int32 */
+            acquired_connections: number;
+            /** Format: int64 */
+            canceled_acquire_count: number;
+            database_name: string;
+            /** Format: int64 */
+            empty_acquire_count: number;
+            error?: string;
+            /** Format: int32 */
+            idle_connections: number;
+            /** Format: int32 */
+            max_connections: number;
+            /** Format: int64 */
+            size_bytes: number;
+            top_tables: components["schemas"]["AdminDBTable"][] | null;
+            /** Format: int32 */
+            total_connections: number;
+            version: string;
+        };
+        AdminDBTable: {
+            name: string;
+            /** Format: int64 */
+            size_bytes: number;
+        };
+        AdminListener: {
+            address: string;
+            description?: string;
+            kind: string;
+            public: boolean;
+            tls: boolean;
+        };
+        AdminListenersBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AdminListenersBody.json
+             */
+            readonly $schema?: string;
+            listeners: components["schemas"]["AdminListener"][] | null;
+            /** Format: int64 */
+            ws_subscribers: number;
+        };
+        AdminLogLevelBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AdminLogLevelBody.json
+             */
+            readonly $schema?: string;
+            available: string[] | null;
+            /** @description Level loaded from HEYA_LOG_LEVEL at boot */
+            boot_level: string;
+            level: string;
+        };
+        AdminSessionView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: int64 */
+            id: number;
+            ip?: string;
+            is_admin: boolean;
+            kind: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            name?: string;
+            user_agent?: string;
+            /** Format: int64 */
+            user_id: number;
+            username: string;
+        };
+        AdminStorageBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AdminStorageBody.json
+             */
+            readonly $schema?: string;
+            data_dir: string;
+            data_dir_volume: components["schemas"]["AdminStoragePath"];
+            /** @description Cached results from the last scan_library_disk run; empty until a scan completes */
+            library_disk_usage: components["schemas"]["LibraryDiskUsage"][] | null;
+            library_paths: components["schemas"]["AdminStoragePath"][] | null;
+            transcode_dir: string;
+            /** Format: int64 */
+            transcode_items: number;
+            /** Format: int64 */
+            transcode_max_gb: number;
+            /** Format: int64 */
+            transcode_used_mb: number;
+            transcode_volume: components["schemas"]["AdminStoragePath"];
+        };
+        AdminStoragePath: {
+            error?: string;
+            exists: boolean;
+            /** Format: int64 */
+            free_bytes?: number;
+            is_dir: boolean;
+            label: string;
+            path: string;
+            /** Format: int64 */
+            total_bytes?: number;
+            /** Format: int64 */
+            used_bytes?: number;
+            /** Format: int64 */
+            used_pct?: number;
+        };
+        AdminSystemBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AdminSystemBody.json
+             */
+            readonly $schema?: string;
+            build?: {
+                [key: string]: unknown;
+            };
+            /** Format: int64 */
+            gc_pause_last_ns: number;
+            go_version: string;
+            goarch: string;
+            /** Format: int64 */
+            gomaxprocs: number;
+            goos: string;
+            /** Format: int64 */
+            goroutines: number;
+            /** Format: int64 */
+            heap_alloc_bytes: number;
+            /** Format: int64 */
+            heap_inuse_bytes: number;
+            hostname: string;
+            /** Format: int64 */
+            num_cgo_call: number;
+            /** Format: int64 */
+            num_cpu: number;
+            /** Format: int32 */
+            num_gc: number;
+            /** Format: int64 */
+            pid: number;
+            /** Format: int64 */
+            stack_bytes: number;
+            /** @example 2026-05-25T08:14:01Z */
+            started_at: string;
+            /** Format: int64 */
+            sys_bytes: number;
+            /** Format: int64 */
+            uptime_seconds: number;
+            /** Format: int64 */
+            ws_subscribers: number;
+        };
+        AdminUserView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AdminUserView.json
+             */
+            readonly $schema?: string;
+            created_at: string;
+            email: string;
+            /** Format: int64 */
+            id: number;
+            is_admin: boolean;
+            username: string;
+        };
         Album: {
             album_type: string;
+            artist_credits: string;
             /** Format: int64 */
             artist_id: number;
             barcode: string;
+            catalog_no: string;
             country: string;
             cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
             genres: string[] | null;
             /** Format: int64 */
             id: number;
             integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
             label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
             loudness_analyzed_at: components["schemas"]["Timestamptz"];
             loudness_range_db: components["schemas"]["Numeric"];
             musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rating: components["schemas"]["Numeric"];
             release_date: components["schemas"]["Date"];
             search_vector: unknown;
+            secondary_types: string[] | null;
             slug: string;
+            styles: string[] | null;
             tags: string[] | null;
             title: string;
             /** Format: int32 */
@@ -2594,6 +4195,26 @@ export interface components {
             total_tracks: number;
             true_peak_db: components["schemas"]["Numeric"];
             year: string;
+        };
+        AlbumResultsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AlbumResultsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["SimilarAlbumsRow"][] | null;
+        };
+        ApiTokenView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            last_seen_at: string;
+            name: string;
         };
         "Apply-identifyRequest": {
             /**
@@ -2605,19 +4226,95 @@ export interface components {
             provider_id: string;
             provider_name: string;
         };
-        Artist: {
-            biography: string;
-            cover_art_enriched_at: components["schemas"]["Timestamptz"];
-            disambiguation: string;
-            discography_enriched_at: components["schemas"]["Timestamptz"];
+        ArtistMember: {
+            /** Format: int64 */
+            begin_year?: number;
+            /** Format: int64 */
+            end_year?: number;
+            mbid?: string;
+            name: string;
+        };
+        ArtistPlayQueueBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ArtistPlayQueueBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListArtistTracksTopPlayedFirstRow"][] | null;
+        };
+        ArtistResultsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ArtistResultsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["SimilarArtistsRow"][] | null;
+        };
+        ArtistTopTrackRow: {
+            /** Format: int64 */
+            listeners: number;
+            /** Format: int64 */
+            local_album_id?: number;
+            local_album_slug?: string;
+            local_album_title?: string;
+            local_album_year?: string;
+            local_cover_path?: string;
+            /** Format: int32 */
+            local_duration?: number;
+            /** Format: int64 */
+            local_track_id?: number;
+            mbid?: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            rank: number;
+            title: string;
+            url?: string;
+        };
+        ArtistURL: {
+            type: string;
+            url: string;
+        };
+        ArtistView: {
+            aliases?: string[] | null;
+            annotation?: string;
+            artist_type?: string;
+            begin_date?: string;
+            /** Format: int32 */
+            begin_year?: number;
+            biography?: string;
+            birthplace?: string;
+            cover_art_enriched_at?: string;
+            deathday?: string;
+            disambiguation?: string;
+            discography_enriched_at?: string;
+            end_date?: string;
+            ended?: boolean;
+            groups?: components["schemas"]["ArtistMember"][] | null;
             /** Format: int64 */
             id: number;
             /** Format: int64 */
+            listeners?: number;
+            /** Format: int64 */
             media_item_id: number;
-            musicbrainz_id: string;
+            members?: components["schemas"]["ArtistMember"][] | null;
+            musicbrainz_id?: string;
             name: string;
-            search_vector: unknown;
-            sort_name: string;
+            /** Format: int64 */
+            playcount?: number;
+            /** Format: int32 */
+            popularity?: number;
+            profiles?: {
+                [key: string]: string;
+            };
+            sort_name?: string;
+            tags?: string[] | null;
+            urls?: components["schemas"]["ArtistURL"][] | null;
+            wikipedia_links?: {
+                [key: string]: string;
+            };
         };
         ArtworkBody: {
             /**
@@ -2653,6 +4350,59 @@ export interface components {
             token: string;
             user: components["schemas"]["UserView"];
         };
+        AuthSessionView: {
+            /** Format: date-time */
+            created_at: string;
+            current: boolean;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: int64 */
+            id: number;
+            ip?: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            user_agent?: string;
+        };
+        "Batch-album-ratingsRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Batch-album-ratingsRequest.json
+             */
+            readonly $schema?: string;
+            album_ids: number[] | null;
+        };
+        "Batch-artist-ratingsRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Batch-artist-ratingsRequest.json
+             */
+            readonly $schema?: string;
+            artist_ids: number[] | null;
+        };
+        "Batch-track-ratingsRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Batch-track-ratingsRequest.json
+             */
+            readonly $schema?: string;
+            /** @description List of track IDs to look up */
+            track_ids: number[] | null;
+        };
+        BatchRatingsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/BatchRatingsBody.json
+             */
+            readonly $schema?: string;
+            /** @description Map of track_id (as string) → rating 1..10. Tracks the user hasn't rated are omitted entirely. */
+            ratings: {
+                [key: string]: number;
+            };
+        };
         CancelBody: {
             /**
              * Format: uri
@@ -2663,6 +4413,23 @@ export interface components {
             /** Format: int64 */
             cancelled: number;
             status: string;
+        };
+        Category: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        "Change-passwordRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Change-passwordRequest.json
+             */
+            readonly $schema?: string;
+            /** @description Current password (verified before swap) */
+            current_password: string;
+            /** @description New password — minimum 8 chars */
+            new_password: string;
         };
         ClearedBody: {
             /**
@@ -2705,10 +4472,59 @@ export interface components {
             collection: components["schemas"]["Collection"];
             movies: components["schemas"]["MediaItem"][] | null;
         };
+        ContinueWatchingEnrichedRow: {
+            /** Format: int64 */
+            entity_id: number;
+            entity_type: string;
+            episode_number: components["schemas"]["Int4"];
+            episode_title: components["schemas"]["Text"];
+            /** Format: int64 */
+            file_id: number;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            library_id: number;
+            /** Format: int64 */
+            media_item_id: number;
+            media_type: string;
+            poster_path: string;
+            /** Format: int32 */
+            progress_seconds: number;
+            season_number: components["schemas"]["Int4"];
+            slug: string;
+            title: string;
+            /** Format: int32 */
+            total_seconds: number;
+            updated_at: components["schemas"]["Timestamptz"];
+        };
         CountLibraryFilesByStatusRow: {
             /** Format: int64 */
             count: number;
             status: string;
+        };
+        Country: {
+            iso_3166_1: string;
+            name: string;
+            /** Format: int64 */
+            stationcount: number;
+        };
+        "Create-api-tokenRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Create-api-tokenRequest.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description 0 means never expires
+             */
+            expires_in_days: number;
+            /**
+             * @description Human label so you can recognise the token
+             * @example Backup script
+             */
+            name: string;
         };
         "Create-user-listRequest": {
             /**
@@ -2734,6 +4550,24 @@ export interface components {
             media_type: "movie" | "tv" | "music" | "book" | "comic" | "podcast" | "radio";
             /** @example Saturday night watchlist */
             name: string;
+        };
+        CreateApiTokenResult: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/CreateApiTokenResult.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            last_seen_at: string;
+            name: string;
+            token: string;
         };
         CreateLibraryInputBody: {
             /**
@@ -2982,6 +4816,11 @@ export interface components {
             env_var?: string;
             source: string;
         };
+        Float4: {
+            /** Format: float */
+            Float32: number;
+            Valid: boolean;
+        };
         FormFile: {
             ContentType: string;
             Filename: string;
@@ -3014,6 +4853,22 @@ export interface components {
             readonly $schema?: string;
             funnel: boolean;
         };
+        GenreBucket: {
+            label: string;
+            name: string;
+            parent: string;
+            /** Format: int64 */
+            track_count: number;
+        };
+        GenreBucketsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/GenreBucketsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["GenreBucket"][] | null;
+        };
         GenreResult: {
             /**
              * Format: uri
@@ -3031,6 +4886,15 @@ export interface components {
             /** Format: float */
             score: number;
         };
+        GenreTracksBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/GenreTracksBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListTracksByGenreRow"][] | null;
+        };
         "Get-user-stateRequest": {
             /**
              * Format: uri
@@ -3042,6 +4906,54 @@ export interface components {
             scope: "movies" | "series" | "seasons" | "episodes";
             /** Format: int64 */
             series_id?: number;
+        };
+        GetMusicArtistBySlugRow: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/GetMusicArtistBySlugRow.json
+             */
+            readonly $schema?: string;
+            /** Format: int64 */
+            album_count: number;
+            aliases: string[] | null;
+            annotation: string;
+            artist_type: string;
+            begin_date: string;
+            /** Format: int32 */
+            begin_year: number;
+            biography: string;
+            birthplace: string;
+            cover_art_enriched_at: components["schemas"]["Timestamptz"];
+            deathday: string;
+            disambiguation: string;
+            discography_enriched_at: components["schemas"]["Timestamptz"];
+            end_date: string;
+            ended: boolean;
+            groups: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            listeners: number;
+            /** Format: int64 */
+            media_item_id: number;
+            members: string;
+            musicbrainz_id: string;
+            name: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            poster_path: string;
+            profiles: string;
+            search_vector: unknown;
+            slug: string;
+            sort_name: string;
+            tags: string[] | null;
+            /** Format: int64 */
+            track_count: number;
+            urls: string;
+            wikipedia_links: string;
         };
         HealthBody: {
             /**
@@ -3091,6 +5003,11 @@ export interface components {
             readonly $schema?: string;
             ids: number[] | null;
         };
+        Int2: {
+            /** Format: int32 */
+            Int16: number;
+            Valid: boolean;
+        };
         Int4: {
             /** Format: int32 */
             Int32: number;
@@ -3100,15 +5017,6 @@ export interface components {
             /** Format: int64 */
             Int64: number;
             Valid: boolean;
-        };
-        ItemsBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/ItemsBody.json
-             */
-            readonly $schema?: string;
-            items: unknown;
         };
         JobListResult: {
             /**
@@ -3169,6 +5077,43 @@ export interface components {
             code: string;
             /** Format: int64 */
             count: number;
+        };
+        LapsedArtistEntry: {
+            albums: components["schemas"]["ListAlbumsByArtistIDForShelfRow"][] | null;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: date-time */
+            last_played_at: string;
+            /** Format: int64 */
+            media_item_id: number;
+            /** Format: int64 */
+            months_lapsed: number;
+            /** Format: int64 */
+            play_count: number;
+        };
+        LapsedShelfBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/LapsedShelfBody.json
+             */
+            readonly $schema?: string;
+            artists: components["schemas"]["LapsedArtistEntry"][] | null;
+            enabled: boolean;
+            since_label: string;
+        };
+        LibraryDiskUsage: {
+            /** Format: int64 */
+            bytes: number;
+            /** Format: int64 */
+            file_count: number;
+            /** Format: int64 */
+            library_id: number;
+            path: string;
+            /** Format: date-time */
+            scanned_at: string;
         };
         LibraryFile: {
             content_hash: string;
@@ -3248,6 +5193,117 @@ export interface components {
             name?: components["schemas"]["FieldSource"];
             paths?: components["schemas"]["FieldSource"];
         };
+        ListAlbumsByArtistIDForShelfRow: {
+            album_type: string;
+            artist_credits: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            barcode: string;
+            catalog_no: string;
+            country: string;
+            cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
+            genres: string[] | null;
+            /** Format: int64 */
+            id: number;
+            integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
+            label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
+            loudness_analyzed_at: components["schemas"]["Timestamptz"];
+            loudness_range_db: components["schemas"]["Numeric"];
+            musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rating: components["schemas"]["Numeric"];
+            release_date: components["schemas"]["Date"];
+            search_vector: unknown;
+            secondary_types: string[] | null;
+            slug: string;
+            styles: string[] | null;
+            tags: string[] | null;
+            title: string;
+            /** Format: int32 */
+            total_discs: number;
+            /** Format: int32 */
+            total_tracks: number;
+            /** Format: int64 */
+            track_count: number;
+            true_peak_db: components["schemas"]["Numeric"];
+            year: string;
+        };
+        ListAlbumsByArtistSlugRow: {
+            album_type: string;
+            artist_credits: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            barcode: string;
+            catalog_no: string;
+            country: string;
+            cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
+            genres: string[] | null;
+            /** Format: int64 */
+            id: number;
+            integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
+            label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
+            loudness_analyzed_at: components["schemas"]["Timestamptz"];
+            loudness_range_db: components["schemas"]["Numeric"];
+            musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rating: components["schemas"]["Numeric"];
+            release_date: components["schemas"]["Date"];
+            search_vector: unknown;
+            secondary_types: string[] | null;
+            slug: string;
+            styles: string[] | null;
+            tags: string[] | null;
+            title: string;
+            /** Format: int32 */
+            total_discs: number;
+            /** Format: int32 */
+            total_tracks: number;
+            /** Format: int64 */
+            track_count: number;
+            true_peak_db: components["schemas"]["Numeric"];
+            year: string;
+        };
+        ListAlbumsByLabelRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_label: string;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+        };
         ListAllCollectionsRow: {
             backdrop_path: string;
             external_ids: string;
@@ -3265,92 +5321,34 @@ export interface components {
             count: number;
             genre: unknown;
         };
-        ListCollectionsWithLocalMediaRow: {
+        ListArtistTopTracksForMixRow: {
+            album_cover_path: string;
             /** Format: int64 */
-            id: number;
-            /** Format: int32 */
-            movie_count: number;
-            name: string;
-            poster_path: string;
-        };
-        ListContinueWatchingRow: {
-            /** Format: int64 */
-            entity_id: number;
-            entity_type: string;
-            episode_number: components["schemas"]["Int4"];
-            episode_title: components["schemas"]["Text"];
-            /** Format: int64 */
-            id: number;
-            /** Format: int64 */
-            library_id: number;
-            /** Format: int64 */
-            media_item_id: number;
-            media_type: string;
-            poster_path: string;
-            /** Format: int32 */
-            progress_seconds: number;
-            season_number: components["schemas"]["Int4"];
-            slug: string;
-            title: string;
-            /** Format: int32 */
-            total_seconds: number;
-            updated_at: components["schemas"]["Timestamptz"];
-        };
-        ListMusicAlbumsRow: {
-            album_type: string;
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
             /** Format: int64 */
             artist_id: number;
             artist_name: string;
             artist_slug: string;
-            barcode: string;
-            country: string;
-            cover_path: string;
-            genres: string[] | null;
-            /** Format: int64 */
-            id: number;
-            integrated_lufs: components["schemas"]["Numeric"];
-            label: string;
-            loudness_analyzed_at: components["schemas"]["Timestamptz"];
-            loudness_range_db: components["schemas"]["Numeric"];
-            musicbrainz_id: string;
-            release_date: components["schemas"]["Date"];
-            search_vector: unknown;
-            slug: string;
-            tags: string[] | null;
-            title: string;
             /** Format: int32 */
-            total_discs: number;
+            disc_number: number;
             /** Format: int32 */
-            total_tracks: number;
+            duration: number;
             /** Format: int64 */
-            track_count: number;
-            true_peak_db: components["schemas"]["Numeric"];
-            year: string;
+            play_count: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
         };
-        ListMusicArtistsRow: {
-            /** Format: int64 */
-            album_count: number;
-            biography: string;
-            cover_art_enriched_at: components["schemas"]["Timestamptz"];
-            disambiguation: string;
-            discography_enriched_at: components["schemas"]["Timestamptz"];
-            /** Format: int64 */
-            id: number;
-            /** Format: int64 */
-            media_item_id: number;
-            musicbrainz_id: string;
-            name: string;
-            poster_path: string;
-            search_vector: unknown;
-            slug: string;
-            sort_name: string;
-            /** Format: int64 */
-            track_count: number;
-        };
-        ListMusicTracksRow: {
+        ListArtistTracksTopPlayedFirstRow: {
             album_cover_path: string;
             /** Format: int64 */
             album_id: number;
+            album_slug: string;
             album_title: string;
             album_year: string;
             /** Format: int64 */
@@ -3366,6 +5364,192 @@ export interface components {
             /** Format: int32 */
             track_number: number;
             track_title: string;
+            /** Format: int64 */
+            user_play_count: number;
+        };
+        ListArtistsByGenreRow: {
+            /** Format: int64 */
+            album_count: number;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int64 */
+            media_item_id: number;
+            poster_path: string;
+            /** Format: int64 */
+            track_count: number;
+        };
+        ListCollectionsWithLocalMediaRow: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int32 */
+            movie_count: number;
+            name: string;
+            poster_path: string;
+        };
+        ListMusicAlbumsRow: {
+            album_type: string;
+            artist_credits: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            barcode: string;
+            catalog_no: string;
+            country: string;
+            cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
+            genres: string[] | null;
+            /** Format: int64 */
+            id: number;
+            integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
+            label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
+            loudness_analyzed_at: components["schemas"]["Timestamptz"];
+            loudness_range_db: components["schemas"]["Numeric"];
+            musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rating: components["schemas"]["Numeric"];
+            release_date: components["schemas"]["Date"];
+            search_vector: unknown;
+            secondary_types: string[] | null;
+            slug: string;
+            styles: string[] | null;
+            tags: string[] | null;
+            title: string;
+            /** Format: int32 */
+            total_discs: number;
+            /** Format: int32 */
+            total_tracks: number;
+            /** Format: int64 */
+            track_count: number;
+            true_peak_db: components["schemas"]["Numeric"];
+            year: string;
+        };
+        ListMusicArtistsRow: {
+            /** Format: int64 */
+            album_count: number;
+            aliases: string[] | null;
+            annotation: string;
+            artist_type: string;
+            begin_date: string;
+            /** Format: int32 */
+            begin_year: number;
+            biography: string;
+            birthplace: string;
+            cover_art_enriched_at: components["schemas"]["Timestamptz"];
+            deathday: string;
+            disambiguation: string;
+            discography_enriched_at: components["schemas"]["Timestamptz"];
+            end_date: string;
+            ended: boolean;
+            groups: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            listeners: number;
+            /** Format: int64 */
+            media_item_id: number;
+            members: string;
+            musicbrainz_id: string;
+            name: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            poster_path: string;
+            profiles: string;
+            search_vector: unknown;
+            slug: string;
+            sort_name: string;
+            tags: string[] | null;
+            /** Format: int64 */
+            track_count: number;
+            urls: string;
+            wikipedia_links: string;
+        };
+        ListMusicTracksRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        ListOnThisDayAlbumsRow: {
+            album_type: string;
+            artist_credits: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            barcode: string;
+            catalog_no: string;
+            country: string;
+            cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
+            genres: string[] | null;
+            /** Format: int64 */
+            id: number;
+            integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
+            label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
+            loudness_analyzed_at: components["schemas"]["Timestamptz"];
+            loudness_range_db: components["schemas"]["Numeric"];
+            musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rating: components["schemas"]["Numeric"];
+            release_date: components["schemas"]["Date"];
+            /** Format: int32 */
+            release_year: number;
+            search_vector: unknown;
+            secondary_types: string[] | null;
+            slug: string;
+            styles: string[] | null;
+            tags: string[] | null;
+            title: string;
+            /** Format: int32 */
+            total_discs: number;
+            /** Format: int32 */
+            total_tracks: number;
+            /** Format: int64 */
+            track_count: number;
+            true_peak_db: components["schemas"]["Numeric"];
+            year: string;
         };
         ListPlaylistTracksRow: {
             added_at: components["schemas"]["Timestamptz"];
@@ -3391,26 +5575,73 @@ export interface components {
             track_number: number;
             track_title: string;
         };
+        ListRadioRecentsRow: {
+            /** Format: int32 */
+            bitrate: number;
+            codec: string;
+            country: string;
+            favicon: string;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            played_at: components["schemas"]["Timestamptz"];
+            stationuuid: string;
+            tags: string;
+            url: string;
+            /** Format: int64 */
+            user_id: number;
+        };
+        ListRecentUserPlaylistsRow: {
+            cover_path: string;
+            created_at: components["schemas"]["Timestamptz"];
+            description: string;
+            /** Format: int64 */
+            id: number;
+            last_activity_at: unknown;
+            last_played_at: unknown;
+            name: string;
+            /** Format: int64 */
+            track_count: number;
+            updated_at: components["schemas"]["Timestamptz"];
+        };
         ListRecentlyAddedAlbumsRow: {
             album_type: string;
+            artist_credits: string;
             /** Format: int64 */
             artist_id: number;
             artist_name: string;
             artist_slug: string;
             barcode: string;
+            catalog_no: string;
             country: string;
             cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
             genres: string[] | null;
             /** Format: int64 */
             id: number;
             integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
             label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
             loudness_analyzed_at: components["schemas"]["Timestamptz"];
             loudness_range_db: components["schemas"]["Numeric"];
             musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rating: components["schemas"]["Numeric"];
             release_date: components["schemas"]["Date"];
             search_vector: unknown;
+            secondary_types: string[] | null;
             slug: string;
+            styles: string[] | null;
             tags: string[] | null;
             title: string;
             /** Format: int32 */
@@ -3425,22 +5656,80 @@ export interface components {
         ListRecentlyAddedArtistsRow: {
             /** Format: int64 */
             album_count: number;
+            aliases: string[] | null;
+            annotation: string;
+            artist_type: string;
+            begin_date: string;
+            /** Format: int32 */
+            begin_year: number;
             biography: string;
+            birthplace: string;
             cover_art_enriched_at: components["schemas"]["Timestamptz"];
+            deathday: string;
             disambiguation: string;
             discography_enriched_at: components["schemas"]["Timestamptz"];
+            end_date: string;
+            ended: boolean;
+            groups: string;
             /** Format: int64 */
             id: number;
             /** Format: int64 */
+            listeners: number;
+            /** Format: int64 */
             media_item_id: number;
+            members: string;
             musicbrainz_id: string;
             name: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
             poster_path: string;
+            profiles: string;
             search_vector: unknown;
             slug: string;
             sort_name: string;
+            tags: string[] | null;
             /** Format: int64 */
             track_count: number;
+            urls: string;
+            wikipedia_links: string;
+        };
+        ListRecentlyPlayedArtistsRow: {
+            /** Format: int64 */
+            album_count: number;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            last_played_at: components["schemas"]["Timestamptz"];
+            /** Format: int64 */
+            media_item_id: number;
+            poster_path: string;
+            /** Format: int64 */
+            track_count: number;
+        };
+        ListRecentlyPlayedTracksRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            played_at: components["schemas"]["Timestamptz"];
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
         };
         ListRecentlyWatchedRow: {
             /** Format: int64 */
@@ -3458,27 +5747,133 @@ export interface components {
             title: string;
             updated_at: components["schemas"]["Timestamptz"];
         };
+        ListTracksByArtistSlugRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        ListTracksByGenreRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: float */
+            score: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        ListTracksByMoodRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: float */
+            score: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        ListTracksByTempoBandRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            bpm: components["schemas"]["Float4"];
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
         ListUserLovedAlbumsRow: {
             album_type: string;
+            artist_credits: string;
             /** Format: int64 */
             artist_id: number;
             artist_name: string;
             artist_slug: string;
             barcode: string;
+            catalog_no: string;
             country: string;
             cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
             genres: string[] | null;
             /** Format: int64 */
             id: number;
             integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
             label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
             loudness_analyzed_at: components["schemas"]["Timestamptz"];
             loudness_range_db: components["schemas"]["Numeric"];
             loved_at: components["schemas"]["Timestamptz"];
             musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rating: components["schemas"]["Numeric"];
             release_date: components["schemas"]["Date"];
             search_vector: unknown;
+            secondary_types: string[] | null;
             slug: string;
+            styles: string[] | null;
             tags: string[] | null;
             title: string;
             /** Format: int32 */
@@ -3493,23 +5888,45 @@ export interface components {
         ListUserLovedArtistsRow: {
             /** Format: int64 */
             album_count: number;
+            aliases: string[] | null;
+            annotation: string;
+            artist_type: string;
+            begin_date: string;
+            /** Format: int32 */
+            begin_year: number;
             biography: string;
+            birthplace: string;
             cover_art_enriched_at: components["schemas"]["Timestamptz"];
+            deathday: string;
             disambiguation: string;
             discography_enriched_at: components["schemas"]["Timestamptz"];
+            end_date: string;
+            ended: boolean;
+            groups: string;
             /** Format: int64 */
             id: number;
+            /** Format: int64 */
+            listeners: number;
             loved_at: components["schemas"]["Timestamptz"];
             /** Format: int64 */
             media_item_id: number;
+            members: string;
             musicbrainz_id: string;
             name: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
             poster_path: string;
+            profiles: string;
             search_vector: unknown;
             slug: string;
             sort_name: string;
+            tags: string[] | null;
             /** Format: int64 */
             track_count: number;
+            urls: string;
+            wikipedia_links: string;
         };
         ListUserLovedTracksRow: {
             album_cover_path: string;
@@ -3532,6 +5949,138 @@ export interface components {
             /** Format: int32 */
             track_number: number;
             track_title: string;
+        };
+        ListUserRatedAlbumsRow: {
+            album_type: string;
+            artist_credits: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            barcode: string;
+            catalog_no: string;
+            country: string;
+            cover_path: string;
+            /** Format: int32 */
+            duration_seconds: number;
+            explicit: boolean;
+            external_ids: string;
+            genres: string[] | null;
+            /** Format: int64 */
+            id: number;
+            integrated_lufs: components["schemas"]["Numeric"];
+            isrcs: string[] | null;
+            label: string;
+            language: string;
+            /** Format: int64 */
+            listeners: number;
+            loudness_analyzed_at: components["schemas"]["Timestamptz"];
+            loudness_range_db: components["schemas"]["Numeric"];
+            musicbrainz_id: string;
+            original_title: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            rated_at: components["schemas"]["Timestamptz"];
+            rating: components["schemas"]["Numeric"];
+            /** Format: int32 */
+            rating_2: number;
+            release_date: components["schemas"]["Date"];
+            search_vector: unknown;
+            secondary_types: string[] | null;
+            slug: string;
+            styles: string[] | null;
+            tags: string[] | null;
+            title: string;
+            /** Format: int32 */
+            total_discs: number;
+            /** Format: int32 */
+            total_tracks: number;
+            true_peak_db: components["schemas"]["Numeric"];
+            year: string;
+        };
+        ListUserRatedArtistsRow: {
+            /** Format: int64 */
+            album_count: number;
+            aliases: string[] | null;
+            annotation: string;
+            artist_type: string;
+            begin_date: string;
+            /** Format: int32 */
+            begin_year: number;
+            biography: string;
+            birthplace: string;
+            cover_art_enriched_at: components["schemas"]["Timestamptz"];
+            deathday: string;
+            disambiguation: string;
+            discography_enriched_at: components["schemas"]["Timestamptz"];
+            end_date: string;
+            ended: boolean;
+            groups: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            listeners: number;
+            /** Format: int64 */
+            media_item_id: number;
+            members: string;
+            musicbrainz_id: string;
+            name: string;
+            /** Format: int64 */
+            playcount: number;
+            /** Format: int32 */
+            popularity: number;
+            poster_path: string;
+            profiles: string;
+            rated_at: components["schemas"]["Timestamptz"];
+            /** Format: int32 */
+            rating: number;
+            search_vector: unknown;
+            slug: string;
+            sort_name: string;
+            tags: string[] | null;
+            /** Format: int64 */
+            track_count: number;
+            urls: string;
+            wikipedia_links: string;
+        };
+        ListUserRatedTracksRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            rated_at: components["schemas"]["Timestamptz"];
+            /** Format: int32 */
+            rating: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        ListeningStats: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ListeningStats.json
+             */
+            readonly $schema?: string;
+            mood_avg: components["schemas"]["TopUserMoodsRow"][] | null;
+            tempo_histogram: components["schemas"]["UserTempoHistogramRow"][] | null;
+            top_genres: components["schemas"]["TopUserGenresRow"][] | null;
+            /** Format: int64 */
+            total_plays: number;
         };
         LiveBody: {
             /**
@@ -3821,6 +6370,141 @@ export interface components {
             title: string;
             year: string;
         };
+        MixToBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MixToBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["MixToTracksRow"][] | null;
+        };
+        MixToTracksRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            bpm: components["schemas"]["Float4"];
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: float */
+            distance: number;
+            /** Format: int32 */
+            duration: number;
+            key_mode: components["schemas"]["Int2"];
+            key_root: components["schemas"]["Int2"];
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        MixesBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MixesBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["MusicMix"][] | null;
+        };
+        MoodBucket: {
+            key: string;
+            label: string;
+            /** Format: float */
+            threshold: number;
+            /** Format: int64 */
+            track_count: number;
+        };
+        MoodBucketsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MoodBucketsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["MoodBucket"][] | null;
+        };
+        MoodTracksBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MoodTracksBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListTracksByMoodRow"][] | null;
+        };
+        MoreByArtist: {
+            albums: components["schemas"]["ListAlbumsByArtistIDForShelfRow"][] | null;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int64 */
+            media_item_id: number;
+        };
+        MoreByArtistsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MoreByArtistsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["MoreByArtist"][] | null;
+        };
+        MoreFromLabelBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MoreFromLabelBody.json
+             */
+            readonly $schema?: string;
+            albums: components["schemas"]["ListAlbumsByLabelRow"][] | null;
+            enabled: boolean;
+            label: string;
+        };
+        MoreInGenreBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MoreInGenreBody.json
+             */
+            readonly $schema?: string;
+            artists: components["schemas"]["ListArtistsByGenreRow"][] | null;
+            enabled: boolean;
+            genre: string;
+        };
+        MostPlayedAlbumsInRangeRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int64 */
+            play_count: number;
+        };
+        MostPlayedBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MostPlayedBody.json
+             */
+            readonly $schema?: string;
+            albums: components["schemas"]["MostPlayedAlbumsInRangeRow"][] | null;
+            enabled: boolean;
+            window_label: string;
+        };
         MusicAlbumDetail: {
             /**
              * Format: uri
@@ -3829,7 +6513,7 @@ export interface components {
              */
             readonly $schema?: string;
             album: components["schemas"]["Album"];
-            artist: components["schemas"]["Artist"];
+            artist: components["schemas"]["ArtistView"];
             artist_slug: string;
             /** Format: int64 */
             media_item_id: number;
@@ -3844,6 +6528,21 @@ export interface components {
             readonly $schema?: string;
             recent_albums: components["schemas"]["ListRecentlyAddedAlbumsRow"][] | null;
             recent_artists: components["schemas"]["ListRecentlyAddedArtistsRow"][] | null;
+        };
+        MusicListPageListAlbumsByArtistSlugRow: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MusicListPageListAlbumsByArtistSlugRow.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListAlbumsByArtistSlugRow"][] | null;
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
         };
         MusicListPageListMusicAlbumsRow: {
             /**
@@ -3883,6 +6582,21 @@ export interface components {
              */
             readonly $schema?: string;
             items: components["schemas"]["ListMusicTracksRow"][] | null;
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
+        };
+        MusicListPageListTracksByArtistSlugRow: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MusicListPageListTracksByArtistSlugRow.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListTracksByArtistSlugRow"][] | null;
             /** Format: int32 */
             limit: number;
             /** Format: int32 */
@@ -3935,6 +6649,45 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        MusicMix: {
+            name: string;
+            /** Format: int64 */
+            seed_artist_id: number;
+            /** Format: int64 */
+            seed_artist_media_item_id: number;
+            seed_artist_name: string;
+            seed_artist_slug: string;
+            tracks: components["schemas"]["ListArtistTopTracksForMixRow"][] | null;
+        };
+        MusicTrackDetail: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MusicTrackDetail.json
+             */
+            readonly $schema?: string;
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            files: components["schemas"]["TrackFile"][] | null;
+            /** Format: int64 */
+            id: number;
+            lyrics_path: string;
+            title: string;
+            /** Format: int32 */
+            track_number: number;
+        };
         Numeric: {
             /** Format: int32 */
             Exp: number;
@@ -3943,6 +6696,24 @@ export interface components {
             Int: string | null;
             NaN: boolean;
             Valid: boolean;
+        };
+        OkBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/OkBody.json
+             */
+            readonly $schema?: string;
+            ok: boolean;
+        };
+        OnThisDayBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/OnThisDayBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListOnThisDayAlbumsRow"][] | null;
         };
         "Opensubtitles-downloadRequest": {
             /**
@@ -4021,6 +6792,38 @@ export interface components {
             rotate?: number;
             strip_dovi_el?: boolean;
         };
+        PlaybackEvent: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PlaybackEvent.json
+             */
+            readonly $schema?: string;
+            /** @description Whether playback reached the end / scrobble threshold */
+            completed: boolean;
+            /**
+             * Format: int64
+             * @description Movie media_item id, episode id, or track id
+             */
+            entity_id: number;
+            /**
+             * @description What's being played
+             * @enum {string}
+             */
+            entity_type: "movie" | "episode" | "track";
+            /**
+             * Format: int32
+             * @description How far into the item the player is
+             */
+            position_seconds: number;
+            /** @description Origin label: queue | radio | album | playlist | search | browse | similar */
+            source?: string;
+            /**
+             * Format: int32
+             * @description Total length (0 if unknown)
+             */
+            total_seconds: number;
+        };
         PlaybackPrefBody: {
             /**
              * Format: uri
@@ -4077,6 +6880,109 @@ export interface components {
             readonly $schema?: string;
             items: unknown;
         };
+        Podcast: {
+            artwork_url: string;
+            author: string;
+            categories: {
+                [key: string]: string;
+            };
+            description: string;
+            /** Format: int64 */
+            episode_count: number;
+            feed_url: string;
+            /** Format: int64 */
+            id: number;
+            language: string;
+            title: string;
+        };
+        PodcastCategoriesBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PodcastCategoriesBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["Category"][] | null;
+        };
+        PodcastContinueBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PodcastContinueBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["UserPodcastProgress"][] | null;
+        };
+        PodcastDetail: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PodcastDetail.json
+             */
+            readonly $schema?: string;
+            artwork_url: string;
+            author: string;
+            categories: string[] | null;
+            description: string;
+            episodes: components["schemas"]["PodcastEpisode"][] | null;
+            feed_url: string;
+            language: string;
+            link: string;
+            title: string;
+        };
+        PodcastEpisode: {
+            artwork_url?: string;
+            /** Format: int64 */
+            audio_size: number;
+            audio_type: string;
+            audio_url: string;
+            description: string;
+            /** Format: int64 */
+            duration_secs: number;
+            /** Format: int64 */
+            episode_number?: number;
+            guid: string;
+            pub_date: string;
+            /** Format: int64 */
+            season_number?: number;
+            title: string;
+        };
+        PodcastProgressInput: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PodcastProgressInput.json
+             */
+            readonly $schema?: string;
+            artwork_url?: string;
+            audio_url: string;
+            completed: boolean;
+            episode_guid: string;
+            feed_url: string;
+            /** Format: int32 */
+            progress_seconds: number;
+            title: string;
+            /** Format: int32 */
+            total_seconds: number;
+        };
+        PodcastSubsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PodcastSubsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["UserPodcastSubscription"][] | null;
+        };
+        PodcastsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PodcastsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["Podcast"][] | null;
+        };
         QualityOption: {
             /** Format: int64 */
             height: number;
@@ -4093,6 +6999,107 @@ export interface components {
                 [key: string]: components["schemas"]["SearchBucket"];
             };
             query: string;
+        };
+        RadioCountriesBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RadioCountriesBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["Country"][] | null;
+        };
+        RadioFavoritesBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RadioFavoritesBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["UserRadioFavorite"][] | null;
+        };
+        RadioRecentsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RadioRecentsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListRadioRecentsRow"][] | null;
+        };
+        RadioRequest: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RadioRequest.json
+             */
+            readonly $schema?: string;
+            /** @description Tracks to skip (typically the current queue) */
+            exclude_track_ids?: number[] | null;
+            /**
+             * Format: int32
+             * @description Number of tracks to return
+             */
+            limit: number;
+            seed: components["schemas"]["RadioSeed"];
+            /** @description Optional. When populated, every seed is resolved to a track and their sonic embeddings are averaged into a centroid for KNN. Use to mix multiple artists/albums/tracks/vibes into one cohesive queue. */
+            seeds?: components["schemas"]["RadioSeed"][] | null;
+        };
+        RadioResponse: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RadioResponse.json
+             */
+            readonly $schema?: string;
+            /** Format: int64 */
+            seed_track_id: number;
+            tracks: components["schemas"]["SimilarTracksByTrackRichRow"][] | null;
+        };
+        RadioSeed: {
+            /**
+             * Format: int64
+             * @description Required when kind=album
+             */
+            album_id?: number;
+            /**
+             * Format: int64
+             * @description Required when kind=artist (or pass artist_slug)
+             */
+            artist_id?: number;
+            /** @description Alternative to artist_id for kind=artist */
+            artist_slug?: string;
+            /**
+             * @description Seed type — picks how Heya resolves the starting track
+             * @enum {string}
+             */
+            kind: "track" | "artist" | "album" | "text";
+            /** @description Required when kind=text (CLAP audio-vibe prompt) */
+            text?: string;
+            /**
+             * Format: int64
+             * @description Required when kind=track
+             */
+            track_id?: number;
+        };
+        RadioTagsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RadioTagsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["Tag"][] | null;
+        };
+        RatingBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RatingBody.json
+             */
+            readonly $schema?: string;
+            /** Format: int64 */
+            rating: number;
         };
         ReadyBody: {
             /**
@@ -4123,6 +7130,42 @@ export interface components {
             source_count: number;
             title: string;
             vote_average: unknown;
+        };
+        RecentAlbumsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RecentAlbumsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListRecentlyAddedAlbumsRow"][] | null;
+        };
+        RecentArtistsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RecentArtistsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListRecentlyPlayedArtistsRow"][] | null;
+        };
+        RecentPlaylistsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RecentPlaylistsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListRecentUserPlaylistsRow"][] | null;
+        };
+        RecentlyPlayedBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RecentlyPlayedBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListRecentlyPlayedTracksRow"][] | null;
         };
         RegisterInputBody: {
             /**
@@ -4245,6 +7288,83 @@ export interface components {
             /** Format: int32 */
             watched: number;
         };
+        Session: {
+            album_title?: string;
+            artist_name?: string;
+            audio_codec?: string;
+            /** Format: int32 */
+            bitrate_kbps?: number;
+            client_ip?: string;
+            client_user_agent?: string;
+            container?: string;
+            /** Format: int64 */
+            entity_id?: number;
+            entity_type?: string;
+            /** Format: int32 */
+            episode_number?: number;
+            episode_title?: string;
+            /** Format: int64 */
+            file_id: number;
+            /** Format: int32 */
+            height?: number;
+            /** Format: date-time */
+            last_heartbeat_at: string;
+            /** Format: int64 */
+            media_item_id: number;
+            media_subtitle?: string;
+            media_title: string;
+            media_type: string;
+            paused: boolean;
+            playback_action?: string;
+            /** Format: int32 */
+            position_seconds: number;
+            /** Format: int32 */
+            season_number?: number;
+            session_id: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: int32 */
+            total_seconds: number;
+            /** Format: int64 */
+            user_id: number;
+            username: string;
+            video_codec?: string;
+            /** Format: int32 */
+            width?: number;
+        };
+        SessionHeartbeatInput: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SessionHeartbeatInput.json
+             */
+            readonly $schema?: string;
+            audio_codec?: string;
+            /** Format: int32 */
+            bitrate_kbps?: number;
+            client_ip?: string;
+            client_user_agent?: string;
+            container?: string;
+            /** Format: int64 */
+            entity_id?: number;
+            entity_type?: string;
+            /** Format: int64 */
+            file_id: number;
+            /** Format: int32 */
+            height?: number;
+            /** Format: int64 */
+            media_item_id: number;
+            paused: boolean;
+            playback_action?: string;
+            /** Format: int32 */
+            position_seconds: number;
+            session_id: string;
+            /** Format: int32 */
+            total_seconds: number;
+            video_codec?: string;
+            /** Format: int32 */
+            width?: number;
+        };
         "Set-playback-preferenceRequest": {
             /**
              * Format: uri
@@ -4269,6 +7389,20 @@ export interface components {
             /** @description JSON-encoded value */
             value: unknown;
         };
+        SimilarAlbumsRow: {
+            album_cover_path: string;
+            album_slug: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: float */
+            distance: number;
+            /** Format: int64 */
+            id: number;
+            title: string;
+        };
         SimilarArtistRow: {
             image?: string;
             /** Format: int64 */
@@ -4280,6 +7414,62 @@ export interface components {
             score: number;
             source: string;
             url?: string;
+        };
+        SimilarArtistsRow: {
+            /** Format: float */
+            distance: number;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            media_item_id: number;
+            media_slug: string;
+            name: string;
+        };
+        SimilarTracksByTextRichRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: float */
+            distance: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        SimilarTracksByTrackRichRow: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: float */
+            distance: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
         };
         SonicAnalysisSettings: {
             /**
@@ -4305,6 +7495,91 @@ export interface components {
         SourceEntry: {
             env_var?: string;
             source: string;
+        };
+        Station: {
+            /** Format: int64 */
+            bitrate: number;
+            /** Format: int64 */
+            clickcount: number;
+            codec: string;
+            country: string;
+            countrycode: string;
+            favicon: string;
+            homepage: string;
+            language: string;
+            name: string;
+            stationuuid: string;
+            tags: string;
+            url: string;
+            url_resolved: string;
+            /** Format: int64 */
+            votes: number;
+        };
+        StationInput: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/StationInput.json
+             */
+            readonly $schema?: string;
+            /** Format: int64 */
+            bitrate?: number;
+            /** Format: int64 */
+            clickcount?: number;
+            codec?: string;
+            country?: string;
+            countrycode?: string;
+            favicon?: string;
+            homepage?: string;
+            language?: string;
+            name: string;
+            stationuuid: string;
+            tags?: string;
+            url?: string;
+            url_resolved?: string;
+            /** Format: int64 */
+            votes?: number;
+        };
+        StationResponse: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/StationResponse.json
+             */
+            readonly $schema?: string;
+            kind: string;
+            label: string;
+            tracks: components["schemas"]["StationTrack"][] | null;
+        };
+        StationTrack: {
+            album_cover_path: string;
+            /** Format: int64 */
+            album_id: number;
+            album_slug: string;
+            album_title: string;
+            album_year: string;
+            /** Format: int64 */
+            artist_id: number;
+            artist_name: string;
+            artist_slug: string;
+            /** Format: int32 */
+            disc_number: number;
+            /** Format: int32 */
+            duration: number;
+            /** Format: int64 */
+            track_id: number;
+            /** Format: int32 */
+            track_number: number;
+            track_title: string;
+        };
+        StationsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/StationsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["Station"][] | null;
         };
         Status: {
             backend_state: string;
@@ -4391,6 +7666,18 @@ export interface components {
             language: string;
             title?: string;
         };
+        "Subscribe-podcastRequest": {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/Subscribe-podcastRequest.json
+             */
+            readonly $schema?: string;
+            artwork_url: string;
+            author: string;
+            feed_url: string;
+            title: string;
+        };
         SubtitleAttributes: {
             ai_translated: boolean;
             /** Format: int64 */
@@ -4442,6 +7729,11 @@ export interface components {
             key: string;
             value?: unknown;
         };
+        Tag: {
+            name: string;
+            /** Format: int64 */
+            stationcount: number;
+        };
         TailscaleConfigPayload: {
             /**
              * Format: uri
@@ -4492,18 +7784,6 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
-        TaskProgress: {
-            /** Format: int64 */
-            completed: number;
-            current_item: string;
-            /** Format: int64 */
-            failed: number;
-            started_at?: string;
-            state: string;
-            task_id: string;
-            /** Format: int64 */
-            total: number;
-        };
         TaskResponse: {
             /**
              * Format: uri
@@ -4531,9 +7811,16 @@ export interface components {
             /** Format: int32 */
             max_runtime_minutes: number;
             next_run_at: string | null;
-            progress: components["schemas"]["TaskProgress"];
+            runtime?: components["schemas"]["TaskRuntime"];
             state: string;
             stats?: components["schemas"]["TaskStats"];
+        };
+        TaskRuntime: {
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            running: number;
+            state: string;
         };
         TaskStats: {
             /** Format: int64 */
@@ -4544,6 +7831,34 @@ export interface components {
             pending: number;
             /** Format: int64 */
             total: number;
+        };
+        TempoBucket: {
+            key: string;
+            label: string;
+            /** Format: float */
+            max_bpm: number;
+            /** Format: float */
+            min_bpm: number;
+            /** Format: int64 */
+            track_count: number;
+        };
+        TempoBucketsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/TempoBucketsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["TempoBucket"][] | null;
+        };
+        TempoTracksBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/TempoTracksBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListTracksByTempoBandRow"][] | null;
         };
         Text: {
             String: string;
@@ -4580,6 +7895,27 @@ export interface components {
             readonly $schema?: string;
             enabled: boolean;
         };
+        TopTracksBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/TopTracksBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ArtistTopTrackRow"][] | null;
+        };
+        TopUserGenresRow: {
+            genre_name: string;
+            /** Format: int64 */
+            play_count: number;
+        };
+        TopUserMoodsRow: {
+            /** Format: double */
+            avg_score: number;
+            mood_key: string;
+            /** Format: int64 */
+            sample_count: number;
+        };
         TrackFile: {
             /** Format: int32 */
             bit_depth: number;
@@ -4610,19 +7946,43 @@ export interface components {
             track_id: number;
             true_peak_db: components["schemas"]["Numeric"];
         };
+        TrackResultsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/TrackResultsBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["SimilarTracksByTrackRichRow"][] | null;
+        };
+        TrackTextSearchBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/TrackTextSearchBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["SimilarTracksByTextRichRow"][] | null;
+        };
         TrackView: {
             /** Format: int64 */
             album_id: number;
+            artist_credits: string;
             /** Format: int32 */
             disc_number: number;
             /** Format: int32 */
             duration: number;
+            explicit: boolean;
+            external_ids: string;
             file_path: string;
             files: components["schemas"]["TrackFile"][] | null;
             /** Format: int64 */
             id: number;
+            isrc: string;
             library_file_id: components["schemas"]["Int8"];
             lyrics_path: string;
+            preview_url: string;
+            recording_mbid: string;
             search_vector: unknown;
             title: string;
             /** Format: int32 */
@@ -4806,20 +8166,6 @@ export interface components {
             icon: string;
             name: string;
         };
-        "Update-watch-progressRequest": {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/Update-watch-progressRequest.json
-             */
-            readonly $schema?: string;
-            /** @description What kind of item is being scrubbed (defaults to 'movie') */
-            entity_type: string;
-            /** Format: int32 */
-            progress_seconds: number;
-            /** Format: int32 */
-            total_seconds: number;
-        };
         UpdateEpisodeReq: {
             /**
              * Format: uri
@@ -4976,6 +8322,117 @@ export interface components {
             /** Format: int64 */
             user_id: number;
         };
+        UserPodcastProgress: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UserPodcastProgress.json
+             */
+            readonly $schema?: string;
+            artwork_url: string;
+            audio_url: string;
+            completed: boolean;
+            episode_guid: string;
+            feed_url: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: int32 */
+            progress_seconds: number;
+            title: string;
+            /** Format: int32 */
+            total_seconds: number;
+            updated_at: components["schemas"]["Timestamptz"];
+            /** Format: int64 */
+            user_id: number;
+        };
+        UserPodcastSubscription: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UserPodcastSubscription.json
+             */
+            readonly $schema?: string;
+            artwork_url: string;
+            author: string;
+            created_at: components["schemas"]["Timestamptz"];
+            feed_url: string;
+            /** Format: int64 */
+            id: number;
+            last_episode_at: components["schemas"]["Timestamptz"];
+            title: string;
+            /** Format: int64 */
+            user_id: number;
+        };
+        UserRadioFavorite: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UserRadioFavorite.json
+             */
+            readonly $schema?: string;
+            /** Format: int32 */
+            bitrate: number;
+            codec: string;
+            country: string;
+            countrycode: string;
+            created_at: components["schemas"]["Timestamptz"];
+            favicon: string;
+            homepage: string;
+            /** Format: int64 */
+            id: number;
+            language: string;
+            name: string;
+            stationuuid: string;
+            tags: string;
+            url: string;
+            /** Format: int64 */
+            user_id: number;
+        };
+        UserRatedAlbumsPage: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UserRatedAlbumsPage.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListUserRatedAlbumsRow"][] | null;
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
+        };
+        UserRatedArtistsPage: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UserRatedArtistsPage.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListUserRatedArtistsRow"][] | null;
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
+        };
+        UserRatedTracksPage: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UserRatedTracksPage.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["ListUserRatedTracksRow"][] | null;
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
+        };
         UserSettings: {
             /**
              * Format: uri
@@ -4984,6 +8441,11 @@ export interface components {
              */
             readonly $schema?: string;
             playback: components["schemas"]["PlaybackSettings"];
+        };
+        UserTempoHistogramRow: {
+            band: string;
+            /** Format: int64 */
+            play_count: number;
         };
         UserView: {
             /**
@@ -4997,27 +8459,6 @@ export interface components {
             id: number;
             is_admin: boolean;
             username: string;
-        };
-        UserWatchProgress: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example https://example.com/schemas/UserWatchProgress.json
-             */
-            readonly $schema?: string;
-            completed: boolean;
-            /** Format: int64 */
-            entity_id: number;
-            entity_type: string;
-            /** Format: int64 */
-            id: number;
-            /** Format: int32 */
-            progress_seconds: number;
-            /** Format: int32 */
-            total_seconds: number;
-            updated_at: components["schemas"]["Timestamptz"];
-            /** Format: int64 */
-            user_id: number;
         };
         VideoStream: {
             bit_rate?: string;
@@ -5097,6 +8538,192 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityItem"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-db": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminDBBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-listeners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminListenersBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-get-log-level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLogLevelBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-set-log-level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Admin-set-log-levelRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLogLevelBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-list-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSessionView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-revoke-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOutputBody"];
                 };
             };
             /** @description Error */
@@ -5235,7 +8862,7 @@ export interface operations {
             };
         };
     };
-    "album-cover": {
+    "admin-storage": {
         parameters: {
             query?: never;
             header?: never;
@@ -5244,13 +8871,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Binary response — content type set per endpoint */
+            /** @description OK */
             200: {
                 headers: {
+                    "Cache-Control"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": unknown;
+                    "application/json": components["schemas"]["AdminStorageBody"];
                 };
             };
             /** @description Error */
@@ -5264,16 +8892,44 @@ export interface operations {
             };
         };
     };
-    "sonic-similar-albums": {
+    "admin-storage-scan": {
         parameters: {
-            query?: {
-                limit?: number;
-            };
+            query?: never;
             header?: never;
-            path: {
-                /** @description Numeric ID */
-                id: number;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Admin-storage-scanRequest"];
             };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -5285,7 +8941,173 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ItemsBody"];
+                    "application/json": components["schemas"]["AdminSystemBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-list-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-create-user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Admin-create-userRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-delete-user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-reset-user-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Admin-reset-user-passwordRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "admin-set-user-role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Admin-set-user-roleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserView"];
                 };
             };
             /** @description Error */
@@ -5302,7 +9124,10 @@ export interface operations {
     login: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Captured into the session so the user can recognise this device on the My Sessions page */
+                "User-Agent"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5399,7 +9224,10 @@ export interface operations {
     register: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Captured into the session so the user can recognise this device on the My Sessions page */
+                "User-Agent"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5593,7 +9421,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -6712,6 +10542,194 @@ export interface operations {
             };
         };
     };
+    "list-api-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiTokenView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-api-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Create-api-tokenRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateApiTokenResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "revoke-api-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-auth-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSessionView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "revoke-other-auth-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "revoke-auth-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "toggle-favorite": {
         parameters: {
             query?: never;
@@ -6766,6 +10784,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FavoritedBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-listening-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListeningStats"];
                 };
             };
             /** @description Error */
@@ -7477,6 +11525,74 @@ export interface operations {
             };
         };
     };
+    "change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Change-passwordRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "record-playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybackEvent"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-playback-preference": {
         parameters: {
             query?: never;
@@ -7768,6 +11884,910 @@ export interface operations {
             };
         };
     };
+    "podcasts-continue": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PodcastContinueBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "record-podcast-progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PodcastProgressInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPodcastProgress"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-podcast-subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PodcastSubsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "subscribe-podcast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Subscribe-podcastRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPodcastSubscription"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "unsubscribe-podcast": {
+        parameters: {
+            query?: {
+                url?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-radio-favorites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RadioFavoritesBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "add-radio-favorite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StationInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRadioFavorite"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "remove-radio-favorite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "record-radio-play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StationInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-radio-recents": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RadioRecentsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-rated-albums": {
+        parameters: {
+            query?: {
+                min_rating?: number;
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRatedAlbumsPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "batch-album-ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Batch-album-ratingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchRatingsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-album-rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-album-rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatingBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-rated-artists": {
+        parameters: {
+            query?: {
+                min_rating?: number;
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRatedArtistsPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "batch-artist-ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Batch-artist-ratingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchRatingsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-artist-rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-artist-rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatingBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-favorites-threshold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-favorites-threshold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatingBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-rated-tracks": {
+        parameters: {
+            query?: {
+                /** @description Filter to ratings at or above N (1..10) */
+                min_rating?: number;
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRatedTracksPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "batch-track-ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Batch-track-ratingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchRatingsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-track-rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-track-rating": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RatingBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RatingBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-recently-played": {
+        parameters: {
+            query?: {
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecentlyPlayedBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "session-heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionHeartbeatInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "end-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-user-settings": {
         parameters: {
             query?: never;
@@ -7884,7 +12904,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListContinueWatchingRow"][] | null;
+                    "application/json": components["schemas"]["ContinueWatchingEnrichedRow"][] | null;
                 };
             };
             /** @description Error */
@@ -7915,42 +12935,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListRecentlyWatchedRow"][] | null;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "update-watch-progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                media_item_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Update-watch-progressRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserWatchProgress"];
                 };
             };
             /** @description Error */
@@ -8602,7 +13586,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                id: number;
+                type: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -8897,13 +13884,182 @@ export interface operations {
             };
         };
     };
+    "album-cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artist_slug: string;
+                album_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary response — content type set per endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "sonic-similar-albums": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                artist_slug: string;
+                album_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlbumResultsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-music-artist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetMusicArtistBySlugRow"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-artist-albums": {
+        parameters: {
+            query?: {
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicListPageListAlbumsByArtistSlugRow"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "artist-play-queue": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistPlayQueueBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "similar-artists": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Numeric ID */
-                id: number;
+                slug: string;
             };
             cookie?: never;
         };
@@ -8937,8 +14093,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Numeric ID */
-                id: number;
+                slug: string;
             };
             cookie?: never;
         };
@@ -8951,7 +14106,279 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ItemsBody"];
+                    "application/json": components["schemas"]["ArtistResultsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "artist-top-tracks": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopTracksBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-artist-tracks": {
+        parameters: {
+            query?: {
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicListPageListTracksByArtistSlugRow"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "browse-music-genres": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenreBucketsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-tracks-by-genre": {
+        parameters: {
+            query?: {
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenreTracksBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "browse-music-moods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoodBucketsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-tracks-by-mood": {
+        parameters: {
+            query?: {
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                mood: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoodTracksBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "browse-music-tempo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TempoBucketsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-tracks-by-tempo": {
+        parameters: {
+            query?: {
+                /** @description Max results */
+                limit?: number;
+                /** @description Results offset */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                band: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TempoTracksBody"];
                 };
             };
             /** @description Error */
@@ -8997,6 +14424,363 @@ export interface operations {
             };
         };
     };
+    "music-home-lapsed-artists": {
+        parameters: {
+            query?: {
+                picks?: number;
+                albums_per_artist?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LapsedShelfBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-mixes": {
+        parameters: {
+            query?: {
+                max?: number;
+                tracks_per_mix?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MixesBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-more-by-artists": {
+        parameters: {
+            query?: {
+                picks?: number;
+                albums_per_artist?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoreByArtistsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-more-from-label": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoreFromLabelBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-more-in-genre": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoreInGenreBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-most-played-month": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MostPlayedBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-on-this-day": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnThisDayBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-recent-playlists": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecentPlaylistsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-recently-added": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecentAlbumsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "music-home-recent-artists": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecentArtistsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "build-music-radio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RadioRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RadioResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "search-music-sonic": {
         parameters: {
             query?: {
@@ -9017,7 +14801,135 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ItemsBody"];
+                    "application/json": components["schemas"]["TrackTextSearchBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stations-deep-cuts": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stations-library-radio": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stations-random-album": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stations-time-travel": {
+        parameters: {
+            query?: {
+                min_year?: number;
+                max_year?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationResponse"];
                 };
             };
             /** @description Error */
@@ -9053,6 +14965,314 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MusicListPageListMusicTracksRow"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-music-track": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Numeric ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicTrackDetail"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-track-facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Numeric ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FacetsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stream-track-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                track_file_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary response — content type set per endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-track-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Numeric ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackFile"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-track-lyrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Numeric ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LyricsResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "mix-to-tracks": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Numeric ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MixToBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "sonic-similar-tracks": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Numeric ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackResultsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stream-track": {
+        parameters: {
+            query?: {
+                supports_flac_native?: boolean;
+                supports_flac?: boolean;
+                supports_alac?: boolean;
+                supports_mp3?: boolean;
+                supports_aac_audio?: boolean;
+                supports_ogg_vorbis?: boolean;
+                supports_opus_audio?: boolean;
+                supports_opus?: boolean;
+                supports_wav_pcm?: boolean;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary response — content type set per endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-track-waveform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Numeric ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaveformBody"];
                 };
             };
             /** @description Error */
@@ -9313,6 +15533,69 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary response — content type set per endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "podcasts-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PodcastCategoriesBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stream-podcast-episode": {
+        parameters: {
+            query?: {
+                url?: string;
+            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -9325,6 +15608,267 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "podcasts-feed": {
+        parameters: {
+            query?: {
+                url?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PodcastDetail"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "podcasts-search": {
+        parameters: {
+            query?: {
+                q?: string;
+                max?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PodcastsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "podcasts-trending": {
+        parameters: {
+            query?: {
+                max?: number;
+                category?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PodcastsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "radio-countries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RadioCountriesBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "radio-search": {
+        parameters: {
+            query?: {
+                name?: string;
+                tag?: string;
+                country?: string;
+                countrycode?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stream-radio": {
+        parameters: {
+            query?: {
+                url?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary response — content type set per endpoint */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "radio-tags": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RadioTagsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "radio-top": {
+        parameters: {
+            query?: {
+                category?: "topvote" | "topclick" | "lastchange";
+                count?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationsBody"];
                 };
             };
             /** @description Error */
@@ -9470,6 +16014,36 @@ export interface operations {
             };
         };
     };
+    "list-active-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveSessionsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "dashboard-stats": {
         parameters: {
             query?: never;
@@ -9504,7 +16078,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                file_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -9531,9 +16107,13 @@ export interface operations {
     };
     "stream-hls-index": {
         parameters: {
-            query?: never;
+            query?: {
+                audio?: string;
+            };
             header?: never;
-            path?: never;
+            path: {
+                file_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -9562,7 +16142,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                file_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -9591,7 +16173,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                file_id: number;
+                segment: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -9698,7 +16283,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                file_id: number;
+                index: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -9759,7 +16347,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                file_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -9788,7 +16378,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                file_id: number;
+                filename: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -9817,7 +16410,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -10308,7 +16903,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                path: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -10320,231 +16917,6 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": unknown;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-track-facets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Numeric ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FacetsView"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "stream-track-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Binary response — content type set per endpoint */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": unknown;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "list-track-files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Numeric ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TrackFile"][] | null;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-track-lyrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Numeric ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LyricsResponse"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "sonic-similar-tracks": {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Numeric ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ItemsBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "stream-track": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Binary response — content type set per endpoint */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": unknown;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-track-waveform": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Numeric ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WaveformBody"];
                 };
             };
             /** @description Error */

@@ -378,6 +378,87 @@ var mediaRefreshCmd = &cobra.Command{
 	},
 }
 
+var mediaMissingCmd = &cobra.Command{
+	Use:   "missing",
+	Short: "List media items whose files are missing on disk",
+	Long:  "Lists media items that have no remaining files on disk (every file soft-deleted). Run a library scan first so missing files are detected.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		app, err := service.New(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		items, err := app.ListMissingMedia(ctx)
+		if err != nil {
+			return err
+		}
+
+		if ui.JSONMode {
+			return ui.OutputJSON(items)
+		}
+
+		if len(items) == 0 {
+			ui.Success("No missing media items.")
+			return nil
+		}
+
+		t := ui.NewTable("ID", "TYPE", "TITLE", "YEAR")
+		for _, item := range items {
+			t.AddRow(
+				strconv.FormatInt(item.ID, 10),
+				ui.MediaBadge(item.MediaType),
+				item.Title,
+				item.Year,
+			)
+		}
+		fmt.Println(t.Render())
+		ui.Warn("Showing up to 50. Run `heya media cleanup-missing --force` to remove all missing items.")
+		return nil
+	},
+}
+
+var mediaCleanupMissingCmd = &cobra.Command{
+	Use:   "cleanup-missing",
+	Short: "Delete media items whose files are missing on disk",
+	Long: "Permanently removes media items that have no remaining files on disk " +
+		"(all files soft-deleted). Run a library scan first so missing files are " +
+		"detected. Requires --force.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		force, _ := cmd.Flags().GetBool("force")
+
+		ctx := context.Background()
+		app, err := service.New(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer app.Close()
+
+		items, err := app.ListMissingMedia(ctx)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			ui.Success("No missing media items to clean up.")
+			return nil
+		}
+
+		if !force {
+			ui.Warn("This permanently deletes media items with no files left on disk.")
+			ui.Warn("Re-run with --force to proceed.")
+			return nil
+		}
+
+		n, err := app.CleanupMissingMedia(ctx)
+		if err != nil {
+			return err
+		}
+		ui.Success("Removed %d missing media item(s).", n)
+		return nil
+	},
+}
+
 func formatMoney(cents int64) string {
 	if cents >= 1_000_000_000 {
 		return fmt.Sprintf("$%.1fB", float64(cents)/1_000_000_000)
@@ -397,9 +478,13 @@ func init() {
 
 	mediaRefreshCmd.Flags().Int64("id", 0, "Media item ID to refresh")
 
+	mediaCleanupMissingCmd.Flags().Bool("force", false, "Confirm permanent deletion")
+
 	mediaCmd.AddCommand(mediaListCmd)
 	mediaCmd.AddCommand(mediaInfoCmd)
 	mediaCmd.AddCommand(mediaSearchCmd)
 	mediaCmd.AddCommand(mediaMatchCmd)
 	mediaCmd.AddCommand(mediaRefreshCmd)
+	mediaCmd.AddCommand(mediaMissingCmd)
+	mediaCmd.AddCommand(mediaCleanupMissingCmd)
 }

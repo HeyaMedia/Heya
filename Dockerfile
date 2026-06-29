@@ -7,6 +7,15 @@
 #   2. backend-build  — Go compile with embedded SPA -> /out/heya
 #   3. runtime        — minideb:trixie + jellyfin-ffmpeg7 + libonnxruntime
 #
+# Multi-arch: builds linux/amd64 and linux/arm64 from the same file. Every
+# stage runs under the *target* platform (buildx emulates the non-native one
+# via QEMU), so the Go CGO compile is always a native-for-target build — no
+# cross C toolchain needed. The runtime stage derives the per-arch bits
+# (jellyfin apt arch, onnxruntime asset name, Debian multiarch lib dir) from
+# `dpkg --print-architecture` so there's nothing arch-specific hardcoded.
+#   docker build --platform=linux/arm64 -t heya:dev .   # native on Apple Silicon
+#   docker buildx build --platform=linux/amd64,linux/arm64 ...  # both (CI)
+#
 # Why these choices:
 # - **minideb:trixie** instead of debian:bookworm-slim: ~30 MB base vs ~80 MB,
 #   ships an `install_packages` helper that auto-cleans apt state, and trixie
@@ -78,12 +87,31 @@ FROM bitnami/minideb:trixie AS runtime
 # - jellyfin-ffmpeg: tied to Jellyfin's release cadence; tracks ffmpeg upstream.
 # - onnxruntime: must stay ABI-compatible with `github.com/yalue/onnxruntime_go`.
 ARG JELLYFIN_FFMPEG_PACKAGE=jellyfin-ffmpeg7
-ARG ONNXRUNTIME_VERSION=1.20.1
+# ONNX Runtime must satisfy the onnxruntime_go binding's ORT_API_VERSION
+# (v1.27.0 → API 24 → needs ORT ≥ 1.24.0). 1.24.1 is the version pinned across
+# ALL images (base CPU here, the CUDA gpu build, and the OpenVINO wheel) so the
+# single heya binary's C-API version matches every variant's libonnxruntime.
+# Bump in lockstep with the binding and the variant Dockerfiles.
+ARG ONNXRUNTIME_VERSION=1.24.1
 
 # minideb's install_packages handles apt update + install + cache cleanup
 # in one shot, but we need to add the Jellyfin apt repo first, so we go
 # manual to control the layering.
-RUN install_packages \
+#
+# Arch is read from `dpkg --print-architecture` (amd64 | arm64) and mapped to
+# the two upstream naming schemes that differ per-arch:
+#   - onnxruntime release asset:  linux-x64 (amd64) | linux-aarch64 (arm64)
+#   - Debian multiarch lib dir:   x86_64-linux-gnu  | aarch64-linux-gnu
+# jellyfin's apt repo already names archs amd64/arm64, so DPKG_ARCH feeds it
+# directly. Keep this in sync with defaultOnnxLib() in
+# internal/sonicanalysis/onnx.go, which resolves the same per-arch lib path.
+RUN DPKG_ARCH="$(dpkg --print-architecture)" && \
+    case "${DPKG_ARCH}" in \
+        amd64) ORT_ARCH=x64;     LIB_DIR=x86_64-linux-gnu ;; \
+        arm64) ORT_ARCH=aarch64; LIB_DIR=aarch64-linux-gnu ;; \
+        *) echo "unsupported architecture: ${DPKG_ARCH}" >&2; exit 1 ;; \
+    esac && \
+    install_packages \
         ca-certificates \
         curl \
         gnupg \
@@ -94,7 +122,7 @@ RUN install_packages \
     install -d /etc/apt/keyrings && \
     curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg && \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/jellyfin.gpg] https://repo.jellyfin.org/master/debian trixie main" \
+    echo "deb [arch=${DPKG_ARCH} signed-by=/etc/apt/keyrings/jellyfin.gpg] https://repo.jellyfin.org/master/debian trixie main" \
         > /etc/apt/sources.list.d/jellyfin.list && \
     install_packages ${JELLYFIN_FFMPEG_PACKAGE} && \
     \
@@ -104,17 +132,17 @@ RUN install_packages \
     ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg  /usr/local/bin/ffmpeg && \
     ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe && \
     \
-    # ONNX Runtime shared library. internal/sonicanalysis/onnx.go looks
-    # for /usr/lib/x86_64-linux-gnu/libonnxruntime.so by default.
-    curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz" \
+    # ONNX Runtime shared library, into the arch's Debian multiarch dir where
+    # defaultOnnxLib() expects it.
+    curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}.tgz" \
         -o /tmp/onnxruntime.tgz && \
     tar -xzf /tmp/onnxruntime.tgz -C /tmp && \
     # -P preserves symlinks: the tarball ships libonnxruntime.so ->
     # libonnxruntime.so.1 -> libonnxruntime.so.X.Y.Z, three names for one
     # ~50 MB blob. Without -P, cp resolves them and we'd ship the file
     # three times.
-    cp -P /tmp/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so* \
-        /usr/lib/x86_64-linux-gnu/ && \
+    cp -P /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so* \
+        /usr/lib/${LIB_DIR}/ && \
     ldconfig && \
     \
     # Drop bootstrap tools — they were only needed to fetch keys + tarball.

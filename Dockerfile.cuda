@@ -1,0 +1,94 @@
+# syntax=docker/dockerfile:1.7
+#
+# Heya — NVIDIA CUDA variant. Built FROM the main image; adds GPU ONNX
+# Runtime (CUDA + TensorRT execution providers) for sonic-analysis and
+# enables NVENC/NVDEC video transcoding.
+#
+#   docker build -t heya:base .                                  # the main image
+#   docker build -f Dockerfile.cuda --build-arg BASE_IMAGE=heya:base -t heya:cuda .
+#
+# amd64 ONLY — the onnxruntime GPU build and the NVIDIA CUDA wheels are
+# x86_64-only. There is no arm64 desktop CUDA target (Jetson is a separate
+# stack we don't support).
+#
+# Runtime split (important): two different sets of NVIDIA libraries.
+#  - CUDA *toolkit runtime* (libcudart, libcublas, libcufft, libcurand,
+#    cuDNN): version-locked to the onnxruntime build, so they ship INSIDE
+#    this image. We pull them from NVIDIA's relocatable pip wheels, which
+#    keeps the image FROM the Debian-based main image (no distro CUDA repo).
+#  - GPU *driver* libraries (libcuda.so, libnvidia-encode for NVENC): match
+#    the HOST kernel driver, so they are injected at run time by the NVIDIA
+#    Container Toolkit. Run with `--gpus all`.
+#
+# Run:
+#   docker run --gpus all -p 8080:8080 -v $PWD/data:/data \
+#     -e HEYA_DATABASE_URL=... heya:cuda
+#
+# NOTE: This variant is built but unverified on real hardware in-repo (no
+# NVIDIA GPU on the test bench). The CUDA EP self-falls back to CPU if the
+# GPU/driver is absent, so the image still boots without `--gpus`.
+
+ARG BASE_IMAGE=heya:base
+
+# ────────────────────────────────────────────────────────────────
+# Stage 1 — fetch the GPU onnxruntime + CUDA/cuDNN runtime libs
+# ────────────────────────────────────────────────────────────────
+# Kept separate so the (large) download + pip tooling never lands in the
+# final image — we copy only the resulting .so files across.
+FROM debian:trixie-slim AS cuda-libs
+
+ARG ONNXRUNTIME_VERSION=1.24.1
+# CUDA/cuDNN wheel versions. onnxruntime 1.24.x is built against CUDA 12.x +
+# cuDNN 9.x; any CUDA 12.x runtime is minor-compatible, so these float within
+# the 12 / 9 majors. Bump deliberately alongside ONNXRUNTIME_VERSION. (1.24.1
+# matches the binding's ORT API 24 — see the base Dockerfile note.)
+ARG CUDA_RUNTIME_VERSION=12.6.77
+ARG CUBLAS_VERSION=12.6.4.1
+ARG CUFFT_VERSION=11.3.0.4
+ARG CURAND_VERSION=10.3.7.77
+ARG CUDNN_VERSION=9.5.1.17
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl python3-pip python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+# GPU onnxruntime: libonnxruntime.so + libonnxruntime_providers_{cuda,tensorrt,shared}.so
+RUN mkdir -p /staging/lib && \
+    curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz" \
+        -o /tmp/ort.tgz && \
+    tar -xzf /tmp/ort.tgz -C /tmp && \
+    cp -P /tmp/onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}/lib/libonnxruntime*.so* /staging/lib/
+
+# NVIDIA relocatable runtime libs via pip wheels (no system CUDA needed).
+# --no-deps: we list each component explicitly and don't want pip pulling a
+# whole CUDA metapackage. The .so files live under .../site-packages/nvidia/*/lib.
+RUN python3 -m pip install --no-cache-dir --no-deps --target=/tmp/cuda \
+        nvidia-cuda-runtime-cu12==${CUDA_RUNTIME_VERSION} \
+        nvidia-cublas-cu12==${CUBLAS_VERSION} \
+        nvidia-cuda-nvrtc-cu12==${CUDA_RUNTIME_VERSION} \
+        nvidia-cufft-cu12==${CUFFT_VERSION} \
+        nvidia-curand-cu12==${CURAND_VERSION} \
+        nvidia-cudnn-cu12==${CUDNN_VERSION} && \
+    find /tmp/cuda/nvidia -name '*.so*' -exec cp -P {} /staging/lib/ \;
+
+# ────────────────────────────────────────────────────────────────
+# Stage 2 — final: main image + the GPU libs
+# ────────────────────────────────────────────────────────────────
+FROM ${BASE_IMAGE} AS runtime
+
+# Drop the CPU onnxruntime that ships in the base and replace the whole set
+# with the GPU build + CUDA runtime. Same multiarch dir defaultOnnxLib()
+# resolves, so the Go side needs no path change — only the lib contents differ.
+RUN rm -f /usr/lib/x86_64-linux-gnu/libonnxruntime.so*
+COPY --from=cuda-libs /staging/lib/ /usr/lib/x86_64-linux-gnu/
+RUN ldconfig
+
+# CUDA EP on by default; NVENC for transcode. Both degrade to CPU when no
+# GPU/driver is present (e.g. run without --gpus), so the image still boots.
+ENV HEYA_SONIC_ACCELERATOR=cuda \
+    HEYA_HWACCEL=nvenc \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+ENTRYPOINT ["/usr/local/bin/heya"]
+CMD ["serve"]

@@ -65,17 +65,18 @@ declaratively for Docker / k8s.
 
 Then add a library via the UI (Settings → Libraries) or CLI
 (`./bin/heya library add …`) and Heya will scan, match, and start populating
-metadata. Day-to-day development runs `make dev`, which starts Caddy on
-`:8080` as the front door, Nuxt on `:3000`, and Go (`heya serve`,
-hot-reloaded by air) on `:3050`. Caddy stays up across air rebuilds, so
-the browser's HMR socket and in-flight WS connections never see the
-backends churn. Requires `brew install caddy`.
+metadata. Day-to-day development runs `make dev`, which uses **mprocs** to
+supervise `heya dev-proxy` on `:8080` (the stable front door), Nuxt on
+`:3000`, and the backend (`heya serve --dev-backend`, hot-reloaded by air) on
+`:3050`. The front door stays up across air rebuilds, so the browser's HMR
+socket and in-flight WS connections never see the backend churn. Requires
+`brew install mprocs`.
 
 ## CLI quick reference
 
 ```bash
 ./bin/heya serve                  # start the HTTP server
-make dev                          # Caddy :8080 (→ Nuxt :3000 + Go :3050) — open :8080
+make dev                          # mprocs: dev-proxy :8080 (→ Nuxt :3000 + Go :3050) — open :8080
 ./bin/heya dashboard              # full-screen TUI: queue, scans, watchers
 ./bin/heya library list           # show libraries
 ./bin/heya library scan <id>      # trigger a scan

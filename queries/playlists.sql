@@ -60,7 +60,8 @@ SELECT t.id            AS track_id,
        a.name          AS artist_name,
        mi.slug         AS artist_slug,
        upt.position    AS position,
-       upt.added_at    AS added_at
+       upt.added_at    AS added_at,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM user_playlist_tracks upt
 JOIN tracks      t  ON t.id  = upt.track_id
 JOIN albums      al ON al.id = t.album_id

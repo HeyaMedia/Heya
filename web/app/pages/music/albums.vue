@@ -7,14 +7,16 @@
       <AppContextMenu
         v-for="al in rows"
         :key="al.id"
-        :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name })"
+        :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name, available: al.available })"
       >
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="grid-tile card-tile"
         style="text-decoration: none; color: inherit"
       >
-        <Poster :idx="al.id" :src="useAlbumCoverUrl(al.artist_slug, al.slug)" aspect="1/1" />
+        <Poster :idx="al.id" :src="useAlbumCoverUrl(al.artist_slug, al.slug)" aspect="1/1" :class="{ 'poster--missing': al.available === false }">
+          <MediaMissingBadge v-if="al.available === false" />
+        </Poster>
         <div class="grid-tile-meta">
           <div class="grid-tile-title">{{ al.title }}</div>
           <div class="grid-tile-sub">{{ al.artist_name }}{{ al.year ? ' · ' + al.year : '' }}</div>

@@ -9,17 +9,19 @@ are global flags.
 
 ## Server lifecycle
 
-| Command          | What it does                                                |
-| ---------------- | ----------------------------------------------------------- |
-| `heya serve`     | Start the HTTP server (default `:8080`, `HEYA_PORT` to override) |
-| `heya dashboard` | Full-screen TUI: server status, queue, scans, watchers      |
-| `heya setup`     | Guided first-time config (writes `.env` and seeds admin)    |
+| Command           | What it does                                                |
+| ----------------- | ----------------------------------------------------------- |
+| `heya serve`      | Start the HTTP server (default `:8080`, `HEYA_PORT` to override) |
+| `heya dev-proxy`  | Dev front-door reverse proxy on `:8080` (normally launched by `make dev`/mprocs, not run directly) |
+| `heya dashboard`  | Full-screen TUI: server status, queue, scans, watchers      |
+| `heya setup`      | Guided first-time config (writes `.env` and seeds admin)    |
 
-For local development use `make dev` (or `make dev-proxy` + `make dev-go`
-+ `make dev-web` in three terminals). It starts Caddy on `:8080` as the
-front door, Nuxt on `:3000`, and Go on `:3050` under air. Caddy reads
-`Caddyfile.dev`; install with `brew install caddy`. See
-[development.md](development.md) for the rationale.
+For local development use `make dev` (or `make dev-front` + `make dev-go`
++ `make dev-web` in three terminals). It uses **mprocs** to start
+`heya dev-proxy` on `:8080` (the front door), the backend
+(`heya serve --dev-backend`) on `:3050` under air, and Nuxt on `:3000`.
+Install with `brew install mprocs`. See [development.md](development.md) for
+the rationale.
 
 ## Libraries
 

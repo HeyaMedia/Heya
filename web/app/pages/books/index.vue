@@ -40,7 +40,9 @@
                 class="grid-tile card-tile"
                 @click="navigateTo(mediaUrl(item))"
               >
-                <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item.id)" :aspect="'2/3'" />
+                <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item.id)" :aspect="'2/3'" :class="{ 'poster--missing': item.available === false }">
+                  <MediaMissingBadge v-if="item.available === false" />
+                </Poster>
                 <div class="grid-tile-meta">
                   <div class="grid-tile-title">{{ item.title }}</div>
                   <div class="grid-tile-sub">{{ item.year }}</div>
@@ -68,9 +70,12 @@
               @click="navigateTo(mediaUrl(item))"
             >
               <div class="list-title-cell">
-                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
+                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
                 <div>
-                  <div class="list-title">{{ item.title }}</div>
+                  <div class="list-title">
+                    {{ item.title }}
+                    <Icon v-if="item.available === false" name="trash" :size="11" class="list-missing-icon" />
+                  </div>
                   <div class="list-sub">{{ item.year }}</div>
                 </div>
               </div>
@@ -136,4 +141,5 @@ onMounted(async () => {
 .grid-virt { /* container for usePosterGrid; width is the source of truth */ }
 .grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
 .empty-lib { padding: 80px 32px; text-align: center; color: var(--fg-2); font-size: 15px; }
+.list-missing-icon { color: #d96b6b; vertical-align: -1px; margin-left: 4px; }
 </style>

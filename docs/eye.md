@@ -19,9 +19,11 @@ bun tools/eye/eye.ts login          # POST /api/auth/login, stash token in local
 bun tools/eye/eye.ts goto /         # navigate (default origin http://localhost:8080)
 ```
 
-Both dev servers (`heya serve` on `:8080` + Nuxt on `:3000`) must be running.
-The login command works against `:8080` (the heya backend); the SPA itself is
-also served from `:8080` in dev so you can hit it directly.
+The full dev stack must be running — `make dev` (mprocs) brings it up: the
+`heya dev-proxy` front door on `:8080`, the backend on `:3050`, and Nuxt on
+`:3000`. You hit `:8080` for everything; the front door routes `/api/*` to the
+backend and the SPA to Nuxt, so the login command and the page both work
+against `:8080` directly.
 
 ## Commands
 

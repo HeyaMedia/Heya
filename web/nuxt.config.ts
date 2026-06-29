@@ -32,6 +32,20 @@ export default defineNuxtConfig({
     { path: '~/components', pathPrefix: false },
   ],
 
+  // Vite ships `server.allowedHosts` defaulting to localhost-only, which
+  // rejects any request with an external Host header — Tailscale MagicDNS
+  // names, Funnel URLs, the laptop's LAN IP when probing from another
+  // device. Caddy forwards the original Host header through, so Vite at
+  // :3000 sees e.g. `mybox.tailnet.ts.net` and 403s with the "not allowed"
+  // message. We allow the whole `.ts.net` suffix so any tailnet device can
+  // hit the dev server without per-machine config; localhost stays implicit.
+  // Dev-only — embedded SPA in prod never touches Vite.
+  vite: {
+    server: {
+      allowedHosts: ['.ts.net'],
+    },
+  },
+
   css: [
     '@fontsource/inter/400.css',
     '@fontsource/inter/500.css',

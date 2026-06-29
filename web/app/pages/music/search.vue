@@ -134,17 +134,18 @@
           <AppContextMenu
             v-for="(t, i) in tracks"
             :key="`track-${t.id}`"
-            :items="actions.forTrack({ id: t.id, title: t.title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_media_item_id, artist_slug: t.artist_slug, album_slug: t.album_slug })"
+            :items="actions.forTrack({ id: t.id, title: t.title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_media_item_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })"
           >
           <li
             class="ms-track-row"
-            :class="{ 'kb-active': isActive('track', i) }"
+            :class="{ 'kb-active': isActive('track', i), 'ms-track-missing': t.available === false }"
             :data-kb-idx="flatIdx('track', i)"
-            @click="playTrack(i)"
+            @click="t.available !== false && playTrack(i)"
           >
             <div class="ms-track-art">
               <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
-              <div class="ms-track-play"><Icon name="play" :size="14" /></div>
+              <div v-if="t.available !== false" class="ms-track-play"><Icon name="play" :size="14" /></div>
+              <div v-else class="ms-track-play ms-track-play-missing" title="Missing on disk"><Icon name="trash" :size="14" /></div>
             </div>
             <div class="ms-track-meta">
               <div class="ms-track-title">{{ t.title }}</div>
@@ -266,6 +267,7 @@ interface TrackRow {
   artist_media_item_id: number
   artist_name: string
   artist_slug: string
+  available?: boolean
 }
 
 const quickQuery = useQuery({
@@ -454,7 +456,9 @@ async function playAlbum(al: AlbumRow) {
 }
 
 async function playTrack(startIdx: number) {
-  const built: Track[] = tracks.value.map((t) => ({
+  const clicked = tracks.value[startIdx]
+  if (!clicked || clicked.available === false) return
+  const built: Track[] = tracks.value.filter((t) => t.available !== false).map((t) => ({
     id: t.id,
     title: t.title,
     artist: t.artist_name,
@@ -467,9 +471,11 @@ async function playTrack(startIdx: number) {
     album_slug: t.album_slug,
     poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
     source: 'search',
+    available: t.available,
   }))
+  if (!built.length) return
   queue.value = built
-  await play(built[startIdx]!)
+  await play(built.find((b) => b.id === clicked.id) ?? built[0]!)
 }
 
 async function playVibe(startIdx: number) {
@@ -680,6 +686,9 @@ async function playVibe(startIdx: number) {
   transition: opacity 0.15s;
 }
 .ms-track-row:hover .ms-track-play { opacity: 1; }
+.ms-track-play-missing { opacity: 1; color: #d96b6b; }
+.ms-track-missing { opacity: 0.5; cursor: default; }
+.ms-track-missing:hover { background: transparent; }
 .ms-track-meta { min-width: 0; }
 .ms-track-title {
   font-size: 14px;

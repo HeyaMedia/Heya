@@ -23,7 +23,7 @@ withDefaults(defineProps<{
   width?: number
   /** 0..100 — bottom progress bar. */
   progressPct?: number
-  /** Renders a small "Missing" chip top-right and dims the tile slightly. */
+  /** Renders a trashcan badge top-right and greys + dims the tile. */
   missing?: boolean
 }>(), {
   src: '',
@@ -40,17 +40,17 @@ withDefaults(defineProps<{
 </script>
 
 <template>
-  <div class="mediac" :class="{ 'mediac-missing': missing }" :aria-label="title">
+  <div class="mediac" :aria-label="title">
     <!-- Don't forward title to Poster — Poster paints it in the centre of
          the fallback gradient when there's no src, which collides with
          our own bottom overlay. We always show the title via .mediac-title
          (visible regardless of image state). -->
-    <Poster :idx="idx" :src="src" :aspect="aspect" :width="width">
+    <Poster :idx="idx" :src="src" :aspect="aspect" :width="width" :class="{ 'poster--missing': missing }">
       <div class="mediac-gradient" />
 
       <div v-if="badgeTl" class="mediac-badge mediac-badge-tl">{{ badgeTl }}</div>
       <div v-if="badgeTr" class="mediac-badge mediac-badge-tr" :class="{ 'mediac-badge-gold': badgeTrGold }">{{ badgeTr }}</div>
-      <div v-if="missing" class="mediac-missing-chip">Missing</div>
+      <MediaMissingBadge v-if="missing" />
 
       <slot name="badges" />
 
@@ -68,7 +68,6 @@ withDefaults(defineProps<{
 
 <style scoped>
 .mediac { display: block; height: 100%; }
-.mediac-missing :deep(.poster) { opacity: 0.55; }
 
 /* Painted from inside the Poster slot, so the gradient sits above the image
    but below any badges/info. z-index inherits Poster's `isolation: isolate`. */
@@ -96,15 +95,6 @@ withDefaults(defineProps<{
 .mediac-badge-tl { top: 8px; left: 8px; }
 .mediac-badge-tr { top: 8px; right: 8px; }
 .mediac-badge-gold { color: var(--gold); }
-
-.mediac-missing-chip {
-  position: absolute; top: 8px; right: 8px; z-index: 4;
-  font-size: 9px; font-weight: 700; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  padding: 3px 8px; border-radius: 100px;
-  background: rgba(217,107,107,0.85); color: #fff;
-  pointer-events: none;
-}
 
 .mediac-info {
   position: absolute; bottom: 0; left: 0; right: 0; z-index: 3;

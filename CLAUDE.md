@@ -16,6 +16,7 @@ For deeper context, see `docs/`:
 | [docs/eye.md](docs/eye.md)                   | Heya Eye — headless-Chrome UI debugger            |
 | [docs/cli.md](docs/cli.md)                   | Full CLI reference                                |
 | [docs/tailscale.md](docs/tailscale.md)       | tsnet integration                                 |
+| [docs/deployment.md](docs/deployment.md)     | Container images (base + CUDA/OpenVINO GPU variants), transcode + ONNX GPU |
 
 ## Toolchain (mandatory)
 
@@ -23,7 +24,8 @@ For deeper context, see `docs/`:
 - **Bun**: the *only* JS package manager and runner. **Never** run `npm`,
   `pnpm`, `yarn`, `npx`. One-shot tooling is `bunx`. The lockfile of record
   is `web/bun.lock` — no `package-lock.json` exists.
-- **Caddy**: dev front door (`brew install caddy`). Reads `Caddyfile.dev`.
+- **mprocs**: dev supervisor + front door (`brew install mprocs`). Reads
+  `mprocs.yaml` at repo root.
 - **Docker** + `docker compose` for Postgres (port `5440`).
 - Optional: `air` (used by `make dev`), `goose` for out-of-CLI migrations,
   `lefthook` + `golangci-lint` + `sqlc` + `govulncheck` for hooks/CI.
@@ -31,15 +33,26 @@ For deeper context, see `docs/`:
 **Don't run `go build -o ./bin/heya …` during dev** — `air` handles rebuilds.
 `go build ./...` is fine as a compile-check.
 
-**Dev topology**: Caddy on `:8080` is the user-facing front door (defined
-in `Caddyfile.dev`). It forwards `/api/*` (HTTP + WebSocket) to `heya
-serve` on `:3050` (run by air) and everything else to Nuxt on `:3000`.
-Caddy stays alive across air rebuilds and Nuxt restarts — the browser's
-HMR socket and any in-flight WS connection survive backend churn. `make
-dev` runs all three under one process group; `make dev-proxy` /
-`make dev-go` / `make dev-web` split them if you want separate terminals.
-Prod collapses back to a single binary (`heya serve` on `:8080` serves
-the embedded SPA) — no Caddy in front.
+**Dev topology**: three processes supervised by **mprocs** (`mprocs.yaml`):
+
+1. `heya dev-proxy` — the stable front door on `:8080`. A stdlib
+   `httputil.ReverseProxy` that forwards `/api/*` (including the `/api/ws`
+   WebSocket, which upgrades natively) to the backend on `:3050`, and
+   everything else to Nuxt/Vite on `:3000`.
+2. `heya serve --dev-backend` on `:3050` (API + WS only), hot-reloaded by `air`.
+3. Nuxt/Vite dev server on `:3000` (HMR).
+
+The front door is its own Go process *on purpose*: the backend restarts on
+every code save (air's job), but tsnet must own a stable listener that doesn't
+flap — so Tailscale lives in `dev-proxy`, which never restarts on a code/Vue
+edit. The browser's HMR socket and any in-flight WS connection survive air
+rebuilds. `make dev` reclaims ports `:8080`/`:3050`/`:3000` from any orphaned
+run, then launches mprocs; quitting mprocs (`q` / Ctrl+C) tears all three down,
+and pressing `r` on a pane restarts just that process. `make dev-front` /
+`make dev-go` / `make dev-web` split them into separate terminals. You open
+**http://localhost:8080** as before. Prod collapses back to a single binary
+(`heya serve`, no flag, on `:8080` serves the embedded SPA + API + WS) — no
+front door process.
 
 ## Design principle
 
@@ -139,13 +152,20 @@ the LAN listener. HTTPS uses Tailscale-issued certs from MagicDNS. Funnel is
 off by default. State lives in `data/tailscale/`. Full integration in
 [docs/tailscale.md](docs/tailscale.md).
 
+In dev the tsnet node lives in the stable `heya dev-proxy` process (not the
+air-restarted backend); the backend drives it over a localhost control socket.
+The DB-backed Settings toggle works in dev — give the dev node a distinct
+identity (`HEYA_TAILSCALE_HOSTNAME=heya-dev`,
+`HEYA_TAILSCALE_STATE_DIR=./data/tailscale-dev` in `.env.local`). See
+[docs/tailscale.md](docs/tailscale.md#development).
+
 ## Helpful CLI subset
 
 `./bin/heya --help` for the full tree. The ones used daily:
 
 | Command                                    | Purpose                                              |
 | ------------------------------------------ | ---------------------------------------------------- |
-| `make dev`                                 | Go (air, :8081) + Nuxt (:8080) — open :8080          |
+| `make dev`                                 | mprocs: dev-proxy :8080 + backend (air) :3050 + Nuxt :3000 — open :8080 |
 | `heya serve`                               | Start the HTTP server (default `:8080`)              |
 | `heya dashboard`                           | TUI: server state, queue, watchers                   |
 | `heya api <method> <path> [body]`          | Auth'd HTTP client w/ token cache — see [docs/development.md](docs/development.md#hitting-the-local-api) |

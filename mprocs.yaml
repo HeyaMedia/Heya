@@ -1,0 +1,25 @@
+# Dev supervisor for `make dev`. Three processes, one front door:
+#
+#   proxy  heya dev-proxy — STABLE front door on :8080. Reverse-proxies
+#          /api/* → :3050 and /* → Nuxt :3000, and owns the Tailscale node.
+#          Never restarts on a code save, so the tailnet node + any WS/HMR
+#          socket survive air rebuilds. Press `r` on this pane to rebuild it
+#          after editing proxy / tailscale code.
+#   api    air — hot-reloads `heya serve --dev-backend` on :3050 (API + WS
+#          only; drives Tailscale via the proxy's control socket).
+#   web    Nuxt/Vite dev server on :3000 (HMR).
+#
+# Open http://localhost:8080. Quit (q / Ctrl+C) tears all three down cleanly.
+# `exec` so SIGTERM reaches the binary → clean tsnet state-dir flush.
+procs:
+  proxy:
+    # mkdir -p tmp: it's gitignored, so on a clean checkout it may not exist
+    # yet when this proc races air to build into it.
+    shell: "mkdir -p tmp && go build -o tmp/heya-dev ./cmd/heya && exec tmp/heya-dev dev-proxy"
+  api:
+    # mkdir -p tmp: it's gitignored, so on a clean checkout it may not exist
+    # yet when air races the proxy to build into it. (.air.toml keeps
+    # clean_on_exit=false so air never deletes this shared dir on exit.)
+    shell: "mkdir -p tmp && go run github.com/air-verse/air@latest"
+  web:
+    shell: "cd web && bun run dev"

@@ -42,6 +42,7 @@ func TestParseSMBURLErrors(t *testing.T) {
 		input string
 	}{
 		{"no share", "smb://host/"},
+		{"no host", "smb:///share"},
 		{"wrong scheme", "http://host/share"},
 		{"empty path", "smb://host"},
 	}
@@ -58,6 +59,23 @@ func TestIsSMBPath(t *testing.T) {
 	assert.True(t, IsSMBPath("smb://host/share"))
 	assert.False(t, IsSMBPath("/local/path"))
 	assert.False(t, IsSMBPath("./relative"))
+}
+
+func TestSMBPathHelpers(t *testing.T) {
+	assert.Equal(t, "smb://host/share/Movies", Dir("smb://host/share/Movies/Film.mkv"))
+	assert.Equal(t, "Film.mkv", Base("smb://host/share/Movies/Film.mkv"))
+	assert.Equal(t, "smb://host/share", Dir("smb://host/share/Movies/"))
+	assert.Equal(t, "Movies", Base("smb://host/share/Movies/"))
+	assert.Equal(t, "smb://host/share/Movies/Film.mkv", Join("smb://host/share/", "/Movies/", "Film.mkv"))
+	assert.Equal(t, "smb://host/share/Movies", Join("smb://host/share", "", "Movies"))
+}
+
+func TestRedactPath(t *testing.T) {
+	assert.Equal(t, "/local/path", RedactPath("/local/path"))
+	assert.Equal(t, "smb://host/share", RedactPath("smb://host/share"))
+	assert.Equal(t, "smb://user:xxxxx@host/share/sub/path", RedactPath("smb://user:pass@host/share/sub/path"))
+	assert.Equal(t, "smb://user:xxxxx@host/share", RedactPath("smb://user:pa%24%24@host/share"))
+	assert.Equal(t, "smb://user@host/share", RedactPath("smb://user@host/share"))
 }
 
 func TestOpenLocalValid(t *testing.T) {

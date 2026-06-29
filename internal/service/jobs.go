@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/vfs"
 )
 
@@ -261,12 +262,11 @@ func (a *App) JobSummary(ctx context.Context) ([]JobSummaryRow, error) {
 
 // RetryJob moves a failed, cancelled, or retryable job back to the available state.
 func (a *App) RetryJob(ctx context.Context, id int64) error {
-	tag, err := a.db.Exec(ctx,
-		"UPDATE river_job SET state = 'available', attempt = GREATEST(attempt - 1, 0), scheduled_at = now(), finalized_at = NULL WHERE id = $1 AND state IN ('discarded', 'cancelled', 'retryable')", id)
+	rows, err := queueops.RetryJob(ctx, a.db, id)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if rows == 0 {
 		return ErrJobNotRetryable
 	}
 	return nil
@@ -274,12 +274,11 @@ func (a *App) RetryJob(ctx context.Context, id int64) error {
 
 // CancelJob cancels a pending (available/retryable/scheduled) job.
 func (a *App) CancelJob(ctx context.Context, id int64) error {
-	tag, err := a.db.Exec(ctx,
-		"UPDATE river_job SET state = 'cancelled', finalized_at = now() WHERE id = $1 AND state IN ('available', 'retryable', 'scheduled')", id)
+	rows, err := queueops.CancelJob(ctx, a.db, id)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if rows == 0 {
 		return ErrJobNotCancellable
 	}
 	return nil
@@ -293,69 +292,33 @@ func (a *App) CancelJob(ctx context.Context, id int64) error {
 // flip back to available.
 //
 // River's own periodic rescuer would eventually catch these via
-// RescueStuckJobsAfter (10min), but that's long enough to make
+// RescueStuckJobsAfter (30min), but that's long enough to make
 // MaxWorkers=N look violated in the UI after every dev reload.
 // Doing it eagerly at boot keeps the running-job snapshot honest.
 //
 // Returns the count rescued so the caller can log it (zero on a clean
 // boot, non-zero after an unclean shutdown).
 func (a *App) RescueOrphanedJobsAtStartup(ctx context.Context) (int64, error) {
-	tag, err := a.db.Exec(ctx,
-		`UPDATE river_job
-		   SET state = 'available', attempted_at = NULL, attempted_by = NULL
-		 WHERE state = 'running'`)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	return queueops.RescueOrphanedRunning(ctx, a.db)
 }
 
-// RescueStuckJobs rescues jobs that have been running for more than 30 seconds.
+// RescueStuckJobs rescues jobs that have been running for more than 30 minutes.
 // It returns the total number of rescued jobs and the number whose retry counts
 // were reset because they had exhausted their max attempts.
 func (a *App) RescueStuckJobs(ctx context.Context) (rescued, retriesReset int64, err error) {
-	tag1, err := a.db.Exec(ctx,
-		`UPDATE river_job
-		 SET state = 'available', attempted_at = NULL, attempted_by = NULL
-		 WHERE state = 'running'
-		   AND attempted_at < now() - interval '30 seconds'
-		   AND attempt < max_attempts`)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	tag2, err := a.db.Exec(ctx,
-		`UPDATE river_job
-		 SET state = 'available', attempted_at = NULL, attempted_by = NULL,
-		     attempt = GREATEST(attempt - 1, 0)
-		 WHERE state = 'running'
-		   AND attempted_at < now() - interval '30 seconds'
-		   AND attempt >= max_attempts`)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	return tag1.RowsAffected() + tag2.RowsAffected(), tag2.RowsAffected(), nil
+	return queueops.RescueStuckRunning(ctx, a.db)
 }
 
 // ClearCompletedJobs deletes all completed, discarded, and cancelled jobs.
 // It returns the number of deleted rows.
 func (a *App) ClearCompletedJobs(ctx context.Context) (int64, error) {
-	tag, err := a.db.Exec(ctx, "DELETE FROM river_job WHERE state IN ('completed', 'discarded', 'cancelled')")
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	return queueops.ClearCompleted(ctx, a.db)
 }
 
 // ClearAllJobs deletes every row from the river_job table.
 // It returns the number of deleted rows.
 func (a *App) ClearAllJobs(ctx context.Context) (int64, error) {
-	tag, err := a.db.Exec(ctx, "DELETE FROM river_job")
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	return queueops.ClearAll(ctx, a.db)
 }
 
 // CancelJobsByKind cancels every River job whose kind matches one of the
@@ -378,32 +341,19 @@ func (a *App) CancelJobsByKind(ctx context.Context, kinds []string) (int64, erro
 	}
 
 	// Pass 1: bulk-cancel queued/scheduled/retryable rows.
-	tag, err := a.db.Exec(ctx,
-		`UPDATE river_job
-		    SET state = 'cancelled', finalized_at = now()
-		  WHERE state IN ('available', 'retryable', 'scheduled')
-		    AND kind = ANY($1::text[])`, kinds)
+	cancelled, err := queueops.CancelPendingByKinds(ctx, a.db, kinds)
 	if err != nil {
 		return 0, err
 	}
-	cancelled := tag.RowsAffected()
 
 	// Pass 2: signal running jobs via River so the worker's ctx is
 	// cancelled (LISTEN/NOTIFY → producer → job ctx.Done). Best-effort —
 	// a worker that ignores ctx will run to completion regardless.
 	if a.river != nil {
-		rows, err := a.db.Query(ctx,
-			`SELECT id FROM river_job
-			  WHERE state = 'running'
-			    AND kind = ANY($1::text[])`, kinds)
+		jobIDs, err := queueops.RunningIDsByKinds(ctx, a.db, kinds)
 		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var jobID int64
-				if err := rows.Scan(&jobID); err != nil {
-					continue
-				}
-				if _, jcErr := a.river.JobCancel(ctx, jobID); jcErr == nil {
+			for _, jobID := range jobIDs {
+				if _, err := a.river.JobCancel(ctx, jobID); err == nil {
 					cancelled++
 				}
 			}
@@ -413,29 +363,37 @@ func (a *App) CancelJobsByKind(ctx context.Context, kinds []string) (int64, erro
 	return cancelled, nil
 }
 
-// CancelLibraryJobs cancels all pending jobs whose args contain the given library ID.
-// It returns the number of cancelled jobs.
-func (a *App) CancelLibraryJobs(ctx context.Context, libraryID int64) (int64, error) {
-	tag, err := a.db.Exec(ctx,
-		`UPDATE river_job SET state = 'cancelled', finalized_at = now()
-		 WHERE state IN ('available', 'retryable', 'scheduled')
-		   AND (args->>'library_id')::bigint = $1`, libraryID)
+func (a *App) CancelScheduledTaskJobs(ctx context.Context, taskID string, kinds []string) (int64, error) {
+	if taskID == "" || len(kinds) == 0 {
+		return 0, nil
+	}
+	cancelled, err := queueops.CancelPendingByScheduledTask(ctx, a.db, taskID, kinds)
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	if a.river != nil {
+		jobIDs, err := queueops.RunningIDsByScheduledTask(ctx, a.db, taskID, kinds)
+		if err == nil {
+			for _, jobID := range jobIDs {
+				if _, err := a.river.JobCancel(ctx, jobID); err == nil {
+					cancelled++
+				}
+			}
+		}
+	}
+	return cancelled, nil
+}
+
+// CancelLibraryJobs cancels all pending jobs whose args contain the given library ID.
+// It returns the number of cancelled jobs.
+func (a *App) CancelLibraryJobs(ctx context.Context, libraryID int64) (int64, error) {
+	return queueops.CancelPendingByLibrary(ctx, a.db, libraryID)
 }
 
 // CancelAllPendingJobs cancels every available, retryable, or scheduled job.
 // It returns the number of cancelled jobs.
 func (a *App) CancelAllPendingJobs(ctx context.Context) (int64, error) {
-	tag, err := a.db.Exec(ctx,
-		`UPDATE river_job SET state = 'cancelled', finalized_at = now()
-		 WHERE state IN ('available', 'retryable', 'scheduled')`)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	return queueops.CancelAllPending(ctx, a.db)
 }
 
 // ScheduleEntry describes a periodic schedule derived from library settings.

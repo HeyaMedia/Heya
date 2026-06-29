@@ -14,6 +14,8 @@ import (
 // internal/service/tailscale_settings.go.
 type Config struct {
 	DatabaseURL         Field[string]
+	DatabaseMaxConns    Field[int]
+	DatabaseMinConns    Field[int]
 	Host                Field[string]
 	Port                Field[string]
 	LogLevel            Field[string]
@@ -54,6 +56,8 @@ func Load() *Config {
 
 	return &Config{
 		DatabaseURL:         envString("HEYA_DATABASE_URL", "postgres://heya:heya@localhost:5440/heya?sslmode=disable"),
+		DatabaseMaxConns:    envInt("HEYA_DB_MAX_CONNS", 15),
+		DatabaseMinConns:    envInt("HEYA_DB_MIN_CONNS", 2),
 		Host:                envString("HEYA_HOST", "0.0.0.0"),
 		Port:                envString("HEYA_PORT", "8080"),
 		LogLevel:            envString("HEYA_LOG_LEVEL", "info"),
@@ -77,6 +81,14 @@ func Load() *Config {
 }
 
 func loadDotEnv() {
+	realEnv := map[string]bool{}
+	for _, entry := range os.Environ() {
+		k, _, ok := strings.Cut(entry, "=")
+		if ok {
+			realEnv[k] = true
+		}
+	}
+	values := map[string]string{}
 	for _, path := range []string{".env", ".env.local"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -99,9 +111,12 @@ func loadDotEnv() {
 					v = v[1 : len(v)-1]
 				}
 			}
-			if _, exists := os.LookupEnv(k); !exists {
-				_ = os.Setenv(k, v)
-			}
+			values[k] = v
+		}
+	}
+	for k, v := range values {
+		if !realEnv[k] {
+			_ = os.Setenv(k, v)
 		}
 	}
 }
@@ -111,25 +126,38 @@ func (c *Config) Addr() string {
 	return fmt.Sprintf("%s:%s", c.Host.Value, c.Port.Value)
 }
 
+type sourceField struct {
+	key   string
+	entry func(*Config) SourceEntry
+}
+
+var sourceFields = []sourceField{
+	{"infra.database_url", func(c *Config) SourceEntry { return c.DatabaseURL.Entry() }},
+	{"infra.database_max_conns", func(c *Config) SourceEntry { return c.DatabaseMaxConns.Entry() }},
+	{"infra.database_min_conns", func(c *Config) SourceEntry { return c.DatabaseMinConns.Entry() }},
+	{"infra.host", func(c *Config) SourceEntry { return c.Host.Entry() }},
+	{"infra.port", func(c *Config) SourceEntry { return c.Port.Entry() }},
+	{"infra.log_level", func(c *Config) SourceEntry { return c.LogLevel.Entry() }},
+	{"infra.log_format", func(c *Config) SourceEntry { return c.LogFormat.Entry() }},
+	{"infra.data_dir", func(c *Config) SourceEntry { return c.DataDir.Entry() }},
+	{"infra.heya_media_url", func(c *Config) SourceEntry { return c.HeyaMediaURL.Entry() }},
+	{"transcoder.hwaccel", func(c *Config) SourceEntry { return c.HWAccel.Entry() }},
+	{"transcoder.cache_dir", func(c *Config) SourceEntry { return c.TranscodeCacheDir.Entry() }},
+	{"transcoder.cache_max_gb", func(c *Config) SourceEntry { return c.TranscodeCacheMaxGB.Entry() }},
+	{"tailscale.enabled", func(c *Config) SourceEntry { return c.Tailscale.Enabled.Entry() }},
+	{"tailscale.hostname", func(c *Config) SourceEntry { return c.Tailscale.Hostname.Entry() }},
+	{"tailscale.state_dir", func(c *Config) SourceEntry { return c.Tailscale.StateDir.Entry() }},
+	{"tailscale.https", func(c *Config) SourceEntry { return c.Tailscale.HTTPS.Entry() }},
+	{"tailscale.funnel", func(c *Config) SourceEntry { return c.Tailscale.Funnel.Entry() }},
+}
+
 // Sources returns the flat key→provenance map for the infra layer. The
 // /api/config/sources endpoint extends this with DB-backed setting groups
 // (tailscale.*, sonic_analysis.*, library.N.*).
 func (c *Config) Sources() map[string]SourceEntry {
-	return map[string]SourceEntry{
-		"infra.database_url":      c.DatabaseURL.Entry(),
-		"infra.host":              c.Host.Entry(),
-		"infra.port":              c.Port.Entry(),
-		"infra.log_level":         c.LogLevel.Entry(),
-		"infra.log_format":        c.LogFormat.Entry(),
-		"infra.data_dir":          c.DataDir.Entry(),
-		"infra.heya_media_url":    c.HeyaMediaURL.Entry(),
-		"transcoder.hwaccel":      c.HWAccel.Entry(),
-		"transcoder.cache_dir":    c.TranscodeCacheDir.Entry(),
-		"transcoder.cache_max_gb": c.TranscodeCacheMaxGB.Entry(),
-		"tailscale.enabled":       c.Tailscale.Enabled.Entry(),
-		"tailscale.hostname":      c.Tailscale.Hostname.Entry(),
-		"tailscale.state_dir":     c.Tailscale.StateDir.Entry(),
-		"tailscale.https":         c.Tailscale.HTTPS.Entry(),
-		"tailscale.funnel":        c.Tailscale.Funnel.Entry(),
+	out := make(map[string]SourceEntry, len(sourceFields))
+	for _, field := range sourceFields {
+		out[field.key] = field.entry(c)
 	}
+	return out
 }

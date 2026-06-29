@@ -1,5 +1,5 @@
 <template>
-  <section v-if="items.length" class="activity-feed">
+  <section v-if="items?.length" class="activity-feed">
     <div class="section-row-head">
       <h2 class="section-title-lg">Recent Activity</h2>
     </div>
@@ -85,7 +85,8 @@ function timeAgo(ts: string) {
 onMounted(async () => {
   try {
     const { $heya } = useNuxtApp()
-    items.value = await $heya('/api/activity') as ActivityItem[]
+    // Guard against a null payload — a nil slice would crash the v-if.
+    items.value = (await $heya('/api/activity') as ActivityItem[] | null) ?? []
   } catch { /* empty */ }
 })
 </script>

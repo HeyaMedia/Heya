@@ -22,61 +22,61 @@ import (
 func registerBinaryRoutes(api huma.API, app *service.App) {
 	// --- Images (no auth — browsers can't attach Authorization to <img>) ---
 	huma.Register(api, binaryOp(http.MethodGet, "/api/media/{id}/image/{type}", "media-image", "Media poster/backdrop bytes", "Images"),
-		wrapStream(handleMediaImage(app)))
+		wrapStreamAs[mediaImageInput](handleMediaImage(app)))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/person/{id}/image", "person-image", "Person photo bytes", "Images"),
-		wrapStream(handlePersonImage(app)))
+		wrapStreamAs[idBinaryInput](handlePersonImage(app)))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/studio/{id}/image", "studio-image", "Studio logo bytes", "Images"),
-		wrapStream(handleStudioImage(app)))
+		wrapStreamAs[idBinaryInput](handleStudioImage(app)))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/extras/{id}/thumbnail", "extra-thumbnail", "Extras thumbnail bytes", "Images"),
-		wrapStream(handleExtraThumbnail(app)))
+		wrapStreamAs[idBinaryInput](handleExtraThumbnail(app)))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
-		wrapStream(handleTMDBImageProxy()))
+		wrapStreamAs[tmdbImageInput](handleTMDBImageProxy()))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
-		wrapStream(handleAlbumCover(app)))
+		wrapStreamAs[albumCoverInput](handleAlbumCover(app)))
 
 	// --- Video streaming (HLS + direct play) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}", "stream-direct", "Direct video stream (range-served bytes)", "Streaming"),
-		wrapStream(handleDirectStream(app)))
+		wrapStreamAs[streamFileInput](handleDirectStream(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/hls/master.m3u8", "stream-hls-master", "HLS master playlist", "Streaming"),
-		wrapStream(handleHLSMaster(app)))
+		wrapStreamAs[streamFileInput](handleHLSMaster(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/hls/index.m3u8", "stream-hls-index", "HLS variant playlist", "Streaming"),
-		wrapStream(handleHLSPlaylist(app)))
+		wrapStreamAs[streamPlaylistInput](handleHLSPlaylist(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/hls/{segment}", "stream-hls-segment", "HLS segment / init.mp4", "Streaming"),
-		wrapStream(handleHLSSegment(app)))
+		wrapStreamAs[streamSegmentInput](handleHLSSegment(app)))
 
 	// --- Subtitles (text body) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/subtitles/{index}", "stream-subtitle-body", "Extracted subtitle file (VTT or ASS)", "Streaming"),
-		wrapStream(handleGetSubtitle(app)))
+		wrapStreamAs[streamSubtitleInput](handleGetSubtitle(app)))
 
 	// --- Trickplay scrubbing previews ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/trickplay/index.vtt", "trickplay-vtt", "Trickplay WebVTT index", "Streaming"),
-		wrapStream(handleTrickplayVTT(app)))
+		wrapStreamAs[streamFileInput](handleTrickplayVTT(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/trickplay/{filename}", "trickplay-sprite", "Trickplay sprite JPEG", "Streaming"),
-		wrapStream(handleTrickplaySprite(app)))
+		wrapStreamAs[trickplaySpriteInput](handleTrickplaySprite(app)))
 
 	// --- Music streaming (range-served audio bytes) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/stream", "stream-track", "Best-quality playable audio for a track", "Music"),
-		wrapStream(handleStreamTrack(app)))
+		wrapStreamAs[musicTrackStreamInput](handleStreamTrack(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/file/{track_file_id}", "stream-track-file", "Specific track file (bit-perfect)", "Music"),
-		wrapStream(handleStreamTrackFile(app)))
+		wrapStreamAs[musicTrackFileInput](handleStreamTrackFile(app)))
 
 	// --- Internet-radio stream proxy (long-lived, ICY metadata stripped) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/radio/stream", "stream-radio", "Proxy an internet-radio stream URL", "Radio"),
-		wrapStream(handleRadioStream(app)))
+		wrapStreamAs[proxyStreamInput](handleRadioStream(app)))
 
 	// --- Podcast episode stream proxy (range-served audio from RSS enclosure) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/podcasts/episode/stream", "stream-podcast-episode", "Proxy a podcast episode audio URL", "Podcasts"),
-		wrapStream(handlePodcastStream(app)))
+		wrapStreamAs[proxyStreamInput](handlePodcastStream(app)))
 
 	// Multipart upload lives in metadata_editor_huma.go because it uses
 	// huma.MultipartFormFiles instead of wrapStream — proper typed binding
@@ -111,11 +111,85 @@ func securedBinary(method, path, opID, summary, tag string) huma.Operation {
 // it needs via r.PathValue.
 func wrapStream(h http.HandlerFunc) func(context.Context, *struct{}) (*huma.StreamResponse, error) {
 	return func(_ context.Context, _ *struct{}) (*huma.StreamResponse, error) {
-		return &huma.StreamResponse{
-			Body: func(hctx huma.Context) {
-				r, w := humago.Unwrap(hctx)
-				h(w, r)
-			},
-		}, nil
+		return streamResponse(h), nil
 	}
+}
+
+func wrapStreamAs[I any](h http.HandlerFunc) func(context.Context, *I) (*huma.StreamResponse, error) {
+	return func(_ context.Context, _ *I) (*huma.StreamResponse, error) {
+		return streamResponse(h), nil
+	}
+}
+
+func streamResponse(h http.HandlerFunc) *huma.StreamResponse {
+	return &huma.StreamResponse{
+		Body: func(hctx huma.Context) {
+			r, w := humago.Unwrap(hctx)
+			h(w, r)
+		},
+	}
+}
+
+type idBinaryInput struct {
+	ID int64 `path:"id" minimum:"1"`
+}
+
+type mediaImageInput struct {
+	ID   int64  `path:"id" minimum:"1"`
+	Type string `path:"type" maxLength:"32"`
+}
+
+type tmdbImageInput struct {
+	Path string `path:"path" maxLength:"512"`
+}
+
+type albumCoverInput struct {
+	ArtistSlug string `path:"artist_slug" pattern:"^[a-z0-9-]+$" maxLength:"200"`
+	AlbumSlug  string `path:"album_slug" pattern:"^[a-z0-9-]+$" maxLength:"200"`
+}
+
+type streamFileInput struct {
+	FileID int64 `path:"file_id" minimum:"1"`
+}
+
+type streamPlaylistInput struct {
+	FileID int64  `path:"file_id" minimum:"1"`
+	Audio  string `query:"audio" required:"false" maxLength:"16"`
+}
+
+type streamSegmentInput struct {
+	FileID  int64  `path:"file_id" minimum:"1"`
+	Segment string `path:"segment" maxLength:"128"`
+}
+
+type streamSubtitleInput struct {
+	FileID int64 `path:"file_id" minimum:"1"`
+	Index  int   `path:"index" minimum:"0"`
+}
+
+type trickplaySpriteInput struct {
+	FileID   int64  `path:"file_id" minimum:"1"`
+	Filename string `path:"filename" maxLength:"128"`
+}
+
+type musicTrackStreamInput struct {
+	ID                 int64 `path:"id" minimum:"1"`
+	SupportsFLACNative bool  `query:"supports_flac_native" required:"false"`
+	SupportsFLAC       bool  `query:"supports_flac" required:"false"`
+	SupportsALAC       bool  `query:"supports_alac" required:"false"`
+	SupportsMP3        bool  `query:"supports_mp3" required:"false"`
+	SupportsAACAudio   bool  `query:"supports_aac_audio" required:"false"`
+	SupportsOggVorbis  bool  `query:"supports_ogg_vorbis" required:"false"`
+	SupportsOpusAudio  bool  `query:"supports_opus_audio" required:"false"`
+	SupportsOpus       bool  `query:"supports_opus" required:"false"`
+	SupportsWavPCM     bool  `query:"supports_wav_pcm" required:"false"`
+}
+
+type musicTrackFileInput struct {
+	ID          int64 `path:"id" minimum:"1"`
+	TrackFileID int64 `path:"track_file_id" minimum:"1"`
+}
+
+type proxyStreamInput struct {
+	URL string `query:"url" minLength:"1" maxLength:"2000"`
 }

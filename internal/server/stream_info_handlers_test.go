@@ -130,6 +130,19 @@ func TestBuildStreamInfoResponse_EmptyMediaInfo(t *testing.T) {
 	}
 }
 
+func TestQueryFlag(t *testing.T) {
+	for _, v := range []string{"1", "true", "TRUE", "True"} {
+		if !queryFlag(v) {
+			t.Fatalf("queryFlag(%q) = false, want true", v)
+		}
+	}
+	for _, v := range []string{"", "0", "false", "yes"} {
+		if queryFlag(v) {
+			t.Fatalf("queryFlag(%q) = true, want false", v)
+		}
+	}
+}
+
 func TestIsHDR(t *testing.T) {
 	tests := []struct {
 		transfer string

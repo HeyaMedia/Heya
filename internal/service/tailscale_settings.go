@@ -36,17 +36,19 @@ const (
 func (a *App) SaveTailscaleSettings(ctx context.Context, u TailscaleUpdate) error {
 	cur := a.config.Tailscale
 
-	if cur.Enabled.Source == config.SourceEnv && cur.Enabled.Value != u.Enabled {
-		return &ErrFieldLockedByEnv{Field: "tailscale.enabled", EnvVar: cur.Enabled.EnvVar}
+	if err := errIfEnvLockedChanged("tailscale.enabled", cur.Enabled, u.Enabled); err != nil {
+		return err
 	}
-	if cur.HTTPS.Source == config.SourceEnv && cur.HTTPS.Value != u.HTTPS {
-		return &ErrFieldLockedByEnv{Field: "tailscale.https", EnvVar: cur.HTTPS.EnvVar}
+	if err := errIfEnvLockedChanged("tailscale.https", cur.HTTPS, u.HTTPS); err != nil {
+		return err
 	}
-	if cur.Funnel.Source == config.SourceEnv && cur.Funnel.Value != u.Funnel {
-		return &ErrFieldLockedByEnv{Field: "tailscale.funnel", EnvVar: cur.Funnel.EnvVar}
+	if err := errIfEnvLockedChanged("tailscale.funnel", cur.Funnel, u.Funnel); err != nil {
+		return err
 	}
-	if cur.Hostname.Source == config.SourceEnv && u.Hostname != "" && cur.Hostname.Value != u.Hostname {
-		return &ErrFieldLockedByEnv{Field: "tailscale.hostname", EnvVar: cur.Hostname.EnvVar}
+	if u.Hostname != "" {
+		if err := errIfEnvLockedChanged("tailscale.hostname", cur.Hostname, u.Hostname); err != nil {
+			return err
+		}
 	}
 
 	if cur.Enabled.Source != config.SourceEnv {

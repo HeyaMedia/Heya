@@ -6,8 +6,9 @@ import (
 	"strconv"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
-	"github.com/karbowiak/heya/internal/worker"
+	"github.com/karbowiak/heya/internal/taskdefs"
 )
 
 // TaskStats holds completion counts for a scheduled task.
@@ -63,36 +64,18 @@ type TaskRuntimeState struct {
 // retryable/scheduled. Replaces the old GetAllTaskProgress which
 // surfaced an in-process ProgressTracker snapshot.
 func (a *App) GetAllTaskRuntimeState(ctx context.Context) map[string]TaskRuntimeState {
-	taskIDs := []string{
-		"scan_libraries",
-		"refresh_stale_items",
-		"scan_music_loudness",
-		"generate_trickplay",
-		"generate_thumbnails",
-		"analyze_music_facets",
-	}
-	out := make(map[string]TaskRuntimeState, len(taskIDs))
-	for _, id := range taskIDs {
-		kinds := worker.TaskKinds(id)
-		if len(kinds) == 0 {
-			continue
-		}
-		var pending, running int
-		err := a.db.QueryRow(ctx, `
-			SELECT
-				count(*) FILTER (WHERE state IN ('available', 'scheduled', 'retryable')),
-				count(*) FILTER (WHERE state = 'running')
-			FROM river_job
-			WHERE kind = ANY($1::text[])
-		`, kinds).Scan(&pending, &running)
+	defs := taskdefs.Scheduled()
+	out := make(map[string]TaskRuntimeState, len(defs))
+	for _, def := range defs {
+		counts, err := queueops.CountScheduledTask(ctx, a.db, def.ID, taskdefs.TaskKinds(def.ID))
 		if err != nil {
 			continue
 		}
 		state := "idle"
-		if pending > 0 || running > 0 {
+		if counts.Pending > 0 || counts.Running > 0 {
 			state = "running"
 		}
-		out[id] = TaskRuntimeState{State: state, Pending: pending, Running: running}
+		out[def.ID] = TaskRuntimeState{State: state, Pending: counts.Pending, Running: counts.Running}
 	}
 	return out
 }
@@ -262,17 +245,16 @@ func (a *App) TriggerTask(ctx context.Context, taskID string) error {
 	return a.scheduler.TriggerNow(ctx, taskID)
 }
 
-// CancelTask cancels every queued / running River job associated with
-// the given scheduled task: its kickoff + every per-item work kind it
-// fans out into (see worker.TaskKinds). Queued rows are flipped to
-// state='cancelled' via SQL; running ones are signalled via River so
-// the worker's ctx fires Done.
+// CancelTask cancels queued / running River jobs associated with a scheduled
+// task. Kickoff workers stamp scheduled_task_id into every child job they fan
+// out; unscoped watcher/manual/view jobs sharing the same worker kinds are left
+// alone.
 func (a *App) CancelTask(ctx context.Context, taskID string) error {
-	kinds := worker.TaskKinds(taskID)
+	kinds := taskdefs.TaskKinds(taskID)
 	if len(kinds) == 0 {
 		return nil
 	}
-	_, err := a.CancelJobsByKind(ctx, kinds)
+	_, err := a.CancelScheduledTaskJobs(ctx, taskID, kinds)
 	return err
 }
 

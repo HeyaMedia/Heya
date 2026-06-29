@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,26 +13,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
-
-var junkFiles = map[string]bool{
-	".DS_Store": true, "Thumbs.db": true, "desktop.ini": true,
-	"theme.mp3": true, "theme.flac": true, "theme.ogg": true,
-}
-
-var skipDirNames = map[string]bool{
-	"@eaDir": true, "#recycle": true, ".Trash": true, "lost+found": true,
-}
-
-var extrasDirNames = map[string]bool{
-	"trailers": true, "trailer": true, "behind the scenes": true,
-	"deleted scenes": true, "featurettes": true, "interviews": true,
-	"scenes": true, "shorts": true, "other": true,
-}
 
 var nfoFiles = map[string]bool{
 	"tvshow.nfo": true, "movie.nfo": true, "artist.nfo": true, "album.nfo": true,
@@ -49,21 +36,37 @@ func New(db *pgxpool.Pool) *Scanner {
 func (s *Scanner) ScanLibrary(ctx context.Context, lib sqlc.Library, opts ScanOptions) (ScanResult, error) {
 	var result ScanResult
 	discovered := make(map[string]bool)
+	failedRoots := 0
+	var firstScanErr error
 
 	log.Info().Int64("library_id", lib.ID).Str("name", lib.Name).Str("type", string(lib.MediaType)).Int("paths", len(lib.Paths)).Msg("starting library scan")
 
 	for _, rootPath := range lib.Paths {
-		log.Info().Str("root", rootPath).Msg("scanning root path")
+		log.Info().Str("root", vfs.RedactPath(rootPath)).Msg("scanning root path")
 		if err := s.scanPath(ctx, lib.ID, rootPath, opts, &result, discovered); err != nil {
-			log.Error().Err(err).Str("path", rootPath).Msg("error scanning path")
+			failedRoots++
+			if firstScanErr == nil {
+				firstScanErr = err
+			}
+			log.Error().Err(err).Str("path", vfs.RedactPath(rootPath)).Msg("error scanning path")
 		}
 	}
 
-	deleted, err := s.detectDeletions(ctx, lib.ID, discovered)
-	if err != nil {
-		log.Error().Err(err).Msg("error detecting deletions")
+	if ctx.Err() != nil {
+		log.Warn().Err(ctx.Err()).Msg("skipping deletion detection after cancelled scan")
+	} else {
+		// Local-path deletion is authoritative via os.Stat regardless of whether
+		// every root opened (a removed root makes its files stat as not-exist),
+		// so it always runs. SMB paths can't be stat'd here, so they're only
+		// soft-deleted via the discovered-set diff when every root scanned
+		// cleanly — otherwise a transient mount outage would nuke the lot.
+		smbTrustworthy := failedRoots == 0
+		deleted, err := s.detectDeletions(ctx, lib.ID, discovered, smbTrustworthy)
+		if err != nil {
+			log.Error().Err(err).Msg("error detecting deletions")
+		}
+		result.Deleted = deleted
 	}
-	result.Deleted = deleted
 
 	log.Info().
 		Int("discovered", result.Discovered).
@@ -74,6 +77,12 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib sqlc.Library, opts ScanOp
 		Int("errors", result.Errors).
 		Msg("scan complete")
 
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	if failedRoots > 0 {
+		return result, fmt.Errorf("scan incomplete: %d root path(s) failed: %w", failedRoots, firstScanErr)
+	}
 	return result, nil
 }
 
@@ -88,21 +97,25 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 	nfoCache := make(map[string]*nfo.ParsedNFO)
 
 	return fs.WalkDir(source.FS, ".", func(relPath string, d fs.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
 		if err != nil {
 			log.Warn().Err(err).Str("path", relPath).Msg("walk error")
 			result.Errors++
-			return nil
+			return err
 		}
 
 		if d.IsDir() {
 			name := d.Name()
 			nameLower := strings.ToLower(name)
 			if relPath != "." {
-				if strings.HasPrefix(name, ".") || skipDirNames[name] || strings.HasSuffix(nameLower, ".trickplay") {
+				if strings.HasPrefix(name, ".") || mediafile.IsSkipDir(name) {
 					log.Debug().Str("dir", relPath).Msg("skipping directory")
 					return fs.SkipDir
 				}
-				if extrasDirNames[nameLower] {
+				if mediafile.IsExtrasDir(nameLower) {
 					log.Debug().Str("dir", relPath).Msg("skipping extras directory (handled by asset detection)")
 					return fs.SkipDir
 				}
@@ -125,7 +138,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 		}
 
 		name := d.Name()
-		if junkFiles[name] || nfoFiles[strings.ToLower(name)] {
+		if mediafile.IsJunkFile(name) || nfoFiles[strings.ToLower(name)] {
 			return nil
 		}
 
@@ -219,7 +232,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 			Status:      sqlc.FileStatusPending,
 		})
 		if upsertErr != nil {
-			log.Error().Err(upsertErr).Str("path", fullPath).Msg("error upserting file")
+			log.Error().Err(upsertErr).Str("path", vfs.RedactPath(fullPath)).Msg("error upserting file")
 			result.Errors++
 			return nil
 		}
@@ -247,7 +260,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 	})
 }
 
-func (s *Scanner) detectDeletions(ctx context.Context, libraryID int64, discovered map[string]bool) (int, error) {
+func (s *Scanner) detectDeletions(ctx context.Context, libraryID int64, discovered map[string]bool, smbTrustworthy bool) (int, error) {
 	rows, err := s.q.ListAllLibraryFilePaths(ctx, libraryID)
 	if err != nil {
 		return 0, err
@@ -259,7 +272,11 @@ func (s *Scanner) detectDeletions(ctx context.Context, libraryID int64, discover
 			continue
 		}
 		if vfs.IsSMBPath(dbPath) {
-			toSoftDelete = append(toSoftDelete, dbPath)
+			// Can't stat SMB cheaply here; only trust the discovered-set diff
+			// when the whole scan completed without a failed root.
+			if smbTrustworthy {
+				toSoftDelete = append(toSoftDelete, dbPath)
+			}
 		} else if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 			toSoftDelete = append(toSoftDelete, dbPath)
 		}
@@ -268,7 +285,7 @@ func (s *Scanner) detectDeletions(ctx context.Context, libraryID int64, discover
 	if len(toSoftDelete) > 0 {
 		log.Info().Int("count", len(toSoftDelete)).Msg("soft-deleting missing files")
 		for _, p := range toSoftDelete {
-			log.Debug().Str("path", p).Msg("soft-deleting")
+			log.Debug().Str("path", vfs.RedactPath(p)).Msg("soft-deleting")
 		}
 		err = s.q.SoftDeleteLibraryFilesByPath(ctx, sqlc.SoftDeleteLibraryFilesByPathParams{
 			LibraryID: libraryID,

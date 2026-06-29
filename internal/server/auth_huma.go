@@ -24,9 +24,9 @@ func registerAuthRoutes(api huma.API, app *service.App) {
 			if in.Body.Username == "" || in.Body.Password == "" || in.Body.Email == "" {
 				return nil, huma.Error400BadRequest("username, email, and password are required")
 			}
-			user, err := app.CreateUser(ctx, in.Body.Username, in.Body.Email, in.Body.Password, false)
+			user, err := app.RegisterFirstUser(ctx, in.Body.Username, in.Body.Email, in.Body.Password)
 			if err != nil {
-				return nil, huma.Error409Conflict(err.Error())
+				return nil, humaServiceErrorStatus(err, http.StatusConflict)
 			}
 			token, err := app.CreateAuthSession(ctx, user.ID, in.UserAgent, "")
 			if err != nil {

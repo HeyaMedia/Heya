@@ -140,6 +140,13 @@ a { color: inherit; text-decoration: none; }
   text-wrap: balance;
 }
 
+/* Missing-on-disk de-emphasis. Greys + dims only the artwork (image/gradient),
+   not the whole .poster, so an overlaid trash badge keeps its colour. Paired
+   with <MediaMissingBadge> across the movies/tv/music/books grids. */
+.poster--missing img,
+.poster--missing .poster-gradient,
+.poster--missing .poster-texture { filter: grayscale(1); opacity: 0.5; }
+
 /* Card hover lift */
 .card-tile {
   cursor: pointer;

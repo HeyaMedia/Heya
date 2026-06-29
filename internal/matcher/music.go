@@ -12,10 +12,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/slug"
 	"github.com/karbowiak/heya/internal/titlematch"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -399,12 +401,12 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		}
 
 		format := strings.ToLower(strings.TrimPrefix(filepath.Ext(trackFile.Path), "."))
-		score := audioQualityScore(format)
+		score := mediaprobe.ExtensionQualityBase(format)
 		probe := parseAudioFromMediaInfo(trackFile.MediaInfo)
 		if probe != nil {
 			// Probe data was already written by FFProbeWorker — adopt it so
 			// the matcher doesn't leave the row at extension-only quality.
-			score = refineQualityWithProbe(format, probe)
+			score = mediaprobe.RefinedQualityScore(format, probe.BitrateKbps, probe.BitDepth, probe.SampleRateHz)
 		}
 
 		insertedTrackFile, err := m.q.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{
@@ -416,7 +418,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 			SizeBytes:     trackFile.Size,
 		})
 		if err != nil {
-			log.Warn().Err(err).Str("file", trackFile.Path).Msg("upsert track_file failed")
+			log.Warn().Err(err).Str("file", vfs.RedactPath(trackFile.Path)).Msg("upsert track_file failed")
 			m.markFile(ctx, trackFile.ID, sqlc.FileStatusError, err.Error(), 0)
 			errored++
 			continue
@@ -428,7 +430,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 				SampleRateHz: int32(probe.SampleRateHz),
 				BitDepth:     int32(probe.BitDepth),
 				Channels:     int32(probe.Channels),
-				Duration:     int32(probe.DurationSec),
+				Duration:     probe.Duration,
 				QualityScore: int32(score),
 			}); err != nil {
 				log.Warn().Err(err).Int64("track_file_id", insertedTrackFile.ID).Msg("seed track_file probe data failed")
@@ -878,136 +880,26 @@ func (m *Matcher) markFile(ctx context.Context, fileID int64, status sqlc.FileSt
 	}
 }
 
-// audioProbeFields is what the matcher needs out of library_files.media_info
-// (set by FFProbeWorker). We decode only the fields used downstream so the
-// rest of ffprobe's verbose output doesn't matter.
-type audioProbeFields struct {
-	BitrateKbps  int
-	SampleRateHz int
-	BitDepth     int
-	Channels     int
-	DurationSec  int
-}
-
 // parseAudioFromMediaInfo reads the JSON FFProbeWorker stored in
 // library_files.media_info and pulls out audio properties. Returns nil if the
 // row hasn't been probed yet or has no audio stream.
-func parseAudioFromMediaInfo(raw []byte) *audioProbeFields {
+func parseAudioFromMediaInfo(raw []byte) *mediaprobe.AudioFields {
 	if len(raw) == 0 || string(raw) == "{}" {
 		return nil
 	}
-	var info struct {
-		Format struct {
-			Duration string `json:"duration"`
-			BitRate  string `json:"bit_rate"`
-		} `json:"format"`
-		Streams []struct {
-			CodecType        string `json:"codec_type"`
-			SampleRate       string `json:"sample_rate"`
-			Channels         int    `json:"channels"`
-			BitsPerRawSample string `json:"bits_per_raw_sample"`
-			BitRate          string `json:"bit_rate"`
-			Duration         string `json:"duration"`
-		} `json:"streams"`
-		Duration float64 `json:"duration"`
-	}
-	if err := json.Unmarshal(raw, &info); err != nil {
+	info, err := mediaprobe.Parse(raw)
+	if err != nil {
 		return nil
 	}
-	var audio *struct {
-		CodecType        string `json:"codec_type"`
-		SampleRate       string `json:"sample_rate"`
-		Channels         int    `json:"channels"`
-		BitsPerRawSample string `json:"bits_per_raw_sample"`
-		BitRate          string `json:"bit_rate"`
-		Duration         string `json:"duration"`
-	}
-	for i := range info.Streams {
-		if info.Streams[i].CodecType == "audio" {
-			audio = &info.Streams[i]
-			break
-		}
-	}
+	audio := mediaprobe.PrimaryAudio(info)
 	if audio == nil {
 		return nil
 	}
-
-	atoi := func(s string) int {
-		n, _ := strconv.Atoi(s)
-		return n
-	}
-	atof := func(s string) float64 {
-		f, _ := strconv.ParseFloat(s, 64)
-		return f
-	}
-
-	bitrate := atoi(audio.BitRate) / 1000
-	if bitrate == 0 {
-		bitrate = atoi(info.Format.BitRate) / 1000
-	}
-	duration := int(info.Duration)
-	if duration == 0 {
-		duration = int(atof(audio.Duration))
-		if duration == 0 {
-			duration = int(atof(info.Format.Duration))
-		}
-	}
-
-	out := audioProbeFields{
-		BitrateKbps:  bitrate,
-		SampleRateHz: atoi(audio.SampleRate),
-		BitDepth:     atoi(audio.BitsPerRawSample),
-		Channels:     audio.Channels,
-		DurationSec:  duration,
-	}
-	if out.BitrateKbps == 0 && out.SampleRateHz == 0 && out.DurationSec == 0 {
+	out := mediaprobe.AudioFieldsFrom(info, audio)
+	if out.BitrateKbps == 0 && out.SampleRateHz == 0 && out.Duration == 0 {
 		return nil
 	}
 	return &out
-}
-
-// refineQualityWithProbe mirrors worker.refinedQualityScore. Kept here too
-// to avoid an import cycle.
-func refineQualityWithProbe(format string, p *audioProbeFields) int {
-	base := audioQualityScore(format)
-	switch format {
-	case "flac", "alac", "wav":
-		if p.BitDepth > 16 {
-			base += (p.BitDepth - 16) * 30
-		}
-		if p.SampleRateHz > 48000 {
-			base += (p.SampleRateHz - 48000) / 1000
-		}
-	default:
-		base += p.BitrateKbps * 4 / 10
-	}
-	return base
-}
-
-// audioQualityScore is the v1 extension-based ranking. Lossless first
-// (FLAC > ALAC > WAV), then high-quality lossy (Opus > Vorbis), then
-// general lossy (AAC ≈ M4A > MP3). Phase 6b will refine this with actual
-// bitrate / sample-rate / bit-depth from ffprobe.
-func audioQualityScore(extOrFormat string) int {
-	switch strings.ToLower(strings.TrimPrefix(extOrFormat, ".")) {
-	case "flac":
-		return 1000
-	case "alac":
-		return 950
-	case "wav":
-		return 900
-	case "opus":
-		return 500
-	case "ogg":
-		return 450
-	case "aac":
-		return 350
-	case "m4a":
-		return 300
-	case "mp3":
-		return 200
-	}
-	return 0
 }
 
 // refreshTrackPrimary picks the highest-quality non-deleted file backing the

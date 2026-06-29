@@ -10,6 +10,7 @@ import (
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/stretchr/testify/assert"
 )
@@ -20,12 +21,12 @@ import (
 // it to 401 the same way it would in production.
 type fakeSessions struct{}
 
-func (fakeSessions) GetSessionByToken(ctx context.Context, token string) (sqlc.Session, error) {
-	switch token {
-	case "admin-token":
-		return sqlc.Session{ID: 1, UserID: 1, Token: token, Kind: "session"}, nil
-	case "user-token":
-		return sqlc.Session{ID: 2, UserID: 2, Token: token, Kind: "session"}, nil
+func (fakeSessions) GetSessionByToken(ctx context.Context, tokenHash string) (sqlc.Session, error) {
+	switch tokenHash {
+	case auth.TokenHash("admin-token"):
+		return sqlc.Session{ID: 1, UserID: 1, TokenHash: tokenHash, Kind: "session"}, nil
+	case auth.TokenHash("user-token"):
+		return sqlc.Session{ID: 2, UserID: 2, TokenHash: tokenHash, Kind: "session"}, nil
 	}
 	return sqlc.Session{}, pgx.ErrNoRows
 }
@@ -70,6 +71,7 @@ var adminRoutes = []struct {
 }{
 	{"system", http.MethodGet, "/api/admin/system", nil},
 	{"storage", http.MethodGet, "/api/admin/storage", nil},
+	{"storage/scan", http.MethodPost, "/api/admin/storage/scan", map[string]any{"library_id": 0}},
 	{"db", http.MethodGet, "/api/admin/db", nil},
 	{"listeners", http.MethodGet, "/api/admin/listeners", nil},
 	{"log-level/get", http.MethodGet, "/api/admin/log-level", nil},
@@ -85,6 +87,8 @@ var adminRoutes = []struct {
 	{"users/password", http.MethodPost, "/api/admin/users/1/password", map[string]any{
 		"new_password": "hunter2hunter2",
 	}},
+	{"sonic/status", http.MethodGet, "/api/admin/sonicanalysis/status", nil},
+	{"logs", http.MethodGet, "/api/logs", nil},
 }
 
 // fire dispatches an HTTP request through humatest using the right verb. The
@@ -138,6 +142,15 @@ func TestAdminSystemRoutesRequireAdmin(t *testing.T) {
 				"non-admin %s %s should be rejected by adminMiddleware", r.method, r.path)
 		})
 	}
+}
+
+func TestLogStreamRequiresAdmin(t *testing.T) {
+	mux := http.NewServeMux()
+	api := BuildAPI(mux, &service.App{}, &config.Config{}, WithSessions(fakeSessions{}), WithLogBuffer(logbuf.New(1)))
+	tapi := humatest.Wrap(t, api)
+
+	code := tapi.Get("/api/logs/stream", "Authorization: Bearer user-token").Result().StatusCode
+	assert.Equal(t, http.StatusForbidden, code)
 }
 
 // Input-validation tests use the admin bearer so we pass the gate, then

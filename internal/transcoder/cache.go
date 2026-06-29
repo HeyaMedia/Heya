@@ -1,11 +1,12 @@
 package transcoder
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -33,10 +34,15 @@ func NewCacheManager(baseDir string, maxSizeGB int) *CacheManager {
 func (c *CacheManager) BaseDir() string { return c.baseDir }
 
 func (c *CacheManager) SegmentDir(key string) string {
-	safe := strings.ReplaceAll(key, ":", "_")
+	safe := safeCacheKey(key)
 	dir := filepath.Join(c.baseDir, safe)
 	os.MkdirAll(dir, 0o755)
 	return dir
+}
+
+func safeCacheKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }
 
 func (c *CacheManager) HasSegment(key, segmentName string) bool {
@@ -93,7 +99,7 @@ func (c *CacheManager) Clear() error {
 func (c *CacheManager) Evict(key string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	safe := strings.ReplaceAll(key, ":", "_")
+	safe := safeCacheKey(key)
 	return os.RemoveAll(filepath.Join(c.baseDir, safe))
 }
 

@@ -73,7 +73,7 @@ func (a *App) SonicEnvLock() (enabledVar, acceleratorVar string) {
 // internally based on the primary Accelerator (see Config.dynamicAccelerator).
 type SonicAnalysisSettings struct {
 	Enabled     bool   `json:"enabled"`
-	Accelerator string `json:"accelerator"` // auto|cpu|coreml|cuda|directml
+	Accelerator string `json:"accelerator"` // auto|cpu|coreml|cuda|openvino|directml
 }
 
 // DefaultSonicAnalysisSettings returns the fallback applied when no
@@ -92,6 +92,18 @@ const sonicSettingsKey = "sonicanalysis"
 // when no row exists. Env-sourced fields (HEYA_SONIC_ENABLED /
 // HEYA_SONIC_ACCELERATOR) overlay the DB blob — env wins.
 func (a *App) SonicAnalysisSettings(ctx context.Context) SonicAnalysisSettings {
+	s := a.sonicAnalysisSettingsFromDB(ctx)
+
+	if v, ok := sonicEnabledFromEnv(); ok {
+		s.Enabled = v
+	}
+	if v, ok := sonicAcceleratorFromEnv(); ok {
+		s.Accelerator = v
+	}
+	return s
+}
+
+func (a *App) sonicAnalysisSettingsFromDB(ctx context.Context) SonicAnalysisSettings {
 	s := DefaultSonicAnalysisSettings()
 	raw, err := a.GetSystemSetting(ctx, sonicSettingsKey)
 	if err == nil {
@@ -106,13 +118,6 @@ func (a *App) SonicAnalysisSettings(ctx context.Context) SonicAnalysisSettings {
 	// Any DB error here (including the expected pgx.ErrNoRows on first boot)
 	// soft-falls back to defaults — we'd rather show a configurable form than
 	// crash the settings page.
-
-	if v, ok := sonicEnabledFromEnv(); ok {
-		s.Enabled = v
-	}
-	if v, ok := sonicAcceleratorFromEnv(); ok {
-		s.Accelerator = v
-	}
 	return s
 }
 
@@ -123,7 +128,7 @@ func (a *App) SonicAnalysisSettings(ctx context.Context) SonicAnalysisSettings {
 // destroying a running batch.
 func (a *App) SetSonicAnalysisSettings(ctx context.Context, s SonicAnalysisSettings) error {
 	switch s.Accelerator {
-	case "auto", "cpu", "coreml", "cuda", "directml":
+	case "auto", "cpu", "coreml", "cuda", "openvino", "directml":
 	default:
 		return fmt.Errorf("invalid accelerator %q", s.Accelerator)
 	}
@@ -134,15 +139,16 @@ func (a *App) SetSonicAnalysisSettings(ctx context.Context, s SonicAnalysisSetti
 		return &ErrFieldLockedByEnv{Field: "sonic_analysis.accelerator", EnvVar: sonicEnvAccelerator}
 	}
 	prev := a.SonicAnalysisSettings(ctx)
+	persisted := a.sonicAnalysisSettingsFromDB(ctx)
 	// Persist only the DB-owned fields. When env locks one, ignore whatever
 	// the caller sent for it — the field stays untouched on disk so removing
 	// the env var later reveals the previously-saved DB value.
 	persistable := SonicAnalysisSettings{Enabled: s.Enabled, Accelerator: s.Accelerator}
 	if _, ok := sonicEnabledFromEnv(); ok {
-		persistable.Enabled = prev.Enabled
+		persistable.Enabled = persisted.Enabled
 	}
 	if _, ok := sonicAcceleratorFromEnv(); ok {
-		persistable.Accelerator = prev.Accelerator
+		persistable.Accelerator = persisted.Accelerator
 	}
 	buf, err := json.Marshal(persistable)
 	if err != nil {

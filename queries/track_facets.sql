@@ -237,6 +237,7 @@ JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
 WHERE (tf.mood_tags->>sqlc.arg(mood_key)::text)::real > sqlc.arg(threshold)::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY (tf.mood_tags->>sqlc.arg(mood_key)::text)::real DESC, t.id ASC
 LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
 
@@ -279,6 +280,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
 WHERE (elem->>'name') = sqlc.arg(genre_name)::text
   AND (elem->>'score')::real >= sqlc.arg(min_score)::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY (elem->>'score')::real DESC, t.id ASC
 LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
 
@@ -314,6 +316,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 WHERE tf.bpm IS NOT NULL
   AND tf.bpm >= sqlc.arg(min_bpm)::real
   AND tf.bpm <  sqlc.arg(max_bpm)::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY tf.bpm ASC, t.id ASC
 LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
 
@@ -359,6 +362,7 @@ WHERE tf.track_embedding IS NOT NULL
   AND tf.key_mode IS NOT NULL
   AND (tf.key_root::int * 2 + tf.key_mode::int) = ANY(sqlc.arg(key_codes)::int[])
   AND NOT (tf.track_id = ANY(sqlc.arg(exclude_ids)::bigint[]))
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY tf.track_embedding <=> sqlc.arg(track_embedding)
 LIMIT sqlc.arg(track_limit);
 

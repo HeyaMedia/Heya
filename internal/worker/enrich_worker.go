@@ -57,7 +57,7 @@ func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichM
 		return nil
 	}
 
-	w.Progress.SetCurrentByKind(EnrichMediaItemArgs{}.Kind(), item.Title)
+	w.Progress.SetCurrent(EnrichMediaItemArgs{}.Kind(), job.Args.ScheduledTaskID, item.Title)
 	_ = q.MarkEnrichAttempted(ctx, item.ID)
 
 	switch item.MediaType {
@@ -138,12 +138,13 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	pending := buildPendingImages(detail)
 	if _, err := client.Insert(ctx, DetectLocalAssetsArgs{
-		MediaItemID:   item.ID,
-		LibraryFileID: 0, // looked up by DetectLocalAssetsWorker if needed
-		MediaType:     string(item.MediaType),
-		PendingImages: pending,
-		QueueEnrich:   true,
-		LibraryID:     item.LibraryID,
+		MediaItemID:     item.ID,
+		LibraryFileID:   0, // looked up by DetectLocalAssetsWorker if needed
+		MediaType:       string(item.MediaType),
+		PendingImages:   pending,
+		QueueEnrich:     true,
+		LibraryID:       item.LibraryID,
+		ScheduledTaskID: job.Args.ScheduledTaskID,
 	}, nil); err != nil {
 		log.Warn().Err(err).Int64("item_id", item.ID).Msg("enqueue DetectLocalAssets failed")
 	}

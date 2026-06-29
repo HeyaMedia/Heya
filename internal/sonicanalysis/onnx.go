@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -31,6 +32,7 @@ const (
 	AccelCPU      Accelerator = "cpu"
 	AccelCoreML   Accelerator = "coreml"
 	AccelCUDA     Accelerator = "cuda"
+	AccelOpenVINO Accelerator = "openvino"
 	AccelDirectML Accelerator = "directml"
 	AccelROCm     Accelerator = "rocm"
 )
@@ -69,6 +71,7 @@ func AvailableAccelerators() []AcceleratorAvailability {
 		{AccelCPU, "CPU"},
 		{AccelCoreML, "CoreML (macOS)"},
 		{AccelCUDA, "CUDA (NVIDIA)"},
+		{AccelOpenVINO, "OpenVINO (Intel)"},
 		{AccelDirectML, "DirectML (Windows)"},
 	}
 
@@ -91,6 +94,13 @@ func AvailableAccelerators() []AcceleratorAvailability {
 		}
 		if c.name == AccelDirectML && runtime.GOOS != "windows" {
 			avail.Reason = "Windows only"
+			out = append(out, avail)
+			continue
+		}
+		// OpenVINO EP exists for Linux + Windows (Intel CPU/iGPU/Arc); not
+		// shipped on macOS, where CoreML is the Intel/Apple path instead.
+		if c.name == AccelOpenVINO && runtime.GOOS == "darwin" {
+			avail.Reason = "not on macOS"
 			out = append(out, avail)
 			continue
 		}
@@ -138,6 +148,13 @@ func defaultOnnxLib() string {
 	case "darwin":
 		return "/opt/homebrew/lib/libonnxruntime.dylib"
 	case "linux":
+		// Debian multiarch dir is arch-specific. The container image
+		// (see Dockerfile runtime stage) drops libonnxruntime.so into the
+		// triplet dir matching the build's TARGETARCH, so the path differs
+		// between the amd64 and arm64 images.
+		if runtime.GOARCH == "arm64" {
+			return "/usr/lib/aarch64-linux-gnu/libonnxruntime.so"
+		}
 		return "/usr/lib/x86_64-linux-gnu/libonnxruntime.so"
 	case "windows":
 		return "onnxruntime.dll"
@@ -184,29 +201,34 @@ type discogsSession struct {
 
 // buildSessionOptions wires the requested execution provider onto a
 // fresh SessionOptions, returning the options + a human-readable
-// description of what got attached.
+// description of what got attached. Each EP case allocates its own
+// SessionOptions so a failed attempt never leaves a half-configured
+// object behind — that matters for the auto path, which tries several.
 func buildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error) {
-	opts, err := ort.NewSessionOptions()
-	if err != nil {
-		return nil, "", err
-	}
 	switch accel {
 	case "", AccelAuto:
-		if runtime.GOOS == "darwin" {
-			if err := opts.AppendExecutionProviderCoreML(0); err == nil {
-				return opts, "coreml (auto)", nil
-			}
-		}
-		return opts, "cpu (auto fallback)", nil
+		return autoSessionOptions()
 	case AccelCPU:
+		opts, err := ort.NewSessionOptions()
+		if err != nil {
+			return nil, "", err
+		}
 		return opts, "cpu", nil
 	case AccelCoreML:
+		opts, err := ort.NewSessionOptions()
+		if err != nil {
+			return nil, "", err
+		}
 		if err := opts.AppendExecutionProviderCoreML(0); err != nil {
 			_ = opts.Destroy()
 			return nil, "", fmt.Errorf("coreml EP not available: %w", err)
 		}
 		return opts, "coreml", nil
 	case AccelCUDA:
+		opts, err := ort.NewSessionOptions()
+		if err != nil {
+			return nil, "", err
+		}
 		cudaOpts, err := ort.NewCUDAProviderOptions()
 		if err != nil {
 			_ = opts.Destroy()
@@ -218,16 +240,79 @@ func buildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error)
 			return nil, "", fmt.Errorf("cuda EP not available: %w", err)
 		}
 		return opts, "cuda", nil
+	case AccelOpenVINO:
+		opts, err := ort.NewSessionOptions()
+		if err != nil {
+			return nil, "", err
+		}
+		// device_type picks the OpenVINO target — "GPU" binds the Intel
+		// iGPU/Arc, "CPU" the OpenVINO CPU plugin, "AUTO" lets OpenVINO
+		// choose. Defaults to GPU (the reason to use this EP) and is
+		// overridable via HEYA_SONIC_OPENVINO_DEVICE.
+		dev := openvinoDevice()
+		ovOpts := map[string]string{"device_type": dev}
+		// cache_dir persists OpenVINO's compiled kernels (the GPU plugin JITs
+		// each model graph on first inference — tens of seconds across our ~14
+		// models). With a cache, that cost is paid once and reused across
+		// process restarts, so cold-start model load drops dramatically. Off
+		// unless HEYA_SONIC_OPENVINO_CACHE_DIR is set (the openvino image sets
+		// it to a path under the data volume).
+		if cacheDir := strings.TrimSpace(os.Getenv("HEYA_SONIC_OPENVINO_CACHE_DIR")); cacheDir != "" {
+			ovOpts["cache_dir"] = cacheDir
+		}
+		if err := opts.AppendExecutionProviderOpenVINO(ovOpts); err != nil {
+			_ = opts.Destroy()
+			return nil, "", fmt.Errorf("openvino EP not available: %w", err)
+		}
+		return opts, "openvino (" + dev + ")", nil
 	case AccelDirectML:
+		opts, err := ort.NewSessionOptions()
+		if err != nil {
+			return nil, "", err
+		}
 		if err := opts.AppendExecutionProviderDirectML(0); err != nil {
 			_ = opts.Destroy()
 			return nil, "", fmt.Errorf("directml EP not available: %w", err)
 		}
 		return opts, "directml", nil
 	default:
-		_ = opts.Destroy()
 		return nil, "", fmt.Errorf("unknown accelerator %q", accel)
 	}
+}
+
+// autoSessionOptions resolves AccelAuto to the best EP actually present in
+// this build's onnxruntime. On macOS that's CoreML; on Linux we try the GPU
+// providers a vendor image may have compiled in (CUDA, then OpenVINO), each
+// of which errors cleanly when its provider lib is absent, before falling
+// back to CPU. This makes the per-vendor images self-configure even if
+// HEYA_SONIC_ACCELERATOR is left at the default.
+func autoSessionOptions() (*ort.SessionOptions, string, error) {
+	var order []Accelerator
+	switch runtime.GOOS {
+	case "darwin":
+		order = []Accelerator{AccelCoreML}
+	case "linux":
+		order = []Accelerator{AccelCUDA, AccelOpenVINO}
+	}
+	for _, c := range order {
+		if opts, desc, err := buildSessionOptions(c); err == nil {
+			return opts, desc + " (auto)", nil
+		}
+	}
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		return nil, "", err
+	}
+	return opts, "cpu (auto fallback)", nil
+}
+
+// openvinoDevice is the OpenVINO device_type the OpenVINO EP binds to.
+// Defaults to GPU (the Intel iGPU/Arc), overridable for CPU/AUTO/GPU.1 etc.
+func openvinoDevice() string {
+	if v := strings.TrimSpace(os.Getenv("HEYA_SONIC_OPENVINO_DEVICE")); v != "" {
+		return v
+	}
+	return "GPU"
 }
 
 func newDiscogsSession(modelPath string, accel Accelerator) (*discogsSession, error) {

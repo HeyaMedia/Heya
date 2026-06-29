@@ -343,7 +343,8 @@ SELECT a.*,
        mi.slug         AS slug,
        mi.poster_path  AS poster_path,
        (SELECT count(*) FROM albums  al WHERE al.artist_id = a.id)                              AS album_count,
-       (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+       (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
+       EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
 FROM artists a
 JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
@@ -364,7 +365,8 @@ SELECT a.*,
        mi.slug         AS slug,
        mi.poster_path  AS poster_path,
        (SELECT count(*) FROM albums  al WHERE al.artist_id = a.id)                              AS album_count,
-       (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+       (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
+       EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
 FROM artists a
 JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
@@ -377,7 +379,8 @@ LIMIT 1;
 SELECT al.*,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
-       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
+       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
@@ -405,7 +408,8 @@ SELECT t.id              AS track_id,
        al.year           AS album_year,
        a.id              AS artist_id,
        a.name            AS artist_name,
-       mi.slug           AS artist_slug
+       mi.slug           AS artist_slug,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
@@ -430,7 +434,8 @@ WHERE mi.slug = $1;
 SELECT al.*,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
-       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
+       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
@@ -463,7 +468,8 @@ SELECT t.id              AS track_id,
        al.year           AS album_year,
        a.id              AS artist_id,
        a.name            AS artist_name,
-       mi.slug           AS artist_slug
+       mi.slug           AS artist_slug,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
@@ -502,7 +508,8 @@ SELECT * FROM track_files WHERE id = $1;
 SELECT al.*,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
-       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
+       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
+       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
@@ -520,7 +527,8 @@ SELECT a.*,
        mi.slug         AS slug,
        mi.poster_path  AS poster_path,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
-       (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
+       (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
+       EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
 FROM artists a
 JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id

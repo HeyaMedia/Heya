@@ -67,7 +67,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 			Str("asset_type", job.Args.AssetType).
 			Str("url", job.Args.URL).
 			Msg("image download failed")
-		return nil
+		return err
 	}
 
 	if localPath == "" {
@@ -212,7 +212,7 @@ func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *rive
 	localPath, err := w.Downloader.Download(ctx, job.Args.URL, "person", personDir, "profile.jpg")
 	if err != nil {
 		log.Warn().Err(err).Str("url", job.Args.URL).Msg("person image download failed")
-		return nil
+		return err
 	}
 	if localPath == "" {
 		return nil

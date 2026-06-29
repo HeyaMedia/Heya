@@ -724,7 +724,7 @@ type ScheduledTask struct {
 type Session struct {
 	ID         int64              `json:"id"`
 	UserID     int64              `json:"user_id"`
-	Token      string             `json:"token"`
+	TokenHash  string             `json:"token_hash"`
 	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	Kind       string             `json:"kind"`

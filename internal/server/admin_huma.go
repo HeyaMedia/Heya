@@ -54,7 +54,7 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 		})
 
 	// --- Sonic analysis ---
-	huma.Register(api, secured(op(http.MethodGet, "/api/admin/sonicanalysis/status", "sonic-analysis-status", "Sonic-analysis runtime status", "Admin")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/sonicanalysis/status", "sonic-analysis-status", "Sonic-analysis runtime status", "Admin")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[map[string]any], error) {
 			return noStoreJSON(collectSonicAnalysisStatus(app)), nil
 		})
@@ -69,10 +69,7 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 			Body service.SonicAnalysisSettings
 		}) (*JSONOutput[sonicSaveBody], error) {
 			if err := app.SetSonicAnalysisSettings(ctx, in.Body); err != nil {
-				if lerr, ok := err.(*service.ErrFieldLockedByEnv); ok {
-					return nil, huma.Error409Conflict(lerr.Error())
-				}
-				return nil, huma.Error400BadRequest(err.Error())
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
 			}
 			applied := true
 			if err := app.ReconfigureSonicAnalysisAnalyzer(ctx); err != nil {
@@ -103,7 +100,7 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 	// client; gate on `buf` at request time instead of registration time. A
 	// nil buf returns an empty slice so callers can't tell the difference
 	// between "no logs yet" and "ring buffer disabled".
-	huma.Register(api, secured(op(http.MethodGet, "/api/logs", "get-logs", "Recent log entries", "Admin")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/logs", "get-logs", "Recent log entries", "Admin")),
 		func(ctx context.Context, in *struct {
 			N     int    `query:"n" minimum:"1" maximum:"1000" default:"200" doc:"Number of entries"`
 			Level string `query:"level" maxLength:"16" doc:"Filter by log level (trace|debug|info|warn|error)"`

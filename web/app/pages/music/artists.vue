@@ -7,14 +7,17 @@
       <AppContextMenu
         v-for="a in rows"
         :key="a.id"
-        :items="actions.forArtist({ id: a.id, name: a.name, slug: a.slug, media_item_id: a.media_item_id })"
+        :items="actions.forArtist({ id: a.id, name: a.name, slug: a.slug, media_item_id: a.media_item_id, available: a.available })"
       >
       <NuxtLink
         :to="`/music/artist/${a.slug}`"
         class="grid-tile card-tile"
         style="text-align: center; text-decoration: none; color: inherit"
       >
-        <Poster :idx="a.id" :src="artistPosterUrl(a)" aspect="1/1" style="border-radius: 50%" />
+        <!-- Badge sits outside the circular Poster (which clips its overflow)
+             so it isn't masked; it anchors to the position:relative .card-tile. -->
+        <Poster :idx="a.id" :src="artistPosterUrl(a)" aspect="1/1" style="border-radius: 50%" :class="{ 'poster--missing': a.available === false }" />
+        <MediaMissingBadge v-if="a.available === false" />
         <div style="margin-top: 10px">
           <div style="font-size: 13px; font-weight: 500">{{ a.name }}</div>
           <div style="font-size: 11px; color: var(--fg-3); font-family: var(--font-mono)">{{ a.album_count }} / {{ a.track_count }}</div>

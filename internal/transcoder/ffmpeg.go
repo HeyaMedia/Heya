@@ -62,7 +62,7 @@ func (f *FFmpegBuilder) ExtractKeyframesCmd(ctx context.Context, filePath string
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time,flags",
 		"-of", "csv=p=0",
-		filePath,
+		"-i", filePath,
 	)
 	return cmd, nil
 }

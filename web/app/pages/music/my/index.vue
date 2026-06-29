@@ -233,9 +233,10 @@ async function playLovedAlbum(al: LovedAlbumRow) {
   try {
     const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
       path: { artist_slug: al.artist_slug, album_slug: al.slug },
-    }) as unknown as { tracks: { id: number; title: string; duration: number }[] }
-    if (!detail.tracks.length) return
-    const built: Track[] = detail.tracks.map((t) => ({
+    }) as unknown as { tracks: { id: number; title: string; duration: number; files?: unknown[] }[] }
+    const playable = (detail.tracks ?? []).filter((t) => (t.files?.length ?? 0) > 0)
+    if (!playable.length) return
+    const built: Track[] = playable.map((t) => ({
       id: t.id,
       title: t.title,
       artist: al.artist_name,

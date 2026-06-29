@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -89,46 +90,50 @@ type subStream struct {
 func parseClientCaps(r *http.Request) transcoder.ClientCapabilities {
 	caps := transcoder.DefaultClientCaps
 	q := r.URL.Query()
-	if q.Get("supports_hevc") == "1" {
+	if queryFlag(q.Get("supports_hevc")) {
 		caps.SupportsHEVC = true
 	}
-	if q.Get("supports_av1") == "1" {
+	if queryFlag(q.Get("supports_av1")) {
 		caps.SupportsAV1 = true
 	}
-	if q.Get("supports_flac") == "1" {
+	if queryFlag(q.Get("supports_flac")) {
 		caps.SupportsFLAC = true
 	}
-	if q.Get("supports_opus") == "1" {
+	if queryFlag(q.Get("supports_opus")) {
 		caps.SupportsOpus = true
 	}
-	if q.Get("supports_ac3") == "1" {
+	if queryFlag(q.Get("supports_ac3")) {
 		caps.SupportsAC3 = true
 	}
-	if q.Get("supports_eac3") == "1" {
+	if queryFlag(q.Get("supports_eac3")) {
 		caps.SupportsEAC3 = true
 	}
-	if q.Get("supports_mkv") == "1" {
+	if queryFlag(q.Get("supports_mkv")) {
 		caps.SupportsMKV = true
 	}
-	if q.Get("supports_webm") == "1" {
+	if queryFlag(q.Get("supports_webm")) {
 		caps.SupportsWebM = true
 	}
-	if q.Get("supports_hdr") == "1" {
+	if queryFlag(q.Get("supports_hdr")) {
 		caps.SupportsHDR = true
 	}
-	if q.Get("supports_hdr10") == "1" {
+	if queryFlag(q.Get("supports_hdr10")) {
 		caps.SupportsHDR10 = true
 	}
-	if q.Get("supports_hlg") == "1" {
+	if queryFlag(q.Get("supports_hlg")) {
 		caps.SupportsHLG = true
 	}
-	if q.Get("supports_dovi") == "1" {
+	if queryFlag(q.Get("supports_dovi")) {
 		caps.SupportsDoVi = true
 	}
-	if q.Get("supports_hevc_hev1") == "1" {
+	if queryFlag(q.Get("supports_hevc_hev1")) {
 		caps.SupportsHEVCHev1 = true
 	}
 	return caps
+}
+
+func queryFlag(v string) bool {
+	return v == "1" || strings.EqualFold(v, "true")
 }
 
 func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabilities, filePath string, libraryID int64) streamInfoResponse {

@@ -39,7 +39,7 @@
       <AppContextMenu
         v-for="al in recentAlbums"
         :key="`ra-${al.id}`"
-        :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name })"
+        :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name, available: al.available })"
       >
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
@@ -51,6 +51,7 @@
           :title="al.title"
           :subtitle="`${al.artist_name}${al.year ? ' · ' + al.year : ''}`"
           :badge-tl="al.album_type && al.album_type !== 'album' ? al.album_type : ''"
+          :missing="al.available === false"
           @play="playAlbum(al)"
         />
       </NuxtLink>
@@ -68,7 +69,7 @@
       <AppContextMenu
         v-for="a in recentArtists"
         :key="`artist-${a.artist_id}`"
-        :items="actions.forArtist({ id: a.artist_id, name: a.artist_name, slug: a.artist_slug, media_item_id: a.media_item_id })"
+        :items="actions.forArtist({ id: a.artist_id, name: a.artist_name, slug: a.artist_slug, media_item_id: a.media_item_id, available: a.available })"
       >
       <NuxtLink
         :to="`/music/artist/${a.artist_slug}`"
@@ -80,6 +81,7 @@
           :title="a.artist_name"
           :subtitle="`${a.album_count} albums · ${a.track_count} tracks`"
           badge-tl="Artist"
+          :missing="a.available === false"
           @play="playArtist(a.artist_slug, a.artist_name)"
         />
       </NuxtLink>
@@ -325,6 +327,7 @@ interface RecentAlbumRow {
   artist_slug: string
   album_type: string
   cover_path: string
+  available?: boolean
 }
 
 interface RecentArtistRow {
@@ -334,6 +337,7 @@ interface RecentArtistRow {
   media_item_id: number
   album_count: number
   track_count: number
+  available?: boolean
 }
 
 interface OnThisDayRow {

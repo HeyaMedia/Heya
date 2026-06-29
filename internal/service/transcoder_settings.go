@@ -21,8 +21,8 @@ const (
 // PATCH semantics where only the dirty fields are sent.
 func (a *App) SaveTranscoderSettings(ctx context.Context, hwAccel string, cacheMaxGB int) error {
 	if hwAccel != "" {
-		if a.config.HWAccel.Source == config.SourceEnv && a.config.HWAccel.Value != hwAccel {
-			return &ErrFieldLockedByEnv{Field: "transcoder.hwaccel", EnvVar: a.config.HWAccel.EnvVar}
+		if err := errIfEnvLockedChanged("transcoder.hwaccel", a.config.HWAccel, hwAccel); err != nil {
+			return err
 		}
 		if a.config.HWAccel.Source != config.SourceEnv {
 			buf, _ := json.Marshal(hwAccel)
@@ -33,8 +33,8 @@ func (a *App) SaveTranscoderSettings(ctx context.Context, hwAccel string, cacheM
 		}
 	}
 	if cacheMaxGB > 0 {
-		if a.config.TranscodeCacheMaxGB.Source == config.SourceEnv && a.config.TranscodeCacheMaxGB.Value != cacheMaxGB {
-			return &ErrFieldLockedByEnv{Field: "transcoder.cache_max_gb", EnvVar: a.config.TranscodeCacheMaxGB.EnvVar}
+		if err := errIfEnvLockedChanged("transcoder.cache_max_gb", a.config.TranscodeCacheMaxGB, cacheMaxGB); err != nil {
+			return err
 		}
 		if a.config.TranscodeCacheMaxGB.Source != config.SourceEnv {
 			buf, _ := json.Marshal(cacheMaxGB)

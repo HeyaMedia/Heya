@@ -137,6 +137,22 @@ LEFT JOIN tv_seasons s ON ep.season_id = s.id
 LEFT JOIN tv_series ts ON s.series_id = ts.id
 LEFT JOIN media_items ep_mi ON ts.media_item_id = ep_mi.id
 WHERE wp.user_id = $1 AND wp.completed = false AND wp.progress_seconds > 30
+  -- Skip items whose file is missing on disk. For a movie that's any live
+  -- file on the media item; for an episode it must be the specific file
+  -- matching this season+episode (a sibling episode surviving doesn't make
+  -- THIS one playable), mirroring BuildEpisodeFileMap's parse_result match.
+  AND (
+    (wp.entity_type = 'movie' AND EXISTS (
+      SELECT 1 FROM library_files lf
+      WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
+    ))
+    OR (wp.entity_type = 'episode' AND EXISTS (
+      SELECT 1 FROM library_files lf
+      WHERE lf.media_item_id = ep_mi.id AND lf.deleted_at IS NULL AND lf.status = 'matched'
+        AND lf.parse_result->'parsed'->'release'->'seasons'  @> to_jsonb(s.season_number)
+        AND lf.parse_result->'parsed'->'release'->'episodes' @> to_jsonb(ep.episode_number)
+    ))
+  )
 ORDER BY wp.updated_at DESC
 LIMIT 20
 `

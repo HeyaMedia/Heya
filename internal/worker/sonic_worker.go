@@ -29,7 +29,8 @@ import (
 // AnalyzerVersion is stamped on every write so a future code bump
 // invalidates existing rows and the scheduler re-picks them.
 type AnalyzeTrackFacetsArgs struct {
-	TrackID int64 `json:"track_id"`
+	TrackID         int64  `json:"track_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (AnalyzeTrackFacetsArgs) Kind() string { return "analyze_track_facets" }
@@ -38,7 +39,7 @@ func (AnalyzeTrackFacetsArgs) InsertOpts() river.InsertOpts {
 		Queue:       "sonic_analysis",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -75,7 +76,7 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 	if row.ArtistName != "" {
 		label = row.ArtistName + " — " + row.Title
 	}
-	w.Progress.SetCurrentByKind(AnalyzeTrackFacetsArgs{}.Kind(), label)
+	w.Progress.SetCurrent(AnalyzeTrackFacetsArgs{}.Kind(), job.Args.ScheduledTaskID, label)
 	currentVersion := sonicanalysis.AnalyzerVersion
 
 	lease, err := w.Holder.Borrow(ctx)
@@ -85,7 +86,7 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 	defer lease.Close()
 
 	stageHook := func(stage sonicanalysis.AnalyzeStage) {
-		w.Progress.SetStageByKind(AnalyzeTrackFacetsArgs{}.Kind(), label, string(stage))
+		w.Progress.SetStage(AnalyzeTrackFacetsArgs{}.Kind(), job.Args.ScheduledTaskID, label, string(stage))
 	}
 	facets, analyzeErr := lease.Analyzer.AnalyzeWithProgress(ctx, row.FilePath, stageHook)
 	if analyzeErr != nil {
@@ -112,10 +113,10 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 	// album collapse to a single refresh.
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	if client != nil {
-		if _, err := client.Insert(ctx, RefreshArtistCentroidArgs{ArtistID: row.ArtistID}, nil); err != nil {
+		if _, err := client.Insert(ctx, RefreshArtistCentroidArgs{ArtistID: row.ArtistID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
 			log.Warn().Err(err).Int64("artist_id", row.ArtistID).Msg("analyze_track_facets: enqueue artist centroid refresh failed")
 		}
-		if _, err := client.Insert(ctx, RefreshAlbumCentroidArgs{AlbumID: row.AlbumID}, nil); err != nil {
+		if _, err := client.Insert(ctx, RefreshAlbumCentroidArgs{AlbumID: row.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
 			log.Warn().Err(err).Int64("album_id", row.AlbumID).Msg("analyze_track_facets: enqueue album centroid refresh failed")
 		}
 	}
@@ -155,7 +156,8 @@ func persistTrackFacets(ctx context.Context, q *sqlc.Queries, trackID int64, f *
 // rapid bursts (e.g. when finishing a 200-track album, only one
 // refresh per artist actually runs).
 type RefreshArtistCentroidArgs struct {
-	ArtistID int64 `json:"artist_id"`
+	ArtistID        int64  `json:"artist_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (RefreshArtistCentroidArgs) Kind() string { return "refresh_artist_centroids" }
@@ -164,7 +166,7 @@ func (RefreshArtistCentroidArgs) InsertOpts() river.InsertOpts {
 		Queue:       "artist_centroid",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -177,14 +179,15 @@ type RefreshArtistCentroidWorker struct {
 func (w *RefreshArtistCentroidWorker) Work(ctx context.Context, job *river.Job[RefreshArtistCentroidArgs]) error {
 	q := sqlc.New(w.DB)
 	if artist, err := q.GetArtistByID(ctx, job.Args.ArtistID); err == nil {
-		w.Progress.SetStageByKind(RefreshArtistCentroidArgs{}.Kind(), artist.Name, "artist centroid")
+		w.Progress.SetStage(RefreshArtistCentroidArgs{}.Kind(), job.Args.ScheduledTaskID, artist.Name, "artist centroid")
 	}
 	return q.RefreshArtistCentroid(ctx, job.Args.ArtistID)
 }
 
 // RefreshAlbumCentroidArgs mirrors RefreshArtistCentroidArgs for albums.
 type RefreshAlbumCentroidArgs struct {
-	AlbumID int64 `json:"album_id"`
+	AlbumID         int64  `json:"album_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (RefreshAlbumCentroidArgs) Kind() string { return "refresh_album_centroids" }
@@ -193,7 +196,7 @@ func (RefreshAlbumCentroidArgs) InsertOpts() river.InsertOpts {
 		Queue:       "album_centroid",
 		MaxAttempts: 2,
 		Priority:    PriorityAnalysis,
-		UniqueOpts:  river.UniqueOpts{ByArgs: true},
+		UniqueOpts:  uniqueWhileActive(),
 	}
 }
 
@@ -206,7 +209,7 @@ type RefreshAlbumCentroidWorker struct {
 func (w *RefreshAlbumCentroidWorker) Work(ctx context.Context, job *river.Job[RefreshAlbumCentroidArgs]) error {
 	q := sqlc.New(w.DB)
 	if album, err := q.GetAlbumByID(ctx, job.Args.AlbumID); err == nil {
-		w.Progress.SetStageByKind(RefreshAlbumCentroidArgs{}.Kind(), album.Title, "album centroid")
+		w.Progress.SetStage(RefreshAlbumCentroidArgs{}.Kind(), job.Args.ScheduledTaskID, album.Title, "album centroid")
 	}
 	return q.RefreshAlbumCentroid(ctx, job.Args.AlbumID)
 }

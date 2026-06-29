@@ -29,6 +29,8 @@ export interface TrackEntity {
   artist_id?: number
   artist_slug?: string
   album_slug?: string
+  /** When false, the track has no file on disk — omit play/queue actions. */
+  available?: boolean
 }
 
 export interface AlbumEntity {
@@ -38,6 +40,8 @@ export interface AlbumEntity {
   album_slug: string
   artist_id?: number
   artist_name?: string
+  /** When false, the album's files are gone — omit play/queue actions. */
+  available?: boolean
 }
 
 export interface ArtistEntity {
@@ -45,6 +49,8 @@ export interface ArtistEntity {
   name: string
   slug: string
   media_item_id?: number
+  /** When false, the artist's files are gone — omit play/queue actions. */
+  available?: boolean
 }
 
 export function useMusicActions() {
@@ -72,6 +78,7 @@ export function useMusicActions() {
       album_slug: t.album_slug,
       poster: t.artist_slug && t.album_slug ? (useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined) : undefined,
       source: 'context',
+      available: t.available,
     }
   }
 
@@ -128,40 +135,46 @@ export function useMusicActions() {
 
   function forTrack(track: TrackEntity): ContextMenuItem[] {
     const playable = trackEntityToPlayable(track)
-    const items: ContextMenuItem[] = [
-      {
-        label: 'Play Now',
-        icon: 'play',
-        action: async () => { queue.value = [playable]; await play(playable) },
-      },
-      {
-        label: 'Play Next',
-        icon: 'chevright',
-        action: () => playNext(playable),
-      },
-      {
-        label: 'Add to Queue',
-        icon: 'plus',
-        action: () => addToQueue(playable),
-      },
-      { label: '', separator: true },
-      {
-        label: 'Start Radio',
-        icon: 'radio',
-        action: () => radio.startRadio({ kind: 'track', track_id: track.id }, playable),
-      },
-      {
-        label: 'Add to Playlist',
-        icon: 'list',
-        submenu: playlistSubmenu(async (plId) => { await playlists.addTrack(plId, track.id) }),
-      },
+    const items: ContextMenuItem[] = []
+    // Playback/queue actions only make sense when the track still has a file.
+    if (track.available !== false) {
+      items.push(
+        {
+          label: 'Play Now',
+          icon: 'play',
+          action: async () => { queue.value = [playable]; await play(playable) },
+        },
+        {
+          label: 'Play Next',
+          icon: 'chevright',
+          action: () => playNext(playable),
+        },
+        {
+          label: 'Add to Queue',
+          icon: 'plus',
+          action: () => addToQueue(playable),
+        },
+        { label: '', separator: true },
+        {
+          label: 'Start Radio',
+          icon: 'radio',
+          action: () => radio.startRadio({ kind: 'track', track_id: track.id }, playable),
+        },
+        {
+          label: 'Add to Playlist',
+          icon: 'list',
+          submenu: playlistSubmenu(async (plId) => { await playlists.addTrack(plId, track.id) }),
+        },
+      )
+    }
+    items.push(
       {
         label: 'Rate',
         icon: 'star',
         submenu: ratingSubmenu(trackRatings.get(track.id), async (v) => { await trackRatings.set(track.id, v) }),
       },
       { label: '', separator: true },
-    ]
+    )
     if (track.artist_slug) {
       items.push({
         label: 'Go to Artist',
@@ -186,57 +199,68 @@ export function useMusicActions() {
     try {
       const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
         path: { artist_slug: album.artist_slug, album_slug: album.album_slug },
-      }) as unknown as { tracks: Array<{ id: number; title: string; duration: number; artist_name?: string }> }
-      return (detail.tracks ?? []).map((t) => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist_name || album.artist_name || '',
-        album: album.title,
-        duration: t.duration,
-        stream_url: `/api/music/tracks/${t.id}/stream`,
-        album_id: album.id,
-        artist_id: album.artist_id,
-        artist_slug: album.artist_slug,
-        album_slug: album.album_slug,
-        poster: useAlbumCoverUrl(album.artist_slug, album.album_slug) ?? undefined,
-        source: 'album',
-      }))
+      }) as unknown as { tracks: Array<{ id: number; title: string; duration: number; artist_name?: string; files?: unknown[] }> }
+      // Only queue tracks that still have a file on disk (detail.tracks[].files
+      // is server-filtered to live files; empty means removed).
+      return (detail.tracks ?? [])
+        .filter((t) => (t.files?.length ?? 0) > 0)
+        .map((t) => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist_name || album.artist_name || '',
+          album: album.title,
+          duration: t.duration,
+          stream_url: `/api/music/tracks/${t.id}/stream`,
+          album_id: album.id,
+          artist_id: album.artist_id,
+          artist_slug: album.artist_slug,
+          album_slug: album.album_slug,
+          poster: useAlbumCoverUrl(album.artist_slug, album.album_slug) ?? undefined,
+          source: 'album',
+          available: true,
+        }))
     } catch {
       return []
     }
   }
 
   function forAlbum(album: AlbumEntity): ContextMenuItem[] {
-    return [
-      {
-        label: 'Play',
-        icon: 'play',
-        action: async () => {
-          const ts = await fetchAlbumTracks(album)
-          if (!ts.length) return
-          queue.value = ts
-          await play(ts[0]!)
+    const items: ContextMenuItem[] = []
+    // Playback/queue actions only make sense when the album still has files.
+    if (album.available !== false) {
+      items.push(
+        {
+          label: 'Play',
+          icon: 'play',
+          action: async () => {
+            const ts = await fetchAlbumTracks(album)
+            if (!ts.length) return
+            queue.value = ts
+            await play(ts[0]!)
+          },
         },
-      },
-      {
-        label: 'Play Next',
-        icon: 'chevright',
-        action: async () => { const ts = await fetchAlbumTracks(album); if (ts.length) await playNext(ts) },
-      },
-      {
-        label: 'Add to Queue',
-        icon: 'plus',
-        action: async () => { const ts = await fetchAlbumTracks(album); if (ts.length) await addToQueue(ts) },
-      },
-      { label: '', separator: true },
-      {
-        label: 'Add All to Playlist',
-        icon: 'list',
-        submenu: playlistSubmenu(async (plId) => {
-          const ts = await fetchAlbumTracks(album)
-          for (const t of ts) await playlists.addTrack(plId, t.id)
-        }),
-      },
+        {
+          label: 'Play Next',
+          icon: 'chevright',
+          action: async () => { const ts = await fetchAlbumTracks(album); if (ts.length) await playNext(ts) },
+        },
+        {
+          label: 'Add to Queue',
+          icon: 'plus',
+          action: async () => { const ts = await fetchAlbumTracks(album); if (ts.length) await addToQueue(ts) },
+        },
+        { label: '', separator: true },
+        {
+          label: 'Add All to Playlist',
+          icon: 'list',
+          submenu: playlistSubmenu(async (plId) => {
+            const ts = await fetchAlbumTracks(album)
+            for (const t of ts) await playlists.addTrack(plId, t.id)
+          }),
+        },
+      )
+    }
+    items.push(
       {
         label: 'Rate Album',
         icon: 'star',
@@ -253,11 +277,15 @@ export function useMusicActions() {
         icon: 'music',
         action: () => navigateTo(`/music/artist/${album.artist_slug}/${album.album_slug}`),
       },
-    ]
+    )
+    return items
   }
 
   function forArtist(artist: ArtistEntity): ContextMenuItem[] {
-    return [
+    const items: ContextMenuItem[] = []
+    // Playback/radio actions only make sense when the artist still has files.
+    if (artist.available !== false) {
+      items.push(
       {
         label: 'Play Top Tracks',
         icon: 'play',
@@ -266,8 +294,9 @@ export function useMusicActions() {
             const r = await $heya('/api/music/artists/{slug}/tracks', {
               path: { slug: artist.slug },
               query: { limit: 50 },
-            }) as unknown as { items?: Array<{ track_id?: number; id?: number; track_title?: string; title?: string; duration: number; album_title?: string; album_slug?: string; artist_slug?: string }> }
-            const items = r.items ?? []
+            }) as unknown as { items?: Array<{ track_id?: number; id?: number; track_title?: string; title?: string; duration: number; album_title?: string; album_slug?: string; artist_slug?: string; available?: boolean }> }
+            // Drop tracks whose file was removed from disk.
+            const items = (r.items ?? []).filter((t) => t.available !== false)
             const ts: Track[] = items.map((t) => ({
               id: t.track_id ?? t.id ?? 0,
               title: t.track_title ?? t.title ?? '',
@@ -280,6 +309,7 @@ export function useMusicActions() {
               album_slug: t.album_slug,
               poster: t.album_slug ? (useAlbumCoverUrl(artist.slug, t.album_slug) ?? undefined) : undefined,
               source: 'artist',
+              available: t.available,
             }))
             if (!ts.length) return
             queue.value = ts
@@ -293,6 +323,9 @@ export function useMusicActions() {
         action: () => radio.startRadio({ kind: 'artist', artist_slug: artist.slug }),
       },
       { label: '', separator: true },
+      )
+    }
+    items.push(
       {
         label: 'Rate Artist',
         icon: 'star',
@@ -304,7 +337,8 @@ export function useMusicActions() {
         icon: 'user',
         action: () => navigateTo(`/music/artist/${artist.slug}`),
       },
-    ]
+    )
+    return items
   }
 
   // --- Mix: a curated, pre-loaded track list. The "Save as Playlist" item
@@ -364,18 +398,22 @@ export function useMusicActions() {
         icon: 'play',
         action: async () => {
           try {
-            const r = await $heya('/api/me/playlists/{id}', { path: { id: p.id } }) as unknown as { tracks?: Array<{ id: number; title: string; artist_name?: string; album_title?: string; duration: number; album_id?: number; artist_id?: number; artist_slug?: string; album_slug?: string }> }
-            const list = r.tracks ?? []
+            // The playlist-detail endpoint returns ListPlaylistTracksRow, whose
+            // JSON keys are track_id/track_title (not id/title). Build from the
+            // correct fields and drop tracks whose file was removed from disk.
+            const r = await $heya('/api/me/playlists/{id}', { path: { id: p.id } }) as unknown as { tracks?: Array<{ track_id: number; track_title: string; artist_name?: string; album_title?: string; duration: number; album_id?: number; artist_id?: number; artist_slug?: string; album_slug?: string; available?: boolean }> }
+            const list = (r.tracks ?? []).filter((t) => t.available !== false)
             if (!list.length) return
             const ts: Track[] = list.map((t) => ({
-              id: t.id, title: t.title,
+              id: t.track_id, title: t.track_title,
               artist: t.artist_name ?? '', album: t.album_title ?? '',
               duration: t.duration,
-              stream_url: `/api/music/tracks/${t.id}/stream`,
+              stream_url: `/api/music/tracks/${t.track_id}/stream`,
               album_id: t.album_id, artist_id: t.artist_id,
               artist_slug: t.artist_slug, album_slug: t.album_slug,
               poster: t.artist_slug && t.album_slug ? (useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined) : undefined,
               source: 'playlist',
+              available: t.available,
             }))
             queue.value = ts
             await play(ts[0]!)

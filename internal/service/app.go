@@ -18,6 +18,7 @@ import (
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/podcastindex"
+	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/radiobrowser"
 	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/sessions"
@@ -43,7 +44,7 @@ type App struct {
 	audioSessions  *transcoder.AudioSessionManager
 	hub            *eventhub.Hub
 	scheduler      *scheduler.Trigger
-	tailscale      *tailscale.Server
+	tailscale      tailscale.Manager
 	textSearcher   *sonicanalysis.TextSearcher
 	modelFetcher   *sonicanalysis.ModelFetcher
 	analyzer       *sonicanalysis.Analyzer
@@ -85,8 +86,8 @@ func (a *App) Sessions() *sessions.Store                      { return a.session
 
 func (a *App) SetScheduler(s *scheduler.Trigger) { a.scheduler = s }
 
-func (a *App) Tailscale() *tailscale.Server      { return a.tailscale }
-func (a *App) SetTailscale(ts *tailscale.Server) { a.tailscale = ts }
+func (a *App) Tailscale() tailscale.Manager      { return a.tailscale }
+func (a *App) SetTailscale(ts tailscale.Manager) { a.tailscale = ts }
 
 func (a *App) TextSearcher() *sonicanalysis.TextSearcher { return a.textSearcher }
 func (a *App) ModelFetcher() *sonicanalysis.ModelFetcher { return a.modelFetcher }
@@ -125,7 +126,10 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 
-	db, err := database.Connect(ctx, cfg.DatabaseURL.Value)
+	db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
+		MaxConns: int32(cfg.DatabaseMaxConns.Value),
+		MinConns: int32(cfg.DatabaseMinConns.Value),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -371,8 +375,10 @@ func (a *App) StartWorkers(ctx context.Context) error {
 }
 
 func (a *App) QueueCounts(ctx context.Context) (pending, running int) {
-	row := a.db.QueryRow(ctx, "SELECT count(*) FILTER (WHERE state = 'available' OR state = 'retryable'), count(*) FILTER (WHERE state = 'running') FROM river_job")
-	row.Scan(&pending, &running)
+	if counts, err := queueops.CountActive(ctx, a.db); err == nil {
+		pending = counts.Pending
+		running = counts.Running
+	}
 	return
 }
 
@@ -434,6 +440,9 @@ func (a *App) Close() {
 	}
 	if a.watcher != nil {
 		a.watcher.StopAll()
+	}
+	if a.transcoder != nil {
+		a.transcoder.Close()
 	}
 	if a.db != nil {
 		a.db.Close()

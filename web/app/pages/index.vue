@@ -121,7 +121,7 @@ const albumsQuery = useQuery({
   queryKey: ['home', 'recent-albums'],
   queryFn: async () => {
     const home = await $heya('/api/music/home', { query: { limit: 20 } }) as { recent_albums: Array<{
-      id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string
+      id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string; available?: boolean
     }> }
     return (home.recent_albums ?? []).map(albumToRowItem)
   },
@@ -170,7 +170,8 @@ const upNextItems = ref<UpNextItem[]>([])
 const favoriteItems = computed<MediaItem[]>(() => {
   const favIDs = new Set(favoritesStateQuery.data.value?.favorited ?? [])
   if (favIDs.size === 0) return []
-  return [...recentMovies.value, ...recentTV.value].filter(m => favIDs.has(m.id))
+  // Curated surface — hide anything missing on disk.
+  return [...recentMovies.value, ...recentTV.value].filter(m => favIDs.has(m.id) && m.available !== false)
 })
 
 const recommendedItems = computed<MediaItem[]>(() => {
@@ -180,7 +181,7 @@ const recommendedItems = computed<MediaItem[]>(() => {
   const local = recs
     .filter(r => r.local_media_item_id !== null)
     .map(r => mediaMap.get(r.local_media_item_id as number))
-    .filter((m): m is MediaItem => !!m)
+    .filter((m): m is MediaItem => !!m && m.available !== false)
   const existing = new Set([
     ...favoriteItems.value.map(m => m.id),
     ...upNextItems.value.map(m => m.id),
@@ -193,9 +194,11 @@ const loading = computed(() =>
 )
 
 const heroItems = computed(() => {
+  // Hero only spotlights playable titles — never feature something whose
+  // files were removed from disk.
   const combined = [
-    ...recentMovies.value.map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
-    ...recentTV.value.map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
+    ...recentMovies.value.filter(i => i.available !== false).map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
+    ...recentTV.value.filter(i => i.available !== false).map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
   ]
   combined.sort((a, b) => b._sort - a._sort)
   return combined.slice(0, 5)
@@ -219,7 +222,7 @@ function albumUrl(item: AlbumRowItem | MediaItem) {
 // which has a wide field surface (library_id, sort_title, …) we don't have or
 // need for the rail.
 function albumToRowItem(al: {
-  id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string
+  id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string; available?: boolean
 }): AlbumRowItem {
   return {
     id: al.id,
@@ -230,6 +233,7 @@ function albumToRowItem(al: {
     slug: al.slug,
     artist_slug: al.artist_slug,
     album_slug: al.slug,
+    available: al.available,
     poster_src: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
   } as unknown as AlbumRowItem
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,8 +16,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/parser"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -36,7 +39,7 @@ type ScanFunc func(libraryID int64, force bool)
 
 type Manager struct {
 	mu       sync.Mutex
-	watchers map[int64]*LibraryWatcher
+	watchers map[string]*LibraryWatcher
 	db       *pgxpool.Pool
 	river    *river.Client[pgx.Tx]
 	onScan   ScanFunc
@@ -44,7 +47,7 @@ type Manager struct {
 
 func NewManager(db *pgxpool.Pool, riverClient *river.Client[pgx.Tx], onScan ScanFunc) *Manager {
 	return &Manager{
-		watchers: make(map[int64]*LibraryWatcher),
+		watchers: make(map[string]*LibraryWatcher),
 		db:       db,
 		river:    riverClient,
 		onScan:   onScan,
@@ -79,7 +82,8 @@ func (m *Manager) Watch(ctx context.Context, libraryID int64, rootPath string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.watchers[libraryID]; exists {
+	key := watcherKey(libraryID, rootPath)
+	if _, exists := m.watchers[key]; exists {
 		return
 	}
 
@@ -90,7 +94,7 @@ func (m *Manager) Watch(ctx context.Context, libraryID int64, rootPath string) {
 	}
 
 	if err := addRecursive(fsw, rootPath); err != nil {
-		log.Error().Err(err).Str("path", rootPath).Msg("failed to add path to watcher")
+		log.Error().Err(err).Str("path", vfs.RedactPath(rootPath)).Msg("failed to add path to watcher")
 		fsw.Close()
 		return
 	}
@@ -102,50 +106,56 @@ func (m *Manager) Watch(ctx context.Context, libraryID int64, rootPath string) {
 		fsw:       fsw,
 		cancel:    cancel,
 	}
-	m.watchers[libraryID] = lw
+	m.watchers[key] = lw
 
 	go m.eventLoop(wctx, lw)
-	log.Info().Int64("library_id", libraryID).Str("path", rootPath).Msg("watching directory")
+	log.Info().Int64("library_id", libraryID).Str("path", vfs.RedactPath(rootPath)).Msg("watching directory")
 }
 
 func (m *Manager) Unwatch(libraryID int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if lw, ok := m.watchers[libraryID]; ok {
-		lw.cancel()
-		lw.fsw.Close()
-		delete(m.watchers, libraryID)
-		log.Info().Int64("library_id", libraryID).Msg("stopped watching")
+	for key, lw := range m.watchers {
+		if lw.libraryID == libraryID {
+			lw.cancel()
+			_ = lw.fsw.Close()
+			delete(m.watchers, key)
+			log.Info().Int64("library_id", libraryID).Str("path", vfs.RedactPath(lw.rootPath)).Msg("stopped watching")
+		}
 	}
 }
 
 func (m *Manager) Pause(libraryID int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if lw, ok := m.watchers[libraryID]; ok {
-		lw.paused.Store(true)
-		log.Debug().Int64("library_id", libraryID).Msg("watcher paused")
+	for _, lw := range m.watchers {
+		if lw.libraryID == libraryID {
+			lw.paused.Store(true)
+		}
 	}
+	log.Debug().Int64("library_id", libraryID).Msg("watcher paused")
 }
 
 func (m *Manager) Resume(libraryID int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if lw, ok := m.watchers[libraryID]; ok {
-		lw.paused.Store(false)
-		log.Debug().Int64("library_id", libraryID).Msg("watcher resumed")
+	for _, lw := range m.watchers {
+		if lw.libraryID == libraryID {
+			lw.paused.Store(false)
+		}
 	}
+	log.Debug().Int64("library_id", libraryID).Msg("watcher resumed")
 }
 
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for id, lw := range m.watchers {
+	for key, lw := range m.watchers {
 		lw.cancel()
 		lw.fsw.Close()
-		delete(m.watchers, id)
+		delete(m.watchers, key)
 	}
 	log.Info().Msg("all watchers stopped")
 }
@@ -155,10 +165,18 @@ func (m *Manager) Status() map[int64]string {
 	defer m.mu.Unlock()
 
 	status := make(map[int64]string)
-	for id, lw := range m.watchers {
-		status[id] = lw.rootPath
+	for _, lw := range m.watchers {
+		if status[lw.libraryID] == "" {
+			status[lw.libraryID] = lw.rootPath
+		} else {
+			status[lw.libraryID] += "," + lw.rootPath
+		}
 	}
 	return status
+}
+
+func watcherKey(libraryID int64, rootPath string) string {
+	return strconv.FormatInt(libraryID, 10) + "\x00" + rootPath
 }
 
 func (m *Manager) eventLoop(ctx context.Context, lw *LibraryWatcher) {
@@ -203,9 +221,9 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 		}
 		if info.IsDir() {
 			name := filepath.Base(path)
-			if !strings.HasPrefix(name, ".") && !isExtrasDir(name) {
+			if !strings.HasPrefix(name, ".") && !mediafile.IsExtrasDir(name) {
 				addRecursive(lw.fsw, path)
-				log.Debug().Str("path", path).Msg("watching new directory")
+				log.Debug().Str("path", vfs.RedactPath(path)).Msg("watching new directory")
 			}
 			return
 		}
@@ -214,10 +232,10 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 	if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
 		ext := strings.ToLower(filepath.Ext(path))
 		if parser.IsMediaExtension(ext) {
-			log.Info().Str("path", path).Str("op", event.Op.String()).Msg("media file removed")
+			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Msg("media file removed")
 			m.enqueueSoftDelete(ctx, lw.libraryID, path)
 		} else if ext == "" {
-			log.Info().Str("path", path).Str("op", event.Op.String()).Int64("library_id", lw.libraryID).Msg("directory removed, scheduling rescan")
+			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Int64("library_id", lw.libraryID).Msg("directory removed, scheduling rescan")
 			m.enqueueRescan(ctx, lw.libraryID)
 		}
 		return
@@ -263,27 +281,40 @@ func (m *Manager) enqueueNewFile(ctx context.Context, lw *LibraryWatcher, filePa
 		Status:      sqlc.FileStatusPending,
 	})
 	if err != nil {
-		log.Error().Err(err).Str("path", filePath).Msg("upsert failed")
+		log.Error().Err(err).Str("path", vfs.RedactPath(filePath)).Msg("upsert failed")
 		return
 	}
 
 	// fsnotify-discovered file: the user just dropped this into the library,
 	// so it jumps ahead of any in-flight bulk scan. PriorityWatcher (1) wins
 	// against PriorityScan (2) which is what the scheduler enqueues at.
-	m.river.Insert(ctx, worker.ProcessFileArgs{
+	if m.river == nil {
+		log.Warn().Str("path", vfs.RedactPath(filePath)).Msg("cannot enqueue process file: river client unavailable")
+		return
+	}
+	if _, err := m.river.Insert(ctx, worker.ProcessFileArgs{
 		LibraryFileID: file.ID,
 		LibraryID:     lw.libraryID,
 		FilePath:      filePath,
-	}, &river.InsertOpts{Priority: worker.PriorityWatcher})
+	}, &river.InsertOpts{Priority: worker.PriorityWatcher}); err != nil {
+		log.Warn().Err(err).Str("path", vfs.RedactPath(filePath)).Int64("file_id", file.ID).Msg("enqueue process file failed")
+		return
+	}
 
 	log.Info().Str("path", relPath).Int64("file_id", file.ID).Msg("new media file detected, enqueued for processing")
 }
 
 func (m *Manager) enqueueSoftDelete(ctx context.Context, libraryID int64, path string) {
-	m.river.Insert(ctx, worker.SoftDeleteArgs{
+	if m.river == nil {
+		log.Warn().Str("path", vfs.RedactPath(path)).Msg("cannot enqueue soft delete: river client unavailable")
+		return
+	}
+	if _, err := m.river.Insert(ctx, worker.SoftDeleteArgs{
 		LibraryID: libraryID,
 		Paths:     []string{path},
-	}, nil)
+	}, nil); err != nil {
+		log.Warn().Err(err).Str("path", vfs.RedactPath(path)).Int64("library_id", libraryID).Msg("enqueue soft delete failed")
+	}
 }
 
 var (
@@ -316,7 +347,7 @@ func addRecursive(fsw *fsnotify.Watcher, root string) error {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if strings.HasPrefix(name, ".") || isExtrasDir(name) || isSkipDir(name) {
+			if strings.HasPrefix(name, ".") || mediafile.IsExtrasDir(name) || mediafile.IsSkipDir(name) {
 				return filepath.SkipDir
 			}
 			return fsw.Add(path)
@@ -327,22 +358,4 @@ func addRecursive(fsw *fsnotify.Watcher, root string) error {
 
 func isLocalPath(p string) bool {
 	return !strings.HasPrefix(p, "smb://")
-}
-
-var extrasDirNames = map[string]bool{
-	"trailers": true, "trailer": true, "behind the scenes": true,
-	"deleted scenes": true, "featurettes": true, "interviews": true,
-	"scenes": true, "shorts": true, "other": true,
-}
-
-var skipDirSet = map[string]bool{
-	"@eaDir": true, "#recycle": true, ".Trash": true, "lost+found": true,
-}
-
-func isExtrasDir(name string) bool {
-	return extrasDirNames[strings.ToLower(name)]
-}
-
-func isSkipDir(name string) bool {
-	return skipDirSet[name] || strings.HasSuffix(strings.ToLower(name), ".trickplay")
 }

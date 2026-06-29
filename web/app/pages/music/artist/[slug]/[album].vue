@@ -80,6 +80,13 @@ const hasMultipleDiscs = computed(() => {
   return seen.size > 1
 })
 
+// A track is playable only when it still has a file on disk (TrackView.files
+// is server-filtered to live files). The album is playable when any track is.
+// Missing tracks/albums still render, but can't be played.
+function isPlayable(t: TrackView) { return t.files.length > 0 }
+const playableTracks = computed(() => tracks.value.filter(isPlayable))
+const albumPlayable = computed(() => playableTracks.value.length > 0)
+
 const coverUrl = computed(() => useAlbumCoverUrl(artistSlug.value, albumSlug.value))
 
 const albumExternalIds = computed<Record<string, string>>(() => {
@@ -113,7 +120,7 @@ function trackToPlayable(t: TrackView): Track {
 }
 
 async function playAll(shuffle: boolean) {
-  let pl = tracks.value.map(trackToPlayable)
+  let pl = playableTracks.value.map(trackToPlayable)
   if (shuffle) pl = [...pl].sort(() => Math.random() - 0.5)
   if (!pl.length) return
   queue.value = pl
@@ -121,7 +128,8 @@ async function playAll(shuffle: boolean) {
 }
 
 async function playFrom(track: TrackView) {
-  queue.value = tracks.value.map(trackToPlayable)
+  if (!isPlayable(track)) return
+  queue.value = playableTracks.value.map(trackToPlayable)
   await play(trackToPlayable(track))
 }
 
@@ -138,7 +146,7 @@ async function playFromFile(track: TrackView, file: TrackFile) {
 }
 
 function queueAll() {
-  queue.value = [...queue.value, ...tracks.value.map(trackToPlayable)]
+  queue.value = [...queue.value, ...playableTracks.value.map(trackToPlayable)]
 }
 
 const radio = useRadio()
@@ -223,10 +231,11 @@ function isDiscBoundary(idx: number) {
       </div>
       <!-- Floating round actions -->
       <div class="hero-floating-actions">
-        <button class="hero-round hero-round-primary" @click="playAll(false)" title="Play">
+        <span v-if="!albumPlayable" class="hero-missing"><Icon name="trash" :size="13" /> Missing on disk</span>
+        <button class="hero-round hero-round-primary" :disabled="!albumPlayable" @click="playAll(false)" title="Play">
           <Icon name="play" :size="22" />
         </button>
-        <button class="hero-round" @click="playAll(true)" title="Shuffle">
+        <button class="hero-round" :disabled="!albumPlayable" @click="playAll(true)" title="Shuffle">
           <Icon name="shuffle" :size="18" />
         </button>
         <div class="hero-rate" @click.stop>
@@ -236,13 +245,13 @@ function isDiscBoundary(idx: number) {
             @update:model-value="(v) => onRateAlbum(album!.id, v)"
           />
         </div>
-        <button class="hero-round" @click="queueAll" title="Add to queue">
+        <button class="hero-round" :disabled="!albumPlayable" @click="queueAll" title="Add to queue">
           <Icon name="plus" :size="18" />
         </button>
         <button
           class="hero-round"
           @click="startAlbumRadio"
-          :disabled="radio.starting.value"
+          :disabled="radio.starting.value || !albumPlayable"
           title="Start radio from this album"
         >
           <Icon name="radio" :size="18" />
@@ -261,11 +270,12 @@ function isDiscBoundary(idx: number) {
         </div>
         <template v-for="(t, i) in tracks" :key="t.id">
           <div class="disc-marker" v-if="hasMultipleDiscs && isDiscBoundary(i)">Disc {{ t.disc_number }}</div>
-          <AppContextMenu :items="actions.forTrack({ id: t.id, title: t.title, artist: detail?.artist?.name ?? '', album: album?.title ?? '', duration: t.duration, album_id: album?.id, artist_id: detail?.artist?.id, artist_slug: artistSlug, album_slug: albumSlug })">
-          <div class="list-row tl-cols" @click="playFrom(t)">
+          <AppContextMenu :items="actions.forTrack({ id: t.id, title: t.title, artist: detail?.artist?.name ?? '', album: album?.title ?? '', duration: t.duration, album_id: album?.id, artist_id: detail?.artist?.id, artist_slug: artistSlug, album_slug: albumSlug, available: isPlayable(t) })">
+          <div class="list-row tl-cols" :class="{ 'tl-missing': !isPlayable(t) }" @click="isPlayable(t) && playFrom(t)">
             <div class="tl-num mono">{{ t.track_number || i + 1 }}</div>
             <div class="tl-title-cell">
               <VuMeter v-if="currentTrack?.id === t.id" :playing="playing" />
+              <Icon v-else-if="!isPlayable(t)" name="trash" :size="13" class="tl-missing-icon" />
               <div class="tl-text">
                 <div class="tl-title" :style="currentTrack?.id === t.id ? { color: 'var(--gold)' } : {}">{{ t.title }}</div>
                 <div v-if="t.files.length" class="tl-format-row" @click.stop>
@@ -406,6 +416,13 @@ function isDiscBoundary(idx: number) {
   box-shadow: 0 10px 24px var(--gold-glow);
 }
 .hero-round-primary:hover { background: var(--gold-bright); }
+.hero-round:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+.hero-missing {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: #d96b6b; margin-right: 6px;
+}
 
 .tracklist { padding-top: 24px; }
 .tl-cols { grid-template-columns: 48px 1fr 120px 80px 80px !important; }
@@ -414,6 +431,8 @@ function isDiscBoundary(idx: number) {
 .tl-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .tl-text { min-width: 0; }
 .tl-title { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-missing { opacity: 0.5; cursor: default; }
+.tl-missing-icon { color: #d96b6b; flex-shrink: 0; }
 .tl-format-row { margin-top: 2px; }
 .tl-disc { text-align: center; color: var(--fg-3); }
 .tl-dur { text-align: right; color: var(--fg-3); }

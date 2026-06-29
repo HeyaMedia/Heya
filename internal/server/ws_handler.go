@@ -17,19 +17,17 @@ var upgrader = websocket.Upgrader{
 
 func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := r.URL.Query().Get("token")
+		token := auth.TokenFromContext(r.Context())
 		if token == "" {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
-		session, err := sessionLookup.GetSessionByToken(r.Context(), token)
-		if err != nil {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
-		if _, err := sessionLookup.GetUserByID(r.Context(), session.UserID); err != nil {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
+			token = r.URL.Query().Get("token")
+			if token == "" {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			if _, err := auth.ResolveSession(r.Context(), sessionLookup, token); err != nil {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
 		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)

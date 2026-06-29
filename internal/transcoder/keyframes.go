@@ -23,6 +23,7 @@ func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) 
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time,flags",
 		"-of", "csv=p=0",
+		"-i",
 		filePath,
 	)
 
@@ -66,6 +67,7 @@ func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) 
 		"-v", "quiet",
 		"-show_entries", "format=duration",
 		"-of", "csv=p=0",
+		"-i",
 		filePath,
 	)
 	if dOut, err := durationCmd.Output(); err == nil {

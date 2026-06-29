@@ -194,8 +194,9 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
   try {
     const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
       path: { artist_slug: al.artist_slug, album_slug: al.slug },
-    }) as unknown as { tracks: { id: number; title: string; duration: number }[] }
-    const list = detail.tracks ?? []
+    }) as unknown as { tracks: { id: number; title: string; duration: number; files?: unknown[] }[] }
+    // Only queue tracks that still have a file on disk.
+    const list = (detail.tracks ?? []).filter((t) => (t.files?.length ?? 0) > 0)
     if (!list.length) return
     const built: Track[] = list.map((t) => ({
       id: t.id,

@@ -98,8 +98,8 @@ docs/               # This directory
 .env.example        # Catalogue of every supported env var (defaults + comments)
 docker-compose.yml  # Postgres 17 on :5440
 sqlc.yaml           # Codegen config
-.air.toml           # Hot-reload config for `make dev` (runs heya serve on :3050)
-Caddyfile.dev       # Dev front door — Caddy on :8080, fronts Nuxt + Go
+.air.toml           # Hot-reload config for `make dev` (runs heya serve --dev-backend on :3050)
+mprocs.yaml         # Dev supervisor — runs heya dev-proxy (:8080 front door) + air backend + Nuxt
 lefthook.yml        # Pre-commit hooks — see docs/development.md
 ```
 

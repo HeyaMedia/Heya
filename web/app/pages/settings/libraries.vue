@@ -227,7 +227,45 @@ const totalByKind = computed(() => {
   return m
 })
 
-onMounted(fetchLibraries)
+// Missing items — media whose files were all removed from disk. The count
+// comes from the dashboard stats; cleanup hard-deletes them from the DB.
+const missingCount = ref(0)
+const cleaningUp = ref(false)
+
+async function fetchMissingCount() {
+  try {
+    const stats = await $heya('/api/stats') as { missing_count?: number }
+    missingCount.value = stats?.missing_count ?? 0
+  } catch {
+    // Non-fatal — the maintenance card just shows 0.
+  }
+}
+
+async function cleanupMissing() {
+  if (missingCount.value === 0) return
+  const ok = await confirm({
+    title: 'Clean up missing items?',
+    message: `Permanently removes ${missingCount.value} media item${missingCount.value === 1 ? '' : 's'} with no files left on disk. Files already gone from disk are not touched.`,
+    destructive: true,
+    confirmLabel: 'Clean up',
+  })
+  if (!ok) return
+  cleaningUp.value = true
+  try {
+    const res = await $heya('/api/media/missing', { method: 'DELETE' }) as { deleted?: number }
+    flash.value = { kind: 'ok', text: `Removed ${res?.deleted ?? 0} missing item${res?.deleted === 1 ? '' : 's'}.` }
+    await fetchMissingCount()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Cleanup failed.' }
+  } finally {
+    cleaningUp.value = false
+  }
+}
+
+onMounted(() => {
+  fetchLibraries()
+  fetchMissingCount()
+})
 </script>
 
 <template>
@@ -380,6 +418,33 @@ onMounted(fetchLibraries)
             </button>
           </div>
         </div>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection title="Missing items" icon="trash">
+      <div class="missing-card" :class="{ warn: missingCount > 0 }">
+        <div class="missing-info">
+          <div class="missing-count">{{ missingCount }}</div>
+          <div>
+            <div class="missing-title">
+              {{ missingCount === 0
+                ? 'Nothing missing'
+                : `${missingCount === 1 ? 'item is' : 'items are'} missing on disk` }}
+            </div>
+            <p class="missing-desc">
+              Media whose files were all removed from disk. Run a library scan first so
+              removals are detected, then clean up to delete these items from the database.
+            </p>
+          </div>
+        </div>
+        <button
+          class="sv2-btn danger"
+          :disabled="missingCount === 0 || cleaningUp"
+          @click="cleanupMissing"
+        >
+          <Icon :name="cleaningUp ? 'spinner' : 'trash'" :size="12" />
+          {{ cleaningUp ? 'Cleaning…' : 'Clean up missing' }}
+        </button>
       </div>
     </SettingsSection>
 
@@ -779,4 +844,19 @@ onMounted(fetchLibraries)
 .sv2-flash.ok   { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
 .sv2-flash.warn { background: rgba(230,185,74,0.10); border: 1px solid rgba(230,185,74,0.30); color: var(--gold); }
 .sv2-flash.err  { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
+
+.missing-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 16px 18px; border-radius: var(--r-md);
+  background: var(--bg-2); border: 1px solid var(--border);
+}
+.missing-card.warn { border-color: rgba(217,107,107,0.30); background: rgba(217,107,107,0.05); }
+.missing-info { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.missing-count {
+  font-size: 28px; font-weight: 700; font-family: var(--font-mono);
+  line-height: 1; color: var(--fg-2); flex-shrink: 0; min-width: 36px; text-align: center;
+}
+.missing-card.warn .missing-count { color: var(--bad); }
+.missing-title { font-size: 14px; font-weight: 600; color: var(--fg-0); }
+.missing-desc { font-size: 12px; color: var(--fg-2); margin-top: 3px; max-width: 60ch; }
 </style>

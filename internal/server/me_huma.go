@@ -229,11 +229,8 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			}
 		}) (*JSONOutput[okBody], error) {
 			err := app.ChangePassword(ctx, userFrom(ctx).ID, in.Body.CurrentPassword, in.Body.NewPassword)
-			if err == service.ErrWrongPassword {
-				return nil, huma.Error401Unauthorized("current password is incorrect")
-			}
 			if err != nil {
-				return nil, huma.Error500InternalServerError("failed to change password")
+				return nil, humaServiceError(err)
 			}
 			return noStoreJSON(okBody{Ok: true}), nil
 		})

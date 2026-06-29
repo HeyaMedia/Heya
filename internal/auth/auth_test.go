@@ -54,7 +54,7 @@ func (m *mockSessionLookup) GetSessionByToken(_ context.Context, token string) (
 	if m.err != nil {
 		return sqlc.Session{}, m.err
 	}
-	if token == m.session.Token {
+	if token == m.session.TokenHash {
 		return m.session, nil
 	}
 	// Mirror sqlc's actual behaviour: a `:one` query that returns no rows
@@ -80,7 +80,7 @@ func (m *mockSessionLookup) TouchSession(_ context.Context, _ string) error {
 
 func TestMiddlewareValidToken(t *testing.T) {
 	mock := &mockSessionLookup{
-		session: sqlc.Session{Token: "validtoken", UserID: 42},
+		session: sqlc.Session{TokenHash: TokenHash("validtoken"), UserID: 42},
 		user:    sqlc.User{ID: 42, Username: "alice"},
 	}
 
@@ -117,7 +117,7 @@ func TestMiddlewareMissingToken(t *testing.T) {
 
 func TestMiddlewareInvalidToken(t *testing.T) {
 	mock := &mockSessionLookup{
-		session: sqlc.Session{Token: "validtoken", UserID: 42},
+		session: sqlc.Session{TokenHash: TokenHash("validtoken"), UserID: 42},
 		user:    sqlc.User{ID: 42},
 	}
 	handler := Middleware(mock)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +152,7 @@ func TestMiddlewareDBErrorReturns503(t *testing.T) {
 
 func TestMiddlewareCookieToken(t *testing.T) {
 	mock := &mockSessionLookup{
-		session: sqlc.Session{Token: "cookietoken", UserID: 1},
+		session: sqlc.Session{TokenHash: TokenHash("cookietoken"), UserID: 1},
 		user:    sqlc.User{ID: 1, Username: "bob"},
 	}
 

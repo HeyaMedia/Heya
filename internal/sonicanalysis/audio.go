@@ -31,6 +31,7 @@ import (
 // Detect availability via `ffmpeg -resamplers` once at startup; fall
 // back to swr+filter_size=128 if soxr isn't compiled in.
 func decodePCM(ctx context.Context, path string, sampleRate int) ([]float32, error) {
+	maxBytes := int64(sampleRate) * int64(MaxAnalysisDurationSeconds+60) * 4
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
@@ -55,7 +56,14 @@ func decodePCM(ctx context.Context, path string, sampleRate int) ([]float32, err
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
-	raw, readErr := io.ReadAll(stdout)
+	raw, readErr := io.ReadAll(io.LimitReader(stdout, maxBytes+1))
+	if int64(len(raw)) > maxBytes {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("decoded PCM exceeds %d bytes", maxBytes)
+	}
 	waitErr := cmd.Wait()
 	if waitErr != nil {
 		return nil, fmt.Errorf("ffmpeg: %w (stderr: %s)", waitErr, stderr.String())

@@ -403,10 +403,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 			}
 		}) (*StatusOutput, error) {
 			if err := app.SaveTranscoderSettings(ctx, in.Body.HWAccel, in.Body.CacheMaxGB); err != nil {
-				if lerr, ok := err.(*service.ErrFieldLockedByEnv); ok {
-					return nil, huma.Error409Conflict(lerr.Error())
-				}
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, humaServiceError(err)
 			}
 			return statusOK("ok"), nil
 		})

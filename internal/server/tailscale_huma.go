@@ -66,10 +66,7 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 				Funnel:   in.Body.Funnel,
 				Hostname: in.Body.Hostname,
 			}); err != nil {
-				if lerr, ok := err.(*service.ErrFieldLockedByEnv); ok {
-					return nil, huma.Error409Conflict(lerr.Error())
-				}
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, humaServiceError(err)
 			}
 			cur := app.ConfigSnapshot().Tailscale
 			log.Info().
@@ -125,8 +122,10 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 				Funnel:   in.Body.Enabled,
 				Hostname: cur.Hostname.Value,
 			}); err != nil {
-				if lerr, ok := err.(*service.ErrFieldLockedByEnv); ok {
-					return nil, huma.Error409Conflict(lerr.Error())
+				if mapped := humaServiceError(err); mapped != nil {
+					if statusErr, ok := mapped.(huma.StatusError); ok && statusErr.GetStatus() == http.StatusConflict {
+						return nil, mapped
+					}
 				}
 				log.Warn().Err(err).Msg("failed to persist tailscale funnel preference")
 			} else {

@@ -2995,6 +2995,9 @@
           "artist_type": {
             "type": "string"
           },
+          "available": {
+            "type": "boolean"
+          },
           "begin_date": {
             "type": "string"
           },
@@ -3128,7 +3131,8 @@
           "slug",
           "poster_path",
           "album_count",
-          "track_count"
+          "track_count",
+          "available"
         ],
         "type": "object"
       },
@@ -4070,6 +4074,9 @@
           "artist_slug": {
             "type": "string"
           },
+          "available": {
+            "type": "boolean"
+          },
           "barcode": {
             "type": "string"
           },
@@ -4245,7 +4252,8 @@
           "artist_credits",
           "artist_name",
           "artist_slug",
-          "track_count"
+          "track_count",
+          "available"
         ],
         "type": "object"
       },
@@ -4579,6 +4587,9 @@
           "artist_slug": {
             "type": "string"
           },
+          "available": {
+            "type": "boolean"
+          },
           "barcode": {
             "type": "string"
           },
@@ -4754,7 +4765,8 @@
           "artist_credits",
           "artist_name",
           "artist_slug",
-          "track_count"
+          "track_count",
+          "available"
         ],
         "type": "object"
       },
@@ -4779,6 +4791,9 @@
           },
           "artist_type": {
             "type": "string"
+          },
+          "available": {
+            "type": "boolean"
           },
           "begin_date": {
             "type": "string"
@@ -4913,7 +4928,8 @@
           "slug",
           "poster_path",
           "album_count",
-          "track_count"
+          "track_count",
+          "available"
         ],
         "type": "object"
       },
@@ -4945,6 +4961,9 @@
           },
           "artist_slug": {
             "type": "string"
+          },
+          "available": {
+            "type": "boolean"
           },
           "disc_number": {
             "format": "int32",
@@ -4979,7 +4998,8 @@
           "album_year",
           "artist_id",
           "artist_name",
-          "artist_slug"
+          "artist_slug",
+          "available"
         ],
         "type": "object"
       },
@@ -5219,6 +5239,9 @@
           "artist_slug": {
             "type": "string"
           },
+          "available": {
+            "type": "boolean"
+          },
           "disc_number": {
             "format": "int32",
             "type": "integer"
@@ -5258,7 +5281,8 @@
           "artist_name",
           "artist_slug",
           "position",
-          "added_at"
+          "added_at",
+          "available"
         ],
         "type": "object"
       },
@@ -5378,6 +5402,9 @@
           },
           "artist_slug": {
             "type": "string"
+          },
+          "available": {
+            "type": "boolean"
           },
           "barcode": {
             "type": "string"
@@ -5554,7 +5581,8 @@
           "artist_credits",
           "artist_name",
           "artist_slug",
-          "track_count"
+          "track_count",
+          "available"
         ],
         "type": "object"
       },
@@ -5579,6 +5607,9 @@
           },
           "artist_type": {
             "type": "string"
+          },
+          "available": {
+            "type": "boolean"
           },
           "begin_date": {
             "type": "string"
@@ -5713,7 +5744,8 @@
           "slug",
           "poster_path",
           "album_count",
-          "track_count"
+          "track_count",
+          "available"
         ],
         "type": "object"
       },
@@ -5733,6 +5765,9 @@
           },
           "artist_slug": {
             "type": "string"
+          },
+          "available": {
+            "type": "boolean"
           },
           "last_played_at": {
             "$ref": "#/components/schemas/Timestamptz"
@@ -5757,7 +5792,8 @@
           "poster_path",
           "last_played_at",
           "album_count",
-          "track_count"
+          "track_count",
+          "available"
         ],
         "type": "object"
       },
@@ -5909,6 +5945,9 @@
           "artist_slug": {
             "type": "string"
           },
+          "available": {
+            "type": "boolean"
+          },
           "disc_number": {
             "format": "int32",
             "type": "integer"
@@ -5941,7 +5980,8 @@
           "album_year",
           "artist_id",
           "artist_name",
-          "artist_slug"
+          "artist_slug",
+          "available"
         ],
         "type": "object"
       },
@@ -6552,6 +6592,9 @@
           "artist_slug": {
             "type": "string"
           },
+          "available": {
+            "type": "boolean"
+          },
           "disc_number": {
             "format": "int32",
             "type": "integer"
@@ -6589,7 +6632,8 @@
           "artist_id",
           "artist_name",
           "artist_slug",
-          "loved_at"
+          "loved_at",
+          "available"
         ],
         "type": "object"
       },
@@ -15698,6 +15742,18 @@
     "/api/extras/{id}/thumbnail": {
       "get": {
         "operationId": "extra-thumbnail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -23107,6 +23163,27 @@
     "/api/media/{id}/image/{type}": {
       "get": {
         "operationId": "media-image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -23663,6 +23740,28 @@
     "/api/music/artists/{artist_slug}/albums/{album_slug}/cover": {
       "get": {
         "operationId": "album-cover",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "artist_slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "pattern": "^[a-z0-9-]+$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "album_slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "pattern": "^[a-z0-9-]+$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -25905,6 +26004,28 @@
     "/api/music/tracks/{id}/file/{track_file_id}": {
       "get": {
         "operationId": "stream-track-file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "track_file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -26207,6 +26328,90 @@
     "/api/music/tracks/{id}/stream": {
       "get": {
         "operationId": "stream-track",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_flac_native",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_flac",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_alac",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_mp3",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_aac_audio",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_ogg_vorbis",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_opus_audio",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_opus",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "supports_wav_pcm",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -26778,6 +26983,18 @@
     "/api/person/{id}/image": {
       "get": {
         "operationId": "person-image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -26848,6 +27065,18 @@
     "/api/podcasts/episode/stream": {
       "get": {
         "operationId": "stream-podcast-episode",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "url",
+            "schema": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -27215,6 +27444,18 @@
     "/api/radio/stream": {
       "get": {
         "operationId": "stream-radio",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "url",
+            "schema": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -27745,6 +27986,18 @@
     "/api/stream/{file_id}": {
       "get": {
         "operationId": "stream-direct",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -27777,6 +28030,27 @@
     "/api/stream/{file_id}/hls/index.m3u8": {
       "get": {
         "operationId": "stream-hls-index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "audio",
+            "schema": {
+              "maxLength": 16,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -27809,6 +28083,18 @@
     "/api/stream/{file_id}/hls/master.m3u8": {
       "get": {
         "operationId": "stream-hls-master",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -27841,6 +28127,27 @@
     "/api/stream/{file_id}/hls/{segment}": {
       "get": {
         "operationId": "stream-hls-segment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "segment",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -28093,6 +28400,28 @@
     "/api/stream/{file_id}/subtitles/{index}": {
       "get": {
         "operationId": "stream-subtitle-body",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -28180,6 +28509,18 @@
     "/api/stream/{file_id}/trickplay/index.vtt": {
       "get": {
         "operationId": "trickplay-vtt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -28212,6 +28553,27 @@
     "/api/stream/{file_id}/trickplay/{filename}": {
       "get": {
         "operationId": "trickplay-sprite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -28244,6 +28606,18 @@
     "/api/studio/{id}/image": {
       "get": {
         "operationId": "studio-image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -29078,6 +29452,17 @@
     "/api/tmdb/image/{path}": {
       "get": {
         "operationId": "tmdb-image-proxy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

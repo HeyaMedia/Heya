@@ -11,7 +11,6 @@ type QueueStatus    = components['schemas']['MetadataQueueStatus']
 type SummaryRow     = components['schemas']['JobSummaryRow']
 type TaskResponse   = components['schemas']['TaskResponse']
 type MissingItem    = components['schemas']['MissingMediaItem']
-type DeletedBody    = components['schemas']['DeletedCountBody']
 // Sonic status is an open-shape object on the API; treat as any here.
 type SonicLike = {
   analyzer_version?: string
@@ -103,12 +102,11 @@ async function cleanupMissing() {
   if (!ok) return
   cleaning.value = true
   try {
-    const res = await $heya('/api/media/missing', { method: 'DELETE' }) as DeletedBody
+    await $heya('/api/media/missing', { method: 'DELETE' })
+    // Cleanup removes tracks + albums + media_items; refetch rather than
+    // guess at the deltas (res.deleted spans all three).
     missing.value = []
-    if (stats.value) {
-      stats.value.missing_count = 0
-      stats.value.total_media = Math.max(0, stats.value.total_media - res.deleted)
-    }
+    await refetchStats()
   } catch {} finally { cleaning.value = false }
 }
 
@@ -425,7 +423,7 @@ onMounted(async () => {
       </template>
 
       <div class="missing-scroll">
-        <div v-for="item in missing" :key="item.id" class="missing-tile">
+        <div v-for="item in missing" :key="`${item.media_type}-${item.id}`" class="missing-tile">
           <div class="missing-poster">
             <NuxtImg
               v-if="item.poster_path && !item.poster_path.startsWith('http')"
