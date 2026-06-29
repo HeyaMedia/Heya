@@ -49,3 +49,8 @@ data/models/
 
 # Sonic-analysis PoC test outputs (no longer produced; kept for clarity).
 data/sonic-poc/
+
+# Private working notes — kept local, never tracked (scrubbed from history)
+PLEXAMP.md
+FUTURE.md
+externals.md
