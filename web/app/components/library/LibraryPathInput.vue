@@ -80,16 +80,26 @@ if (props.modelValue.startsWith('smb://')) {
 }
 
 function parseSmbUrl(raw: string) {
+  // Split the authority (user:pass@host:port) from the path at the first slash
+  // and keep the path literal. Parsing the whole URL with `new URL` would
+  // swallow a literal '#' or '?' in the path as a fragment/query and drop
+  // everything after it — the same trap the Go ParseSMBURL had. SMB filenames
+  // legitimately contain those characters, and the backend stores the path
+  // verbatim, so the edit form must read it back verbatim too.
+  const rest = raw.slice('smb://'.length)
+  const slash = rest.indexOf('/')
+  const authority = slash >= 0 ? rest.slice(0, slash) : rest
+  const rawPath = slash >= 0 ? rest.slice(slash + 1) : ''
   try {
-    const u = new URL(raw)
+    const u = new URL(`smb://${authority}`)
     smb.host = u.hostname
     smb.port = u.port || ''
     smb.user = decodeURIComponent(u.username || '')
     smb.pass = decodeURIComponent(u.password || '')
-    const parts = u.pathname.replace(/^\//, '').split('/')
-    smb.share = parts[0] || ''
-    smb.path = parts.slice(1).join('/')
   } catch {}
+  const parts = rawPath.split('/')
+  smb.share = parts[0] || ''
+  smb.path = parts.slice(1).join('/')
 }
 
 const smbUrl = computed(() => {
