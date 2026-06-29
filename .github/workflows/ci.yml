@@ -29,7 +29,7 @@ jobs:
           bun-version: latest
 
       - name: Cache bun install
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
@@ -98,7 +98,7 @@ jobs:
           cache: true
 
       - name: Cache Go build outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -171,7 +171,7 @@ jobs:
           cache: true
 
       - name: Cache Go build outputs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/go-build
           key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}
@@ -180,7 +180,7 @@ jobs:
             go-build-${{ runner.os }}-
 
       - name: Cache goose binary
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/go/bin/goose
           key: goose-${{ runner.os }}-v3
@@ -211,7 +211,7 @@ jobs:
           cache: true
 
       - name: Cache govulncheck binary
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/go/bin/govulncheck
           key: govulncheck-${{ runner.os }}-v1
