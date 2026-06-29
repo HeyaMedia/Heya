@@ -1,16 +1,18 @@
 # Container build + push.
 #
 # Triggers only on `vX.Y.Z` tag push — main-branch pushes go through the
-# regular CI (ci.yml) for fast feedback; tagging is what releases an image.
-# This keeps GHCR free of half-baked SHAs and means `latest` only moves
-# when a real version cuts.
+# regular CI (ci.yml); tagging is what releases an image.
 #
 # Three images per release, all from ghcr.io/<owner>/<repo>:
 #   :<ver>            base — CPU ONNX + Intel/AMD VAAPI/QSV transcode (amd64+arm64)
 #   :<ver>-cuda       NVIDIA — CUDA/TensorRT ONNX + NVENC transcode (amd64)
 #   :<ver>-openvino   Intel  — OpenVINO ONNX (Arc/iGPU) + QSV/VAAPI (amd64)
-# The GPU variants are built FROM the base by digest, so they always match the
-# exact base just pushed. Auth: GITHUB_TOKEN — no manual secrets needed.
+#
+# The base is built NATIVELY per-arch — amd64 on ubuntu-latest, arm64 on the
+# GitHub-hosted ubuntu-24.04-arm runner (free for public repos), NO QEMU. Each
+# arch is pushed by digest, then a merge job assembles one multi-arch manifest
+# with the version tags. The GPU variants build FROM that merged base.
+# Auth: GITHUB_TOKEN — no manual secrets needed.
 
 name: Container
 
@@ -28,26 +30,25 @@ concurrency:
 
 jobs:
   base:
-    name: base (amd64 + arm64)
-    runs-on: ubuntu-latest
+    name: base ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
       image: ${{ steps.img.outputs.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, platform: linux/amd64, runner: ubuntu-latest }
+          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v7
 
       # GHCR refs must be lowercase, but github.repository can be mixed-case
-      # (e.g. HeyaMedia/Heya). metadata-action lowercases its own tag output,
-      # but the variant jobs build a base ref by hand (image@digest), so we
-      # need an explicitly lowercased name to hand them.
+      # (e.g. HeyaMedia/Heya).
       - name: Lowercase image ref
         id: img
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      # Registers binfmt handlers so the amd64 runner can execute arm64
-      # build steps under emulation. Required for the linux/arm64 leg.
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
@@ -57,41 +58,91 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derives image tags from the git tag: v1.2.3 -> 1.2.3, 1.2, 1, latest.
+      # OCI labels for the per-arch image. Tags are applied by the merge job.
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.img.outputs.image }}
+
+      # Native build for this runner's arch — no emulation. Pushed by digest
+      # only (no tag); the merge job assembles the tagged manifest list. Cache
+      # is scoped per-arch so the two runners don't clobber each other.
+      - name: Build + push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=base-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=base-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: base manifest
+    needs: base
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ needs.base.outputs.image }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Version tags from the git tag: v1.2.3 -> 1.2.3, 1.2, 1, latest.
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.base.outputs.image }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      - name: Build and push base
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          # Both arches from the one Dockerfile (it derives per-arch bits from
-          # dpkg). The arm64 leg builds under QEMU; gha cache keeps repeat tag
-          # builds cheap. NOTE: the Nuxt prerender is much slower under bun on
-          # amd64 than arm64 — the amd64 leg's `bun run build` takes a few extra
-          # minutes; that's a bun node-compat quirk, not a hang.
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Distinct scope per image — base + both variants run in the same
-          # workflow; a shared (default) gha scope would have them overwrite
-          # each other's cache.
-          cache-from: type=gha,scope=base
-          cache-to: type=gha,mode=max,scope=base
+      # Assemble the multi-arch manifest from the per-arch digests and tag it.
+      - name: Create + push manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ needs.base.outputs.image }}@sha256:%s ' *)
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "${{ needs.base.outputs.image }}:${{ steps.meta.outputs.version }}"
 
   variants:
     name: ${{ matrix.variant }} (amd64)
-    needs: base
+    needs: merge
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -108,18 +159,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Same version tags as base, suffixed -cuda / -openvino. Use the base
-      # job's already-lowercased image ref so the suffixed tags + the FROM ref
-      # below are valid GHCR names regardless of the repo's casing.
-      # onlatest=true is REQUIRED: the suffix flavor defaults to onlatest=false,
-      # which would leave the `latest` tag UNsuffixed — both variants would then
-      # publish a bare `:latest` and clobber the base image. With it, latest ->
-      # latest-cuda / latest-openvino.
+      # Same version tags as base, suffixed -cuda / -openvino. onlatest=true is
+      # REQUIRED: the suffix flavor defaults to onlatest=false, which would leave
+      # `latest` UNsuffixed — both variants would then publish a bare `:latest`
+      # and clobber the base. With it, latest -> latest-cuda / latest-openvino.
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ needs.base.outputs.image }}
+          images: ${{ needs.merge.outputs.image }}
           flavor: suffix=-${{ matrix.variant }},onlatest=true
           tags: |
             type=semver,pattern={{version}}
@@ -127,10 +175,9 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      # FROM the exact base digest just pushed — amd64 only (the GPU runtimes
-      # are x86_64). Reuses the base's already-built layers, so this is a thin,
-      # fast build (no frontend/Go recompile). The base ref must be lowercase
-      # (GHCR requirement) — needs.base.outputs.image is already lowercased.
+      # FROM the merged base manifest (by version tag pushed above) — amd64 only
+      # (the GPU runtimes are x86_64). Reuses the base's layers, so it's a thin
+      # build (no frontend/Go recompile).
       - name: Build and push ${{ matrix.variant }}
         uses: docker/build-push-action@v7
         with:
@@ -138,7 +185,7 @@ jobs:
           file: Dockerfile.${{ matrix.variant }}
           platforms: linux/amd64
           build-args: |
-            BASE_IMAGE=${{ needs.base.outputs.image }}@${{ needs.base.outputs.digest }}
+            BASE_IMAGE=${{ needs.merge.outputs.image }}:${{ needs.merge.outputs.version }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
