@@ -80,6 +80,9 @@ var serveCmd = &cobra.Command{
 		// Bridge events published from other processes (e.g. a `heya library
 		// remove` CLI call) onto this process's live hub → WebSocket clients.
 		app.EventHub().StartCrossProcessRelay(appCtx, app.DBPool())
+		// React to those bridged events: a CLI delete must also tear down this
+		// process's file watcher for the removed library.
+		app.StartDeletedLibraryReaper(appCtx)
 		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
 
 		// Scheduler is now a thin 60s trigger loop. All actual work

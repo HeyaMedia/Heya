@@ -154,6 +154,61 @@ func (a *App) DeleteLibrary(ctx context.Context, id int64) error {
 	return nil
 }
 
+// StartDeletedLibraryReaper tears down this process's in-memory state for
+// libraries deleted from *any* process. The file watcher lives in the
+// `heya serve` process, but a `heya library remove` CLI call deletes the DB
+// rows from its own short-lived process and can't reach the server's watcher —
+// so without this, the server keeps an fsnotify watcher running on a
+// now-deleted library's paths.
+//
+// We learn about deletions the same way browsers do: the library.deleted
+// event, bridged into this process by the cross-process relay (NOTIFY →
+// hub). The HTTP delete handler still unwatches synchronously (race-free for
+// the in-process path); Manager.Unwatch is idempotent, so this reaper is a
+// harmless no-op there and the real teardown for CLI deletes. Server-only —
+// started from serve.go alongside the relay.
+func (a *App) StartDeletedLibraryReaper(ctx context.Context) {
+	if a.hub == nil || a.watcher == nil {
+		return
+	}
+	ch := a.hub.Subscribe()
+	go func() {
+		defer a.hub.Unsubscribe(ch)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				if ev.Type != eventhub.EventLibraryDeleted {
+					continue
+				}
+				if id, ok := libraryIDFromEventPayload(ev.Payload); ok {
+					a.watcher.Unwatch(id)
+				}
+			}
+		}
+	}()
+}
+
+// libraryIDFromEventPayload pulls library_id out of a hub event. Events that
+// rode in through the relay carry a map[string]any (Event.Payload is `any`,
+// so the NOTIFY JSON round-trip decodes the body as a generic map with
+// float64 numbers) rather than a typed eventhub.LibraryPayload.
+func libraryIDFromEventPayload(payload any) (int64, bool) {
+	m, ok := payload.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	f, ok := m["library_id"].(float64)
+	if !ok {
+		return 0, false
+	}
+	return int64(f), true
+}
+
 func (a *App) MatchLibrary(ctx context.Context, id int64) (matcher.MatchResult, error) {
 	lib, err := a.GetLibrary(ctx, id)
 	if err != nil {
