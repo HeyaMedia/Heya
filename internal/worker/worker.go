@@ -212,14 +212,34 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
 		},
-		// Backstop for jobs that crashed mid-run (process died, OS
-		// killed it, etc.) — River reassigns them after this window.
-		// Set above the longest legitimate job runtime so River doesn't
-		// preempt a still-working worker. Artist enrich can sit at
-		// ~120s under HeyaMedia rate-limit backoff, and album loudness
-		// can take a few minutes on long albums; 10 minutes covers both
-		// with margin while still giving reasonable crash-recovery.
-		RescueStuckJobsAfter: 30 * time.Minute,
+		// Per-job context deadline. River's default JobTimeout is 1
+		// MINUTE — it silently wraps every Work(ctx) in a 60s
+		// context.WithTimeout. That's wrong for essentially every heavy
+		// job here: a library scan over SMB walks tens of thousands of
+		// files, artist enrich blocks up to the HeyaMedia client's
+		// 5-minute HTTP timeout, the sonic model bundle fetch can run 30
+		// minutes, and loudness/transcode/trickplay/disk-walk jobs
+		// routinely run several minutes. Under the default those all died
+		// with "context deadline exceeded" at the 60s mark (originally
+		// observed as a failed large SMB scan). 6h is a generous ceiling
+		// that no legitimate single job should hit; the real bounds live
+		// where they belong — per-HTTP-client timeouts for network work,
+		// ffmpeg/walk semantics for media/FS work.
+		//
+		// Must stay strictly below RescueStuckJobsAfter (River requires
+		// rescue > timeout): the rescuer keys off wall-clock running time
+		// and can't tell a still-working job from a crashed one, so a job
+		// that outlives the rescue window gets re-run while alive. Keeping
+		// rescue = JobTimeout + 1h (River's own default margin) means a
+		// job is cancelled by its timeout before it ever looks "stuck".
+		JobTimeout: 6 * time.Hour,
+		// Backstop for jobs whose worker died mid-run (process died, OS
+		// killed it, etc.) — River reassigns them after this window. Held
+		// at JobTimeout + 1h so it always exceeds the longest a healthy
+		// job can run (a job past its 6h timeout has had its context
+		// cancelled and is genuinely stuck), avoiding duplicate execution
+		// of jobs that are slow but still working.
+		RescueStuckJobsAfter: 7 * time.Hour,
 		Workers:              workers,
 	})
 	if err != nil {
