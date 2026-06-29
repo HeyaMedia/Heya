@@ -88,17 +88,25 @@ func RedactPath(path string) string {
 	if !IsSMBPath(path) {
 		return path
 	}
-	u, err := url.Parse(path)
-	if err != nil || u.User == nil {
-		return path
+	// Mask the password by slicing the authority only — never re-parse the
+	// whole URL, or a literal '#'/'?' in the path would be mangled (see
+	// ParseSMBURL). The path tail is kept verbatim.
+	rest := path[len("smb://"):]
+	authority := rest
+	tail := ""
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		authority = rest[:i]
+		tail = rest[i:] // keeps the leading '/'
 	}
-	username := u.User.Username()
-	if _, ok := u.User.Password(); ok {
-		u.User = url.UserPassword(username, "xxxxx")
-	} else {
-		u.User = url.User(username)
+	at := strings.LastIndexByte(authority, '@')
+	if at < 0 {
+		return path // no credentials to redact
 	}
-	return u.String()
+	userinfo := authority[:at]
+	if colon := strings.IndexByte(userinfo, ':'); colon >= 0 {
+		userinfo = userinfo[:colon+1] + "xxxxx"
+	}
+	return "smb://" + userinfo + authority[at:] + tail
 }
 
 func trimSMBTrailingSlash(path string) string {
@@ -118,15 +126,31 @@ type SMBConfig struct {
 }
 
 func ParseSMBURL(rawURL string) (*SMBConfig, error) {
-	u, err := url.Parse(rawURL)
+	rest, ok := strings.CutPrefix(rawURL, "smb://")
+	if !ok {
+		return nil, fmt.Errorf("expected smb:// scheme: %q", rawURL)
+	}
+
+	// Split the authority (user:pass@host:port) from the path at the first
+	// slash, then keep the path verbatim. We deliberately do NOT run the path
+	// through url.Parse: SMB filenames routinely contain '#', '?', '%', spaces
+	// and other bytes that url.Parse treats as fragment/query delimiters and
+	// silently truncates (a literal '#' in a directory name turned the path
+	// into a fragment and lost everything after it). Paths are stored verbatim
+	// by the scanner, so we read them back verbatim.
+	authority := rest
+	rawPath := ""
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		authority = rest[:i]
+		rawPath = rest[i+1:]
+	}
+
+	// Only the authority gets URL semantics — host/port splitting (incl. IPv6)
+	// and percent-decoding of credentials.
+	u, err := url.Parse("smb://" + authority)
 	if err != nil {
 		return nil, fmt.Errorf("invalid SMB URL: %w", err)
 	}
-
-	if u.Scheme != "smb" {
-		return nil, fmt.Errorf("expected smb:// scheme, got %s://", u.Scheme)
-	}
-
 	host := u.Hostname()
 	if host == "" {
 		return nil, fmt.Errorf("SMB URL must include a host: smb://host/share[/path]")
@@ -143,9 +167,8 @@ func ParseSMBURL(rawURL string) (*SMBConfig, error) {
 		password, _ = u.User.Password()
 	}
 
-	path := strings.TrimPrefix(u.Path, "/")
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) == 0 || parts[0] == "" {
+	parts := strings.SplitN(rawPath, "/", 2)
+	if parts[0] == "" {
 		return nil, fmt.Errorf("SMB URL must include a share name: smb://host/share[/path]")
 	}
 

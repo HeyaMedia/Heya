@@ -36,6 +36,46 @@ func TestParseSMBURLWithPort(t *testing.T) {
 	assert.Equal(t, "1234", cfg.Port)
 }
 
+// SMB filenames legitimately contain '#', '?', '$', '!', '%' and spaces.
+// url.Parse treats '#'/'?' as fragment/query delimiters and would truncate the
+// path — these must survive verbatim. Regression for the "$#-! My Dad Says"
+// directory that collapsed to "$" and dropped the rest of the path.
+func TestParseSMBURLSpecialChars(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantShare string
+		wantPath  string
+	}{
+		{
+			name:      "hash and bang in dir and file",
+			input:     "smb://guest:pass@host/storage/TV/Foreign/$#-! My Dad Says (2010)/Season 01/$#-! My Dad Says - S01E06.mkv",
+			wantShare: "storage",
+			wantPath:  "TV/Foreign/$#-! My Dad Says (2010)/Season 01/$#-! My Dad Says - S01E06.mkv",
+		},
+		{
+			name:      "question mark",
+			input:     "smb://host/share/Who Knows? (2020)/file.mkv",
+			wantShare: "share",
+			wantPath:  "Who Knows? (2020)/file.mkv",
+		},
+		{
+			name:      "literal percent is not decoded",
+			input:     "smb://host/share/50% Off/file.mkv",
+			wantShare: "share",
+			wantPath:  "50% Off/file.mkv",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ParseSMBURL(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantShare, cfg.Share)
+			assert.Equal(t, tt.wantPath, cfg.Path)
+		})
+	}
+}
+
 func TestParseSMBURLErrors(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -76,6 +116,10 @@ func TestRedactPath(t *testing.T) {
 	assert.Equal(t, "smb://user:xxxxx@host/share/sub/path", RedactPath("smb://user:pass@host/share/sub/path"))
 	assert.Equal(t, "smb://user:xxxxx@host/share", RedactPath("smb://user:pa%24%24@host/share"))
 	assert.Equal(t, "smb://user@host/share", RedactPath("smb://user@host/share"))
+	// A literal '#' in the path must not be re-parsed as a URL fragment and lost.
+	assert.Equal(t,
+		"smb://guest:xxxxx@host/storage/TV/Foreign/$#-! My Dad Says (2010)/Season 01/ep.mkv",
+		RedactPath("smb://guest:pass@host/storage/TV/Foreign/$#-! My Dad Says (2010)/Season 01/ep.mkv"))
 }
 
 func TestOpenLocalValid(t *testing.T) {
