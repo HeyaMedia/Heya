@@ -120,6 +120,50 @@ LIMIT 1;
 -- name: ListAlbumsByArtist :many
 SELECT * FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC;
 
+-- name: AlbumHasFileOutsideFolder :one
+-- True when the album has at least one track file NOT under `folder` — i.e. it's
+-- "mixed" and a whole-album move would drag foreign-folder files along, so the
+-- split must work at track-file granularity instead.
+SELECT EXISTS (
+  SELECT 1 FROM tracks t
+  JOIN track_files tf ON tf.track_id = t.id
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE t.album_id = sqlc.arg(album_id)
+    AND sqlc.arg(folder) <> ALL(string_to_array(lf.path, '/'))
+);
+
+-- name: ListAlbumTracksUnderFolder :many
+-- Tracks of an album that have at least one track file under `folder`. Used by
+-- the split tool to peel a mixed album's foreign-folder files onto sibling
+-- tracks under the destination artist.
+SELECT DISTINCT t.id, t.disc_number, t.track_number, t.title
+FROM tracks t
+JOIN track_files tf ON tf.track_id = t.id
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE t.album_id = sqlc.arg(album_id)
+  AND sqlc.arg(folder) = ANY(string_to_array(lf.path, '/'))
+ORDER BY t.disc_number, t.track_number;
+
+-- name: MoveTrackFilesUnderFolderToTrack :exec
+-- Move src_track's files that live under `folder` onto dst_track. track_files are
+-- unique on library_file_id only, so re-pointing track_id never collides.
+UPDATE track_files tf
+SET track_id = sqlc.arg(dst_track_id)
+FROM library_files lf
+WHERE tf.library_file_id = lf.id
+  AND tf.track_id = sqlc.arg(src_track_id)
+  AND sqlc.arg(folder) = ANY(string_to_array(lf.path, '/'));
+
+-- name: DeleteEmptyTracksOfAlbum :exec
+-- Drop the album's tracks that no longer have any track files (their files moved
+-- out during a split). CASCADE clears facets / play_events / ratings.
+DELETE FROM tracks t
+WHERE t.album_id = sqlc.arg(album_id)
+  AND NOT EXISTS (SELECT 1 FROM track_files tf WHERE tf.track_id = t.id);
+
+-- name: AlbumHasTracks :one
+SELECT EXISTS (SELECT 1 FROM tracks WHERE album_id = sqlc.arg(album_id));
+
 -- name: ListAlbumsByArtistUnderFolder :many
 -- Albums of an artist that have at least one track file living under the given
 -- top-level folder, matched as an EXACT path segment (so "Avicii" never catches

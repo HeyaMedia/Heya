@@ -46,12 +46,12 @@ Idempotent — re-running once the albums have moved is a no-op.`,
 		if err != nil {
 			return err
 		}
-		if res.AlbumsMoved == 0 {
-			ui.Warn("No albums of artist %d live under folder %q — nothing to split.", artistID, folder)
+		if !res.Changed() {
+			ui.Warn("No content of artist %d lives under folder %q — nothing to split.", artistID, folder)
 			return nil
 		}
-		ui.Success("Moved %d album(s) out of artist %d into %q (artist %d); queued for re-enrichment.",
-			res.AlbumsMoved, artistID, res.NewArtistName, res.NewArtistID)
+		ui.Success("Split folder %q out of artist %d into %q (artist %d): %d album(s) moved, %d album(s) un-merged; queued for re-enrichment.",
+			folder, artistID, res.NewArtistName, res.NewArtistID, res.AlbumsMoved, res.AlbumsSplit)
 		return nil
 	},
 }

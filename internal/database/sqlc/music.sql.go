@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const albumHasFileOutsideFolder = `-- name: AlbumHasFileOutsideFolder :one
+SELECT EXISTS (
+  SELECT 1 FROM tracks t
+  JOIN track_files tf ON tf.track_id = t.id
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE t.album_id = $1
+    AND $2 <> ALL(string_to_array(lf.path, '/'))
+)
+`
+
+type AlbumHasFileOutsideFolderParams struct {
+	AlbumID int64  `json:"album_id"`
+	Folder  string `json:"folder"`
+}
+
+// True when the album has at least one track file NOT under `folder` — i.e. it's
+// "mixed" and a whole-album move would drag foreign-folder files along, so the
+// split must work at track-file granularity instead.
+func (q *Queries) AlbumHasFileOutsideFolder(ctx context.Context, arg AlbumHasFileOutsideFolderParams) (bool, error) {
+	row := q.db.QueryRow(ctx, albumHasFileOutsideFolder, arg.AlbumID, arg.Folder)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const albumHasTracks = `-- name: AlbumHasTracks :one
+SELECT EXISTS (SELECT 1 FROM tracks WHERE album_id = $1)
+`
+
+func (q *Queries) AlbumHasTracks(ctx context.Context, albumID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, albumHasTracks, albumID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const albumSlugExists = `-- name: AlbumSlugExists :one
 SELECT EXISTS (
     SELECT 1 FROM albums WHERE artist_id = $1 AND slug = $2 AND id <> $3
@@ -453,6 +489,19 @@ type DeleteCollidingAlbumTracksParams struct {
 // the derived track_facets remain and CASCADE clears them (they regenerate).
 func (q *Queries) DeleteCollidingAlbumTracks(ctx context.Context, arg DeleteCollidingAlbumTracksParams) error {
 	_, err := q.db.Exec(ctx, deleteCollidingAlbumTracks, arg.SrcAlbumID, arg.DstAlbumID)
+	return err
+}
+
+const deleteEmptyTracksOfAlbum = `-- name: DeleteEmptyTracksOfAlbum :exec
+DELETE FROM tracks t
+WHERE t.album_id = $1
+  AND NOT EXISTS (SELECT 1 FROM track_files tf WHERE tf.track_id = t.id)
+`
+
+// Drop the album's tracks that no longer have any track files (their files moved
+// out during a split). CASCADE clears facets / play_events / ratings.
+func (q *Queries) DeleteEmptyTracksOfAlbum(ctx context.Context, albumID int64) error {
+	_, err := q.db.Exec(ctx, deleteEmptyTracksOfAlbum, albumID)
 	return err
 }
 
@@ -1369,6 +1418,56 @@ func (q *Queries) ListAlbumTrackFilesForLoudness(ctx context.Context, albumID in
 			&i.DiscNumber,
 			&i.TrackNumber,
 			&i.Path,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlbumTracksUnderFolder = `-- name: ListAlbumTracksUnderFolder :many
+SELECT DISTINCT t.id, t.disc_number, t.track_number, t.title
+FROM tracks t
+JOIN track_files tf ON tf.track_id = t.id
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE t.album_id = $1
+  AND $2 = ANY(string_to_array(lf.path, '/'))
+ORDER BY t.disc_number, t.track_number
+`
+
+type ListAlbumTracksUnderFolderParams struct {
+	AlbumID int64  `json:"album_id"`
+	Folder  string `json:"folder"`
+}
+
+type ListAlbumTracksUnderFolderRow struct {
+	ID          int64  `json:"id"`
+	DiscNumber  int32  `json:"disc_number"`
+	TrackNumber int32  `json:"track_number"`
+	Title       string `json:"title"`
+}
+
+// Tracks of an album that have at least one track file under `folder`. Used by
+// the split tool to peel a mixed album's foreign-folder files onto sibling
+// tracks under the destination artist.
+func (q *Queries) ListAlbumTracksUnderFolder(ctx context.Context, arg ListAlbumTracksUnderFolderParams) ([]ListAlbumTracksUnderFolderRow, error) {
+	rows, err := q.db.Query(ctx, listAlbumTracksUnderFolder, arg.AlbumID, arg.Folder)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlbumTracksUnderFolderRow{}
+	for rows.Next() {
+		var i ListAlbumTracksUnderFolderRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.Title,
 		); err != nil {
 			return nil, err
 		}
@@ -2925,6 +3024,28 @@ type MergeUserArtistRatingsParams struct {
 // they rated the same artist twice under different rows).
 func (q *Queries) MergeUserArtistRatings(ctx context.Context, arg MergeUserArtistRatingsParams) error {
 	_, err := q.db.Exec(ctx, mergeUserArtistRatings, arg.DstID, arg.SrcID)
+	return err
+}
+
+const moveTrackFilesUnderFolderToTrack = `-- name: MoveTrackFilesUnderFolderToTrack :exec
+UPDATE track_files tf
+SET track_id = $1
+FROM library_files lf
+WHERE tf.library_file_id = lf.id
+  AND tf.track_id = $2
+  AND $3 = ANY(string_to_array(lf.path, '/'))
+`
+
+type MoveTrackFilesUnderFolderToTrackParams struct {
+	DstTrackID int64  `json:"dst_track_id"`
+	SrcTrackID int64  `json:"src_track_id"`
+	Folder     string `json:"folder"`
+}
+
+// Move src_track's files that live under `folder` onto dst_track. track_files are
+// unique on library_file_id only, so re-pointing track_id never collides.
+func (q *Queries) MoveTrackFilesUnderFolderToTrack(ctx context.Context, arg MoveTrackFilesUnderFolderToTrackParams) error {
+	_, err := q.db.Exec(ctx, moveTrackFilesUnderFolderToTrack, arg.DstTrackID, arg.SrcTrackID, arg.Folder)
 	return err
 }
 

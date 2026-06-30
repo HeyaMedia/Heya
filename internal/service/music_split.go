@@ -20,7 +20,7 @@ func (a *App) SplitArtist(ctx context.Context, artistID int64, folder string) (m
 	if err != nil {
 		return res, err
 	}
-	if res.AlbumsMoved > 0 {
+	if res.Changed() {
 		if enqErr := worker.EnqueueEnrich(ctx, a.river, res.NewArtistMediaItem, sqlc.MediaTypeMusic, worker.EnrichSourceForced); enqErr != nil {
 			log.Warn().Err(enqErr).
 				Int64("media_item", res.NewArtistMediaItem).
