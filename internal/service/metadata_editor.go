@@ -216,8 +216,84 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 			}
 		}
 
+		// Stamp 'user' provenance for the fields the user actually set, so a later
+		// enrich / forced refresh / re-identify fills around them (matcher's
+		// provenance-gated writers) instead of clobbering the edit.
+		var edited []string
+		if req.Title != nil {
+			edited = append(edited, "title")
+		}
+		if req.Year != nil {
+			edited = append(edited, "year")
+		}
+		if req.Description != nil {
+			edited = append(edited, "description")
+		}
+		if req.Tagline != nil {
+			edited = append(edited, "tagline")
+		}
+		if req.OriginalTitle != nil {
+			edited = append(edited, "original_title")
+		}
+		if req.OriginalLanguage != nil {
+			edited = append(edited, "original_language")
+		}
+		if req.OriginalName != nil {
+			edited = append(edited, "original_name")
+		}
+		if req.Status != nil {
+			edited = append(edited, "status")
+		}
+		if req.ExternalIDs != nil {
+			edited = append(edited, "external_ids")
+		}
+		if req.Genres != nil {
+			edited = append(edited, "genres")
+		}
+		if req.RuntimeMinutes != nil {
+			edited = append(edited, "runtime_minutes")
+		}
+		if req.ReleaseDate != nil {
+			edited = append(edited, "release_date")
+		}
+		if req.FirstAirDate != nil {
+			edited = append(edited, "first_air_date")
+		}
+		if req.LastAirDate != nil {
+			edited = append(edited, "last_air_date")
+		}
+		if len(edited) > 0 {
+			if err := q.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{
+				ID:              mediaItemID,
+				FieldProvenance: stampUserProvenance(item.FieldProvenance, edited...),
+			}); err != nil {
+				return fmt.Errorf("stamping field provenance: %w", err)
+			}
+		}
+
 		return nil
 	})
+}
+
+// stampUserProvenance merges the given field names into the existing
+// field_provenance map as "user" (manual edits), returning the JSON blob. A
+// never-nil "{}" floor keeps the jsonb column a valid object.
+func stampUserProvenance(existing []byte, fields ...string) []byte {
+	m := map[string]string{}
+	if len(existing) > 0 {
+		_ = json.Unmarshal(existing, &m)
+	}
+	if m == nil {
+		m = map[string]string{}
+	}
+	for _, f := range fields {
+		m[f] = "user"
+	}
+	b, err := json.Marshal(m)
+	if err != nil || len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
 }
 
 // UpdateEpisode patches a TV episode record.

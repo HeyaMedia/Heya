@@ -1,86 +1,97 @@
 <template>
   <AppDialog
     :model-value="open"
-    title="Equalizer"
+    title="Audio"
     size="md"
     @update:model-value="(v) => v ? null : $emit('close')"
   >
-    <!-- Master enable toggle — promoted to a labeled row so the relationship
-         between the switch and "the whole EQ" is explicit. The old design
-         tucked this into the header next to the close button. -->
-    <div class="eq-master-row">
-      <span class="eq-master-label">Enable equalizer</span>
-      <AppSwitch
-        :model-value="eq.enabled"
-        :aria-label="eq.enabled ? 'Disable EQ' : 'Enable EQ'"
-        size="md"
-        @update:model-value="settings.setEQEnabled"
-      />
-    </div>
-
-    <div class="eq-presets">
+    <div class="eq-tabs">
       <button
-        v-for="p in settings.presets"
-        :key="p.name"
-        class="eq-preset"
-        :class="{ active: eq.presetName === p.name }"
-        @click="settings.applyPreset(p.name)"
-      >
-        {{ p.name }}
-      </button>
+        v-for="t in TABS"
+        :key="t.id"
+        class="eq-tab"
+        :class="{ active: tab === t.id }"
+        @click="tab = t.id"
+      >{{ t.label }}</button>
     </div>
 
-    <div class="eq-bands">
-      <div v-for="(value, i) in eq.bands" :key="i" class="eq-band">
-        <div
-          class="eq-bar-track"
-          @mousedown="startDrag($event, i)"
+    <!-- ── Equalizer ─────────────────────────────────────────────── -->
+    <div v-show="tab === 'eq'">
+      <div class="eq-master-row">
+        <span class="eq-master-label">Enable equalizer</span>
+        <AppSwitch
+          :model-value="eq.enabled"
+          :aria-label="eq.enabled ? 'Disable EQ' : 'Enable EQ'"
+          size="md"
+          @update:model-value="settings.setEQEnabled"
+        />
+      </div>
+
+      <div class="eq-presets">
+        <button
+          v-for="p in settings.presets"
+          :key="p.name"
+          class="eq-preset"
+          :class="{ active: eq.presetName === p.name }"
+          @click="settings.applyPreset(p.name)"
         >
-          <div class="eq-bar-baseline" />
+          {{ p.name }}
+        </button>
+      </div>
+
+      <div class="eq-bands">
+        <div v-for="(value, i) in eq.bands" :key="i" class="eq-band">
           <div
-            class="eq-bar-fill"
-            :class="{ negative: value < 0 }"
-            :style="bandStyle(value)"
-          />
-          <div class="eq-bar-knob" :style="knobStyle(value)" />
+            class="eq-bar-track"
+            @mousedown="startDrag($event, i)"
+          >
+            <div class="eq-bar-baseline" />
+            <div
+              class="eq-bar-fill"
+              :class="{ negative: value < 0 }"
+              :style="bandStyle(value)"
+            />
+            <div class="eq-bar-knob" :style="knobStyle(value)" />
+          </div>
+          <span class="eq-val">{{ value > 0 ? `+${value}` : value }}</span>
+          <span class="eq-freq">{{ BAND_LABELS[i] }}</span>
         </div>
-        <span class="eq-val">{{ value > 0 ? `+${value}` : value }}</span>
-        <span class="eq-freq">{{ BAND_LABELS[i] }}</span>
+      </div>
+
+      <div class="eq-extras">
+        <div class="eq-extra-row">
+          <span class="eq-extra-label">Pre-amp</span>
+          <AppSlider
+            :model-value="eq.preamp"
+            :min="-12"
+            :max="12"
+            :step="0.5"
+            bipolar
+            aria-label="Pre-amp"
+            class="eq-slider-flex"
+            @update:model-value="settings.setPreamp"
+          />
+          <span class="eq-extra-val">{{ eq.preamp > 0 ? `+${eq.preamp}` : eq.preamp }} dB</span>
+        </div>
+        <div class="eq-extra-row">
+          <span class="eq-extra-label">Post-gain</span>
+          <AppSlider
+            :model-value="eq.postgain"
+            :min="-12"
+            :max="12"
+            :step="0.5"
+            bipolar
+            aria-label="Post-gain"
+            class="eq-slider-flex"
+            @update:model-value="settings.setPostgain"
+          />
+          <span class="eq-extra-val">{{ eq.postgain > 0 ? `+${eq.postgain}` : eq.postgain }} dB</span>
+        </div>
       </div>
     </div>
 
-    <div class="eq-extras">
-      <div class="eq-extra-row">
-        <span class="eq-extra-label">Pre-amp</span>
-        <AppSlider
-          :model-value="eq.preamp"
-          :min="-12"
-          :max="12"
-          :step="0.5"
-          bipolar
-          aria-label="Pre-amp"
-          class="eq-slider-flex"
-          @update:model-value="settings.setPreamp"
-        />
-        <span class="eq-extra-val">{{ eq.preamp > 0 ? `+${eq.preamp}` : eq.preamp }} dB</span>
-      </div>
-      <div class="eq-extra-row">
-        <span class="eq-extra-label">Post-gain</span>
-        <AppSlider
-          :model-value="eq.postgain"
-          :min="-12"
-          :max="12"
-          :step="0.5"
-          bipolar
-          aria-label="Post-gain"
-          class="eq-slider-flex"
-          @update:model-value="settings.setPostgain"
-        />
-        <span class="eq-extra-val">{{ eq.postgain > 0 ? `+${eq.postgain}` : eq.postgain }} dB</span>
-      </div>
-
-      <div class="eq-divider" />
-
+    <!-- ── Playback ──────────────────────────────────────────────── -->
+    <div v-show="tab === 'playback'" class="eq-pane">
       <div class="eq-extra-row">
         <span class="eq-extra-label">Crossfade</span>
         <div class="eq-select-wrap">
@@ -88,11 +99,11 @@
             :model-value="crossfade.mode"
             :options="CROSSFADE_OPTIONS"
             aria-label="Crossfade mode"
-            @change="v => settings.setCrossfadeMode(v as 'gapless' | 'crossfade')"
+            @change="v => settings.setCrossfadeMode(v as 'gapless' | 'crossfade' | 'smart')"
           />
         </div>
         <AppSlider
-          v-if="crossfade.mode === 'crossfade'"
+          v-if="crossfade.mode !== 'gapless'"
           :model-value="crossfade.durationSeconds"
           :min="1"
           :max="12"
@@ -101,7 +112,22 @@
           class="eq-slider-flex"
           @update:model-value="settings.setCrossfadeDuration"
         />
-        <span v-if="crossfade.mode === 'crossfade'" class="eq-extra-val">{{ crossfade.durationSeconds }}s</span>
+        <span v-if="crossfade.mode !== 'gapless'" class="eq-extra-val">{{ crossfade.durationSeconds }}s</span>
+      </div>
+
+      <div v-if="crossfade.mode === 'smart'" class="eq-extra-row">
+        <span class="eq-extra-hint">Smart aligns the fade to each song's natural outro; the duration above is the fallback when a track hasn't been analyzed yet.</span>
+      </div>
+
+      <div v-if="crossfade.mode !== 'gapless'" class="eq-extra-row">
+        <span class="eq-extra-label">Album segues</span>
+        <span class="eq-extra-hint">Skip crossfade between same-album tracks</span>
+        <AppSwitch
+          :model-value="crossfade.albumAware"
+          size="md"
+          aria-label="Album-aware crossfade"
+          @update:model-value="settings.setCrossfadeAlbumAware"
+        />
       </div>
 
       <div class="eq-extra-row">
@@ -116,6 +142,54 @@
         </div>
       </div>
     </div>
+
+    <!-- ── Effects ───────────────────────────────────────────────── -->
+    <div v-show="tab === 'effects'" class="eq-pane">
+      <div class="eq-extra-row">
+        <span class="eq-extra-label">Crossfeed</span>
+        <span class="eq-extra-hint">Eases hard L/R separation on headphones</span>
+        <AppSwitch
+          :model-value="crossfeed.enabled"
+          size="md"
+          aria-label="Enable crossfeed"
+          @update:model-value="settings.setCrossfeedEnabled"
+        />
+      </div>
+      <div v-if="crossfeed.enabled" class="eq-extra-row">
+        <span class="eq-extra-label">Strength</span>
+        <div class="eq-select-wrap eq-select-wrap-wide">
+          <AppSelect
+            :model-value="crossfeed.preset"
+            :options="CROSSFEED_OPTIONS"
+            aria-label="Crossfeed strength"
+            @change="v => settings.setCrossfeedPreset(v as 'subtle' | 'natural' | 'strong')"
+          />
+        </div>
+      </div>
+
+      <div class="eq-divider" />
+
+      <div class="eq-chain">
+        <div class="eq-chain-label">Signal chain</div>
+        <div class="chain-row chain-pinned">
+          <span class="chain-name">Normalization</span>
+          <span class="chain-note">{{ replayGain.mode === 'off' ? 'off' : `replay gain · ${replayGain.mode}` }}</span>
+        </div>
+        <div v-for="(id, i) in dspChain.order" :key="id" class="chain-row">
+          <div class="chain-move">
+            <button class="chain-arrow" :disabled="i === 0" aria-label="Move earlier" @click="settings.moveDspBlock(id, -1)">↑</button>
+            <button class="chain-arrow" :disabled="i === dspChain.order.length - 1" aria-label="Move later" @click="settings.moveDspBlock(id, 1)">↓</button>
+          </div>
+          <span class="chain-name">{{ blockLabel(id) }}</span>
+          <AppSwitch :model-value="blockEnabled(id)" size="sm" :aria-label="blockLabel(id)" @update:model-value="(v) => setBlockEnabled(id, v)" />
+        </div>
+        <div class="chain-row chain-pinned">
+          <span class="chain-name">Limiter</span>
+          <span class="chain-note">safety</span>
+          <AppSwitch :model-value="dspChain.limiterEnabled" size="sm" aria-label="Limiter" @update:model-value="settings.setLimiterEnabled" />
+        </div>
+      </div>
+    </div>
   </AppDialog>
 </template>
 
@@ -125,14 +199,38 @@ defineEmits<{ close: [] }>()
 
 import type { SelectOption } from '~/components/ui/AppSelect.vue'
 
+import type { DspBlockId } from '~/composables/useAudioSettings'
+
 const settings = useAudioSettings()
 const eq = settings.eq
 const crossfade = settings.crossfade
 const replayGain = settings.replayGain
+const crossfeed = settings.crossfeed
+const dspChain = settings.dspChain
+
+const TABS = [
+  { id: 'eq', label: 'Equalizer' },
+  { id: 'playback', label: 'Playback' },
+  { id: 'effects', label: 'Effects' },
+] as const
+const tab = ref<typeof TABS[number]['id']>('eq')
+
+// Signal-chain block helpers. 'equalizer' covers preamp+EQ+postgain as a unit.
+function blockLabel(id: DspBlockId) {
+  return id === 'equalizer' ? 'Equalizer' : 'Crossfeed'
+}
+function blockEnabled(id: DspBlockId) {
+  return id === 'equalizer' ? eq.value.enabled : crossfeed.value.enabled
+}
+function setBlockEnabled(id: DspBlockId, v: boolean) {
+  if (id === 'equalizer') settings.setEQEnabled(v)
+  else settings.setCrossfeedEnabled(v)
+}
 
 const CROSSFADE_OPTIONS: SelectOption[] = [
   { value: 'gapless', label: 'Gapless' },
   { value: 'crossfade', label: 'Crossfade' },
+  { value: 'smart', label: 'Smart' },
 ]
 
 const REPLAY_GAIN_OPTIONS: SelectOption[] = [
@@ -140,6 +238,12 @@ const REPLAY_GAIN_OPTIONS: SelectOption[] = [
   { value: 'track', label: 'Track — each song normalized' },
   { value: 'album', label: 'Album — preserve album dynamics' },
   { value: 'auto',  label: 'Auto — track on shuffle, album otherwise' },
+]
+
+const CROSSFEED_OPTIONS: SelectOption[] = [
+  { value: 'subtle',  label: 'Subtle' },
+  { value: 'natural', label: 'Natural' },
+  { value: 'strong',  label: 'Strong' },
 ]
 
 const BAND_LABELS = ['32', '64', '125', '250', '500', '1K', '2K', '4K', '8K', '16K'] as const
@@ -182,6 +286,37 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 <style scoped>
 /* AppDialog supplies the modal chrome (overlay/panel/header/close). The
    rules below are layout-only for the EQ-specific body content. */
+
+/* Tabs */
+.eq-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.eq-tab {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.eq-tab:hover { color: var(--fg-0); }
+.eq-tab.active {
+  color: var(--gold-bright, var(--gold));
+  background: var(--gold-soft, rgba(230, 185, 74, 0.1));
+}
+/* Standalone tab panes (Playback / Effects) — no top border, the tab bar
+   already separates them from the header. */
+.eq-pane { display: flex; flex-direction: column; gap: 12px; }
 
 .eq-master-row {
   display: flex;
@@ -267,6 +402,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 .eq-extras { display: flex; flex-direction: column; gap: 12px; padding-top: 18px; border-top: 1px solid var(--border); }
 .eq-extra-row { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--fg-1); }
 .eq-extra-label { width: 80px; flex-shrink: 0; color: var(--fg-2); }
+.eq-extra-hint { flex: 1; min-width: 0; color: var(--fg-3); font-size: 11px; }
 .eq-extra-val {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -287,4 +423,44 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 }
 .eq-select-wrap-wide { flex: 1; }
 .eq-divider { height: 1px; background: var(--border); margin: 6px 0; }
+
+/* Signal chain */
+.eq-chain { display: flex; flex-direction: column; gap: 4px; }
+.eq-chain-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  margin-bottom: 4px;
+}
+.chain-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+.chain-row.chain-pinned { background: transparent; border-style: dashed; opacity: 0.8; }
+.chain-name { font-size: 12px; color: var(--fg-1); flex: 1; }
+.chain-note {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  text-transform: lowercase;
+}
+.chain-move { display: flex; flex-direction: column; gap: 1px; }
+.chain-arrow {
+  width: 18px; height: 13px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; line-height: 1;
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.chain-arrow:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
+.chain-arrow:disabled { opacity: 0.3; cursor: default; }
 </style>

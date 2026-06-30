@@ -57,6 +57,34 @@ SELECT count(*) FROM media_items WHERE media_type = $1;
 -- name: MarkMetadataRefreshed :exec
 UPDATE media_items SET metadata_refreshed_at = now() WHERE id = $1;
 
+-- name: MarkMediaItemLocal :exec
+-- Flags a media_item as born from local signal (NFO/tags/filename) with no
+-- confident remote match yet. enrichment_status='local' keeps it out of the
+-- "matched, awaiting enrich" (pending) bucket while still being visible; the
+-- local_identity_key anchors re-scan dedup for NFO-less items.
+UPDATE media_items
+SET enrichment_status  = 'local',
+    local_identity_key = $2,
+    match_confidence   = $3
+WHERE id = $1;
+
+-- name: GetMediaItemByLocalIdentityKey :one
+-- Dedup lookup for NFO-less locally-materialized entities. Keyed on the
+-- normalized lower(title)|year|media_type so a re-scan links to the same row
+-- instead of relying on external_ids containment (which mis-joins on '{}').
+SELECT * FROM media_items
+WHERE library_id = $1 AND local_identity_key = sqlc.arg(local_identity_key)
+  AND local_identity_key != ''
+ORDER BY id
+LIMIT 1;
+
+-- name: SetMediaItemFieldProvenance :exec
+-- Replaces the per-field provenance map ({field: "local"|"remote"|"user"}).
+-- Written by the matcher (stamping locally-derived fields 'local') and the
+-- metadata editor (stamping user-edited fields 'user'); read by the enrich
+-- writers so they fill local/empty fields but never overwrite a user edit.
+UPDATE media_items SET field_provenance = $2 WHERE id = $1;
+
 -- name: MarkMatched :exec
 -- Stamped by the match step after writing a search-only stub. Sets the
 -- enrichment_status floor to 'pending' (it's the default for new rows, but

@@ -158,6 +158,14 @@ const isCustom = computed(() => {
   max-height: min(280px, var(--reka-select-content-available-height));
   padding: 4px;
 }
+/* reka copies the content element's computed z-index onto its popper wrapper
+   (otherwise z-index:auto, which loses to modal panels — AppDialog is 5001 — so
+   a select opened inside a dialog renders trapped behind it). The two-class
+   selector beats .surface's z-index:200 regardless of stylesheet order. 5100
+   sits above dialogs but below the lightbox/confirm tier (9999+). */
+.surface.app-select-content {
+  z-index: 5100;
+}
 .app-select-viewport {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;

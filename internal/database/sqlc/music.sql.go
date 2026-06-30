@@ -1166,7 +1166,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 }
 
 const getPrimaryTrackFile = `-- name: GetPrimaryTrackFile :one
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
@@ -1199,6 +1199,11 @@ func (q *Queries) GetPrimaryTrackFile(ctx context.Context, trackID int64) (Track
 		&i.SamplePeakDb,
 		&i.LoudnessAnalyzedAt,
 		&i.CreatedAt,
+		&i.IntroEndMs,
+		&i.OutroStartMs,
+		&i.FadeStartMs,
+		&i.SilenceStartMs,
+		&i.BoundariesAnalyzedAt,
 	)
 	return i, err
 }
@@ -1308,6 +1313,8 @@ SELECT t.id,
        al.slug           AS album_slug,
        al.year           AS album_year,
        al.cover_path     AS album_cover_path,
+       al.integrated_lufs AS album_integrated_lufs,
+       al.true_peak_db    AS album_true_peak_db,
        a.id              AS artist_id,
        a.name            AS artist_name,
        mi.slug           AS artist_slug
@@ -1320,20 +1327,22 @@ LIMIT 1
 `
 
 type GetTrackDetailByIDRow struct {
-	ID             int64  `json:"id"`
-	AlbumID        int64  `json:"album_id"`
-	DiscNumber     int32  `json:"disc_number"`
-	TrackNumber    int32  `json:"track_number"`
-	Title          string `json:"title"`
-	Duration       int32  `json:"duration"`
-	LyricsPath     string `json:"lyrics_path"`
-	AlbumTitle     string `json:"album_title"`
-	AlbumSlug      string `json:"album_slug"`
-	AlbumYear      string `json:"album_year"`
-	AlbumCoverPath string `json:"album_cover_path"`
-	ArtistID       int64  `json:"artist_id"`
-	ArtistName     string `json:"artist_name"`
-	ArtistSlug     string `json:"artist_slug"`
+	ID                  int64          `json:"id"`
+	AlbumID             int64          `json:"album_id"`
+	DiscNumber          int32          `json:"disc_number"`
+	TrackNumber         int32          `json:"track_number"`
+	Title               string         `json:"title"`
+	Duration            int32          `json:"duration"`
+	LyricsPath          string         `json:"lyrics_path"`
+	AlbumTitle          string         `json:"album_title"`
+	AlbumSlug           string         `json:"album_slug"`
+	AlbumYear           string         `json:"album_year"`
+	AlbumCoverPath      string         `json:"album_cover_path"`
+	AlbumIntegratedLufs pgtype.Numeric `json:"album_integrated_lufs"`
+	AlbumTruePeakDb     pgtype.Numeric `json:"album_true_peak_db"`
+	ArtistID            int64          `json:"artist_id"`
+	ArtistName          string         `json:"artist_name"`
+	ArtistSlug          string         `json:"artist_slug"`
 }
 
 // One-shot track detail: track row + album + artist context. Pair with
@@ -1353,6 +1362,8 @@ func (q *Queries) GetTrackDetailByID(ctx context.Context, id int64) (GetTrackDet
 		&i.AlbumSlug,
 		&i.AlbumYear,
 		&i.AlbumCoverPath,
+		&i.AlbumIntegratedLufs,
+		&i.AlbumTruePeakDb,
 		&i.ArtistID,
 		&i.ArtistName,
 		&i.ArtistSlug,
@@ -1361,7 +1372,7 @@ func (q *Queries) GetTrackDetailByID(ctx context.Context, id int64) (GetTrackDet
 }
 
 const getTrackFileByID = `-- name: GetTrackFileByID :one
-SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at FROM track_files WHERE id = $1
+SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at FROM track_files WHERE id = $1
 `
 
 func (q *Queries) GetTrackFileByID(ctx context.Context, id int64) (TrackFile, error) {
@@ -1386,12 +1397,17 @@ func (q *Queries) GetTrackFileByID(ctx context.Context, id int64) (TrackFile, er
 		&i.SamplePeakDb,
 		&i.LoudnessAnalyzedAt,
 		&i.CreatedAt,
+		&i.IntroEndMs,
+		&i.OutroStartMs,
+		&i.FadeStartMs,
+		&i.SilenceStartMs,
+		&i.BoundariesAnalyzedAt,
 	)
 	return i, err
 }
 
 const getTrackFileByLibraryFileID = `-- name: GetTrackFileByLibraryFileID :one
-SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at FROM track_files WHERE library_file_id = $1
+SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at FROM track_files WHERE library_file_id = $1
 `
 
 func (q *Queries) GetTrackFileByLibraryFileID(ctx context.Context, libraryFileID int64) (TrackFile, error) {
@@ -1416,6 +1432,11 @@ func (q *Queries) GetTrackFileByLibraryFileID(ctx context.Context, libraryFileID
 		&i.SamplePeakDb,
 		&i.LoudnessAnalyzedAt,
 		&i.CreatedAt,
+		&i.IntroEndMs,
+		&i.OutroStartMs,
+		&i.FadeStartMs,
+		&i.SilenceStartMs,
+		&i.BoundariesAnalyzedAt,
 	)
 	return i, err
 }
@@ -2632,7 +2653,7 @@ func (q *Queries) ListStaleArtistsByLibrary(ctx context.Context, arg ListStaleAr
 }
 
 const listTrackFilesByTrack = `-- name: ListTrackFilesByTrack :many
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
@@ -2668,6 +2689,11 @@ func (q *Queries) ListTrackFilesByTrack(ctx context.Context, trackID int64) ([]T
 			&i.SamplePeakDb,
 			&i.LoudnessAnalyzedAt,
 			&i.CreatedAt,
+			&i.IntroEndMs,
+			&i.OutroStartMs,
+			&i.FadeStartMs,
+			&i.SilenceStartMs,
+			&i.BoundariesAnalyzedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2690,7 +2716,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lf.deleted_at IS NULL
-  AND tf.integrated_lufs IS NULL
+  AND (tf.integrated_lufs IS NULL OR tf.boundaries_analyzed_at IS NULL)
 ORDER BY tf.id
 LIMIT $1
 `
@@ -2702,9 +2728,11 @@ type ListTrackFilesPendingLoudnessRow struct {
 	Path          string `json:"path"`
 }
 
-// Files in music libraries that don't yet have loudness data and aren't
-// soft-deleted. The track-loudness worker pulls from here as a backstop in
-// case the FFProbeWorker hand-off missed something.
+// Files in music libraries missing loudness OR boundary analysis (and not
+// soft-deleted). The track-loudness worker pulls from here as a backstop in
+// case the FFProbeWorker hand-off missed something, and to backfill boundaries
+// on tracks scanned before boundary detection existed. The worker only computes
+// whichever piece is actually missing, so re-listing already-loud tracks is cheap.
 func (q *Queries) ListTrackFilesPendingLoudness(ctx context.Context, limit int32) ([]ListTrackFilesPendingLoudnessRow, error) {
 	rows, err := q.db.Query(ctx, listTrackFilesPendingLoudness, limit)
 	if err != nil {
@@ -3830,6 +3858,39 @@ func (q *Queries) UpdateTrackExtendedMetadata(ctx context.Context, arg UpdateTra
 	return err
 }
 
+const updateTrackFileBoundaries = `-- name: UpdateTrackFileBoundaries :exec
+UPDATE track_files
+   SET intro_end_ms           = $2,
+       outro_start_ms         = $3,
+       fade_start_ms          = $4,
+       silence_start_ms       = $5,
+       boundaries_analyzed_at = now()
+ WHERE id = $1
+`
+
+type UpdateTrackFileBoundariesParams struct {
+	ID             int64       `json:"id"`
+	IntroEndMs     pgtype.Int4 `json:"intro_end_ms"`
+	OutroStartMs   pgtype.Int4 `json:"outro_start_ms"`
+	FadeStartMs    pgtype.Int4 `json:"fade_start_ms"`
+	SilenceStartMs pgtype.Int4 `json:"silence_start_ms"`
+}
+
+// Structural transition points (intro/outro/fade/silence, in ms) detected from
+// the RMS envelope. Written by ScanTrackLoudnessWorker in the same pass as
+// loudness, since it has already decoded the file. Feeds the client smart
+// crossfade.
+func (q *Queries) UpdateTrackFileBoundaries(ctx context.Context, arg UpdateTrackFileBoundariesParams) error {
+	_, err := q.db.Exec(ctx, updateTrackFileBoundaries,
+		arg.ID,
+		arg.IntroEndMs,
+		arg.OutroStartMs,
+		arg.FadeStartMs,
+		arg.SilenceStartMs,
+	)
+	return err
+}
+
 const updateTrackFileLoudness = `-- name: UpdateTrackFileLoudness :exec
 UPDATE track_files
    SET integrated_lufs      = $2,
@@ -4000,7 +4061,7 @@ ON CONFLICT (library_file_id) DO UPDATE
         quality_score = EXCLUDED.quality_score,
         lyrics_path = EXCLUDED.lyrics_path,
         size_bytes = EXCLUDED.size_bytes
-RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at
+RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at
 `
 
 type UpsertTrackFileParams struct {
@@ -4045,6 +4106,11 @@ func (q *Queries) UpsertTrackFile(ctx context.Context, arg UpsertTrackFileParams
 		&i.SamplePeakDb,
 		&i.LoudnessAnalyzedAt,
 		&i.CreatedAt,
+		&i.IntroEndMs,
+		&i.OutroStartMs,
+		&i.FadeStartMs,
+		&i.SilenceStartMs,
+		&i.BoundariesAnalyzedAt,
 	)
 	return i, err
 }

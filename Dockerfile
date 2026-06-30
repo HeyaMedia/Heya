@@ -157,9 +157,15 @@ COPY --from=backend-build /out/heya /usr/local/bin/heya
 # Tailscale state, transcode cache, and any uploaded assets all land here.
 RUN mkdir -p /data
 WORKDIR /data
+# HEYA_ALLOW_REMOTE_ACTIVE: the deployed image legitimately owns its (often
+# remote) database, so it may run active mode against it. Source/dev checkouts
+# do NOT get this and must stay passive when pointed at a remote DB — the
+# active-mode guard in serve.go enforces it. The CUDA/OpenVINO images build
+# FROM this one and inherit the value.
 ENV HEYA_DATA_DIR=/data \
     HEYA_HOST=0.0.0.0 \
-    HEYA_PORT=8080
+    HEYA_PORT=8080 \
+    HEYA_ALLOW_REMOTE_ACTIVE=true
 
 EXPOSE 8080
 VOLUME ["/data"]

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/scheduler"
@@ -49,6 +51,34 @@ var serveCmd = &cobra.Command{
 		}
 		log.Logger = zerolog.New(baseWriter).With().Timestamp().Logger()
 
+		// Resolve run mode and enforce the active-mode safety guard BEFORE
+		// service.New(): New() auto-migrates and active startup then bootstraps
+		// libraries — both MUTATE the target DB. A guard placed after New() would
+		// already have altered a remote/prod schema. Active mode (workers +
+		// watchers + scanner) must never run against a non-local DB from a
+		// source/dev checkout — it would join that DB's job queue and scan local
+		// paths into it. The deployed container opts in with
+		// HEYA_ALLOW_REMOTE_ACTIVE=true (it owns its remote DB); --dev-backend can
+		// never opt in; a local DB always passes.
+		passive := cfg.PassiveMode.Value
+		devBackend, _ := cmd.Flags().GetBool("dev-backend")
+		if !passive {
+			// Classify the host pgx will ACTUALLY dial (via pgx's own parser), not
+			// a naive URL parse — otherwise a ?host=, DSN keyword form, PGHOST env,
+			// or multi-host fallback could point the real connection at prod while
+			// the URL authority reads localhost.
+			localDB, dbHost, perr := database.AllHostsLocal(cfg.DatabaseURL.Value)
+			if perr != nil {
+				return fmt.Errorf("refusing to start active mode: cannot parse HEYA_DATABASE_URL to verify the database host is local: %w", perr)
+			}
+			if !localDB && (devBackend || !cfg.AllowRemoteActive.Value) {
+				return fmt.Errorf("refusing to start active mode against non-local database host %q: "+
+					"set HEYA_PASSIVE_MODE=true to use it read-only, point HEYA_DATABASE_URL at a local DB, "+
+					"or set HEYA_ALLOW_REMOTE_ACTIVE=true if this instance is meant to own that DB "+
+					"(--dev-backend can never run active against a remote DB)", dbHost)
+			}
+		}
+
 		app, err := service.New(appCtx, cfg)
 		if err != nil {
 			return err
@@ -63,9 +93,6 @@ var serveCmd = &cobra.Command{
 		// second worker pool on prod's queue. It would pull prod's jobs and run
 		// a disk scan against a /storage path that doesn't exist locally,
 		// soft-deleting the whole library. See docs/development.md.
-		passive := cfg.PassiveMode.Value
-		devBackend, _ := cmd.Flags().GetBool("dev-backend")
-
 		if passive {
 			log.Warn().Msg("passive mode: workers, watchers, scheduler, sonic-analysis and orphan-rescue are DISABLED — this process will not process jobs or touch the filesystem")
 		}

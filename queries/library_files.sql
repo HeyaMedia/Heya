@@ -93,8 +93,17 @@ WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'
 ORDER BY path ASC;
 
 -- name: GetMediaItemByExternalID :one
+-- Link by provider id. Guarded against the empty-object trap: `external_ids @>
+-- '{}'` matches EVERY row, so without the `<> '{}'` filter a stub with no
+-- provider IDs would link onto an arbitrary existing media_item. Callers must
+-- still skip this for empty IDs; the filter + deterministic ORDER BY are
+-- defense in depth so a future caller can't reintroduce the mis-link.
 SELECT * FROM media_items
-WHERE library_id = $1 AND external_ids @> $2::jsonb;
+WHERE library_id = $1
+  AND sqlc.arg(ext_filter)::jsonb <> '{}'::jsonb
+  AND external_ids @> sqlc.arg(ext_filter)::jsonb
+ORDER BY id
+LIMIT 1;
 
 -- name: UpdateLibraryFileTrickplay :exec
 UPDATE library_files

@@ -16,7 +16,7 @@
 -->
 <template>
   <SwitchRoot
-    v-model:checked="checked"
+    v-model="checked"
     class="app-switch"
     :class="[`app-switch-${size}`, { 'has-label': !!label }]"
     :aria-label="ariaLabel ?? label"

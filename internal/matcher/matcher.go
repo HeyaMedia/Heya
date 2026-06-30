@@ -128,9 +128,9 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		return MatchInfo{}, nil
 	}
 
-	allResults, err := m.heya.Search(ctx, kind, query)
-	if err != nil {
-		log.Warn().Err(err).Msg("search failed")
+	allResults, searchErr := m.heya.Search(ctx, kind, query)
+	if searchErr != nil {
+		log.Warn().Err(searchErr).Msg("search failed")
 		allResults = nil
 	}
 	for i := range allResults {
@@ -138,10 +138,23 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 	}
 
 	if len(allResults) == 0 {
+		// Materialize a local entity ONLY when the search genuinely returned
+		// nothing. A search ERROR (transient / network) must stay a retryable
+		// unmatched row — materializing would permanently mark the file matched
+		// and mask a fetchable remote match behind a low-quality local stub.
+		if searchErr == nil {
+			if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID); ok {
+				return info, nil
+			}
+		}
+		msg := "no provider results"
+		if searchErr != nil {
+			msg = "search error: " + searchErr.Error()
+		}
 		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:           file.ID,
 			Status:       sqlc.FileStatusUnmatched,
-			ErrorMessage: "no provider results",
+			ErrorMessage: msg,
 		})
 		return MatchInfo{}, nil
 	}
@@ -190,12 +203,126 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		Msg("match rejected — needs manual review")
 
 	m.storeCandidates(ctx, file.ID, allResults)
+	if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID); ok {
+		return info, nil
+	}
 	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 		ID:           file.ID,
 		Status:       sqlc.FileStatusUnmatched,
 		ErrorMessage: fmt.Sprintf("%d candidates, top confidence %.2f", len(allResults), top.Confidence),
 	})
 	return MatchInfo{}, nil
+}
+
+// localIdentityKey is the dedup key for a locally-materialized entity:
+// normalized title + year + media type. The library scoping is in the query.
+func localIdentityKey(title, year string, mt sqlc.MediaType) string {
+	t := strings.ToLower(strings.TrimSpace(title))
+	if t == "" {
+		return ""
+	}
+	return t + "|" + year + "|" + string(mt)
+}
+
+// materializeLocal creates a visible entity from local signal (filename / NFO)
+// when remote matching produced nothing confident — so the file isn't left
+// invisible. The entity is flagged enrichment_status='local'; the enrich worker
+// upgrades it in place if it carries a provider id. Returns ok=false (writing
+// nothing) when there isn't even a local title to show. Music is not handled
+// here (it goes through matchMusicSingleFile).
+func (m *Matcher) materializeLocal(ctx context.Context, file sqlc.LibraryFile, parsed parser.ParsedStorageEntry, nfoIDs *metadata.NFOIDs, kind metadata.MediaKind, mediaType sqlc.MediaType, libraryID int64) (MatchInfo, bool) {
+	title, year := "", ""
+	if parsed.Release != nil {
+		title = parsed.Release.Title
+		year = parsed.Release.Year
+	}
+	if nfoIDs != nil && nfoIDs.Title != "" {
+		title = nfoIDs.Title
+		if nfoIDs.Year != "" {
+			year = nfoIDs.Year
+		}
+	}
+	if strings.TrimSpace(title) == "" {
+		return MatchInfo{}, false
+	}
+
+	key := localIdentityKey(title, year, mediaType)
+
+	// Dedup: a re-scan of the same local entity links to the existing row
+	// instead of creating a duplicate.
+	if key != "" {
+		if existing, err := m.q.GetMediaItemByLocalIdentityKey(ctx, sqlc.GetMediaItemByLocalIdentityKeyParams{
+			LibraryID:        libraryID,
+			LocalIdentityKey: key,
+		}); err == nil {
+			_ = m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+				ID:          file.ID,
+				Status:      sqlc.FileStatusMatched,
+				MediaItemID: pgInt8(existing.ID),
+			})
+			return MatchInfo{IsNew: false}, true
+		}
+	}
+
+	extIDs := map[string]string{}
+	providerKind := "local"
+	if nfoIDs != nil {
+		if nfoIDs.TMDBID != "" {
+			extIDs["tmdb"] = nfoIDs.TMDBID
+		}
+		if nfoIDs.IMDBID != "" {
+			extIDs["imdb"] = nfoIDs.IMDBID
+		}
+		if nfoIDs.TVDBID != "" {
+			extIDs["tvdb"] = nfoIDs.TVDBID
+		}
+		if len(extIDs) > 0 {
+			providerKind = "nfo"
+		}
+	}
+
+	stub := &metadata.MediaDetail{
+		Title:        title,
+		SortTitle:    strings.ToLower(title),
+		Year:         year,
+		ExternalIDs:  extIDs,
+		ProviderKind: providerKind,
+	}
+
+	mediaItemID, isNew, err := m.createOrLinkMediaItem(ctx, stub, kind, libraryID, file.Path)
+	if err != nil {
+		log.Error().Err(err).Int64("file_id", file.ID).Msg("materialize local: create media item failed")
+		return MatchInfo{}, false
+	}
+
+	// Flag local + stamp the dedup key; record title/year as locally-sourced
+	// (enrich may refresh them — they're not user-locked).
+	if err := m.q.MarkMediaItemLocal(ctx, sqlc.MarkMediaItemLocalParams{
+		ID:               mediaItemID,
+		LocalIdentityKey: key,
+		MatchConfidence:  0,
+	}); err != nil {
+		log.Warn().Err(err).Int64("id", mediaItemID).Msg("materialize local: mark local failed")
+	}
+	prov := FieldProvenance{}.Set("title", ProvLocal).Set("year", ProvLocal)
+	_ = m.q.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{ID: mediaItemID, FieldProvenance: prov.Marshal()})
+
+	// Materialize the type-specific stub so the item is visible via the library's
+	// INNER JOIN. The stub detail carries no seasons, so for TV this writes only
+	// the series row; episodes arrive from enrich.
+	if err := m.createTypeSpecificRow(ctx, mediaItemID, kind, stub, file.Path); err != nil {
+		log.Warn().Err(err).Int64("id", mediaItemID).Msg("materialize local: type-specific row failed")
+	}
+
+	_ = m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+		ID:          file.ID,
+		Status:      sqlc.FileStatusMatched,
+		MediaItemID: pgInt8(mediaItemID),
+	})
+
+	log.Info().Int64("file_id", file.ID).Int64("media_id", mediaItemID).
+		Str("title", title).Str("provider_kind", providerKind).Msg("materialized local entity")
+	return MatchInfo{IsNew: isNew}, true
 }
 
 // scoreBestTitle scores the query against the result's primary Title plus
@@ -425,12 +552,45 @@ func parseFileResult(data []byte) (parser.ParsedStorageEntry, *metadata.NFOIDs) 
 				Year:   wrapper.NFO.Year,
 			}
 		}
-		return wrapper.Parsed, ids
+		return wrapper.Parsed, mergeFilenameIDs(ids, wrapper.Parsed.Release)
 	}
 
 	var parsed parser.ParsedStorageEntry
 	json.Unmarshal(data, &parsed)
-	return parsed, nil
+	return parsed, mergeFilenameIDs(nil, parsed.Release)
+}
+
+// mergeFilenameIDs folds provider IDs embedded in the filename/path into the
+// NFO-derived ID set. NFO IDs win (they're explicit, curated metadata); the
+// filename only fills providers the NFO didn't supply. Returns ids unchanged
+// when the release carries no embedded IDs.
+func mergeFilenameIDs(ids *metadata.NFOIDs, rel *parser.SceneReleaseParse) *metadata.NFOIDs {
+	if rel == nil || (rel.ImdbID == "" && rel.TmdbID == "" && rel.TvdbID == "") {
+		return ids
+	}
+	if ids == nil {
+		ids = &metadata.NFOIDs{}
+	}
+	if ids.IMDBID == "" {
+		ids.IMDBID = rel.ImdbID
+	}
+	if ids.TMDBID == "" {
+		ids.TMDBID = rel.TmdbID
+	}
+	if ids.TVDBID == "" {
+		ids.TVDBID = rel.TvdbID
+	}
+	// Carry the filename's title/year too: the new-item strong-ID path
+	// (tryNFOLookup → stubDetailFromNFO) needs a title to write the stub —
+	// without it, a filename-ID-only item would bail to a fuzzy title search
+	// instead of an authoritative direct-ID match.
+	if ids.Title == "" {
+		ids.Title = rel.Title
+	}
+	if ids.Year == "" {
+		ids.Year = rel.Year
+	}
+	return ids
 }
 
 func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind metadata.MediaKind, libraryID int64, ids *metadata.NFOIDs) (MatchInfo, bool) {
@@ -528,7 +688,7 @@ func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFil
 		extJSON, _ := json.Marshal(extIDs)
 		existing, err := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
 			LibraryID: libraryID,
-			Column2:   extJSON,
+			ExtFilter: extJSON,
 		})
 		if err != nil {
 			continue

@@ -212,17 +212,26 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 }
 
 const getMediaItemByExternalID = `-- name: GetMediaItemByExternalID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error FROM media_items
-WHERE library_id = $1 AND external_ids @> $2::jsonb
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items
+WHERE library_id = $1
+  AND $2::jsonb <> '{}'::jsonb
+  AND external_ids @> $2::jsonb
+ORDER BY id
+LIMIT 1
 `
 
 type GetMediaItemByExternalIDParams struct {
 	LibraryID int64  `json:"library_id"`
-	Column2   []byte `json:"column_2"`
+	ExtFilter []byte `json:"ext_filter"`
 }
 
+// Link by provider id. Guarded against the empty-object trap: `external_ids @>
+// '{}'` matches EVERY row, so without the `<> '{}'` filter a stub with no
+// provider IDs would link onto an arbitrary existing media_item. Callers must
+// still skip this for empty IDs; the filter + deterministic ORDER BY are
+// defense in depth so a future caller can't reintroduce the mis-link.
 func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItemByExternalIDParams) (MediaItem, error) {
-	row := q.db.QueryRow(ctx, getMediaItemByExternalID, arg.LibraryID, arg.Column2)
+	row := q.db.QueryRow(ctx, getMediaItemByExternalID, arg.LibraryID, arg.ExtFilter)
 	var i MediaItem
 	err := row.Scan(
 		&i.ID,
@@ -257,6 +266,10 @@ func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItem
 		&i.StructureEnrichedAt,
 		&i.LastEnrichAttemptAt,
 		&i.LastEnrichError,
+		&i.FieldProvenance,
+		&i.MatchConfidence,
+		&i.LocalIdentityKey,
+		&i.SlugLocked,
 	)
 	return i, err
 }

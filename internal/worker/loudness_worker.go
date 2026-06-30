@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -58,39 +59,72 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 
 	w.Progress.SetCurrent(ScanTrackLoudnessArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(lf.Path))
 
-	// Cap wall-clock for ebur128. 20× real-time on a modern CPU for FLAC,
-	// so a 10-minute track lands in ~30s; 5 min covers worst-case lossy.
+	// Cap wall-clock for the ffmpeg passes. 20× real-time on a modern CPU for
+	// FLAC, so a 10-minute track lands in ~30s; 5 min covers worst-case lossy.
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	result, err := runEBUR128(probeCtx, lf.Path)
-	if err != nil {
-		return fmt.Errorf("ebur128 %s: %w", lf.Path, err)
-	}
+	// Loudness (ebur128). Skip when already measured — this worker also runs as
+	// a boundary-only backfill, and re-listing loud-but-boundary-less tracks
+	// shouldn't pay for a redundant full-rate analysis pass.
+	if !tf.IntegratedLufs.Valid {
+		result, err := runEBUR128(probeCtx, lf.Path)
+		if err != nil {
+			return fmt.Errorf("ebur128 %s: %w", lf.Path, err)
+		}
 
-	if err := q.UpdateTrackFileLoudness(ctx, sqlc.UpdateTrackFileLoudnessParams{
-		ID:              tf.ID,
-		IntegratedLufs:  pgNumericFromFloat(result.IntegratedLUFS),
-		TruePeakDb:      pgNumericFromFloat(result.TruePeakDB),
-		LoudnessRangeDb: pgNumericFromFloat(result.LoudnessRangeDB),
-		SamplePeakDb:    pgNumericFromFloat(result.SamplePeakDB),
-	}); err != nil {
-		return fmt.Errorf("update track_file loudness: %w", err)
-	}
+		if err := q.UpdateTrackFileLoudness(ctx, sqlc.UpdateTrackFileLoudnessParams{
+			ID:              tf.ID,
+			IntegratedLufs:  pgNumericFromFloat(result.IntegratedLUFS),
+			TruePeakDb:      pgNumericFromFloat(result.TruePeakDB),
+			LoudnessRangeDb: pgNumericFromFloat(result.LoudnessRangeDB),
+			SamplePeakDb:    pgNumericFromFloat(result.SamplePeakDB),
+		}); err != nil {
+			return fmt.Errorf("update track_file loudness: %w", err)
+		}
 
-	// Cascade: if every track in the album now has loudness, enqueue the
-	// album-level analysis. The unique-by-args guard on the worker means
-	// concurrent track workers can't double-enqueue.
-	track, err := q.GetTrackByID(ctx, tf.TrackID)
-	if err == nil {
-		done, err := q.AllAlbumTracksHaveLoudness(ctx, track.AlbumID)
-		if err == nil && done {
-			client := river.ClientFromContext[pgx.Tx](ctx)
-			if client != nil {
-				if _, err := client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
-					return fmt.Errorf("enqueue album loudness: %w", err)
+		// Cascade: if every track in the album now has loudness, enqueue the
+		// album-level analysis. The unique-by-args guard on the worker means
+		// concurrent track workers can't double-enqueue.
+		track, err := q.GetTrackByID(ctx, tf.TrackID)
+		if err == nil {
+			done, err := q.AllAlbumTracksHaveLoudness(ctx, track.AlbumID)
+			if err == nil && done {
+				client := river.ClientFromContext[pgx.Tx](ctx)
+				if client != nil {
+					if _, err := client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
+						return fmt.Errorf("enqueue album loudness: %w", err)
+					}
 				}
 			}
+		}
+	}
+
+	// Structural boundaries (intro/outro/fade/silence) for smart crossfade — a
+	// cheap 8kHz decode. Best-effort and idempotent: skip if already done, and
+	// never fail the job on a boundary error (e.g. an SMB path ffmpeg can't open).
+	//
+	// We ALWAYS stamp boundaries_analyzed_at after an attempt — including when
+	// detection errors or yields nothing (too-short / undecodable). Otherwise the
+	// widened pending-loudness backfill query would re-list this file every
+	// kickoff tick forever. NULL ms columns mean "analyzed, no usable
+	// boundaries"; the client falls back to a timed crossfade. A genuine ctx
+	// cancellation also fails the stamp write below, so those correctly retry.
+	if !tf.BoundariesAnalyzedAt.Valid {
+		params := sqlc.UpdateTrackFileBoundariesParams{ID: tf.ID}
+		if b, berr := sonicanalysis.DetectBoundaries(probeCtx, lf.Path); berr != nil {
+			log.Debug().Err(berr).Str("path", lf.Path).Msg("boundary detection failed; marking analyzed with no boundaries")
+		} else if b != nil {
+			params.IntroEndMs = pgInt4(b.IntroEndMs)
+			params.OutroStartMs = pgInt4(b.OutroStartMs)
+			params.FadeStartMs = pgInt4(b.FadeStartMs)
+			params.SilenceStartMs = pgInt4(b.SilenceStartMs)
+		}
+		// Surface a stamp-write failure rather than swallowing it: loudness has
+		// already committed independently, so River retries the job, skips the
+		// loudness pass (now present), and re-attempts only the boundary stamp.
+		if err := q.UpdateTrackFileBoundaries(ctx, params); err != nil {
+			return fmt.Errorf("update track_file boundaries: %w", err)
 		}
 	}
 
@@ -295,6 +329,11 @@ func pgNumericFromFloat(v float64) pgtype.Numeric {
 	var n pgtype.Numeric
 	_ = n.Scan(strconv.FormatFloat(v, 'f', 2, 64))
 	return n
+}
+
+// pgInt4 wraps a non-null int32 for nullable INTEGER write-back.
+func pgInt4(v int) pgtype.Int4 {
+	return pgtype.Int4{Int32: int32(v), Valid: true}
 }
 
 // ffmpegConcatEscape escapes a path for use inside single-quoted concat

@@ -65,6 +65,11 @@
             <span v-if="repeatMode === 'one'" class="repeat-badge">1</span>
           </button>
         </AppTooltip>
+        <!-- Quality readout floats to the right of the transport so the play
+             button stays dead-centered (absolute → out of the flex flow). -->
+        <div v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0" class="pb-quality-slot">
+          <PlaybarQuality :key="currentTrack.id" :track-id="currentTrack.id" />
+        </div>
       </div>
       <div class="pb-scrubber">
         <span class="pb-time">{{ formatTime(position) }}</span>
@@ -88,6 +93,7 @@
       <AppTooltip label="Equalizer">
         <button class="btn-icon" :class="{ active: eqOpen }" @click="eqOpen = !eqOpen"><Icon name="eq" :size="16" /></button>
       </AppTooltip>
+      <SleepTimer />
       <div class="pb-volume">
         <AppTooltip :label="muted ? 'Unmute' : 'Mute'">
           <button class="btn-icon" @click="toggleMute">
@@ -122,6 +128,10 @@ const {
   cycleRepeat, nextTrack, prevTrack,
   toggleQueue, toggleLyrics, formatTime,
 } = usePlayer()
+
+// Bridge OS media keys / lock-screen transport to the player. Mounted here
+// because the Playbar is the one always-present music surface.
+useMediaSession()
 
 import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 
@@ -212,7 +222,8 @@ function onVolumeChange(v: number) {
 .pb-title { font-size: 13px; font-weight: 500; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pb-artist { font-size: 11px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pb-center { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.pb-controls { display: flex; align-items: center; gap: 8px; }
+.pb-controls { display: flex; align-items: center; gap: 8px; position: relative; }
+.pb-quality-slot { position: absolute; left: 100%; margin-left: 14px; top: 50%; transform: translateY(-50%); }
 .pb-play {
   width: 36px; height: 36px;
   border-radius: 50%;

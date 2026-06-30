@@ -7602,6 +7602,10 @@
           "extras_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "heya_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -7627,6 +7631,13 @@
           "library_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "local_identity_key": {
+            "type": "string"
+          },
+          "match_confidence": {
+            "format": "float",
+            "type": "number"
           },
           "matched_at": {
             "$ref": "#/components/schemas/Timestamptz"
@@ -7655,6 +7666,9 @@
           "search_vector": {},
           "slug": {
             "type": "string"
+          },
+          "slug_locked": {
+            "type": "boolean"
           },
           "sort_title": {
             "type": "string"
@@ -7710,7 +7724,11 @@
           "images_enriched_at",
           "structure_enriched_at",
           "last_enrich_attempt_at",
-          "last_enrich_error"
+          "last_enrich_error",
+          "field_provenance",
+          "match_confidence",
+          "local_identity_key",
+          "slug_locked"
         ],
         "type": "object"
       },
@@ -7742,6 +7760,10 @@
           "extras_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "heya_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -7767,6 +7789,13 @@
           "library_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "local_identity_key": {
+            "type": "string"
+          },
+          "match_confidence": {
+            "format": "float",
+            "type": "number"
           },
           "matched_at": {
             "$ref": "#/components/schemas/Timestamptz"
@@ -7795,6 +7824,9 @@
           "search_vector": {},
           "slug": {
             "type": "string"
+          },
+          "slug_locked": {
+            "type": "boolean"
           },
           "sort_title": {
             "type": "string"
@@ -7851,7 +7883,11 @@
           "images_enriched_at",
           "structure_enriched_at",
           "last_enrich_attempt_at",
-          "last_enrich_error"
+          "last_enrich_error",
+          "field_provenance",
+          "match_confidence",
+          "local_identity_key",
+          "slug_locked"
         ],
         "type": "object"
       },
@@ -8967,11 +9003,17 @@
             "format": "int64",
             "type": "integer"
           },
+          "album_integrated_lufs": {
+            "$ref": "#/components/schemas/Numeric"
+          },
           "album_slug": {
             "type": "string"
           },
           "album_title": {
             "type": "string"
+          },
+          "album_true_peak_db": {
+            "$ref": "#/components/schemas/Numeric"
           },
           "album_year": {
             "type": "string"
@@ -9031,6 +9073,8 @@
           "album_slug",
           "album_year",
           "album_cover_path",
+          "album_integrated_lufs",
+          "album_true_peak_db",
           "artist_id",
           "artist_name",
           "artist_slug"
@@ -12610,6 +12654,9 @@
             "format": "int32",
             "type": "integer"
           },
+          "boundaries_analyzed_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
           "channels": {
             "format": "int32",
             "type": "integer"
@@ -12621,6 +12668,9 @@
             "format": "int32",
             "type": "integer"
           },
+          "fade_start_ms": {
+            "$ref": "#/components/schemas/Int4"
+          },
           "format": {
             "type": "string"
           },
@@ -12630,6 +12680,9 @@
           },
           "integrated_lufs": {
             "$ref": "#/components/schemas/Numeric"
+          },
+          "intro_end_ms": {
+            "$ref": "#/components/schemas/Int4"
           },
           "library_file_id": {
             "format": "int64",
@@ -12644,6 +12697,9 @@
           "lyrics_path": {
             "type": "string"
           },
+          "outro_start_ms": {
+            "$ref": "#/components/schemas/Int4"
+          },
           "quality_score": {
             "format": "int32",
             "type": "integer"
@@ -12654,6 +12710,9 @@
           "sample_rate_hz": {
             "format": "int32",
             "type": "integer"
+          },
+          "silence_start_ms": {
+            "$ref": "#/components/schemas/Int4"
           },
           "size_bytes": {
             "format": "int64",
@@ -12685,7 +12744,12 @@
           "loudness_range_db",
           "sample_peak_db",
           "loudness_analyzed_at",
-          "created_at"
+          "created_at",
+          "intro_end_ms",
+          "outro_start_ms",
+          "fade_start_ms",
+          "silence_start_ms",
+          "boundaries_analyzed_at"
         ],
         "type": "object"
       },

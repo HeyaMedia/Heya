@@ -51,6 +51,17 @@ func ParseStoragePath(inputPath string) ParsedStorageEntry {
 		releaseSegment = releaseCandidate.segment
 	}
 
+	if release != nil {
+		// Embedded provider IDs live in the release's own segment (folder) or the
+		// filename — scan both, not the whole path, to avoid picking up an ID from
+		// an unrelated ancestor directory.
+		idSource := basename
+		if releaseSegment != "" && releaseSegment != basename {
+			idSource = releaseSegment + " " + basename
+		}
+		release.ImdbID, release.TmdbID, release.TvdbID = ParseProviderIDs(idSource)
+	}
+
 	if release != nil && release.Strategy == StrategyMusicCurated {
 		if releaseCandidate.index > 0 {
 			if _, disambig := splitArtistDisambiguator(segments[releaseCandidate.index-1]); disambig != "" {

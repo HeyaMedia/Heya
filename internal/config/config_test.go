@@ -10,6 +10,7 @@ import (
 // allHeyaEnvKeys is the canonical list every test starts from a known state on.
 var allHeyaEnvKeys = []string{
 	"HEYA_DATABASE_URL", "HEYA_DB_MAX_CONNS", "HEYA_DB_MIN_CONNS",
+	"HEYA_PASSIVE_MODE", "HEYA_ALLOW_REMOTE_ACTIVE",
 	"HEYA_HOST", "HEYA_PORT", "HEYA_LOG_LEVEL",
 	"HEYA_LOG_FORMAT", "HEYA_DATA_DIR", "HEYA_MEDIA_URL", "HEYA_HWACCEL",
 	"HEYA_TRANSCODE_CACHE_DIR", "HEYA_TRANSCODE_CACHE_MAX_GB",
@@ -93,6 +94,14 @@ func TestSources(t *testing.T) {
 	assert.Equal(t, "HEYA_HOST", sources["infra.host"].EnvVar)
 	assert.Equal(t, SourceDefault, sources["infra.port"].Source)
 	assert.Empty(t, sources["infra.port"].EnvVar)
+}
+
+func TestAllowRemoteActiveSourceRegistered(t *testing.T) {
+	clearHeyaEnv(t)
+	t.Setenv("HEYA_ALLOW_REMOTE_ACTIVE", "true")
+	cfg := Load()
+	assert.True(t, cfg.AllowRemoteActive.Value)
+	assert.Equal(t, SourceEnv, cfg.Sources()["infra.allow_remote_active"].Source)
 }
 
 func TestSourceRegistryKeysAreUnique(t *testing.T) {

@@ -61,7 +61,7 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		file, err := app.GetLibraryFile(r.Context(), fileID)
+		file, err := app.EnsureFileProbed(r.Context(), fileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -213,7 +213,7 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 }
 
 func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duration float64) *transcoder.TranscodeSession {
-	file, err := app.GetLibraryFile(r.Context(), fileID)
+	file, err := app.EnsureFileProbed(r.Context(), fileID)
 	if err != nil {
 		return nil
 	}

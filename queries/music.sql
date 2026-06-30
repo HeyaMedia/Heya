@@ -395,6 +395,8 @@ SELECT t.id,
        al.slug           AS album_slug,
        al.year           AS album_year,
        al.cover_path     AS album_cover_path,
+       al.integrated_lufs AS album_integrated_lufs,
+       al.true_peak_db    AS album_true_peak_db,
        a.id              AS artist_id,
        a.name            AS artist_name,
        mi.slug           AS artist_slug
@@ -658,10 +660,25 @@ UPDATE track_files
        loudness_analyzed_at = now()
  WHERE id = $1;
 
+-- name: UpdateTrackFileBoundaries :exec
+-- Structural transition points (intro/outro/fade/silence, in ms) detected from
+-- the RMS envelope. Written by ScanTrackLoudnessWorker in the same pass as
+-- loudness, since it has already decoded the file. Feeds the client smart
+-- crossfade.
+UPDATE track_files
+   SET intro_end_ms           = $2,
+       outro_start_ms         = $3,
+       fade_start_ms          = $4,
+       silence_start_ms       = $5,
+       boundaries_analyzed_at = now()
+ WHERE id = $1;
+
 -- name: ListTrackFilesPendingLoudness :many
--- Files in music libraries that don't yet have loudness data and aren't
--- soft-deleted. The track-loudness worker pulls from here as a backstop in
--- case the FFProbeWorker hand-off missed something.
+-- Files in music libraries missing loudness OR boundary analysis (and not
+-- soft-deleted). The track-loudness worker pulls from here as a backstop in
+-- case the FFProbeWorker hand-off missed something, and to backfill boundaries
+-- on tracks scanned before boundary detection existed. The worker only computes
+-- whichever piece is actually missing, so re-listing already-loud tracks is cheap.
 SELECT tf.id, tf.library_file_id, tf.track_id, lf.path
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
@@ -672,7 +689,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lf.deleted_at IS NULL
-  AND tf.integrated_lufs IS NULL
+  AND (tf.integrated_lufs IS NULL OR tf.boundaries_analyzed_at IS NULL)
 ORDER BY tf.id
 LIMIT $1;
 

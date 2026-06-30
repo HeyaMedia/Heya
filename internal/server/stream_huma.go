@@ -37,7 +37,11 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 			SupportsDoVi     bool `query:"supports_dovi"`
 			SupportsHEVCHev1 bool `query:"supports_hevc_hev1"`
 		}) (*JSONOutput[streamInfoResponse], error) {
-			file, err := app.GetLibraryFile(ctx, in.FileID)
+			// Force a probe if this file has never been ffprobed. The FE fetches
+			// this endpoint on player mount and gates direct-play vs HLS on the
+			// returned plan, so it's the natural choke point — without media_info
+			// Decide() would blindly fall back to a 1080p transcode.
+			file, err := app.EnsureFileProbed(ctx, in.FileID)
 			if err != nil {
 				return nil, huma.Error404NotFound("file not found")
 			}

@@ -541,6 +541,10 @@ type MediaItem struct {
 	StructureEnrichedAt pgtype.Timestamptz `json:"structure_enriched_at"`
 	LastEnrichAttemptAt pgtype.Timestamptz `json:"last_enrich_attempt_at"`
 	LastEnrichError     string             `json:"last_enrich_error"`
+	FieldProvenance     []byte             `json:"field_provenance"`
+	MatchConfidence     float32            `json:"match_confidence"`
+	LocalIdentityKey    string             `json:"local_identity_key"`
+	SlugLocked          bool               `json:"slug_locked"`
 }
 
 type MediaKeyword struct {
@@ -779,24 +783,29 @@ type TrackFacet struct {
 }
 
 type TrackFile struct {
-	ID                 int64              `json:"id"`
-	TrackID            int64              `json:"track_id"`
-	LibraryFileID      int64              `json:"library_file_id"`
-	Format             string             `json:"format"`
-	QualityScore       int32              `json:"quality_score"`
-	BitrateKbps        int32              `json:"bitrate_kbps"`
-	SampleRateHz       int32              `json:"sample_rate_hz"`
-	BitDepth           int32              `json:"bit_depth"`
-	Channels           int32              `json:"channels"`
-	Duration           int32              `json:"duration"`
-	SizeBytes          int64              `json:"size_bytes"`
-	LyricsPath         string             `json:"lyrics_path"`
-	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
-	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
-	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
-	SamplePeakDb       pgtype.Numeric     `json:"sample_peak_db"`
-	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ID                   int64              `json:"id"`
+	TrackID              int64              `json:"track_id"`
+	LibraryFileID        int64              `json:"library_file_id"`
+	Format               string             `json:"format"`
+	QualityScore         int32              `json:"quality_score"`
+	BitrateKbps          int32              `json:"bitrate_kbps"`
+	SampleRateHz         int32              `json:"sample_rate_hz"`
+	BitDepth             int32              `json:"bit_depth"`
+	Channels             int32              `json:"channels"`
+	Duration             int32              `json:"duration"`
+	SizeBytes            int64              `json:"size_bytes"`
+	LyricsPath           string             `json:"lyrics_path"`
+	IntegratedLufs       pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb           pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb      pgtype.Numeric     `json:"loudness_range_db"`
+	SamplePeakDb         pgtype.Numeric     `json:"sample_peak_db"`
+	LoudnessAnalyzedAt   pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	IntroEndMs           pgtype.Int4        `json:"intro_end_ms"`
+	OutroStartMs         pgtype.Int4        `json:"outro_start_ms"`
+	FadeStartMs          pgtype.Int4        `json:"fade_start_ms"`
+	SilenceStartMs       pgtype.Int4        `json:"silence_start_ms"`
+	BoundariesAnalyzedAt pgtype.Timestamptz `json:"boundaries_analyzed_at"`
 }
 
 type TvEpisode struct {

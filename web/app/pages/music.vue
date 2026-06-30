@@ -14,11 +14,16 @@
     <Playbar />
     <EQPanel :open="eqOpen" @close="eqOpen = false" />
     <CreatePlaylistModal :open="createOpen" @close="createOpen = false" @created="onCreated" />
+    <HotkeyHelp />
   </div>
 </template>
 
 <script setup lang="ts">
 definePageMeta({ layout: 'default' })
+
+// Global transport hotkeys (space / arrows / m-s-r-q-l), active across the
+// music shell. Suppressed while typing.
+useGlobalHotkeys()
 
 const route = useRoute()
 const router = useRouter()

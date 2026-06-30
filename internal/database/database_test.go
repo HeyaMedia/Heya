@@ -19,6 +19,49 @@ func getTestDatabaseURL(t *testing.T) string {
 	return url
 }
 
+func TestAllHostsLocalClassification(t *testing.T) {
+	cases := []struct {
+		name  string
+		conn  string
+		local bool
+	}{
+		{"localhost", "postgres://heya:heya@localhost:5440/heya_dev?sslmode=disable", true},
+		{"loopback v4", "postgres://heya:heya@127.0.0.1:5440/heya", true},
+		{"loopback v6", "postgres://heya:pw@[::1]:5432/heya", true},
+		{"unix socket host param", "postgres:///heya?host=/var/run/postgresql", true},
+		{"remote authority", "postgres://heya:pw@knas-heya-postgres.drum-ray.ts.net:5432/heya?sslmode=disable", false},
+		{"remote dsn keyword", "host=knas-heya-postgres.drum-ray.ts.net port=5432 user=heya dbname=heya", false},
+		// pgx dials a leading "@" host as TCP (only "/" is a unix socket), so it
+		// must NOT be classified local.
+		{"at-prefixed host is tcp", "host=@evil.example.com port=5432 user=heya dbname=heya", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			local, host, err := database.AllHostsLocal(c.conn)
+			if err != nil {
+				t.Fatalf("AllHostsLocal(%q): %v", c.conn, err)
+			}
+			if local != c.local {
+				t.Errorf("AllHostsLocal(%q) = %v (host %q); want %v", c.conn, local, host, c.local)
+			}
+		})
+	}
+}
+
+// TestAllHostsLocalSeesPGHOST is the bypass the old url.Parse check missed: a
+// host-less URL parses to an empty (local-looking) host, but pgx resolves the
+// real host from PGHOST. The guard must classify what pgx actually dials.
+func TestAllHostsLocalSeesPGHOST(t *testing.T) {
+	t.Setenv("PGHOST", "knas-prod.example.com")
+	local, host, err := database.AllHostsLocal("postgres:///heya_dev")
+	if err != nil {
+		t.Fatalf("AllHostsLocal: %v", err)
+	}
+	if local {
+		t.Errorf("expected non-local via PGHOST, got local (host=%q)", host)
+	}
+}
+
 func TestIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

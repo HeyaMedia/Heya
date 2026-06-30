@@ -48,23 +48,10 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 	probeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	var output []byte
-	var err error
-
-	if vfs.IsSMBPath(job.Args.FilePath) {
-		output, err = ffprobeSMB(probeCtx, job.Args.FilePath)
-	} else {
-		output, err = ffprobeLocal(probeCtx, job.Args.FilePath)
-	}
+	info, err := ProbeFile(probeCtx, job.Args.FilePath)
 	if err != nil {
 		log.Warn().Err(err).Str("path", vfs.RedactPath(job.Args.FilePath)).Msg("ffprobe failed")
-		return fmt.Errorf("ffprobe exec: %w", err)
-	}
-
-	info, err := ParseFFProbeOutput(output)
-	if err != nil {
-		log.Warn().Err(err).Str("path", vfs.RedactPath(job.Args.FilePath)).Msg("ffprobe output parse error")
-		return fmt.Errorf("ffprobe parse: %w", err)
+		return fmt.Errorf("ffprobe: %w", err)
 	}
 
 	infoJSON, err := json.Marshal(info)
@@ -113,7 +100,7 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 	}
 
 	if hasAudio && primaryAudio != nil {
-		w.updateAudioTrackFile(ctx, q, job.Args.LibraryFileID, info, primaryAudio)
+		UpdateAudioTrackFileFromProbe(ctx, q, job.Args.LibraryFileID, info, primaryAudio)
 		w.enqueueLoudnessIfMusic(ctx, q, job.Args.LibraryFileID, job.Args.ScheduledTaskID)
 	}
 
@@ -139,6 +126,28 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 	}
 
 	return nil
+}
+
+// ProbeFile runs ffprobe against a local or SMB path and returns parsed
+// MediaInfo. It is the shared entry point for both the async FFProbeWorker and
+// the on-demand service probe (App.EnsureFileProbed), so the two can never
+// drift on ffprobe flags or SMB pipe handling.
+func ProbeFile(ctx context.Context, path string) (*MediaInfo, error) {
+	var output []byte
+	var err error
+	if vfs.IsSMBPath(path) {
+		output, err = ffprobeSMB(ctx, path)
+	} else {
+		output, err = ffprobeLocal(ctx, path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ffprobe exec: %w", err)
+	}
+	info, err := ParseFFProbeOutput(output)
+	if err != nil {
+		return nil, fmt.Errorf("ffprobe parse: %w", err)
+	}
+	return info, nil
 }
 
 func ffprobeLocal(ctx context.Context, path string) ([]byte, error) {
@@ -187,11 +196,12 @@ func ffprobeSMB(ctx context.Context, smbPath string) ([]byte, error) {
 	return cmd.Output()
 }
 
-// updateAudioTrackFile writes probe results to the matching track_files row
-// (if one exists — matcher creates it). Updates bitrate / sample_rate /
-// bit_depth / channels / duration / size and recomputes quality_score using
-// the real numbers (no longer extension-only).
-func (w *FFProbeWorker) updateAudioTrackFile(ctx context.Context, q *sqlc.Queries, libraryFileID int64, info *MediaInfo, audio *StreamInfo) {
+// UpdateAudioTrackFileFromProbe writes probe results to the matching
+// track_files row (if one exists — matcher creates it). Updates bitrate /
+// sample_rate / bit_depth / channels / duration / size and recomputes
+// quality_score using the real numbers (no longer extension-only). Shared by
+// FFProbeWorker and the on-demand service probe.
+func UpdateAudioTrackFileFromProbe(ctx context.Context, q *sqlc.Queries, libraryFileID int64, info *MediaInfo, audio *StreamInfo) {
 	tf, err := q.GetTrackFileByLibraryFileID(ctx, libraryFileID)
 	if err != nil {
 		// Matcher hasn't run yet; nothing to update. The matcher will fill

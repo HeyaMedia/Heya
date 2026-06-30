@@ -55,6 +55,13 @@ type SceneReleaseParse struct {
 	IsTv           bool                `json:"isTv"`
 	Score          int                 `json:"score"`
 
+	// Provider IDs embedded in the release name / path (e.g. "{imdb-tt0113198}"
+	// or "[tmdbid=603]"). Empty when absent. A strong-match signal threaded into
+	// the matcher alongside NFO IDs. See ParseProviderIDs.
+	ImdbID string `json:"imdbId,omitempty"`
+	TmdbID string `json:"tmdbId,omitempty"`
+	TvdbID string `json:"tvdbId,omitempty"`
+
 	Artist               string `json:"artist,omitempty"`
 	ArtistDisambiguation string `json:"artistDisambiguation,omitempty"`
 	Album                string `json:"album,omitempty"`

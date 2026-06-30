@@ -1,6 +1,7 @@
 import type { CrossfadeMode } from '~~/shared/types/audio'
 import { generateFadeIn, generateFadeOut } from './crossfade/curves'
 import type { TransitionPlan } from './crossfade/strategy'
+import { alog } from './debug'
 import { Deck } from './deck'
 
 export interface DeckManagerEvents {
@@ -50,6 +51,7 @@ export class DeckManager {
 
   async transition(mode: CrossfadeMode | 'gapless', plan?: TransitionPlan): Promise<void> {
     if (mode === 'gapless') {
+      alog('deck', 'gapless: pause active + swap to preloaded pending deck')
       this.activeDeck.pause()
       this.swapRoles()
       await this.activeDeck.play()
@@ -57,6 +59,7 @@ export class DeckManager {
     }
 
     const durationSeconds = plan?.durationSeconds ?? 3
+    alog('deck', `crossfade: overlapping both decks for ${durationSeconds.toFixed(2)}s`)
     const fadeOutCurve = plan?.fadeOutCurve ?? generateFadeOut(durationSeconds * 100)
     const fadeInCurve = plan?.fadeInCurve ?? generateFadeIn(durationSeconds * 100)
     const now = this.ctx.currentTime

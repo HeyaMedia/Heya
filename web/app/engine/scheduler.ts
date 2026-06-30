@@ -1,12 +1,17 @@
+import { alog } from './debug'
+
 export interface SchedulerOptions {
-  gaplessOffsetMs: number
   crossfadeDurationSeconds: number
   onTransitionPoint: () => void
 }
 
-// Watches the active deck's playback position and fires the transition
-// callback at the right moment for gapless (very last instant) or crossfade
-// (N seconds before the end). The fired flag prevents double-trigger.
+// Watches the active deck's position and fires the transition callback for the
+// *overlap* transitions only — crossfade (N seconds before the end) and smart
+// crossfade (at an absolute start time). Gapless is deliberately NOT scheduled
+// here: firing early and pausing the outgoing deck would clip the end of every
+// track. Gapless instead swaps on the deck's natural `ended` event (see
+// usePlayer.handleEnded), so the outgoing track plays in full. The `fired` flag
+// prevents a double-trigger.
 export class Scheduler {
   private options: SchedulerOptions
   private fired = false
@@ -15,7 +20,6 @@ export class Scheduler {
 
   constructor(options: Partial<SchedulerOptions> & { onTransitionPoint: () => void }) {
     this.options = {
-      gaplessOffsetMs: 100,
       crossfadeDurationSeconds: 3,
       ...options,
     }
@@ -28,21 +32,24 @@ export class Scheduler {
   onTimeUpdate(currentTime: number, duration: number) {
     if (this.fired || !duration || !Number.isFinite(duration)) return
 
+    // Smart crossfade: absolute start time (from server boundary analysis).
     if (this.smartStartTimeSeconds !== null) {
       if (currentTime >= this.smartStartTimeSeconds) {
         this.fired = true
+        alog('sched', `fired smart @ ${currentTime.toFixed(1)}s (start ${this.smartStartTimeSeconds.toFixed(1)}s)`)
         this.options.onTransitionPoint()
       }
       return
     }
 
-    const remainingMs = (duration - currentTime) * 1000
-    const threshold = this.mode === 'gapless'
-      ? this.options.gaplessOffsetMs
-      : this.options.crossfadeDurationSeconds * 1000
+    // Only crossfade gets an early fire. Gapless is handled on `ended`.
+    if (this.mode !== 'crossfade') return
 
-    if (remainingMs <= threshold) {
+    const remainingMs = (duration - currentTime) * 1000
+    const thresholdMs = this.options.crossfadeDurationSeconds * 1000
+    if (remainingMs <= thresholdMs) {
       this.fired = true
+      alog('sched', `fired crossfade @ ${currentTime.toFixed(1)}/${duration.toFixed(1)}s (overlap ${(thresholdMs / 1000).toFixed(2)}s)`)
       this.options.onTransitionPoint()
     }
   }

@@ -68,11 +68,13 @@ func handleStreamTrack(app *service.App) http.HandlerFunc {
 		caps := parseAudioCaps(r)
 
 		if !hasCaps {
+			_, _ = app.EnsureFileProbed(r.Context(), files[0].LibraryFileID)
 			serveTrackFileBytes(w, r, app, files[0].LibraryFileID)
 			return
 		}
 
 		if tf, ok := pickBestPlayableFile(files, caps); ok {
+			_, _ = app.EnsureFileProbed(r.Context(), tf.LibraryFileID)
 			serveTrackFileBytes(w, r, app, tf.LibraryFileID)
 			return
 		}
@@ -86,7 +88,7 @@ func handleStreamTrack(app *service.App) http.HandlerFunc {
 			return
 		}
 		primary := files[0]
-		lf, err := app.GetLibraryFile(r.Context(), primary.LibraryFileID)
+		lf, err := app.EnsureFileProbed(r.Context(), primary.LibraryFileID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "library file not found")
 			return
@@ -136,6 +138,7 @@ func handleStreamTrackFile(app *service.App) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "track file not found")
 			return
 		}
+		_, _ = app.EnsureFileProbed(r.Context(), tf.LibraryFileID)
 		serveTrackFileBytes(w, r, app, tf.LibraryFileID)
 	}
 }

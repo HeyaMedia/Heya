@@ -2,8 +2,10 @@ import type { Ref } from 'vue'
 import type { CrossfadeMode } from '~~/shared/types/audio'
 import { AnalyserBridge } from '~/engine/analysis/analyserBridge'
 import { getAudioContext, resumeContext } from '~/engine/context'
+import { alog, shortUrl } from '~/engine/debug'
 import type { TransitionPlan } from '~/engine/crossfade/strategy'
 import { DeckManager } from '~/engine/deckManager'
+import { createCrossfeed } from '~/engine/dsp/crossfeed'
 import { createEqualizer } from '~/engine/dsp/equalizer'
 import { createLimiter } from '~/engine/dsp/limiter'
 import { computeNormalizationGain, createNormalization } from '~/engine/dsp/normalization'
@@ -24,18 +26,23 @@ function createEngine() {
   const preamp = createPreamp(ctx)
   const equalizer = createEqualizer(ctx)
   const postgain = createPostgain(ctx)
+  const crossfeed = createCrossfeed(ctx)
   const limiter = createLimiter(ctx)
 
   // Per-deck normGainNode handles normalization, so the shared block in the
   // chain stays disabled — keeping it present lets us flip on a global mode
   // later without a graph rebuild.
   normalization.enabled = false
-  // EQ / preamp / postgain off by default. Limiter stays on as a safety net.
+  // EQ / preamp / postgain / crossfeed off by default. Limiter stays on as a
+  // safety net.
   preamp.enabled = false
   equalizer.enabled = false
   postgain.enabled = false
+  crossfeed.enabled = false
 
-  signalChain.setBlocks([normalization, preamp, equalizer, postgain, limiter])
+  // Crossfeed sits after the EQ/gain stages and before the limiter, so the
+  // limiter still catches any peaks the channel summing introduces.
+  signalChain.setBlocks([normalization, preamp, equalizer, postgain, crossfeed, limiter])
   signalChain.setSource(deckManager.getActiveOutput())
   signalChain.setDestination(analyserBridge.analyserNode)
   analyserBridge.analyserNode.connect(ctx.destination)
@@ -77,10 +84,21 @@ function createEngine() {
     errorCallback?.(err)
   })
 
+  // Fast fade applied when hot-swapping the active deck's source (a manual
+  // track change), so the hard cut doesn't click. ~60ms is inaudible as a fade
+  // but long enough to ramp cleanly through the discontinuity.
+  const SWITCH_FADE_SECONDS = 0.06
+
   async function play(url: string) {
+    alog('engine', 'play (cold load on active deck)', shortUrl(url))
     await resumeContext()
+    // Jellyfin-style: fade the currently-playing track to silence before the
+    // source swap so the cut is click-free, then fade the new track in.
+    if (isPlaying.value && !deckManager.active.paused) {
+      await deckManager.active.fadeOut(SWITCH_FADE_SECONDS)
+    }
     await deckManager.loadAndPlay(url)
-    deckManager.active.setVolume(volume.value)
+    deckManager.active.fadeIn(volume.value, SWITCH_FADE_SECONDS)
     isPlaying.value = true
     scheduler.reset()
   }
@@ -109,7 +127,10 @@ function createEngine() {
     deckManager.active.setVolume(clamped)
   }
 
-  async function loadNext(url: string) { await deckManager.loadNext(url) }
+  async function loadNext(url: string) {
+    alog('engine', 'loadNext (buffering pending deck)', shortUrl(url))
+    await deckManager.loadNext(url)
+  }
 
   async function transition(mode: CrossfadeMode | 'gapless', plan?: TransitionPlan) {
     if (mode !== 'gapless') {
@@ -124,12 +145,19 @@ function createEngine() {
   }
 
   function setActiveNormalization(integrated: number, truePeak: number) {
-    deckManager.setActiveNormalization(computeNormalizationGain(integrated, truePeak))
+    const gain = computeNormalizationGain(integrated, truePeak)
+    alog('norm', `active gain ×${gain.toFixed(3)} (${(20 * Math.log10(gain || 1)).toFixed(1)} dB) — ${integrated.toFixed(1)} LUFS, peak ${truePeak.toFixed(1)} dB`)
+    deckManager.setActiveNormalization(gain)
   }
   function setPendingNormalization(integrated: number, truePeak: number) {
-    deckManager.setPendingNormalization(computeNormalizationGain(integrated, truePeak))
+    const gain = computeNormalizationGain(integrated, truePeak)
+    alog('norm', `pending gain ×${gain.toFixed(3)} (${(20 * Math.log10(gain || 1)).toFixed(1)} dB)`)
+    deckManager.setPendingNormalization(gain)
   }
-  function resetActiveNormalization() { deckManager.setActiveNormalization(1) }
+  function resetActiveNormalization() {
+    alog('norm', 'active gain reset (×1.0, no normalization)')
+    deckManager.setActiveNormalization(1)
+  }
   function resetPendingNormalization() { deckManager.setPendingNormalization(1) }
 
   function dispose() {
@@ -144,7 +172,7 @@ function createEngine() {
     play, pause, stop, resume, seek, setVolume,
     loadNext, transition, setOnTransitionPoint, setOnEnded, setOnError,
     dispose,
-    normalization, preamp, equalizer, postgain, limiter,
+    normalization, preamp, equalizer, postgain, crossfeed, limiter,
     signalChain, analyserBridge, scheduler,
     setActiveNormalization, setPendingNormalization,
     resetActiveNormalization, resetPendingNormalization,

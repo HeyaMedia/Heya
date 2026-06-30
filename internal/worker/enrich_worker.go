@@ -81,6 +81,13 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 
 	providerIDs := heyamedia.BuildLookupIDs(kind, externalIDs, item.HeyaSlug)
 	if len(providerIDs) == 0 {
+		// A pure-local entity (materialized from filename/tags, no NFO/filename
+		// provider id) has nothing to fetch yet — leave it visible and 'local'
+		// rather than marking it failed. (A title-search fast path can upgrade
+		// these later.) A non-local item missing an id is a real failure.
+		if item.ProviderKind == "local" {
+			return nil
+		}
 		return w.markFailed(ctx, q, item.ID, "no provider lookup id in external_ids")
 	}
 
@@ -104,11 +111,16 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	}
 
 	// Base: type-specific row (movies / tv_series / books) + seasons for TV.
-	// StoreEntityMetadata already handles the kind branch.
-	w.Matcher.StoreEntityMetadata(ctx, item.ID, kind, detail)
-	_ = q.MarkEnrichBaseDone(ctx, item.ID)
-	if kind == metadata.KindTV {
-		_ = q.MarkEnrichStructureDone(ctx, item.ID)
+	// Skip when a prior (partial) attempt already did it and this isn't a forced
+	// refresh — re-running would re-link networks/creators (delete+recreate) and
+	// re-walk the season tree. The *_enriched_at stamps exist precisely to resume
+	// without redoing successful components (migration 00017); Force refreshes all.
+	if job.Args.Force || !item.BaseEnrichedAt.Valid {
+		w.Matcher.StoreEntityMetadata(ctx, item.ID, kind, detail)
+		_ = q.MarkEnrichBaseDone(ctx, item.ID)
+		if kind == metadata.KindTV {
+			_ = q.MarkEnrichStructureDone(ctx, item.ID)
+		}
 	}
 
 	// Persist heya.media's canonical slug. It's a stable lookup key
@@ -123,13 +135,16 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		}
 	}
 
-	// People + extras come from the same StoreRichMetadata call. We stamp
-	// both timestamps even though one call does the work, so the UI can
-	// surface "people enriched" / "extras enriched" independently if we
-	// ever split the call.
-	w.Matcher.StoreRichMetadata(ctx, item.ID, detail)
-	_ = q.MarkEnrichPeopleDone(ctx, item.ID)
-	_ = q.MarkEnrichExtrasDone(ctx, item.ID)
+	// People + extras come from the same StoreRichMetadata call. Skip when a
+	// prior attempt already enriched people and this isn't a forced refresh —
+	// re-running rewrites (and, lacking dedup, can duplicate) cast/crew/keywords.
+	// Force does a full refresh. We stamp both timestamps even though one call
+	// does the work, so the UI can surface them independently if we ever split.
+	if job.Args.Force || !item.PeopleEnrichedAt.Valid {
+		w.Matcher.StoreRichMetadata(ctx, item.ID, detail)
+		_ = q.MarkEnrichPeopleDone(ctx, item.ID)
+		_ = q.MarkEnrichExtrasDone(ctx, item.ID)
+	}
 
 	// Image pipeline: enqueue DetectLocalAssets (which fans out poster +
 	// backdrop downloads + secondary artwork enrichment). We stamp

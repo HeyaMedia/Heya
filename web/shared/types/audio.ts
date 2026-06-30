@@ -15,6 +15,9 @@ export interface DSPBlockState {
 
 export type CrossfadeMode = 'timed' | 'smart'
 
+// Headphone crossfeed strength. See engine/dsp/crossfeed.ts.
+export type CrossfeedPreset = 'subtle' | 'natural' | 'strong'
+
 export interface CodecSupport {
   flac: boolean
   alac: boolean

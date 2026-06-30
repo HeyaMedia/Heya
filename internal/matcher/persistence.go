@@ -3,9 +3,11 @@ package matcher
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -16,13 +18,22 @@ import (
 func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.MediaDetail, kind metadata.MediaKind, libraryID int64, filePath string) (int64, bool, error) {
 	extJSON, _ := json.Marshal(detail.ExternalIDs)
 
-	existing, err := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
-		LibraryID: libraryID,
-		Column2:   extJSON,
-	})
-	if err == nil {
-		log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing media item")
-		return existing.ID, false, nil
+	// Only link by external IDs when we actually HAVE some. `external_ids @> '{}'`
+	// matches every row, so an empty-ID stub (NFO-less / filename-only local)
+	// would otherwise link onto an arbitrary existing media_item. Empty-ID
+	// dedup is handled by local_identity_key (Phase 1), not containment.
+	hasExternalIDs := len(detail.ExternalIDs) > 0 && len(extJSON) > 0 &&
+		string(extJSON) != "{}" && string(extJSON) != "null"
+
+	if hasExternalIDs {
+		existing, err := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
+			LibraryID: libraryID,
+			ExtFilter: extJSON,
+		})
+		if err == nil {
+			log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing media item")
+			return existing.ID, false, nil
+		}
 	}
 
 	mediaType := kindToMediaType(kind)
@@ -46,13 +57,15 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 		HeyaSlug:         detail.HeyaSlug,
 	})
 	if err != nil {
-		existing, retryErr := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
-			LibraryID: libraryID,
-			Column2:   extJSON,
-		})
-		if retryErr == nil {
-			log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing media item (race resolved)")
-			return existing.ID, false, nil
+		if hasExternalIDs {
+			existing, retryErr := m.q.GetMediaItemByExternalID(ctx, sqlc.GetMediaItemByExternalIDParams{
+				LibraryID: libraryID,
+				ExtFilter: extJSON,
+			})
+			if retryErr == nil {
+				log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing media item (race resolved)")
+				return existing.ID, false, nil
+			}
 		}
 		return 0, false, fmt.Errorf("creating media item: %w", err)
 	}
@@ -92,28 +105,120 @@ func (m *Matcher) createTypeSpecificRow(ctx context.Context, mediaItemID int64, 
 	return nil
 }
 
+// createMovie writes the movies row from a remote detail. Get-or-create-or-fill:
+//   - no row yet (normal first enrich, or a freshly materialized local stub) →
+//     INSERT the full detail.
+//   - row exists (local stub being upgraded by enrich, a re-identify, or a
+//     forced refresh) → UPDATE with remote values, EXCEPT fields the user has
+//     edited (field_provenance == "user"), which are preserved (edits win).
+//
+// Non-forced re-enrich never reaches here: the enrich worker gates the base
+// component on BaseEnrichedAt. Rich metadata (cast/crew/…) is written by the
+// caller's separate StoreRichMetadata, not here.
 func (m *Matcher) createMovie(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
-	_, err := m.q.CreateMovie(ctx, sqlc.CreateMovieParams{
-		MediaItemID:      mediaItemID,
-		RuntimeMinutes:   int32(d.RuntimeMinutes),
-		Tagline:          d.Tagline,
-		Genres:           emptyIfNil(d.Genres),
-		Rating:           numericFromFloat(d.Rating),
-		ReleaseDate:      pgDateFromString(d.ReleaseDate),
-		OriginalTitle:    d.OriginalTitle,
-		OriginalLanguage: d.OriginalLanguage,
-		Budget:           d.Budget,
-		Revenue:          d.Revenue,
-		Popularity:       numericFromFloat(d.Popularity),
-		SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
-		OriginCountry:    emptyIfNil(d.OriginCountry),
-	})
-	if err != nil {
-		return err
+	existing, gerr := m.q.GetMovieByMediaItemID(ctx, mediaItemID)
+	switch {
+	case errors.Is(gerr, pgx.ErrNoRows):
+		_, err := m.q.CreateMovie(ctx, sqlc.CreateMovieParams{
+			MediaItemID:      mediaItemID,
+			RuntimeMinutes:   int32(d.RuntimeMinutes),
+			Tagline:          d.Tagline,
+			Genres:           emptyIfNil(d.Genres),
+			Rating:           numericFromFloat(d.Rating),
+			ReleaseDate:      pgDateFromString(d.ReleaseDate),
+			OriginalTitle:    d.OriginalTitle,
+			OriginalLanguage: d.OriginalLanguage,
+			Budget:           d.Budget,
+			Revenue:          d.Revenue,
+			Popularity:       numericFromFloat(d.Popularity),
+			SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
+			OriginCountry:    emptyIfNil(d.OriginCountry),
+		})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	case gerr == nil:
+		locked := m.lockedFields(ctx, mediaItemID)
+		p := sqlc.UpdateMovieParams{
+			ID:               existing.ID,
+			RuntimeMinutes:   int32(d.RuntimeMinutes),
+			Tagline:          d.Tagline,
+			Genres:           emptyIfNil(d.Genres),
+			Rating:           numericFromFloat(d.Rating),
+			ReleaseDate:      pgDateFromString(d.ReleaseDate),
+			OriginalTitle:    d.OriginalTitle,
+			OriginalLanguage: d.OriginalLanguage,
+			Budget:           d.Budget,
+			Revenue:          d.Revenue,
+			Popularity:       numericFromFloat(d.Popularity),
+			SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
+			OriginCountry:    emptyIfNil(d.OriginCountry),
+		}
+		// Remote wins EXCEPT any field the user has edited (provenance == "user").
+		if locked["genres"] {
+			p.Genres = existing.Genres
+		}
+		if locked["runtime_minutes"] {
+			p.RuntimeMinutes = existing.RuntimeMinutes
+		}
+		if locked["tagline"] {
+			p.Tagline = existing.Tagline
+		}
+		if locked["rating"] {
+			p.Rating = existing.Rating
+		}
+		if locked["release_date"] {
+			p.ReleaseDate = existing.ReleaseDate
+		}
+		if locked["original_title"] {
+			p.OriginalTitle = existing.OriginalTitle
+		}
+		if locked["original_language"] {
+			p.OriginalLanguage = existing.OriginalLanguage
+		}
+		if locked["budget"] {
+			p.Budget = existing.Budget
+		}
+		if locked["revenue"] {
+			p.Revenue = existing.Revenue
+		}
+		if locked["popularity"] {
+			p.Popularity = existing.Popularity
+		}
+		if locked["spoken_languages"] {
+			p.SpokenLanguages = existing.SpokenLanguages
+		}
+		if locked["origin_country"] {
+			p.OriginCountry = existing.OriginCountry
+		}
+		if _, err := m.q.UpdateMovie(ctx, p); err != nil {
+			return err
+		}
+	default:
+		return gerr
 	}
-
-	m.storeRichMetadata(ctx, mediaItemID, d)
 	return nil
+}
+
+// lockedFields returns the set of base/type-specific field names a user has
+// manually edited (field_provenance == "user") on the media_item — the enrich
+// writers must not overwrite these.
+func (m *Matcher) lockedFields(ctx context.Context, mediaItemID int64) map[string]bool {
+	item, err := m.q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return nil
+	}
+	fp := ParseFieldProvenance(item.FieldProvenance)
+	if len(fp) == 0 {
+		return nil
+	}
+	locked := make(map[string]bool, len(fp))
+	for field, src := range fp {
+		if src == ProvUser {
+			locked[field] = true
+		}
+	}
+	return locked
 }
 
 func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) {
@@ -403,23 +508,9 @@ func (m *Matcher) shouldAutoCollect(ctx context.Context, mediaItemID int64) bool
 }
 
 func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
-	series, err := m.q.CreateTVSeries(ctx, sqlc.CreateTVSeriesParams{
-		MediaItemID:      mediaItemID,
-		Status:           d.Status,
-		Genres:           emptyIfNil(d.Genres),
-		Rating:           numericFromFloat(d.Rating),
-		FirstAirDate:     pgDateFromString(d.FirstAirDate),
-		LastAirDate:      pgDateFromString(d.LastAirDate),
-		OriginalName:     d.OriginalName,
-		OriginalLanguage: d.OriginalLanguage,
-		NumberOfSeasons:  int32(d.NumberOfSeasons),
-		NumberOfEpisodes: int32(d.NumberOfEpisodes),
-		Popularity:       numericFromFloat(d.Popularity),
-		SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
-		OriginCountry:    emptyIfNil(d.OriginCountry),
-	})
+	series, err := m.upsertTVSeriesRow(ctx, mediaItemID, d)
 	if err != nil {
-		return fmt.Errorf("creating tv series: %w", err)
+		return err
 	}
 
 	m.linkNetworks(ctx, series.ID, d.Networks)
@@ -449,6 +540,11 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 			AiredEpisodes: int32(sd.AiredEpisodes),
 			ExternalIds:   mustJSON(seasonExtIDs),
 		})
+		// DO NOTHING → no row when the season already exists; recover its id so
+		// new episodes can still be attached under it.
+		if errors.Is(err, pgx.ErrNoRows) {
+			season, err = m.q.GetTVSeason(ctx, sqlc.GetTVSeasonParams{SeriesID: series.ID, SeasonNumber: int32(sd.Number)})
+		}
 		if err != nil {
 			log.Warn().Err(err).Int("season", sd.Number).Msg("error creating season")
 			continue
@@ -478,6 +574,11 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 				ExternalIds:    mustJSON(epExtIDs),
 				Source:         ep.Source,
 			})
+			// DO NOTHING → episode already exists; preserve it (incl. user edits)
+			// and skip its title/overview re-insert below.
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
 			if err != nil {
 				log.Warn().Err(err).Int("episode", ep.Number).Msg("error creating episode")
 				continue
@@ -500,9 +601,95 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 		}
 	}
 
-	m.storeRichMetadata(ctx, mediaItemID, d)
-
 	return nil
+}
+
+// upsertTVSeriesRow writes the tv_series row from a remote detail, mirroring
+// createMovie's get-or-create-or-fill + provenance rules. Returns the row so
+// the caller can attach networks/creators/seasons to series.ID.
+func (m *Matcher) upsertTVSeriesRow(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) (sqlc.TvSeries, error) {
+	existing, gerr := m.q.GetTVSeriesByMediaItemID(ctx, mediaItemID)
+	switch {
+	case errors.Is(gerr, pgx.ErrNoRows):
+		s, err := m.q.CreateTVSeries(ctx, sqlc.CreateTVSeriesParams{
+			MediaItemID:      mediaItemID,
+			Status:           d.Status,
+			Genres:           emptyIfNil(d.Genres),
+			Rating:           numericFromFloat(d.Rating),
+			FirstAirDate:     pgDateFromString(d.FirstAirDate),
+			LastAirDate:      pgDateFromString(d.LastAirDate),
+			OriginalName:     d.OriginalName,
+			OriginalLanguage: d.OriginalLanguage,
+			NumberOfSeasons:  int32(d.NumberOfSeasons),
+			NumberOfEpisodes: int32(d.NumberOfEpisodes),
+			Popularity:       numericFromFloat(d.Popularity),
+			SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
+			OriginCountry:    emptyIfNil(d.OriginCountry),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Concurrent insert won the conflict — fetch the existing row.
+			return m.q.GetTVSeriesByMediaItemID(ctx, mediaItemID)
+		}
+		if err != nil {
+			return sqlc.TvSeries{}, fmt.Errorf("creating tv series: %w", err)
+		}
+		return s, nil
+	case gerr == nil:
+		locked := m.lockedFields(ctx, mediaItemID)
+		p := sqlc.UpdateTVSeriesParams{
+			ID:               existing.ID,
+			Status:           d.Status,
+			Genres:           emptyIfNil(d.Genres),
+			Rating:           numericFromFloat(d.Rating),
+			FirstAirDate:     pgDateFromString(d.FirstAirDate),
+			LastAirDate:      pgDateFromString(d.LastAirDate),
+			OriginalName:     d.OriginalName,
+			OriginalLanguage: d.OriginalLanguage,
+			NumberOfSeasons:  int32(d.NumberOfSeasons),
+			NumberOfEpisodes: int32(d.NumberOfEpisodes),
+			Popularity:       numericFromFloat(d.Popularity),
+			SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
+			OriginCountry:    emptyIfNil(d.OriginCountry),
+		}
+		// Remote wins EXCEPT any user-edited field.
+		if locked["genres"] {
+			p.Genres = existing.Genres
+		}
+		if locked["status"] {
+			p.Status = existing.Status
+		}
+		if locked["rating"] {
+			p.Rating = existing.Rating
+		}
+		if locked["first_air_date"] {
+			p.FirstAirDate = existing.FirstAirDate
+		}
+		if locked["last_air_date"] {
+			p.LastAirDate = existing.LastAirDate
+		}
+		if locked["original_name"] {
+			p.OriginalName = existing.OriginalName
+		}
+		if locked["original_language"] {
+			p.OriginalLanguage = existing.OriginalLanguage
+		}
+		if locked["popularity"] {
+			p.Popularity = existing.Popularity
+		}
+		if locked["spoken_languages"] {
+			p.SpokenLanguages = existing.SpokenLanguages
+		}
+		if locked["origin_country"] {
+			p.OriginCountry = existing.OriginCountry
+		}
+		s, err := m.q.UpdateTVSeries(ctx, p)
+		if err != nil {
+			return sqlc.TvSeries{}, fmt.Errorf("updating tv series: %w", err)
+		}
+		return s, nil
+	default:
+		return sqlc.TvSeries{}, gerr
+	}
 }
 
 func (m *Matcher) linkNetworks(ctx context.Context, seriesID int64, nets []metadata.NetworkDetail) {
@@ -651,7 +838,13 @@ func mustJSON(v any) []byte {
 // createOrLinkMediaItem, and the enrich worker fills in the type-specific
 // row here.
 func (m *Matcher) StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail) {
-	_ = m.createTypeSpecificRow(ctx, mediaItemID, kind, detail, "")
+	// pgx.ErrNoRows here is the benign "row already exists" no-op (ON CONFLICT DO
+	// NOTHING on a re-enrich) — not a failure. Surface anything else instead of
+	// the previous unconditional swallow.
+	if err := m.createTypeSpecificRow(ctx, mediaItemID, kind, detail, ""); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Error().Err(err).Int64("media_id", mediaItemID).Str("kind", string(kind)).
+			Msg("failed to store type-specific metadata")
+	}
 }
 
 // StoreRichMetadata persists cast, crew, keywords, production companies, videos,

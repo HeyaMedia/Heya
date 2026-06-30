@@ -57,6 +57,15 @@ export class Deck {
   }
 
   async load(url: string): Promise<void> {
+    // Pause before swapping src. Assigning a new `.src` to an element that is
+    // still *playing* and wired into a MediaElementAudioSourceNode flushes the
+    // old decode buffer through the graph as a brief garbled burst before the
+    // new track starts. Pausing first silences the element so the swap is
+    // clean. No-op for an already-idle (pending/first-play) deck.
+    if (!this.audio.paused) this.audio.pause()
+    // Drop the old source so the element fully resets and can't emit a stale
+    // buffer between src assignment and the new track becoming ready.
+    this.audio.removeAttribute('src')
     this.audio.src = url
     this.audio.load()
     await new Promise<void>((resolve, reject) => {
@@ -86,7 +95,33 @@ export class Deck {
   get paused(): boolean { return this.audio.paused }
 
   setVolume(value: number) {
+    this.gainNode.gain.cancelScheduledValues(this.ctx.currentTime)
     this.gainNode.gain.setValueAtTime(value, this.ctx.currentTime)
+  }
+
+  // Fast linear fade of the deck gain to silence, resolving when it completes.
+  // Used before a hard source-swap so the cut doesn't click/pop — ramping the
+  // signal smoothly to zero removes the discontinuity a bare pause leaves.
+  fadeOut(seconds: number): Promise<void> {
+    return new Promise((resolve) => {
+      const now = this.ctx.currentTime
+      const g = this.gainNode.gain
+      g.cancelScheduledValues(now)
+      g.setValueAtTime(g.value, now)
+      g.linearRampToValueAtTime(0, now + seconds)
+      setTimeout(resolve, Math.ceil(seconds * 1000))
+    })
+  }
+
+  // Fast linear fade of the deck gain up to `target` — the incoming-track
+  // counterpart to fadeOut, so a freshly-started track eases in instead of
+  // snapping to full level.
+  fadeIn(target: number, seconds: number) {
+    const now = this.ctx.currentTime
+    const g = this.gainNode.gain
+    g.cancelScheduledValues(now)
+    g.setValueAtTime(g.value, now)
+    g.linearRampToValueAtTime(target, now + seconds)
   }
 
   reset() {

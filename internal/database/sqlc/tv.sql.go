@@ -14,6 +14,7 @@ import (
 const createTVEpisode = `-- name: CreateTVEpisode :one
 INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (season_id, episode_number) DO NOTHING
 RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source
 `
 
@@ -33,6 +34,9 @@ type CreateTVEpisodeParams struct {
 	Source         string         `json:"source"`
 }
 
+// DO NOTHING: episodes are insert-or-preserve. On re-enrich an existing episode
+// (possibly user-edited) returns ErrNoRows and the caller skips it; new episodes
+// insert. Episode-field refresh is deferred (episodes have no provenance column).
 func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams) (TvEpisode, error) {
 	row := q.db.QueryRow(ctx, createTVEpisode,
 		arg.SeasonID,
@@ -72,6 +76,7 @@ func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams
 const createTVSeason = `-- name: CreateTVSeason :one
 INSERT INTO tv_seasons (series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (series_id, season_number) DO NOTHING
 RETURNING id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids
 `
 
@@ -88,6 +93,9 @@ type CreateTVSeasonParams struct {
 	ExternalIds   []byte      `json:"external_ids"`
 }
 
+// DO NOTHING preserves an existing season (incl. user edits) on re-enrich; the
+// caller recovers its id via GetTVSeason on the resulting ErrNoRows so new
+// episodes can still be attached. New seasons insert normally.
 func (q *Queries) CreateTVSeason(ctx context.Context, arg CreateTVSeasonParams) (TvSeason, error) {
 	row := q.db.QueryRow(ctx, createTVSeason,
 		arg.SeriesID,

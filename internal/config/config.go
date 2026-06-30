@@ -25,6 +25,16 @@ type Config struct {
 	// exist locally (which would soft-delete the whole library). The HTTP API
 	// and the read-only dashboard emitters still run. See docs/development.md.
 	PassiveMode Field[bool]
+	// AllowRemoteActive authorises ACTIVE mode (workers, watchers, scanner) to
+	// run against a NON-local database. Defaults false: a source/dev checkout
+	// pointed at a remote DB must stay PassiveMode=true, because active mode
+	// against (e.g.) prod's DB turns this process into a second worker pool on
+	// prod's queue and soft-deletes libraries when it scans paths that don't
+	// exist locally. The deployed container image sets
+	// HEYA_ALLOW_REMOTE_ACTIVE=true — it legitimately owns its remote DB. The
+	// dev front-door (--dev-backend) can never satisfy it. Enforced in
+	// cmd/heya/cmd/serve.go before any worker starts.
+	AllowRemoteActive Field[bool]
 	// ImageProxyURL is the base URL of another Heya instance whose image bytes
 	// should be served in this one's place. Only consulted in passive mode,
 	// where the local data dir holds none of the borrowed DB's images: the
@@ -76,6 +86,7 @@ func Load() *Config {
 		DatabaseMaxConns:    envInt("HEYA_DB_MAX_CONNS", 15),
 		DatabaseMinConns:    envInt("HEYA_DB_MIN_CONNS", 2),
 		PassiveMode:         envBool("HEYA_PASSIVE_MODE", false),
+		AllowRemoteActive:   envBool("HEYA_ALLOW_REMOTE_ACTIVE", false),
 		ImageProxyURL:       envString("HEYA_IMAGE_PROXY_URL", ""),
 		Host:                envString("HEYA_HOST", "0.0.0.0"),
 		Port:                envString("HEYA_PORT", "8080"),
@@ -145,6 +156,11 @@ func (c *Config) Addr() string {
 	return fmt.Sprintf("%s:%s", c.Host.Value, c.Port.Value)
 }
 
+// NOTE: the active-mode "is this DB local?" check intentionally lives in
+// internal/database (database.AllHostsLocal), not here — it must classify the
+// host pgx ACTUALLY dials (?host= / DSN / PGHOST / fallbacks), which only pgx's
+// own parser resolves. A net/url parse here would be bypassable.
+
 type sourceField struct {
 	key   string
 	entry func(*Config) SourceEntry
@@ -155,6 +171,7 @@ var sourceFields = []sourceField{
 	{"infra.database_max_conns", func(c *Config) SourceEntry { return c.DatabaseMaxConns.Entry() }},
 	{"infra.database_min_conns", func(c *Config) SourceEntry { return c.DatabaseMinConns.Entry() }},
 	{"infra.passive_mode", func(c *Config) SourceEntry { return c.PassiveMode.Entry() }},
+	{"infra.allow_remote_active", func(c *Config) SourceEntry { return c.AllowRemoteActive.Entry() }},
 	{"infra.image_proxy_url", func(c *Config) SourceEntry { return c.ImageProxyURL.Entry() }},
 	{"infra.host", func(c *Config) SourceEntry { return c.Host.Entry() }},
 	{"infra.port", func(c *Config) SourceEntry { return c.Port.Entry() }},
