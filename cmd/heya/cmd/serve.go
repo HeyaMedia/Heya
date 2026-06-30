@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -64,55 +65,31 @@ var serveCmd = &cobra.Command{
 		// a disk scan against a /storage path that doesn't exist locally,
 		// soft-deleting the whole library. See docs/development.md.
 		passive := cfg.PassiveMode.Value
+		devBackend, _ := cmd.Flags().GetBool("dev-backend")
 
-		if !passive {
-			// Rescue any jobs left in state='running' by a previous process
-			// (e.g. an `air` hot-reload killed the worker mid-job). Without
-			// this, those rows sit "running" until River's periodic rescuer
-			// catches them after RescueStuckJobsAfter (10min) — long enough
-			// to look like real concurrency violations in the UI.
-			if n, err := app.RescueOrphanedJobsAtStartup(appCtx); err != nil {
-				log.Warn().Err(err).Msg("startup orphan-rescue failed")
-			} else if n > 0 {
-				log.Info().Int64("rescued", n).Msg("released orphaned jobs from previous process")
-			}
-
-			if err := app.StartWorkers(appCtx); err != nil {
-				return err
-			}
-			log.Info().Msg("river workers started")
-
-			if err := app.StartWatchers(appCtx); err != nil {
-				log.Warn().Err(err).Msg("failed to start watchers")
-			}
-		} else {
+		if passive {
 			log.Warn().Msg("passive mode: workers, watchers, scheduler, sonic-analysis and orphan-rescue are DISABLED — this process will not process jobs or touch the filesystem")
+		} else {
+			// Safety guard: active mode (workers + watchers + scanner) must NEVER
+			// run against a non-local database from a source/dev checkout. Doing so
+			// makes this a second worker pool on that DB's queue and scans local
+			// paths into it — the exact prod-library soft-delete passive mode
+			// exists to prevent. The deployed container image opts in with
+			// HEYA_ALLOW_REMOTE_ACTIVE=true (it owns its remote DB); the dev
+			// front-door (--dev-backend) can never opt in. A local DB always passes.
+			if !cfg.DatabaseHostIsLocal() && (devBackend || !cfg.AllowRemoteActive.Value) {
+				return fmt.Errorf("refusing to start active mode against non-local database host %q: "+
+					"set HEYA_PASSIVE_MODE=true to use it read-only, point HEYA_DATABASE_URL at a local DB, "+
+					"or set HEYA_ALLOW_REMOTE_ACTIVE=true if this instance is meant to own that DB "+
+					"(--dev-backend can never run active against a remote DB)", cfg.DatabaseHost())
+			}
 		}
 
-		bridgeLogToHub(appCtx, logRing, app.EventHub())
-		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
-		// Bridge events published from other processes (e.g. a `heya library
-		// remove` CLI call) onto this process's live hub → WebSocket clients.
-		app.EventHub().StartCrossProcessRelay(appCtx, app.DBPool())
-		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
-
-		// Scheduler is now a thin 60s trigger loop. All actual work
-		// runs as River jobs (kickoff_* + per-item workers). We still register
-		// the trigger on the app in passive mode (so any handler that resolves
-		// it doesn't nil-deref) but never start its tick loop.
+		// Register the scheduler trigger up front so request handlers can resolve
+		// it (in passive mode too, to avoid a nil-deref); its 60s tick loop only
+		// starts with the other background services further down.
 		taskTrigger := scheduler.NewTrigger(app.DBPool(), app.RiverClient())
 		app.SetScheduler(taskTrigger)
-		if !passive {
-			// React to bridged delete events: a CLI delete must also tear down
-			// this process's file watcher for the removed library. Pointless
-			// when no watchers are running.
-			app.StartDeletedLibraryReaper(appCtx)
-			taskTrigger.Start(appCtx)
-
-			// Kick off the model fetcher in the background. No-op when
-			// sonic-analysis is disabled in config.
-			app.StartSonicAnalysis(appCtx)
-		}
 
 		srv := server.New(cfg, app,
 			server.WithLogBuffer(logRing),
@@ -126,7 +103,6 @@ var serveCmd = &cobra.Command{
 		// lives in the stable `heya dev-proxy` front-door (so it survives air
 		// rebuilds) and we drive it over a localhost control socket — the
 		// DB-backed enable/disable flow through the handlers is identical.
-		devBackend, _ := cmd.Flags().GetBool("dev-backend")
 		tsLogger := log.With().Str("subsystem", "tailscale").Logger()
 		onTSStatus := func(st tsnetwrap.Status) {
 			app.EventHub().Emit(eventhub.EventTailscale, st)
@@ -155,6 +131,12 @@ var serveCmd = &cobra.Command{
 			}()
 		}
 
+		// Bring the HTTP listener up FIRST — before the (potentially slow,
+		// SMB-bound) worker + watcher startup below — so :8080 answers health
+		// probes within a second instead of only after the recursive watch setup
+		// on a large library finishes. Everything past this point runs while the
+		// server is already accepting connections, so a slow StartWatchers can no
+		// longer hold the startup/readiness gate hostage and crash-loop the pod.
 		ln, err := reuseAddrListen(cfg.Addr())
 		if err != nil {
 			return err
@@ -166,6 +148,53 @@ var serveCmd = &cobra.Command{
 				log.Fatal().Err(err).Msg("server error")
 			}
 		}()
+
+		// --- Background services. The listener is already live above, so a slow
+		// startup here only delays job processing / file watching, never the
+		// health gate. ---
+		if !passive {
+			// Rescue any jobs left in state='running' by a previous process
+			// (e.g. an `air` hot-reload killed the worker mid-job). Without
+			// this, those rows sit "running" until River's periodic rescuer
+			// catches them after RescueStuckJobsAfter (10min) — long enough
+			// to look like real concurrency violations in the UI.
+			if n, err := app.RescueOrphanedJobsAtStartup(appCtx); err != nil {
+				log.Warn().Err(err).Msg("startup orphan-rescue failed")
+			} else if n > 0 {
+				log.Info().Int64("rescued", n).Msg("released orphaned jobs from previous process")
+			}
+
+			if err := app.StartWorkers(appCtx); err != nil {
+				return err
+			}
+			log.Info().Msg("river workers started")
+
+			// Recursive watch setup can take minutes on a large SMB-mounted
+			// library; it runs here, after the listener is live, so it never
+			// gates startup health.
+			if err := app.StartWatchers(appCtx); err != nil {
+				log.Warn().Err(err).Msg("failed to start watchers")
+			}
+		}
+
+		bridgeLogToHub(appCtx, logRing, app.EventHub())
+		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
+		// Bridge events published from other processes (e.g. a `heya library
+		// remove` CLI call) onto this process's live hub → WebSocket clients.
+		app.EventHub().StartCrossProcessRelay(appCtx, app.DBPool())
+		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
+
+		if !passive {
+			// React to bridged delete events: a CLI delete must also tear down
+			// this process's file watcher for the removed library. Pointless
+			// when no watchers are running.
+			app.StartDeletedLibraryReaper(appCtx)
+			taskTrigger.Start(appCtx)
+
+			// Kick off the model fetcher in the background. No-op when
+			// sonic-analysis is disabled in config.
+			app.StartSonicAnalysis(appCtx)
+		}
 
 		<-sigCtx.Done()
 		log.Info().Msg("shutting down")
