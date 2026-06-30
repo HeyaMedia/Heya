@@ -154,6 +154,53 @@ WHERE tf.library_file_id = lf.id
   AND tf.track_id = sqlc.arg(src_track_id)
   AND sqlc.arg(folder) = ANY(string_to_array(lf.path, '/'));
 
+-- name: TrackHasFileOutsideFolder :one
+-- True when the track has at least one file NOT under `folder` — i.e. it's a
+-- "mixed" track (the same song fused from two folders) whose folder files should
+-- be peeled, vs a whole-track move that can carry all its state along.
+SELECT EXISTS (
+  SELECT 1 FROM track_files tf
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE tf.track_id = sqlc.arg(track_id)
+    AND sqlc.arg(folder) <> ALL(string_to_array(lf.path, '/'))
+);
+
+-- name: MoveTrackToAlbum :exec
+-- Relocate a whole track row to another album. track_id is unchanged, so every
+-- track-owned row — ratings, playlist entries, play history, facets, metadata,
+-- track_files — rides along. Used by the split tool for a track that lives
+-- entirely under the split folder (no state lost, unlike a file-peel + delete).
+UPDATE tracks SET album_id = sqlc.arg(dst_album_id) WHERE id = sqlc.arg(track_id);
+
+-- name: GetTrackByAlbumDiscTrack :one
+SELECT * FROM tracks
+WHERE album_id = sqlc.arg(album_id)
+  AND disc_number = sqlc.arg(disc_number)
+  AND track_number = sqlc.arg(track_number);
+
+-- name: MoveAllTrackFilesToTrack :exec
+UPDATE track_files SET track_id = sqlc.arg(dst_track_id) WHERE track_id = sqlc.arg(src_track_id);
+
+-- name: MergeTrackRatingsInto :exec
+-- Move user_track_ratings from src to dst track, keeping the higher rating.
+INSERT INTO user_track_ratings (user_id, track_id, rating)
+SELECT r.user_id, sqlc.arg(dst_track_id), r.rating
+FROM user_track_ratings r WHERE r.track_id = sqlc.arg(src_track_id)
+ON CONFLICT (user_id, track_id) DO UPDATE
+SET rating = GREATEST(user_track_ratings.rating, EXCLUDED.rating), updated_at = now();
+
+-- name: MergeTrackPlaylistsInto :exec
+INSERT INTO user_playlist_tracks (playlist_id, track_id, position, added_at)
+SELECT p.playlist_id, sqlc.arg(dst_track_id), p.position, p.added_at
+FROM user_playlist_tracks p WHERE p.track_id = sqlc.arg(src_track_id)
+ON CONFLICT (playlist_id, track_id) DO NOTHING;
+
+-- name: ReparentTrackPlayEventsInto :exec
+UPDATE play_events SET track_id = sqlc.arg(dst_track_id) WHERE track_id = sqlc.arg(src_track_id);
+
+-- name: DeleteTrackByID :exec
+DELETE FROM tracks WHERE id = sqlc.arg(id);
+
 -- name: DeleteEmptyTracksOfAlbum :exec
 -- Drop the album's tracks that no longer have any track files (their files moved
 -- out during a split). CASCADE clears facets / play_events / ratings.

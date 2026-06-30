@@ -131,19 +131,52 @@ func (m *Matcher) SplitArtistByFolder(ctx context.Context, artistID int64, folde
 			return res, fmt.Errorf("list folder tracks of album %d: %w", al.ID, err)
 		}
 		for _, t := range tracks {
-			destTrack, err := m.q.GetOrCreateTrack(ctx, sqlc.GetOrCreateTrackParams{
-				AlbumID: destAlbum, DiscNumber: t.DiscNumber, TrackNumber: t.TrackNumber, Title: t.Title,
+			outside, err := m.q.TrackHasFileOutsideFolder(ctx, sqlc.TrackHasFileOutsideFolderParams{
+				TrackID: t.ID, Folder: folder,
 			})
 			if err != nil {
-				return res, fmt.Errorf("dest track %d/%d: %w", t.DiscNumber, t.TrackNumber, err)
+				return res, fmt.Errorf("inspect track %d: %w", t.ID, err)
 			}
-			if destTrack.ID == t.ID {
+			if outside {
+				// Mixed track: peel only the folder's files onto a sibling track.
+				// The source track survives with its rating / facets / metadata;
+				// the peeled file is a distinct copy and the new track is
+				// re-enriched on the destination artist.
+				destTrack, err := m.q.GetOrCreateTrack(ctx, sqlc.GetOrCreateTrackParams{
+					AlbumID: destAlbum, DiscNumber: t.DiscNumber, TrackNumber: t.TrackNumber, Title: t.Title,
+				})
+				if err != nil {
+					return res, fmt.Errorf("dest track %d/%d: %w", t.DiscNumber, t.TrackNumber, err)
+				}
+				if destTrack.ID != t.ID {
+					if err := m.q.MoveTrackFilesUnderFolderToTrack(ctx, sqlc.MoveTrackFilesUnderFolderToTrackParams{
+						DstTrackID: destTrack.ID, SrcTrackID: t.ID, Folder: folder,
+					}); err != nil {
+						return res, fmt.Errorf("peel files of track %d: %w", t.ID, err)
+					}
+				}
 				continue
 			}
-			if err := m.q.MoveTrackFilesUnderFolderToTrack(ctx, sqlc.MoveTrackFilesUnderFolderToTrackParams{
-				DstTrackID: destTrack.ID, SrcTrackID: t.ID, Folder: folder,
-			}); err != nil {
-				return res, fmt.Errorf("move files of track %d: %w", t.ID, err)
+			// Whole-folder track: relocate the ROW so all track-owned state
+			// (ratings, playlists, play history, facets, metadata) rides along.
+			// On a (disc, track_number) collision with a track the destination
+			// album already has, merge the source's files + state into it.
+			existing, err := m.q.GetTrackByAlbumDiscTrack(ctx, sqlc.GetTrackByAlbumDiscTrackParams{
+				AlbumID: destAlbum, DiscNumber: t.DiscNumber, TrackNumber: t.TrackNumber,
+			})
+			switch {
+			case err == nil && existing.ID != t.ID:
+				if err := m.mergeTrackInto(ctx, existing.ID, t.ID); err != nil {
+					return res, fmt.Errorf("merge track %d into %d: %w", t.ID, existing.ID, err)
+				}
+			case errors.Is(err, pgx.ErrNoRows):
+				if err := m.q.MoveTrackToAlbum(ctx, sqlc.MoveTrackToAlbumParams{
+					DstAlbumID: destAlbum, TrackID: t.ID,
+				}); err != nil {
+					return res, fmt.Errorf("move track %d to album %d: %w", t.ID, destAlbum, err)
+				}
+			case err != nil:
+				return res, fmt.Errorf("lookup dest track for %d: %w", t.ID, err)
 			}
 		}
 		// Prune source tracks left fileless by the move, then the album if empty.
@@ -170,6 +203,38 @@ func (m *Matcher) SplitArtistByFolder(ctx context.Context, artistID int64, folde
 		Int("albums_split", res.AlbumsSplit).
 		Msg("split foreign-folder content into its own artist")
 	return res, nil
+}
+
+// mergeTrackInto folds src track into dst (used when a whole-folder track being
+// relocated collides with a track the destination album already has). The
+// source's files and user state (ratings — higher wins, playlist entries, play
+// history) move onto dst; then the now-empty src track is deleted. dst keeps its
+// own metadata / facets, which is correct: it's the same song.
+func (m *Matcher) mergeTrackInto(ctx context.Context, dstTrackID, srcTrackID int64) error {
+	if err := m.q.MoveAllTrackFilesToTrack(ctx, sqlc.MoveAllTrackFilesToTrackParams{
+		DstTrackID: dstTrackID, SrcTrackID: srcTrackID,
+	}); err != nil {
+		return fmt.Errorf("move track files: %w", err)
+	}
+	if err := m.q.MergeTrackRatingsInto(ctx, sqlc.MergeTrackRatingsIntoParams{
+		DstTrackID: dstTrackID, SrcTrackID: srcTrackID,
+	}); err != nil {
+		return fmt.Errorf("merge ratings: %w", err)
+	}
+	if err := m.q.MergeTrackPlaylistsInto(ctx, sqlc.MergeTrackPlaylistsIntoParams{
+		DstTrackID: dstTrackID, SrcTrackID: srcTrackID,
+	}); err != nil {
+		return fmt.Errorf("merge playlists: %w", err)
+	}
+	if err := m.q.ReparentTrackPlayEventsInto(ctx, sqlc.ReparentTrackPlayEventsIntoParams{
+		DstTrackID: dstTrackID, SrcTrackID: srcTrackID,
+	}); err != nil {
+		return fmt.Errorf("move play events: %w", err)
+	}
+	if err := m.q.DeleteTrackByID(ctx, srcTrackID); err != nil {
+		return fmt.Errorf("delete src track: %w", err)
+	}
+	return nil
 }
 
 // findOrCreateAlbum returns the id of artistID's album with (title, year),

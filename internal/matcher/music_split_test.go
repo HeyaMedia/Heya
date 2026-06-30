@@ -119,6 +119,83 @@ func TestSplitArtistByFolder_MixedTrack(t *testing.T) {
 	require.Equal(t, 0, filesUnder(newTrack, portland))
 }
 
+// seedTrackWithFile adds a track (disc/num/title) + one library_file at `path`
+// to an existing album and returns the track id.
+func seedTrackWithFile(t *testing.T, ctx context.Context, qtx *sqlc.Queries, libID, albumID int64, disc, num int32, title, path string) int64 {
+	t.Helper()
+	track, err := qtx.CreateTrack(ctx, sqlc.CreateTrackParams{
+		AlbumID: albumID, DiscNumber: disc, TrackNumber: num, Title: title,
+	})
+	require.NoError(t, err)
+	lf, err := qtx.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+		LibraryID: libID, Path: path, ParseResult: []byte("{}"), Status: sqlc.FileStatusMatched,
+	})
+	require.NoError(t, err)
+	_, err = qtx.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{
+		TrackID: track.ID, LibraryFileID: lf.ID, Format: "flac",
+	})
+	require.NoError(t, err)
+	return track.ID
+}
+
+// TestSplitArtistByFolder_PreservesTrackState guards the bug Codex caught: a
+// track that lives ENTIRELY under the split folder (within a mixed album) must
+// move its row — carrying ratings / play history / facets — rather than getting
+// peeled onto a bare track and deleted, which would drop that state.
+func TestSplitArtistByFolder_PreservesTrackState(t *testing.T) {
+	pool := mergeTestPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+	qtx := sqlc.New(pool).WithTx(tx)
+	m := &Matcher{q: qtx}
+
+	user, err := qtx.CreateUser(ctx, sqlc.CreateUserParams{
+		Username: "splitstate", Email: "splitstate@example.com", PasswordHash: "x", IsAdmin: true,
+	})
+	require.NoError(t, err)
+	_, libID := seedUserAndMusicLib(t, ctx, qtx)
+	const portland = "Ark Patrol (Electronic duo from Portland)"
+	const hawaii = "Ark Patrol (Electronic artist born in Hawaii based in LA)"
+
+	src := seedBareArtist(t, ctx, qtx, libID, "Ark Patrol", "Electronic duo from Portland", "")
+	album, err := qtx.CreateAlbum(ctx, sqlc.CreateAlbumParams{
+		ArtistID: src, Title: "Split EP", Year: "2022", Genres: []string{}, Tags: []string{},
+	})
+	require.NoError(t, err)
+	// trackA: ONLY a Hawaii file (whole-folder) — carries a rating + a play event.
+	trackA := seedTrackWithFile(t, ctx, qtx, libID, album.ID, 1, 1, "Song A",
+		"/storage/Music/"+hawaii+"/Split EP/01.flac")
+	// trackB: a Portland file — keeps the album mixed so we hit the track path.
+	seedTrackWithFile(t, ctx, qtx, libID, album.ID, 1, 2, "Song B",
+		"/storage/Music/"+portland+"/Split EP/02.flac")
+	_, err = tx.Exec(ctx, `INSERT INTO user_track_ratings (user_id, track_id, rating) VALUES ($1,$2,8)`, user.ID, trackA)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `INSERT INTO play_events (user_id, track_id, listened_seconds) VALUES ($1,$2,200)`, user.ID, trackA)
+	require.NoError(t, err)
+
+	res, err := m.SplitArtistByFolder(ctx, src, hawaii)
+	require.NoError(t, err)
+	require.Equal(t, 1, res.AlbumsSplit)
+
+	// trackA moved as a ROW (same id) to the destination artist's album, and its
+	// rating + play event came along.
+	moved, err := qtx.GetTrackByID(ctx, trackA)
+	require.NoError(t, err)
+	newAlbums, err := qtx.ListAlbumsByArtist(ctx, res.NewArtistID)
+	require.NoError(t, err)
+	require.Len(t, newAlbums, 1)
+	require.Equal(t, newAlbums[0].ID, moved.AlbumID, "trackA should now live under the new artist's album")
+
+	var rating, events int
+	require.NoError(t, tx.QueryRow(ctx, `SELECT rating FROM user_track_ratings WHERE track_id=$1`, trackA).Scan(&rating))
+	require.Equal(t, 8, rating, "rating must survive the move")
+	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM play_events WHERE track_id=$1`, trackA).Scan(&events))
+	require.Equal(t, 1, events, "play history must survive the move")
+}
+
 func TestSplitArtistByFolder(t *testing.T) {
 	pool := mergeTestPool(t)
 	defer pool.Close()

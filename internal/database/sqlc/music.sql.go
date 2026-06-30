@@ -505,6 +505,15 @@ func (q *Queries) DeleteEmptyTracksOfAlbum(ctx context.Context, albumID int64) e
 	return err
 }
 
+const deleteTrackByID = `-- name: DeleteTrackByID :exec
+DELETE FROM tracks WHERE id = $1
+`
+
+func (q *Queries) DeleteTrackByID(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteTrackByID, id)
+	return err
+}
+
 const deleteUserArtistRatingsByArtist = `-- name: DeleteUserArtistRatingsByArtist :exec
 DELETE FROM user_artist_ratings WHERE artist_id = $1
 `
@@ -1190,6 +1199,43 @@ func (q *Queries) GetPrimaryTrackFile(ctx context.Context, trackID int64) (Track
 		&i.SamplePeakDb,
 		&i.LoudnessAnalyzedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getTrackByAlbumDiscTrack = `-- name: GetTrackByAlbumDiscTrack :one
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits FROM tracks
+WHERE album_id = $1
+  AND disc_number = $2
+  AND track_number = $3
+`
+
+type GetTrackByAlbumDiscTrackParams struct {
+	AlbumID     int64 `json:"album_id"`
+	DiscNumber  int32 `json:"disc_number"`
+	TrackNumber int32 `json:"track_number"`
+}
+
+func (q *Queries) GetTrackByAlbumDiscTrack(ctx context.Context, arg GetTrackByAlbumDiscTrackParams) (Track, error) {
+	row := q.db.QueryRow(ctx, getTrackByAlbumDiscTrack, arg.AlbumID, arg.DiscNumber, arg.TrackNumber)
+	var i Track
+	err := row.Scan(
+		&i.ID,
+		&i.AlbumID,
+		&i.DiscNumber,
+		&i.TrackNumber,
+		&i.Title,
+		&i.Duration,
+		&i.FilePath,
+		&i.LyricsPath,
+		&i.SearchVector,
+		&i.LibraryFileID,
+		&i.ExternalIds,
+		&i.Isrc,
+		&i.RecordingMbid,
+		&i.PreviewUrl,
+		&i.Explicit,
+		&i.ArtistCredits,
 	)
 	return i, err
 }
@@ -3004,6 +3050,42 @@ func (q *Queries) MergeCollidingAlbumTrackRatings(ctx context.Context, arg Merge
 	return err
 }
 
+const mergeTrackPlaylistsInto = `-- name: MergeTrackPlaylistsInto :exec
+INSERT INTO user_playlist_tracks (playlist_id, track_id, position, added_at)
+SELECT p.playlist_id, $1, p.position, p.added_at
+FROM user_playlist_tracks p WHERE p.track_id = $2
+ON CONFLICT (playlist_id, track_id) DO NOTHING
+`
+
+type MergeTrackPlaylistsIntoParams struct {
+	DstTrackID int64 `json:"dst_track_id"`
+	SrcTrackID int64 `json:"src_track_id"`
+}
+
+func (q *Queries) MergeTrackPlaylistsInto(ctx context.Context, arg MergeTrackPlaylistsIntoParams) error {
+	_, err := q.db.Exec(ctx, mergeTrackPlaylistsInto, arg.DstTrackID, arg.SrcTrackID)
+	return err
+}
+
+const mergeTrackRatingsInto = `-- name: MergeTrackRatingsInto :exec
+INSERT INTO user_track_ratings (user_id, track_id, rating)
+SELECT r.user_id, $1, r.rating
+FROM user_track_ratings r WHERE r.track_id = $2
+ON CONFLICT (user_id, track_id) DO UPDATE
+SET rating = GREATEST(user_track_ratings.rating, EXCLUDED.rating), updated_at = now()
+`
+
+type MergeTrackRatingsIntoParams struct {
+	DstTrackID int64 `json:"dst_track_id"`
+	SrcTrackID int64 `json:"src_track_id"`
+}
+
+// Move user_track_ratings from src to dst track, keeping the higher rating.
+func (q *Queries) MergeTrackRatingsInto(ctx context.Context, arg MergeTrackRatingsIntoParams) error {
+	_, err := q.db.Exec(ctx, mergeTrackRatingsInto, arg.DstTrackID, arg.SrcTrackID)
+	return err
+}
+
 const mergeUserArtistRatings = `-- name: MergeUserArtistRatings :exec
 INSERT INTO user_artist_ratings (user_id, artist_id, rating)
 SELECT user_id, $1, rating
@@ -3027,6 +3109,20 @@ func (q *Queries) MergeUserArtistRatings(ctx context.Context, arg MergeUserArtis
 	return err
 }
 
+const moveAllTrackFilesToTrack = `-- name: MoveAllTrackFilesToTrack :exec
+UPDATE track_files SET track_id = $1 WHERE track_id = $2
+`
+
+type MoveAllTrackFilesToTrackParams struct {
+	DstTrackID int64 `json:"dst_track_id"`
+	SrcTrackID int64 `json:"src_track_id"`
+}
+
+func (q *Queries) MoveAllTrackFilesToTrack(ctx context.Context, arg MoveAllTrackFilesToTrackParams) error {
+	_, err := q.db.Exec(ctx, moveAllTrackFilesToTrack, arg.DstTrackID, arg.SrcTrackID)
+	return err
+}
+
 const moveTrackFilesUnderFolderToTrack = `-- name: MoveTrackFilesUnderFolderToTrack :exec
 UPDATE track_files tf
 SET track_id = $1
@@ -3046,6 +3142,24 @@ type MoveTrackFilesUnderFolderToTrackParams struct {
 // unique on library_file_id only, so re-pointing track_id never collides.
 func (q *Queries) MoveTrackFilesUnderFolderToTrack(ctx context.Context, arg MoveTrackFilesUnderFolderToTrackParams) error {
 	_, err := q.db.Exec(ctx, moveTrackFilesUnderFolderToTrack, arg.DstTrackID, arg.SrcTrackID, arg.Folder)
+	return err
+}
+
+const moveTrackToAlbum = `-- name: MoveTrackToAlbum :exec
+UPDATE tracks SET album_id = $1 WHERE id = $2
+`
+
+type MoveTrackToAlbumParams struct {
+	DstAlbumID int64 `json:"dst_album_id"`
+	TrackID    int64 `json:"track_id"`
+}
+
+// Relocate a whole track row to another album. track_id is unchanged, so every
+// track-owned row — ratings, playlist entries, play history, facets, metadata,
+// track_files — rides along. Used by the split tool for a track that lives
+// entirely under the split folder (no state lost, unlike a file-peel + delete).
+func (q *Queries) MoveTrackToAlbum(ctx context.Context, arg MoveTrackToAlbumParams) error {
+	_, err := q.db.Exec(ctx, moveTrackToAlbum, arg.DstAlbumID, arg.TrackID)
 	return err
 }
 
@@ -3183,6 +3297,20 @@ func (q *Queries) ReparentSimilarLocalRefs(ctx context.Context, arg ReparentSimi
 	return err
 }
 
+const reparentTrackPlayEventsInto = `-- name: ReparentTrackPlayEventsInto :exec
+UPDATE play_events SET track_id = $1 WHERE track_id = $2
+`
+
+type ReparentTrackPlayEventsIntoParams struct {
+	DstTrackID int64 `json:"dst_track_id"`
+	SrcTrackID int64 `json:"src_track_id"`
+}
+
+func (q *Queries) ReparentTrackPlayEventsInto(ctx context.Context, arg ReparentTrackPlayEventsIntoParams) error {
+	_, err := q.db.Exec(ctx, reparentTrackPlayEventsInto, arg.DstTrackID, arg.SrcTrackID)
+	return err
+}
+
 const replaceArtistSimilarArtists = `-- name: ReplaceArtistSimilarArtists :exec
 DELETE FROM artist_similar_artists WHERE artist_id = $1
 `
@@ -3221,6 +3349,30 @@ type SetAlbumSlugParams struct {
 func (q *Queries) SetAlbumSlug(ctx context.Context, arg SetAlbumSlugParams) error {
 	_, err := q.db.Exec(ctx, setAlbumSlug, arg.ID, arg.Slug)
 	return err
+}
+
+const trackHasFileOutsideFolder = `-- name: TrackHasFileOutsideFolder :one
+SELECT EXISTS (
+  SELECT 1 FROM track_files tf
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE tf.track_id = $1
+    AND $2 <> ALL(string_to_array(lf.path, '/'))
+)
+`
+
+type TrackHasFileOutsideFolderParams struct {
+	TrackID int64  `json:"track_id"`
+	Folder  string `json:"folder"`
+}
+
+// True when the track has at least one file NOT under `folder` — i.e. it's a
+// "mixed" track (the same song fused from two folders) whose folder files should
+// be peeled, vs a whole-track move that can carry all its state along.
+func (q *Queries) TrackHasFileOutsideFolder(ctx context.Context, arg TrackHasFileOutsideFolderParams) (bool, error) {
+	row := q.db.QueryRow(ctx, trackHasFileOutsideFolder, arg.TrackID, arg.Folder)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const updateAlbum = `-- name: UpdateAlbum :one
