@@ -35,6 +35,15 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(summary), nil
 		})
 
+	huma.Register(api, secured(op(http.MethodGet, "/api/jobs/kinds", "job-kind-summary", "Per-kind job counts", "Jobs")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.JobKindSummaryRow], error) {
+			summary, err := app.JobKindSummary(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(summary), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/rescue", "rescue-jobs", "Rescue stuck jobs", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[rescueBody], error) {
 			rescued, retriesReset, err := app.RescueStuckJobs(ctx)
@@ -72,6 +81,21 @@ func registerJobRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodDelete, "/api/jobs", "clear-all-jobs", "Clear all jobs", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[clearedBody], error) {
 			n, err := app.ClearAllJobs(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[clearedBody]{Body: clearedBody{Cleared: n}}, nil
+		})
+
+	// Scoped flush — deletes jobs of a single kind, optionally narrowed to one
+	// state. Kept distinct from "clear-all-jobs" above so a missing kind can't
+	// be coerced into a queue-wide wipe; an empty kind deletes nothing.
+	huma.Register(api, secured(op(http.MethodDelete, "/api/jobs/by-kind", "clear-jobs-by-kind", "Clear jobs of a single kind", "Jobs")),
+		func(ctx context.Context, in *struct {
+			Kind  string `query:"kind" required:"true" maxLength:"64" doc:"Job kind to flush (River task name)"`
+			State string `query:"state" enum:"available,running,scheduled,retryable,completed,cancelled,discarded" doc:"Optional state to narrow the flush"`
+		}) (*JSONOutput[clearedBody], error) {
+			n, err := app.ClearJobsByKind(ctx, in.Kind, in.State)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

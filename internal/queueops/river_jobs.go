@@ -265,6 +265,28 @@ func ClearAll(ctx context.Context, db DB) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
+// ClearByKind deletes every river_job of the given kind, optionally scoped to a
+// single state. An empty kind is a no-op (returns 0) — the guard is deliberate
+// so a missing kind can never collapse into a queue-wide DELETE the way
+// ClearAll would. With state empty this hard-deletes running rows too, matching
+// the "Wipe queue" (ClearAll) precedent.
+func ClearByKind(ctx context.Context, db DB, kind, state string) (int64, error) {
+	if kind == "" {
+		return 0, nil
+	}
+	query := "DELETE FROM river_job WHERE kind = $1"
+	args := []any{kind}
+	if state != "" {
+		query += " AND state = $2"
+		args = append(args, state)
+	}
+	tag, err := db.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 func CancelPendingByLibrary(ctx context.Context, db DB, libraryID int64) (int64, error) {
 	tag, err := db.Exec(ctx, `
 		UPDATE river_job

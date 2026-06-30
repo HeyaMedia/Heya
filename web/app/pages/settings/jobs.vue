@@ -8,15 +8,19 @@ type SummaryRow = components['schemas']['JobSummaryRow']
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 
+type KindRow = components['schemas']['JobKindSummaryRow']
+
 const jobs = ref<JobRow[]>([])
 const total = ref(0)
 const summary = ref<SummaryRow[]>([])
+const kindSummary = ref<KindRow[]>([])
 const filter = ref<string>('')
+const kindFilter = ref<string>('')
 const offset = ref(0)
 const limit = 50
 const expanded = ref<number | null>(null)
 const loading = ref(true)
-const busy = ref<'' | 'rescue' | 'completed' | 'all'>('')
+const busy = ref<'' | 'rescue' | 'completed' | 'all' | 'kind'>('')
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 const tick = ref(0)
 setInterval(() => { tick.value++ }, 1000)
@@ -25,6 +29,7 @@ async function fetchJobs() {
   try {
     const query: Record<string, any> = { limit, offset: offset.value }
     if (filter.value) query.state = filter.value
+    if (kindFilter.value) query.kind = kindFilter.value
     const res = await $heya('/api/jobs', { query })
     jobs.value = res.jobs ?? []
     total.value = res.total
@@ -39,10 +44,16 @@ async function fetchSummary() {
   } catch {}
 }
 
+async function fetchKinds() {
+  try {
+    kindSummary.value = await $heya('/api/jobs/kinds')
+  } catch {}
+}
+
 // First load shows the spinner; subsequent refreshes silently update so
 // the table doesn't flash empty every time WS fires a queue event.
 async function refresh() {
-  await Promise.all([fetchJobs(), fetchSummary()])
+  await Promise.all([fetchJobs(), fetchSummary(), fetchKinds()])
 }
 
 async function retryJob(id: number) {
@@ -111,7 +122,35 @@ async function clearAll() {
   }
 }
 
+async function flushKind() {
+  const k = kindFilter.value
+  if (!k) return
+  const scope = filter.value ? `${filter.value} ` : ''
+  const ok = await confirm({
+    title: `Flush ${k} jobs?`,
+    message: `All ${total.value} ${scope}${k} job(s) will be permanently deleted. This cannot be undone.`,
+    destructive: true,
+    confirmLabel: 'Flush',
+  })
+  if (!ok) return
+  busy.value = 'kind'
+  try {
+    // `kind` is required by the endpoint; keep it statically present so the
+    // typed client is satisfied. `state` is the optional enum narrow.
+    const query: { kind: string, state?: any } = { kind: k }
+    if (filter.value) query.state = filter.value
+    await $heya('/api/jobs/by-kind', { method: 'DELETE', query })
+    flash.value = { kind: 'ok', text: `Flushed ${scope}${k} jobs.` }
+    refresh()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Flush failed.' }
+  } finally {
+    busy.value = ''
+  }
+}
+
 watch(filter, () => { offset.value = 0; fetchJobs() })
+watch(kindFilter, () => { offset.value = 0; fetchJobs() })
 
 function summaryCount(state: string): number {
   return summary.value.find(s => s.state === state)?.count ?? 0
@@ -218,6 +257,10 @@ onMounted(async () => {
           <Icon name="trash" :size="12" />
           {{ busy === 'all' ? 'Wiping…' : 'Wipe queue' }}
         </button>
+        <button class="sv2-btn danger" :disabled="!kindFilter || busy === 'kind'" @click="flushKind">
+          <Icon name="trash" :size="12" />
+          {{ busy === 'kind' ? 'Flushing…' : kindFilter ? `Flush ${kindFilter}` : 'Flush kind' }}
+        </button>
         <button class="sv2-btn ghost" @click="refresh">
           <Icon name="refresh" :size="12" />
           Refresh
@@ -225,6 +268,7 @@ onMounted(async () => {
       </template>
 
       <div class="filter-row">
+        <span class="filter-group-label"><Icon name="list" :size="11" /> Filter · State</span>
         <button
           v-for="s in summary"
           :key="s.state"
@@ -236,14 +280,31 @@ onMounted(async () => {
           <span class="filter-label">{{ s.state }}</span>
         </button>
         <button v-if="filter" class="filter-pill clear" @click="filter = ''">
-          <Icon name="close" :size="10" /> Clear filter
+          <Icon name="close" :size="10" /> Clear
+        </button>
+      </div>
+
+      <div v-if="kindSummary.length" class="filter-row kinds">
+        <span class="filter-group-label"><Icon name="list" :size="11" /> Filter · Kind</span>
+        <button
+          v-for="k in kindSummary"
+          :key="k.kind"
+          class="filter-pill kind"
+          :class="{ active: kindFilter === k.kind }"
+          @click="kindFilter = kindFilter === k.kind ? '' : k.kind"
+        >
+          <span class="filter-count">{{ k.count }}</span>
+          <span class="filter-label">{{ k.kind }}</span>
+        </button>
+        <button v-if="kindFilter" class="filter-pill clear" @click="kindFilter = ''">
+          <Icon name="close" :size="10" /> Clear
         </button>
       </div>
 
       <div v-if="loading" class="empty-state"><Icon name="spinner" :size="14" /> Loading…</div>
       <div v-else-if="jobs.length === 0" class="empty-state">
         <Icon name="check" :size="14" />
-        {{ filter ? `No ${filter} jobs.` : 'Queue is empty.' }}
+        {{ filter || kindFilter ? `No ${[filter, kindFilter].filter(Boolean).join(' ')} jobs.` : 'Queue is empty.' }}
       </div>
 
       <div v-else class="job-table">
@@ -346,6 +407,18 @@ onMounted(async () => {
   display: flex; flex-wrap: wrap; gap: 6px;
   margin-bottom: 14px;
 }
+/* Leading label that marks each pill row as a filter control. */
+.filter-group-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-3);
+  margin-right: 4px;
+}
+/* Kind pills sit in their own row just below the state pills. Snake_case
+   kind names must not be capitalised the way state labels are. */
+.filter-row.kinds { margin-top: -4px; }
+.filter-pill.kind { text-transform: none; }
 .filter-pill {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 12px; border-radius: 999px;

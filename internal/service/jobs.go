@@ -63,6 +63,13 @@ type JobSummaryRow struct {
 	Count int    `json:"count"`
 }
 
+// JobKindSummaryRow holds a per-kind job count — powers the Jobs page kind
+// filter (only kinds that actually have rows, with their counts).
+type JobKindSummaryRow struct {
+	Kind  string `json:"kind"`
+	Count int    `json:"count"`
+}
+
 // ListJobs returns a filtered, ordered page of river jobs.
 func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, offset int) (JobListResult, error) {
 	where := "WHERE 1=1"
@@ -260,6 +267,25 @@ func (a *App) JobSummary(ctx context.Context) ([]JobSummaryRow, error) {
 	return summary, nil
 }
 
+// JobKindSummary returns per-kind job counts, ordered by kind.
+func (a *App) JobKindSummary(ctx context.Context) ([]JobKindSummaryRow, error) {
+	rows, err := a.db.Query(ctx, "SELECT kind, count(*) FROM river_job GROUP BY kind ORDER BY kind")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	summary := []JobKindSummaryRow{}
+	for rows.Next() {
+		var s JobKindSummaryRow
+		if err := rows.Scan(&s.Kind, &s.Count); err != nil {
+			continue
+		}
+		summary = append(summary, s)
+	}
+	return summary, nil
+}
+
 // RetryJob moves a failed, cancelled, or retryable job back to the available state.
 func (a *App) RetryJob(ctx context.Context, id int64) error {
 	rows, err := queueops.RetryJob(ctx, a.db, id)
@@ -321,6 +347,13 @@ func (a *App) ClearCompletedJobs(ctx context.Context) (int64, error) {
 // It returns the number of deleted rows.
 func (a *App) ClearAllJobs(ctx context.Context) (int64, error) {
 	return queueops.ClearAll(ctx, a.db)
+}
+
+// ClearJobsByKind deletes every job of the given kind, optionally scoped to a
+// single state. Returns the number of deleted rows. An empty kind deletes
+// nothing (queueops.ClearByKind guards it).
+func (a *App) ClearJobsByKind(ctx context.Context, kind, state string) (int64, error) {
+	return queueops.ClearByKind(ctx, a.db, kind, state)
 }
 
 // CancelJobsByKind cancels every River job whose kind matches one of the

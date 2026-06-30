@@ -3298,6 +3298,23 @@
         ],
         "type": "object"
       },
+      "JobKindSummaryRow": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "count"
+        ],
+        "type": "object"
+      },
       "JobListResult": {
         "additionalProperties": false,
         "properties": {
@@ -16227,6 +16244,82 @@
         ]
       }
     },
+    "/api/jobs/by-kind": {
+      "delete": {
+        "operationId": "clear-jobs-by-kind",
+        "parameters": [
+          {
+            "description": "Job kind to flush (River task name)",
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "Job kind to flush (River task name)",
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional state to narrow the flush",
+            "explode": false,
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "description": "Optional state to narrow the flush",
+              "enum": [
+                "available",
+                "running",
+                "scheduled",
+                "retryable",
+                "completed",
+                "cancelled",
+                "discarded"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearedBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Clear jobs of a single kind",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
     "/api/jobs/completed": {
       "delete": {
         "operationId": "clear-completed-jobs",
@@ -16265,6 +16358,55 @@
           }
         ],
         "summary": "Clear completed jobs",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/api/jobs/kinds": {
+      "get": {
+        "operationId": "job-kind-summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobKindSummaryRow"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Per-kind job counts",
         "tags": [
           "Jobs"
         ]
