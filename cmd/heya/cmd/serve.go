@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -69,20 +68,6 @@ var serveCmd = &cobra.Command{
 
 		if passive {
 			log.Warn().Msg("passive mode: workers, watchers, scheduler, sonic-analysis and orphan-rescue are DISABLED — this process will not process jobs or touch the filesystem")
-		} else {
-			// Safety guard: active mode (workers + watchers + scanner) must NEVER
-			// run against a non-local database from a source/dev checkout. Doing so
-			// makes this a second worker pool on that DB's queue and scans local
-			// paths into it — the exact prod-library soft-delete passive mode
-			// exists to prevent. The deployed container image opts in with
-			// HEYA_ALLOW_REMOTE_ACTIVE=true (it owns its remote DB); the dev
-			// front-door (--dev-backend) can never opt in. A local DB always passes.
-			if !cfg.DatabaseHostIsLocal() && (devBackend || !cfg.AllowRemoteActive.Value) {
-				return fmt.Errorf("refusing to start active mode against non-local database host %q: "+
-					"set HEYA_PASSIVE_MODE=true to use it read-only, point HEYA_DATABASE_URL at a local DB, "+
-					"or set HEYA_ALLOW_REMOTE_ACTIVE=true if this instance is meant to own that DB "+
-					"(--dev-backend can never run active against a remote DB)", cfg.DatabaseHost())
-			}
 		}
 
 		// Register the scheduler trigger up front so request handlers can resolve
