@@ -1564,6 +1564,86 @@ func (q *Queries) ListAlbumsByArtistSlug(ctx context.Context, arg ListAlbumsByAr
 	return items, nil
 }
 
+const listAlbumsByArtistUnderFolder = `-- name: ListAlbumsByArtistUnderFolder :many
+SELECT DISTINCT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits
+FROM albums al
+WHERE al.artist_id = $1
+  AND EXISTS (
+    SELECT 1
+    FROM tracks t
+    JOIN track_files tf ON tf.track_id = t.id
+    JOIN library_files lf ON lf.id = tf.library_file_id
+    WHERE t.album_id = al.id
+      AND $2 = ANY(string_to_array(lf.path, '/'))
+  )
+ORDER BY al.year, al.title
+`
+
+type ListAlbumsByArtistUnderFolderParams struct {
+	ArtistID int64  `json:"artist_id"`
+	Folder   string `json:"folder"`
+}
+
+// Albums of an artist that have at least one track file living under the given
+// top-level folder, matched as an EXACT path segment (so "Avicii" never catches
+// "Avicii Presents"). Used by the artist un-fuse tool to find the foreign-folder
+// albums a bad enrichment merge pulled into the wrong artist.
+func (q *Queries) ListAlbumsByArtistUnderFolder(ctx context.Context, arg ListAlbumsByArtistUnderFolderParams) ([]Album, error) {
+	rows, err := q.db.Query(ctx, listAlbumsByArtistUnderFolder, arg.ArtistID, arg.Folder)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Album{}
+	for rows.Next() {
+		var i Album
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArtistID,
+			&i.Title,
+			&i.Slug,
+			&i.Year,
+			&i.MusicbrainzID,
+			&i.AlbumType,
+			&i.Genres,
+			&i.CoverPath,
+			&i.ReleaseDate,
+			&i.Label,
+			&i.Country,
+			&i.Barcode,
+			&i.TotalTracks,
+			&i.TotalDiscs,
+			&i.Tags,
+			&i.IntegratedLufs,
+			&i.TruePeakDb,
+			&i.LoudnessRangeDb,
+			&i.LoudnessAnalyzedAt,
+			&i.SearchVector,
+			&i.CatalogNo,
+			&i.Explicit,
+			&i.OriginalTitle,
+			&i.SecondaryTypes,
+			&i.Styles,
+			&i.Language,
+			&i.DurationSeconds,
+			&i.Isrcs,
+			&i.Rating,
+			&i.Popularity,
+			&i.Listeners,
+			&i.Playcount,
+			&i.ExternalIds,
+			&i.ArtistCredits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAlbumsPendingLoudness = `-- name: ListAlbumsPendingLoudness :many
 SELECT al.id, al.title
 FROM albums al

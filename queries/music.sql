@@ -120,6 +120,24 @@ LIMIT 1;
 -- name: ListAlbumsByArtist :many
 SELECT * FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC;
 
+-- name: ListAlbumsByArtistUnderFolder :many
+-- Albums of an artist that have at least one track file living under the given
+-- top-level folder, matched as an EXACT path segment (so "Avicii" never catches
+-- "Avicii Presents"). Used by the artist un-fuse tool to find the foreign-folder
+-- albums a bad enrichment merge pulled into the wrong artist.
+SELECT DISTINCT al.*
+FROM albums al
+WHERE al.artist_id = sqlc.arg(artist_id)
+  AND EXISTS (
+    SELECT 1
+    FROM tracks t
+    JOIN track_files tf ON tf.track_id = t.id
+    JOIN library_files lf ON lf.id = tf.library_file_id
+    WHERE t.album_id = al.id
+      AND sqlc.arg(folder) = ANY(string_to_array(lf.path, '/'))
+  )
+ORDER BY al.year, al.title;
+
 -- name: GetAlbumByID :one
 SELECT * FROM albums WHERE id = $1;
 
