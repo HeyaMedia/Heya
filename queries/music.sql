@@ -80,9 +80,12 @@ LIMIT 1;
 -- helped resolve a canonical sibling — falls back to "is there an
 -- existing row whose (name, disambig) already matches what we're about
 -- to write?" so the unique-constraint collision turns into a merge.
+-- The `disambiguation != ''` guard keeps two same-named but undisambiguated
+-- acts (e.g. "Ado", "666") from fusing — same name alone is too weak.
 SELECT * FROM artists
 WHERE lower(name) = lower($1)
   AND lower(disambiguation) = lower($2)
+  AND disambiguation != ''
   AND id != sqlc.arg(exclude_id)
 LIMIT 1;
 
@@ -622,9 +625,12 @@ ORDER BY t.disc_number, t.track_number;
 -- Used by RefreshMusicArtist to detect "we resolved the same MBID as an
 -- existing sibling row" so the matcher can merge instead of letting
 -- UpdateArtistEnrichedFields collide on uq_artists_name_disambig.
+-- The `!= ''` guard stops an empty MBID arg from matching every
+-- empty-MBID row and fusing unrelated artists.
 SELECT *
 FROM artists
 WHERE musicbrainz_id = sqlc.arg(mbid)
+  AND musicbrainz_id != ''
   AND id != sqlc.arg(exclude_id)
 LIMIT 1;
 

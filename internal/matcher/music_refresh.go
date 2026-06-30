@@ -49,7 +49,7 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		return res, fmt.Errorf("get artist %d: %w", artistID, err)
 	}
 
-	detail := m.enrichArtistFromHeyaMedia(ctx, artist.MusicbrainzID, artist.Name)
+	detail := m.enrichArtistFromHeyaMedia(ctx, artist.MusicbrainzID, artist.Name, artist.Disambiguation)
 	if detail == nil {
 		// Negative cache: mark so the scan task's staleness gate skips it.
 		if markErr := m.q.MarkArtistDiscographyEnriched(ctx, artistID); markErr != nil {
@@ -352,6 +352,6 @@ func (m *Matcher) MediaItemIDForArtist(ctx context.Context, artistID int64) (int
 // EnrichArtistFromHeyaMedia is the exported wrapper around the internal helper
 // so external packages (worker) can probe heya.media via the matcher's
 // configured provider.
-func (m *Matcher) EnrichArtistFromHeyaMedia(ctx context.Context, mbid, name string) *metadata.MediaDetail {
-	return m.enrichArtistFromHeyaMedia(ctx, mbid, name)
+func (m *Matcher) EnrichArtistFromHeyaMedia(ctx context.Context, mbid, name, disambig string) *metadata.MediaDetail {
+	return m.enrichArtistFromHeyaMedia(ctx, mbid, name, disambig)
 }

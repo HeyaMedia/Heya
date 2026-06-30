@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -590,7 +591,7 @@ func (m *Matcher) cachedEnrichArtist(ctx context.Context, cache *enrichCache, mb
 		}
 	}
 
-	detail := m.enrichArtistFromHeyaMedia(ctx, mbid, name)
+	detail := m.enrichArtistFromHeyaMedia(ctx, mbid, name, "")
 	for _, k := range keys {
 		cache.known[k] = true
 		cache.byKey[k] = detail
@@ -721,12 +722,12 @@ func findEmbeddedTrack(album *metadata.AlbumEntry, disc, position int) *metadata
 // enrichArtistFromHeyaMedia consults heya.media for canonical artist metadata.
 // Strategy: prefer MBID-direct lookup (fast, exact); fall back to name search
 // (slower, fuzzier). Returns nil on any error — enrichment is best-effort.
-func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name string) *metadata.MediaDetail {
+func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name, disambig string) *metadata.MediaDetail {
 	if m.heya == nil {
 		return nil
 	}
 
-	if mbid != "" {
+	if mbid != "" && !isSyntheticMBID(mbid) {
 		detail, _, err := m.heya.LookupByNFO(ctx, metadata.KindMusic, metadata.NFOIDs{MBID: mbid}, nil)
 		if err == nil && detail != nil {
 			log.Info().Str("mbid", mbid).Str("artist", detail.ArtistName).Msg("enriched artist via heya.media MBID lookup")
@@ -749,22 +750,22 @@ func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name stri
 		}
 		return nil
 	}
-	// Precision gate: never let a name search collapse a collaboration folder
-	// ("A & B", "A feat. B") onto a single member. heya.media's discover can
-	// rank a solo member above a duo it hasn't indexed — e.g. query
-	// "Charly Lownoise & Mental Theo" returns hit "Charly Lownoise" at 0.95.
-	// Applying that match renames the duo and then merges it into the solo
-	// row (findCanonicalSibling), polluting the solo artist's discography with
-	// the collaboration's releases. Treat it as no match: the collaboration
-	// stays its own distinct, un-enriched artist. Linking collaborations to
-	// their members is the deferred collaboration-graph feature (see FUTURE.md).
-	if collaborationCollapsed(name, hit.Name) {
+	// Verification gate: only accept a search hit whose name actually
+	// corresponds to the local artist. heya.media's discover can return a
+	// wildly wrong artist ("Avicii" → "Alicia Keys") or collapse a
+	// collaboration onto a member ("Charly Lownoise & Mental Theo" → "Charly
+	// Lownoise"); accepting either writes the wrong identity + MBID onto the
+	// local row, and findCanonicalSibling then fuses two distinct artists.
+	// Reject and keep the artist distinct + un-enriched — under-enrich beats
+	// mis-merge. (Collaboration→member linking is the deferred collaboration
+	// graph; see FUTURE.md.)
+	if !artistNameAcceptable(name, hit.Name) {
 		log.Debug().
 			Str("name", name).
 			Str("hit_name", hit.Name).
 			Str("hit_id", hit.ID).
 			Float64("score", hit.Score).
-			Msg("rejecting reductive collaboration match; keeping local artist distinct")
+			Msg("rejecting dissimilar artist match; keeping local artist distinct")
 		return nil
 	}
 	detail, _, err := m.heya.FetchByKindID(ctx, "artist", hit.ID)
@@ -791,6 +792,20 @@ func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name stri
 			}
 		}
 		log.Debug().Err(err).Str("name", name).Str("hit_id", hit.ID).Msg("heya.media artist fetch failed")
+		return nil
+	}
+	// Same-name guard: a verified name match can still be the WRONG artist when
+	// two acts share a name ("Ado" the Japanese vocalist vs "Ado" the techno
+	// producer). When both rows carry a disambiguation and they clearly
+	// describe different acts, reject — accepting it would write the other
+	// act's MBID and let findCanonicalSibling fuse the two same-named rows.
+	if disambiguationConflict(disambig, detail.ArtistDisambiguation) {
+		log.Debug().
+			Str("name", name).
+			Str("local_disambig", disambig).
+			Str("matched_disambig", detail.ArtistDisambiguation).
+			Str("hit_id", hit.ID).
+			Msg("rejecting artist match: disambiguation conflict")
 		return nil
 	}
 	// Detail came back but heya.media's payload may not include any
@@ -842,6 +857,92 @@ func isCollaborationName(name string) bool {
 // "Chase & Status") keeps its markers on both sides and is allowed through.
 func collaborationCollapsed(local, matched string) bool {
 	return isCollaborationName(local) && !isCollaborationName(matched)
+}
+
+// artistNameAcceptable reports whether `matched` (an upstream search-hit name)
+// is a trustworthy identity for the local artist `local`. heya.media's discover
+// — especially a self-hosted instance — can return a wildly wrong artist (the
+// "Avicii" folder resolving to "Alicia Keys"), and accepting it writes that
+// identity + MBID onto the local row, which then lets findCanonicalSibling fuse
+// two unrelated artists. The match must be FuzzyEqual (transliteration / casing
+// / punctuation tolerant, so HANABIE↔花冷え。 and "Charli xcx"↔"Charli XCX" pass)
+// AND must not be a collaboration reduced to one member (FuzzyEqual's substring
+// fallback would otherwise wave "A & B"→"A" through). Rejection leaves the
+// artist un-enriched but distinct — the safe failure: under-enrich beats
+// mis-merge.
+func artistNameAcceptable(local, matched string) bool {
+	if collaborationCollapsed(local, matched) {
+		return false
+	}
+	if titlematch.FuzzyEqual(local, matched) {
+		return true
+	}
+	// Cross-script pairs (romaji "HANABIE" vs kana "花冷え。") frequently don't
+	// survive transliteration cleanly, yet a different-script match is almost
+	// always a legitimate localized name rather than the wrong artist — and
+	// rejecting it would break the transliteration-rename merge this was built
+	// for. Only same-script-yet-dissimilar pairs are the "Avicii → Alicia Keys"
+	// wrong-match signal, so reject those.
+	return !sameScript(local, matched)
+}
+
+// hasCJK reports whether a string contains any Han / kana / Hangul rune — the
+// cheap "is this a CJK-script name" test.
+func hasCJK(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) ||
+			unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameScript reports whether two names sit in the same broad script family.
+// Coarse on purpose: it only distinguishes CJK from non-CJK, which is enough to
+// tell a transliteration pair (cross-script) from a same-script wrong match.
+func sameScript(a, b string) bool {
+	return hasCJK(a) == hasCJK(b)
+}
+
+// disambiguationConflict reports whether two non-empty disambiguations clearly
+// describe different acts — the last line of defence for same-name artists a
+// name match can't tell apart ("Ado" the Japanese vocalist vs "Ado" the techno
+// producer). Conservative on purpose: only a conflict when BOTH sides are set
+// and they share no significant token (length ≥ 4, to skip "the"/"from"/"and"),
+// so a paraphrase ("Japanese vocalist" vs "Japanese singer") is NOT treated as
+// a conflict. Empty on either side → no signal → not a conflict.
+func disambiguationConflict(a, b string) bool {
+	if strings.TrimSpace(a) == "" || strings.TrimSpace(b) == "" {
+		return false
+	}
+	sig := func(s string) map[string]struct{} {
+		m := map[string]struct{}{}
+		for _, tok := range titlematch.Tokenize(strings.ToLower(s)) {
+			if len([]rune(tok)) >= 4 {
+				m[tok] = struct{}{}
+			}
+		}
+		return m
+	}
+	aSet, bSet := sig(a), sig(b)
+	if len(aSet) == 0 || len(bSet) == 0 {
+		return false // nothing significant to compare → don't reject
+	}
+	for tok := range aSet {
+		if _, ok := bSet[tok]; ok {
+			return false // shared significant token → plausibly the same act
+		}
+	}
+	return true
+}
+
+// isSyntheticMBID reports whether an MBID is a heya.media placeholder rather
+// than a real MusicBrainz id. The self-hosted aggregator emits ids like
+// "dddddddd-dddd-dddd-dddd-ddd513923292" when it has no real MBID; two distinct
+// artists sharing one of those must never be fused by the MBID merge path.
+func isSyntheticMBID(mbid string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(mbid)), "dddddddd-")
 }
 
 type musicAlbumInput struct {

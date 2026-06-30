@@ -74,3 +74,64 @@ func TestIsCollaborationName(t *testing.T) {
 		assert.False(t, isCollaborationName(n), "expected %q to read as a single artist", n)
 	}
 }
+
+// TestArtistNameAcceptable pins the name-similarity gate that stops enrichment
+// from accepting a wildly-wrong match (the Avicii→Alicia Keys class of fusion).
+// Fixtures are real names pulled from the knas dataset.
+func TestArtistNameAcceptable(t *testing.T) {
+	accept := [][2]string{
+		{"Avicii", "Avicii"},                          // exact
+		{"Charli xcx", "Charli XCX"},                  // casing
+		{"Charli XCX", "Charli xcx (English singer)"}, // casing + parenthetical
+		{"HANABIE", "花冷え。"},                           // romaji ↔ kana transliteration
+		{"Beyonce", "Beyoncé"},                        // accent fold
+		{"Above & Beyond", "Above & Beyond"},          // fixed-name duo, self-match
+	}
+	for _, c := range accept {
+		assert.True(t, artistNameAcceptable(c[0], c[1]), "expected %q ~ %q to be accepted", c[0], c[1])
+	}
+
+	reject := [][2]string{
+		{"Avicii", "Alicia Keys"},                            // the headline fusion
+		{"Babymetal", "Bring Me the Horizon"},                // totally different
+		{"Bonnie McKee", "Britney Spears"},                   //
+		{"April Kry", "Carrie Underwood"},                    //
+		{"Alien Ant Farm", "ATLiens"},                        //
+		{"Braids", "BROODS"},                                 // single-token near-miss
+		{"ARTBAT", "Artemas"},                                //
+		{"Anna Nalick", "Anya Nami"},                         //
+		{"AJ Mitchell", "Aly and AJ"},                        //
+		{"Charly Lownoise & Mental Theo", "Charly Lownoise"}, // collaboration → member
+	}
+	for _, c := range reject {
+		assert.False(t, artistNameAcceptable(c[0], c[1]), "expected %q ~ %q to be rejected", c[0], c[1])
+	}
+}
+
+func TestDisambiguationConflict(t *testing.T) {
+	conflict := [][2]string{
+		{"techno", "Japanese vocalist"},            // the two "Ado"s
+		{"hardstyle DJ", "drum and bass producer"}, // no shared significant token
+	}
+	for _, c := range conflict {
+		assert.True(t, disambiguationConflict(c[0], c[1]), "expected %q vs %q to conflict", c[0], c[1])
+	}
+
+	noConflict := [][2]string{
+		{"Japanese vocalist", "Japanese singer"}, // share "japanese" → paraphrase
+		{"", "Japanese vocalist"},                // one empty → no signal
+		{"techno", ""},                           //
+		{"Electronic duo from Portland", "Electronic artist born in Hawaii"}, // share "electronic"
+		{"band", "act"}, // both sub-4-char → nothing significant
+	}
+	for _, c := range noConflict {
+		assert.False(t, disambiguationConflict(c[0], c[1]), "expected %q vs %q to NOT conflict", c[0], c[1])
+	}
+}
+
+func TestIsSyntheticMBID(t *testing.T) {
+	assert.True(t, isSyntheticMBID("dddddddd-dddd-dddd-dddd-ddd513923292"))
+	assert.True(t, isSyntheticMBID("DDDDDDDD-DDDD-DDDD-DDDD-DDD513923292"))  // case-insensitive
+	assert.False(t, isSyntheticMBID("c85cfd6b-b1e9-4a50-bd55-eb725f04f7d5")) // real Alicia Keys MBID
+	assert.False(t, isSyntheticMBID(""))
+}

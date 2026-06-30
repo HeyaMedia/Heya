@@ -29,7 +29,11 @@ import (
 // with the UPDATE" — the worst case is we hit the unique constraint and
 // fail this enrich, not data corruption.
 func (m *Matcher) findCanonicalSibling(ctx context.Context, artistID int64, newMBID, postName, postDisambig string) *sqlc.Artist {
-	if newMBID != "" {
+	// MBID path — strongest signal, but only for a real id. Empty is skipped by
+	// the guard; a synthetic heya.media placeholder ("dddddddd-…") would match
+	// any other row carrying the same placeholder and fuse unrelated artists,
+	// so it's excluded too (the SQL also guards `musicbrainz_id != ''`).
+	if newMBID != "" && !isSyntheticMBID(newMBID) {
 		sibling, err := m.q.GetArtistByMusicBrainzIDExcludingID(ctx, sqlc.GetArtistByMusicBrainzIDExcludingIDParams{
 			Mbid:      newMBID,
 			ExcludeID: artistID,
@@ -41,7 +45,13 @@ func (m *Matcher) findCanonicalSibling(ctx context.Context, artistID int64, newM
 			log.Warn().Err(err).Str("mbid", newMBID).Msg("dup-artist MBID lookup failed")
 		}
 	}
-	if postName != "" {
+	// Name path — only fires with a NON-EMPTY disambiguation. Same name + empty
+	// disambiguation is too weak: two distinct acts that happen to share a name
+	// ("Ado", "666") would otherwise fuse. Requiring a matching, non-empty
+	// disambiguation keeps the legitimate transliteration-rename merge
+	// (HANABIE / 花冷え。 carrying the same "metalcore band" disambig) while
+	// dropping the ambiguous case. The SQL also guards `disambiguation != ''`.
+	if postName != "" && postDisambig != "" {
 		sibling, err := m.q.GetArtistByNameAndDisambiguationExcludingID(ctx, sqlc.GetArtistByNameAndDisambiguationExcludingIDParams{
 			Lower:     postName,
 			Lower_2:   postDisambig,

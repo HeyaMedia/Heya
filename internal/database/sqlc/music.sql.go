@@ -809,6 +809,7 @@ const getArtistByMusicBrainzIDExcludingID = `-- name: GetArtistByMusicBrainzIDEx
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags
 FROM artists
 WHERE musicbrainz_id = $1
+  AND musicbrainz_id != ''
   AND id != $2
 LIMIT 1
 `
@@ -821,6 +822,8 @@ type GetArtistByMusicBrainzIDExcludingIDParams struct {
 // Used by RefreshMusicArtist to detect "we resolved the same MBID as an
 // existing sibling row" so the matcher can merge instead of letting
 // UpdateArtistEnrichedFields collide on uq_artists_name_disambig.
+// The `!= ”` guard stops an empty MBID arg from matching every
+// empty-MBID row and fusing unrelated artists.
 func (q *Queries) GetArtistByMusicBrainzIDExcludingID(ctx context.Context, arg GetArtistByMusicBrainzIDExcludingIDParams) (Artist, error) {
 	row := q.db.QueryRow(ctx, getArtistByMusicBrainzIDExcludingID, arg.Mbid, arg.ExcludeID)
 	var i Artist
@@ -908,6 +911,7 @@ const getArtistByNameAndDisambiguationExcludingID = `-- name: GetArtistByNameAnd
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags FROM artists
 WHERE lower(name) = lower($1)
   AND lower(disambiguation) = lower($2)
+  AND disambiguation != ''
   AND id != $3
 LIMIT 1
 `
@@ -922,6 +926,8 @@ type GetArtistByNameAndDisambiguationExcludingIDParams struct {
 // helped resolve a canonical sibling — falls back to "is there an
 // existing row whose (name, disambig) already matches what we're about
 // to write?" so the unique-constraint collision turns into a merge.
+// The `disambiguation != ”` guard keeps two same-named but undisambiguated
+// acts (e.g. "Ado", "666") from fusing — same name alone is too weak.
 func (q *Queries) GetArtistByNameAndDisambiguationExcludingID(ctx context.Context, arg GetArtistByNameAndDisambiguationExcludingIDParams) (Artist, error) {
 	row := q.db.QueryRow(ctx, getArtistByNameAndDisambiguationExcludingID, arg.Lower, arg.Lower_2, arg.ExcludeID)
 	var i Artist
