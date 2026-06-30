@@ -60,6 +60,9 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 		func(ctx context.Context, in *struct {
 			Body tailscaleConfigPayload
 		}) (*JSONOutput[statusBody], error) {
+			if err := tailscaleReadOnly(app.ConfigSnapshot()); err != nil {
+				return nil, err
+			}
 			if err := app.SaveTailscaleSettings(ctx, service.TailscaleUpdate{
 				Enabled:  in.Body.Enabled,
 				HTTPS:    in.Body.HTTPS,
@@ -111,6 +114,9 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 				Enabled bool `json:"enabled"`
 			}
 		}) (*JSONOutput[funnelBody], error) {
+			if err := tailscaleReadOnly(app.ConfigSnapshot()); err != nil {
+				return nil, err
+			}
 			ts := app.Tailscale()
 			if ts == nil {
 				return nil, huma.Error400BadRequest("Tailscale is not running")
@@ -138,6 +144,9 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 
 	huma.Register(api, secured(op(http.MethodPost, "/api/tailscale/logout", "tailscale-logout", "Log this node out of the tailnet", "Tailscale")),
 		func(ctx context.Context, _ *struct{}) (*StatusOutput, error) {
+			if err := tailscaleReadOnly(app.ConfigSnapshot()); err != nil {
+				return nil, err
+			}
 			ts := app.Tailscale()
 			if ts == nil {
 				return nil, huma.Error400BadRequest("Tailscale is not running")
@@ -152,6 +161,21 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 			go func() { _ = ts.Logout(app.LifetimeContext()) }()
 			return statusOK("logging out"), nil
 		})
+}
+
+// tailscaleReadOnly gates the mutating tailscale endpoints when the server is
+// in passive mode. Passive mode is a guest on a borrowed (usually production)
+// DB: persisting tailscale settings would mutate that DB (logout would even
+// flip prod's enabled flag off), and bringing the node up would join the
+// tailnet under the source server's identity — a node-name collision with the
+// real server. The read-only status endpoints stay available; only the
+// mutating ones are gated. Mirrors the boot-time guard in service.New that
+// skips LoadTailscaleFromDB.
+func tailscaleReadOnly(cfg *config.Config) error {
+	if cfg != nil && cfg.PassiveMode.Value {
+		return huma.Error403Forbidden("Tailscale is read-only in passive mode (HEYA_PASSIVE_MODE)")
+	}
+	return nil
 }
 
 type tailscaleConfigPayload struct {

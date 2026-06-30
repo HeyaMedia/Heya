@@ -109,6 +109,54 @@ edit prior migrations in place. When a change needs the table empty,
 `make db-reset` and re-add libraries. A consolidation pass happens before the
 alpha tag, so the churn is fine.
 
+## Developing against the production database (passive mode)
+
+To build UI/views against real data, point local dev at the production Postgres
+and run the backend in **passive mode** so it can't damage prod:
+
+```bash
+# .env.local (gitignored, layered over .env)
+HEYA_DATABASE_URL=postgres://heya:PASSWORD@knas:5432/heya?sslmode=disable
+HEYA_PASSIVE_MODE=true
+```
+
+Then `make dev` as usual — open http://localhost:8080.
+
+**Why passive mode is mandatory here, not optional.** River's job queue lives
+*inside* the same Postgres. A normal backend connected to prod's DB becomes a
+second worker pool on prod's queue: it pulls prod's queued jobs and runs a disk
+scan against a `/storage/...` path that isn't mounted on your laptop — every
+file reads as missing and the library gets soft-deleted. Passive mode
+(`internal/config`, gated in `service.New` + `cmd/heya/cmd/serve.go`) disables
+everything that writes or touches disk:
+
+- auto-migrate — won't alter prod's schema to match your branch
+- `HEYA_ADMIN_*` / `HEYA_LIBRARY_*` env bootstrap — won't overwrite prod users/libraries
+- River workers, filesystem watchers, the scheduler tick loop, sonic-analysis,
+  and startup orphan-rescue
+
+What still runs: the HTTP/API/WS server and the read-only dashboard emitters, so
+the UI is live over real data.
+
+**Caveats worth knowing:**
+
+- **Be on prod's migration version.** Auto-migrate is skipped, so if your branch
+  adds columns your sqlc queries reference, those queries fail locally. Build
+  views on a branch whose schema already matches prod.
+- **The API can still write.** Passive mode only stops *background* work — a UI
+  action that POSTs (edit metadata, mark watched) hits the real DB. For a hard
+  wall, connect with a read-only Postgres role (note: auth/session writes then
+  fail too).
+- **Triggering a scan from the dev UI runs on prod.** Local enqueues a job; with
+  no local workers it's picked up by knas's real worker — which *does* have the
+  files. Harmless, but not local.
+- **Images come from prod's data dir.** The public image endpoints serve files
+  from the server's `HEYA_DATA_DIR`, which isn't on your laptop. Set
+  `HEYA_IMAGE_PROXY_URL` to prod's base URL (e.g. `https://heya.example.ts.net`)
+  and, in passive mode, those endpoints reverse-proxy the identical path to prod
+  so posters/backdrops/covers render. Leave it empty and images 404 locally.
+- **Network.** knas must be reachable (LAN or tailnet) on the Postgres port.
+
 ## sqlc codegen
 
 After editing files under `queries/` or `migrations/`:

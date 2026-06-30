@@ -66,6 +66,11 @@ features: if you can't do it from the CLI, it doesn't exist.
 These are guardrails — bug-avoidance rules earned the hard way. Don't break
 them without a discussion.
 
+- **Work on `main`. No feature branches, no worktrees.** This is a solo,
+  fast-moving repo where branch-per-feature and worktrees only add merge
+  friction. Commit straight to `main` and push. Releases are cut by tagging
+  `vX.Y.Z` (next is bumped from the latest `git tag`), which triggers the
+  container build + deploy via `.github/workflows/container.yml`.
 - **No backwards-compat shims while in active dev.** Schema changes ship as
   new numbered migrations; don't edit prior migrations in place. The user
   runs a consolidation pass before tagging an alpha release, so the churn is

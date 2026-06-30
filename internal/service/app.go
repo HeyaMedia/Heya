@@ -122,8 +122,16 @@ func (a *App) UpdateTailscaleConfig(enabled, https, funnel bool, hostname string
 }
 
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
-	if err := AutoMigrate(cfg.DatabaseURL.Value); err != nil {
-		return nil, err
+	// Passive mode is a read-mostly guest on someone else's DB (typically a
+	// dev box pointed at production). Skip AutoMigrate so we never mutate the
+	// target's schema to match this binary's branch — if the schemas differ,
+	// failing local queries are a far safer outcome than altering prod.
+	if !cfg.PassiveMode.Value {
+		if err := AutoMigrate(cfg.DatabaseURL.Value); err != nil {
+			return nil, err
+		}
+	} else {
+		log.Warn().Msg("passive mode: skipping auto-migrate; this binary will NOT alter the target schema")
 	}
 
 	db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
@@ -273,18 +281,31 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Overlay persisted UI settings onto the config snapshot. Env-sourced
 	// fields are preserved; only default-sourced fields get DB values.
 	// Order matters less here since the two loaders touch disjoint fields.
-	app.LoadTailscaleFromDB(ctx)
+	//
+	// Tailscale is deliberately NOT loaded from the DB in passive mode: the
+	// borrowed (production) DB has tailscale.enabled=true with hostname `heya`,
+	// and overlaying that would make serve.go bring up a tsnet node on this dev
+	// box that joins the tailnet under prod's identity — a node-name collision
+	// with the real server. In passive mode tailscale stays env-only; a dev who
+	// wants it sets HEYA_TAILSCALE_ENABLED with a distinct HEYA_TAILSCALE_HOSTNAME.
+	if !cfg.PassiveMode.Value {
+		app.LoadTailscaleFromDB(ctx)
+	}
 	app.LoadTranscoderFromDB(ctx)
 
 	// Env bootstrap. Order: admin first (libraries.created_by FK requires
 	// at least one user). Failures here are logged and continue — a misformed
 	// env var shouldn't kill the server. The /api/config/sources response
-	// will reflect whatever actually got persisted.
-	if err := app.BootstrapAdminFromEnv(ctx); err != nil {
-		log.Warn().Err(err).Msg("HEYA_ADMIN_* bootstrap failed")
-	}
-	if err := app.BootstrapLibrariesFromEnv(ctx); err != nil {
-		log.Warn().Err(err).Msg("HEYA_LIBRARY_* bootstrap failed")
+	// will reflect whatever actually got persisted. Skipped in passive mode:
+	// a dev box's local HEYA_ADMIN_* / HEYA_LIBRARY_* must never overwrite the
+	// users and library paths of the production DB it's borrowing.
+	if !cfg.PassiveMode.Value {
+		if err := app.BootstrapAdminFromEnv(ctx); err != nil {
+			log.Warn().Err(err).Msg("HEYA_ADMIN_* bootstrap failed")
+		}
+		if err := app.BootstrapLibrariesFromEnv(ctx); err != nil {
+			log.Warn().Err(err).Msg("HEYA_LIBRARY_* bootstrap failed")
+		}
 	}
 
 	return app, nil

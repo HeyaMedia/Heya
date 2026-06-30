@@ -13,9 +13,26 @@ import (
 // tables, not here — see internal/service/sonicanalysis_settings.go and
 // internal/service/tailscale_settings.go.
 type Config struct {
-	DatabaseURL         Field[string]
-	DatabaseMaxConns    Field[int]
-	DatabaseMinConns    Field[int]
+	DatabaseURL      Field[string]
+	DatabaseMaxConns Field[int]
+	DatabaseMinConns Field[int]
+	// PassiveMode turns the server into a read-mostly guest on its database:
+	// no auto-migrate, no env bootstrap, no River workers, no filesystem
+	// watchers, no scheduler tick loop, no sonic-analysis fetcher, no startup
+	// orphan-rescue. It exists so local dev can point HEYA_DATABASE_URL at a
+	// production DB to build UI against real data without the worker pool
+	// stealing prod's queued jobs and scanning a /storage path that doesn't
+	// exist locally (which would soft-delete the whole library). The HTTP API
+	// and the read-only dashboard emitters still run. See docs/development.md.
+	PassiveMode Field[bool]
+	// ImageProxyURL is the base URL of another Heya instance whose image bytes
+	// should be served in this one's place. Only consulted in passive mode,
+	// where the local data dir holds none of the borrowed DB's images: the
+	// public /api/.../image endpoints reverse-proxy the identical path to this
+	// base (e.g. https://heya.example.ts.net) so posters/backdrops/covers
+	// render. Empty → serve locally (images 404 in passive mode). See
+	// docs/development.md.
+	ImageProxyURL       Field[string]
 	Host                Field[string]
 	Port                Field[string]
 	LogLevel            Field[string]
@@ -58,6 +75,8 @@ func Load() *Config {
 		DatabaseURL:         envString("HEYA_DATABASE_URL", "postgres://heya:heya@localhost:5440/heya?sslmode=disable"),
 		DatabaseMaxConns:    envInt("HEYA_DB_MAX_CONNS", 15),
 		DatabaseMinConns:    envInt("HEYA_DB_MIN_CONNS", 2),
+		PassiveMode:         envBool("HEYA_PASSIVE_MODE", false),
+		ImageProxyURL:       envString("HEYA_IMAGE_PROXY_URL", ""),
 		Host:                envString("HEYA_HOST", "0.0.0.0"),
 		Port:                envString("HEYA_PORT", "8080"),
 		LogLevel:            envString("HEYA_LOG_LEVEL", "info"),
@@ -135,6 +154,8 @@ var sourceFields = []sourceField{
 	{"infra.database_url", func(c *Config) SourceEntry { return c.DatabaseURL.Entry() }},
 	{"infra.database_max_conns", func(c *Config) SourceEntry { return c.DatabaseMaxConns.Entry() }},
 	{"infra.database_min_conns", func(c *Config) SourceEntry { return c.DatabaseMinConns.Entry() }},
+	{"infra.passive_mode", func(c *Config) SourceEntry { return c.PassiveMode.Entry() }},
+	{"infra.image_proxy_url", func(c *Config) SourceEntry { return c.ImageProxyURL.Entry() }},
 	{"infra.host", func(c *Config) SourceEntry { return c.Host.Entry() }},
 	{"infra.port", func(c *Config) SourceEntry { return c.Port.Entry() }},
 	{"infra.log_level", func(c *Config) SourceEntry { return c.LogLevel.Entry() }},

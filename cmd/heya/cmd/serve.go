@@ -55,24 +55,38 @@ var serveCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		// Rescue any jobs left in state='running' by a previous process
-		// (e.g. an `air` hot-reload killed the worker mid-job). Without
-		// this, those rows sit "running" until River's periodic rescuer
-		// catches them after RescueStuckJobsAfter (10min) — long enough
-		// to look like real concurrency violations in the UI.
-		if n, err := app.RescueOrphanedJobsAtStartup(appCtx); err != nil {
-			log.Warn().Err(err).Msg("startup orphan-rescue failed")
-		} else if n > 0 {
-			log.Info().Int64("rescued", n).Msg("released orphaned jobs from previous process")
-		}
+		// Passive mode (HEYA_PASSIVE_MODE=true): the server is a read-mostly
+		// guest on its DB — typically local dev pointed at a production
+		// database to build UI against real data. We must NOT run any worker,
+		// watcher, scheduler, or startup job-rescue: River's queue lives in the
+		// same Postgres, so starting workers here turns this process into a
+		// second worker pool on prod's queue. It would pull prod's jobs and run
+		// a disk scan against a /storage path that doesn't exist locally,
+		// soft-deleting the whole library. See docs/development.md.
+		passive := cfg.PassiveMode.Value
 
-		if err := app.StartWorkers(appCtx); err != nil {
-			return err
-		}
-		log.Info().Msg("river workers started")
+		if !passive {
+			// Rescue any jobs left in state='running' by a previous process
+			// (e.g. an `air` hot-reload killed the worker mid-job). Without
+			// this, those rows sit "running" until River's periodic rescuer
+			// catches them after RescueStuckJobsAfter (10min) — long enough
+			// to look like real concurrency violations in the UI.
+			if n, err := app.RescueOrphanedJobsAtStartup(appCtx); err != nil {
+				log.Warn().Err(err).Msg("startup orphan-rescue failed")
+			} else if n > 0 {
+				log.Info().Int64("rescued", n).Msg("released orphaned jobs from previous process")
+			}
 
-		if err := app.StartWatchers(appCtx); err != nil {
-			log.Warn().Err(err).Msg("failed to start watchers")
+			if err := app.StartWorkers(appCtx); err != nil {
+				return err
+			}
+			log.Info().Msg("river workers started")
+
+			if err := app.StartWatchers(appCtx); err != nil {
+				log.Warn().Err(err).Msg("failed to start watchers")
+			}
+		} else {
+			log.Warn().Msg("passive mode: workers, watchers, scheduler, sonic-analysis and orphan-rescue are DISABLED — this process will not process jobs or touch the filesystem")
 		}
 
 		bridgeLogToHub(appCtx, logRing, app.EventHub())
@@ -80,20 +94,25 @@ var serveCmd = &cobra.Command{
 		// Bridge events published from other processes (e.g. a `heya library
 		// remove` CLI call) onto this process's live hub → WebSocket clients.
 		app.EventHub().StartCrossProcessRelay(appCtx, app.DBPool())
-		// React to those bridged events: a CLI delete must also tear down this
-		// process's file watcher for the removed library.
-		app.StartDeletedLibraryReaper(appCtx)
 		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
 
 		// Scheduler is now a thin 60s trigger loop. All actual work
-		// runs as River jobs (kickoff_* + per-item workers).
+		// runs as River jobs (kickoff_* + per-item workers). We still register
+		// the trigger on the app in passive mode (so any handler that resolves
+		// it doesn't nil-deref) but never start its tick loop.
 		taskTrigger := scheduler.NewTrigger(app.DBPool(), app.RiverClient())
 		app.SetScheduler(taskTrigger)
-		taskTrigger.Start(appCtx)
+		if !passive {
+			// React to bridged delete events: a CLI delete must also tear down
+			// this process's file watcher for the removed library. Pointless
+			// when no watchers are running.
+			app.StartDeletedLibraryReaper(appCtx)
+			taskTrigger.Start(appCtx)
 
-		// Kick off the model fetcher in the background. No-op when
-		// sonic-analysis is disabled in config.
-		app.StartSonicAnalysis(appCtx)
+			// Kick off the model fetcher in the background. No-op when
+			// sonic-analysis is disabled in config.
+			app.StartSonicAnalysis(appCtx)
+		}
 
 		srv := server.New(cfg, app,
 			server.WithLogBuffer(logRing),
@@ -182,7 +201,13 @@ var serveCmd = &cobra.Command{
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			app.StopWorkers(shutdownCtx)
+			// Workers were never started in passive mode; River's Stop on a
+			// never-started client has nothing to do, so skip it.
+			if !passive {
+				if err := app.StopWorkers(shutdownCtx); err != nil {
+					log.Warn().Err(err).Msg("worker shutdown error")
+				}
+			}
 		}()
 		go func() {
 			defer wg.Done()

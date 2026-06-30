@@ -21,23 +21,30 @@ import (
 // content-type sniffing, and any custom header logic.
 func registerBinaryRoutes(api huma.API, app *service.App) {
 	// --- Images (no auth — browsers can't attach Authorization to <img>) ---
+	// In passive mode with HEYA_IMAGE_PROXY_URL set, imgProxy is non-nil and
+	// these endpoints reverse-proxy the identical path to the source instance
+	// (whose disk actually holds the files); otherwise it's nil and the local
+	// byte handlers serve as normal. The TMDB proxy is excluded — it already
+	// fetches from image.tmdb.org directly and needs no local files.
+	imgProxy := newPassiveImageProxy(app.ConfigSnapshot())
+
 	huma.Register(api, binaryOp(http.MethodGet, "/api/media/{id}/image/{type}", "media-image", "Media poster/backdrop bytes", "Images"),
-		wrapStreamAs[mediaImageInput](handleMediaImage(app)))
+		wrapStreamAs[mediaImageInput](proxiedImage(imgProxy, handleMediaImage(app))))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/person/{id}/image", "person-image", "Person photo bytes", "Images"),
-		wrapStreamAs[idBinaryInput](handlePersonImage(app)))
+		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handlePersonImage(app))))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/studio/{id}/image", "studio-image", "Studio logo bytes", "Images"),
-		wrapStreamAs[idBinaryInput](handleStudioImage(app)))
+		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handleStudioImage(app))))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/extras/{id}/thumbnail", "extra-thumbnail", "Extras thumbnail bytes", "Images"),
-		wrapStreamAs[idBinaryInput](handleExtraThumbnail(app)))
+		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handleExtraThumbnail(app))))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
 		wrapStreamAs[tmdbImageInput](handleTMDBImageProxy()))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
-		wrapStreamAs[albumCoverInput](handleAlbumCover(app)))
+		wrapStreamAs[albumCoverInput](proxiedImage(imgProxy, handleAlbumCover(app))))
 
 	// --- Video streaming (HLS + direct play) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}", "stream-direct", "Direct video stream (range-served bytes)", "Streaming"),
