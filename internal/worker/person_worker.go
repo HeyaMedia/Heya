@@ -105,6 +105,33 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		aka = []string{}
 	}
 
+	// Guard idx_people_heya_slug — a *global* UNIQUE on heya_slug. Two
+	// distinct person rows can resolve to the same upstream person (e.g. the
+	// same actor scanned under name variants across titles). When the slug is
+	// already owned by a different row, that row is the established canonical:
+	// fold this person into it (reparenting its cast/crew links) and stop —
+	// the owner already carries the enriched metadata. This both removes the
+	// duplicate and avoids the UpdatePersonFull 23505 that would otherwise
+	// throw away this person's entire enrichment (it writes heya_slug
+	// alongside every other column in one statement).
+	if resp.Slug != "" && resp.Slug != existing.HeyaSlug {
+		if owner, err := q.GetPersonByHeyaSlug(ctx, resp.Slug); err == nil && owner.ID != job.Args.PersonID {
+			if mergeErr := mergePersonInto(ctx, w.DB, q, owner.ID, job.Args.PersonID); mergeErr != nil {
+				log.Warn().Err(mergeErr).
+					Int64("person_id", job.Args.PersonID).
+					Int64("canonical_id", owner.ID).
+					Msg("merge duplicate person failed")
+				return nil
+			}
+			log.Debug().
+				Int64("merged_person_id", job.Args.PersonID).
+				Int64("canonical_id", owner.ID).
+				Str("heya_slug", resp.Slug).
+				Msg("merged duplicate person into canonical row")
+			return nil
+		}
+	}
+
 	// 7. Update person with full data.
 	_, err = q.UpdatePersonFull(ctx, sqlc.UpdatePersonFullParams{
 		ID:                 job.Args.PersonID,

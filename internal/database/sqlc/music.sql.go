@@ -374,6 +374,18 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 	return i, err
 }
 
+const deleteAlbumByID = `-- name: DeleteAlbumByID :exec
+DELETE FROM albums WHERE id = $1
+`
+
+// Album-merge step 7. Remove the emptied src album once its tracks, ratings,
+// and favorites have moved. CASCADE clears album_centroids and any remaining
+// album-scoped rows.
+func (q *Queries) DeleteAlbumByID(ctx context.Context, albumID int64) error {
+	_, err := q.db.Exec(ctx, deleteAlbumByID, albumID)
+	return err
+}
+
 const deleteArtist = `-- name: DeleteArtist :exec
 DELETE FROM artists WHERE id = $1
 `
@@ -416,6 +428,31 @@ DELETE FROM artist_top_tracks WHERE artist_id = $1
 
 func (q *Queries) DeleteArtistTopTracks(ctx context.Context, srcID int64) error {
 	_, err := q.db.Exec(ctx, deleteArtistTopTracks, srcID)
+	return err
+}
+
+const deleteCollidingAlbumTracks = `-- name: DeleteCollidingAlbumTracks :exec
+DELETE FROM tracks src
+WHERE src.album_id = $1
+  AND EXISTS (
+      SELECT 1 FROM tracks dst
+      WHERE dst.album_id = $2
+        AND dst.disc_number = src.disc_number
+        AND dst.track_number = src.track_number
+  )
+`
+
+type DeleteCollidingAlbumTracksParams struct {
+	SrcAlbumID int64 `json:"src_album_id"`
+	DstAlbumID int64 `json:"dst_album_id"`
+}
+
+// Album-merge step 3. Drop the src_album tracks whose (disc, track_number)
+// already exists on dst_album. Their track_files (step 1) and user-scoped rows
+// — ratings, playlists, play history (steps 2a-2c) — have already moved; only
+// the derived track_facets remain and CASCADE clears them (they regenerate).
+func (q *Queries) DeleteCollidingAlbumTracks(ctx context.Context, arg DeleteCollidingAlbumTracksParams) error {
+	_, err := q.db.Exec(ctx, deleteCollidingAlbumTracks, arg.SrcAlbumID, arg.DstAlbumID)
 	return err
 }
 
@@ -2668,6 +2705,48 @@ func (q *Queries) MarkArtistDiscographyEnriched(ctx context.Context, id int64) e
 	return err
 }
 
+const mergeAlbumFavorites = `-- name: MergeAlbumFavorites :exec
+INSERT INTO user_favorites (user_id, entity_type, entity_id)
+SELECT user_id, 'album', $1
+FROM user_favorites
+WHERE entity_type = 'album' AND user_favorites.entity_id = $2
+ON CONFLICT (user_id, entity_type, entity_id) DO NOTHING
+`
+
+type MergeAlbumFavoritesParams struct {
+	DstAlbumID int64 `json:"dst_album_id"`
+	SrcAlbumID int64 `json:"src_album_id"`
+}
+
+// Album-merge step 6. Move "loved album" entries from src to dst, collapsing
+// dupes via the (user_id, entity_type, entity_id) unique key.
+func (q *Queries) MergeAlbumFavorites(ctx context.Context, arg MergeAlbumFavoritesParams) error {
+	_, err := q.db.Exec(ctx, mergeAlbumFavorites, arg.DstAlbumID, arg.SrcAlbumID)
+	return err
+}
+
+const mergeAlbumRatings = `-- name: MergeAlbumRatings :exec
+INSERT INTO user_album_ratings (user_id, album_id, rating)
+SELECT user_id, $1, rating
+FROM user_album_ratings
+WHERE user_album_ratings.album_id = $2
+ON CONFLICT (user_id, album_id) DO UPDATE
+SET rating = GREATEST(user_album_ratings.rating, EXCLUDED.rating),
+    updated_at = now()
+`
+
+type MergeAlbumRatingsParams struct {
+	DstAlbumID int64 `json:"dst_album_id"`
+	SrcAlbumID int64 `json:"src_album_id"`
+}
+
+// Album-merge step 5. Move user_album_ratings from src to dst, keeping the
+// higher rating on collision.
+func (q *Queries) MergeAlbumRatings(ctx context.Context, arg MergeAlbumRatingsParams) error {
+	_, err := q.db.Exec(ctx, mergeAlbumRatings, arg.DstAlbumID, arg.SrcAlbumID)
+	return err
+}
+
 const mergeArtistFavorites = `-- name: MergeArtistFavorites :exec
 INSERT INTO user_favorites (user_id, entity_type, entity_id)
 SELECT user_id, 'artist', $1
@@ -2685,6 +2764,58 @@ type MergeArtistFavoritesParams struct {
 // entity_id) collapse to a no-op via the existing unique constraint.
 func (q *Queries) MergeArtistFavorites(ctx context.Context, arg MergeArtistFavoritesParams) error {
 	_, err := q.db.Exec(ctx, mergeArtistFavorites, arg.DstID, arg.SrcID)
+	return err
+}
+
+const mergeCollidingAlbumTrackPlaylists = `-- name: MergeCollidingAlbumTrackPlaylists :exec
+INSERT INTO user_playlist_tracks (playlist_id, track_id, position, added_at)
+SELECT pt.playlist_id, dst.id, pt.position, pt.added_at
+FROM user_playlist_tracks pt
+JOIN tracks src ON src.id = pt.track_id AND src.album_id = $1
+JOIN tracks dst
+    ON dst.album_id = $2
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+ON CONFLICT (playlist_id, track_id) DO NOTHING
+`
+
+type MergeCollidingAlbumTrackPlaylistsParams struct {
+	SrcAlbumID int64 `json:"src_album_id"`
+	DstAlbumID int64 `json:"dst_album_id"`
+}
+
+// Album-merge step 2b. Move playlist memberships off the colliding src tracks
+// onto their dst counterpart, keeping dst's slot when the track is already in
+// the playlist. MUST run before the src tracks are deleted.
+func (q *Queries) MergeCollidingAlbumTrackPlaylists(ctx context.Context, arg MergeCollidingAlbumTrackPlaylistsParams) error {
+	_, err := q.db.Exec(ctx, mergeCollidingAlbumTrackPlaylists, arg.SrcAlbumID, arg.DstAlbumID)
+	return err
+}
+
+const mergeCollidingAlbumTrackRatings = `-- name: MergeCollidingAlbumTrackRatings :exec
+INSERT INTO user_track_ratings (user_id, track_id, rating)
+SELECT utr.user_id, dst.id, utr.rating
+FROM user_track_ratings utr
+JOIN tracks src ON src.id = utr.track_id AND src.album_id = $1
+JOIN tracks dst
+    ON dst.album_id = $2
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+ON CONFLICT (user_id, track_id) DO UPDATE
+SET rating = GREATEST(user_track_ratings.rating, EXCLUDED.rating),
+    updated_at = now()
+`
+
+type MergeCollidingAlbumTrackRatingsParams struct {
+	SrcAlbumID int64 `json:"src_album_id"`
+	DstAlbumID int64 `json:"dst_album_id"`
+}
+
+// Album-merge step 2a. Fold user_track_ratings off the colliding src tracks
+// onto their dst counterpart, keeping the higher rating. MUST run before the
+// src tracks are deleted, or CASCADE drops these user ratings.
+func (q *Queries) MergeCollidingAlbumTrackRatings(ctx context.Context, arg MergeCollidingAlbumTrackRatingsParams) error {
+	_, err := q.db.Exec(ctx, mergeCollidingAlbumTrackRatings, arg.SrcAlbumID, arg.DstAlbumID)
 	return err
 }
 
@@ -2711,6 +2842,50 @@ func (q *Queries) MergeUserArtistRatings(ctx context.Context, arg MergeUserArtis
 	return err
 }
 
+const reparentAlbumToArtist = `-- name: ReparentAlbumToArtist :exec
+UPDATE albums a SET
+    artist_id = $1,
+    slug = CASE WHEN EXISTS (
+        SELECT 1 FROM albums b
+        WHERE b.artist_id = $1
+          AND b.slug = a.slug AND b.slug != '' AND b.id != a.id
+    ) THEN '' ELSE a.slug END
+WHERE a.id = $2
+`
+
+type ReparentAlbumToArtistParams struct {
+	DstArtistID int64 `json:"dst_artist_id"`
+	AlbumID     int64 `json:"album_id"`
+}
+
+// Move ONE album to a new artist. Drops the album's slug when the destination
+// artist already has an album using it, sidestepping uq_albums_artist_slug;
+// the slug regenerates on the next refresh (that index is WHERE slug != ”).
+// Used by the artist merge for albums that do NOT collide on
+// (lower(title), year) — colliders are folded by the album-merge queries below.
+func (q *Queries) ReparentAlbumToArtist(ctx context.Context, arg ReparentAlbumToArtistParams) error {
+	_, err := q.db.Exec(ctx, reparentAlbumToArtist, arg.DstArtistID, arg.AlbumID)
+	return err
+}
+
+const reparentAlbumTracks = `-- name: ReparentAlbumTracks :exec
+UPDATE tracks SET album_id = $1
+WHERE album_id = $2
+`
+
+type ReparentAlbumTracksParams struct {
+	DstAlbumID int64 `json:"dst_album_id"`
+	SrcAlbumID int64 `json:"src_album_id"`
+}
+
+// Album-merge step 4. Move the surviving (non-colliding) src_album tracks onto
+// dst_album. Safe after DeleteCollidingAlbumTracks: the remaining
+// (disc, track_number) tuples are now unique across the two albums.
+func (q *Queries) ReparentAlbumTracks(ctx context.Context, arg ReparentAlbumTracksParams) error {
+	_, err := q.db.Exec(ctx, reparentAlbumTracks, arg.DstAlbumID, arg.SrcAlbumID)
+	return err
+}
+
 const reparentAlbums = `-- name: ReparentAlbums :exec
 UPDATE albums SET artist_id = $1 WHERE albums.artist_id = $2
 `
@@ -2722,8 +2897,63 @@ type ReparentAlbumsParams struct {
 
 // Move every album from src_id over to dst_id. Tracks follow via
 // albums.artist_id (track_id is keyed on album_id, not artist_id).
+// NOTE: blind move — only safe when no album collides on
+// uq_albums_artist_title_year. The artist merge no longer uses this; it walks
+// albums one at a time (ReparentAlbumToArtist for non-colliders, the album
+// merge queries below for colliders). Retained for callers that have already
+// proven the destination is collision-free.
 func (q *Queries) ReparentAlbums(ctx context.Context, arg ReparentAlbumsParams) error {
 	_, err := q.db.Exec(ctx, reparentAlbums, arg.DstID, arg.SrcID)
+	return err
+}
+
+const reparentCollidingAlbumTrackFiles = `-- name: ReparentCollidingAlbumTrackFiles :exec
+UPDATE track_files tf
+SET track_id = dst.id
+FROM tracks src
+JOIN tracks dst
+    ON dst.album_id = $2
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+WHERE tf.track_id = src.id
+  AND src.album_id = $1
+`
+
+type ReparentCollidingAlbumTrackFilesParams struct {
+	SrcAlbumID int64 `json:"src_album_id"`
+	DstAlbumID int64 `json:"dst_album_id"`
+}
+
+// Album-merge step 1. For src_album tracks whose (disc, track_number) already
+// exists on dst_album, move their track_files onto the matching dst track so
+// the audio survives the merge. track_files are unique only on
+// library_file_id, so re-pointing track_id never collides.
+func (q *Queries) ReparentCollidingAlbumTrackFiles(ctx context.Context, arg ReparentCollidingAlbumTrackFilesParams) error {
+	_, err := q.db.Exec(ctx, reparentCollidingAlbumTrackFiles, arg.SrcAlbumID, arg.DstAlbumID)
+	return err
+}
+
+const reparentCollidingAlbumTrackPlayEvents = `-- name: ReparentCollidingAlbumTrackPlayEvents :exec
+UPDATE play_events pe
+SET track_id = dst.id
+FROM tracks src
+JOIN tracks dst
+    ON dst.album_id = $2
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+WHERE pe.track_id = src.id AND src.album_id = $1
+`
+
+type ReparentCollidingAlbumTrackPlayEventsParams struct {
+	SrcAlbumID int64 `json:"src_album_id"`
+	DstAlbumID int64 `json:"dst_album_id"`
+}
+
+// Album-merge step 2c. Move play history off the colliding src tracks onto
+// their dst counterpart. play_events has no per-track unique key, so a plain
+// UPDATE moves every event. MUST run before the src tracks are deleted.
+func (q *Queries) ReparentCollidingAlbumTrackPlayEvents(ctx context.Context, arg ReparentCollidingAlbumTrackPlayEventsParams) error {
+	_, err := q.db.Exec(ctx, reparentCollidingAlbumTrackPlayEvents, arg.SrcAlbumID, arg.DstAlbumID)
 	return err
 }
 

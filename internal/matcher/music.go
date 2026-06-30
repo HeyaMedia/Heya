@@ -749,6 +749,24 @@ func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name stri
 		}
 		return nil
 	}
+	// Precision gate: never let a name search collapse a collaboration folder
+	// ("A & B", "A feat. B") onto a single member. heya.media's discover can
+	// rank a solo member above a duo it hasn't indexed — e.g. query
+	// "Charly Lownoise & Mental Theo" returns hit "Charly Lownoise" at 0.95.
+	// Applying that match renames the duo and then merges it into the solo
+	// row (findCanonicalSibling), polluting the solo artist's discography with
+	// the collaboration's releases. Treat it as no match: the collaboration
+	// stays its own distinct, un-enriched artist. Linking collaborations to
+	// their members is the deferred collaboration-graph feature (see FUTURE.md).
+	if collaborationCollapsed(name, hit.Name) {
+		log.Debug().
+			Str("name", name).
+			Str("hit_name", hit.Name).
+			Str("hit_id", hit.ID).
+			Float64("score", hit.Score).
+			Msg("rejecting reductive collaboration match; keeping local artist distinct")
+		return nil
+	}
 	detail, _, err := m.heya.FetchByKindID(ctx, "artist", hit.ID)
 	if err != nil || detail == nil {
 		// heya.media has the artist in its search index (with an image
@@ -789,6 +807,41 @@ func (m *Matcher) enrichArtistFromHeyaMedia(ctx context.Context, mbid, name stri
 		Str("artist", detail.ArtistName).
 		Msg("enriched artist via heya.media discover+fetch")
 	return detail
+}
+
+// collabSeparators are the high-confidence "this folder names more than one
+// artist" tokens. Kept tight on purpose — each is space-padded so it only
+// matches as a standalone separator, never as a substring of a real word
+// ("Daft Punk" / "Left Eye" must not read as " ft ", "AT&T" / "C+C" must not
+// read as " & " / " + "). Markers like "," / " and " / " x " / " with " are
+// deliberately excluded: they appear inside legitimate single-artist names
+// ("Tyler, the Creator", "Hall and Oates") and would cause false rejections.
+var collabSeparators = []string{
+	" & ", " feat. ", " feat ", " featuring ", " ft. ", " ft ", " vs. ", " vs ", " versus ", " + ",
+}
+
+// isCollaborationName reports whether a name reads as a multi-artist
+// collaboration ("A & B", "A feat. B"). Case-insensitive; the name is
+// space-padded so a separator at the very start/end still matches.
+func isCollaborationName(name string) bool {
+	s := " " + strings.ToLower(strings.TrimSpace(name)) + " "
+	for _, sep := range collabSeparators {
+		if strings.Contains(s, sep) {
+			return true
+		}
+	}
+	return false
+}
+
+// collaborationCollapsed reports whether enriching `local` with a match named
+// `matched` would reduce a collaboration to a single contributor — the signal
+// that the upstream search returned a member instead of the collaboration
+// itself. True only when the local name is a collaboration and the matched
+// name has dropped the collaboration form. A fixed-name duo that maps to
+// itself ("Simon & Garfunkel" → "Simon & Garfunkel", "Chase & Status" →
+// "Chase & Status") keeps its markers on both sides and is allowed through.
+func collaborationCollapsed(local, matched string) bool {
+	return isCollaborationName(local) && !isCollaborationName(matched)
 }
 
 type musicAlbumInput struct {

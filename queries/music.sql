@@ -631,7 +631,132 @@ LIMIT 1;
 -- name: ReparentAlbums :exec
 -- Move every album from src_id over to dst_id. Tracks follow via
 -- albums.artist_id (track_id is keyed on album_id, not artist_id).
+-- NOTE: blind move — only safe when no album collides on
+-- uq_albums_artist_title_year. The artist merge no longer uses this; it walks
+-- albums one at a time (ReparentAlbumToArtist for non-colliders, the album
+-- merge queries below for colliders). Retained for callers that have already
+-- proven the destination is collision-free.
 UPDATE albums SET artist_id = sqlc.arg(dst_id) WHERE albums.artist_id = sqlc.arg(src_id);
+
+-- name: ReparentAlbumToArtist :exec
+-- Move ONE album to a new artist. Drops the album's slug when the destination
+-- artist already has an album using it, sidestepping uq_albums_artist_slug;
+-- the slug regenerates on the next refresh (that index is WHERE slug != '').
+-- Used by the artist merge for albums that do NOT collide on
+-- (lower(title), year) — colliders are folded by the album-merge queries below.
+UPDATE albums a SET
+    artist_id = sqlc.arg(dst_artist_id),
+    slug = CASE WHEN EXISTS (
+        SELECT 1 FROM albums b
+        WHERE b.artist_id = sqlc.arg(dst_artist_id)
+          AND b.slug = a.slug AND b.slug != '' AND b.id != a.id
+    ) THEN '' ELSE a.slug END
+WHERE a.id = sqlc.arg(album_id);
+
+-- name: ReparentCollidingAlbumTrackFiles :exec
+-- Album-merge step 1. For src_album tracks whose (disc, track_number) already
+-- exists on dst_album, move their track_files onto the matching dst track so
+-- the audio survives the merge. track_files are unique only on
+-- library_file_id, so re-pointing track_id never collides.
+UPDATE track_files tf
+SET track_id = dst.id
+FROM tracks src
+JOIN tracks dst
+    ON dst.album_id = sqlc.arg(dst_album_id)
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+WHERE tf.track_id = src.id
+  AND src.album_id = sqlc.arg(src_album_id);
+
+-- name: MergeCollidingAlbumTrackRatings :exec
+-- Album-merge step 2a. Fold user_track_ratings off the colliding src tracks
+-- onto their dst counterpart, keeping the higher rating. MUST run before the
+-- src tracks are deleted, or CASCADE drops these user ratings.
+INSERT INTO user_track_ratings (user_id, track_id, rating)
+SELECT utr.user_id, dst.id, utr.rating
+FROM user_track_ratings utr
+JOIN tracks src ON src.id = utr.track_id AND src.album_id = sqlc.arg(src_album_id)
+JOIN tracks dst
+    ON dst.album_id = sqlc.arg(dst_album_id)
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+ON CONFLICT (user_id, track_id) DO UPDATE
+SET rating = GREATEST(user_track_ratings.rating, EXCLUDED.rating),
+    updated_at = now();
+
+-- name: MergeCollidingAlbumTrackPlaylists :exec
+-- Album-merge step 2b. Move playlist memberships off the colliding src tracks
+-- onto their dst counterpart, keeping dst's slot when the track is already in
+-- the playlist. MUST run before the src tracks are deleted.
+INSERT INTO user_playlist_tracks (playlist_id, track_id, position, added_at)
+SELECT pt.playlist_id, dst.id, pt.position, pt.added_at
+FROM user_playlist_tracks pt
+JOIN tracks src ON src.id = pt.track_id AND src.album_id = sqlc.arg(src_album_id)
+JOIN tracks dst
+    ON dst.album_id = sqlc.arg(dst_album_id)
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+ON CONFLICT (playlist_id, track_id) DO NOTHING;
+
+-- name: ReparentCollidingAlbumTrackPlayEvents :exec
+-- Album-merge step 2c. Move play history off the colliding src tracks onto
+-- their dst counterpart. play_events has no per-track unique key, so a plain
+-- UPDATE moves every event. MUST run before the src tracks are deleted.
+UPDATE play_events pe
+SET track_id = dst.id
+FROM tracks src
+JOIN tracks dst
+    ON dst.album_id = sqlc.arg(dst_album_id)
+   AND dst.disc_number = src.disc_number
+   AND dst.track_number = src.track_number
+WHERE pe.track_id = src.id AND src.album_id = sqlc.arg(src_album_id);
+
+-- name: DeleteCollidingAlbumTracks :exec
+-- Album-merge step 3. Drop the src_album tracks whose (disc, track_number)
+-- already exists on dst_album. Their track_files (step 1) and user-scoped rows
+-- — ratings, playlists, play history (steps 2a-2c) — have already moved; only
+-- the derived track_facets remain and CASCADE clears them (they regenerate).
+DELETE FROM tracks src
+WHERE src.album_id = sqlc.arg(src_album_id)
+  AND EXISTS (
+      SELECT 1 FROM tracks dst
+      WHERE dst.album_id = sqlc.arg(dst_album_id)
+        AND dst.disc_number = src.disc_number
+        AND dst.track_number = src.track_number
+  );
+
+-- name: ReparentAlbumTracks :exec
+-- Album-merge step 4. Move the surviving (non-colliding) src_album tracks onto
+-- dst_album. Safe after DeleteCollidingAlbumTracks: the remaining
+-- (disc, track_number) tuples are now unique across the two albums.
+UPDATE tracks SET album_id = sqlc.arg(dst_album_id)
+WHERE album_id = sqlc.arg(src_album_id);
+
+-- name: MergeAlbumRatings :exec
+-- Album-merge step 5. Move user_album_ratings from src to dst, keeping the
+-- higher rating on collision.
+INSERT INTO user_album_ratings (user_id, album_id, rating)
+SELECT user_id, sqlc.arg(dst_album_id), rating
+FROM user_album_ratings
+WHERE user_album_ratings.album_id = sqlc.arg(src_album_id)
+ON CONFLICT (user_id, album_id) DO UPDATE
+SET rating = GREATEST(user_album_ratings.rating, EXCLUDED.rating),
+    updated_at = now();
+
+-- name: MergeAlbumFavorites :exec
+-- Album-merge step 6. Move "loved album" entries from src to dst, collapsing
+-- dupes via the (user_id, entity_type, entity_id) unique key.
+INSERT INTO user_favorites (user_id, entity_type, entity_id)
+SELECT user_id, 'album', sqlc.arg(dst_album_id)
+FROM user_favorites
+WHERE entity_type = 'album' AND user_favorites.entity_id = sqlc.arg(src_album_id)
+ON CONFLICT (user_id, entity_type, entity_id) DO NOTHING;
+
+-- name: DeleteAlbumByID :exec
+-- Album-merge step 7. Remove the emptied src album once its tracks, ratings,
+-- and favorites have moved. CASCADE clears album_centroids and any remaining
+-- album-scoped rows.
+DELETE FROM albums WHERE id = sqlc.arg(album_id);
 
 -- name: ReparentSimilarLocalRefs :exec
 -- Re-point any "this dupe is a similar artist of X" pointer at the

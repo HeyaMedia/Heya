@@ -134,6 +134,61 @@ func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Per
 	return i, err
 }
 
+const deleteCollidingPersonCast = `-- name: DeleteCollidingPersonCast :exec
+
+DELETE FROM media_cast src
+WHERE src.person_id = $1
+  AND EXISTS (
+      SELECT 1 FROM media_cast dst
+      WHERE dst.person_id = $2
+        AND dst.media_item_id = src.media_item_id
+        AND dst.character = src.character
+  )
+`
+
+type DeleteCollidingPersonCastParams struct {
+	SrcID int64 `json:"src_id"`
+	DstID int64 `json:"dst_id"`
+}
+
+// Person merge ----------------------------------------------------------------
+// Two person rows can resolve to the same upstream person (the same actor
+// scanned under name variants across titles). They share an idx_people_heya_slug
+// collision; the fix is to fold src into the canonical dst. people's derived
+// children (biographies, profiles, external_credits) are all ON DELETE CASCADE
+// and regenerate from dst's own enrichment, so only the credit *links*
+// (media_cast / media_crew) need to survive the merge. People are neither rated
+// nor favorited, so there's no user data to migrate.
+// Drop src cast rows that would collide with dst on (media_item_id, character)
+// before the reparent UPDATE moves the rest.
+func (q *Queries) DeleteCollidingPersonCast(ctx context.Context, arg DeleteCollidingPersonCastParams) error {
+	_, err := q.db.Exec(ctx, deleteCollidingPersonCast, arg.SrcID, arg.DstID)
+	return err
+}
+
+const deleteCollidingPersonCrew = `-- name: DeleteCollidingPersonCrew :exec
+DELETE FROM media_crew src
+WHERE src.person_id = $1
+  AND EXISTS (
+      SELECT 1 FROM media_crew dst
+      WHERE dst.person_id = $2
+        AND dst.media_item_id = src.media_item_id
+        AND dst.job = src.job
+  )
+`
+
+type DeleteCollidingPersonCrewParams struct {
+	SrcID int64 `json:"src_id"`
+	DstID int64 `json:"dst_id"`
+}
+
+// Drop src crew rows that would collide with dst on (media_item_id, job)
+// before the reparent UPDATE moves the rest.
+func (q *Queries) DeleteCollidingPersonCrew(ctx context.Context, arg DeleteCollidingPersonCrewParams) error {
+	_, err := q.db.Exec(ctx, deleteCollidingPersonCrew, arg.SrcID, arg.DstID)
+	return err
+}
+
 const deleteMediaCastByItem = `-- name: DeleteMediaCastByItem :exec
 DELETE FROM media_cast WHERE media_item_id = $1
 `
@@ -149,6 +204,17 @@ DELETE FROM media_crew WHERE media_item_id = $1
 
 func (q *Queries) DeleteMediaCrewByItem(ctx context.Context, mediaItemID int64) error {
 	_, err := q.db.Exec(ctx, deleteMediaCrewByItem, mediaItemID)
+	return err
+}
+
+const deletePerson = `-- name: DeletePerson :exec
+DELETE FROM people WHERE id = $1
+`
+
+// Remove the emptied src person. CASCADE clears its biographies, profiles, and
+// external_credits (and any cast/crew not already reparented).
+func (q *Queries) DeletePerson(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deletePerson, id)
 	return err
 }
 
@@ -726,6 +792,34 @@ func (q *Queries) PersonSlugExists(ctx context.Context, arg PersonSlugExistsPara
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const reparentPersonCast = `-- name: ReparentPersonCast :exec
+UPDATE media_cast SET person_id = $1 WHERE person_id = $2
+`
+
+type ReparentPersonCastParams struct {
+	DstID int64 `json:"dst_id"`
+	SrcID int64 `json:"src_id"`
+}
+
+func (q *Queries) ReparentPersonCast(ctx context.Context, arg ReparentPersonCastParams) error {
+	_, err := q.db.Exec(ctx, reparentPersonCast, arg.DstID, arg.SrcID)
+	return err
+}
+
+const reparentPersonCrew = `-- name: ReparentPersonCrew :exec
+UPDATE media_crew SET person_id = $1 WHERE person_id = $2
+`
+
+type ReparentPersonCrewParams struct {
+	DstID int64 `json:"dst_id"`
+	SrcID int64 `json:"src_id"`
+}
+
+func (q *Queries) ReparentPersonCrew(ctx context.Context, arg ReparentPersonCrewParams) error {
+	_, err := q.db.Exec(ctx, reparentPersonCrew, arg.DstID, arg.SrcID)
+	return err
 }
 
 const searchPeopleByName = `-- name: SearchPeopleByName :many

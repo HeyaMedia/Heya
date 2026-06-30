@@ -113,3 +113,47 @@ RETURNING *;
 
 -- name: MarkPersonEnriched :exec
 UPDATE people SET heya_enriched_at = now() WHERE id = $1;
+
+-- Person merge ----------------------------------------------------------------
+-- Two person rows can resolve to the same upstream person (the same actor
+-- scanned under name variants across titles). They share an idx_people_heya_slug
+-- collision; the fix is to fold src into the canonical dst. people's derived
+-- children (biographies, profiles, external_credits) are all ON DELETE CASCADE
+-- and regenerate from dst's own enrichment, so only the credit *links*
+-- (media_cast / media_crew) need to survive the merge. People are neither rated
+-- nor favorited, so there's no user data to migrate.
+
+-- name: DeleteCollidingPersonCast :exec
+-- Drop src cast rows that would collide with dst on (media_item_id, character)
+-- before the reparent UPDATE moves the rest.
+DELETE FROM media_cast src
+WHERE src.person_id = sqlc.arg(src_id)
+  AND EXISTS (
+      SELECT 1 FROM media_cast dst
+      WHERE dst.person_id = sqlc.arg(dst_id)
+        AND dst.media_item_id = src.media_item_id
+        AND dst.character = src.character
+  );
+
+-- name: ReparentPersonCast :exec
+UPDATE media_cast SET person_id = sqlc.arg(dst_id) WHERE person_id = sqlc.arg(src_id);
+
+-- name: DeleteCollidingPersonCrew :exec
+-- Drop src crew rows that would collide with dst on (media_item_id, job)
+-- before the reparent UPDATE moves the rest.
+DELETE FROM media_crew src
+WHERE src.person_id = sqlc.arg(src_id)
+  AND EXISTS (
+      SELECT 1 FROM media_crew dst
+      WHERE dst.person_id = sqlc.arg(dst_id)
+        AND dst.media_item_id = src.media_item_id
+        AND dst.job = src.job
+  );
+
+-- name: ReparentPersonCrew :exec
+UPDATE media_crew SET person_id = sqlc.arg(dst_id) WHERE person_id = sqlc.arg(src_id);
+
+-- name: DeletePerson :exec
+-- Remove the emptied src person. CASCADE clears its biographies, profiles, and
+-- external_credits (and any cast/crew not already reparented).
+DELETE FROM people WHERE id = sqlc.arg(id);

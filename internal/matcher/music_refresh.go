@@ -63,22 +63,6 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 	res.BackdropURL = detail.BackdropURL
 	res.ArtistImages = detail.ArtistImages
 
-	// Persist the canonical heya.media slug on the parent media_item.
-	// Stable lookup key for future refreshes — heya.media accepts
-	// slug:<slug> as an artist lookup id alongside mbid:<id> and
-	// per-provider keys.
-	if detail.HeyaSlug != "" {
-		item, err := m.q.GetMediaItemByID(ctx, artist.MediaItemID)
-		if err == nil && item.HeyaSlug != detail.HeyaSlug {
-			if err := m.q.UpdateMediaItemHeyaSlug(ctx, sqlc.UpdateMediaItemHeyaSlugParams{
-				ID:       artist.MediaItemID,
-				HeyaSlug: detail.HeyaSlug,
-			}); err != nil {
-				log.Warn().Err(err).Int64("media_item_id", artist.MediaItemID).Msg("update heya_slug failed")
-			}
-		}
-	}
-
 	// Artist row: only overwrite fields when the new value is non-empty
 	// (UpdateArtistEnrichedFields handles that at the SQL level).
 	newMBID := artist.MusicbrainzID
@@ -117,6 +101,25 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		res.ArtistID = canonical.ID
 		artist = *canonical
 		artistID = canonical.ID
+	}
+
+	// Persist the canonical heya.media slug on the parent media_item.
+	// Stable lookup key for future refreshes — heya.media accepts
+	// slug:<slug> as an artist lookup id alongside mbid:<id> and
+	// per-provider keys. Runs AFTER the dup-merge above: a row that just
+	// got folded into a canonical sibling (which already owns this slug in
+	// the library) would otherwise issue a doomed UPDATE that trips
+	// idx_media_items_heya_slug. Post-merge `artist` points at the canonical.
+	if detail.HeyaSlug != "" {
+		item, err := m.q.GetMediaItemByID(ctx, artist.MediaItemID)
+		if err == nil && item.HeyaSlug != detail.HeyaSlug {
+			if err := m.q.UpdateMediaItemHeyaSlug(ctx, sqlc.UpdateMediaItemHeyaSlugParams{
+				ID:       artist.MediaItemID,
+				HeyaSlug: detail.HeyaSlug,
+			}); err != nil {
+				log.Warn().Err(err).Int64("media_item_id", artist.MediaItemID).Msg("update heya_slug failed")
+			}
+		}
 	}
 
 	if err := m.q.UpdateArtistEnrichedFields(ctx, sqlc.UpdateArtistEnrichedFieldsParams{
@@ -207,6 +210,36 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 			coverURL = embedded.CoverURL
 		}
 
+		// Guard uq_albums_artist_title_year before writing: enrichment can
+		// collapse two distinct local albums onto the same (artist, title,
+		// year) tuple (a deluxe/standard pair fuzzy-matching one upstream
+		// release, or a year backfill landing on a same-titled sibling), and
+		// that rewrite would fail the album's UPDATE outright. albumWriteTitleYear
+		// falls back to the local title+year when the tuple is already owned by
+		// another album of this artist, so the row keeps its index slot and the
+		// remaining enriched columns still land. See the helper for the detail.
+		var collidedWith int64
+		newTitle, newYear := albumWriteTitleYear(embedded.Title, dbAlbum.Title, newYear, dbAlbum.Year, func(title, year string) bool {
+			sib, err := m.q.GetAlbumByArtistTitleYear(ctx, sqlc.GetAlbumByArtistTitleYearParams{
+				ArtistID: artistID,
+				Lower:    title,
+				Year:     year,
+			})
+			if err == nil && sib.ID != dbAlbum.ID {
+				collidedWith = sib.ID
+				return true
+			}
+			return false
+		})
+		if collidedWith != 0 {
+			log.Debug().
+				Int64("album", dbAlbum.ID).
+				Int64("collides_with", collidedWith).
+				Str("title", embedded.Title).
+				Str("year", newYear).
+				Msg("album enrichment would duplicate a sibling tuple; keeping local title+year")
+		}
+
 		changed := albumMBID != dbAlbum.MusicbrainzID ||
 			newYear != dbAlbum.Year ||
 			newType != dbAlbum.AlbumType ||
@@ -219,7 +252,7 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 			if err := m.q.UpdateAlbumEnrichedFields(ctx, sqlc.UpdateAlbumEnrichedFieldsParams{
 				ID:       dbAlbum.ID,
 				Column2:  albumMBID,
-				Column3:  embedded.Title,
+				Column3:  newTitle,
 				Column4:  newYear,
 				Column5:  newType,
 				Column6:  embedded.Label,

@@ -4,11 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 )
+
+// albumWriteTitleYear decides the (title, year) to persist for a single album
+// during enrichment, guarding the uq_albums_artist_title_year unique index
+// — (artist_id, lower(title), year).
+//
+// Enrichment can collapse two distinct local albums onto the same tuple:
+//   - title drift: a standard and a deluxe folder both fuzzy-match one
+//     upstream release, so both want the same canonical title; or
+//   - year drift: a row with no local year gets the upstream year backfilled,
+//     landing it on a same-titled sibling.
+//
+// Either rewrite trips the constraint and fails that album's UPDATE outright.
+// When the normalized (title, year) is already owned by a *different* album of
+// the same artist — reported by collides — both fields fall back to the local
+// values so the row keeps its existing index slot and the remaining enriched
+// columns (MBID, label, cover, …) still land.
+//
+// An empty embeddedTitle preserves the local title (upstream had nothing to
+// say); the candidate year is the caller's already-resolved target.
+func albumWriteTitleYear(embeddedTitle, localTitle, candidateYear, localYear string, collides func(title, year string) bool) (title, year string) {
+	title = embeddedTitle
+	if title == "" {
+		title = localTitle
+	}
+	year = candidateYear
+	if (!strings.EqualFold(title, localTitle) || year != localYear) && collides(title, year) {
+		return localTitle, localYear
+	}
+	return title, year
+}
 
 // writeArtistExtendedMetadata fills the post-00019 columns on the artists
 // row. Separated from the main RefreshMusicArtist body so its JSON encoding
