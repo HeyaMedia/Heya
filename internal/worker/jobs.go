@@ -161,15 +161,16 @@ func (FetchArtworkArgs) InsertOpts() river.InsertOpts {
 // "Refreshing 17/200 (Calvin Harris)" progress events without consulting
 // River's job table.
 type EnrichMediaItemArgs struct {
-	// (ItemID, Force) is the uniqueness key (river:"unique"): at most one active
-	// enrich per item per force-level. Coalesces the many enqueue sites (scan,
-	// watcher debounce, view-promotion, stale/failed re-drive) so re-drives can't
-	// stack duplicate jobs — while a user's Force refresh is NOT deduped away by
-	// a queued non-forced enrich (different key). Terminal jobs don't block, so
-	// the item stays re-enrichable.
-	ItemID          int64  `json:"item_id" river:"unique"`
+	// NOTE: deliberately NOT unique-while-active. River's unique dedup returns
+	// the pre-existing job WITHOUT bumping its priority, so a P1 view-promotion
+	// enrich (EnrichSourceView) would be swallowed by an already-queued P2/P3
+	// scan enrich for the same item and never run at high priority. Coalescing is
+	// instead handled priority-safely by the enrich idempotency gate + the
+	// debounce table; the stale/failed re-drive is bounded (scheduled cadence,
+	// fast-completing jobs, unique kickoff).
+	ItemID          int64  `json:"item_id"`
 	Source          string `json:"source,omitempty"`
-	Force           bool   `json:"force,omitempty" river:"unique"`
+	Force           bool   `json:"force,omitempty"`
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 
 	BatchLibraryID int64 `json:"batch_library_id,omitempty"`
@@ -183,7 +184,7 @@ func (EnrichMediaItemArgs) InsertOpts() river.InsertOpts {
 	// overrides per-insert with the correct priority for the (source,
 	// media_type) combination. Priority bands within this queue:
 	// P1=watcher/view, P2=movies+tv, P3=music+books, P4=analysis.
-	return river.InsertOpts{Queue: "enrich_media_item", MaxAttempts: 3, Priority: 2, UniqueOpts: uniqueWhileActive()}
+	return river.InsertOpts{Queue: "enrich_media_item", MaxAttempts: 3, Priority: 2}
 }
 
 type SaveNFOArgs struct {
