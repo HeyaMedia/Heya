@@ -47,17 +47,38 @@ func (t *TextSearcher) Ready() bool {
 // Embed returns a 512-dim L2-normalized embedding for `text`. Lazy-
 // loads the encoder on first call. Subsequent calls share the warm
 // session.
+//
+// The session is used UNDER t.mu on purpose: Close/Reconfigure destroy
+// the native ONNX session, and an embed running on a snapshot taken
+// outside the lock would be a use-after-free (segfault, not an error).
+// Serializing embeds is fine — a text embed is milliseconds and comes
+// from interactive searches.
 func (t *TextSearcher) Embed(text string) ([]float32, error) {
 	if err := t.ensureLoaded(); err != nil {
 		return nil, err
 	}
 	t.mu.Lock()
-	sess := t.session
-	t.mu.Unlock()
-	if sess == nil {
+	defer t.mu.Unlock()
+	if t.session == nil {
 		return nil, ErrTextSearcherUnavailable
 	}
-	return sess.Embed(text)
+	return t.session.Embed(text)
+}
+
+// Reconfigure closes any loaded session and swaps the config, so the
+// next Embed lazy-loads with the new settings (models dir/accelerator).
+// It takes the same mutex as Embed/ensureLoaded, so an in-flight embed
+// or load finishes before the old session is destroyed — reconfigure
+// in place instead of swapping the *TextSearcher pointer, which would
+// race with concurrent readers of the pointer.
+func (t *TextSearcher) Reconfigure(cfg Config) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.session != nil {
+		t.session.Close()
+		t.session = nil
+	}
+	t.cfg = cfg.normalize()
 }
 
 // ensureLoaded loads the encoder once; subsequent callers wait on

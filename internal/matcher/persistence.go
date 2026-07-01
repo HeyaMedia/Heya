@@ -221,7 +221,39 @@ func (m *Matcher) lockedFields(ctx context.Context, mediaItemID int64) map[strin
 	return locked
 }
 
-func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) {
+// richErrs accumulates non-benign failures across storeRichMetadata's fan-out.
+// The fan-out keeps going on individual failures (partial rich metadata beats
+// none, and every insert is idempotent via ON CONFLICT), but the joined summary
+// stops the caller from stamping the enrich component done — so a degraded
+// cast/crew set gets retried instead of frozen. Capped: a dead connection
+// would otherwise collect thousands of identical lines.
+type richErrs struct {
+	errs   []error
+	total  int
+	misses int // people/keywords/companies that could not be resolved or created
+}
+
+func (r *richErrs) add(err error) {
+	r.total++
+	if len(r.errs) < 8 {
+		r.errs = append(r.errs, err)
+	}
+}
+
+func (r *richErrs) result() error {
+	out := append([]error{}, r.errs...)
+	if r.total > len(r.errs) {
+		out = append(out, fmt.Errorf("… and %d more failures", r.total-len(r.errs)))
+	}
+	if r.misses > 0 {
+		out = append(out, fmt.Errorf("%d referenced people/keywords/companies could not be resolved", r.misses))
+	}
+	return errors.Join(out...)
+}
+
+func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
+	var re richErrs
+
 	seenCast := map[string]bool{}
 	for _, c := range d.Cast {
 		dedup := c.Name + "|" + c.Character
@@ -232,16 +264,19 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 
 		person := m.findOrCreatePerson(ctx, c.Name, c.ExternalIDs, c.Gender, c.ProfilePath, c.Popularity, c.Profiles)
 		if person.ID == 0 {
+			re.misses++
 			continue
 		}
-		m.q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
+		if err := m.q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
 			MediaItemID:  mediaItemID,
 			PersonID:     person.ID,
 			Character:    c.Character,
 			DisplayOrder: int32(c.Order),
 			Gender:       int32(c.Gender),
 			Source:       c.Source,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("cast %q: %w", c.Name, err))
+		}
 	}
 
 	seenCrew := map[string]bool{}
@@ -254,16 +289,19 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 
 		person := m.findOrCreatePerson(ctx, c.Name, c.ExternalIDs, c.Gender, c.ProfilePath, 0, c.Profiles)
 		if person.ID == 0 {
+			re.misses++
 			continue
 		}
-		m.q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
+		if err := m.q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
 			MediaItemID: mediaItemID,
 			PersonID:    person.ID,
 			Job:         c.Job,
 			Department:  c.Department,
 			Gender:      int32(c.Gender),
 			Source:      c.Source,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("crew %q: %w", c.Name, err))
+		}
 	}
 
 	seenKeywords := map[string]bool{}
@@ -275,12 +313,15 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 
 		kw := m.findOrCreateKeyword(ctx, k.Name, k.ExternalIDs)
 		if kw.ID == 0 {
+			re.misses++
 			continue
 		}
-		m.q.LinkMediaKeyword(ctx, sqlc.LinkMediaKeywordParams{
+		if err := m.q.LinkMediaKeyword(ctx, sqlc.LinkMediaKeywordParams{
 			MediaItemID: mediaItemID,
 			KeywordID:   kw.ID,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("keyword %q: %w", k.Name, err))
+		}
 	}
 
 	seenCompanies := map[string]bool{}
@@ -292,16 +333,19 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 
 		co := m.findOrCreateCompany(ctx, pc.Name, pc.ExternalIDs, pc.LogoPath, pc.OriginCountry)
 		if co.ID == 0 {
+			re.misses++
 			continue
 		}
-		m.q.LinkMediaProductionCompany(ctx, sqlc.LinkMediaProductionCompanyParams{
+		if err := m.q.LinkMediaProductionCompany(ctx, sqlc.LinkMediaProductionCompanyParams{
 			MediaItemID: mediaItemID,
 			CompanyID:   co.ID,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("company %q: %w", pc.Name, err))
+		}
 	}
 
 	for _, v := range d.Videos {
-		m.q.CreateMediaVideo(ctx, sqlc.CreateMediaVideoParams{
+		if err := m.q.CreateMediaVideo(ctx, sqlc.CreateMediaVideoParams{
 			MediaItemID: mediaItemID,
 			ProviderKey: v.ProviderKey,
 			Name:        v.Name,
@@ -310,22 +354,26 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			VideoType:   v.Type,
 			Language:    v.Language,
 			Official:    v.Official,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("video %q: %w", v.Name, err))
+		}
 	}
 
 	for _, c := range d.Certifications {
-		m.q.CreateMediaCertification(ctx, sqlc.CreateMediaCertificationParams{
+		if err := m.q.CreateMediaCertification(ctx, sqlc.CreateMediaCertificationParams{
 			MediaItemID:   mediaItemID,
 			Country:       c.Country,
 			Certification: c.Certification,
 			ReleaseDate:   pgDateFromString(c.ReleaseDate),
 			ReleaseType:   int32(c.ReleaseType),
 			Source:        c.Source,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("certification %s: %w", c.Country, err))
+		}
 	}
 
 	for _, r := range d.Recommendations {
-		m.q.CreateMediaRecommendation(ctx, sqlc.CreateMediaRecommendationParams{
+		if err := m.q.CreateMediaRecommendation(ctx, sqlc.CreateMediaRecommendationParams{
 			MediaItemID: mediaItemID,
 			ExternalIds: mustJSON(r.ExternalIDs),
 			Title:       r.Title,
@@ -333,7 +381,9 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			MediaType:   r.MediaType,
 			VoteAverage: numericFromFloat(r.VoteAverage),
 			ReleaseDate: r.ReleaseDate,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("recommendation %q: %w", r.Title, err))
+		}
 	}
 
 	if d.Collection != nil && d.Collection.Name != "" && m.shouldAutoCollect(ctx, mediaItemID) {
@@ -343,7 +393,7 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 	if d.ExternalIDs["wikidata"] != "" || d.ExternalIDs["facebook"] != "" || d.ExternalIDs["instagram"] != "" || d.ExternalIDs["twitter"] != "" || d.Homepage != "" {
 		item, err := m.q.GetMediaItemByID(ctx, mediaItemID)
 		if err == nil {
-			m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+			if _, err := m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
 				ID:               item.ID,
 				Title:            item.Title,
 				SortTitle:        item.SortTitle,
@@ -358,27 +408,33 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 				Status:           item.Status,
 				ProviderKind:     item.ProviderKind,
 				HeyaSlug:         item.HeyaSlug,
-			})
+			}); err != nil {
+				re.add(fmt.Errorf("external ids: %w", err))
+			}
 		}
 	}
 
 	for _, t := range d.Titles {
-		m.q.CreateMediaTitle(ctx, sqlc.CreateMediaTitleParams{
+		if err := m.q.CreateMediaTitle(ctx, sqlc.CreateMediaTitleParams{
 			MediaItemID: mediaItemID,
 			Title:       t.Title,
 			Language:    t.Language,
 			Country:     t.Country,
 			TitleType:   t.TitleType,
 			Source:      t.Source,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("title %q: %w", t.Title, err))
+		}
 	}
 
 	for lang, text := range d.Overviews {
-		m.q.CreateMediaOverview(ctx, sqlc.CreateMediaOverviewParams{
+		if err := m.q.CreateMediaOverview(ctx, sqlc.CreateMediaOverviewParams{
 			MediaItemID: mediaItemID,
 			Language:    lang,
 			Overview:    text,
-		})
+		}); err != nil {
+			re.add(fmt.Errorf("overview %s: %w", lang, err))
+		}
 	}
 
 	log.Info().Int64("media_id", mediaItemID).
@@ -390,6 +446,8 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		Int("titles", len(d.Titles)).
 		Int("overviews", len(d.Overviews)).
 		Msg("stored rich metadata")
+
+	return re.result()
 }
 
 func (m *Matcher) findOrCreatePerson(ctx context.Context, name string, externalIDs map[string]string, gender int, profilePath string, popularity float64, profiles []metadata.ProfileImage) sqlc.Person {
@@ -925,7 +983,9 @@ func (m *Matcher) StoreEntityMetadata(ctx context.Context, mediaItemID int64, ki
 
 // StoreRichMetadata persists cast, crew, keywords, production companies, videos,
 // certifications, recommendations, and collections for a media item. Called by
-// the worker pipeline (EnrichMediaItemWorker) and the metadata editor.
-func (m *Matcher) StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) {
-	m.storeRichMetadata(ctx, mediaItemID, detail)
+// the worker pipeline (EnrichMediaItemWorker) and the metadata editor. A non-nil
+// error means at least one component failed to persist — the caller must not
+// stamp the enrich component done (the fan-out is idempotent, so a retry heals).
+func (m *Matcher) StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) error {
+	return m.storeRichMetadata(ctx, mediaItemID, detail)
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -61,6 +62,17 @@ func New(db *pgxpool.Pool, opts MatchOptions, heya *heyamedia.HeyaProvider, prob
 		opts:  opts,
 		probe: probe,
 	}
+}
+
+// WithTx returns a copy of the matcher whose queries run inside tx, so a caller
+// can make a multi-step rebuild (delete + re-store, as in re-identify) atomic.
+// Every persistence helper goes through m.q, so swapping it is sufficient. The
+// one exception is the music-merge path, which opens its own pool transaction
+// via m.db — don't call it through a tx-scoped matcher.
+func (m *Matcher) WithTx(tx pgx.Tx) *Matcher {
+	c := *m
+	c.q = m.q.WithTx(tx)
+	return &c
 }
 
 func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType sqlc.MediaType) (MatchResult, error) {

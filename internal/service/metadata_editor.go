@@ -578,8 +578,30 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 		return fmt.Errorf("metadata fetch failed: %w", err)
 	}
 
+	var kind metadata.MediaKind
+	switch item.MediaType {
+	case sqlc.MediaTypeMovie:
+		kind = metadata.KindMovie
+	case sqlc.MediaTypeTv:
+		kind = metadata.KindTV
+	default:
+		kind = metadata.MediaKind(item.MediaType)
+	}
+
+	// Everything below is destructive-then-rebuild (wipe cast/crew/keywords/…,
+	// re-store from the fresh detail), so it runs in ONE transaction: a failure
+	// mid-rebuild must roll the deletes back, not leave the item stripped. The
+	// artwork job is enqueued through the same tx so it only exists if the
+	// rebuild committed.
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin re-identify transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	txq := q.WithTx(tx)
+
 	externalIDs, _ := json.Marshal(detail.ExternalIDs)
-	q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+	if _, err := txq.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
 		ID:               mediaItemID,
 		Title:            detail.Title,
 		SortTitle:        strings.ToLower(detail.Title),
@@ -594,40 +616,43 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 		Status:           item.Status,
 		ProviderKind:     item.ProviderKind,
 		HeyaSlug:         item.HeyaSlug,
-	})
-
-	q.DeleteMediaCastByItem(ctx, mediaItemID)
-	q.DeleteMediaCrewByItem(ctx, mediaItemID)
-	q.DeleteMediaKeywordsByItem(ctx, mediaItemID)
-	q.DeleteMediaVideosByItem(ctx, mediaItemID)
-	q.DeleteMediaCertificationsByItem(ctx, mediaItemID)
-	q.DeleteMediaRecommendationsByItem(ctx, mediaItemID)
-	q.DeleteMediaProductionCompaniesByItem(ctx, mediaItemID)
-
-	var kind metadata.MediaKind
-	switch item.MediaType {
-	case sqlc.MediaTypeMovie:
-		kind = metadata.KindMovie
-	case sqlc.MediaTypeTv:
-		kind = metadata.KindTV
-	default:
-		kind = metadata.MediaKind(item.MediaType)
+	}); err != nil {
+		return fmt.Errorf("re-identify: update media item: %w", err)
 	}
 
-	if err := a.matcher.StoreEntityMetadata(ctx, mediaItemID, kind, detail); err != nil {
+	for _, del := range []struct {
+		name string
+		fn   func(context.Context, int64) error
+	}{
+		{"cast", txq.DeleteMediaCastByItem},
+		{"crew", txq.DeleteMediaCrewByItem},
+		{"keywords", txq.DeleteMediaKeywordsByItem},
+		{"videos", txq.DeleteMediaVideosByItem},
+		{"certifications", txq.DeleteMediaCertificationsByItem},
+		{"recommendations", txq.DeleteMediaRecommendationsByItem},
+		{"production companies", txq.DeleteMediaProductionCompaniesByItem},
+	} {
+		if err := del.fn(ctx, mediaItemID); err != nil {
+			return fmt.Errorf("re-identify: clear %s: %w", del.name, err)
+		}
+	}
+
+	txMatcher := a.matcher.WithTx(tx)
+	if err := txMatcher.StoreEntityMetadata(ctx, mediaItemID, kind, detail); err != nil {
 		return fmt.Errorf("re-identify: store base metadata: %w", err)
 	}
-	a.matcher.StoreRichMetadata(ctx, mediaItemID, detail)
-
-	tx, txErr := a.db.Begin(ctx)
-	if txErr == nil {
-		_, _ = a.river.InsertTx(ctx, tx, worker.FetchArtworkArgs{
-			MediaItemID: mediaItemID,
-			MediaType:   string(item.MediaType),
-		}, nil)
-		_ = tx.Commit(ctx)
+	if err := txMatcher.StoreRichMetadata(ctx, mediaItemID, detail); err != nil {
+		return fmt.Errorf("re-identify: store rich metadata: %w", err)
 	}
 
+	_, _ = a.river.InsertTx(ctx, tx, worker.FetchArtworkArgs{
+		MediaItemID: mediaItemID,
+		MediaType:   string(item.MediaType),
+	}, nil)
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit re-identify: %w", err)
+	}
 	return nil
 }
 

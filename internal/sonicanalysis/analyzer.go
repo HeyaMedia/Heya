@@ -148,6 +148,23 @@ func (a *Analyzer) State() AnalyzerState {
 	return AnalyzerState(a.state.Load())
 }
 
+// ErrAnalyzerBusy is returned by Reconfigure when the analyzer isn't idle.
+var ErrAnalyzerBusy = errors.New("sonicanalysis: analyzer busy; cannot reconfigure")
+
+// Reconfigure swaps the analyzer's config (models dir / accelerator) for the
+// next Load. It reserves the state machine with the same Unloaded→Loading CAS
+// that Load uses, so it can never interleave with a concurrent Load writing
+// a.cfg/a.bundle — reconfigure in place instead of swapping the *Analyzer
+// pointer, which would race with concurrent readers of the pointer.
+func (a *Analyzer) Reconfigure(cfg Config) error {
+	if !a.state.CompareAndSwap(int32(StateUnloaded), int32(StateLoading)) {
+		return ErrAnalyzerBusy
+	}
+	a.cfg = cfg.normalize()
+	a.state.Store(int32(StateUnloaded))
+	return nil
+}
+
 // IsReady is a convenience wrapper around State.
 func (a *Analyzer) IsReady() bool {
 	return a.State() == StateReady

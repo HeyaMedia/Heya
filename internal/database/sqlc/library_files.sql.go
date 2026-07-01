@@ -78,78 +78,6 @@ func (q *Queries) DeleteLibraryFilesByPath(ctx context.Context, arg DeleteLibrar
 	return err
 }
 
-const getDeletedFileByContentHash = `-- name: GetDeletedFileByContentHash :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
-WHERE library_id = $1 AND content_hash = $2 AND content_hash != ''
-  AND deleted_at IS NOT NULL AND deleted_at > now() - interval '7 days'
-LIMIT 1
-`
-
-type GetDeletedFileByContentHashParams struct {
-	LibraryID   int64  `json:"library_id"`
-	ContentHash string `json:"content_hash"`
-}
-
-func (q *Queries) GetDeletedFileByContentHash(ctx context.Context, arg GetDeletedFileByContentHashParams) (LibraryFile, error) {
-	row := q.db.QueryRow(ctx, getDeletedFileByContentHash, arg.LibraryID, arg.ContentHash)
-	var i LibraryFile
-	err := row.Scan(
-		&i.ID,
-		&i.LibraryID,
-		&i.Path,
-		&i.Size,
-		&i.Mtime,
-		&i.MediaItemID,
-		&i.ParseResult,
-		&i.Status,
-		&i.ErrorMessage,
-		&i.DeletedAt,
-		&i.MediaInfo,
-		&i.Keyframes,
-		&i.HasTrickplay,
-		&i.ContentHash,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getDeletedFileBySize = `-- name: GetDeletedFileBySize :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
-WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
-  AND deleted_at > now() - interval '7 days'
-LIMIT 1
-`
-
-type GetDeletedFileBySizeParams struct {
-	LibraryID int64 `json:"library_id"`
-	Size      int64 `json:"size"`
-}
-
-func (q *Queries) GetDeletedFileBySize(ctx context.Context, arg GetDeletedFileBySizeParams) (LibraryFile, error) {
-	row := q.db.QueryRow(ctx, getDeletedFileBySize, arg.LibraryID, arg.Size)
-	var i LibraryFile
-	err := row.Scan(
-		&i.ID,
-		&i.LibraryID,
-		&i.Path,
-		&i.Size,
-		&i.Mtime,
-		&i.MediaItemID,
-		&i.ParseResult,
-		&i.Status,
-		&i.ErrorMessage,
-		&i.DeletedAt,
-		&i.MediaInfo,
-		&i.Keyframes,
-		&i.HasTrickplay,
-		&i.ContentHash,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getLibraryFileByID = `-- name: GetLibraryFileByID :one
 SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files WHERE id = $1
 `
@@ -291,6 +219,61 @@ func (q *Queries) ListAllLibraryFilePaths(ctx context.Context, libraryID int64) 
 			return nil, err
 		}
 		items = append(items, path)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeletedFilesBySize = `-- name: ListDeletedFilesBySize :many
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
+  AND deleted_at > now() - interval '7 days'
+ORDER BY deleted_at DESC
+LIMIT 16
+`
+
+type ListDeletedFilesBySizeParams struct {
+	LibraryID int64 `json:"library_id"`
+	Size      int64 `json:"size"`
+}
+
+// Move-detection candidates: recently soft-deleted files with the same byte
+// size. Size alone is NOT sufficient to claim a move — the scanner requires a
+// matching basename or mtime on top (see relocate logic in scanner.go) so a
+// coincidentally same-sized new file can't inherit a deleted file's
+// identity/watch history. Newest deletions first for deterministic preference.
+func (q *Queries) ListDeletedFilesBySize(ctx context.Context, arg ListDeletedFilesBySizeParams) ([]LibraryFile, error) {
+	rows, err := q.db.Query(ctx, listDeletedFilesBySize, arg.LibraryID, arg.Size)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryFile{}
+	for rows.Next() {
+		var i LibraryFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.MediaItemID,
+			&i.ParseResult,
+			&i.Status,
+			&i.ErrorMessage,
+			&i.DeletedAt,
+			&i.MediaInfo,
+			&i.Keyframes,
+			&i.HasTrickplay,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

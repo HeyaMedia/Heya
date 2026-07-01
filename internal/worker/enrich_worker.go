@@ -147,7 +147,13 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	// Force does a full refresh. We stamp both timestamps even though one call
 	// does the work, so the UI can surface them independently if we ever split.
 	if job.Args.Force || !item.PeopleEnrichedAt.Valid {
-		w.Matcher.StoreRichMetadata(ctx, item.ID, detail)
+		// A partial rich write (some cast rows failed, person creates errored)
+		// must not be stamped done — mark the item failed so the refresh-stale
+		// sweep re-drives it; the fan-out is ON CONFLICT-idempotent, so the
+		// retry fills exactly the gaps.
+		if err := w.Matcher.StoreRichMetadata(ctx, item.ID, detail); err != nil {
+			return w.markFailed(ctx, q, item.ID, fmt.Sprintf("store rich metadata: %v", err))
+		}
 		_ = q.MarkEnrichPeopleDone(ctx, item.ID)
 		_ = q.MarkEnrichExtrasDone(ctx, item.ID)
 	}

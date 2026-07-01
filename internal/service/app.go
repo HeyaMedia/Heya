@@ -339,17 +339,21 @@ func (a *App) SonicAnalysisEnabled(ctx context.Context) bool {
 	return a.SonicAnalysisSettings(ctx).Enabled
 }
 
-// ReconfigureSonicAnalysisAnalyzer rebuilds the Analyzer + TextSearcher
-// with the current settings' accelerator choice. Caller must ensure
-// the analyzer isn't mid-batch (state == Unloaded). Returns
-// ErrSonicBusy if it is. The scheduler swallows this and waits for
-// the next window naturally.
+// ReconfigureSonicAnalysisAnalyzer applies the current settings'
+// accelerator choice to the Analyzer + TextSearcher. Returns
+// ErrSonicBusy when the analyzer is mid-batch; the scheduler swallows
+// this and waits for the next window naturally.
+//
+// Both are reconfigured IN PLACE (Analyzer.Reconfigure CASes the state
+// machine; TextSearcher.Reconfigure closes its session under the same
+// lock Embed holds). The old version swapped the a.analyzer /
+// a.textSearcher pointers instead — an unsynchronized write racing every
+// concurrent TextSearcher()/SonicAnalyzer() reader, and Close() on the
+// old searcher could destroy the ONNX session under an in-flight Embed
+// (native use-after-free).
 func (a *App) ReconfigureSonicAnalysisAnalyzer(ctx context.Context) error {
 	if a.analyzer == nil {
 		return nil
-	}
-	if a.analyzer.State() != sonicanalysis.StateUnloaded {
-		return ErrSonicBusy
 	}
 	settings := a.SonicAnalysisSettings(ctx)
 	modelsDir := a.config.DataDir.Value + "/models"
@@ -357,9 +361,10 @@ func (a *App) ReconfigureSonicAnalysisAnalyzer(ctx context.Context) error {
 		ModelsDir:   modelsDir,
 		Accelerator: sonicanalysis.Accelerator(settings.Accelerator),
 	}
-	a.analyzer = sonicanalysis.NewAnalyzer(saCfg)
-	a.textSearcher.Close()
-	a.textSearcher = sonicanalysis.NewTextSearcher(saCfg)
+	if err := a.analyzer.Reconfigure(saCfg); err != nil {
+		return ErrSonicBusy
+	}
+	a.textSearcher.Reconfigure(saCfg)
 	return nil
 }
 

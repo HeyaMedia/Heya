@@ -207,11 +207,13 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 			parseJSON = []byte("{}")
 		}
 
-		moved, moveErr := s.q.GetDeletedFileBySize(ctx, sqlc.GetDeletedFileBySizeParams{
-			LibraryID: libraryID,
-			Size:      size,
-		})
-		if moveErr == nil && moved.ID > 0 {
+		// Move detection: a recently soft-deleted file with the same size is a
+		// relocate *candidate*, but size alone is too weak an identity — a new,
+		// coincidentally same-sized file would inherit the deleted file's
+		// media link and watch history. Moves preserve the basename and/or the
+		// mtime, so require one of those on top (basename preferred: a move
+		// across dirs keeps the name; a rename-in-place keeps the mtime).
+		if moved := s.findMovedFile(ctx, libraryID, size, fullPath, mtime); moved != nil {
 			s.q.RelocateLibraryFile(ctx, sqlc.RelocateLibraryFileParams{
 				ID:          moved.ID,
 				Path:        fullPath,
@@ -258,6 +260,34 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 		result.New++
 		return nil
 	})
+}
+
+// findMovedFile returns the soft-deleted file this new path is a relocation of,
+// or nil. Candidates share the byte size (7-day window, newest deletion first);
+// the claim additionally needs a matching basename (move across dirs) or a
+// matching mtime (rename in place) — size alone would let an unrelated
+// same-sized file steal the deleted file's identity and watch history.
+func (s *Scanner) findMovedFile(ctx context.Context, libraryID, size int64, fullPath string, mtime time.Time) *sqlc.LibraryFile {
+	candidates, err := s.q.ListDeletedFilesBySize(ctx, sqlc.ListDeletedFilesBySizeParams{
+		LibraryID: libraryID,
+		Size:      size,
+	})
+	if err != nil || len(candidates) == 0 {
+		return nil
+	}
+	base := filepath.Base(fullPath)
+	for i := range candidates {
+		if filepath.Base(candidates[i].Path) == base {
+			return &candidates[i]
+		}
+	}
+	want := mtime.Truncate(time.Microsecond)
+	for i := range candidates {
+		if candidates[i].Mtime.Valid && candidates[i].Mtime.Time.Truncate(time.Microsecond).Equal(want) {
+			return &candidates[i]
+		}
+	}
+	return nil
 }
 
 func (s *Scanner) detectDeletions(ctx context.Context, libraryID int64, discovered map[string]bool, smbTrustworthy bool) (int, error) {

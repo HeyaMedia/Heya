@@ -120,17 +120,17 @@ UPDATE library_files
 SET content_hash = $2, updated_at = now()
 WHERE id = $1;
 
--- name: GetDeletedFileBySize :one
+-- name: ListDeletedFilesBySize :many
+-- Move-detection candidates: recently soft-deleted files with the same byte
+-- size. Size alone is NOT sufficient to claim a move — the scanner requires a
+-- matching basename or mtime on top (see relocate logic in scanner.go) so a
+-- coincidentally same-sized new file can't inherit a deleted file's
+-- identity/watch history. Newest deletions first for deterministic preference.
 SELECT * FROM library_files
 WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
   AND deleted_at > now() - interval '7 days'
-LIMIT 1;
-
--- name: GetDeletedFileByContentHash :one
-SELECT * FROM library_files
-WHERE library_id = $1 AND content_hash = $2 AND content_hash != ''
-  AND deleted_at IS NOT NULL AND deleted_at > now() - interval '7 days'
-LIMIT 1;
+ORDER BY deleted_at DESC
+LIMIT 16;
 
 -- name: RelocateLibraryFile :exec
 UPDATE library_files

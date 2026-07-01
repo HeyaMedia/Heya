@@ -29,7 +29,7 @@ var _ pgx.Tx // ensure import used
 type MatchService interface {
 	MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) (matcher.MatchInfo, error)
 	StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail) error
-	StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail)
+	StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) error
 	ResolveMatch(ctx context.Context, fileID, candidateID int64) error
 	RefreshMusicArtist(ctx context.Context, artistID int64) (matcher.RefreshArtistResult, error)
 	MediaItemIDForArtist(ctx context.Context, artistID int64) (int64, error)
