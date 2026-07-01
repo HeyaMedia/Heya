@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -111,12 +112,27 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 		enqueued += n
 		failed += enqueueFailed
 
+		// Self-heal files that were matched but never successfully probed (their
+		// first ffprobe failed on a flaky mount, and the size+mtime skip means
+		// plain rescans never revisit them). ffprobe jobs are unique-while-active,
+		// so this can't stack duplicates against probes still in flight.
+		reprobed := enqueueReprobeUnprobed(ctx, q, rc, lib.ID, taskID)
+		enqueued += reprobed
+
+		// Self-heal files stranded 'unmatched' by a transient provider search
+		// error — the match analogue of the reprobe pass. metadata_match is
+		// unique-while-active, so re-drives coalesce.
+		rematched := enqueueRematchTransient(ctx, q, rc, lib.ID, taskID)
+		enqueued += rematched
+
 		log.Info().
 			Int64("library_id", lib.ID).
 			Int("discovered", result.Discovered).
 			Int("new", result.New).
 			Int("deleted", result.Deleted).
 			Int("enqueued", n).
+			Int("reprobed", reprobed).
+			Int("rematched", rematched).
 			Msg("kickoff_library_scan: library done")
 
 		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
@@ -152,6 +168,89 @@ func sortLibrariesByMediaPriority(libs []sqlc.Library) {
 	sort.SliceStable(libs, func(i, j int) bool {
 		return rank(libs[i].MediaType) < rank(libs[j].MediaType)
 	})
+}
+
+// reprobeCap bounds how many stuck-unprobed files one scan re-enqueues per
+// library, so a large backlog (the single ffprobe worker drains slowly) can't
+// flood the queue in one pass. ffprobe jobs are unique-while-active, so the same
+// files simply re-coalesce across scans until they actually drain.
+const reprobeCap = 2000
+
+// enqueueReprobeUnprobed re-enqueues ffprobe for probeable files that are known
+// (matched) but never got media_info — the "scanned once, probe failed, never
+// retried" gap. Files that already carry media_info are left untouched, so a
+// probed-and-unchanged file is never needlessly re-probed.
+func enqueueReprobeUnprobed(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string) int {
+	if rc == nil {
+		return 0
+	}
+	files, err := q.ListUnprobedProbeableFiles(ctx, sqlc.ListUnprobedProbeableFilesParams{
+		LibraryID: libraryID,
+		Limit:     reprobeCap,
+	})
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", libraryID).Msg("kickoff_library_scan: list unprobed failed")
+		return 0
+	}
+	n := 0
+	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return n
+		}
+		if !mediafile.IsProbeable(f.Path) {
+			continue // sidecars (.nfo/.srt/...) legitimately have no media_info
+		}
+		if _, err := rc.Insert(ctx, FFProbeArgs{
+			LibraryFileID:   f.ID,
+			FilePath:        f.Path,
+			ScheduledTaskID: taskID,
+		}, nil); err != nil {
+			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue reprobe failed")
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// enqueueRematchTransient re-enqueues metadata match for files stranded
+// 'unmatched' by a transient provider search error, so a network/upstream blip
+// during matching doesn't leave a file invisible forever. Only files whose
+// error_message marks a transient search error are retried — a genuine "no
+// results" is left alone. Capped per scan; metadata_match is unique-while-active.
+func enqueueRematchTransient(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string) int {
+	if rc == nil {
+		return 0
+	}
+	files, err := q.ListRetryableUnmatchedFiles(ctx, sqlc.ListRetryableUnmatchedFilesParams{
+		LibraryID: libraryID,
+		Limit:     reprobeCap,
+	})
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", libraryID).Msg("kickoff_library_scan: list retryable-unmatched failed")
+		return 0
+	}
+	lib, err := q.GetLibraryByID(ctx, libraryID)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return n
+		}
+		if _, err := rc.Insert(ctx, MetadataMatchArgs{
+			LibraryFileID:   f.ID,
+			LibraryID:       libraryID,
+			MediaType:       string(lib.MediaType),
+			ScheduledTaskID: taskID,
+		}, nil); err != nil {
+			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue rematch failed")
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 func enqueuePendingFiles(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string) (int, int) {
@@ -212,7 +311,7 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
 	rows, err := w.DB.Query(ctx, `
-		SELECT mi.id, mi.media_type, mi.title, l.settings, mi.metadata_refreshed_at
+		SELECT mi.id, mi.media_type, mi.title, l.settings, mi.metadata_refreshed_at, mi.enrichment_status
 		FROM media_items mi
 		JOIN libraries l ON l.id = mi.library_id
 		WHERE mi.media_type = 'music' OR mi.external_ids != '{}'
@@ -229,14 +328,31 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 		ID        int64
 		MediaType sqlc.MediaType
 		Title     string
+		Force     bool
 	}
 	var items []stale
 	for rows.Next() {
 		var id int64
-		var mt, title string
+		var mt, title, status string
 		var settingsJSON []byte
 		var refreshedAt *time.Time
-		if err := rows.Scan(&id, &mt, &title, &settingsJSON, &refreshedAt); err != nil {
+		if err := rows.Scan(&id, &mt, &title, &settingsJSON, &refreshedAt, &status); err != nil {
+			continue
+		}
+		// A previously FAILED enrichment is stranded — River doesn't retry it
+		// (markFailed returns nil) and rescans skip the unchanged file. Re-drive
+		// it every sweep regardless of the metadata_refresh_days knob so a
+		// transient provider blip self-heals. Non-forced is enough (the item
+		// isn't 'complete', so the enrich idempotency gate lets it run).
+		if status == "failed" {
+			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title})
+			continue
+		}
+		// Everything else here is the staleness path: only 'complete' items past
+		// their window, and only when the library opted in (refresh_days > 0).
+		// force=true because the enrich worker short-circuits non-forced refreshes
+		// of already-'complete' items — without it the sweep would no-op.
+		if status != enrichStatusComplete {
 			continue
 		}
 		settings := metadata.ParseSettings(settingsJSON)
@@ -244,12 +360,12 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 			continue
 		}
 		if refreshedAt == nil {
-			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title})
+			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title, Force: true})
 			continue
 		}
 		cutoff := now.AddDate(0, 0, -settings.MetadataRefreshDays)
 		if refreshedAt.Before(cutoff) {
-			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title})
+			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title, Force: true})
 		}
 	}
 
@@ -261,7 +377,7 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 			return err
 		}
 		w.Progress.Set("refresh_stale_items", "kickoff_refresh_stale", it.Title)
-		if err := enqueueEnrich(ctx, rc, it.ID, it.MediaType, EnrichSourceScheduled, false, taskID, 0, 0, 0); err != nil {
+		if err := enqueueEnrich(ctx, rc, it.ID, it.MediaType, EnrichSourceScheduled, it.Force, taskID, 0, 0, 0); err != nil {
 			log.Warn().Err(err).Int64("item_id", it.ID).Msg("kickoff_refresh_stale: enqueue failed")
 			failed++
 			continue

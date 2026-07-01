@@ -153,3 +153,31 @@ WHERE lf.media_item_id = ANY(@media_item_ids::bigint[])
   AND lf.deleted_at IS NULL
   AND lf.media_info IS NOT NULL
 GROUP BY lf.media_item_id;
+
+-- name: ListUnprobedProbeableFiles :many
+-- Files that are already known (not 'pending' — those flow through ProcessFile)
+-- but were never successfully probed (media_info still empty). The scan
+-- re-enqueues ffprobe for these so a file whose first probe failed (e.g. a
+-- flaky mount) isn't stuck unprobed forever. Capped per call; ffprobe jobs are
+-- unique-while-active, so repeating this across scans never stacks duplicates.
+SELECT * FROM library_files
+WHERE library_id = $1
+  AND deleted_at IS NULL
+  AND status <> 'pending'
+  AND (media_info = '{}'::jsonb OR media_info = 'null'::jsonb)
+ORDER BY id
+LIMIT $2;
+
+-- name: ListRetryableUnmatchedFiles :many
+-- Files stranded as 'unmatched' by a TRANSIENT provider search error (the
+-- matcher records "search error: ..." there). A genuine "no results" / "no
+-- title" match is NOT retried (different error_message), so this only re-drives
+-- files that could plausibly match once the provider recovers. Capped;
+-- metadata_match is unique-while-active so re-drives coalesce across scans.
+SELECT * FROM library_files
+WHERE library_id = $1
+  AND deleted_at IS NULL
+  AND status = 'unmatched'
+  AND error_message LIKE 'search error:%'
+ORDER BY id
+LIMIT $2;

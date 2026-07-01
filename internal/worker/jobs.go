@@ -82,14 +82,24 @@ func (DownloadImageArgs) InsertOpts() river.InsertOpts {
 }
 
 type FFProbeArgs struct {
-	LibraryFileID   int64  `json:"library_file_id"`
+	// LibraryFileID is the sole uniqueness key (river:"unique" — file_path and
+	// scheduled_task_id are ignored), so at most one ffprobe job per file is
+	// active at a time. That lets the scan re-enqueue a probe for a file whose
+	// first attempt failed without stacking duplicates while one is still
+	// queued/running; once the job reaches a terminal state it can be re-run.
+	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
 	FilePath        string `json:"file_path"`
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }
 
 func (FFProbeArgs) Kind() string { return "ffprobe" }
 func (FFProbeArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "ffprobe", MaxAttempts: 3, Priority: PriorityEnrichment}
+	return river.InsertOpts{
+		Queue:       "ffprobe",
+		MaxAttempts: 3,
+		Priority:    PriorityEnrichment,
+		UniqueOpts:  uniqueWhileActive(),
+	}
 }
 
 type PendingImage struct {
@@ -151,9 +161,15 @@ func (FetchArtworkArgs) InsertOpts() river.InsertOpts {
 // "Refreshing 17/200 (Calvin Harris)" progress events without consulting
 // River's job table.
 type EnrichMediaItemArgs struct {
-	ItemID          int64  `json:"item_id"`
+	// (ItemID, Force) is the uniqueness key (river:"unique"): at most one active
+	// enrich per item per force-level. Coalesces the many enqueue sites (scan,
+	// watcher debounce, view-promotion, stale/failed re-drive) so re-drives can't
+	// stack duplicate jobs — while a user's Force refresh is NOT deduped away by
+	// a queued non-forced enrich (different key). Terminal jobs don't block, so
+	// the item stays re-enrichable.
+	ItemID          int64  `json:"item_id" river:"unique"`
 	Source          string `json:"source,omitempty"`
-	Force           bool   `json:"force,omitempty"`
+	Force           bool   `json:"force,omitempty" river:"unique"`
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 
 	BatchLibraryID int64 `json:"batch_library_id,omitempty"`
@@ -167,7 +183,7 @@ func (EnrichMediaItemArgs) InsertOpts() river.InsertOpts {
 	// overrides per-insert with the correct priority for the (source,
 	// media_type) combination. Priority bands within this queue:
 	// P1=watcher/view, P2=movies+tv, P3=music+books, P4=analysis.
-	return river.InsertOpts{Queue: "enrich_media_item", MaxAttempts: 3, Priority: 2}
+	return river.InsertOpts{Queue: "enrich_media_item", MaxAttempts: 3, Priority: 2, UniqueOpts: uniqueWhileActive()}
 }
 
 type SaveNFOArgs struct {

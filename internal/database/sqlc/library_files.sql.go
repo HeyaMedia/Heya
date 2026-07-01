@@ -570,6 +570,120 @@ func (q *Queries) ListMediaResolutions(ctx context.Context, mediaItemIds []int64
 	return items, nil
 }
 
+const listRetryableUnmatchedFiles = `-- name: ListRetryableUnmatchedFiles :many
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+WHERE library_id = $1
+  AND deleted_at IS NULL
+  AND status = 'unmatched'
+  AND error_message LIKE 'search error:%'
+ORDER BY id
+LIMIT $2
+`
+
+type ListRetryableUnmatchedFilesParams struct {
+	LibraryID int64 `json:"library_id"`
+	Limit     int32 `json:"limit"`
+}
+
+// Files stranded as 'unmatched' by a TRANSIENT provider search error (the
+// matcher records "search error: ..." there). A genuine "no results" / "no
+// title" match is NOT retried (different error_message), so this only re-drives
+// files that could plausibly match once the provider recovers. Capped;
+// metadata_match is unique-while-active so re-drives coalesce across scans.
+func (q *Queries) ListRetryableUnmatchedFiles(ctx context.Context, arg ListRetryableUnmatchedFilesParams) ([]LibraryFile, error) {
+	rows, err := q.db.Query(ctx, listRetryableUnmatchedFiles, arg.LibraryID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryFile{}
+	for rows.Next() {
+		var i LibraryFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.MediaItemID,
+			&i.ParseResult,
+			&i.Status,
+			&i.ErrorMessage,
+			&i.DeletedAt,
+			&i.MediaInfo,
+			&i.Keyframes,
+			&i.HasTrickplay,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnprobedProbeableFiles = `-- name: ListUnprobedProbeableFiles :many
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+WHERE library_id = $1
+  AND deleted_at IS NULL
+  AND status <> 'pending'
+  AND (media_info = '{}'::jsonb OR media_info = 'null'::jsonb)
+ORDER BY id
+LIMIT $2
+`
+
+type ListUnprobedProbeableFilesParams struct {
+	LibraryID int64 `json:"library_id"`
+	Limit     int32 `json:"limit"`
+}
+
+// Files that are already known (not 'pending' — those flow through ProcessFile)
+// but were never successfully probed (media_info still empty). The scan
+// re-enqueues ffprobe for these so a file whose first probe failed (e.g. a
+// flaky mount) isn't stuck unprobed forever. Capped per call; ffprobe jobs are
+// unique-while-active, so repeating this across scans never stacks duplicates.
+func (q *Queries) ListUnprobedProbeableFiles(ctx context.Context, arg ListUnprobedProbeableFilesParams) ([]LibraryFile, error) {
+	rows, err := q.db.Query(ctx, listUnprobedProbeableFiles, arg.LibraryID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryFile{}
+	for rows.Next() {
+		var i LibraryFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.MediaItemID,
+			&i.ParseResult,
+			&i.Status,
+			&i.ErrorMessage,
+			&i.DeletedAt,
+			&i.MediaInfo,
+			&i.Keyframes,
+			&i.HasTrickplay,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const purgeDeletedLibraryFiles = `-- name: PurgeDeletedLibraryFiles :exec
 DELETE FROM library_files
 WHERE library_id = $1 AND deleted_at IS NOT NULL AND deleted_at < $2
