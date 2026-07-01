@@ -3,16 +3,20 @@
     <NuxtPage v-if="ready" />
   </NuxtLayout>
   <Lightbox />
-  <!-- vue-query cache inspector — dev-only floating button (bottom-right).
-       Click the TanStack logo to expand the panel; shows every query's
-       state, fetch status, last-updated, and lets you manually invalidate. -->
-  <VueQueryDevtools v-if="isDev" />
+  <!-- Dev-only in-app query-cache overview (bottom-left toggle, ⌘⇧Q). Reads
+       the live $queryClient: every query's key, status, staleness, observers,
+       age + per-query invalidate/refetch/remove. Async-imported behind
+       import.meta.dev so it (and its type-only deps) drop out of the prod
+       single binary. Replaces the old TanStack floating widget. -->
+  <component :is="QueryCachePanel" v-if="QueryCachePanel" />
 </template>
 
 <script setup lang="ts">
-import { VueQueryDevtools } from '@tanstack/vue-query-devtools'
+import { defineAsyncComponent } from 'vue'
 
-const isDev = import.meta.dev
+const QueryCachePanel = import.meta.dev
+  ? defineAsyncComponent(() => import('~/components/dev/QueryCachePanel.vue'))
+  : null
 const route = useRoute()
 const { ready, isAuthenticated } = useAuth()
 

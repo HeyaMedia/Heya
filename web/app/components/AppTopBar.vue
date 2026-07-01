@@ -26,6 +26,15 @@
     </nav>
 
     <div class="topbar-right">
+      <button
+        v-if="isDev"
+        class="btn-icon qcp-nav-btn"
+        :class="{ active: devQueryOpen }"
+        title="Query cache (⌘⇧Q)"
+        @click="devQueryOpen = !devQueryOpen"
+      >
+        <Icon name="database" :size="16" />
+      </button>
       <div class="search-wrap open" ref="searchWrapRef">
         <Icon name="search" :size="16" />
         <input
@@ -262,6 +271,11 @@ import type { TaskProgressPayload } from '~/composables/useEventBus'
 const route = useRoute()
 const { user } = useAuth()
 const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgress, taskProgress } = useEventBus()
+
+// Dev-only Query Cache toggle (left of search). Shares open-state with
+// components/dev/QueryCachePanel.vue via this useState key.
+const isDev = import.meta.dev
+const devQueryOpen = useState('dev_query_panel', () => false)
 
 const progressLibs = computed(() => Object.values(scanProgress.value))
 

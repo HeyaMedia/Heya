@@ -27,7 +27,6 @@
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.14.0",
-    "@tanstack/vue-query-devtools": "^6.1.36",
     "typescript": "^6.0.3"
   }
 }
