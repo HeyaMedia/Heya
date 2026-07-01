@@ -113,6 +113,15 @@ func (c *CacheManager) EvictLRU() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// maxBytes <= 0 means the cap is disabled (HEYA_TRANSCODE_CACHE_MAX_GB=0 =
+	// "unlimited"). Without this guard TotalSize is always > 0 >= maxBytes, so
+	// every call would evict the *entire* cache — including live session dirs —
+	// which the newly-wired 10s cleanup tick would do continuously. Skip early
+	// (also avoids the full-tree walk on the disabled path).
+	if c.maxBytes <= 0 {
+		return nil
+	}
+
 	stats := c.statsLocked()
 	if stats.TotalSize <= c.maxBytes {
 		return nil

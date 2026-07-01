@@ -817,23 +817,61 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 		ext = filePath[idx+1:]
 	}
 
-	_, err := m.q.CreateBook(ctx, sqlc.CreateBookParams{
-		MediaItemID:   mediaItemID,
-		AuthorID:      authorID,
-		Isbn:          d.ISBN,
-		OpenlibraryID: d.ExternalIDs["openlibrary"],
-		PageCount:     int32(d.PageCount),
-		Publisher:     d.Publisher,
-		PublishDate:   pgDateFromString(d.PublishDate),
-		FilePath:      filePath,
-		Subjects:      emptyIfNil(d.Subjects),
-		Language:      d.Language,
-		SeriesName:    d.SeriesName,
-		SeriesNumber:  int32(d.SeriesNum),
-		Format:        ext,
-		Description:   d.Description,
-	})
-	return err
+	// Get-or-create-or-fill, like createMovie/createTVSeries. The plain
+	// INSERT-only version unique-violated books.media_item_id on any re-write
+	// (forced refresh / re-identify / re-scan), which — now that the error is no
+	// longer swallowed — marked the book failed. On an existing row we UPDATE
+	// instead. Enrich reaches here with filePath=="" (it carries metadata, not
+	// the local file), so preserve the stored path/format rather than blanking
+	// them; only the local materialize/scan paths supply a real filePath.
+	existing, gerr := m.q.GetBookByMediaItemID(ctx, mediaItemID)
+	switch {
+	case errors.Is(gerr, pgx.ErrNoRows):
+		if _, err := m.q.CreateBook(ctx, sqlc.CreateBookParams{
+			MediaItemID:   mediaItemID,
+			AuthorID:      authorID,
+			Isbn:          d.ISBN,
+			OpenlibraryID: d.ExternalIDs["openlibrary"],
+			PageCount:     int32(d.PageCount),
+			Publisher:     d.Publisher,
+			PublishDate:   pgDateFromString(d.PublishDate),
+			FilePath:      filePath,
+			Subjects:      emptyIfNil(d.Subjects),
+			Language:      d.Language,
+			SeriesName:    d.SeriesName,
+			SeriesNumber:  int32(d.SeriesNum),
+			Format:        ext,
+			Description:   d.Description,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	case gerr == nil:
+		filePathToStore, formatToStore := filePath, ext
+		if filePath == "" {
+			filePathToStore, formatToStore = existing.FilePath, existing.Format
+		}
+		if _, err := m.q.UpdateBook(ctx, sqlc.UpdateBookParams{
+			ID:            existing.ID,
+			AuthorID:      authorID,
+			Isbn:          d.ISBN,
+			OpenlibraryID: d.ExternalIDs["openlibrary"],
+			PageCount:     int32(d.PageCount),
+			Publisher:     d.Publisher,
+			PublishDate:   pgDateFromString(d.PublishDate),
+			FilePath:      filePathToStore,
+			Subjects:      emptyIfNil(d.Subjects),
+			Language:      d.Language,
+			SeriesName:    d.SeriesName,
+			SeriesNumber:  int32(d.SeriesNum),
+			Format:        formatToStore,
+			Description:   d.Description,
+		}); err != nil {
+			return err
+		}
+	default:
+		return gerr
+	}
+	return nil
 }
 
 func kindToMediaType(kind metadata.MediaKind) sqlc.MediaType {
