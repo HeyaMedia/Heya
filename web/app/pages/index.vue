@@ -16,13 +16,6 @@
       />
 
       <ContentRow
-        v-if="favoriteItems.length"
-        title="Your Favorites"
-        :items="favoriteItems"
-        @tile="(item) => navigateTo(mediaUrl(item))"
-      />
-
-      <ContentRow
         v-if="recommendedItems.length"
         title="Recommended For You"
         subtitle="Based on your library"
@@ -167,10 +160,12 @@ const movieDetails = ref<Record<number, Movie>>({})
 const heroPlayInfo = ref<Record<number, HeroPlayInfo>>({})
 const upNextItems = ref<UpNextItem[]>([])
 
+// No longer rendered as its own row — kept only so Recommended For You can
+// exclude titles the user already favorited (the Loved sidebar views cover
+// browsing favorites).
 const favoriteItems = computed<MediaItem[]>(() => {
   const favIDs = new Set(favoritesStateQuery.data.value?.favorited ?? [])
   if (favIDs.size === 0) return []
-  // Curated surface — hide anything missing on disk.
   return [...recentMovies.value, ...recentTV.value].filter(m => favIDs.has(m.id) && m.available !== false)
 })
 
