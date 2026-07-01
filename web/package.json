@@ -16,6 +16,8 @@
     "@vueuse/core": "^14.3.0",
     "@vueuse/nuxt": "^14.3.0",
     "akarisub": "^0.2.2",
+    "butterchurn": "^2.6.7",
+    "butterchurn-presets": "^2.4.7",
     "hls.js": "^1.6.16",
     "nuxt": "^4.4.8",
     "nuxt-open-fetch": "^0.13.9",

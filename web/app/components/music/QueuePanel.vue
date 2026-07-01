@@ -171,6 +171,15 @@
           Drop a matching .lrc next to the audio file and re-scan to add them.
         </p>
       </div>
+
+      <!-- Fullscreen handoff: the lyrics side view is where the fullscreen
+           now-playing view is launched from (no longer from clicking the art). -->
+      <div v-if="currentTrack" class="qp-lyrics-footer">
+        <button class="qp-fullscreen-btn" @click="openFullscreen" title="Open the fullscreen now-playing view">
+          <Icon name="expand" :size="14" />
+          <span>Fullscreen</span>
+        </button>
+      </div>
     </div>
   </aside>
 </template>
@@ -179,10 +188,17 @@
 const {
   playing, currentTrack, queue, queueOpen, position, formatTime,
   shuffled, repeatMode, currentIndex, playedTracks, upcomingTracks,
-  jumpTo, removeFromQueue, moveInQueue, clearUpcoming, seek,
+  jumpTo, removeFromQueue, moveInQueue, clearUpcoming, seek, sideTab,
 } = usePlayer()
 
-const tab = ref<'queue' | 'lyrics'>('queue')
+// The active tab lives in shared player state so the playbar's Queue / Lyrics
+// buttons can open the panel straight onto the tab they name.
+const tab = sideTab
+
+// Fullscreen now-playing overlay — opened from the lyrics footer. Shared state
+// slot (same one the playbar's Expand button uses).
+const nowPlayingOpen = useState('now_playing_open', () => false)
+function openFullscreen() { nowPlayingOpen.value = true }
 
 // --- Lyrics fetch + sync ----------------------------------------------------
 
@@ -569,4 +585,32 @@ function onDrop(_event: DragEvent, toIndex: number) {
 }
 .qp-timing-reset:hover { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
 .mono { font-family: var(--font-mono); }
+
+/* Fullscreen launcher — pinned at the bottom of the lyrics tab. */
+.qp-lyrics-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.qp-fullscreen-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--fg-1);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.qp-fullscreen-btn:hover {
+  background: var(--gold-soft, rgba(255, 196, 50, 0.08));
+  color: var(--gold);
+  border-color: var(--gold);
+}
 </style>

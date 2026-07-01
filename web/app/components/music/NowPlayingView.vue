@@ -116,10 +116,13 @@
             >
               <Icon name="shuffle" :size="18" />
             </button>
+            <button class="np-icon" @click="openVisualizer" title="Visualizer">
+              <Icon name="pulse" :size="18" />
+            </button>
             <button class="np-icon" @click="toggleQueue" title="Queue">
               <Icon name="queue" :size="18" />
             </button>
-            <div class="np-volume">
+            <div class="np-volume" @wheel.prevent="onVolumeWheel">
               <button class="np-icon" @click="toggleMute">
                 <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="18" />
               </button>
@@ -153,6 +156,13 @@ async function onRate(trackId: number, v: number) {
 }
 
 const radio = useRadio()
+const vis = useVisualizer()
+
+// Open the immersive visualizer over the Now Playing view (it sits at a higher
+// z-index, so the NP view stays mounted underneath).
+function openVisualizer() {
+  vis.fullscreenOpen.value = true
+}
 
 async function startTrackRadio() {
   const t = track.value
@@ -197,6 +207,14 @@ function onSeek(e: MouseEvent) {
 function onVolume(e: MouseEvent) {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   setVolume(Math.round(((e.clientX - rect.left) / rect.width) * 100))
+}
+// Scroll over the volume control to nudge it ±5. Up = louder. Base the delta on
+// the real stored level (not the muted-display 0) so scrolling while muted
+// adjusts/restores the remembered volume instead of losing it.
+function onVolumeWheel(e: WheelEvent) {
+  const next = Math.max(0, Math.min(100, volume.value + (e.deltaY < 0 ? 5 : -5)))
+  if (muted.value && next > 0) toggleMute()
+  setVolume(next)
 }
 
 // ---------------------------------------------------------------------------

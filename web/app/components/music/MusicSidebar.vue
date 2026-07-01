@@ -1,5 +1,5 @@
 <template>
-  <aside class="music-sidebar scroll">
+  <aside class="music-sidebar scroll" :class="{ 'ms-cover-expanded': coverShown }">
     <!-- Primary nav -->
     <ul class="ms-nav">
       <li>
@@ -169,6 +169,15 @@ const props = defineProps<{
 
 defineEmits<{ 'create-playlist': [] }>()
 
+// When the now-playing cover folds out (MusicBigCover), it overlaps the bottom
+// of the sidebar. Reserve space so the menu scrolls/sits above it rather than
+// hiding behind it. Gate on a track being present too — the cover only renders
+// when coverExpanded AND a track is loaded, so without this the sidebar would
+// stay shrunk (empty gap, no cover) after playback stops with the mode still on.
+const { currentTrack } = usePlayer()
+const coverExpanded = useState('music_cover_expanded', () => false)
+const coverShown = computed(() => coverExpanded.value && !!currentTrack.value)
+
 // Auto-open the group that contains the active section. User can still
 // collapse manually after — these are open by default if the user happens
 // to be inside the group.
@@ -204,7 +213,27 @@ watch(() => props.section, (s) => {
   flex-direction: column;
   height: 100%;
   gap: 4px;
+  transition: height 0.28s ease;
 }
+/* The fold-out cover (bottom:8px, height: sidebar-w − 16px → top at sidebar-w −
+   8px from the shell bottom) rises into the sidebar's lower area. Shrink the
+   sidebar's height so its whole scroll region — track and content — ends above
+   the cover; the menu (playlists included) can then scroll into the reduced
+   viewport instead of hiding behind the art. Flat calc (no nested parens, which
+   silently invalidated the declaration and left height at 100%). +16px of
+   breathing room above the cover. */
+.ms-cover-expanded {
+  height: calc(100% - var(--music-sidebar-w) + var(--playbar-h) - 12px);
+}
+/* The playlists live in their OWN bottom-docked scroll region (.ms-playlists is
+   flex:1 + overflow-y:auto), so shrinking the outer sidebar never moved them —
+   that flex:1 child just kept filling down behind the cover. When the cover is
+   out, collapse that nested scroll into the main sidebar scroll: pin the direct
+   children to natural height (no flex-shrink) and turn .ms-playlists into a
+   plain block (no grow, no inner scroll). Now the whole sidebar scrolls as one
+   reduced region that ends above the cover, so every playlist is reachable. */
+.ms-cover-expanded > * { flex-shrink: 0; }
+.ms-cover-expanded .ms-playlists { flex: 0 0 auto; overflow: visible; min-height: auto; }
 
 .ms-nav { display: flex; flex-direction: column; gap: 2px; }
 

@@ -33,6 +33,15 @@ export async function closeContext(): Promise<void> {
   }
 }
 
+// Whether this browser can route the AudioContext to a chosen output device.
+// The capability that matters is AudioContext.setSinkId — Chromium has it,
+// Safari/Firefox don't (they DO expose enumerateDevices, so testing that
+// misdetects them as supported). Probe the prototype so we don't have to
+// construct a context just to answer the question.
+export function audioSinkSupported(): boolean {
+  return typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype
+}
+
 // setSinkId routes the AudioContext to a specific output device (when the
 // browser supports it — Chromium yes, Safari/Firefox lag here).
 export async function setAudioSinkId(deviceId: string): Promise<boolean> {

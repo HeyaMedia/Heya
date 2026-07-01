@@ -46,6 +46,21 @@ export interface Track {
 // seeking forward past 30s never fakes a play.
 const SCROBBLE_MIN_SECONDS = 30
 
+// Volume + mute survive reloads via localStorage. useState seeds a default so
+// the slider has a value before the client restore runs; setVolume/toggleMute
+// are the only mutators, so persistence hangs off them (no watcher needed).
+// SPA-only app (ssr: false), so the synchronous client restore below can't
+// cause a hydration mismatch.
+const VOLUME_STORAGE_KEY = 'heya_player_volume_v1'
+let volumeRestored = false
+
+function persistVolumePrefs(volume: number, muted: boolean) {
+  if (import.meta.server) return
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, JSON.stringify({ volume, muted }))
+  } catch { /* private mode / quota — non-fatal */ }
+}
+
 // --- Client-only transition coordination (singletons) ----------------------
 // These coordinate between prepareTransition() (which preloads the pending
 // deck + arms the scheduler) and handleTransition() (fired by the scheduler
@@ -132,6 +147,23 @@ export function usePlayer() {
   const duration = useState('player_duration', () => 0)
   const volume = useState('player_volume', () => 80)
   const muted = useState('player_muted', () => false)
+
+  // Restore persisted volume/mute once on the client. useState is a singleton,
+  // so a single assignment propagates to every usePlayer() consumer; the flag
+  // keeps repeat calls (one per mounting component) from re-reading storage.
+  if (import.meta.client && !volumeRestored) {
+    volumeRestored = true
+    try {
+      const raw = localStorage.getItem(VOLUME_STORAGE_KEY)
+      if (raw) {
+        const p = JSON.parse(raw) as { volume?: number, muted?: boolean }
+        if (typeof p.volume === 'number' && Number.isFinite(p.volume)) {
+          volume.value = Math.max(0, Math.min(100, p.volume))
+        }
+        if (typeof p.muted === 'boolean') muted.value = p.muted
+      }
+    } catch { /* corrupt/absent — keep defaults */ }
+  }
   const shuffled = useState('player_shuffled', () => false)
   const repeatMode = useState<'off' | 'all' | 'one'>('player_repeat', () => 'off')
   const queue = useState<Track[]>('player_queue', () => [])
@@ -139,7 +171,10 @@ export function usePlayer() {
   // (with already-played tracks kept up front) when shuffle turns off.
   const originalOrder = useState<Track[]>('player_original_order', () => [])
   const queueOpen = useState('player_queue_open', () => false)
-  const lyricsOpen = useState('player_lyrics_open', () => false)
+  // The right-side panel (QueuePanel) is a single surface with two tabs. The
+  // tab lives here (not local to QueuePanel) so the playbar's Queue / Lyrics
+  // buttons can open the panel straight onto the tab they name.
+  const sideTab = useState<'queue' | 'lyrics'>('player_side_tab', () => 'queue')
   const engineWired = useState('player_engine_wired', () => false)
   // Tracks the last track ID we already scrobbled this session so the listened
   // watcher, handleTransition, and handleEnded don't double-fire for one play.
@@ -182,8 +217,13 @@ export function usePlayer() {
       watch(e.duration, (v) => {
         if (Number.isFinite(v) && v > 0) duration.value = v
       })
-      e.setVolume(muted.value ? 0 : volume.value / 100)
     }
+    // Seed the engine's volume OUTSIDE the wiring guard so it's idempotent: a
+    // hot reload of useAudioEngine resets its module singleton (back to a 1.0
+    // default) while engineWired (a useState) survives — gating the seed on
+    // !engineWired would leave the rebuilt engine at full blast on the next
+    // play. Re-applying every ensureEngine call is cheap and keeps them in sync.
+    if (import.meta.client) e.setVolume(muted.value ? 0 : volume.value / 100)
     // Register the settings→engine bridge. Deliberately OUTSIDE the engineWired
     // guard and idempotent: a hot reload of useAudioSettings resets its
     // module-level applyToEngineFn to null while engineWired (a useState)
@@ -562,14 +602,22 @@ export function usePlayer() {
 
   function setVolume(v: number) {
     const clamped = Math.max(0, Math.min(100, v))
+    // While muted the control's baseline reads 0, so a stray down-scroll or a
+    // click on the zero-thumb would call setVolume(0) and wipe the remembered
+    // pre-mute level (both in state and localStorage). Ignore a muted set-to-0
+    // so unmuting restores the real level; explicit set-to-0 while audible
+    // still works.
+    if (muted.value && clamped === 0) return
     volume.value = clamped
     if (clamped > 0) muted.value = false
     if (engineWired.value) ensureEngine().setVolume(muted.value ? 0 : clamped / 100)
+    persistVolumePrefs(volume.value, muted.value)
   }
 
   function toggleMute() {
     muted.value = !muted.value
     if (engineWired.value) ensureEngine().setVolume(muted.value ? 0 : volume.value / 100)
+    persistVolumePrefs(volume.value, muted.value)
   }
 
   // --- Shuffle (reorders the queue in place) -------------------------------
@@ -738,8 +786,19 @@ export function usePlayer() {
     }
   }
 
-  function toggleQueue() { queueOpen.value = !queueOpen.value }
-  function toggleLyrics() { lyricsOpen.value = !lyricsOpen.value }
+  // The Queue and Lyrics buttons both drive the one side panel: clicking a
+  // button opens the panel on that tab, or closes it if it's already showing
+  // that tab (so each button toggles its own view).
+  function toggleQueue() {
+    if (queueOpen.value && sideTab.value === 'queue') { queueOpen.value = false; return }
+    sideTab.value = 'queue'
+    queueOpen.value = true
+  }
+  function toggleLyrics() {
+    if (queueOpen.value && sideTab.value === 'lyrics') { queueOpen.value = false; return }
+    sideTab.value = 'lyrics'
+    queueOpen.value = true
+  }
 
   function formatTime(s: number) {
     if (!Number.isFinite(s)) return '0:00'
@@ -871,7 +930,7 @@ export function usePlayer() {
 
   return {
     playing, currentTrack, position, duration, volume, muted,
-    shuffled, repeatMode, queue, queueOpen, lyricsOpen,
+    shuffled, repeatMode, queue, queueOpen, sideTab,
     currentIndex, playedTracks, upcomingTracks, upcomingCount,
     play, pause, togglePlay, seek, setVolume, toggleMute, stop,
     toggleShuffle, cycleRepeat, nextTrack, prevTrack,

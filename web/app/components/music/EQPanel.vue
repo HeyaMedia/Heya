@@ -190,16 +190,54 @@
         </div>
       </div>
     </div>
+
+    <!-- ── Output ────────────────────────────────────────────────── -->
+    <div v-show="tab === 'output'" class="eq-pane">
+      <p v-if="!supported" class="eq-extra-hint">
+        This browser doesn't expose per-app audio-output routing (<code>AudioContext.setSinkId</code>), so playback follows the system default output. Chromium-based browsers support it today; other engines light this up automatically once they ship the API.
+      </p>
+      <template v-else>
+        <div class="dev-head">
+          <span class="eq-chain-label">Output device</span>
+          <button v-if="!labelsAvailable" class="dev-reveal" @click="devices.revealLabels()">Reveal names</button>
+        </div>
+
+        <div class="dev-list">
+          <button
+            v-for="d in availableDevices"
+            :key="d.deviceId"
+            class="dev-row"
+            :class="{ active: d.deviceId === activeDeviceId }"
+            @click="devices.selectDevice(d.deviceId)"
+          >
+            <span class="dev-dot" />
+            <span class="dev-name">
+              {{ d.label }}
+              <span v-if="d.isDefault" class="dev-tag">default</span>
+            </span>
+            <span v-if="devices.hasProfile(d)" class="dev-badge">EQ</span>
+          </button>
+          <p v-if="!availableDevices.length" class="eq-extra-hint">No output devices detected yet.</p>
+        </div>
+
+        <div class="eq-divider" />
+
+        <div class="dev-actions">
+          <button class="dev-save" @click="devices.saveActiveProfile()">Save current EQ to this device</button>
+          <button v-if="devices.activeHasProfile()" class="dev-del" @click="devices.deleteProfile(devices.activeKey())">Remove profile</button>
+        </div>
+        <p class="eq-extra-hint">A saved profile stores the current EQ + crossfeed and re-applies automatically whenever you switch back to that device — surviving unplug/replug.</p>
+      </template>
+    </div>
   </AppDialog>
 </template>
 
 <script setup lang="ts">
-defineProps<{ open: boolean }>()
-defineEmits<{ close: [] }>()
-
 import type { SelectOption } from '~/components/ui/AppSelect.vue'
-
 import type { DspBlockId } from '~/composables/useAudioSettings'
+
+const props = defineProps<{ open: boolean }>()
+defineEmits<{ close: [] }>()
 
 const settings = useAudioSettings()
 const eq = settings.eq
@@ -212,8 +250,19 @@ const TABS = [
   { id: 'eq', label: 'Equalizer' },
   { id: 'playback', label: 'Playback' },
   { id: 'effects', label: 'Effects' },
+  { id: 'output', label: 'Output' },
 ] as const
 const tab = ref<typeof TABS[number]['id']>('eq')
+
+const devices = useAudioDevices()
+const { availableDevices, activeDeviceId, labelsAvailable, supported } = devices
+
+// Enumerate outputs the first time the modal opens. Deferred (not on mount) so
+// the enumerate/permission surface only touches the API when the user actually
+// looks at audio settings.
+watch(() => props.open, (isOpen) => {
+  if (isOpen) void devices.init()
+}, { immediate: true })
 
 // Signal-chain block helpers. 'equalizer' covers preamp+EQ+postgain as a unit.
 function blockLabel(id: DspBlockId) {
@@ -463,4 +512,89 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 }
 .chain-arrow:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
 .chain-arrow:disabled { opacity: 0.3; cursor: default; }
+
+/* Output devices */
+.dev-head { display: flex; align-items: center; justify-content: space-between; }
+.dev-reveal {
+  font-size: 11px;
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.dev-reveal:hover { background: rgba(255, 255, 255, 0.1); color: var(--fg-0); }
+
+.dev-list { display: flex; flex-direction: column; gap: 4px; }
+.dev-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+.dev-row:hover { background: rgba(255, 255, 255, 0.06); }
+.dev-row.active { border-color: rgba(230, 185, 74, 0.4); background: var(--gold-soft); }
+.dev-dot {
+  width: 8px; height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--fg-3);
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.dev-row.active .dev-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
+.dev-name { flex: 1; min-width: 0; font-size: 12px; color: var(--fg-1); display: flex; align-items: center; gap: 8px; }
+.dev-tag {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.dev-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--gold-bright, var(--gold));
+  background: var(--gold-soft);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.dev-actions { display: flex; gap: 8px; align-items: center; }
+.dev-save {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-0);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.dev-save:hover { background: rgba(255, 255, 255, 0.12); }
+.dev-del {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--fg-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.dev-del:hover { background: rgba(220, 80, 80, 0.14); color: #f0a0a0; border-color: rgba(220, 80, 80, 0.4); }
 </style>

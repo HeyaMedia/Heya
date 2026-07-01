@@ -19,6 +19,7 @@ const nameMap: Record<string, string> = {
   settings: 'gear-six',
   play: 'play',
   pause: 'pause',
+  stop: 'stop',
   prev: 'skip-back',
   next: 'skip-forward',
   shuffle: 'shuffle',

@@ -151,7 +151,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	hub := eventhub.New()
 
-	m := matcher.New(db, matcher.DefaultOptions(), heya)
+	m := matcher.New(db, matcher.DefaultOptions(), heya, worker.ProbeFile)
 
 	var tc *transcoder.SessionManager
 	var tcCache *transcoder.CacheManager

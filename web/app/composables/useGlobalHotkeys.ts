@@ -7,6 +7,7 @@ import { useEventListener } from '@vueuse/core'
 //   Space      play / pause        ↑ / ↓        volume ±5
 //   ← / →      seek ∓5s            ⇧← / ⇧→      previous / next track
 //   M mute     S shuffle           R repeat     Q queue    L lyrics
+//   V visualizer (when open: ←/→ preset, R random, Esc close)
 
 function isTypingTarget(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null
@@ -22,6 +23,7 @@ function isActivatable(el: Element | null): boolean {
 
 export function useGlobalHotkeys() {
   const player = usePlayer()
+  const vis = useVisualizer()
   // Shared with the HotkeyHelp modal mounted in the music shell.
   const helpOpen = useState('music_hotkey_help_open', () => false)
 
@@ -34,6 +36,10 @@ export function useGlobalHotkeys() {
   useEventListener('keydown', (e: KeyboardEvent) => {
     if (isTypingTarget(e)) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
+
+    // While the immersive visualizer is open it owns ←/→/r (preset navigation)
+    // and Escape (close) via its own listener — don't also seek/repeat below.
+    if (vis.fullscreenOpen.value && ['ArrowLeft', 'ArrowRight', 'r', 'R', 'Escape'].includes(e.key)) return
 
     switch (e.key) {
       case ' ':
@@ -70,6 +76,8 @@ export function useGlobalHotkeys() {
         e.preventDefault(); player.toggleQueue(); break
       case 'l': case 'L':
         e.preventDefault(); player.toggleLyrics(); break
+      case 'v': case 'V':
+        e.preventDefault(); vis.fullscreenOpen.value = !vis.fullscreenOpen.value; break
       case '?':
         e.preventDefault(); helpOpen.value = !helpOpen.value; break
     }

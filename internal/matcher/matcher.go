@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/parser"
@@ -36,19 +37,29 @@ type MatchInfo struct {
 	ArtistID int64
 }
 
+// ProbeFunc runs ffprobe against a local or SMB path and returns parsed media
+// info. It is injected (rather than imported) so the matcher can read embedded
+// audio tags on demand without depending on the worker package — which imports
+// the matcher, so a direct import would cycle. Wired to worker.ProbeFile in
+// service.App; nil in tests, where music fusion transparently falls back to
+// path/NFO only.
+type ProbeFunc func(ctx context.Context, path string) (*mediaprobe.MediaInfo, error)
+
 type Matcher struct {
-	db   *pgxpool.Pool
-	q    *sqlc.Queries
-	heya *heyamedia.HeyaProvider
-	opts MatchOptions
+	db    *pgxpool.Pool
+	q     *sqlc.Queries
+	heya  *heyamedia.HeyaProvider
+	opts  MatchOptions
+	probe ProbeFunc
 }
 
-func New(db *pgxpool.Pool, opts MatchOptions, heya *heyamedia.HeyaProvider) *Matcher {
+func New(db *pgxpool.Pool, opts MatchOptions, heya *heyamedia.HeyaProvider, probe ProbeFunc) *Matcher {
 	return &Matcher{
-		db:   db,
-		q:    sqlc.New(db),
-		heya: heya,
-		opts: opts,
+		db:    db,
+		q:     sqlc.New(db),
+		heya:  heya,
+		opts:  opts,
+		probe: probe,
 	}
 }
 

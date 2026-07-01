@@ -18,6 +18,15 @@ export type CrossfadeMode = 'timed' | 'smart'
 // Headphone crossfeed strength. See engine/dsp/crossfeed.ts.
 export type CrossfeedPreset = 'subtle' | 'natural' | 'strong'
 
+// A selectable audio output (from navigator.mediaDevices, kind==='audiooutput').
+// `label` is blank until the browser grants device-label permission (mic
+// access) — enumerate before that and you only get opaque deviceIds.
+export interface AudioOutputDevice {
+  deviceId: string
+  label: string
+  isDefault: boolean
+}
+
 export interface CodecSupport {
   flac: boolean
   alac: boolean

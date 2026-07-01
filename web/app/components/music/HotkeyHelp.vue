@@ -44,6 +44,18 @@ const GROUPS = [
       { label: 'Repeat', keys: ['R'] },
       { label: 'Queue', keys: ['Q'] },
       { label: 'Lyrics', keys: ['L'] },
+      { label: 'Visualizer', keys: ['V'] },
+    ],
+  },
+  {
+    title: 'Visualizer (when open)',
+    rows: [
+      { label: 'Previous / next preset', keys: ['←', '→'] },
+      { label: 'Random preset', keys: ['R'] },
+      { label: 'Browse presets', keys: ['O'] },
+      { label: 'Switch mode', keys: ['1', '·', '4'] },
+      { label: 'Native fullscreen', keys: ['F'] },
+      { label: 'Close', keys: ['Esc'] },
     ],
   },
   {

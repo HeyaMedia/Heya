@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
@@ -195,6 +196,24 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 
 	leadParsed, _ := parseFileResult(tracks[0].ParseResult)
 
+	// Embedded-tag view of the release, read from the lead track. Probing on
+	// demand here (when the async FFProbeWorker hasn't run yet) is what lets a
+	// scene-garbage folder still resolve: its path yields no artist/album, but
+	// its ID3/Vorbis tags do. leadTags is empty — and every fusion below falls
+	// back to path/NFO exactly as before — when there's no prober or no tags.
+	// The result is cached so the per-track loop reuses it instead of re-probing.
+	probeCache := map[int64]*mediaprobe.MediaInfo{}
+	leadInfo := m.musicFileProbe(ctx, tracks[0])
+	probeCache[tracks[0].ID] = leadInfo
+	leadTags := extractMusicTags(collectAudioTags(leadInfo))
+	leadRawSegment := filepath.Base(releaseDir)
+	if leadParsed.Release != nil && leadParsed.Release.RawName != "" {
+		leadRawSegment = leadParsed.Release.RawName
+	} else if leadParsed.ReleaseSegment != "" {
+		leadRawSegment = leadParsed.ReleaseSegment
+	}
+	pTrust := pathTrust(leadRawSegment)
+
 	artistName := ""
 	artistDisambig := ""
 	artistMBID := ""
@@ -208,21 +227,64 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		artistBio = artistNFO.Plot
 		artistSortName = artistNFO.SortName
 	}
-	if leadParsed.Release != nil {
-		if artistName == "" {
-			artistName = leadParsed.Release.Artist
+	// artistExplicit means the name came from a deliberate source (NFO or the
+	// on-disk folder), not only from embedded tags. A human who foldered
+	// "Various Artists" meant it — that's a legitimate shared bucket — whereas a
+	// ripper's "Unknown Artist" tag is junk. Only the latter is rejected below.
+	artistExplicit := artistNFO != nil
+	if artistName == "" {
+		pathArtist := ""
+		if leadParsed.Release != nil {
+			pathArtist = leadParsed.Release.Artist
 		}
-		if artistDisambig == "" {
-			artistDisambig = leadParsed.Release.ArtistDisambiguation
+		// Prefer the embedded ALBUMARTIST over the per-track ARTIST so a
+		// featured guest on one track can't hijack the album's artist.
+		tagArtist := leadTags.AlbumArtist
+		if tagArtist == "" {
+			tagArtist = leadTags.Artist
 		}
+		fused := fuseText(pathArtist, tagArtist, pTrust, tagTrust(tagArtist))
+		artistName = fused.Value
+		if fused.Source == sourcePath || fused.Source == sourceBoth {
+			artistExplicit = true
+		}
+		if fused.Source == sourceTag || fused.Source == sourceBoth {
+			log.Debug().Str("artist", artistName).Str("source", fused.Source.String()).Float64("confidence", fused.Confidence).Msg("music artist resolved via tag fusion")
+		}
+	}
+	if artistDisambig == "" && leadParsed.Release != nil {
+		artistDisambig = leadParsed.Release.ArtistDisambiguation
 	}
 	if artistMBID == "" && albumNFO != nil {
 		artistMBID = albumNFO.MBAlbumArtistID
 	}
+	if artistMBID == "" {
+		// A tag MBID is only safe to stamp when the tag NAME it belongs to
+		// matches the artist name we actually resolved. When the path (or NFO)
+		// won a disagreement, the tag names a DIFFERENT act, and adopting its
+		// MBID would stamp our artist with another artist's id and fuse them
+		// globally via GetArtistByMusicBrainzID (artists has no library_id).
+		// Prefer the album-artist MBID (belongs to ALBUMARTIST); fall back to the
+		// track ARTIST MBID (belongs to ARTIST) — each gated on its own name.
+		tagArtistMBID := ""
+		switch {
+		case leadTags.AlbumArtist != "" && titlematch.FuzzyEqual(leadTags.AlbumArtist, artistName):
+			tagArtistMBID = leadTags.AlbumArtistMBID
+		case leadTags.Artist != "" && titlematch.FuzzyEqual(leadTags.Artist, artistName):
+			tagArtistMBID = leadTags.ArtistMBID
+		}
+		artistMBID = fuseMBID("", tagArtistMBID).Value
+	}
 
-	if artistName == "" {
+	// The artists table has no library_id: its uniqueness is global. A
+	// placeholder name that came ONLY from tags ("Unknown Artist" left by a
+	// ripper) would fuse untagged releases across every library into one poison
+	// row, so refuse it — the group stays retryable-unmatched. A placeholder
+	// that a human deliberately foldered (artistExplicit) is kept, preserving
+	// the pre-fusion behaviour and legitimate "Various Artists" compilations.
+	if artistName == "" || (!artistExplicit && !isUsableArtist(artistName)) {
 		for _, f := range files {
-			m.markFile(ctx, f.ID, sqlc.FileStatusUnmatched, "no artist name from path or NFO", 0)
+			m.markFile(ctx, f.ID, sqlc.FileStatusUnmatched, "no reliable artist name from path, tags, or NFO", 0)
 			unmatched++
 		}
 		return 0, unmatched, 0, 0
@@ -275,23 +337,38 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 			}
 		}
 	}
+	pathAlbum, pathAlbumYear := "", ""
 	if leadParsed.Release != nil {
-		if albumTitle == "" {
-			albumTitle = leadParsed.Release.Album
-		}
-		if albumYear == "" {
-			albumYear = leadParsed.Release.Year
-		}
+		pathAlbum = leadParsed.Release.Album
+		pathAlbumYear = leadParsed.Release.Year
 		if albumType == "" {
 			albumType = leadParsed.Release.ReleaseKind
 		}
+	}
+	if albumTitle == "" {
+		fused := fuseText(pathAlbum, leadTags.Album, pTrust, tagTrust(leadTags.Album))
+		albumTitle = fused.Value
+		if fused.Source == sourceTag || fused.Source == sourceBoth {
+			log.Debug().Str("album", albumTitle).Str("source", fused.Source.String()).Float64("confidence", fused.Confidence).Msg("music album resolved via tag fusion")
+		}
+	}
+	if albumYear == "" {
+		albumYear = fuseText(pathAlbumYear, leadTags.Year, pTrust, tagTrust(leadTags.Year)).Value
+	}
+	if albumMBID == "" && sameRelease(leadTags.Album, albumTitle) {
+		// Only adopt the tag's RELEASE MBID when the tag names the exact same
+		// release as the title we resolved — strict equality, not FuzzyEqual.
+		// Fuzzy matching collapses editions ("X" vs "X (Deluxe)"), but each
+		// edition has a distinct release MBID, so a fuzzy match would stamp one
+		// edition's id onto another and mislink them in the global album dedup.
+		albumMBID = fuseMBID("", leadTags.AlbumMBID).Value
 	}
 	if albumType == "" {
 		albumType = "album"
 	}
 	if albumTitle == "" {
 		for _, f := range files {
-			m.markFile(ctx, f.ID, sqlc.FileStatusUnmatched, "no album title from path or NFO", 0)
+			m.markFile(ctx, f.ID, sqlc.FileStatusUnmatched, "no album title from path, tags, or NFO", 0)
 			unmatched++
 		}
 		return 0, unmatched, 0, 0
@@ -321,49 +398,121 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		return 0, 0, errored, 0
 	}
 
+	// Track numbering runs in two passes so an unnumbered file can never steal a
+	// numbered file's slot regardless of scan order, and so incremental rescans
+	// fill above the album's persisted tracks instead of colliding with them.
+	type trackPlan struct {
+		file  sqlc.LibraryFile
+		info  *mediaprobe.MediaInfo
+		disc  int
+		want  int // fused track number; 0 = unknown, filled in pass 2
+		title string
+	}
+	assigner := newTrackNumberAssigner()
+	// Seed with the album's already-persisted track numbers (empty for a fresh
+	// album) so a later scan of new, unnumbered files fills above them.
+	if persisted, err := m.q.ListTracksByAlbum(ctx, album.ID); err == nil {
+		for _, t := range persisted {
+			assigner.reserve(int(t.DiscNumber), int(t.TrackNumber))
+		}
+	}
+
+	// Pass 1: resolve disc / number / title / probe for each track and reserve
+	// every KNOWN number.
+	plans := make([]trackPlan, 0, len(tracks))
 	for _, trackFile := range tracks {
 		trackParsed, _ := parseFileResult(trackFile.ParseResult)
 
-		discNum := 1
-		trackNum := 0
-		trackTitle := ""
-		hasTrackInfo := false
+		discNum := 0
+		pathTrackNum := 0
+		pathTrackTitle := ""
 		if trackParsed.Release != nil && trackParsed.Release.HasTrackInfo {
 			discNum = trackParsed.Release.DiscNumber
-			if discNum == 0 {
-				discNum = 1
-			}
-			trackNum = trackParsed.Release.TrackNumber
-			trackTitle = trackParsed.Release.TrackTitle
-			hasTrackInfo = true
+			pathTrackNum = trackParsed.Release.TrackNumber
+			pathTrackTitle = trackParsed.Release.TrackTitle
 		}
+
+		// Only spend an on-demand ffprobe when we actually need embedded tags:
+		// the filename already carries both a track number and a title on a
+		// well-named (curated) library, so those tracks stay path-only and match
+		// exactly as fast as before. Always reuse the cached lead probe or any
+		// media_info the FFProbeWorker already wrote (free), so quality still
+		// lands when it's available.
+		pathTrackComplete := pathTrackNum > 0 && pathTrackTitle != ""
+		// Two-value lookup, not `== nil`: the lead track is seeded into the cache
+		// even when its probe returned nil (failed/timed-out), and a plain nil
+		// check would re-probe it — doubling the worst-case probe time on a
+		// stalled mount, the very thing the probe timeout bounds.
+		info, seen := probeCache[trackFile.ID]
+		if !seen {
+			if existing := parseMediaInfoBytes(trackFile.MediaInfo); existing != nil {
+				info = existing
+			} else if !pathTrackComplete {
+				info = m.musicFileProbe(ctx, trackFile)
+			}
+			probeCache[trackFile.ID] = info
+		}
+		tags := extractMusicTags(collectAudioTags(info))
+
+		// Disc number: parsed filename / "Disc N" subdir take precedence, then
+		// the embedded tag, defaulting to 1.
 		if d := discNumFromPath(trackFile.Path); d > 0 {
 			discNum = d
 		}
+		if discNum == 0 {
+			discNum = tags.DiscNumber
+		}
+		if discNum == 0 {
+			discNum = 1
+		}
 
+		// Track number: path filename number fused with the tag (path wins a
+		// disagreement — the filename reflects on-disk order).
+		wantNum := fuseTrackNumber(pathTrackNum, tags.TrackNumber)
+
+		// Track title: fused path/tag, then an exact NFO disc+position override,
+		// then the filename stem as last resort.
+		trackTitle := fuseText(pathTrackTitle, tags.Title, basePathTrust, tagTrust(tags.Title)).Value
 		if albumNFO != nil {
 			for _, nfoT := range albumNFO.Tracks {
 				nfoDisc := nfoT.Disc
 				if nfoDisc == 0 {
 					nfoDisc = 1
 				}
-				if nfoDisc == discNum && nfoT.Position == trackNum {
-					if nfoT.Title != "" {
-						trackTitle = nfoT.Title
-					}
+				if nfoDisc == discNum && nfoT.Position == wantNum && nfoT.Title != "" {
+					trackTitle = nfoT.Title
 					break
 				}
 			}
+		}
+		if trackTitle == "" {
+			base := filepath.Base(trackFile.Path)
+			trackTitle = strings.TrimSuffix(base, filepath.Ext(base))
+		}
+
+		assigner.reserve(discNum, wantNum) // no-op when wantNum == 0
+		plans = append(plans, trackPlan{file: trackFile, info: info, disc: discNum, want: wantNum, title: trackTitle})
+	}
+
+	// Pass 2: create/link each track. A known number is used as-is — two files
+	// sharing one are quality-alternates of a single track and merge via
+	// GetOrCreateTrack's upsert; an unknown number is filled to a free per-disc
+	// slot that collides with no reserved number, so distinct unnumbered files
+	// stay distinct.
+	for _, p := range plans {
+		trackFile := p.file
+		info := p.info
+		discNum := p.disc
+		trackTitle := p.title
+		trackNum := p.want
+		if trackNum == 0 {
+			trackNum = assigner.fill(discNum)
+			log.Debug().Str("file", vfs.RedactPath(trackFile.Path)).Int("disc", discNum).Int("assigned", trackNum).Msg("assigned synthetic track number (unnumbered file)")
 		}
 
 		duration := 0
 		// (duration / canonical title from heya.media populated later by
 		// EnrichMediaItemWorker via UpdateTrackFromEnrichment)
-
-		if !hasTrackInfo && trackTitle == "" {
-			base := filepath.Base(trackFile.Path)
-			trackTitle = strings.TrimSuffix(base, filepath.Ext(base))
-		}
 
 		lyricsPath := findLyricsForTrack(trackFile, lyrics)
 
@@ -403,10 +552,10 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 
 		format := strings.ToLower(strings.TrimPrefix(filepath.Ext(trackFile.Path), "."))
 		score := mediaprobe.ExtensionQualityBase(format)
-		probe := parseAudioFromMediaInfo(trackFile.MediaInfo)
+		probe := audioFieldsFromInfo(info)
 		if probe != nil {
-			// Probe data was already written by FFProbeWorker — adopt it so
-			// the matcher doesn't leave the row at extension-only quality.
+			// Probe data (from FFProbeWorker or our on-demand probe above) —
+			// adopt it so the row doesn't stay at extension-only quality.
 			score = mediaprobe.RefinedQualityScore(format, probe.BitrateKbps, probe.BitDepth, probe.SampleRateHz)
 		}
 
@@ -1034,15 +1183,24 @@ func (m *Matcher) markFile(ctx context.Context, fileID int64, status sqlc.FileSt
 	}
 }
 
-// parseAudioFromMediaInfo reads the JSON FFProbeWorker stored in
-// library_files.media_info and pulls out audio properties. Returns nil if the
-// row hasn't been probed yet or has no audio stream.
-func parseAudioFromMediaInfo(raw []byte) *mediaprobe.AudioFields {
+// parseMediaInfoBytes parses a library_files.media_info blob into MediaInfo,
+// returning nil for the unprobed sentinel ('{}') or any parse error.
+func parseMediaInfoBytes(raw []byte) *mediaprobe.MediaInfo {
 	if len(raw) == 0 || string(raw) == "{}" {
 		return nil
 	}
 	info, err := mediaprobe.Parse(raw)
 	if err != nil {
+		return nil
+	}
+	return info
+}
+
+// audioFieldsFromInfo pulls the primary audio stream's quality fields out of
+// already-parsed probe info. Returns nil when there's no audio stream or
+// nothing useful was decoded.
+func audioFieldsFromInfo(info *mediaprobe.MediaInfo) *mediaprobe.AudioFields {
+	if info == nil {
 		return nil
 	}
 	audio := mediaprobe.PrimaryAudio(info)
@@ -1054,6 +1212,45 @@ func parseAudioFromMediaInfo(raw []byte) *mediaprobe.AudioFields {
 		return nil
 	}
 	return &out
+}
+
+// musicFileProbe returns parsed ffprobe info for a track file. It reuses the
+// media_info the async FFProbeWorker may already have written; when that
+// hasn't landed yet (match usually beats ffprobe in the queue) it probes on
+// demand and persists the result. Probing here — before the artist/album
+// decision — lets tag fusion read embedded ID3/Vorbis tags rather than trust a
+// possibly-garbage path, and makes the later FFProbeWorker pass a cheap
+// re-probe. Returns nil when no prober is wired (tests) or the probe fails;
+// callers then fall back to path/NFO only, exactly as before tag fusion.
+// musicProbeTimeout bounds a single on-demand probe during matching, mirroring
+// the bounds the other worker.ProbeFile callers use.
+const musicProbeTimeout = 90 * time.Second
+
+func (m *Matcher) musicFileProbe(ctx context.Context, file sqlc.LibraryFile) *mediaprobe.MediaInfo {
+	if info := parseMediaInfoBytes(file.MediaInfo); info != nil {
+		return info
+	}
+	if m.probe == nil {
+		return nil
+	}
+	// Bound every on-demand probe like the other ProbeFile call sites do
+	// (FFProbeWorker 120s, EnsureFileProbed 60s). Without this the raw match-job
+	// context (River JobTimeout is 6h) would let a stalled SMB read hang ffprobe
+	// on its pipe and wedge the single-worker match queue — which serves every
+	// media type — for hours.
+	probeCtx, cancel := context.WithTimeout(ctx, musicProbeTimeout)
+	defer cancel()
+	info, err := m.probe(probeCtx, file.Path)
+	if err != nil {
+		log.Debug().Err(err).Str("path", vfs.RedactPath(file.Path)).Msg("on-demand music probe failed; using path/NFO only")
+		return nil
+	}
+	if infoJSON, mErr := json.Marshal(info); mErr == nil && file.ID > 0 {
+		if err := m.q.UpdateLibraryFileMediaInfo(ctx, sqlc.UpdateLibraryFileMediaInfoParams{ID: file.ID, MediaInfo: infoJSON}); err != nil {
+			log.Debug().Err(err).Int64("file_id", file.ID).Msg("persist on-demand music probe failed")
+		}
+	}
+	return info
 }
 
 // refreshTrackPrimary picks the highest-quality non-deleted file backing the

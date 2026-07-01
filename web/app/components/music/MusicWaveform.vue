@@ -31,6 +31,25 @@ const wrap = ref<HTMLDivElement | null>(null)
 const hoverPct = ref<number | null>(null)
 const dragging = ref(false)
 
+// The stored peaks are raw max-absolute amplitude, which sits near full-scale
+// for loud/brickwalled masters — so a linear render pegs the whole strip. We
+// normalize against the 95th-percentile peak (robust to a lone transient
+// setting the max) and apply a gamma so the loud body gets pushed down and the
+// envelope shows dynamics, then leave vertical headroom so nothing hits the
+// ceiling.
+const WF_GAMMA = 1.5
+const WF_HEADROOM = 0.82
+
+// Memoized per peaks array — recomputed only when the data changes, not on
+// every progress tick.
+const normRef = computed(() => {
+  const p = props.peaks
+  if (!p || p.length === 0) return 1
+  const sorted = [...p].sort((a, b) => a - b)
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))
+  return Math.max(0.05, sorted[idx] ?? 1)
+})
+
 function getCssVar(name: string, fallback: string): string {
   if (typeof getComputedStyle !== 'function' || !document.documentElement) return fallback
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -73,12 +92,14 @@ function draw() {
   const gapPx = Math.max(0, Math.floor(c.width / peaks.length) - barWPx)
   const mid = c.height / 2
   const playedX = c.width * Math.max(0, Math.min(1, props.progress))
+  const ref = normRef.value
+  const maxH = (c.height - 2 * dpr) * WF_HEADROOM
 
   for (let i = 0; i < peaks.length; i++) {
     const x = i * (barWPx + gapPx)
     if (x >= c.width) break
-    const peak = Math.max(0.01, Math.min(1, peaks[i] ?? 0))
-    const h = peak * (c.height - 2 * dpr)
+    const norm = Math.min(1, Math.max(0, peaks[i] ?? 0) / ref)
+    const h = Math.max(dpr, Math.pow(norm, WF_GAMMA) * maxH)
     const y = mid - h / 2
     ctx.fillStyle = x < playedX ? fillColor : baseColor
     ctx.fillRect(x, y, barWPx, h)

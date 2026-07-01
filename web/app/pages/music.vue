@@ -12,8 +12,10 @@
       <QueuePanel />
     </div>
     <Playbar />
+    <MusicBigCover />
     <EQPanel :open="eqOpen" @close="eqOpen = false" />
     <CreatePlaylistModal :open="createOpen" @close="createOpen = false" @created="onCreated" />
+    <VisualizerFullscreen />
     <HotkeyHelp />
   </div>
 </template>
@@ -84,6 +86,8 @@ function onCreated(id: number) {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Positioning context for the fold-out MusicBigCover (absolute, bottom-left). */
+  position: relative;
 }
 .music-body {
   display: flex;
