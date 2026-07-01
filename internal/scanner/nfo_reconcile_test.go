@@ -2,6 +2,33 @@ package scanner
 
 import "testing"
 
+// The two namespaces must not be conflated: filePrefix mirrors the walk's
+// verbatim path construction (double slash for a trailing-slash SMB root),
+// while rootKey is canonical so library_nfo_dirs rows keep matching across
+// trailing-slash config drift — conflating them orphans recorded state and
+// swallows pending NFO edits.
+func TestScanPathPrefixes(t *testing.T) {
+	cases := []struct {
+		root       string
+		isSMB      bool
+		wantPrefix string
+		wantKey    string
+	}{
+		{"smb://h/share/dir", true, "smb://h/share/dir/", "smb://h/share/dir"},
+		{"smb://h/share/dir/", true, "smb://h/share/dir//", "smb://h/share/dir"},
+		{"smb://h/share/dir//", true, "smb://h/share/dir///", "smb://h/share/dir"},
+		{"/data/movies", false, "/data/movies/", "/data/movies"},
+		{"/data/movies/", false, "/data/movies/", "/data/movies"},
+	}
+	for _, c := range cases {
+		prefix, key := scanPathPrefixes(c.root, c.isSMB)
+		if prefix != c.wantPrefix || key != c.wantKey {
+			t.Errorf("scanPathPrefixes(%q, %v) = (%q, %q), want (%q, %q)",
+				c.root, c.isSMB, prefix, key, c.wantPrefix, c.wantKey)
+		}
+	}
+}
+
 // A rooted fileDir can reach nearestNFODir when a root prefix doesn't
 // round-trip cleanly (e.g. an SMB root configured with a trailing slash).
 // filepath.Dir("/") == "/" is a fixed point, so without the termination

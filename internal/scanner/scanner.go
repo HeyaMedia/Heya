@@ -194,6 +194,27 @@ func (r *nfoResolver) forPath(relPath string) *nfo.ParsedNFO {
 	}
 }
 
+// scanPathPrefixes returns the two path namespaces the NFO reconcile needs
+// for one library root.
+//
+// filePrefix mirrors EXACTLY how the walk builds library_files paths — SMB is
+// rootPath verbatim + "/" (a trailing-slash root yields a double slash, and
+// stored paths carry it too), local is filepath.Join's cleaned form. Anything
+// else and TrimPrefix leaves a rooted rel path, breaking seenNFOs lookups.
+//
+// rootKey is the canonical (no trailing slash) root used for
+// library_nfo_dirs keys. It deliberately does NOT mirror the walk: state keys
+// must stay identical across trailing-slash config drift, or a rename of the
+// key namespace would make every recorded row look brand new and silently
+// swallow a pending NFO edit (new-dir semantics record without re-applying).
+func scanPathPrefixes(rootPath string, isSMB bool) (filePrefix, rootKey string) {
+	if isSMB {
+		return rootPath + "/", strings.TrimRight(rootPath, "/")
+	}
+	clean := filepath.Clean(rootPath)
+	return clean + "/", clean
+}
+
 // nearestNFODir walks up from fileDir to the nearest directory with a seen
 // NFO. Same fixed-point termination as forPath: a rooted path (possible if a
 // stored path's root prefix didn't round-trip cleanly) must fail the lookup,
@@ -407,29 +428,19 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 // parse_result rebuilt and flow back through the match pipeline as pending;
 // everything else stays untouched, so a no-change rescan writes nothing.
 func (s *Scanner) reconcileNFOs(ctx context.Context, libraryID int64, rootPath string, isSMB bool, fsys fs.FS, seenNFOs map[string]nfoEntry, nfoState map[string]nfoDirState, known map[string]knownFile, discovered map[string]bool, upserted map[string]bool, result *ScanResult) {
-	// Full-path prefix EXACTLY as the walk builds file paths — SMB is
-	// rootPath verbatim + "/" (a trailing-slash root yields a double slash,
-	// and stored paths carry it too), local is filepath.Join's cleaned form.
-	// Anything else and TrimPrefix leaves a rooted rel path, which breaks
-	// the seenNFOs lookups.
-	var prefix string
-	if isSMB {
-		prefix = rootPath + "/"
-	} else {
-		prefix = filepath.Clean(rootPath) + "/"
-	}
-	rootFull := strings.TrimSuffix(prefix, "/")
+	prefix, rootKey := scanPathPrefixes(rootPath, isSMB)
+	keyPrefix := rootKey + "/"
 	dirFull := func(relDir string) string {
 		if relDir == "." {
-			return rootFull
+			return rootKey
 		}
-		return prefix + relDir
+		return keyPrefix + relDir
 	}
 	relOfDir := func(full string) string {
-		if full == rootFull {
+		if full == rootKey {
 			return "."
 		}
-		return strings.TrimPrefix(full, prefix)
+		return strings.TrimPrefix(full, keyPrefix)
 	}
 
 	// Dirs whose recorded NFO differs from what the walk saw. Postgres stores
@@ -449,7 +460,7 @@ func (s *Scanner) reconcileNFOs(ctx context.Context, libraryID int64, rootPath s
 	// Recorded NFO dirs under this root that no longer have an NFO on disk.
 	var removedFull, removedRel []string
 	for full := range nfoState {
-		if full != rootFull && !strings.HasPrefix(full, prefix) {
+		if full != rootKey && !strings.HasPrefix(full, keyPrefix) {
 			continue
 		}
 		if !seenFull[full] {
