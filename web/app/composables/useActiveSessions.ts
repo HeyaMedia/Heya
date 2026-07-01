@@ -3,9 +3,11 @@
 // vue-query for the initial fetch + remount-survives caching, plus an
 // event-bus subscription so the cache stays live without polling.
 //
-// Server pushes the *full* sessions list on every session.update event
-// (start/end/heartbeat), so we don't need delta merging on the FE — we
-// just replace cached data wholesale. Cheap given sessions are O(handful).
+// The server emits a payload-less `session.update` ping on every change
+// (start/end/heartbeat) — it deliberately does NOT push the session list,
+// because the WS stream is unfiltered and that would leak other users'
+// sessions. On each ping we invalidate the query so it re-fetches through the
+// auth-scoped /api/sessions/active endpoint (own-only for non-admins).
 
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
@@ -43,10 +45,6 @@ export interface ActiveSession {
   last_heartbeat_at: string
 }
 
-interface SessionUpdatePayload {
-  sessions: ActiveSession[]
-}
-
 const SESSIONS_QUERY_KEY = ['sessions', 'active'] as const
 
 export function useActiveSessions() {
@@ -66,15 +64,13 @@ export function useActiveSessions() {
     staleTime: 1000 * 60 * 5,
   })
 
-  // Wire WS push → cache write. The server emits the full list on each
-  // change so we can do a wholesale setQueryData (no merging logic).
+  // The session.update event is a payload-less change signal — refetch through
+  // the auth-scoped endpoint rather than trusting anything on the wire.
   // We connect once per consumer; useEventBus.connect is idempotent.
   if (import.meta.client) {
     connect()
-    on('session.update', (event) => {
-      const payload = event.payload as SessionUpdatePayload | undefined
-      if (!payload?.sessions) return
-      queryClient.setQueryData(SESSIONS_QUERY_KEY, payload.sessions)
+    on('session.update', () => {
+      queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
     })
   }
 

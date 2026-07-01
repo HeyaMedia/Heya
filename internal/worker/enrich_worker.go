@@ -116,7 +116,13 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	// re-walk the season tree. The *_enriched_at stamps exist precisely to resume
 	// without redoing successful components (migration 00017); Force refreshes all.
 	if job.Args.Force || !item.BaseEnrichedAt.Valid {
-		w.Matcher.StoreEntityMetadata(ctx, item.ID, kind, detail)
+		// If the type-specific row can't be written the item would be invisible
+		// (library grid INNER JOINs movies/tv_series/books) — so mark it failed
+		// (the refresh-stale sweep re-drives 'failed') instead of stamping it
+		// base-done/complete on a phantom success.
+		if err := w.Matcher.StoreEntityMetadata(ctx, item.ID, kind, detail); err != nil {
+			return w.markFailed(ctx, q, item.ID, fmt.Sprintf("store base metadata: %v", err))
+		}
 		_ = q.MarkEnrichBaseDone(ctx, item.ID)
 		if kind == metadata.KindTV {
 			_ = q.MarkEnrichStructureDone(ctx, item.ID)

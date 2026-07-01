@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -141,21 +143,38 @@ func (a *App) ListRecentlyWatched(ctx context.Context, userID int64) ([]sqlc.Lis
 	return rows, nil
 }
 
-func (a *App) ToggleFavorite(ctx context.Context, userID, mediaItemID int64) error {
+// ToggleFavorite flips the favorite flag for (entityType, entityID) and returns
+// the resulting state. entityType is honored (episode/season/track/artist/album
+// share this table keyed by their own id space — the old hardcoded "media_item"
+// collided those ids with media_items). A re-click now removes the favorite
+// instead of 500-ing; a racing double-click is benign.
+func (a *App) ToggleFavorite(ctx context.Context, userID int64, entityType string, entityID int64) (bool, error) {
+	if entityType == "" {
+		entityType = "media_item"
+	}
 	q := sqlc.New(a.db)
-	_, err := q.ToggleFavorite(ctx, sqlc.ToggleFavoriteParams{
-		UserID:     userID,
-		EntityType: "media_item",
-		EntityID:   mediaItemID,
-	})
-	return err
+	favorited, err := q.IsFavorited(ctx, sqlc.IsFavoritedParams{UserID: userID, EntityType: entityType, EntityID: entityID})
+	if err != nil {
+		return false, err
+	}
+	if favorited {
+		if err := q.RemoveFavorite(ctx, sqlc.RemoveFavoriteParams{UserID: userID, EntityType: entityType, EntityID: entityID}); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	// ErrNoRows = INSERT hit ON CONFLICT DO NOTHING (already favorited via a
+	// race) — benign; the end state is still favorited.
+	if _, err := q.ToggleFavorite(ctx, sqlc.ToggleFavoriteParams{UserID: userID, EntityType: entityType, EntityID: entityID}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+	return true, nil
 }
 
-func (a *App) IsFavorited(ctx context.Context, userID, mediaItemID int64) (bool, error) {
+func (a *App) IsFavorited(ctx context.Context, userID int64, entityType string, entityID int64) (bool, error) {
+	if entityType == "" {
+		entityType = "media_item"
+	}
 	q := sqlc.New(a.db)
-	return q.IsFavorited(ctx, sqlc.IsFavoritedParams{
-		UserID:     userID,
-		EntityType: "media_item",
-		EntityID:   mediaItemID,
-	})
+	return q.IsFavorited(ctx, sqlc.IsFavoritedParams{UserID: userID, EntityType: entityType, EntityID: entityID})
 }

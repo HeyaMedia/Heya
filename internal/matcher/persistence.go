@@ -872,14 +872,17 @@ func mustJSON(v any) []byte {
 // NOT call this — it writes only the media_items stub via
 // createOrLinkMediaItem, and the enrich worker fills in the type-specific
 // row here.
-func (m *Matcher) StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail) {
+func (m *Matcher) StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail) error {
 	// pgx.ErrNoRows here is the benign "row already exists" no-op (ON CONFLICT DO
-	// NOTHING on a re-enrich) — not a failure. Surface anything else instead of
-	// the previous unconditional swallow.
+	// NOTHING on a re-enrich) — not a failure. Any OTHER error means the
+	// type-specific row (movies / tv_series / books) was NOT written; the library
+	// grid INNER JOINs on it, so a missing row makes the item invisible. Return
+	// the error so the caller doesn't stamp the item enrichment_status='complete'
+	// (which would strand it invisible-and-never-retried).
 	if err := m.createTypeSpecificRow(ctx, mediaItemID, kind, detail, ""); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		log.Error().Err(err).Int64("media_id", mediaItemID).Str("kind", string(kind)).
-			Msg("failed to store type-specific metadata")
+		return fmt.Errorf("store type-specific metadata (media %d, %s): %w", mediaItemID, kind, err)
 	}
+	return nil
 }
 
 // StoreRichMetadata persists cast, crew, keywords, production companies, videos,

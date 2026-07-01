@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
@@ -336,12 +338,13 @@ func (a *App) GetMusicHome(ctx context.Context, limit int32) (*MusicHomeData, er
 func (a *App) SetEntityLoved(ctx context.Context, userID int64, entityType string, entityID int64, loved bool) (bool, error) {
 	q := sqlc.New(a.db)
 	if loved {
-		_, err := q.ToggleFavorite(ctx, sqlc.ToggleFavoriteParams{
+		// ErrNoRows = already loved (ON CONFLICT DO NOTHING) — benign; loving an
+		// already-loved entity must be idempotent, not a 500.
+		if _, err := q.ToggleFavorite(ctx, sqlc.ToggleFavoriteParams{
 			UserID:     userID,
 			EntityType: entityType,
 			EntityID:   entityID,
-		})
-		if err != nil {
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return false, err
 		}
 		return true, nil

@@ -254,24 +254,23 @@ func (s *Store) purge() {
 // Called any time the set changes — upsert, end, purge. Keeps the FE
 // activity panel honest without forcing a poll.
 //
-// Holding no lock here on purpose — the caller already released theirs
-// before calling broadcast(), so we re-read via List() which takes its
-// own RLock. Re-entrancy through the lock would deadlock the purge path.
+// broadcast is signal-only on purpose. The WebSocket fan-out is a single
+// global stream with no per-recipient filtering, so putting the (cross-user)
+// session list in the payload would leak every user's IP / user-agent /
+// now-playing to every connected client. Instead we emit an empty "sessions
+// changed" ping; clients re-fetch through the auth-scoped /api/sessions/active
+// endpoint (own-only for non-admins, full list for admins).
 func (s *Store) broadcast() {
 	if s.hub == nil {
 		return
 	}
-	go func() {
-		s.hub.Emit(EventSessionUpdate, SessionUpdatePayload{Sessions: s.List()})
-	}()
+	s.hub.Emit(EventSessionUpdate, SessionUpdatePayload{})
 }
 
-// EventSessionUpdate / SessionUpdatePayload — exposed so the eventhub
-// package can register the new event type alongside its existing
-// constants. The hub doesn't need to know the shape; this lives here
-// so the session schema and the event payload don't drift.
+// EventSessionUpdate is a change notification only — it carries no session data
+// (see broadcast). SessionUpdatePayload is kept as an explicit empty type so the
+// event's "no payload" contract is documented rather than implicit.
 const EventSessionUpdate eventhub.EventType = "session.update"
 
 type SessionUpdatePayload struct {
-	Sessions []Session `json:"sessions"`
 }

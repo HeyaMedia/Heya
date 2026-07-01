@@ -84,7 +84,7 @@ func TestLocalFirstUpserts(t *testing.T) {
 		require.NoError(t, err)
 
 		// First enrich inserts the movie row (none existed).
-		m.StoreEntityMetadata(ctx, id, metadata.KindMovie, &metadata.MediaDetail{Genres: []string{"Action"}, RuntimeMinutes: 120, Tagline: "boom"})
+		_ = m.StoreEntityMetadata(ctx, id, metadata.KindMovie, &metadata.MediaDetail{Genres: []string{"Action"}, RuntimeMinutes: 120, Tagline: "boom"})
 		mv, err := qtx.GetMovieByMediaItemID(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, []string{"Action"}, mv.Genres)
@@ -104,7 +104,7 @@ func TestLocalFirstUpserts(t *testing.T) {
 
 		// Re-enrich: user-locked fields survive (incl. the cleared tagline);
 		// unlocked fields are refreshed from remote.
-		m.StoreEntityMetadata(ctx, id, metadata.KindMovie, &metadata.MediaDetail{Genres: []string{"Drama", "Thriller"}, RuntimeMinutes: 999, Tagline: "refilled tagline"})
+		_ = m.StoreEntityMetadata(ctx, id, metadata.KindMovie, &metadata.MediaDetail{Genres: []string{"Drama", "Thriller"}, RuntimeMinutes: 999, Tagline: "refilled tagline"})
 		mv2, err := qtx.GetMovieByMediaItemID(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, []string{"UserPick"}, mv2.Genres, "user-locked genres must survive re-enrich")
@@ -117,7 +117,7 @@ func TestLocalFirstUpserts(t *testing.T) {
 		id, _, err := m.createOrLinkMediaItem(ctx, &metadata.MediaDetail{Title: "Show", Year: "2004", ExternalIDs: map[string]string{"tmdb": "222"}}, metadata.KindTV, lib, "")
 		require.NoError(t, err)
 
-		m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
+		_ = m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
 			Status:  "Returning",
 			Seasons: []metadata.SeasonDetail{{Number: 1, Title: "Season 1", Episodes: []metadata.EpisodeDetail{{Number: 1, Title: "Pilot"}}}},
 		})
@@ -144,7 +144,7 @@ func TestLocalFirstUpserts(t *testing.T) {
 		// re-enrich is gated out at the worker) fills the existing series and adds
 		// the new E2 under the existing season, while the edited E1 is preserved
 		// (CreateTVEpisode is insert-or-skip).
-		m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
+		_ = m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
 			Status: "Returning",
 			Seasons: []metadata.SeasonDetail{{Number: 1, Title: "Season 1", Episodes: []metadata.EpisodeDetail{
 				{Number: 1, Title: "Pilot"}, {Number: 2, Title: "Second"},

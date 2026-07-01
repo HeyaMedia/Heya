@@ -614,7 +614,9 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 		kind = metadata.MediaKind(item.MediaType)
 	}
 
-	a.matcher.StoreEntityMetadata(ctx, mediaItemID, kind, detail)
+	if err := a.matcher.StoreEntityMetadata(ctx, mediaItemID, kind, detail); err != nil {
+		return fmt.Errorf("re-identify: store base metadata: %w", err)
+	}
 	a.matcher.StoreRichMetadata(ctx, mediaItemID, detail)
 
 	tx, txErr := a.db.Begin(ctx)

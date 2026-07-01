@@ -61,10 +61,10 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			}
 		}) (*JSONOutput[favoritedBody], error) {
 			user := userFrom(ctx)
-			if err := app.ToggleFavorite(ctx, user.ID, in.Body.EntityID); err != nil {
+			fav, err := app.ToggleFavorite(ctx, user.ID, in.Body.EntityType, in.Body.EntityID)
+			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			fav, _ := app.IsFavorited(ctx, user.ID, in.Body.EntityID)
 			return &JSONOutput[favoritedBody]{Body: favoritedBody{Favorited: fav}}, nil
 		})
 
@@ -73,7 +73,7 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			EntityType string `query:"entity_type" enum:"media_item,episode,season,track,artist,album"`
 			EntityID   int64  `query:"entity_id" minimum:"1"`
 		}) (*JSONOutput[favoritedBody], error) {
-			fav, _ := app.IsFavorited(ctx, userFrom(ctx).ID, in.EntityID)
+			fav, _ := app.IsFavorited(ctx, userFrom(ctx).ID, in.EntityType, in.EntityID)
 			return noStoreJSON(favoritedBody{Favorited: fav}), nil
 		})
 

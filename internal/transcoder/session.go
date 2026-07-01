@@ -903,6 +903,17 @@ func (m *SessionManager) cleanupLoop() {
 			}
 		}
 		m.mu.Unlock()
+
+		// Enforce the on-disk cache size cap. Without this the configured
+		// maxSizeGB was never applied (EvictLRU had no caller), so the
+		// transcoded-audio dir grew until the disk filled on a long-uptime pod.
+		// Run outside m.mu: EvictLRU takes its own lock and does disk IO, and
+		// must not block GetOrCreate/GetExisting behind the manager mutex.
+		if m.cache != nil {
+			if err := m.cache.EvictLRU(); err != nil {
+				log.Warn().Err(err).Msg("transcode cache eviction failed")
+			}
+		}
 	}
 }
 

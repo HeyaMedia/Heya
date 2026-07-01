@@ -259,8 +259,14 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 		if info.IsDir() {
 			name := filepath.Base(path)
 			if !strings.HasPrefix(name, ".") && !mediafile.IsExtrasDir(name) {
-				addRecursive(lw.fsw, path)
-				log.Debug().Str("path", vfs.RedactPath(path)).Msg("watching new directory")
+				// Bounded like the initial arm — a new subdir on a stalled mount
+				// must not wedge this library's eventLoop in an uninterruptible
+				// Getdents (the gap the v0.1.10 arm-stall fix didn't cover).
+				if err := addRecursiveBounded(ctx, lw.fsw, path); err != nil {
+					log.Warn().Err(err).Str("path", vfs.RedactPath(path)).Msg("failed to watch new directory (will rely on periodic rescans)")
+				} else {
+					log.Debug().Str("path", vfs.RedactPath(path)).Msg("watching new directory")
+				}
 			}
 			return
 		}
