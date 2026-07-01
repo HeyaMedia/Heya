@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,14 @@ import (
 )
 
 const debounceDelay = 2 * time.Second
+
+// watchWalkTimeout bounds the initial recursive directory walk when arming a
+// watcher. A healthy tree — even a large one — walks well under this; a network
+// mount that has stalled would otherwise block forever in a Getdents syscall
+// that neither context nor a deadline can interrupt. On timeout we give up
+// live-watching that path (periodic rescans still catch changes) rather than
+// wedge the whole watcher subsystem.
+const watchWalkTimeout = 60 * time.Second
 
 type LibraryWatcher struct {
 	libraryID int64
@@ -69,36 +78,26 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		}
 		for _, p := range lib.Paths {
 			if isLocalPath(p) {
-				m.Watch(ctx, lib.ID, p)
+				// Arm each watcher concurrently: the recursive walk can be slow
+				// (or stall on a flaky mount), and one library must never block
+				// startup or its siblings. Watch is self-synchronizing.
+				go m.Watch(ctx, lib.ID, p)
 			}
 		}
 	}
 
-	log.Info().Int("count", len(m.watchers)).Msg("filesystem watchers started")
+	log.Info().Msg("filesystem watchers arming in background")
 	return nil
 }
 
 func (m *Manager) Watch(ctx context.Context, libraryID int64, rootPath string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	key := watcherKey(libraryID, rootPath)
-	if _, exists := m.watchers[key]; exists {
-		return
-	}
 
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Error().Err(err).Int64("library_id", libraryID).Msg("failed to create watcher")
 		return
 	}
-
-	if err := addRecursive(fsw, rootPath); err != nil {
-		log.Error().Err(err).Str("path", vfs.RedactPath(rootPath)).Msg("failed to add path to watcher")
-		fsw.Close()
-		return
-	}
-
 	wctx, cancel := context.WithCancel(ctx)
 	lw := &LibraryWatcher{
 		libraryID: libraryID,
@@ -106,7 +105,45 @@ func (m *Manager) Watch(ctx context.Context, libraryID int64, rootPath string) {
 		fsw:       fsw,
 		cancel:    cancel,
 	}
+
+	// Reserve the slot BEFORE the (unlocked, possibly slow) walk — with the real
+	// fsw + cancel in place — so a concurrent Unwatch can find and tear us down
+	// mid-arm. The commit check after the walk then refuses to resurrect a
+	// library that was unwatched while arming. This also dedups concurrent Watch
+	// calls for the same key.
+	m.mu.Lock()
+	if _, exists := m.watchers[key]; exists {
+		m.mu.Unlock()
+		cancel()
+		_ = fsw.Close()
+		return
+	}
 	m.watchers[key] = lw
+	m.mu.Unlock()
+
+	// Arm the recursive watch WITHOUT holding m.mu (a stalled mount must not
+	// deadlock Pause/Resume/Unwatch or any scan that toggles the watcher) and
+	// with a timeout; wctx lets Unwatch abort a slow arm.
+	walkErr := addRecursiveBounded(wctx, fsw, rootPath)
+
+	m.mu.Lock()
+	mine := m.watchers[key] == lw
+	if mine && walkErr != nil {
+		delete(m.watchers, key)
+	}
+	m.mu.Unlock()
+
+	if !mine {
+		// Unwatch removed us during arming; it already cancelled + closed our
+		// fsw, so do NOT resurrect the watcher.
+		return
+	}
+	if walkErr != nil {
+		log.Error().Err(walkErr).Str("path", vfs.RedactPath(rootPath)).Msg("failed to arm recursive watch; library falls back to periodic rescans")
+		cancel()
+		_ = fsw.Close()
+		return
+	}
 
 	go m.eventLoop(wctx, lw)
 	log.Info().Int64("library_id", libraryID).Str("path", vfs.RedactPath(rootPath)).Msg("watching directory")
@@ -338,6 +375,30 @@ func (m *Manager) enqueueRescan(_ context.Context, libraryID int64) {
 		m.onScan(libraryID, false)
 		log.Info().Int64("library_id", libraryID).Msg("rescan enqueued after directory change")
 	})
+}
+
+// addRecursiveBounded runs addRecursive with a timeout. The walk issues
+// blocking Getdents syscalls that neither context nor a deadline can interrupt
+// once a mount stalls, so it runs in a goroutine that we abandon on timeout.
+// The orphaned goroutine holds no locks and returns (into a buffered channel)
+// if the mount ever recovers, so it can't wedge anything — worst case one
+// leaked goroutine per stalled arm attempt. A timeout is surfaced as an error
+// so the caller skips live-watching that path.
+// recursiveWalkFn is the walk implementation, overridable in tests so the
+// arm/unwatch race can be exercised deterministically.
+var recursiveWalkFn = addRecursive
+
+func addRecursiveBounded(ctx context.Context, fsw *fsnotify.Watcher, root string) error {
+	done := make(chan error, 1)
+	go func() { done <- recursiveWalkFn(fsw, root) }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(watchWalkTimeout):
+		return fmt.Errorf("recursive watch of %s timed out after %s (stalled mount?)", vfs.RedactPath(root), watchWalkTimeout)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func addRecursive(fsw *fsnotify.Watcher, root string) error {
