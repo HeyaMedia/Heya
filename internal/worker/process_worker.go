@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,7 +43,12 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 	// subtitle sidecars, and book formats are companion files the matcher
 	// reads directly via filesystem walks — sending them through ffprobe
 	// just produces "exit status 1" noise in the logs.
-	if isFFProbeable(file.Path) {
+	//
+	// Populated media_info means the bytes haven't changed since the last
+	// probe — the scanner clears it whenever size/mtime drift (see
+	// UpsertLibraryFile), so a pending file that still carries probe data got
+	// here via an NFO-only re-apply and doesn't need another probe.
+	if isFFProbeable(file.Path) && !hasProbeData(file.MediaInfo) {
 		if _, err := client.Insert(ctx, FFProbeArgs{
 			LibraryFileID:   file.ID,
 			FilePath:        file.Path,
@@ -69,4 +75,11 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 // formats (.epub, .pdf) get a false here.
 func isFFProbeable(path string) bool {
 	return mediafile.IsProbeable(path)
+}
+
+// hasProbeData reports whether media_info holds a real probe result (the
+// column defaults to '{}'; a failed probe can leave 'null').
+func hasProbeData(mediaInfo []byte) bool {
+	s := strings.TrimSpace(string(mediaInfo))
+	return s != "" && s != "{}" && s != "null"
 }

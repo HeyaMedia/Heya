@@ -1,11 +1,35 @@
 -- name: UpsertLibraryFile :one
+-- The conflict branch means the bytes changed (or a force rescan), so stale
+-- probe artifacts are cleared — ProcessFile skips ffprobe when media_info is
+-- already populated, and this reset is what makes that skip safe. NFO-only
+-- re-applies must NOT come through here (they'd wipe good probe data); they
+-- use ReapplyLibraryFileParse instead.
 INSERT INTO library_files (library_id, path, size, mtime, parse_result, status)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (library_id, path) DO UPDATE
 SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
+    media_info = '{}'::jsonb, keyframes = NULL,
     deleted_at = NULL, updated_at = now()
 RETURNING *;
+
+-- name: ReapplyLibraryFileParse :exec
+-- Local-metadata re-apply for a file whose bytes did NOT change (its NFO
+-- did). Refreshes parse_result and re-drives the match pipeline, but keeps
+-- media_info/keyframes so ProcessFile won't re-probe unchanged bytes.
+UPDATE library_files
+SET parse_result = $2, status = 'pending', error_message = '', updated_at = now()
+WHERE id = $1;
+
+-- name: ListLibraryFilesForScan :many
+-- One-shot preload of every known file (soft-deleted included — the scanner
+-- needs those for the restore path) so the walk does map lookups instead of
+-- one SELECT per file. has_nfo says whether local metadata was ever applied,
+-- without shipping the whole parse_result across.
+SELECT id, path, size, mtime, deleted_at, has_trickplay,
+       (parse_result ? 'nfo')::boolean AS has_nfo
+FROM library_files
+WHERE library_id = $1;
 
 -- name: GetLibraryFileByID :one
 SELECT * FROM library_files WHERE id = $1;

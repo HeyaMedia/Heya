@@ -20,10 +20,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var nfoFiles = map[string]bool{
-	"tvshow.nfo": true, "movie.nfo": true, "artist.nfo": true, "album.nfo": true,
-}
-
 type Scanner struct {
 	db *pgxpool.Pool
 	q  *sqlc.Queries
@@ -31,6 +27,35 @@ type Scanner struct {
 
 func New(db *pgxpool.Pool) *Scanner {
 	return &Scanner{db: db, q: sqlc.New(db)}
+}
+
+// knownFile is the preloaded DB state for one library file. Loading the whole
+// library in one query and doing map lookups replaces the previous one
+// SELECT per walked file.
+type knownFile struct {
+	id           int64
+	size         int64
+	mtime        pgtype.Timestamptz
+	deleted      bool
+	hasTrickplay bool
+	hasNFO       bool
+}
+
+// nfoEntry is a canonical NFO file observed during the walk. The walk gets
+// mtimes for free from the directory listing, so an edited NFO is detectable
+// without ever opening it.
+type nfoEntry struct {
+	name  string // actual on-disk entry name
+	kind  string // tvshow | movie | artist | album
+	mtime time.Time
+	prio  int
+}
+
+// nfoDirState mirrors a library_nfo_dirs row: the NFO that was last applied
+// to the files beneath dir_path.
+type nfoDirState struct {
+	name  string
+	mtime time.Time
 }
 
 func (s *Scanner) ScanLibrary(ctx context.Context, lib sqlc.Library, opts ScanOptions) (ScanResult, error) {
@@ -41,9 +66,22 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib sqlc.Library, opts ScanOp
 
 	log.Info().Int64("library_id", lib.ID).Str("name", lib.Name).Str("type", string(lib.MediaType)).Int("paths", len(lib.Paths)).Msg("starting library scan")
 
+	// Force rescan re-upserts everything during the walk, so the preload map
+	// would never be consulted — skip the query.
+	known := map[string]knownFile{}
+	if !opts.ForceRescan {
+		var err error
+		known, err = s.loadKnownFiles(ctx, lib.ID)
+		if err != nil {
+			return result, fmt.Errorf("preloading library files: %w", err)
+		}
+	}
+	nfoState := s.loadNFODirState(ctx, lib.ID)
+	upserted := make(map[string]bool)
+
 	for _, rootPath := range lib.Paths {
 		log.Info().Str("root", vfs.RedactPath(rootPath)).Msg("scanning root path")
-		if err := s.scanPath(ctx, lib.ID, rootPath, opts, &result, discovered); err != nil {
+		if err := s.scanPath(ctx, lib.ID, rootPath, opts, &result, discovered, known, nfoState, upserted); err != nil {
 			failedRoots++
 			if firstScanErr == nil {
 				firstScanErr = err
@@ -86,7 +124,74 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib sqlc.Library, opts ScanOp
 	return result, nil
 }
 
-func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string, opts ScanOptions, result *ScanResult, discovered map[string]bool) error {
+func (s *Scanner) loadKnownFiles(ctx context.Context, libraryID int64) (map[string]knownFile, error) {
+	rows, err := s.q.ListLibraryFilesForScan(ctx, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	known := make(map[string]knownFile, len(rows))
+	for _, r := range rows {
+		known[r.Path] = knownFile{
+			id:           r.ID,
+			size:         r.Size,
+			mtime:        r.Mtime,
+			deleted:      r.DeletedAt.Valid,
+			hasTrickplay: r.HasTrickplay,
+			hasNFO:       r.HasNfo,
+		}
+	}
+	return known, nil
+}
+
+// loadNFODirState is best-effort: an empty map just means every NFO dir looks
+// new this scan, which records rows without re-applying anything (files that
+// already carry nfo data are left alone) — no storm, self-corrects next scan.
+func (s *Scanner) loadNFODirState(ctx context.Context, libraryID int64) map[string]nfoDirState {
+	rows, err := s.q.ListLibraryNFODirs(ctx, libraryID)
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", libraryID).Msg("loading NFO dir state failed; treating as empty")
+		return map[string]nfoDirState{}
+	}
+	state := make(map[string]nfoDirState, len(rows))
+	for _, r := range rows {
+		state[r.DirPath] = nfoDirState{name: r.NfoName, mtime: r.Mtime.Time}
+	}
+	return state
+}
+
+// nfoResolver lazily finds and parses the governing NFO for a path, memoizing
+// per directory (nil entries memoize "looked, nothing there"). On an
+// unchanged rescan it is never consulted, so no NFO is opened at all.
+type nfoResolver struct {
+	fsys  fs.FS
+	cache map[string]*nfo.ParsedNFO
+}
+
+func (r *nfoResolver) dir(dir string) *nfo.ParsedNFO {
+	if p, ok := r.cache[dir]; ok {
+		return p
+	}
+	p := nfo.FindAndParse(r.fsys, dir)
+	r.cache[dir] = p
+	return p
+}
+
+// forPath returns the nearest ancestor directory's NFO (starting at the
+// file's own dir, ending at the root).
+func (r *nfoResolver) forPath(relPath string) *nfo.ParsedNFO {
+	dir := filepath.Dir(relPath)
+	for {
+		if p := r.dir(dir); p != nil {
+			return p
+		}
+		if dir == "." || dir == "" {
+			return nil
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string, opts ScanOptions, result *ScanResult, discovered map[string]bool, known map[string]knownFile, nfoState map[string]nfoDirState, upserted map[string]bool) error {
 	source, err := vfs.Open(rootPath)
 	if err != nil {
 		return err
@@ -94,9 +199,10 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 	defer source.Close()
 
 	isSMB := vfs.IsSMBPath(rootPath)
-	nfoCache := make(map[string]*nfo.ParsedNFO)
+	resolver := &nfoResolver{fsys: source.FS, cache: make(map[string]*nfo.ParsedNFO)}
+	seenNFOs := make(map[string]nfoEntry) // rel dir → canonical NFO present there
 
-	return fs.WalkDir(source.FS, ".", func(relPath string, d fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(source.FS, ".", func(relPath string, d fs.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
@@ -121,24 +227,24 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 				}
 			}
 			log.Debug().Str("dir", relPath).Msg("entering directory")
-
-			parsed := nfo.FindAndParse(source.FS, relPath)
-			if parsed != nil {
-				nfoCache[relPath] = parsed
-				log.Info().
-					Str("dir", relPath).
-					Str("kind", parsed.Kind).
-					Str("title", parsed.Title).
-					Str("tmdb", parsed.TMDBID).
-					Str("imdb", parsed.IMDBID).
-					Str("tvdb", parsed.TVDBID).
-					Msg("NFO metadata found")
-			}
 			return nil
 		}
 
 		name := d.Name()
-		if mediafile.IsJunkFile(name) || nfoFiles[strings.ToLower(name)] {
+		if mediafile.IsJunkFile(name) {
+			return nil
+		}
+
+		// Canonical NFOs aren't media, but their mtime (free — it comes with
+		// the directory listing) is how edits get detected without opening
+		// them. Parsing stays lazy: only a new/changed file pulls it in.
+		if kind, prio, ok := nfo.CanonicalNFO(strings.ToLower(name)); ok {
+			if info, ierr := d.Info(); ierr == nil {
+				dir := filepath.Dir(relPath)
+				if cur, exists := seenNFOs[dir]; !exists || prio < cur.prio {
+					seenNFOs[dir] = nfoEntry{name: name, kind: kind, mtime: info.ModTime(), prio: prio}
+				}
+			}
 			return nil
 		}
 
@@ -171,19 +277,19 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 		mtime := info.ModTime()
 
 		if !opts.ForceRescan {
-			existing, err := s.q.GetLibraryFileByPath(ctx, sqlc.GetLibraryFileByPathParams{
-				LibraryID: libraryID,
-				Path:      fullPath,
-			})
-			if err == nil {
-				if existing.DeletedAt.Valid {
-					s.q.RestoreLibraryFile(ctx, existing.ID)
+			if existing, ok := known[fullPath]; ok {
+				if existing.deleted {
+					if err := s.q.RestoreLibraryFile(ctx, existing.id); err != nil {
+						log.Error().Err(err).Str("file", relPath).Msg("error restoring soft-deleted file")
+						result.Errors++
+						return nil
+					}
 					log.Info().Str("file", relPath).Msg("restored previously soft-deleted file")
 					result.New++
 					return nil
 				}
-				if existing.Size == size && existing.Mtime.Valid && existing.Mtime.Time.Truncate(time.Microsecond).Equal(mtime.Truncate(time.Microsecond)) {
-					s.syncTrickplayFlag(ctx, existing.ID, fullPath, existing.HasTrickplay)
+				if existing.size == size && existing.mtime.Valid && existing.mtime.Time.Truncate(time.Microsecond).Equal(mtime.Truncate(time.Microsecond)) {
+					s.syncTrickplayFlag(ctx, existing.id, fullPath, existing.hasTrickplay)
 					log.Debug().Str("file", relPath).Msg("unchanged, skipping")
 					result.Unchanged++
 					return nil
@@ -193,7 +299,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 
 		parsed := parser.ParseStoragePath(relPath)
 
-		nfoData := findNFOForPath(nfoCache, relPath)
+		nfoData := resolver.forPath(relPath)
 
 		parseData := map[string]any{
 			"parsed": parsed,
@@ -221,6 +327,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 				ParseResult: parseJSON,
 			})
 			log.Info().Str("from", moved.Path).Str("to", relPath).Int64("file_id", moved.ID).Msg("detected file move")
+			upserted[fullPath] = true
 			result.Updated++
 			return nil
 		}
@@ -238,6 +345,7 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 			result.Errors++
 			return nil
 		}
+		upserted[fullPath] = true
 
 		title := ""
 		if parsed.Release != nil {
@@ -260,6 +368,201 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 		result.New++
 		return nil
 	})
+	if walkErr != nil {
+		return walkErr
+	}
+
+	// Only reconcile after a clean walk — a partial walk has an incomplete
+	// seenNFOs set, and acting on it would misread missing dirs as removed
+	// NFOs and re-drive files for nothing.
+	s.reconcileNFOs(ctx, libraryID, rootPath, isSMB, source.FS, seenNFOs, nfoState, known, discovered, upserted, result)
+	return nil
+}
+
+// reconcileNFOs applies local-metadata changes to files whose bytes did not
+// change: an edited NFO (mtime/name drift vs the recorded row), an NFO added
+// after its files were scanned (file lacks nfo data), or a removed NFO
+// (files re-resolve to an outer NFO or to none). Affected files get their
+// parse_result rebuilt and flow back through the match pipeline as pending;
+// everything else stays untouched, so a no-change rescan writes nothing.
+func (s *Scanner) reconcileNFOs(ctx context.Context, libraryID int64, rootPath string, isSMB bool, fsys fs.FS, seenNFOs map[string]nfoEntry, nfoState map[string]nfoDirState, known map[string]knownFile, discovered map[string]bool, upserted map[string]bool, result *ScanResult) {
+	// Full-path prefix exactly as the walk builds file paths, so DB paths
+	// round-trip back to walk-relative paths.
+	var rootFull string
+	if isSMB {
+		rootFull = strings.TrimSuffix(rootPath, "/")
+	} else {
+		rootFull = filepath.Clean(rootPath)
+	}
+	prefix := rootFull + "/"
+	dirFull := func(relDir string) string {
+		if relDir == "." {
+			return rootFull
+		}
+		return prefix + relDir
+	}
+	relOfDir := func(full string) string {
+		if full == rootFull {
+			return "."
+		}
+		return strings.TrimPrefix(full, prefix)
+	}
+
+	// Dirs whose recorded NFO differs from what the walk saw. Postgres stores
+	// µs precision, so compare µs-truncated.
+	changed := make(map[string]bool)
+	seenFull := make(map[string]bool, len(seenNFOs))
+	for relDir, e := range seenNFOs {
+		full := dirFull(relDir)
+		seenFull[full] = true
+		if st, ok := nfoState[full]; ok {
+			if st.name != e.name || !st.mtime.Truncate(time.Microsecond).Equal(e.mtime.Truncate(time.Microsecond)) {
+				changed[relDir] = true
+			}
+		}
+	}
+
+	// Recorded NFO dirs under this root that no longer have an NFO on disk.
+	var removedFull, removedRel []string
+	for full := range nfoState {
+		if full != rootFull && !strings.HasPrefix(full, prefix) {
+			continue
+		}
+		if !seenFull[full] {
+			removedFull = append(removedFull, full)
+			removedRel = append(removedRel, relOfDir(full))
+		}
+	}
+
+	// Lazy parse of a seen NFO, at most once per dir. A nil parse marks the
+	// dir failed: its files are skipped (don't wipe good local metadata over
+	// a broken XML) and its state row is left alone so the next scan retries.
+	parseCache := make(map[string]*nfo.ParsedNFO)
+	failedParse := make(map[string]bool)
+	parseSeen := func(relDir string) *nfo.ParsedNFO {
+		if p, ok := parseCache[relDir]; ok {
+			return p
+		}
+		e := seenNFOs[relDir]
+		path := e.name
+		if relDir != "." {
+			path = relDir + "/" + e.name
+		}
+		p := nfo.ParseFile(fsys, path, e.kind)
+		parseCache[relDir] = p
+		if p == nil {
+			failedParse[relDir] = true
+			log.Warn().Str("dir", relDir).Str("nfo", e.name).Msg("NFO changed but failed to parse; leaving files untouched")
+		}
+		return p
+	}
+	governingDir := func(fileDir string) (string, bool) {
+		dir := fileDir
+		for {
+			if _, ok := seenNFOs[dir]; ok {
+				return dir, true
+			}
+			if dir == "." || dir == "" {
+				return "", false
+			}
+			dir = filepath.Dir(dir)
+		}
+	}
+	underRemoved := func(fileDir string) bool {
+		for _, rr := range removedRel {
+			if rr == "." || fileDir == rr || strings.HasPrefix(fileDir, rr+"/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	reapplied := 0
+	for fullPath, kf := range known {
+		if !discovered[fullPath] || upserted[fullPath] || !strings.HasPrefix(fullPath, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(fullPath, prefix)
+		fileDir := filepath.Dir(rel)
+
+		gov, hasGov := governingDir(fileDir)
+		needs := underRemoved(fileDir) || (hasGov && (changed[gov] || !kf.hasNFO))
+		if !needs {
+			continue
+		}
+
+		var nfoData *nfo.ParsedNFO
+		if hasGov {
+			nfoData = parseSeen(gov)
+			if nfoData == nil {
+				continue // failed parse — keep the file's existing metadata
+			}
+		}
+
+		parseData := map[string]any{
+			"parsed": parser.ParseStoragePath(rel),
+		}
+		if nfoData != nil {
+			parseData["nfo"] = nfoData
+		}
+		parseJSON, err := json.Marshal(parseData)
+		if err != nil {
+			parseJSON = []byte("{}")
+		}
+		if err := s.q.ReapplyLibraryFileParse(ctx, sqlc.ReapplyLibraryFileParseParams{
+			ID:          kf.id,
+			ParseResult: parseJSON,
+		}); err != nil {
+			log.Error().Err(err).Str("path", vfs.RedactPath(fullPath)).Msg("error re-applying NFO metadata")
+			result.Errors++
+			continue
+		}
+		upserted[fullPath] = true
+		result.Updated++
+		reapplied++
+	}
+
+	// Persist observed state: new/changed rows only, so a no-change rescan
+	// issues zero writes. Failed parses stay unrecorded to retry next scan.
+	for relDir, e := range seenNFOs {
+		if failedParse[relDir] {
+			continue
+		}
+		full := dirFull(relDir)
+		if st, ok := nfoState[full]; ok && st.name == e.name && st.mtime.Truncate(time.Microsecond).Equal(e.mtime.Truncate(time.Microsecond)) {
+			continue
+		}
+		if err := s.q.UpsertLibraryNFODir(ctx, sqlc.UpsertLibraryNFODirParams{
+			LibraryID: libraryID,
+			DirPath:   full,
+			NfoName:   e.name,
+			Mtime:     pgtype.Timestamptz{Time: e.mtime, Valid: true},
+		}); err != nil {
+			log.Error().Err(err).Str("dir", relDir).Msg("error recording NFO dir state")
+			continue
+		}
+		nfoState[full] = nfoDirState{name: e.name, mtime: e.mtime}
+	}
+	if len(removedFull) > 0 {
+		if err := s.q.DeleteLibraryNFODirs(ctx, sqlc.DeleteLibraryNFODirsParams{
+			LibraryID: libraryID,
+			Column2:   removedFull,
+		}); err != nil {
+			log.Error().Err(err).Msg("error deleting removed NFO dir state")
+		} else {
+			for _, full := range removedFull {
+				delete(nfoState, full)
+			}
+		}
+	}
+
+	if reapplied > 0 || len(removedFull) > 0 || len(changed) > 0 {
+		log.Info().
+			Int("reapplied", reapplied).
+			Int("changed_nfos", len(changed)).
+			Int("removed_nfos", len(removedFull)).
+			Msg("NFO reconcile applied local metadata changes")
+	}
 }
 
 // findMovedFile returns the soft-deleted file this new path is a relocation of,
@@ -340,18 +643,4 @@ func (s *Scanner) syncTrickplayFlag(ctx context.Context, fileID int64, fullPath 
 			HasTrickplay: hasTrickplay,
 		})
 	}
-}
-
-func findNFOForPath(cache map[string]*nfo.ParsedNFO, relPath string) *nfo.ParsedNFO {
-	dir := filepath.Dir(relPath)
-	for dir != "." && dir != "" {
-		if n, ok := cache[dir]; ok {
-			return n
-		}
-		dir = filepath.Dir(dir)
-	}
-	if n, ok := cache["."]; ok {
-		return n
-	}
-	return nil
 }

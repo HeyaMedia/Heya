@@ -160,35 +160,55 @@ type ParsedNFO struct {
 	Kind             string // "tvshow", "movie", "artist", "album"
 }
 
+// canonicalNFOs lists the recognized NFO filenames in priority order — when a
+// directory somehow contains more than one, the earlier entry wins. Keep this
+// the single source of truth for both FindAndParse and the scanner's
+// walk-time NFO tracking.
+var canonicalNFOs = []struct {
+	name string
+	kind string
+}{
+	{"tvshow.nfo", "tvshow"},
+	{"movie.nfo", "movie"},
+	{"artist.nfo", "artist"},
+	{"album.nfo", "album"},
+}
+
+// CanonicalNFO reports whether name (lowercased by the caller) is one of the
+// canonical NFO filenames, returning its kind and priority (lower wins).
+func CanonicalNFO(name string) (kind string, prio int, ok bool) {
+	for i, nf := range canonicalNFOs {
+		if nf.name == name {
+			return nf.kind, i, true
+		}
+	}
+	return "", 0, false
+}
+
+// ParseFile parses a single known NFO file from fsys. Returns nil when the
+// file can't be opened or doesn't parse as the given kind.
+func ParseFile(fsys fs.FS, path, kind string) *ParsedNFO {
+	f, err := fsys.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+
+	parsed, err := parseNFO(f, kind)
+	if err != nil {
+		log.Debug().Err(err).Str("path", path).Msg("error parsing NFO")
+		return nil
+	}
+	log.Info().Str("path", path).Str("kind", kind).Str("title", parsed.Title).Str("tmdb", parsed.TMDBID).Str("imdb", parsed.IMDBID).Msg("found NFO")
+	return parsed
+}
+
 func FindAndParse(fsys fs.FS, dir string) *ParsedNFO {
-	nfoFiles := []struct {
-		name string
-		kind string
-	}{
-		{"tvshow.nfo", "tvshow"},
-		{"movie.nfo", "movie"},
-		{"artist.nfo", "artist"},
-		{"album.nfo", "album"},
-	}
-
-	for _, nf := range nfoFiles {
-		path := filepath.Join(dir, nf.name)
-		f, err := fsys.Open(path)
-		if err != nil {
-			continue
+	for _, nf := range canonicalNFOs {
+		if parsed := ParseFile(fsys, filepath.Join(dir, nf.name), nf.kind); parsed != nil {
+			return parsed
 		}
-		defer f.Close()
-
-		parsed, err := parseNFO(f, nf.kind)
-		if err != nil {
-			log.Debug().Err(err).Str("path", path).Msg("error parsing NFO")
-			continue
-		}
-
-		log.Info().Str("path", path).Str("kind", nf.kind).Str("title", parsed.Title).Str("tmdb", parsed.TMDBID).Str("imdb", parsed.IMDBID).Msg("found NFO")
-		return parsed
 	}
-
 	return nil
 }
 

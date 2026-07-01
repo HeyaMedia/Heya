@@ -4,6 +4,30 @@ The path from "file appears on disk" to "fully enriched media item" is split
 into two phases: a **match** phase that produces a stub from a single search
 call, and an **enrich** phase that fans out the heavy detail work.
 
+## Scan (change detection first)
+
+`internal/scanner/`. A rescan of an already-imported library is designed to
+cost near-zero I/O beyond the directory walk itself:
+
+- **One preload query, not one per file.** `ListLibraryFilesForScan` loads the
+  whole library into a map up front; the walk's known/changed check is a map
+  lookup. A file whose size + mtime (µs-truncated) match is skipped.
+- **NFO parsing is lazy.** Canonical NFOs (`tvshow/movie/artist/album.nfo`)
+  are only opened when a new/changed file actually needs one (nearest-ancestor
+  resolution, memoized per directory). An unchanged rescan opens zero NFOs.
+- **NFO edits are detected by mtime, not by re-reading.** The walk sees each
+  NFO's mtime for free in the dir listing; `library_nfo_dirs` records what was
+  last applied per directory. On drift (edit/add/remove), only the files under
+  that directory get their `parse_result` rebuilt (`ReapplyLibraryFileParse`)
+  and re-enter the pipeline as `pending` — so local-metadata changes land on
+  the next scan without a force rescan.
+- **No redundant ffprobe on re-apply.** The walk upsert clears `media_info`
+  when bytes change; `ProcessFile` skips the probe when `media_info` is still
+  populated (NFO-only re-apply), so probe work tracks byte changes only.
+
+`ScanOptions.ForceRescan` bypasses the unchanged check and re-upserts
+everything (which also clears probe data → full re-probe + re-match).
+
 ## Match (search-only stub)
 
 `internal/matcher/`. The scanner emits a parsed filename; the

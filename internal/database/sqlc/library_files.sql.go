@@ -510,6 +510,55 @@ func (q *Queries) ListLibraryFilesByStatus(ctx context.Context, arg ListLibraryF
 	return items, nil
 }
 
+const listLibraryFilesForScan = `-- name: ListLibraryFilesForScan :many
+SELECT id, path, size, mtime, deleted_at, has_trickplay,
+       (parse_result ? 'nfo')::boolean AS has_nfo
+FROM library_files
+WHERE library_id = $1
+`
+
+type ListLibraryFilesForScanRow struct {
+	ID           int64              `json:"id"`
+	Path         string             `json:"path"`
+	Size         int64              `json:"size"`
+	Mtime        pgtype.Timestamptz `json:"mtime"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	HasTrickplay bool               `json:"has_trickplay"`
+	HasNfo       bool               `json:"has_nfo"`
+}
+
+// One-shot preload of every known file (soft-deleted included — the scanner
+// needs those for the restore path) so the walk does map lookups instead of
+// one SELECT per file. has_nfo says whether local metadata was ever applied,
+// without shipping the whole parse_result across.
+func (q *Queries) ListLibraryFilesForScan(ctx context.Context, libraryID int64) ([]ListLibraryFilesForScanRow, error) {
+	rows, err := q.db.Query(ctx, listLibraryFilesForScan, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLibraryFilesForScanRow{}
+	for rows.Next() {
+		var i ListLibraryFilesForScanRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.DeletedAt,
+			&i.HasTrickplay,
+			&i.HasNfo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMediaResolutions = `-- name: ListMediaResolutions :many
 SELECT lf.media_item_id,
        max(
@@ -679,6 +728,25 @@ type PurgeDeletedLibraryFilesParams struct {
 
 func (q *Queries) PurgeDeletedLibraryFiles(ctx context.Context, arg PurgeDeletedLibraryFilesParams) error {
 	_, err := q.db.Exec(ctx, purgeDeletedLibraryFiles, arg.LibraryID, arg.DeletedAt)
+	return err
+}
+
+const reapplyLibraryFileParse = `-- name: ReapplyLibraryFileParse :exec
+UPDATE library_files
+SET parse_result = $2, status = 'pending', error_message = '', updated_at = now()
+WHERE id = $1
+`
+
+type ReapplyLibraryFileParseParams struct {
+	ID          int64  `json:"id"`
+	ParseResult []byte `json:"parse_result"`
+}
+
+// Local-metadata re-apply for a file whose bytes did NOT change (its NFO
+// did). Refreshes parse_result and re-drives the match pipeline, but keeps
+// media_info/keyframes so ProcessFile won't re-probe unchanged bytes.
+func (q *Queries) ReapplyLibraryFileParse(ctx context.Context, arg ReapplyLibraryFileParseParams) error {
+	_, err := q.db.Exec(ctx, reapplyLibraryFileParse, arg.ID, arg.ParseResult)
 	return err
 }
 
@@ -853,6 +921,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (library_id, path) DO UPDATE
 SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
+    media_info = '{}'::jsonb, keyframes = NULL,
     deleted_at = NULL, updated_at = now()
 RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at
 `
@@ -866,6 +935,11 @@ type UpsertLibraryFileParams struct {
 	Status      FileStatus         `json:"status"`
 }
 
+// The conflict branch means the bytes changed (or a force rescan), so stale
+// probe artifacts are cleared — ProcessFile skips ffprobe when media_info is
+// already populated, and this reset is what makes that skip safe. NFO-only
+// re-applies must NOT come through here (they'd wipe good probe data); they
+// use ReapplyLibraryFileParse instead.
 func (q *Queries) UpsertLibraryFile(ctx context.Context, arg UpsertLibraryFileParams) (LibraryFile, error) {
 	row := q.db.QueryRow(ctx, upsertLibraryFile,
 		arg.LibraryID,

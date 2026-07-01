@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -549,6 +550,217 @@ func TestScanNonMediaFilesIgnored(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, result.Discovered, "only .mkv should be counted")
+}
+
+func writeNFO(t *testing.T, path, tmdbID string) {
+	t.Helper()
+	content := `<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Test Movie</title>
+  <uniqueid type="tmdb">` + tmdbID + `</uniqueid>
+</movie>`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+}
+
+func markMatched(t *testing.T, q *sqlc.Queries, libraryID int64) sqlc.LibraryFile {
+	t.Helper()
+	files, err := q.ListLibraryFiles(context.Background(), sqlc.ListLibraryFilesParams{
+		LibraryID: libraryID, Limit: 10, Offset: 0,
+	})
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.NoError(t, q.UpdateLibraryFileStatus(context.Background(), sqlc.UpdateLibraryFileStatusParams{
+		ID: files[0].ID, Status: sqlc.FileStatusMatched,
+	}))
+	return files[0]
+}
+
+func TestNFOEditReappliesToUnchangedFiles(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	dir := t.TempDir()
+	nfoPath := filepath.Join(dir, "Test Movie (2024)", "movie.nfo")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nfoPath), 0o755))
+	writeNFO(t, nfoPath, "12345")
+	createTestFile(t, dir, "Test Movie (2024)/Test Movie (2024).mkv", 100)
+
+	lib := createTestLibrary(t, q, dir, sqlc.MediaTypeMovie)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	s := scanner.New(pool)
+	_, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+
+	file := markMatched(t, q, lib.ID)
+	// Probe data must survive an NFO-only re-apply (bytes didn't change).
+	require.NoError(t, q.UpdateLibraryFileMediaInfo(ctx, sqlc.UpdateLibraryFileMediaInfoParams{
+		ID: file.ID, MediaInfo: []byte(`{"streams":[{"codec_type":"video"}]}`),
+	}))
+
+	writeNFO(t, nfoPath, "55555")
+	future := time.Now().Add(2 * time.Second)
+	require.NoError(t, os.Chtimes(nfoPath, future, future))
+
+	result, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.New)
+	assert.Equal(t, 1, result.Unchanged, "media bytes are unchanged")
+	assert.Equal(t, 1, result.Updated, "edited NFO should re-apply to the file")
+
+	updated, err := q.GetLibraryFileByID(ctx, file.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sqlc.FileStatusPending, updated.Status, "re-applied file should re-enter the match pipeline")
+	assert.Contains(t, string(updated.ParseResult), "55555")
+	assert.Contains(t, string(updated.MediaInfo), "codec_type", "media_info must survive an NFO-only re-apply")
+
+	// And a scan with nothing changed re-applies nothing.
+	result3, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result3.Updated)
+	assert.Equal(t, 1, result3.Unchanged)
+}
+
+func TestNFOAddedLaterAppliesToUnchangedFiles(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	dir := t.TempDir()
+	createTestFile(t, dir, "Test Movie (2024)/Test Movie (2024).mkv", 100)
+
+	lib := createTestLibrary(t, q, dir, sqlc.MediaTypeMovie)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	s := scanner.New(pool)
+	_, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	file := markMatched(t, q, lib.ID)
+	assert.NotContains(t, string(file.ParseResult), `"nfo"`)
+
+	writeNFO(t, filepath.Join(dir, "Test Movie (2024)", "movie.nfo"), "77777")
+
+	result, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Updated, "a dropped-in NFO should apply to already-scanned files")
+
+	updated, err := q.GetLibraryFileByID(ctx, file.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sqlc.FileStatusPending, updated.Status)
+	assert.Contains(t, string(updated.ParseResult), `"nfo"`)
+	assert.Contains(t, string(updated.ParseResult), "77777")
+}
+
+func TestNFORemovalDropsLocalMetadata(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	dir := t.TempDir()
+	nfoPath := filepath.Join(dir, "Test Movie (2024)", "movie.nfo")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nfoPath), 0o755))
+	writeNFO(t, nfoPath, "12345")
+	createTestFile(t, dir, "Test Movie (2024)/Test Movie (2024).mkv", 100)
+
+	lib := createTestLibrary(t, q, dir, sqlc.MediaTypeMovie)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	s := scanner.New(pool)
+	_, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	file := markMatched(t, q, lib.ID)
+
+	require.NoError(t, os.Remove(nfoPath))
+
+	result, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Updated, "removed NFO should re-resolve the file's metadata")
+
+	updated, err := q.GetLibraryFileByID(ctx, file.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sqlc.FileStatusPending, updated.Status)
+	assert.NotContains(t, string(updated.ParseResult), `"nfo"`)
+
+	// The removal must only fire once — the state row is gone now.
+	result3, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result3.Updated)
+}
+
+func TestNFOUnchangedRescanReappliesNothing(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	dir := t.TempDir()
+	nfoPath := filepath.Join(dir, "Test Movie (2024)", "movie.nfo")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nfoPath), 0o755))
+	writeNFO(t, nfoPath, "12345")
+	createTestFile(t, dir, "Test Movie (2024)/Test Movie (2024).mkv", 100)
+
+	lib := createTestLibrary(t, q, dir, sqlc.MediaTypeMovie)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	s := scanner.New(pool)
+	_, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	file := markMatched(t, q, lib.ID)
+
+	for i := 0; i < 3; i++ {
+		result, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, 0, result.Updated, "rescan %d must not re-apply anything", i+1)
+		assert.Equal(t, 1, result.Unchanged)
+	}
+
+	updated, err := q.GetLibraryFileByID(ctx, file.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sqlc.FileStatusMatched, updated.Status, "matched status must survive quiet rescans")
+}
+
+func TestNFOEditReappliesToWholeShowSubtree(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	dir := t.TempDir()
+	showDir := filepath.Join(dir, "Test Show (2020)")
+	require.NoError(t, os.MkdirAll(showDir, 0o755))
+	nfoPath := filepath.Join(showDir, "tvshow.nfo")
+	nfoContent := `<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<tvshow>
+  <title>Test Show</title>
+  <uniqueid type="tmdb">11111</uniqueid>
+</tvshow>`
+	require.NoError(t, os.WriteFile(nfoPath, []byte(nfoContent), 0o644))
+	createTestFile(t, dir, "Test Show (2020)/Season 01/Test Show (2020) - S01E01.mkv", 100)
+	createTestFile(t, dir, "Test Show (2020)/Season 02/Test Show (2020) - S02E01.mkv", 100)
+
+	lib := createTestLibrary(t, q, dir, sqlc.MediaTypeTv)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	s := scanner.New(pool)
+	_, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+
+	newContent := strings.Replace(nfoContent, "11111", "22222", 1)
+	require.NoError(t, os.WriteFile(nfoPath, []byte(newContent), 0o644))
+	future := time.Now().Add(2 * time.Second)
+	require.NoError(t, os.Chtimes(nfoPath, future, future))
+
+	result, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.Updated, "show-level NFO edit should re-apply to every episode beneath it")
+
+	files, err := q.ListLibraryFiles(ctx, sqlc.ListLibraryFilesParams{
+		LibraryID: lib.ID, Limit: 10, Offset: 0,
+	})
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+	for _, f := range files {
+		assert.Contains(t, string(f.ParseResult), "22222", "%s should carry the edited NFO", f.Path)
+	}
 }
 
 func testdataRoot() string {

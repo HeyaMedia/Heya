@@ -432,6 +432,14 @@ type LibraryFile struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type LibraryNfoDir struct {
+	LibraryID int64              `json:"library_id"`
+	DirPath   string             `json:"dir_path"`
+	NfoName   string             `json:"nfo_name"`
+	Mtime     pgtype.Timestamptz `json:"mtime"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MatchCandidate struct {
 	ID            int64              `json:"id"`
 	LibraryFileID int64              `json:"library_file_id"`
