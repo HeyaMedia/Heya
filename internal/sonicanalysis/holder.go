@@ -29,6 +29,7 @@ type Holder struct {
 	idleTimeout time.Duration
 
 	mu              sync.Mutex
+	pendingCfg      *Config // Reconfigure arrived while leased; applied when refs drop to 0
 	analyzer        *Analyzer
 	refs            int
 	idleStop        chan struct{}
@@ -49,6 +50,9 @@ type Status struct {
 	LastBorrowAt   *time.Time    `json:"last_borrow_at,omitempty"`
 	IdleTimeoutSec int           `json:"idle_timeout_sec"`
 	TotalBorrows   int64         `json:"total_borrows"`
+	// PendingAccelerator is set while a mid-batch Reconfigure waits for the
+	// current leases to drain; Accelerator still shows what's running now.
+	PendingAccelerator *Accelerator `json:"pending_accelerator,omitempty"`
 }
 
 // Status returns a snapshot of the Holder's state for diagnostic use.
@@ -61,6 +65,10 @@ func (h *Holder) Status() Status {
 		Refs:           h.refs,
 		IdleTimeoutSec: int(h.idleTimeout / time.Second),
 		TotalBorrows:   h.lifetimeBorrows,
+	}
+	if h.pendingCfg != nil {
+		acc := h.pendingCfg.Accelerator
+		st.PendingAccelerator = &acc
 	}
 	if h.analyzer == nil {
 		st.State = StateUnloaded
@@ -141,25 +149,40 @@ func (h *Holder) Borrow(ctx context.Context) (*Lease, error) {
 }
 
 // Reconfigure swaps the underlying config (typically the accelerator).
-// Refuses with ErrHolderBusy if any lease is outstanding — the caller
-// should retry on next idle. Used by the Settings UI when the user
-// changes accelerator without restarting the server.
+// If a lease is outstanding the new config is stashed and applied
+// automatically when the last lease is released (see release), and
+// ErrHolderBusy is returned so the caller can report "saved, applies
+// when the current batch finishes" — it does NOT mean the change was
+// dropped. Used by the Settings UI when the user changes accelerator
+// without restarting the server.
 func (h *Holder) Reconfigure(cfg Config) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.refs > 0 {
+		c := cfg
+		h.pendingCfg = &c
 		return ErrHolderBusy
 	}
+	h.pendingCfg = nil
+	h.applyConfigLocked(cfg)
+	return nil
+}
+
+// applyConfigLocked tears down the current analyzer (cancelling any
+// idle-unload timer) and installs cfg for the next Borrow. Caller must
+// hold h.mu and have ensured refs == 0.
+func (h *Holder) applyConfigLocked(cfg Config) {
 	if h.idleStop != nil {
 		close(h.idleStop)
 		h.idleStop = nil
 	}
+	h.idleUnloadAt = time.Time{}
 	if h.analyzer != nil && h.analyzer.State() == StateReady {
 		h.analyzer.Unload()
 	}
 	h.analyzer = nil
+	h.loadedAt = time.Time{}
 	h.cfg = cfg
-	return nil
 }
 
 // Close tears down the holder, unloading any resident model. The
@@ -192,6 +215,17 @@ func (h *Holder) release() {
 	h.refs--
 	if h.refs < 0 {
 		h.refs = 0
+	}
+	// A Reconfigure that arrived mid-batch was stashed; this refs→0
+	// transition is the "next idle" it was waiting for. Apply it now —
+	// the analyzer is torn down, so the next Borrow lazy-loads with the
+	// new config. No idle-unload timer needed after this.
+	if h.refs == 0 && h.pendingCfg != nil {
+		cfg := *h.pendingCfg
+		h.pendingCfg = nil
+		h.applyConfigLocked(cfg)
+		h.mu.Unlock()
+		return
 	}
 	if h.refs > 0 || h.idleTimeout <= 0 {
 		h.mu.Unlock()
@@ -235,5 +269,6 @@ func (h *Holder) unloadIfIdle(myStop chan struct{}) {
 }
 
 // ErrHolderBusy is returned by Reconfigure when a lease is still
-// outstanding.
-var ErrHolderBusy = errors.New("sonicanalysis: holder is busy; reconfigure on next idle")
+// outstanding. The config is NOT lost — it's stashed and applied
+// automatically when the current leases drain.
+var ErrHolderBusy = errors.New("sonicanalysis: holder is busy; settings will apply when the current batch finishes")

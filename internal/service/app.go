@@ -354,9 +354,12 @@ func (a *App) SonicAnalysisEnabled(ctx context.Context) bool {
 // the old searcher could destroy the ONNX session under an in-flight
 // Embed (native use-after-free).
 //
-// Best-effort: a component that is mid-batch refuses and stays on the
-// old config, and ErrSonicBusy is returned so the UI shows the settings
-// as saved-but-not-applied; a later save retries idempotently.
+// Busy handling: a mid-batch Holder stashes the config and applies it
+// itself when the current leases drain (no user action needed), but
+// ErrSonicBusy is still returned so the UI can show "applies when the
+// current batch finishes". The standalone analyzer/searcher can't be
+// busy in the server (nothing loads them outside the CLI); a re-save
+// retries idempotently regardless.
 func (a *App) ReconfigureSonicAnalysisAnalyzer(ctx context.Context) error {
 	if a.analyzer == nil {
 		return nil
