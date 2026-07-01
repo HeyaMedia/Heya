@@ -153,10 +153,90 @@ func (s *Scanner) loadNFODirState(ctx context.Context, libraryID int64) map[stri
 		return map[string]nfoDirState{}
 	}
 	state := make(map[string]nfoDirState, len(rows))
+	var legacy []string
 	for _, r := range rows {
-		state[r.DirPath] = nfoDirState{name: r.NfoName, mtime: r.Mtime.Time}
+		key := canonicalNFOKey(r.DirPath)
+		if key != r.DirPath {
+			legacy = append(legacy, r.DirPath)
+		}
+		entry := nfoDirState{name: r.NfoName, mtime: r.Mtime.Time}
+		// On a key collision keep the OLDER mtime: a stale applied-marker only
+		// costs a redundant re-apply, a fresh one swallows a pending edit.
+		if cur, ok := state[key]; !ok || entry.mtime.Before(cur.mtime) {
+			state[key] = entry
+		}
+	}
+	if len(legacy) > 0 {
+		s.rewriteLegacyNFOKeys(ctx, libraryID, legacy, state)
 	}
 	return state
+}
+
+// rewriteLegacyNFOKeys persists rows that were stored under a non-canonical
+// key (the brief window where keys mirrored the walk's verbatim double-slash
+// form) under their canonical key, then drops the legacy rows. Without the
+// rewrite a canonical-key lookup misses them, the dir reads as brand new, and
+// new-dir semantics (record without re-applying) swallow any pending NFO
+// edit. Crash-safe ordering: canonical upserts land before legacy deletes,
+// and a failed delete just re-normalizes on the next scan.
+func (s *Scanner) rewriteLegacyNFOKeys(ctx context.Context, libraryID int64, legacy []string, state map[string]nfoDirState) {
+	written := make(map[string]bool, len(legacy))
+	for _, old := range legacy {
+		key := canonicalNFOKey(old)
+		if written[key] {
+			continue
+		}
+		e := state[key]
+		if err := s.q.UpsertLibraryNFODir(ctx, sqlc.UpsertLibraryNFODirParams{
+			LibraryID: libraryID,
+			DirPath:   key,
+			NfoName:   e.name,
+			Mtime:     pgtype.Timestamptz{Time: e.mtime, Valid: true},
+		}); err != nil {
+			log.Warn().Err(err).Str("dir", key).Msg("rewriting legacy NFO state key failed; will retry next scan")
+			return
+		}
+		written[key] = true
+	}
+	if err := s.q.DeleteLibraryNFODirs(ctx, sqlc.DeleteLibraryNFODirsParams{
+		LibraryID: libraryID,
+		Column2:   legacy,
+	}); err != nil {
+		log.Warn().Err(err).Msg("deleting legacy NFO state keys failed; will retry next scan")
+		return
+	}
+	log.Info().Int("rows", len(legacy)).Msg("normalized legacy NFO state keys")
+}
+
+// canonicalNFOKey maps any historical library_nfo_dirs key form onto today's
+// canonical one: duplicate slashes collapsed (the smb:// scheme's own double
+// slash excepted) and no trailing slash.
+func canonicalNFOKey(key string) string {
+	if rest, ok := strings.CutPrefix(key, "smb://"); ok {
+		return "smb://" + strings.TrimRight(collapseSlashes(rest), "/")
+	}
+	if key == "/" {
+		return key
+	}
+	return strings.TrimRight(collapseSlashes(key), "/")
+}
+
+func collapseSlashes(s string) string {
+	if !strings.Contains(s, "//") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	var prev byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '/' && prev == '/' {
+			continue
+		}
+		b.WriteByte(c)
+		prev = c
+	}
+	return b.String()
 }
 
 // nfoResolver lazily finds and parses the governing NFO for a path, memoizing
@@ -202,14 +282,16 @@ func (r *nfoResolver) forPath(relPath string) *nfo.ParsedNFO {
 // stored paths carry it too), local is filepath.Join's cleaned form. Anything
 // else and TrimPrefix leaves a rooted rel path, breaking seenNFOs lookups.
 //
-// rootKey is the canonical (no trailing slash) root used for
-// library_nfo_dirs keys. It deliberately does NOT mirror the walk: state keys
-// must stay identical across trailing-slash config drift, or a rename of the
-// key namespace would make every recorded row look brand new and silently
-// swallow a pending NFO edit (new-dir semantics record without re-applying).
+// rootKey is the canonical root (duplicate slashes collapsed, no trailing
+// slash) used for library_nfo_dirs keys. It deliberately does NOT mirror the
+// walk: state keys must stay identical across slash-config drift, or a rename
+// of the key namespace would make every recorded row look brand new and
+// silently swallow a pending NFO edit (new-dir semantics record without
+// re-applying). canonicalNFOKey is the single definition of that form —
+// loadNFODirState rewrites any legacy row onto it.
 func scanPathPrefixes(rootPath string, isSMB bool) (filePrefix, rootKey string) {
 	if isSMB {
-		return rootPath + "/", strings.TrimRight(rootPath, "/")
+		return rootPath + "/", canonicalNFOKey(rootPath)
 	}
 	clean := filepath.Clean(rootPath)
 	return clean + "/", clean

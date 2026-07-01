@@ -719,6 +719,64 @@ func TestNFOUnchangedRescanReappliesNothing(t *testing.T) {
 	assert.Equal(t, sqlc.FileStatusMatched, updated.Status, "matched status must survive quiet rescans")
 }
 
+// Rows recorded under a legacy (double-slash) state key must be normalized at
+// load time and still detect a pending edit — a canonical-only lookup would
+// read the dir as brand new and record the fresh mtime WITHOUT re-applying,
+// silently swallowing the edit.
+func TestNFOLegacyStateKeyStillDetectsPendingEdit(t *testing.T) {
+	pool := setupPool(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	dir := t.TempDir()
+	nfoPath := filepath.Join(dir, "Test Movie (2024)", "movie.nfo")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nfoPath), 0o755))
+	writeNFO(t, nfoPath, "12345")
+	createTestFile(t, dir, "Test Movie (2024)/Test Movie (2024).mkv", 100)
+
+	lib := createTestLibrary(t, q, dir, sqlc.MediaTypeMovie)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	s := scanner.New(pool)
+	_, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	file := markMatched(t, q, lib.ID)
+
+	// Simulate the double-slash window: the only state row sits under a
+	// non-canonical key, carrying the pre-edit mtime.
+	legacyKey := dir + "//Test Movie (2024)"
+	tag, err := pool.Exec(ctx,
+		`UPDATE library_nfo_dirs SET dir_path = $2, mtime = mtime - interval '1 hour' WHERE library_id = $1`,
+		lib.ID, legacyKey)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected())
+
+	// The pending edit: newer content + newer mtime than the recorded state.
+	writeNFO(t, nfoPath, "99999")
+	future := time.Now().Add(2 * time.Second)
+	require.NoError(t, os.Chtimes(nfoPath, future, future))
+
+	result, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Updated, "edit recorded only under a legacy key must still re-apply")
+
+	updated, err := q.GetLibraryFileByID(ctx, file.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sqlc.FileStatusPending, updated.Status)
+	assert.Contains(t, string(updated.ParseResult), "99999")
+
+	// The legacy row is rewritten onto the canonical key, exactly once.
+	rows, err := q.ListLibraryNFODirs(ctx, lib.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, filepath.Join(dir, "Test Movie (2024)"), rows[0].DirPath)
+
+	// And the steady state is quiet again.
+	result3, err := s.ScanLibrary(ctx, lib, scanner.ScanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result3.Updated)
+}
+
 func TestNFOEditReappliesToWholeShowSubtree(t *testing.T) {
 	pool := setupPool(t)
 	ctx := context.Background()

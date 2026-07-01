@@ -29,6 +29,23 @@ func TestScanPathPrefixes(t *testing.T) {
 	}
 }
 
+func TestCanonicalNFOKey(t *testing.T) {
+	cases := map[string]string{
+		"smb://h/share/dir":         "smb://h/share/dir",
+		"smb://h/share/dir/":        "smb://h/share/dir",
+		"smb://h/share/dir//Movie":  "smb://h/share/dir/Movie",
+		"smb://h/share//dir/Movie/": "smb://h/share/dir/Movie",
+		"/data/movies":              "/data/movies",
+		"/data/movies//Movie A":     "/data/movies/Movie A",
+		"/":                         "/",
+	}
+	for in, want := range cases {
+		if got := canonicalNFOKey(in); got != want {
+			t.Errorf("canonicalNFOKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // A rooted fileDir can reach nearestNFODir when a root prefix doesn't
 // round-trip cleanly (e.g. an SMB root configured with a trailing slash).
 // filepath.Dir("/") == "/" is a fixed point, so without the termination
