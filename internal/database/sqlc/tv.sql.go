@@ -386,6 +386,50 @@ func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([
 	return items, nil
 }
 
+const listTVEpisodesBySeries = `-- name: ListTVEpisodesBySeries :many
+SELECT e.id, e.season_id, e.episode_number, e.title, e.overview, e.still_path, e.runtime_minutes, e.air_date, e.rating, e.absolute_number, e.is_special, e.episode_type, e.external_ids, e.source FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+WHERE s.series_id = $1
+ORDER BY s.season_number ASC, e.episode_number ASC
+`
+
+// Whole-series episode fetch for the detail page — one query instead of one
+// ListTVEpisodesBySeason per season. Ordered so the caller can group by season.
+func (q *Queries) ListTVEpisodesBySeries(ctx context.Context, seriesID int64) ([]TvEpisode, error) {
+	rows, err := q.db.Query(ctx, listTVEpisodesBySeries, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TvEpisode{}
+	for rows.Next() {
+		var i TvEpisode
+		if err := rows.Scan(
+			&i.ID,
+			&i.SeasonID,
+			&i.EpisodeNumber,
+			&i.Title,
+			&i.Overview,
+			&i.StillPath,
+			&i.RuntimeMinutes,
+			&i.AirDate,
+			&i.Rating,
+			&i.AbsoluteNumber,
+			&i.IsSpecial,
+			&i.EpisodeType,
+			&i.ExternalIds,
+			&i.Source,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTVSeasonsBySeries = `-- name: ListTVSeasonsBySeries :many
 SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids FROM tv_seasons WHERE series_id = $1 ORDER BY season_number ASC
 `

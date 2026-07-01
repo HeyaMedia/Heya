@@ -92,3 +92,43 @@ func (q *Queries) ListEpisodeTitles(ctx context.Context, episodeID int64) ([]Epi
 	}
 	return items, nil
 }
+
+const listEpisodeTitlesForSeries = `-- name: ListEpisodeTitlesForSeries :many
+SELECT et.id, et.episode_id, et.title, et.language, et.source FROM episode_titles et
+JOIN tv_episodes e ON e.id = et.episode_id
+JOIN tv_seasons s ON s.id = e.season_id
+WHERE s.series_id = $1 AND et.language = ANY($2::text[])
+`
+
+type ListEpisodeTitlesForSeriesParams struct {
+	SeriesID  int64    `json:"series_id"`
+	Languages []string `json:"languages"`
+}
+
+// Batched detail-page fetch: every episode title for a series in the wanted
+// languages, one query instead of 1-2 GetEpisodeTitleByLanguage per episode.
+func (q *Queries) ListEpisodeTitlesForSeries(ctx context.Context, arg ListEpisodeTitlesForSeriesParams) ([]EpisodeTitle, error) {
+	rows, err := q.db.Query(ctx, listEpisodeTitlesForSeries, arg.SeriesID, arg.Languages)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EpisodeTitle{}
+	for rows.Next() {
+		var i EpisodeTitle
+		if err := rows.Scan(
+			&i.ID,
+			&i.EpisodeID,
+			&i.Title,
+			&i.Language,
+			&i.Source,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -64,3 +64,11 @@ SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date =
     absolute_number = $8, is_special = $9, episode_type = $10, external_ids = $11, source = $12
 WHERE id = $1
 RETURNING *;
+
+-- name: ListTVEpisodesBySeries :many
+-- Whole-series episode fetch for the detail page — one query instead of one
+-- ListTVEpisodesBySeason per season. Ordered so the caller can group by season.
+SELECT e.* FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+WHERE s.series_id = $1
+ORDER BY s.season_number ASC, e.episode_number ASC;

@@ -84,47 +84,29 @@ func (a *App) GetAllTaskRuntimeState(ctx context.Context) map[string]TaskRuntime
 func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 	stats := make(map[string]TaskStats)
 
-	var trickTotal, trickDone int
-	row := a.db.QueryRow(ctx, `
-		SELECT
-			count(*) FILTER (WHERE lf.media_info IS NOT NULL AND lf.media_info->'streams' @> '[{"codec_type":"video"}]'),
-			count(*) FILTER (WHERE lf.has_trickplay = true AND lf.media_info IS NOT NULL AND lf.media_info->'streams' @> '[{"codec_type":"video"}]')
-		FROM library_files lf
-		JOIN libraries l ON l.id = lf.library_id
-		WHERE lf.deleted_at IS NULL
-		  AND lf.status = 'matched'
-		  AND l.settings->>'enable_trickplay' = 'true'
-	`)
-	if row.Scan(&trickTotal, &trickDone) == nil {
+	q := sqlc.New(a.db)
+
+	// Eligibility comes from the shared views (migration 00035) so these
+	// counts can never drift from what the kickoff workers actually enqueue.
+	if tp, err := q.CountTrickplayEligible(ctx); err == nil {
 		stats["generate_trickplay"] = TaskStats{
-			Complete: trickDone,
-			Pending:  trickTotal - trickDone,
-			Total:    trickTotal,
+			Complete: int(tp.Complete),
+			Pending:  int(tp.Total - tp.Complete),
+			Total:    int(tp.Total),
 		}
 	}
 
-	var thumbTotal, thumbDone int
-	row = a.db.QueryRow(ctx, `
-		SELECT
-			count(*),
-			count(*) FILTER (WHERE me.thumbnail_path != '')
-		FROM media_extras me
-		JOIN media_items mi ON mi.id = me.media_item_id
-		JOIN libraries l ON l.id = mi.library_id
-		WHERE me.file_path != ''
-		  AND l.settings->>'generate_thumbnails' = 'true'
-	`)
-	if row.Scan(&thumbTotal, &thumbDone) == nil {
+	if th, err := q.CountThumbnailEligible(ctx); err == nil {
 		stats["generate_thumbnails"] = TaskStats{
-			Complete: thumbDone,
-			Pending:  thumbTotal - thumbDone,
-			Total:    thumbTotal,
+			Complete: int(th.Complete),
+			Pending:  int(th.Total - th.Complete),
+			Total:    int(th.Total),
 		}
 	}
 
 	var libTotal int
 	var libWithPending int
-	row = a.db.QueryRow(ctx, `
+	row := a.db.QueryRow(ctx, `
 		SELECT
 			(SELECT count(*) FROM libraries),
 			(SELECT count(DISTINCT l.id) FROM libraries l
@@ -260,155 +242,86 @@ func (a *App) CancelTask(ctx context.Context, taskID string) error {
 
 // QueryTrickplayItems returns trickplay generation items with pagination.
 func (a *App) QueryTrickplayItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
-	var total, complete int
-	err := a.db.QueryRow(ctx, `
-		SELECT
-			count(*),
-			count(*) FILTER (WHERE lf.has_trickplay = true)
-		FROM library_files lf
-		JOIN libraries l ON l.id = lf.library_id
-		WHERE lf.deleted_at IS NULL
-		  AND lf.status = 'matched'
-		  AND lf.media_info IS NOT NULL
-		  AND lf.media_info->'streams' @> '[{"codec_type":"video"}]'
-		  AND l.settings->>'enable_trickplay' = 'true'
-	`).Scan(&total, &complete)
+	q := sqlc.New(a.db)
+
+	counts, err := q.CountTrickplayEligible(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	statusFilter := ""
-	switch status {
-	case "complete":
-		statusFilter = "AND lf.has_trickplay = true"
-	case "pending":
-		statusFilter = "AND lf.has_trickplay = false"
-	}
-
-	rows, err := a.db.Query(ctx, `
-		SELECT lf.id, lf.path, lf.has_trickplay
-		FROM library_files lf
-		JOIN libraries l ON l.id = lf.library_id
-		WHERE lf.deleted_at IS NULL
-		  AND lf.status = 'matched'
-		  AND lf.media_info IS NOT NULL
-		  AND lf.media_info->'streams' @> '[{"codec_type":"video"}]'
-		  AND l.settings->>'enable_trickplay' = 'true'
-		  `+statusFilter+`
-		ORDER BY lf.has_trickplay ASC, lf.path ASC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+	rows, err := q.ListTrickplayEligibleItems(ctx, sqlc.ListTrickplayEligibleItemsParams{
+		Status:    status,
+		RowLimit:  int32(limit),
+		RowOffset: int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var items []TaskItem
-	for rows.Next() {
-		var id int64
-		var path string
-		var hasTrickplay bool
-		if err := rows.Scan(&id, &path, &hasTrickplay); err != nil {
-			continue
-		}
+	items := make([]TaskItem, 0, len(rows))
+	for _, r := range rows {
 		s := "pending"
-		if hasTrickplay {
+		if r.HasTrickplay {
 			s = "complete"
 		}
 		items = append(items, TaskItem{
-			ID:     id,
-			Name:   filepath.Base(path),
-			Path:   path,
+			ID:     r.ID,
+			Name:   filepath.Base(r.Path),
+			Path:   r.Path,
 			Status: s,
 		})
 	}
 
-	if items == nil {
-		items = []TaskItem{}
-	}
-
 	return &TaskItemsResult{
 		Items:    items,
-		Total:    total,
-		Complete: complete,
-		Pending:  total - complete,
+		Total:    int(counts.Total),
+		Complete: int(counts.Complete),
+		Pending:  int(counts.Total - counts.Complete),
 	}, nil
 }
 
 // QueryThumbnailItems returns thumbnail generation items with pagination.
 func (a *App) QueryThumbnailItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
-	var total, complete int
-	err := a.db.QueryRow(ctx, `
-		SELECT
-			count(*),
-			count(*) FILTER (WHERE me.thumbnail_path != '')
-		FROM media_extras me
-		JOIN media_items mi ON mi.id = me.media_item_id
-		JOIN libraries l ON l.id = mi.library_id
-		WHERE me.file_path != ''
-		  AND l.settings->>'generate_thumbnails' = 'true'
-	`).Scan(&total, &complete)
+	q := sqlc.New(a.db)
+
+	counts, err := q.CountThumbnailEligible(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	statusFilter := ""
-	switch status {
-	case "complete":
-		statusFilter = "AND me.thumbnail_path != ''"
-	case "pending":
-		statusFilter = "AND me.thumbnail_path = ''"
-	}
-
-	rows, err := a.db.Query(ctx, `
-		SELECT me.id, me.title, me.file_path, me.thumbnail_path, me.extra_type, mi.title
-		FROM media_extras me
-		JOIN media_items mi ON mi.id = me.media_item_id
-		JOIN libraries l ON l.id = mi.library_id
-		WHERE me.file_path != ''
-		  AND l.settings->>'generate_thumbnails' = 'true'
-		  `+statusFilter+`
-		ORDER BY (me.thumbnail_path = '') DESC, mi.title ASC, me.title ASC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+	rows, err := q.ListThumbnailEligibleItems(ctx, sqlc.ListThumbnailEligibleItemsParams{
+		Status:    status,
+		RowLimit:  int32(limit),
+		RowOffset: int32(offset),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var items []TaskItem
-	for rows.Next() {
-		var id int64
-		var title, filePath, thumbPath, extraType, mediaTitle string
-		if err := rows.Scan(&id, &title, &filePath, &thumbPath, &extraType, &mediaTitle); err != nil {
-			continue
-		}
+	items := make([]TaskItem, 0, len(rows))
+	for _, r := range rows {
 		s := "pending"
-		if thumbPath != "" {
+		if r.ThumbnailPath != "" {
 			s = "complete"
 		}
-		name := title
+		name := r.Title
 		if name == "" {
-			name = filepath.Base(filePath)
+			name = filepath.Base(r.FilePath)
 		}
 		items = append(items, TaskItem{
-			ID:     id,
+			ID:     r.ID,
 			Name:   name,
-			Path:   filePath,
+			Path:   r.FilePath,
 			Status: s,
-			Detail: extraType + " · " + mediaTitle,
+			Detail: string(r.ExtraType) + " · " + r.MediaTitle,
 		})
-	}
-
-	if items == nil {
-		items = []TaskItem{}
 	}
 
 	return &TaskItemsResult{
 		Items:    items,
-		Total:    total,
-		Complete: complete,
-		Pending:  total - complete,
+		Total:    int(counts.Total),
+		Complete: int(counts.Complete),
+		Pending:  int(counts.Total - counts.Complete),
 	}, nil
 }
 

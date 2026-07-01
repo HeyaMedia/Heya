@@ -198,30 +198,59 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 			libSettings := metadata.ParseSettings(lib.Settings)
 			prefLang := libSettings.PreferredLanguage
 
+			// Three whole-series queries instead of one per season plus 2-4
+			// per episode — the old shape was ~4000 queries on a
+			// 1000-episode series. Preferred-language resolution happens
+			// in-memory off the maps.
+			allEps, _ := q.ListTVEpisodesBySeries(ctx, series.ID)
+			epsBySeason := map[int64][]sqlc.TvEpisode{}
+			for _, ep := range allEps {
+				epsBySeason[ep.SeasonID] = append(epsBySeason[ep.SeasonID], ep)
+			}
+
+			titleByEp := map[int64]map[string]string{}
+			overviewByEp := map[int64]map[string]string{}
+			if prefLang != "" {
+				langs := []string{prefLang}
+				if prefLang != "en" {
+					langs = append(langs, "en")
+				}
+				if titles, err := q.ListEpisodeTitlesForSeries(ctx, sqlc.ListEpisodeTitlesForSeriesParams{SeriesID: series.ID, Languages: langs}); err == nil {
+					for _, t := range titles {
+						if titleByEp[t.EpisodeID] == nil {
+							titleByEp[t.EpisodeID] = map[string]string{}
+						}
+						titleByEp[t.EpisodeID][t.Language] = t.Title
+					}
+				}
+				if overviews, err := q.ListEpisodeOverviewsForSeries(ctx, sqlc.ListEpisodeOverviewsForSeriesParams{SeriesID: series.ID, Languages: langs}); err == nil {
+					for _, o := range overviews {
+						if overviewByEp[o.EpisodeID] == nil {
+							overviewByEp[o.EpisodeID] = map[string]string{}
+						}
+						overviewByEp[o.EpisodeID][o.Language] = o.Overview
+					}
+				}
+			}
+			pick := func(m map[int64]map[string]string, epID int64) string {
+				byLang := m[epID]
+				if v := byLang[prefLang]; v != "" {
+					return v
+				}
+				return byLang["en"]
+			}
+
 			var enriched []seasonWithEpisodes
 			for _, s := range seasons {
 				if len(availableSeasons) > 0 && !availableSeasons[int(s.SeasonNumber)] {
 					continue
 				}
-				eps, _ := q.ListTVEpisodesBySeason(ctx, s.ID)
 				var views []episodeView
-				for _, ep := range eps {
+				for _, ep := range epsBySeason[s.ID] {
 					ev := episodeView{TvEpisode: ep}
 					if prefLang != "" {
-						if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: ep.ID, Language: prefLang}); err == nil {
-							ev.PreferredTitle = t.Title
-						} else if prefLang != "en" {
-							if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: ep.ID, Language: "en"}); err == nil {
-								ev.PreferredTitle = t.Title
-							}
-						}
-						if o, err := q.GetEpisodeOverviewByLanguage(ctx, sqlc.GetEpisodeOverviewByLanguageParams{EpisodeID: ep.ID, Language: prefLang}); err == nil {
-							ev.PreferredOverview = o.Overview
-						} else if prefLang != "en" {
-							if o, err := q.GetEpisodeOverviewByLanguage(ctx, sqlc.GetEpisodeOverviewByLanguageParams{EpisodeID: ep.ID, Language: "en"}); err == nil {
-								ev.PreferredOverview = o.Overview
-							}
-						}
+						ev.PreferredTitle = pick(titleByEp, ep.ID)
+						ev.PreferredOverview = pick(overviewByEp, ep.ID)
 					}
 					views = append(views, ev)
 				}
@@ -796,15 +825,30 @@ func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []Alb
 	if err != nil {
 		return nil
 	}
+
+	// Three whole-artist queries instead of one per album plus one per track
+	// (a 50-album / 1000-track artist was ~1050 queries). Both batches come
+	// back pre-ordered (tracks by disc/number, files quality-desc within each
+	// track), so grouping by id preserves the per-album/per-track order.
+	tracks, _ := q.ListTracksByArtist(ctx, artistID)
+	files, _ := q.ListTrackFilesByArtist(ctx, artistID)
+
+	filesByTrack := make(map[int64][]sqlc.TrackFile, len(tracks))
+	for _, f := range files {
+		filesByTrack[f.TrackID] = append(filesByTrack[f.TrackID], f)
+	}
+	tracksByAlbum := make(map[int64][]TrackView, len(albums))
+	for _, t := range tracks {
+		tracksByAlbum[t.AlbumID] = append(tracksByAlbum[t.AlbumID], TrackView{Track: t, Files: filesByTrack[t.ID]})
+	}
+
 	views := make([]AlbumView, 0, len(albums))
 	for _, album := range albums {
-		tracks, _ := q.ListTracksByAlbum(ctx, album.ID)
-		trackViews := make([]TrackView, 0, len(tracks))
-		for _, t := range tracks {
-			files, _ := q.ListTrackFilesByTrack(ctx, t.ID)
-			trackViews = append(trackViews, TrackView{Track: t, Files: files})
+		tv := tracksByAlbum[album.ID]
+		if tv == nil {
+			tv = []TrackView{} // keep `tracks: []` (not null) for trackless albums
 		}
-		views = append(views, AlbumView{Album: album, Tracks: trackViews})
+		views = append(views, AlbumView{Album: album, Tracks: tv})
 	}
 	return views
 }

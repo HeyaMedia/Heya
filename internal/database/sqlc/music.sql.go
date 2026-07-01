@@ -2652,6 +2652,62 @@ func (q *Queries) ListStaleArtistsByLibrary(ctx context.Context, arg ListStaleAr
 	return items, nil
 }
 
+const listTrackFilesByArtist = `-- name: ListTrackFilesByArtist :many
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
+FROM track_files tf
+JOIN library_files lf ON lf.id = tf.library_file_id
+JOIN tracks t ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+WHERE al.artist_id = $1 AND lf.deleted_at IS NULL
+ORDER BY tf.track_id ASC, tf.quality_score DESC, tf.id ASC
+`
+
+// Whole-artist batch — see ListTracksByArtist. Quality-descending within each
+// track so callers can keep picking [0] as the primary after grouping.
+func (q *Queries) ListTrackFilesByArtist(ctx context.Context, artistID int64) ([]TrackFile, error) {
+	rows, err := q.db.Query(ctx, listTrackFilesByArtist, artistID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TrackFile{}
+	for rows.Next() {
+		var i TrackFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.TrackID,
+			&i.LibraryFileID,
+			&i.Format,
+			&i.QualityScore,
+			&i.BitrateKbps,
+			&i.SampleRateHz,
+			&i.BitDepth,
+			&i.Channels,
+			&i.Duration,
+			&i.SizeBytes,
+			&i.LyricsPath,
+			&i.IntegratedLufs,
+			&i.TruePeakDb,
+			&i.LoudnessRangeDb,
+			&i.SamplePeakDb,
+			&i.LoudnessAnalyzedAt,
+			&i.CreatedAt,
+			&i.IntroEndMs,
+			&i.OutroStartMs,
+			&i.FadeStartMs,
+			&i.SilenceStartMs,
+			&i.BoundariesAnalyzedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTrackFilesByTrack = `-- name: ListTrackFilesByTrack :many
 SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
 FROM track_files tf
@@ -2764,6 +2820,52 @@ SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyri
 
 func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track, error) {
 	rows, err := q.db.Query(ctx, listTracksByAlbum, albumID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Track{}
+	for rows.Next() {
+		var i Track
+		if err := rows.Scan(
+			&i.ID,
+			&i.AlbumID,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.Title,
+			&i.Duration,
+			&i.FilePath,
+			&i.LyricsPath,
+			&i.SearchVector,
+			&i.LibraryFileID,
+			&i.ExternalIds,
+			&i.Isrc,
+			&i.RecordingMbid,
+			&i.PreviewUrl,
+			&i.Explicit,
+			&i.ArtistCredits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTracksByArtist = `-- name: ListTracksByArtist :many
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits FROM tracks t
+JOIN albums al ON al.id = t.album_id
+WHERE al.artist_id = $1
+ORDER BY t.album_id ASC, t.disc_number ASC, t.track_number ASC
+`
+
+// Whole-artist batch for the artist detail page — one query instead of one
+// ListTracksByAlbum per album. Ordered so the caller can group by album.
+func (q *Queries) ListTracksByArtist(ctx context.Context, artistID int64) ([]Track, error) {
+	rows, err := q.db.Query(ctx, listTracksByArtist, artistID)
 	if err != nil {
 		return nil, err
 	}

@@ -478,37 +478,24 @@ func (w *KickoffTrickplayWorker) Work(ctx context.Context, job *river.Job[Kickof
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
-	rows, err := w.DB.Query(ctx, `
-		SELECT lf.id, lf.path
-		FROM library_files lf
-		JOIN libraries l ON l.id = lf.library_id
-		WHERE lf.deleted_at IS NULL
-		  AND lf.status = 'matched'
-		  AND lf.has_trickplay = false
-		  AND lf.media_info IS NOT NULL
-		  AND lf.media_info->'streams' @> '[{"codec_type":"video"}]'
-		  AND l.settings->>'enable_trickplay' = 'true'
-	`)
+	// Eligibility lives in the trickplay_eligible_files view (migration 00035),
+	// shared with the Settings counts and task item listings — one predicate,
+	// no count-vs-enqueue drift.
+	pending, err := q.ListTrickplayPendingKickoff(ctx)
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
-	defer rows.Close()
 
 	enqueued, failed := 0, 0
-	for rows.Next() {
-		var id int64
-		var path string
-		if err := rows.Scan(&id, &path); err != nil {
-			continue
-		}
+	for _, f := range pending {
 		if err := ctx.Err(); err != nil {
 			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
-		w.Progress.Set("generate_trickplay", "kickoff_trickplay", filepathBase(path))
-		if _, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: id, ScheduledTaskID: taskID}, nil); err != nil {
-			log.Warn().Err(err).Int64("library_file_id", id).Msg("kickoff_trickplay: enqueue failed")
+		w.Progress.Set("generate_trickplay", "kickoff_trickplay", filepathBase(f.Path))
+		if _, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: f.ID, ScheduledTaskID: taskID}, nil); err != nil {
+			log.Warn().Err(err).Int64("library_file_id", f.ID).Msg("kickoff_trickplay: enqueue failed")
 			failed++
 			continue
 		}
@@ -546,39 +533,28 @@ func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[Kicko
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
-	rows, err := w.DB.Query(ctx, `
-		SELECT me.id, me.title, me.file_path
-		FROM media_extras me
-		JOIN media_items mi ON mi.id = me.media_item_id
-		JOIN libraries l ON l.id = mi.library_id
-		WHERE me.thumbnail_path = ''
-		  AND me.file_path != ''
-		  AND l.settings->>'generate_thumbnails' = 'true'
-	`)
+	// Eligibility lives in the thumbnail_eligible_extras view (migration 00035),
+	// shared with the Settings counts and task item listings — one predicate,
+	// no count-vs-enqueue drift.
+	pending, err := q.ListThumbnailPendingKickoff(ctx)
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
-	defer rows.Close()
 
 	enqueued, failed := 0, 0
-	for rows.Next() {
-		var id int64
-		var title, fpath string
-		if err := rows.Scan(&id, &title, &fpath); err != nil {
-			continue
-		}
+	for _, e := range pending {
 		if err := ctx.Err(); err != nil {
 			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
 			return err
 		}
-		label := title
+		label := e.Title
 		if label == "" {
-			label = filepathBase(fpath)
+			label = filepathBase(e.FilePath)
 		}
 		w.Progress.Set("generate_thumbnails", "kickoff_thumbnails", label)
-		if _, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: id, ScheduledTaskID: taskID}, nil); err != nil {
-			log.Warn().Err(err).Int64("extra_id", id).Msg("kickoff_thumbnails: enqueue failed")
+		if _, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: e.ID, ScheduledTaskID: taskID}, nil); err != nil {
+			log.Warn().Err(err).Int64("extra_id", e.ID).Msg("kickoff_thumbnails: enqueue failed")
 			failed++
 			continue
 		}

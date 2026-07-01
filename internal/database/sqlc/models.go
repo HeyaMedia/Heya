@@ -745,6 +745,15 @@ type SystemSetting struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ThumbnailEligibleExtra struct {
+	ID            int64     `json:"id"`
+	Title         string    `json:"title"`
+	FilePath      string    `json:"file_path"`
+	ThumbnailPath string    `json:"thumbnail_path"`
+	ExtraType     ExtraType `json:"extra_type"`
+	MediaTitle    string    `json:"media_title"`
+}
+
 type Track struct {
 	ID            int64       `json:"id"`
 	AlbumID       int64       `json:"album_id"`
@@ -806,6 +815,12 @@ type TrackFile struct {
 	FadeStartMs          pgtype.Int4        `json:"fade_start_ms"`
 	SilenceStartMs       pgtype.Int4        `json:"silence_start_ms"`
 	BoundariesAnalyzedAt pgtype.Timestamptz `json:"boundaries_analyzed_at"`
+}
+
+type TrickplayEligibleFile struct {
+	ID           int64  `json:"id"`
+	Path         string `json:"path"`
+	HasTrickplay bool   `json:"has_trickplay"`
 }
 
 type TvEpisode struct {

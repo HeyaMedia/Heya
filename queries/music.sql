@@ -1002,3 +1002,22 @@ SELECT NOT EXISTS (
       AND lf.deleted_at IS NULL
       AND tf.integrated_lufs IS NULL
 ) AS done;
+
+-- name: ListTracksByArtist :many
+-- Whole-artist batch for the artist detail page — one query instead of one
+-- ListTracksByAlbum per album. Ordered so the caller can group by album.
+SELECT t.* FROM tracks t
+JOIN albums al ON al.id = t.album_id
+WHERE al.artist_id = $1
+ORDER BY t.album_id ASC, t.disc_number ASC, t.track_number ASC;
+
+-- name: ListTrackFilesByArtist :many
+-- Whole-artist batch — see ListTracksByArtist. Quality-descending within each
+-- track so callers can keep picking [0] as the primary after grouping.
+SELECT tf.*
+FROM track_files tf
+JOIN library_files lf ON lf.id = tf.library_file_id
+JOIN tracks t ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+WHERE al.artist_id = $1 AND lf.deleted_at IS NULL
+ORDER BY tf.track_id ASC, tf.quality_score DESC, tf.id ASC;
