@@ -53,7 +53,7 @@ func registerSystemRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(body), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/watchers", "watcher-status", "Filesystem watcher status", "System")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/watchers", "watcher-status", "Filesystem watcher status", "System")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[watcherStatusBody], error) {
 			status := app.WatcherManager().Status()
 			body := watcherStatusBody{Watchers: make([]watcherEntry, 0, len(status))}

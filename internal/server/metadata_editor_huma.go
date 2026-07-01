@@ -31,7 +31,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return cachedJSON(items, 30), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPut, "/api/media/{id}/metadata", "update-media-metadata", "Edit media metadata fields", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/media/{id}/metadata", "update-media-metadata", "Edit media metadata fields", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Body service.UpdateMediaMetadataReq
@@ -42,7 +42,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return statusOK("updated"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPut, "/api/media/{id}/episode/{episode_id}", "update-episode", "Edit a single episode", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/media/{id}/episode/{episode_id}", "update-episode", "Edit a single episode", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			EpisodeID int64 `path:"episode_id" minimum:"1"`
@@ -55,7 +55,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[sqlc.TvEpisode]{Body: updated}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/identify", "identify-search", "Provider search for re-identification", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/media/{id}/identify", "identify-search", "Provider search for re-identification", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Q    string `query:"q" maxLength:"200" doc:"Title query"`
@@ -68,7 +68,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[identifyBody]{Body: identifyBody{Results: result.Results}}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/media/{id}/identify", "apply-identify", "Switch the media item to a chosen provider match", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/media/{id}/identify", "apply-identify", "Switch the media item to a chosen provider match", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Body struct {
@@ -83,7 +83,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 		})
 
 	// --- Asset CRUD ---
-	huma.Register(api, secured(op(http.MethodDelete, "/api/media/{id}/assets/{asset_id}", "delete-asset", "Delete a media asset", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/media/{id}/assets/{asset_id}", "delete-asset", "Delete a media asset", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			AssetID int64 `path:"asset_id" minimum:"1"`
@@ -94,7 +94,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return statusOK("deleted"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPut, "/api/media/{id}/assets/{asset_id}/primary", "set-primary-asset", "Pin an asset as primary for its type", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/media/{id}/assets/{asset_id}/primary", "set-primary-asset", "Pin an asset as primary for its type", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			AssetID int64 `path:"asset_id" minimum:"1"`
@@ -105,7 +105,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return statusOK("updated"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/assets/search", "search-provider-artwork", "Search upstream provider artwork", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/media/{id}/assets/search", "search-provider-artwork", "Search upstream provider artwork", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Type     string `query:"type" enum:",poster,backdrop,logo,clearart,banner,thumb,still" doc:"Filter by asset type (empty = all)"`
@@ -118,7 +118,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[artworkBody]{Body: artworkBody{Results: results}}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/media/{id}/assets/download", "download-asset", "Queue an artwork download from a URL", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/media/{id}/assets/download", "download-asset", "Queue an artwork download from a URL", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Body struct {
@@ -132,7 +132,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return statusOK("queued"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/files", "media-files", "Per-file ffprobe stream summary", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/media/{id}/files", "media-files", "Per-file ffprobe stream summary", "Metadata Editor")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[[]mediaFileInfo], error) {
 			q := sqlc.New(app.DBPool())
 			files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: in.ID, Valid: true})
@@ -149,7 +149,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 	// Upload artwork via multipart/form-data. Huma decodes the `file` field
 	// into a typed FormFile; the asset_type string field is read off the raw
 	// form (Huma's MultipartFormFiles only auto-binds FormFile/[]FormFile).
-	huma.Register(api, secured(op(http.MethodPost, "/api/media/{id}/assets/upload", "upload-media-asset", "Upload an artwork file", "Metadata Editor")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/media/{id}/assets/upload", "upload-media-asset", "Upload an artwork file", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			RawBody huma.MultipartFormFiles[uploadAssetForm]

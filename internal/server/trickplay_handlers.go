@@ -44,7 +44,11 @@ func handleTrickplaySprite(app *service.App) http.HandlerFunc {
 		}
 
 		filename := r.PathValue("filename")
-		if filepath.Ext(filename) != ".jpg" {
+		// Reject any path component (a %2f-decoded separator, a leading dir, or
+		// "..") so the sprite name can't traverse out of the trickplay dir. The
+		// route's `pattern` also blocks this, but this is the load-bearing check
+		// since the sprite is served by a raw handler.
+		if filepath.Ext(filename) != ".jpg" || filepath.Base(filename) != filename {
 			writeError(w, http.StatusBadRequest, "invalid filename")
 			return
 		}

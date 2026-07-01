@@ -168,6 +168,23 @@ func (s *Store) End(sessionID string) {
 	}
 }
 
+// EndForUser tears down a session only when it belongs to userID, so a user
+// can't end another user's live playback session by guessing its (client-chosen)
+// id. Returns whether a session was actually removed.
+func (s *Store) EndForUser(sessionID string, userID int64) bool {
+	s.mu.Lock()
+	sess, ok := s.data[sessionID]
+	owned := ok && sess.UserID == userID
+	if owned {
+		delete(s.data, sessionID)
+	}
+	s.mu.Unlock()
+	if owned {
+		s.broadcast()
+	}
+	return owned
+}
+
 // List returns a snapshot of every active session. The slice is a copy;
 // mutating it doesn't affect the store. Ordered by StartedAt ascending
 // so the activity panel's row order is stable across renders.

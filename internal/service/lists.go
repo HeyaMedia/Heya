@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
@@ -58,15 +60,17 @@ func (a *App) CreateUserList(ctx context.Context, userID int64, name, descriptio
 	})
 }
 
-func (a *App) GetUserList(ctx context.Context, listID int64) (sqlc.UserList, []sqlc.MediaItem, error) {
+// GetUserList returns a list and its items, scoped to the owner. A list owned by
+// another user (or absent) yields ErrNoRows from the ownership-scoped lookup.
+func (a *App) GetUserList(ctx context.Context, listID, userID int64) (sqlc.UserList, []sqlc.MediaItem, error) {
 	q := sqlc.New(a.db)
 
-	list, err := q.GetUserListByID(ctx, listID)
+	list, err := q.GetUserListByID(ctx, sqlc.GetUserListByIDParams{ID: listID, UserID: userID})
 	if err != nil {
 		return sqlc.UserList{}, nil, fmt.Errorf("getting list: %w", err)
 	}
 
-	items, err := q.ListItemsInList(ctx, list.ID)
+	items, err := q.ListItemsInList(ctx, sqlc.ListItemsInListParams{ListID: list.ID, UserID: userID})
 	if err != nil {
 		return sqlc.UserList{}, nil, fmt.Errorf("listing items in list: %w", err)
 	}
@@ -74,7 +78,7 @@ func (a *App) GetUserList(ctx context.Context, listID int64) (sqlc.UserList, []s
 	return list, items, nil
 }
 
-func (a *App) UpdateUserList(ctx context.Context, listID int64, name, description, icon string, filterJSON []byte) (sqlc.UserList, error) {
+func (a *App) UpdateUserList(ctx context.Context, listID, userID int64, name, description, icon string, filterJSON []byte) (sqlc.UserList, error) {
 	q := sqlc.New(a.db)
 	return q.UpdateUserList(ctx, sqlc.UpdateUserListParams{
 		ID:          listID,
@@ -82,37 +86,47 @@ func (a *App) UpdateUserList(ctx context.Context, listID int64, name, descriptio
 		Description: description,
 		FilterJson:  filterJSON,
 		Icon:        icon,
+		UserID:      userID,
 	})
 }
 
-func (a *App) DeleteUserList(ctx context.Context, listID int64) error {
+func (a *App) DeleteUserList(ctx context.Context, listID, userID int64) error {
 	q := sqlc.New(a.db)
-	return q.DeleteUserList(ctx, listID)
+	return q.DeleteUserList(ctx, sqlc.DeleteUserListParams{ID: listID, UserID: userID})
 }
 
-func (a *App) AddToList(ctx context.Context, listID, mediaItemID int64) (sqlc.UserListItem, error) {
+func (a *App) AddToList(ctx context.Context, listID, mediaItemID, userID int64) (sqlc.UserListItem, error) {
 	q := sqlc.New(a.db)
-	return q.AddToList(ctx, sqlc.AddToListParams{
+	item, err := q.AddToList(ctx, sqlc.AddToListParams{
 		ListID:      listID,
 		MediaItemID: mediaItemID,
+		UserID:      userID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Ownership guard didn't match, or the item is already in the list —
+		// either way there's nothing to add and no data was changed.
+		return sqlc.UserListItem{}, nil
+	}
+	return item, err
 }
 
-func (a *App) RemoveFromList(ctx context.Context, listID, mediaItemID int64) error {
+func (a *App) RemoveFromList(ctx context.Context, listID, mediaItemID, userID int64) error {
 	q := sqlc.New(a.db)
 	return q.RemoveFromList(ctx, sqlc.RemoveFromListParams{
 		ListID:      listID,
 		MediaItemID: mediaItemID,
+		UserID:      userID,
 	})
 }
 
-func (a *App) ReorderList(ctx context.Context, listID int64, items []ReorderItem) error {
+func (a *App) ReorderList(ctx context.Context, listID, userID int64, items []ReorderItem) error {
 	q := sqlc.New(a.db)
 	for _, item := range items {
 		if err := q.ReorderListItem(ctx, sqlc.ReorderListItemParams{
 			ListID:      listID,
 			MediaItemID: item.MediaItemID,
 			SortOrder:   item.SortOrder,
+			UserID:      userID,
 		}); err != nil {
 			return fmt.Errorf("reordering item %d: %w", item.MediaItemID, err)
 		}

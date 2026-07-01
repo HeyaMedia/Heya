@@ -33,7 +33,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return cachedJSON(views, 10), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/libraries", "create-library", "Create a library", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries", "create-library", "Create a library", "Libraries")),
 		func(ctx context.Context, in *createLibraryInput) (*JSONOutput[libraryView], error) {
 			if in.Body.Name == "" || in.Body.MediaType == "" || len(in.Body.Paths) == 0 {
 				return nil, huma.Error400BadRequest("name, media_type, and paths are required")
@@ -68,7 +68,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return cachedJSON(toLibraryView(lib, app.EnvManagedLibraries()[lib.ID]), 10), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPut, "/api/libraries/{id}", "update-library", "Update a library", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/libraries/{id}", "update-library", "Update a library", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Body struct {
@@ -86,7 +86,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[libraryView]{Body: toLibraryView(lib, service.EnvManagedLibrary{})}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodDelete, "/api/libraries/{id}", "delete-library", "Delete a library", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/libraries/{id}", "delete-library", "Delete a library", "Libraries")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if env, ok := app.EnvManagedLibraries()[in.ID]; ok {
 				return nil, huma.Error409Conflict("library is locked by " + env.NameEnv + " — remove the env var to delete")
@@ -98,7 +98,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return statusOK("deleted"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/libraries/{id}/settings", "get-library-settings", "Get library settings", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/settings", "get-library-settings", "Get library settings", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Type string `query:"type" enum:",movie,tv,music,book,comic,podcast,radio" doc:"Media type for default settings"`
@@ -113,7 +113,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			}, 10), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPut, "/api/libraries/{id}/settings", "update-library-settings", "Update library settings", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/libraries/{id}/settings", "update-library-settings", "Update library settings", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Body metadata.LibrarySettings
@@ -137,7 +137,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 		})
 
 	// --- Scan triggers + refresh ---
-	huma.Register(api, secured(op(http.MethodPost, "/api/libraries/{id}/scan", "scan-library", "Enqueue a library scan", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scan", "scan-library", "Enqueue a library scan", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Force bool `query:"force" doc:"Force re-match of already-matched files"`
@@ -146,7 +146,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return statusOK("queued"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/libraries/{id}/scan/cancel", "cancel-library-scan", "Cancel queued scan jobs for this library", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scan/cancel", "cancel-library-scan", "Cancel queued scan jobs for this library", "Libraries")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[cancelBody], error) {
 			n, err := app.CancelLibraryJobs(ctx, in.ID)
 			if err != nil {
@@ -155,7 +155,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[cancelBody]{Body: cancelBody{Status: "cancelled", Cancelled: n}}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/libraries/scan/cancel-all", "cancel-all-scans", "Cancel all queued scan jobs", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/scan/cancel-all", "cancel-all-scans", "Cancel all queued scan jobs", "Libraries")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[cancelBody], error) {
 			n, err := app.CancelAllPendingJobs(ctx)
 			if err != nil {
@@ -164,7 +164,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[cancelBody]{Body: cancelBody{Status: "cancelled", Cancelled: n}}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/libraries/{id}/refresh-metadata", "refresh-library-metadata", "Force a metadata refresh", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/refresh-metadata", "refresh-library-metadata", "Force a metadata refresh", "Libraries")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if err := app.EnqueueForceRefreshMetadata(ctx, in.ID); err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
@@ -172,7 +172,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return statusOK("queued"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/libraries/{id}/refresh-images", "refresh-library-images", "Force an image refresh", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/refresh-images", "refresh-library-images", "Force an image refresh", "Libraries")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if err := app.EnqueueForceRefreshImages(ctx, in.ID); err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
@@ -183,7 +183,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 	// --- File browser (matched + unmatched) ---
 	// Per-file scan state changes constantly during an active library scan;
 	// no-store keeps the file browser from showing stale row counts.
-	huma.Register(api, secured(op(http.MethodGet, "/api/libraries/{id}/files", "list-library-files", "Paginated library files", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/files", "list-library-files", "Paginated library files", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Pagination
@@ -195,7 +195,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(files), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/libraries/{id}/files/stats", "library-file-stats", "File status counts", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/files/stats", "library-file-stats", "File status counts", "Libraries")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[[]sqlc.CountLibraryFilesByStatusRow], error) {
 			stats, err := app.LibraryFileStats(ctx, in.ID)
 			if err != nil {
@@ -204,7 +204,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(stats), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/libraries/{id}/unmatched", "list-unmatched", "Unmatched files with match candidates", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/unmatched", "list-unmatched", "Unmatched files with match candidates", "Libraries")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[[]service.UnmatchedFile], error) {
 			result, err := app.ListUnmatched(ctx, in.ID)
 			if err != nil {
@@ -213,7 +213,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(result), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/library-files/{id}/resolve", "resolve-match", "Accept a match candidate for an unmatched file", "Matching")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/library-files/{id}/resolve", "resolve-match", "Accept a match candidate for an unmatched file", "Matching")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Body struct {

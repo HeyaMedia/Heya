@@ -79,7 +79,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 			return cachedJSON(result, 30), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/media/{id}/refresh", "refresh-media", "Force a metadata refresh for one item", "Media")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/media/{id}/refresh", "refresh-media", "Force a metadata refresh for one item", "Media")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if err := app.RefreshMediaItem(ctx, in.ID); err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
@@ -87,7 +87,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 			return statusOK("refreshed"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/media/missing", "list-missing", "Media whose files no longer exist", "Media")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/media/missing", "list-missing", "Media whose files no longer exist", "Media")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.MissingMediaItem], error) {
 			items, err := app.ListMissingMedia(ctx)
 			if err != nil {
@@ -96,7 +96,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 			return cachedJSON(items, 30), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodDelete, "/api/media/missing", "cleanup-missing", "Delete missing media records", "Media")),
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/media/missing", "cleanup-missing", "Delete missing media records", "Media")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[deletedCountBody], error) {
 			count, err := app.CleanupMissingMedia(ctx)
 			if err != nil {
@@ -326,7 +326,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 		})
 
 	// --- Filesystem browser ---
-	huma.Register(api, secured(op(http.MethodGet, "/api/fs/browse", "fs-browse", "Filesystem directory listing (library wizard)", "System")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/fs/browse", "fs-browse", "Filesystem directory listing (library wizard)", "System")),
 		func(ctx context.Context, in *struct {
 			Path string `query:"path" doc:"Absolute directory to list"`
 		}) (*JSONOutput[fsBrowseBody], error) {
@@ -395,7 +395,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(resp), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPut, "/api/transcode/settings", "update-transcode-settings", "Update transcoder settings", "Transcoding")),
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/transcode/settings", "update-transcode-settings", "Update transcoder settings", "Transcoding")),
 		func(ctx context.Context, in *struct {
 			Body struct {
 				HWAccel    string `json:"hw_accel" enum:"auto,none,vaapi,qsv,nvenc,videotoolbox"`
@@ -408,7 +408,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 			return statusOK("ok"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodDelete, "/api/transcode/cache", "clear-transcode-cache", "Clear cached transcoded segments", "Transcoding")),
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/transcode/cache", "clear-transcode-cache", "Clear cached transcoded segments", "Transcoding")),
 		func(ctx context.Context, _ *struct{}) (*StatusOutput, error) {
 			if app.TranscoderCache() == nil {
 				return nil, huma.Error503ServiceUnavailable("transcoding not available")

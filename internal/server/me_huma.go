@@ -134,7 +134,7 @@ func registerMeRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/lists/{id}", "get-user-list", "List detail with items", "Me")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[userListDetailBody], error) {
-			list, items, err := app.GetUserList(ctx, in.ID)
+			list, items, err := app.GetUserList(ctx, in.ID, userFrom(ctx).ID)
 			if err != nil {
 				return nil, huma.Error404NotFound("list not found")
 			}
@@ -151,7 +151,7 @@ func registerMeRoutes(api huma.API, app *service.App) {
 				Icon        string          `json:"icon" maxLength:"64"`
 			}
 		}) (*JSONOutput[userListView], error) {
-			list, err := app.UpdateUserList(ctx, in.ID, in.Body.Name, in.Body.Description, in.Body.Icon, in.Body.FilterJSON)
+			list, err := app.UpdateUserList(ctx, in.ID, userFrom(ctx).ID, in.Body.Name, in.Body.Description, in.Body.Icon, in.Body.FilterJSON)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -160,7 +160,7 @@ func registerMeRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodDelete, "/api/me/lists/{id}", "delete-user-list", "Delete a list", "Me")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
-			_ = app.DeleteUserList(ctx, in.ID)
+			_ = app.DeleteUserList(ctx, in.ID, userFrom(ctx).ID)
 			return statusOK("deleted"), nil
 		})
 
@@ -171,7 +171,7 @@ func registerMeRoutes(api huma.API, app *service.App) {
 				MediaItemID int64 `json:"media_item_id" minimum:"1"`
 			}
 		}) (*JSONOutput[sqlc.UserListItem], error) {
-			item, err := app.AddToList(ctx, in.ID, in.Body.MediaItemID)
+			item, err := app.AddToList(ctx, in.ID, in.Body.MediaItemID, userFrom(ctx).ID)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -183,7 +183,7 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			IDPath
 			MediaID int64 `path:"media_id" minimum:"1"`
 		}) (*StatusOutput, error) {
-			_ = app.RemoveFromList(ctx, in.ID, in.MediaID)
+			_ = app.RemoveFromList(ctx, in.ID, in.MediaID, userFrom(ctx).ID)
 			return statusOK("removed"), nil
 		})
 
@@ -194,7 +194,7 @@ func registerMeRoutes(api huma.API, app *service.App) {
 				Items []service.ReorderItem `json:"items"`
 			}
 		}) (*StatusOutput, error) {
-			if err := app.ReorderList(ctx, in.ID, in.Body.Items); err != nil {
+			if err := app.ReorderList(ctx, in.ID, userFrom(ctx).ID, in.Body.Items); err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return statusOK("reordered"), nil

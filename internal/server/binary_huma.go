@@ -175,8 +175,11 @@ type streamSubtitleInput struct {
 }
 
 type trickplaySpriteInput struct {
-	FileID   int64  `path:"file_id" minimum:"1"`
-	Filename string `path:"filename" maxLength:"128"`
+	FileID int64 `path:"file_id" minimum:"1"`
+	// pattern is OpenAPI documentation only — wrapStreamAs ignores this input
+	// struct, so the actual traversal guard is the filepath.Base check in
+	// handleTrickplaySprite. Kept in sync for spec accuracy.
+	Filename string `path:"filename" maxLength:"128" pattern:"^[A-Za-z0-9._-]+$"`
 }
 
 type musicTrackStreamInput struct {

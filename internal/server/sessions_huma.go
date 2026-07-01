@@ -79,13 +79,21 @@ func registerSessionRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			SessionID string `path:"session_id" maxLength:"128"`
 		}) (*JSONOutput[okBody], error) {
-			app.Sessions().End(in.SessionID)
+			// Only end a session the caller owns — the id is client-chosen, so
+			// without this any user could end another's playback presence.
+			app.Sessions().EndForUser(in.SessionID, userFrom(ctx).ID)
 			return noStoreJSON(okBody{Ok: true}), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/sessions/active", "list-active-sessions", "Active playback sessions across all users", "Sessions")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/sessions/active", "list-active-sessions", "Active playback sessions (own; all for admins)", "Sessions")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[activeSessionsBody], error) {
-			items := app.Sessions().List()
+			// A non-admin sees only their own sessions; the full cross-user view
+			// (other users' IP / user-agent / what they're watching) is admin-only.
+			u := userFrom(ctx)
+			items := app.Sessions().ListForUser(u.ID)
+			if u.IsAdmin {
+				items = app.Sessions().List()
+			}
 			return noStoreJSON(activeSessionsBody{Items: items}), nil
 		})
 }

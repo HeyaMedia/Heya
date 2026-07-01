@@ -12,7 +12,7 @@ import (
 // registerJobRoutes covers /api/jobs/* and /api/schedules — runtime queue
 // inspection and rescue/retry/cancel verbs.
 func registerJobRoutes(api huma.API, app *service.App) {
-	huma.Register(api, secured(op(http.MethodGet, "/api/jobs", "list-jobs", "List background jobs", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs", "list-jobs", "List background jobs", "Jobs")),
 		func(ctx context.Context, in *struct {
 			State  string `query:"state" enum:"available,running,scheduled,retryable,completed,cancelled,discarded" doc:"Filter by River state"`
 			Kind   string `query:"kind" maxLength:"64" doc:"Filter by job kind (River task name)"`
@@ -26,7 +26,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(result), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/jobs/summary", "job-summary", "Job state summary", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/summary", "job-summary", "Job state summary", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.JobSummaryRow], error) {
 			summary, err := app.JobSummary(ctx)
 			if err != nil {
@@ -35,7 +35,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(summary), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/jobs/kinds", "job-kind-summary", "Per-kind job counts", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/kinds", "job-kind-summary", "Per-kind job counts", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.JobKindSummaryRow], error) {
 			summary, err := app.JobKindSummary(ctx)
 			if err != nil {
@@ -44,7 +44,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(summary), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/rescue", "rescue-jobs", "Rescue stuck jobs", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/jobs/rescue", "rescue-jobs", "Rescue stuck jobs", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[rescueBody], error) {
 			rescued, retriesReset, err := app.RescueStuckJobs(ctx)
 			if err != nil {
@@ -53,7 +53,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[rescueBody]{Body: rescueBody{Rescued: rescued, RetriesReset: retriesReset}}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/{id}/retry", "retry-job", "Retry a job", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/jobs/{id}/retry", "retry-job", "Retry a job", "Jobs")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if err := app.RetryJob(ctx, in.ID); err != nil {
 				return nil, humaServiceError(err)
@@ -61,7 +61,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return statusOK("retried"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/jobs/{id}/cancel", "cancel-job", "Cancel a job", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/jobs/{id}/cancel", "cancel-job", "Cancel a job", "Jobs")),
 		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
 			if err := app.CancelJob(ctx, in.ID); err != nil {
 				return nil, humaServiceError(err)
@@ -69,7 +69,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return statusOK("cancelled"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodDelete, "/api/jobs/completed", "clear-completed-jobs", "Clear completed jobs", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/jobs/completed", "clear-completed-jobs", "Clear completed jobs", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[clearedBody], error) {
 			n, err := app.ClearCompletedJobs(ctx)
 			if err != nil {
@@ -78,7 +78,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[clearedBody]{Body: clearedBody{Cleared: n}}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodDelete, "/api/jobs", "clear-all-jobs", "Clear all jobs", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/jobs", "clear-all-jobs", "Clear all jobs", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[clearedBody], error) {
 			n, err := app.ClearAllJobs(ctx)
 			if err != nil {
@@ -90,7 +90,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 	// Scoped flush — deletes jobs of a single kind, optionally narrowed to one
 	// state. Kept distinct from "clear-all-jobs" above so a missing kind can't
 	// be coerced into a queue-wide wipe; an empty kind deletes nothing.
-	huma.Register(api, secured(op(http.MethodDelete, "/api/jobs/by-kind", "clear-jobs-by-kind", "Clear jobs of a single kind", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/jobs/by-kind", "clear-jobs-by-kind", "Clear jobs of a single kind", "Jobs")),
 		func(ctx context.Context, in *struct {
 			Kind  string `query:"kind" required:"true" maxLength:"64" doc:"Job kind to flush (River task name)"`
 			State string `query:"state" enum:"available,running,scheduled,retryable,completed,cancelled,discarded" doc:"Optional state to narrow the flush"`
@@ -102,7 +102,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[clearedBody]{Body: clearedBody{Cleared: n}}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/schedules", "list-schedules", "Periodic schedules computed from library settings", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/schedules", "list-schedules", "Periodic schedules computed from library settings", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ScheduleEntry], error) {
 			entries, err := app.ListSchedules(ctx)
 			if err != nil {
@@ -111,7 +111,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(entries), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/jobs/queue/metadata", "metadata-queue-status", "Snapshot of the unified metadata enrich queue (pending counts by priority, current item, throughput)", "Jobs")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/queue/metadata", "metadata-queue-status", "Snapshot of the unified metadata enrich queue (pending counts by priority, current item, throughput)", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.MetadataQueueStatus], error) {
 			status, err := app.MetadataQueueStatus(ctx)
 			if err != nil {
@@ -124,7 +124,7 @@ func registerJobRoutes(api huma.API, app *service.App) {
 // registerTaskRoutes covers /api/tasks/* — the scheduled-task UI for trickplay,
 // thumbnails, scan, and metadata refresh.
 func registerTaskRoutes(api huma.API, app *service.App) {
-	huma.Register(api, secured(op(http.MethodGet, "/api/tasks", "list-tasks", "List scheduled tasks", "Tasks")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/tasks", "list-tasks", "List scheduled tasks", "Tasks")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]taskResponse], error) {
 			tasks, err := app.ListScheduledTasks(ctx)
 			if err != nil {
@@ -142,7 +142,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(result), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/tasks/{id}/run", "run-task", "Trigger a scheduled task immediately", "Tasks")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/tasks/{id}/run", "run-task", "Trigger a scheduled task immediately", "Tasks")),
 		func(ctx context.Context, in *struct {
 			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
 		}) (*StatusOutput, error) {
@@ -152,7 +152,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			return statusOK("started"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/tasks/{id}/cancel", "cancel-task", "Cancel an in-flight scheduled task", "Tasks")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/tasks/{id}/cancel", "cancel-task", "Cancel an in-flight scheduled task", "Tasks")),
 		func(ctx context.Context, in *struct {
 			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
 		}) (*StatusOutput, error) {
@@ -162,7 +162,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			return statusOK("cancelled"), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPut, "/api/tasks/{id}", "update-task", "Update a scheduled task's window/cadence", "Tasks")),
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/tasks/{id}", "update-task", "Update a scheduled task's window/cadence", "Tasks")),
 		func(ctx context.Context, in *struct {
 			ID   string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
 			Body struct {
@@ -180,7 +180,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[taskResponse]{Body: taskToResponse(updated, nil)}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/tasks/{id}/items", "task-items", "Items associated with a task run", "Tasks")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/tasks/{id}/items", "task-items", "Items associated with a task run", "Tasks")),
 		func(ctx context.Context, in *struct {
 			ID     string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,analyze_music_facets" doc:"Task identifier"`
 			Status string `query:"status" maxLength:"32" doc:"Filter by item status (pending/running/done/error)"`

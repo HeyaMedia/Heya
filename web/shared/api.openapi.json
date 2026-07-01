@@ -28140,7 +28140,7 @@
             "bearer": null
           }
         ],
-        "summary": "Active playback sessions across all users",
+        "summary": "Active playback sessions (own; all for admins)",
         "tags": [
           "Sessions"
         ]
@@ -28776,6 +28776,7 @@
             "required": true,
             "schema": {
               "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._-]+$",
               "type": "string"
             }
           }

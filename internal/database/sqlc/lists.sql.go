@@ -13,7 +13,8 @@ import (
 
 const addToList = `-- name: AddToList :one
 INSERT INTO user_list_items (list_id, media_item_id, sort_order)
-VALUES ($1, $2, COALESCE((SELECT max(sort_order) + 1 FROM user_list_items WHERE list_id = $1), 0))
+SELECT $1, $2, COALESCE((SELECT max(sort_order) + 1 FROM user_list_items WHERE list_id = $1), 0)
+WHERE EXISTS (SELECT 1 FROM user_lists WHERE id = $1 AND user_id = $3)
 ON CONFLICT (list_id, media_item_id) DO NOTHING
 RETURNING id, list_id, media_item_id, sort_order, added_at
 `
@@ -21,10 +22,12 @@ RETURNING id, list_id, media_item_id, sort_order, added_at
 type AddToListParams struct {
 	ListID      int64 `json:"list_id"`
 	MediaItemID int64 `json:"media_item_id"`
+	UserID      int64 `json:"user_id"`
 }
 
+// Ownership-guarded: only inserts when list $1 belongs to user $3 (else 0 rows).
 func (q *Queries) AddToList(ctx context.Context, arg AddToListParams) (UserListItem, error) {
-	row := q.db.QueryRow(ctx, addToList, arg.ListID, arg.MediaItemID)
+	row := q.db.QueryRow(ctx, addToList, arg.ListID, arg.MediaItemID, arg.UserID)
 	var i UserListItem
 	err := row.Scan(
 		&i.ID,
@@ -77,20 +80,30 @@ func (q *Queries) CreateUserList(ctx context.Context, arg CreateUserListParams) 
 }
 
 const deleteUserList = `-- name: DeleteUserList :exec
-DELETE FROM user_lists WHERE id = $1
+DELETE FROM user_lists WHERE id = $1 AND user_id = $2
 `
 
-func (q *Queries) DeleteUserList(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, deleteUserList, id)
+type DeleteUserListParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteUserList(ctx context.Context, arg DeleteUserListParams) error {
+	_, err := q.db.Exec(ctx, deleteUserList, arg.ID, arg.UserID)
 	return err
 }
 
 const getUserListByID = `-- name: GetUserListByID :one
-SELECT id, user_id, name, description, list_type, filter_json, media_type, icon, created_at, updated_at FROM user_lists WHERE id = $1
+SELECT id, user_id, name, description, list_type, filter_json, media_type, icon, created_at, updated_at FROM user_lists WHERE id = $1 AND user_id = $2
 `
 
-func (q *Queries) GetUserListByID(ctx context.Context, id int64) (UserList, error) {
-	row := q.db.QueryRow(ctx, getUserListByID, id)
+type GetUserListByIDParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) GetUserListByID(ctx context.Context, arg GetUserListByIDParams) (UserList, error) {
+	row := q.db.QueryRow(ctx, getUserListByID, arg.ID, arg.UserID)
 	var i UserList
 	err := row.Scan(
 		&i.ID,
@@ -130,11 +143,17 @@ SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi
 FROM media_items mi
 JOIN user_list_items li ON li.media_item_id = mi.id
 WHERE li.list_id = $1
+  AND EXISTS (SELECT 1 FROM user_lists WHERE id = $1 AND user_id = $2)
 ORDER BY li.sort_order, li.added_at
 `
 
-func (q *Queries) ListItemsInList(ctx context.Context, listID int64) ([]MediaItem, error) {
-	rows, err := q.db.Query(ctx, listItemsInList, listID)
+type ListItemsInListParams struct {
+	ListID int64 `json:"list_id"`
+	UserID int64 `json:"user_id"`
+}
+
+func (q *Queries) ListItemsInList(ctx context.Context, arg ListItemsInListParams) ([]MediaItem, error) {
+	rows, err := q.db.Query(ctx, listItemsInList, arg.ListID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -282,38 +301,48 @@ func (q *Queries) ListsContainingMedia(ctx context.Context, arg ListsContainingM
 }
 
 const removeFromList = `-- name: RemoveFromList :exec
-DELETE FROM user_list_items WHERE list_id = $1 AND media_item_id = $2
+DELETE FROM user_list_items
+WHERE list_id = $1 AND media_item_id = $2
+  AND EXISTS (SELECT 1 FROM user_lists WHERE id = $1 AND user_id = $3)
 `
 
 type RemoveFromListParams struct {
 	ListID      int64 `json:"list_id"`
 	MediaItemID int64 `json:"media_item_id"`
+	UserID      int64 `json:"user_id"`
 }
 
 func (q *Queries) RemoveFromList(ctx context.Context, arg RemoveFromListParams) error {
-	_, err := q.db.Exec(ctx, removeFromList, arg.ListID, arg.MediaItemID)
+	_, err := q.db.Exec(ctx, removeFromList, arg.ListID, arg.MediaItemID, arg.UserID)
 	return err
 }
 
 const reorderListItem = `-- name: ReorderListItem :exec
 UPDATE user_list_items SET sort_order = $3
 WHERE list_id = $1 AND media_item_id = $2
+  AND EXISTS (SELECT 1 FROM user_lists WHERE id = $1 AND user_id = $4)
 `
 
 type ReorderListItemParams struct {
 	ListID      int64 `json:"list_id"`
 	MediaItemID int64 `json:"media_item_id"`
 	SortOrder   int32 `json:"sort_order"`
+	UserID      int64 `json:"user_id"`
 }
 
 func (q *Queries) ReorderListItem(ctx context.Context, arg ReorderListItemParams) error {
-	_, err := q.db.Exec(ctx, reorderListItem, arg.ListID, arg.MediaItemID, arg.SortOrder)
+	_, err := q.db.Exec(ctx, reorderListItem,
+		arg.ListID,
+		arg.MediaItemID,
+		arg.SortOrder,
+		arg.UserID,
+	)
 	return err
 }
 
 const updateUserList = `-- name: UpdateUserList :one
 UPDATE user_lists SET name = $2, description = $3, filter_json = $4, icon = $5, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND user_id = $6
 RETURNING id, user_id, name, description, list_type, filter_json, media_type, icon, created_at, updated_at
 `
 
@@ -323,6 +352,7 @@ type UpdateUserListParams struct {
 	Description string `json:"description"`
 	FilterJson  []byte `json:"filter_json"`
 	Icon        string `json:"icon"`
+	UserID      int64  `json:"user_id"`
 }
 
 func (q *Queries) UpdateUserList(ctx context.Context, arg UpdateUserListParams) (UserList, error) {
@@ -332,6 +362,7 @@ func (q *Queries) UpdateUserList(ctx context.Context, arg UpdateUserListParams) 
 		arg.Description,
 		arg.FilterJson,
 		arg.Icon,
+		arg.UserID,
 	)
 	var i UserList
 	err := row.Scan(
