@@ -839,7 +839,11 @@ func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []Alb
 	}
 	tracksByAlbum := make(map[int64][]TrackView, len(albums))
 	for _, t := range tracks {
-		tracksByAlbum[t.AlbumID] = append(tracksByAlbum[t.AlbumID], TrackView{Track: t, Files: filesByTrack[t.ID]})
+		files := filesByTrack[t.ID]
+		if files == nil {
+			files = []sqlc.TrackFile{} // keep `files: []` (not null) for fileless tracks
+		}
+		tracksByAlbum[t.AlbumID] = append(tracksByAlbum[t.AlbumID], TrackView{Track: t, Files: files})
 	}
 
 	views := make([]AlbumView, 0, len(albums))
