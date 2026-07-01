@@ -177,17 +177,38 @@ func (r *nfoResolver) dir(dir string) *nfo.ParsedNFO {
 }
 
 // forPath returns the nearest ancestor directory's NFO (starting at the
-// file's own dir, ending at the root).
+// file's own dir, ending at the root). Terminates at filepath.Dir's fixed
+// point ("." for relative paths, "/" for rooted ones) so a malformed input
+// can't spin the loop forever.
 func (r *nfoResolver) forPath(relPath string) *nfo.ParsedNFO {
 	dir := filepath.Dir(relPath)
 	for {
 		if p := r.dir(dir); p != nil {
 			return p
 		}
-		if dir == "." || dir == "" {
+		parent := filepath.Dir(dir)
+		if parent == dir {
 			return nil
 		}
-		dir = filepath.Dir(dir)
+		dir = parent
+	}
+}
+
+// nearestNFODir walks up from fileDir to the nearest directory with a seen
+// NFO. Same fixed-point termination as forPath: a rooted path (possible if a
+// stored path's root prefix didn't round-trip cleanly) must fail the lookup,
+// not hang the scan on Dir("/") == "/".
+func nearestNFODir(fileDir string, seen map[string]nfoEntry) (string, bool) {
+	dir := fileDir
+	for {
+		if _, ok := seen[dir]; ok {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
 	}
 }
 
@@ -386,15 +407,18 @@ func (s *Scanner) scanPath(ctx context.Context, libraryID int64, rootPath string
 // parse_result rebuilt and flow back through the match pipeline as pending;
 // everything else stays untouched, so a no-change rescan writes nothing.
 func (s *Scanner) reconcileNFOs(ctx context.Context, libraryID int64, rootPath string, isSMB bool, fsys fs.FS, seenNFOs map[string]nfoEntry, nfoState map[string]nfoDirState, known map[string]knownFile, discovered map[string]bool, upserted map[string]bool, result *ScanResult) {
-	// Full-path prefix exactly as the walk builds file paths, so DB paths
-	// round-trip back to walk-relative paths.
-	var rootFull string
+	// Full-path prefix EXACTLY as the walk builds file paths — SMB is
+	// rootPath verbatim + "/" (a trailing-slash root yields a double slash,
+	// and stored paths carry it too), local is filepath.Join's cleaned form.
+	// Anything else and TrimPrefix leaves a rooted rel path, which breaks
+	// the seenNFOs lookups.
+	var prefix string
 	if isSMB {
-		rootFull = strings.TrimSuffix(rootPath, "/")
+		prefix = rootPath + "/"
 	} else {
-		rootFull = filepath.Clean(rootPath)
+		prefix = filepath.Clean(rootPath) + "/"
 	}
-	prefix := rootFull + "/"
+	rootFull := strings.TrimSuffix(prefix, "/")
 	dirFull := func(relDir string) string {
 		if relDir == "." {
 			return rootFull
@@ -456,18 +480,6 @@ func (s *Scanner) reconcileNFOs(ctx context.Context, libraryID int64, rootPath s
 		}
 		return p
 	}
-	governingDir := func(fileDir string) (string, bool) {
-		dir := fileDir
-		for {
-			if _, ok := seenNFOs[dir]; ok {
-				return dir, true
-			}
-			if dir == "." || dir == "" {
-				return "", false
-			}
-			dir = filepath.Dir(dir)
-		}
-	}
 	underRemoved := func(fileDir string) bool {
 		for _, rr := range removedRel {
 			if rr == "." || fileDir == rr || strings.HasPrefix(fileDir, rr+"/") {
@@ -485,7 +497,7 @@ func (s *Scanner) reconcileNFOs(ctx context.Context, libraryID int64, rootPath s
 		rel := strings.TrimPrefix(fullPath, prefix)
 		fileDir := filepath.Dir(rel)
 
-		gov, hasGov := governingDir(fileDir)
+		gov, hasGov := nearestNFODir(fileDir, seenNFOs)
 		needs := underRemoved(fileDir) || (hasGov && (changed[gov] || !kf.hasNFO))
 		if !needs {
 			continue
