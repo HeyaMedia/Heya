@@ -340,17 +340,23 @@ func (a *App) SonicAnalysisEnabled(ctx context.Context) bool {
 }
 
 // ReconfigureSonicAnalysisAnalyzer applies the current settings'
-// accelerator choice to the Analyzer + TextSearcher. Returns
-// ErrSonicBusy when the analyzer is mid-batch; the scheduler swallows
-// this and waits for the next window naturally.
+// accelerator choice to every sonic-analysis surface: the worker-facing
+// Holder (which owns its own Analyzer built from its own cfg copy — the
+// long-standing gap: Holder.Reconfigure previously had no callers, so
+// the analysis worker kept the old accelerator until restart), the
+// facets-read Analyzer, and the TextSearcher.
 //
-// Both are reconfigured IN PLACE (Analyzer.Reconfigure CASes the state
-// machine; TextSearcher.Reconfigure closes its session under the same
-// lock Embed holds). The old version swapped the a.analyzer /
-// a.textSearcher pointers instead — an unsynchronized write racing every
-// concurrent TextSearcher()/SonicAnalyzer() reader, and Close() on the
-// old searcher could destroy the ONNX session under an in-flight Embed
-// (native use-after-free).
+// All three are reconfigured IN PLACE (the Holder under its lease lock;
+// Analyzer.Reconfigure CASes the state machine; TextSearcher.Reconfigure
+// closes its session under the same lock Embed holds). The old version
+// swapped the a.analyzer / a.textSearcher pointers instead — an
+// unsynchronized write racing every concurrent reader, and Close() on
+// the old searcher could destroy the ONNX session under an in-flight
+// Embed (native use-after-free).
+//
+// Best-effort: a component that is mid-batch refuses and stays on the
+// old config, and ErrSonicBusy is returned so the UI shows the settings
+// as saved-but-not-applied; a later save retries idempotently.
 func (a *App) ReconfigureSonicAnalysisAnalyzer(ctx context.Context) error {
 	if a.analyzer == nil {
 		return nil
@@ -361,10 +367,19 @@ func (a *App) ReconfigureSonicAnalysisAnalyzer(ctx context.Context) error {
 		ModelsDir:   modelsDir,
 		Accelerator: sonicanalysis.Accelerator(settings.Accelerator),
 	}
+	busy := false
+	if a.sonicHolder != nil {
+		if err := a.sonicHolder.Reconfigure(saCfg); err != nil {
+			busy = true
+		}
+	}
 	if err := a.analyzer.Reconfigure(saCfg); err != nil {
-		return ErrSonicBusy
+		busy = true
 	}
 	a.textSearcher.Reconfigure(saCfg)
+	if busy {
+		return ErrSonicBusy
+	}
 	return nil
 }
 
