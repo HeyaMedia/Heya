@@ -645,7 +645,10 @@ watch(() => route.fullPath, () => { closeDropdown() })
 <style scoped>
 .topbar {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* Equal flexible side columns so the tabs center on the viewport, not on
+     the leftover space (the right side — search + buttons — is much wider
+     than the brand, which used to skew the tabs left). */
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 24px;
   padding: 0 24px;
@@ -657,7 +660,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   z-index: 50;
   position: relative;
 }
-.topbar-brand { display: flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
+.topbar-brand { display: flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; justify-self: start; }
 .brand-mark { display: flex; align-items: center; justify-content: center; }
 .brand-name { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--fg-0); }
 .brand-name .brand-dot { color: var(--gold); }
@@ -673,7 +676,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
 }
 .topbar-tabs .tab:hover { color: var(--fg-0); background: rgba(255,255,255,0.04); }
 .topbar-tabs .tab.active { color: var(--gold); }
-.topbar-right { display: flex; align-items: center; gap: 10px; }
+.topbar-right { display: flex; align-items: center; gap: 10px; justify-self: end; }
 .search-wrap { display: flex; align-items: center; gap: 8px; }
 .search-wrap.open {
   background: var(--bg-3);

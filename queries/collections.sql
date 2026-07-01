@@ -5,6 +5,14 @@ VALUES ($1, $2, $3, $4, $5) RETURNING *;
 -- name: FindCollectionByName :one
 SELECT * FROM collections WHERE name = $1 LIMIT 1;
 
+-- name: UpdateCollection :exec
+UPDATE collections
+SET external_ids = $2, overview = $3, poster_path = $4, backdrop_path = $5
+WHERE id = $1;
+
+-- name: SetMovieCollection :exec
+UPDATE movies SET collection_id = $2 WHERE media_item_id = $1;
+
 -- name: GetCollectionByID :one
 SELECT * FROM collections WHERE id = $1;
 

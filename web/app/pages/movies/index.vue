@@ -8,6 +8,7 @@
       :total-count="items.length"
       :loved-count="favoritedSet.size"
       :user-lists="userLists"
+      :collections="collections"
       :drag-over-list-id="dragState.overListId"
       @select="activeLib = $event; activeView = null"
       @view="activeView = $event"
@@ -128,13 +129,14 @@
 </template>
 
 <script setup lang="ts">
-import type { EnrichedMediaItem, Library, UserList, FilterState } from '~~/shared/types'
+import type { EnrichedMediaItem, Library, UserList, FilterState, CollectionBrowse } from '~~/shared/types'
 import { useCardContextItems } from '~/composables/useContextMenu'
 
 const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<EnrichedMediaItem[]>([])
 const libraries = ref<Library[]>([])
 const userLists = ref<UserList[]>([])
+const collections = ref<CollectionBrowse[]>([])
 const loading = ref(true)
 const activeLib = ref<number | null>(null)
 const activeView = ref<string | null>(null)
@@ -209,7 +211,10 @@ const viewTitle = computed(() => {
     const list = userLists.value.find(l => `list-${l.id}` === activeView.value)
     return list?.name || 'List'
   }
-  if (activeView.value?.startsWith('collection-')) return 'Collection'
+  if (activeView.value?.startsWith('collection-')) {
+    const col = collections.value.find(c => `collection-${c.id}` === activeView.value)
+    return col?.name || 'Franchise'
+  }
   return 'Movies'
 })
 
@@ -335,13 +340,14 @@ function formatDate(d: string) {
 
 onMounted(async () => {
   const { $heya } = useNuxtApp()
-  const [mediaRes, libRes, stateRes, listsRes] = await Promise.allSettled([
+  const [mediaRes, libRes, stateRes, listsRes, colRes] = await Promise.allSettled([
     // /api/media/enriched wraps results in `{ movies, tv, type }` since the
     // API rewrite — unwrap the relevant branch.
     $heya('/api/media/enriched', { query: { type: 'movie', limit: 5000 } }) as Promise<{ movies: EnrichedMediaItem[] | null }>,
     $heya('/api/libraries') as Promise<Library[]>,
     fetchUserState('movies'),
     $heya('/api/me/lists') as Promise<UserList[]>,
+    $heya('/api/collections/browse') as Promise<CollectionBrowse[]>,
   ])
   if (mediaRes.status === 'fulfilled') items.value = mediaRes.value.movies ?? []
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'movie')
@@ -350,6 +356,7 @@ onMounted(async () => {
     watchedSet.value = new Set(stateRes.value.watched || [])
   }
   if (listsRes.status === 'fulfilled') userLists.value = listsRes.value
+  if (colRes.status === 'fulfilled') collections.value = colRes.value ?? []
   loading.value = false
 })
 </script>

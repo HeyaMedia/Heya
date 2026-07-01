@@ -14,11 +14,11 @@
       <div
         v-for="lib in libraries"
         :key="lib.id"
-        class="lib-item"
+        class="lib-item lib-item-nested"
         :class="{ active: activeLib === lib.id && !activeView }"
         @click="selectLib(lib.id)"
       >
-        <Icon name="folder" :size="16" />
+        <Icon name="folder" :size="12" class="list-type-icon" />
         <span>{{ lib.name }}</span>
       </div>
     </div>
@@ -61,26 +61,29 @@
         </div>
       </template>
 
-      <!-- TMDB Collections -->
-      <div class="lib-item lists-toggle" @click="collectionsExpanded = !collectionsExpanded" style="margin-top: 4px">
-        <Icon name="film" :size="16" />
-        <span>Franchises</span>
-        <Icon :name="collectionsExpanded ? 'chevdown' : 'chevright'" :size="10" class="expand-icon" />
-      </div>
-      <template v-if="collectionsExpanded">
-        <div
-          v-for="c in tmdbCollections"
-          :key="c.id"
-          class="lib-item lib-item-nested"
-          :class="{ active: activeView === `collection-${c.id}` }"
-          @click="$emit('view', `collection-${c.id}`)"
-        >
-          <span>{{ c.name }}</span>
-          <span class="count">{{ c.movie_count }}</span>
+      <!-- TMDB Collections — movie-only, so the section renders only when the
+           parent page passes the browse result in (tv/books leave it unset). -->
+      <template v-if="collections">
+        <div class="lib-item lists-toggle" @click="collectionsExpanded = !collectionsExpanded" style="margin-top: 4px">
+          <Icon name="film" :size="16" />
+          <span>Franchises</span>
+          <Icon :name="collectionsExpanded ? 'chevdown' : 'chevright'" :size="10" class="expand-icon" />
         </div>
-        <div v-if="!tmdbCollections.length" class="lib-item lib-item-nested lib-item-empty">
-          No franchises
-        </div>
+        <template v-if="collectionsExpanded">
+          <div
+            v-for="c in collections"
+            :key="c.id"
+            class="lib-item lib-item-nested"
+            :class="{ active: activeView === `collection-${c.id}` }"
+            @click="$emit('view', `collection-${c.id}`)"
+          >
+            <span>{{ c.name }}</span>
+            <span class="count">{{ c.movie_count }}</span>
+          </div>
+          <div v-if="!collections.length" class="lib-item lib-item-nested lib-item-empty">
+            No franchises
+          </div>
+        </template>
       </template>
     </div>
 
@@ -102,6 +105,8 @@ const props = defineProps<{
   lovedCount?: number
   userLists?: UserList[]
   dragOverListId?: number | null
+  /** TMDB collections with local movies. Undefined hides the Franchises section. */
+  collections?: CollectionBrowse[]
 }>()
 
 const emit = defineEmits<{
@@ -114,7 +119,6 @@ const emit = defineEmits<{
 
 const listsExpanded = ref(false)
 const collectionsExpanded = ref(false)
-const tmdbCollections = ref<CollectionBrowse[]>([])
 
 const displayLists = computed(() => props.userLists || [])
 
@@ -134,14 +138,6 @@ async function createList() {
   } catch { /* empty */ }
 }
 
-async function loadCollections() {
-  try {
-    const { $heya } = useNuxtApp()
-    tmdbCollections.value = await $heya('/api/collections/browse') as CollectionBrowse[]
-  } catch { /* empty */ }
-}
-
-onMounted(() => { loadCollections() })
 </script>
 
 <style scoped>

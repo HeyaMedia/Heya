@@ -253,3 +253,42 @@ func (q *Queries) ListCollectionsWithLocalMedia(ctx context.Context) ([]ListColl
 	}
 	return items, nil
 }
+
+const setMovieCollection = `-- name: SetMovieCollection :exec
+UPDATE movies SET collection_id = $2 WHERE media_item_id = $1
+`
+
+type SetMovieCollectionParams struct {
+	MediaItemID  int64       `json:"media_item_id"`
+	CollectionID pgtype.Int8 `json:"collection_id"`
+}
+
+func (q *Queries) SetMovieCollection(ctx context.Context, arg SetMovieCollectionParams) error {
+	_, err := q.db.Exec(ctx, setMovieCollection, arg.MediaItemID, arg.CollectionID)
+	return err
+}
+
+const updateCollection = `-- name: UpdateCollection :exec
+UPDATE collections
+SET external_ids = $2, overview = $3, poster_path = $4, backdrop_path = $5
+WHERE id = $1
+`
+
+type UpdateCollectionParams struct {
+	ID           int64  `json:"id"`
+	ExternalIds  []byte `json:"external_ids"`
+	Overview     string `json:"overview"`
+	PosterPath   string `json:"poster_path"`
+	BackdropPath string `json:"backdrop_path"`
+}
+
+func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error {
+	_, err := q.db.Exec(ctx, updateCollection,
+		arg.ID,
+		arg.ExternalIds,
+		arg.Overview,
+		arg.PosterPath,
+		arg.BackdropPath,
+	)
+	return err
+}

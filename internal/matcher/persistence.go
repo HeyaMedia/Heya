@@ -336,14 +336,8 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		})
 	}
 
-	if d.Collection != nil && m.shouldAutoCollect(ctx, mediaItemID) {
-		m.q.CreateCollection(ctx, sqlc.CreateCollectionParams{
-			ExternalIds:  mustJSON(d.Collection.ExternalIDs),
-			Name:         d.Collection.Name,
-			Overview:     d.Collection.Overview,
-			PosterPath:   d.Collection.PosterPath,
-			BackdropPath: d.Collection.BackdropPath,
-		})
+	if d.Collection != nil && d.Collection.Name != "" && m.shouldAutoCollect(ctx, mediaItemID) {
+		m.linkCollection(ctx, mediaItemID, d.Collection)
 	}
 
 	if d.ExternalIDs["wikidata"] != "" || d.ExternalIDs["facebook"] != "" || d.ExternalIDs["instagram"] != "" || d.ExternalIDs["twitter"] != "" || d.Homepage != "" {
@@ -489,6 +483,47 @@ func (m *Matcher) findOrCreateCompany(ctx context.Context, name string, external
 		return sqlc.ProductionCompany{}
 	}
 	return co
+}
+
+// linkCollection find-or-creates the collection (franchise) row and points
+// the movie's collection_id at it. Collections carry no unique constraint on
+// name, so a blind insert per enrich would pile up duplicate rows — an
+// existing row is refreshed with the latest artwork/overview instead.
+func (m *Matcher) linkCollection(ctx context.Context, mediaItemID int64, c *metadata.CollectionDetail) {
+	col, err := m.q.FindCollectionByName(ctx, c.Name)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		col, err = m.q.CreateCollection(ctx, sqlc.CreateCollectionParams{
+			ExternalIds:  mustJSON(c.ExternalIDs),
+			Name:         c.Name,
+			Overview:     c.Overview,
+			PosterPath:   c.PosterPath,
+			BackdropPath: c.BackdropPath,
+		})
+		if err != nil {
+			log.Debug().Err(err).Str("collection", c.Name).Msg("failed to create collection")
+			return
+		}
+	case err != nil:
+		log.Debug().Err(err).Str("collection", c.Name).Msg("failed to look up collection")
+		return
+	default:
+		if err := m.q.UpdateCollection(ctx, sqlc.UpdateCollectionParams{
+			ID:           col.ID,
+			ExternalIds:  mustJSON(c.ExternalIDs),
+			Overview:     c.Overview,
+			PosterPath:   c.PosterPath,
+			BackdropPath: c.BackdropPath,
+		}); err != nil {
+			log.Debug().Err(err).Str("collection", c.Name).Msg("failed to refresh collection")
+		}
+	}
+	if err := m.q.SetMovieCollection(ctx, sqlc.SetMovieCollectionParams{
+		MediaItemID:  mediaItemID,
+		CollectionID: pgtype.Int8{Int64: col.ID, Valid: true},
+	}); err != nil {
+		log.Debug().Err(err).Int64("media_id", mediaItemID).Str("collection", c.Name).Msg("failed to link movie to collection")
+	}
 }
 
 func (m *Matcher) shouldAutoCollect(ctx context.Context, mediaItemID int64) bool {
