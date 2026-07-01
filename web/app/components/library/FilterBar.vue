@@ -1,3 +1,16 @@
+<!--
+  FilterBar — sticky toolbar for the library browse pages (movies / tv).
+
+  Title + count on the left; a uniform control row on the right: Reset
+  (only when sort/filters are dirty), Filters (anchored popover panel),
+  Sort (dropdown menu) and the grid/detail/list view toggle. Active
+  filters render as removable pills under the toolbar.
+
+  The filter panel is a reka Popover (not DropdownMenu) so the inputs and
+  typeaheads inside it can take focus without closing the panel. All panel
+  styles live in the unscoped style block — the popover portals to <body>,
+  out of reach of scoped CSS.
+-->
 <template>
   <div class="filter-bar">
     <div class="filter-bar-top">
@@ -6,15 +19,154 @@
         <span class="filter-bar-count">{{ count }} titles</span>
       </div>
       <div class="filter-bar-right">
-        <button class="btn-ghost-sm" :class="{ active: panelOpen }" @click="panelOpen = !panelOpen">
-          <Icon name="filter" :size="14" />
-          Filters
-          <span v-if="activeCount > 0" class="filter-badge">{{ activeCount }}</span>
+        <button v-if="dirty" class="btn-ghost-sm fb-reset" title="Reset filters and sorting" @click="$emit('reset')">
+          <Icon name="undo" :size="14" />
+          Reset
         </button>
-        <AppMenu trigger-class="btn-ghost-sm" :width="220" align="end">
+
+        <PopoverRoot v-model:open="panelOpen">
+          <PopoverTrigger as-child>
+            <button class="btn-ghost-sm" :class="{ active: activeCount > 0 || panelOpen }">
+              <Icon name="filter" :size="14" />
+              Filters
+              <span v-if="activeCount > 0" class="filter-badge">{{ activeCount }}</span>
+              <Icon name="chevdown" :size="10" class="fb-caret" :class="{ open: panelOpen }" />
+            </button>
+          </PopoverTrigger>
+          <PopoverPortal>
+            <PopoverContent class="surface fb-pop" align="end" :side-offset="8" :collision-padding="16">
+              <div class="fb-pop-scroll scroll">
+                <div class="fb-sec">
+                  <div class="fb-sec-label">Genre</div>
+                  <div class="fb-chips">
+                    <button
+                      v-for="g in availableGenres"
+                      :key="g"
+                      class="fb-chip"
+                      :class="{ active: local.genres.includes(g) }"
+                      @click="toggleGenre(g)"
+                    >
+                      {{ g }}<span v-if="genreCounts?.[g]" class="fb-chip-count">{{ genreCounts?.[g] }}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="fb-sec fb-sec-cols">
+                  <div>
+                    <div class="fb-sec-label">Year</div>
+                    <div class="fb-range">
+                      <input
+                        type="number" class="fb-input" placeholder="From" :value="local.yearMin"
+                        @input="local.yearMin = parseNum($event); emitFilters()"
+                      >
+                      <span class="fb-range-sep">–</span>
+                      <input
+                        type="number" class="fb-input" placeholder="To" :value="local.yearMax"
+                        @input="local.yearMax = parseNum($event); emitFilters()"
+                      >
+                    </div>
+                  </div>
+                  <div>
+                    <div class="fb-sec-label">Rating</div>
+                    <div class="fb-range">
+                      <input
+                        type="number" class="fb-input" placeholder="Min" step="0.5" min="0" max="10" :value="local.ratingMin"
+                        @input="local.ratingMin = parseFloat(($event.target as HTMLInputElement).value) || null; emitFilters()"
+                      >
+                      <span class="fb-range-sep">–</span>
+                      <input
+                        type="number" class="fb-input" placeholder="Max" step="0.5" min="0" max="10" :value="local.ratingMax"
+                        @input="local.ratingMax = parseFloat(($event.target as HTMLInputElement).value) || null; emitFilters()"
+                      >
+                    </div>
+                  </div>
+                </div>
+
+                <div class="fb-sec fb-sec-cols">
+                  <div>
+                    <div class="fb-sec-label">Resolution</div>
+                    <div class="fb-chips">
+                      <button
+                        v-for="r in ['4k', '1080p', '720p', 'sd']" :key="r"
+                        class="fb-chip" :class="{ active: local.resolutions.includes(r) }"
+                        @click="toggleResolution(r)"
+                      >{{ r === '4k' ? '4K' : r === 'sd' ? 'SD' : r }}</button>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="fb-sec-label">Watched</div>
+                    <div class="fb-seg">
+                      <button
+                        v-for="opt in [{ v: 'all', l: 'All' }, { v: 'watched', l: 'Seen' }, { v: 'unwatched', l: 'Unseen' }]"
+                        :key="opt.v" :class="{ active: local.watched === opt.v }"
+                        @click="local.watched = opt.v as any; emitFilters()"
+                      >{{ opt.l }}</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="availableLanguages.length > 1" class="fb-sec">
+                  <div class="fb-sec-label">Language</div>
+                  <div class="fb-chips">
+                    <button class="fb-chip" :class="{ active: local.language === null }" @click="local.language = null; emitFilters()">All</button>
+                    <button
+                      v-for="l in availableLanguages.slice(0, 12)" :key="l"
+                      class="fb-chip" :class="{ active: local.language === l }"
+                      @click="local.language = local.language === l ? null : l; emitFilters()"
+                    >{{ langName(l) }}</button>
+                  </div>
+                </div>
+
+                <div class="fb-sec fb-sec-cols">
+                  <div>
+                    <div class="fb-sec-label">Actor / Director</div>
+                    <div class="fb-ta">
+                      <input v-model="personQuery" type="text" class="fb-input fb-ta-input" placeholder="Search people..." @input="searchPeople">
+                      <div v-if="personResults.length > 0" class="fb-ta-drop">
+                        <div v-for="p in personResults" :key="p.id" class="fb-ta-opt" @click="addPerson(p)">{{ p.name }}</div>
+                      </div>
+                    </div>
+                    <div v-if="local.personNames.length" class="fb-chips" style="margin-top: 6px">
+                      <button
+                        v-for="(name, i) in local.personNames" :key="local.personIds[i]"
+                        class="fb-chip active" @click="removePerson(i)"
+                      >{{ name }} <Icon name="close" :size="8" /></button>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="fb-sec-label">Studio</div>
+                    <div class="fb-ta">
+                      <input v-model="studioQuery" type="text" class="fb-input fb-ta-input" placeholder="Search studios..." @input="searchStudios">
+                      <div v-if="studioResults.length > 0" class="fb-ta-drop">
+                        <div v-for="st in studioResults" :key="st.id" class="fb-ta-opt" @click="addStudio(st)">{{ st.name }}</div>
+                      </div>
+                    </div>
+                    <div v-if="local.studioNames.length" class="fb-chips" style="margin-top: 6px">
+                      <button
+                        v-for="(name, i) in local.studioNames" :key="local.studioIds[i]"
+                        class="fb-chip active" @click="removeStudio(i)"
+                      >{{ name }} <Icon name="close" :size="8" /></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="fb-pop-foot">
+                <button class="fb-foot-btn" :disabled="activeCount === 0" @click="clearAll">Clear filters</button>
+                <button class="fb-foot-btn gold" :disabled="activeCount === 0" @click="$emit('save-list')">
+                  <Icon name="bookmark" :size="12" />
+                  Save as Smart List
+                </button>
+              </div>
+            </PopoverContent>
+          </PopoverPortal>
+        </PopoverRoot>
+
+        <AppMenu trigger-class="btn-ghost-sm" :width="210" align="end">
           <template #trigger>
             <Icon name="sort" :size="14" />
             {{ sortLabel }}
+            <Icon name="chevdown" :size="10" class="fb-caret" />
           </template>
           <DropdownMenuItem
             v-for="opt in sortOptions"
@@ -24,17 +176,19 @@
             @select="$emit('sort', opt.value)"
           >
             {{ opt.label }}
+            <Icon v-if="sort === opt.value" name="check" :size="12" class="fb-sort-check" />
           </DropdownMenuItem>
         </AppMenu>
+
         <div class="view-toggle">
-          <AppTooltip label="Grid view">
-            <button class="btn-icon" :class="{ active: view === 'grid' }" aria-label="Grid view" @click="$emit('view', 'grid')">
-              <Icon name="grid" :size="16" />
-            </button>
-          </AppTooltip>
-          <AppTooltip label="List view">
-            <button class="btn-icon" :class="{ active: view === 'list' }" aria-label="List view" @click="$emit('view', 'list')">
-              <Icon name="list" :size="16" />
+          <AppTooltip v-for="v in viewOptions" :key="v.value" :label="v.label">
+            <button
+              class="view-toggle-btn"
+              :class="{ active: view === v.value }"
+              :aria-label="v.label"
+              @click="$emit('view', v.value)"
+            >
+              <Icon :name="v.icon" :size="15" />
             </button>
           </AppTooltip>
         </div>
@@ -52,133 +206,13 @@
         {{ pill.label }} <Icon name="close" :size="10" />
       </button>
       <button class="filter-pill filter-pill-clear" @click="clearAll">Clear all</button>
-      <button class="btn-ghost-sm save-smart" @click="$emit('save-list')">
-        <Icon name="bookmark" :size="12" />
-        Save as Smart List
-      </button>
-    </div>
-
-    <!-- Filter panel — compact grid layout -->
-    <div v-if="panelOpen" class="filter-panel">
-      <div class="filter-grid">
-        <!-- Genre chips — full width -->
-        <div class="filter-cell full">
-          <label class="filter-label">Genre</label>
-          <div class="filter-chips">
-            <button
-              v-for="g in availableGenres"
-              :key="g"
-              class="chip"
-              :class="{ active: local.genres.includes(g) }"
-              @click="toggleGenre(g)"
-            >{{ g }}</button>
-          </div>
-        </div>
-
-        <!-- Year -->
-        <div class="filter-cell">
-          <label class="filter-label">Year</label>
-          <div class="filter-range">
-            <input type="number" class="range-input" placeholder="From" :value="local.yearMin"
-              @input="local.yearMin = parseNum($event); emit()" />
-            <span class="range-sep">–</span>
-            <input type="number" class="range-input" placeholder="To" :value="local.yearMax"
-              @input="local.yearMax = parseNum($event); emit()" />
-          </div>
-        </div>
-
-        <!-- Rating -->
-        <div class="filter-cell">
-          <label class="filter-label">Rating</label>
-          <div class="filter-range">
-            <input type="number" class="range-input" placeholder="Min" step="0.5" min="0" max="10"
-              :value="local.ratingMin"
-              @input="local.ratingMin = parseFloat(($event.target as HTMLInputElement).value) || null; emit()" />
-            <span class="range-sep">–</span>
-            <input type="number" class="range-input" placeholder="Max" step="0.5" min="0" max="10"
-              :value="local.ratingMax"
-              @input="local.ratingMax = parseFloat(($event.target as HTMLInputElement).value) || null; emit()" />
-          </div>
-        </div>
-
-        <!-- Resolution -->
-        <div class="filter-cell">
-          <label class="filter-label">Resolution</label>
-          <div class="filter-chips">
-            <button v-for="r in ['4k', '1080p', '720p', 'sd']" :key="r"
-              class="chip" :class="{ active: local.resolutions.includes(r) }"
-              @click="toggleResolution(r)"
-            >{{ r === '4k' ? '4K' : r === 'sd' ? 'SD' : r }}</button>
-          </div>
-        </div>
-
-        <!-- Watched -->
-        <div class="filter-cell">
-          <label class="filter-label">Watched</label>
-          <div class="filter-chips">
-            <button v-for="opt in [{ v: 'all', l: 'All' }, { v: 'watched', l: 'Watched' }, { v: 'unwatched', l: 'Unwatched' }]"
-              :key="opt.v" class="chip" :class="{ active: local.watched === opt.v }"
-              @click="local.watched = opt.v as any; emit()"
-            >{{ opt.l }}</button>
-          </div>
-        </div>
-
-        <!-- Language -->
-        <div v-if="availableLanguages.length > 1" class="filter-cell">
-          <label class="filter-label">Language</label>
-          <div class="filter-chips">
-            <button class="chip" :class="{ active: local.language === null }"
-              @click="local.language = null; emit()">All</button>
-            <button v-for="l in availableLanguages.slice(0, 8)" :key="l"
-              class="chip" :class="{ active: local.language === l }"
-              @click="local.language = local.language === l ? null : l; emit()"
-            >{{ langName(l) }}</button>
-          </div>
-        </div>
-
-        <!-- Person -->
-        <div class="filter-cell">
-          <label class="filter-label">Actor / Director</label>
-          <div class="typeahead-wrap">
-            <input type="text" class="typeahead-input" placeholder="Search people..."
-              v-model="personQuery" @input="searchPeople" />
-            <div v-if="personResults.length > 0" class="typeahead-dropdown">
-              <div v-for="p in personResults" :key="p.id" class="typeahead-option"
-                @click="addPerson(p)">{{ p.name }}</div>
-            </div>
-          </div>
-          <div v-if="local.personNames.length" class="filter-chips" style="margin-top: 4px">
-            <button v-for="(name, i) in local.personNames" :key="local.personIds[i]"
-              class="chip active" @click="removePerson(i)"
-            >{{ name }} <Icon name="close" :size="8" /></button>
-          </div>
-        </div>
-
-        <!-- Studio -->
-        <div class="filter-cell">
-          <label class="filter-label">Studio</label>
-          <div class="typeahead-wrap">
-            <input type="text" class="typeahead-input" placeholder="Search studios..."
-              v-model="studioQuery" @input="searchStudios" />
-            <div v-if="studioResults.length > 0" class="typeahead-dropdown">
-              <div v-for="s in studioResults" :key="s.id" class="typeahead-option"
-                @click="addStudio(s)">{{ s.name }}</div>
-            </div>
-          </div>
-          <div v-if="local.studioNames.length" class="filter-chips" style="margin-top: 4px">
-            <button v-for="(name, i) in local.studioNames" :key="local.studioIds[i]"
-              class="chip active" @click="removeStudio(i)"
-            >{{ name }} <Icon name="close" :size="8" /></button>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { FilterState } from '~~/shared/types'
-import { DropdownMenuItem } from 'reka-ui'
+import { DropdownMenuItem, PopoverRoot, PopoverTrigger, PopoverPortal, PopoverContent } from 'reka-ui'
 
 const props = defineProps<{
   title: string
@@ -188,6 +222,10 @@ const props = defineProps<{
   filters: FilterState
   availableGenres: string[]
   availableLanguages: string[]
+  /** Per-genre item counts shown in the filter panel chips. */
+  genreCounts?: Record<string, number>
+  /** True when sort or filters differ from defaults — shows the Reset button. */
+  dirty?: boolean
 }>()
 
 const emits = defineEmits<{
@@ -195,6 +233,7 @@ const emits = defineEmits<{
   view: [value: string]
   'update:filters': [filters: FilterState]
   'save-list': []
+  reset: []
 }>()
 
 const panelOpen = ref(false)
@@ -205,7 +244,7 @@ watch(() => props.filters, (f) => {
   Object.assign(local, f)
 }, { deep: true })
 
-function emit() {
+function emitFilters() {
   emits('update:filters', { ...local })
 }
 
@@ -215,6 +254,12 @@ const sortOptions = [
   { label: 'Year (Newest)', value: 'year-desc' },
   { label: 'Year (Oldest)', value: 'year-asc' },
   { label: 'Rating', value: 'rating' },
+]
+
+const viewOptions = [
+  { value: 'grid', label: 'Grid view', icon: 'grid' },
+  { value: 'detail', label: 'Detail view', icon: 'rows' },
+  { value: 'list', label: 'List view', icon: 'list' },
 ]
 
 const sortLabel = computed(() => sortOptions.find(o => o.value === props.sort)?.label || 'Sort')
@@ -273,33 +318,31 @@ function removePill(pill: Pill) {
     case 'studio': if (pill.index !== undefined) removeStudio(pill.index); return
     case 'language': local.language = null; break
   }
-  emit()
+  emitFilters()
 }
 
 function clearAll() {
   Object.assign(local, defaultFilters())
-  emit()
+  emitFilters()
 }
 
 function toggleGenre(g: string) {
   const idx = local.genres.indexOf(g)
   if (idx >= 0) local.genres.splice(idx, 1)
   else local.genres.push(g)
-  emit()
+  emitFilters()
 }
 
 function toggleResolution(r: string) {
   const idx = local.resolutions.indexOf(r)
   if (idx >= 0) local.resolutions.splice(idx, 1)
   else local.resolutions.push(r)
-  emit()
+  emitFilters()
 }
 
 function parseNum(e: Event): number | null {
   const v = parseInt((e.target as HTMLInputElement).value)
-  const result = isNaN(v) ? null : v
-  emit()
-  return result
+  return isNaN(v) ? null : v
 }
 
 const personQuery = ref('')
@@ -325,13 +368,13 @@ function addPerson(p: { id: number; name: string }) {
   local.personNames.push(p.name)
   personQuery.value = ''
   personResults.value = []
-  emit()
+  emitFilters()
 }
 
 function removePerson(i: number) {
   local.personIds.splice(i, 1)
   local.personNames.splice(i, 1)
-  emit()
+  emitFilters()
 }
 
 const studioQuery = ref('')
@@ -357,13 +400,13 @@ function addStudio(s: { id: number; name: string }) {
   local.studioNames.push(s.name)
   studioQuery.value = ''
   studioResults.value = []
-  emit()
+  emitFilters()
 }
 
 function removeStudio(i: number) {
   local.studioIds.splice(i, 1)
   local.studioNames.splice(i, 1)
-  emit()
+  emitFilters()
 }
 
 const LANG_NAMES: Record<string, string> = {
@@ -385,29 +428,64 @@ function langName(code: string) {
 </script>
 
 <style scoped>
-.filter-bar { padding: 24px 32px 0; }
+/* Sticky so view/sort/filter controls stay reachable mid-scroll. Safe to
+   blur here: the filter panel portals to <body>, so no descendant carries
+   its own backdrop-filter (see docs/ui.md gotcha #4). */
+.filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 18px 32px 14px;
+  background: color-mix(in srgb, var(--bg-1) 86%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
 .filter-bar-top { display: flex; align-items: center; justify-content: space-between; }
-.filter-bar-left { display: flex; align-items: baseline; gap: 12px; }
-.filter-bar-title { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.filter-bar-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
-.filter-bar-right { display: flex; align-items: center; gap: 8px; }
+.filter-bar-left { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.filter-bar-title {
+  font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.filter-bar-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); white-space: nowrap; }
+.filter-bar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-.btn-ghost-sm.active { color: var(--gold); }
+.btn-ghost-sm.active { color: var(--gold); border-color: rgba(230, 185, 74, 0.35); }
+
+.fb-reset { color: var(--fg-2); }
+.fb-reset:hover { color: var(--bad); border-color: rgba(217, 107, 107, 0.35); }
+
+.fb-caret { opacity: 0.45; margin-left: -2px; transition: transform 0.15s ease; }
+.fb-caret.open { transform: rotate(180deg); }
 
 .filter-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 18px; padding: 0 5px;
   border-radius: 100px; font-size: 10px; font-weight: 700;
   background: var(--gold); color: var(--bg-0);
-  margin-left: 4px;
 }
 
-.view-toggle { display: flex; gap: 2px; }
+/* Segmented grid / detail / list toggle */
+.view-toggle {
+  display: flex; align-items: center; gap: 2px;
+  height: 32px; padding: 2px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.view-toggle-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 26px; border-radius: 4px;
+  color: var(--fg-2);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.view-toggle-btn:hover { color: var(--fg-0); background: rgba(255,255,255,0.06); }
+.view-toggle-btn.active { background: var(--gold-soft); color: var(--gold); }
 
 /* Filter pills */
 .filter-pills {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-  margin-top: 14px; padding-bottom: 4px;
+  margin-top: 12px;
 }
 .filter-pill {
   display: inline-flex; align-items: center; gap: 5px;
@@ -418,65 +496,103 @@ function langName(code: string) {
 .filter-pill:hover { border-color: var(--gold); color: var(--gold); }
 .filter-pill-clear { color: var(--fg-3); border-color: transparent; background: none; }
 .filter-pill-clear:hover { color: var(--bad); }
-.save-smart { margin-left: auto; color: var(--gold); font-size: 12px; }
+</style>
 
-/* Filter panel — compact grid */
-.filter-panel {
-  margin-top: 14px; padding: 14px 0 6px;
-  border-top: 1px solid var(--border);
+<style>
+/* Everything below lands inside portaled reka content (filter popover, sort
+   menu) — unreachable from the scoped block above. */
+.fb-pop {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
 }
-.filter-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 24px;
+.fb-pop-scroll {
+  max-height: min(66vh, 620px);
+  padding: 6px 0 10px;
 }
-.filter-cell { display: flex; flex-direction: column; gap: 5px; }
-.filter-cell.full { grid-column: 1 / -1; }
-.filter-label {
-  font-size: 10px; font-weight: 700; color: var(--fg-4);
+
+.fb-sec { padding: 10px 16px 4px; }
+.fb-sec-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+.fb-sec-label {
+  font-size: 10px; font-weight: 700; color: var(--fg-3);
   text-transform: uppercase; letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  margin-bottom: 7px;
 }
-.filter-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.chip {
-  padding: 3px 10px; border-radius: 100px; font-size: 11px; font-weight: 500;
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--fg-2); cursor: pointer; transition: all 0.15s;
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.chip:hover { border-color: var(--fg-3); color: var(--fg-1); }
-.chip.active { background: var(--gold-soft, rgba(212,175,55,0.15)); border-color: var(--gold); color: var(--gold); }
 
-.filter-range { display: flex; align-items: center; gap: 6px; }
-.range-input {
-  width: 72px; padding: 4px 8px; border-radius: var(--r-sm);
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--fg-1); font-size: 12px; font-family: var(--font-mono);
+.fb-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.fb-chip {
+  padding: 4px 11px; border-radius: 100px; font-size: 11.5px; font-weight: 500;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  color: var(--fg-1); cursor: pointer; transition: all 0.15s;
+  display: inline-flex; align-items: center; gap: 5px;
 }
-.range-input:focus { border-color: var(--gold); outline: none; }
-.range-sep { color: var(--fg-3); font-size: 13px; }
+.fb-chip:hover { border-color: var(--fg-3); color: var(--fg-0); }
+.fb-chip.active { background: var(--gold-soft); border-color: rgba(230,185,74,0.5); color: var(--gold-bright); }
+.fb-chip-count { font-size: 9.5px; font-family: var(--font-mono); color: var(--fg-3); }
+.fb-chip.active .fb-chip-count { color: rgba(230,185,74,0.65); }
+
+.fb-range { display: flex; align-items: center; gap: 6px; }
+.fb-range-sep { color: var(--fg-3); font-size: 13px; }
+.fb-input {
+  width: 76px; padding: 6px 9px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+  color: var(--fg-0); font-size: 12px; font-family: var(--font-mono);
+  transition: border-color 0.15s;
+}
+.fb-input:focus { border-color: var(--gold); outline: none; }
+.fb-input::placeholder { color: var(--fg-3); }
+
+/* Watched segmented control */
+.fb-seg {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.fb-seg button {
+  padding: 4px 11px; border-radius: 4px; font-size: 11.5px; font-weight: 500;
+  color: var(--fg-2); cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.fb-seg button:hover { color: var(--fg-0); }
+.fb-seg button.active { background: var(--gold-soft); color: var(--gold-bright); }
 
 /* Typeahead */
-.typeahead-wrap { position: relative; max-width: 220px; }
-.typeahead-input {
-  width: 100%; padding: 4px 8px; border-radius: var(--r-sm);
-  background: var(--bg-3); border: 1px solid var(--border);
-  color: var(--fg-1); font-size: 12px;
-}
-.typeahead-input:focus { border-color: var(--gold); outline: none; }
-.typeahead-dropdown {
+.fb-ta { position: relative; }
+.fb-ta-input { width: 100%; font-family: var(--font-sans); }
+.fb-ta-drop {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;
   background: var(--bg-3); border: 1px solid var(--border-strong);
   border-radius: var(--r-md); padding: 4px; z-index: 30; box-shadow: var(--shadow-2);
   max-height: 180px; overflow-y: auto;
 }
-.typeahead-option {
-  padding: 5px 8px; font-size: 12px; border-radius: var(--r-sm);
+.fb-ta-opt {
+  padding: 6px 9px; font-size: 12px; border-radius: var(--r-sm);
   cursor: pointer; color: var(--fg-1);
 }
-.typeahead-option:hover { background: rgba(255,255,255,0.06); }
-</style>
+.fb-ta-opt:hover { background: rgba(255,255,255,0.06); color: var(--fg-0); }
 
-<style>
-/* AppMenu portals the sort dropdown out of this component's scope. */
+.fb-pop-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(0,0,0,0.15);
+}
+.fb-foot-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--r-sm);
+  font-size: 12px; font-weight: 500; color: var(--fg-2);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.fb-foot-btn:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.fb-foot-btn:disabled { opacity: 0.35; cursor: default; }
+.fb-foot-btn.gold { color: var(--gold); }
+.fb-foot-btn.gold:hover:not(:disabled) { background: var(--gold-soft); color: var(--gold-bright); }
+
+/* Sort menu items (AppMenu portals these out of scope too) */
+.fb-sort-item { justify-content: space-between; }
 .fb-sort-item.active { color: var(--gold); }
+.fb-sort-check { color: var(--gold); }
 </style>

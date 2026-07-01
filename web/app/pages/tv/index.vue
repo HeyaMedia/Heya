@@ -15,7 +15,7 @@
       @list-dragover="onListDragOver"
       @list-dragleave="onListDragLeave"
     />
-    <div class="library-main scroll">
+    <div ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
       <FilterBar
         :title="viewTitle"
         :count="sorted.length"
@@ -24,10 +24,13 @@
         :filters="filters"
         :available-genres="availableGenres"
         :available-languages="availableLanguages"
+        :genre-counts="genreCounts"
+        :dirty="isDirty"
         @sort="sort = $event"
         @view="view = $event"
         @update:filters="onFiltersChange"
         @save-list="saveSmartList"
+        @reset="resetBrowse"
       />
 
       <div class="lib-content">
@@ -80,6 +83,48 @@
           </RecycleScroller>
         </div>
 
+        <div v-else-if="view === 'detail'" class="detail-virt" style="padding: 0 32px 80px">
+          <RecycleScroller
+            :items="sorted"
+            :item-size="188"
+            key-field="id"
+            page-mode
+            v-slot="{ item, index }"
+          >
+            <AppContextMenu :items="ctxItemsFor(item)">
+              <div
+                class="browse-detail-row"
+                :class="{ unavailable: item.available === false }"
+                draggable="true"
+                @click="item.available !== false && navigateTo(mediaUrl(item))"
+                @dragstart="onDragStart($event, item)"
+                @dragend="onDragEnd"
+              >
+                <Poster :idx="index" :src="usePosterUrl(item.id)" class-name="browse-detail-poster" :width="120" />
+                <div class="browse-detail-body">
+                  <div class="browse-detail-title">
+                    <span>{{ item.title }}</span>
+                    <Icon v-if="isFullyWatched(item.id)" name="check" :size="14" style="color: var(--good); flex-shrink: 0" />
+                    <Icon v-if="isFavorited(item.id)" name="heartfill" :size="14" style="color: var(--bad); flex-shrink: 0" />
+                  </div>
+                  <div class="browse-detail-meta">
+                    <span>{{ item.year }}</span>
+                    <span v-if="item.number_of_seasons">{{ item.number_of_seasons }} {{ item.number_of_seasons === 1 ? 'season' : 'seasons' }}</span>
+                    <span v-if="item.number_of_episodes">{{ item.number_of_episodes }} eps</span>
+                    <span v-if="item.rating" class="star"><Icon name="star" :size="11" weight="fill" />{{ item.rating.toFixed(1) }}</span>
+                    <span v-if="item.resolution" class="browse-detail-res">{{ item.resolution === '4k' ? '4K' : item.resolution }}</span>
+                    <span v-if="unwatchedCount(item.id) > 0" class="browse-detail-unseen">{{ unwatchedCount(item.id) }} unseen</span>
+                  </div>
+                  <div v-if="item.genres?.length" class="browse-detail-genres">
+                    <span v-for="g in item.genres.slice(0, 4)" :key="g" class="chip">{{ g }}</span>
+                  </div>
+                  <p v-if="item.description" class="browse-detail-overview">{{ item.description }}</p>
+                </div>
+              </div>
+            </AppContextMenu>
+          </RecycleScroller>
+        </div>
+
         <div v-else class="list-rows" style="padding: 0 32px 80px">
           <div class="list-row list-row-head">
             <div>Title</div>
@@ -121,7 +166,13 @@
         </div>
 
         <div v-if="!loading && !items.length" class="empty-lib">
+          <Icon name="tv" :size="30" class="empty-icon" />
           <p>No TV shows found. Scan a library to discover content.</p>
+        </div>
+        <div v-else-if="!loading && !sorted.length" class="empty-lib">
+          <Icon name="filter" :size="30" class="empty-icon" />
+          <p>Nothing matches the current filters.</p>
+          <button v-if="isDirty" class="btn btn-secondary" @click="resetBrowse">Reset filters</button>
         </div>
       </div>
     </div>
@@ -132,16 +183,18 @@
 import type { EnrichedMediaItem, Library, UserList, FilterState } from '~~/shared/types'
 import { useCardContextItems } from '~/composables/useContextMenu'
 
+const mainEl = ref<HTMLElement | null>(null)
 const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<EnrichedMediaItem[]>([])
 const libraries = ref<Library[]>([])
 const userLists = ref<UserList[]>([])
 const loading = ref(true)
-const activeLib = ref<number | null>(null)
-const activeView = ref<string | null>(null)
-const sort = ref('title')
-const view = ref('grid')
-const filters = ref<FilterState>(defaultFilters())
+
+// View mode, sort, filters, sidebar selection and scroll offset all persist —
+// navigating into a show and back restores the page exactly as it was.
+const browse = useBrowseState('tv')
+const { view, sort, filters, activeLib, activeView, scrollTop } = browse
+const { isDirty, restoreScroll } = browse
 
 const showStates = ref<Map<number, { total: number; watched: number }>>(new Map())
 const favoritedSet = ref<Set<number>>(new Set())
@@ -219,7 +272,17 @@ const viewTitle = computed(() => {
 const availableGenres = computed(() => extractAvailableGenres(items.value))
 const availableLanguages = computed(() => extractLanguages(items.value))
 
-watch(activeView, async (v) => {
+const genreCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const item of items.value) {
+    for (const g of item.genres || []) counts[g] = (counts[g] || 0) + 1
+  }
+  return counts
+})
+
+watch(activeView, (v) => { syncActiveView(v) })
+
+async function syncActiveView(v: string | null) {
   if (!v) { listItems.value = new Set(); return }
   if (v.startsWith('list-')) {
     const listId = v.replace('list-', '')
@@ -237,7 +300,7 @@ watch(activeView, async (v) => {
       listItems.value = new Set((res.items || []).map((i: any) => i.id))
     } catch { listItems.value = new Set() }
   }
-})
+}
 
 const filtered = computed(() => {
   let list = [...items.value]
@@ -274,6 +337,16 @@ const sorted = computed(() => {
 })
 
 const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted)
+
+function onMainScroll() {
+  if (mainEl.value) scrollTop.value = mainEl.value.scrollTop
+}
+
+function resetBrowse() {
+  browse.reset()
+  personMediaIds.value = new Set()
+  studioMediaIds.value = new Set()
+}
 
 async function onFiltersChange(f: FilterState) {
   filters.value = f
@@ -354,14 +427,32 @@ onMounted(async () => {
   }
   if (listsRes.status === 'fulfilled') userLists.value = listsRes.value
   loading.value = false
+
+  // Re-validate the persisted sidebar selection against fresh data — a
+  // deleted library/list would otherwise filter everything away.
+  if (activeLib.value !== null && !libraries.value.some(l => l.id === activeLib.value)) activeLib.value = null
+  if (activeView.value?.startsWith('list-') && !userLists.value.some(l => `list-${l.id}` === activeView.value)) activeView.value = null
+
+  // Restored person/studio filters need their media-id sets refetched, and a
+  // restored list view needs its items loaded, before scroll can be restored.
+  if (filters.value.personIds.length || filters.value.studioIds.length) await onFiltersChange(filters.value)
+  if (activeView.value) await syncActiveView(activeView.value)
+
+  await nextTick()
+  restoreScroll(mainEl.value)
 })
 </script>
 
 <style scoped>
-.lib-content { min-height: 200px; }
+.lib-content { min-height: 200px; padding-top: 16px; }
 .grid-virt { /* container for usePosterGrid; width is the source of truth */ }
 .grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
-.empty-lib { padding: 80px 32px; text-align: center; color: var(--fg-2); font-size: 15px; }
+.empty-lib {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 90px 32px; text-align: center; color: var(--fg-2); font-size: 15px;
+}
+.empty-lib p { margin: 0; }
+.empty-icon { opacity: 0.35; }
 .unavailable { opacity: 0.4; cursor: default !important; }
 /* Badges injected through MediaCard's slot stay in the parent's scope.
    They absolutely position inside the Poster (closest positioned ancestor)
@@ -397,4 +488,5 @@ onMounted(async () => {
   color: var(--bad);
 }
 .list-status { font-size: 12px; color: var(--fg-3); }
+.browse-detail-unseen { color: var(--gold); font-size: 11px; }
 </style>

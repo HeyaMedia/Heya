@@ -284,7 +284,14 @@ func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaIte
 
 const listEnrichedMovies = `-- name: ListEnrichedMovies :many
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.slug,
-       mi.year, mi.description, mi.poster_path, mi.backdrop_path,
+       mi.year,
+       COALESCE(NULLIF(mi.description, ''),
+         (SELECT mo.overview FROM media_overviews mo
+          WHERE mo.media_item_id = mi.id AND mo.language = 'en' LIMIT 1),
+         (SELECT mo.overview FROM media_overviews mo
+          WHERE mo.media_item_id = mi.id AND mo.language = m.original_language LIMIT 1),
+         '')::text AS description,
+       mi.poster_path, mi.backdrop_path,
        mi.external_ids, mi.created_at, mi.updated_at,
        m.genres, m.rating, m.runtime_minutes, m.original_language,
        m.release_date, m.collection_id
@@ -321,6 +328,13 @@ type ListEnrichedMoviesRow struct {
 	CollectionID     pgtype.Int8        `json:"collection_id"`
 }
 
+// mi.description holds the provider's base (English) overview; rows enriched
+// before that field existed have it empty, with only media_overviews
+// translations (which exclude the base language). The browse detail view
+// wants one synopsis line: description, else the 'en' overview, else the
+// item's original-language overview. Deliberately NOT "any language" — a
+// random-alphabet synopsis is worse than none, and a metadata refresh
+// backfills description anyway.
 func (q *Queries) ListEnrichedMovies(ctx context.Context, arg ListEnrichedMoviesParams) ([]ListEnrichedMoviesRow, error) {
 	rows, err := q.db.Query(ctx, listEnrichedMovies, arg.Limit, arg.Offset)
 	if err != nil {
@@ -363,7 +377,14 @@ func (q *Queries) ListEnrichedMovies(ctx context.Context, arg ListEnrichedMovies
 
 const listEnrichedTVSeries = `-- name: ListEnrichedTVSeries :many
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.slug,
-       mi.year, mi.description, mi.poster_path, mi.backdrop_path,
+       mi.year,
+       COALESCE(NULLIF(mi.description, ''),
+         (SELECT mo.overview FROM media_overviews mo
+          WHERE mo.media_item_id = mi.id AND mo.language = 'en' LIMIT 1),
+         (SELECT mo.overview FROM media_overviews mo
+          WHERE mo.media_item_id = mi.id AND mo.language = ts.original_language LIMIT 1),
+         '')::text AS description,
+       mi.poster_path, mi.backdrop_path,
        mi.external_ids, mi.created_at, mi.updated_at,
        ts.genres, ts.rating, ts.first_air_date, ts.last_air_date,
        ts.status, ts.original_language, ts.number_of_seasons, ts.number_of_episodes
