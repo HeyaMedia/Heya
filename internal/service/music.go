@@ -350,8 +350,8 @@ func (a *App) GetSimilarArtists(ctx context.Context, artistID int64) ([]SimilarA
 
 // MusicHomeData powers the music landing page front view.
 type MusicHomeData struct {
-	RecentArtists []sqlc.ListRecentlyAddedArtistsRow `json:"recent_artists"`
-	RecentAlbums  []sqlc.ListRecentlyAddedAlbumsRow  `json:"recent_albums"`
+	RecentArtists []RecentArtistEntry               `json:"recent_artists"`
+	RecentAlbums  []sqlc.ListRecentlyAddedAlbumsRow `json:"recent_albums"`
 }
 
 // GetMusicHome assembles the small set of rows the landing page renders.
@@ -362,7 +362,10 @@ func (a *App) GetMusicHome(ctx context.Context, limit int32) (*MusicHomeData, er
 		limit = 24
 	}
 	q := sqlc.New(a.db)
-	artists, err := q.ListRecentlyAddedArtists(ctx, limit)
+	// Recent artists are grouped file-arrival events (new artist vs new
+	// releases for a known artist), not raw enrichment order — see
+	// listRecentArtistEvents.
+	artists, err := a.listRecentArtistEvents(ctx, q, limit)
 	if err != nil {
 		return nil, fmt.Errorf("recent artists: %w", err)
 	}

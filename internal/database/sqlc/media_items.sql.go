@@ -605,6 +605,78 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 	return items, nil
 }
 
+const listMediaItemsByTypeRecent = `-- name: ListMediaItemsByTypeRecent :many
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items
+WHERE media_type = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListMediaItemsByTypeRecentParams struct {
+	MediaType MediaType `json:"media_type"`
+	Limit     int32     `json:"limit"`
+	Offset    int32     `json:"offset"`
+}
+
+// Same page shape as ListMediaItemsByType but newest-first — powers the
+// home "Recently Added" rails (created_at is when the first file matched).
+func (q *Queries) ListMediaItemsByTypeRecent(ctx context.Context, arg ListMediaItemsByTypeRecentParams) ([]MediaItem, error) {
+	rows, err := q.db.Query(ctx, listMediaItemsByTypeRecent, arg.MediaType, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MediaItem{}
+	for rows.Next() {
+		var i MediaItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.MediaType,
+			&i.Title,
+			&i.SortTitle,
+			&i.Year,
+			&i.Description,
+			&i.PosterPath,
+			&i.BackdropPath,
+			&i.ExternalIds,
+			&i.Slug,
+			&i.Homepage,
+			&i.Tagline,
+			&i.OriginalTitle,
+			&i.OriginalLanguage,
+			&i.Status,
+			&i.ProviderKind,
+			&i.HeyaSlug,
+			&i.HeyaEnrichedAt,
+			&i.MetadataRefreshedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SearchVector,
+			&i.MatchedAt,
+			&i.EnrichmentStatus,
+			&i.BaseEnrichedAt,
+			&i.PeopleEnrichedAt,
+			&i.ExtrasEnrichedAt,
+			&i.ImagesEnrichedAt,
+			&i.StructureEnrichedAt,
+			&i.LastEnrichAttemptAt,
+			&i.LastEnrichError,
+			&i.FieldProvenance,
+			&i.MatchConfidence,
+			&i.LocalIdentityKey,
+			&i.SlugLocked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnavailableMediaItemIDs = `-- name: ListUnavailableMediaItemIDs :many
 SELECT DISTINCT mi.id
 FROM media_items mi

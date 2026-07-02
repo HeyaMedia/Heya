@@ -34,10 +34,10 @@
       />
 
       <ContentRow
-        v-if="recentTV.length"
-        title="Recently Added TV Shows"
-        subtitle="Across all libraries"
-        :items="recentTV"
+        v-if="recentTVItems.length"
+        title="Recently Added TV"
+        subtitle="New shows, seasons & episodes"
+        :items="recentTVItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @more="navigateTo('/tv')"
@@ -53,6 +53,18 @@
         more="See all"
         @tile="(item) => navigateTo(albumUrl(item))"
         @more="navigateTo('/music/albums')"
+      />
+
+      <ContentRow
+        v-if="recentArtists.length"
+        title="Recently Added Artists"
+        subtitle="New & updated artists"
+        :items="recentArtists"
+        :aspect="'1/1'"
+        :tile-width="168"
+        more="See all"
+        @tile="(item) => navigateTo(mediaUrl(item))"
+        @more="navigateTo('/music/artists')"
       />
 
       <ContentRow
@@ -87,36 +99,72 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 const { $heya } = useNuxtApp()
 const queryClient = useQueryClient()
 
-// Music row shows recent ALBUMS (not artists / media items) — focuses the rail
-// on something a user can actually press play on. Items are normalized to
+// Music rows show recent ALBUMS plus recent ARTISTS. Items are normalized to
 // MediaItem-ish so ContentRow renders them, with poster_src set to the
 // album-cover endpoint and the click handler routing to album detail.
 type AlbumRowItem = MediaItem & { artist_slug: string; album_slug: string }
+
+// The TV rail is Plex-style grouped file arrivals, not bare shows: a brand-new
+// show is one "New show" card, a season drop one "New season" card, and a
+// lone episode an episode card. The backend derives the grouping; the FE only
+// formats subtitles.
+interface RecentTVEntry {
+  media_item_id: number
+  title: string
+  slug: string
+  kind: 'series' | 'season' | 'episodes' | 'episode'
+  season_number: number
+  episode_number: number
+  episode_title?: string
+  season_count: number
+  episode_count: number
+  added_at: string
+}
+
+interface RecentArtistEntry {
+  id: number
+  media_item_id: number
+  name: string
+  slug: string
+  album_count: number
+  track_count: number
+  kind: 'new' | 'updated'
+  new_album_count: number
+  latest_album_title?: string
+  latest_album_slug?: string
+  added_at: string
+}
 
 // One vue-query per rail. Each caches independently so cross-page navigation
 // returns instantly. Event-bus listeners below invalidate by key to refresh.
 const moviesQuery = useQuery({
   queryKey: ['media', 'recent', 'movie'],
-  queryFn: async () => (await $heya('/api/media', { query: { type: 'movie', limit: 20 } })) as MediaItem[],
+  queryFn: async () => (await $heya('/api/media', { query: { type: 'movie', sort: 'added', limit: 20 } })) as MediaItem[],
   staleTime: 1000 * 60,
 })
 const tvQuery = useQuery({
   queryKey: ['media', 'recent', 'tv'],
-  queryFn: async () => (await $heya('/api/media', { query: { type: 'tv', limit: 20 } })) as MediaItem[],
+  queryFn: async () => (await $heya('/api/media/tv/recently-added', { query: { limit: 20 } })) as RecentTVEntry[],
   staleTime: 1000 * 60,
 })
 const booksQuery = useQuery({
   queryKey: ['media', 'recent', 'book'],
-  queryFn: async () => (await $heya('/api/media', { query: { type: 'book', limit: 20 } })) as MediaItem[],
+  queryFn: async () => (await $heya('/api/media', { query: { type: 'book', sort: 'added', limit: 20 } })) as MediaItem[],
   staleTime: 1000 * 60,
 })
-const albumsQuery = useQuery({
+const musicHomeQuery = useQuery({
   queryKey: ['home', 'recent-albums'],
   queryFn: async () => {
-    const home = await $heya('/api/music/home', { query: { limit: 20 } }) as { recent_albums: Array<{
-      id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string; available?: boolean
-    }> }
-    return (home.recent_albums ?? []).map(albumToRowItem)
+    const home = await $heya('/api/music/home', { query: { limit: 20 } }) as {
+      recent_albums: Array<{
+        id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string; available?: boolean
+      }>
+      recent_artists: RecentArtistEntry[]
+    }
+    return {
+      albums: (home.recent_albums ?? []).map(albumToRowItem),
+      artists: (home.recent_artists ?? []).map(artistToRowItem),
+    }
   },
   staleTime: 1000 * 60,
 })
@@ -147,9 +195,31 @@ const recsQuery = useQuery({
 })
 
 const recentMovies = computed<MediaItem[]>(() => moviesQuery.data.value ?? [])
-const recentTV = computed<MediaItem[]>(() => tvQuery.data.value ?? [])
 const recentBooks = computed<MediaItem[]>(() => booksQuery.data.value ?? [])
-const recentAlbums = computed<AlbumRowItem[]>(() => albumsQuery.data.value ?? [])
+const recentAlbums = computed<AlbumRowItem[]>(() => musicHomeQuery.data.value?.albums ?? [])
+const recentArtists = computed<MediaItem[]>(() => musicHomeQuery.data.value?.artists ?? [])
+
+// Rail items: one card per grouped TV event (a show may appear twice).
+const recentTVItems = computed<MediaItem[]>(() => (tvQuery.data.value ?? []).map(tvEntryToRowItem))
+// Deduped MediaItem-ish shows for hero / favorites / recommendations, which
+// think in shows, not events.
+const recentTVShows = computed<MediaItem[]>(() => {
+  const seen = new Set<number>()
+  const out: MediaItem[] = []
+  for (const e of tvQuery.data.value ?? []) {
+    if (seen.has(e.media_item_id)) continue
+    seen.add(e.media_item_id)
+    out.push({
+      id: e.media_item_id,
+      title: e.title,
+      slug: e.slug,
+      media_type: 'tv',
+      created_at: e.added_at,
+      available: true,
+    } as unknown as MediaItem)
+  }
+  return out
+})
 
 const continueWatching = computed<ContinueWatchingItem[]>(() => continueWatchingQuery.data.value ?? [])
 
@@ -166,13 +236,13 @@ const upNextItems = ref<UpNextItem[]>([])
 const favoriteItems = computed<MediaItem[]>(() => {
   const favIDs = new Set(favoritesStateQuery.data.value?.favorited ?? [])
   if (favIDs.size === 0) return []
-  return [...recentMovies.value, ...recentTV.value].filter(m => favIDs.has(m.id) && m.available !== false)
+  return [...recentMovies.value, ...recentTVShows.value].filter(m => favIDs.has(m.id) && m.available !== false)
 })
 
 const recommendedItems = computed<MediaItem[]>(() => {
   const recs = recsQuery.data.value ?? []
   if (!recs.length) return []
-  const mediaMap = new Map([...recentMovies.value, ...recentTV.value].map(m => [m.id, m]))
+  const mediaMap = new Map([...recentMovies.value, ...recentTVShows.value].map(m => [m.id, m]))
   const local = recs
     .filter(r => r.local_media_item_id !== null)
     .map(r => mediaMap.get(r.local_media_item_id as number))
@@ -185,7 +255,7 @@ const recommendedItems = computed<MediaItem[]>(() => {
 })
 
 const loading = computed(() =>
-  moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value || albumsQuery.isPending.value
+  moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value || musicHomeQuery.isPending.value
 )
 
 const heroItems = computed(() => {
@@ -193,14 +263,14 @@ const heroItems = computed(() => {
   // files were removed from disk.
   const combined = [
     ...recentMovies.value.filter(i => i.available !== false).map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
-    ...recentTV.value.filter(i => i.available !== false).map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
+    ...recentTVShows.value.map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
   ]
   combined.sort((a, b) => b._sort - a._sort)
   return combined.slice(0, 5)
 })
 
 const hasContent = computed(() =>
-  recentMovies.value.length + recentTV.value.length + recentAlbums.value.length + recentBooks.value.length > 0
+  recentMovies.value.length + recentTVItems.value.length + recentAlbums.value.length + recentBooks.value.length > 0
 )
 
 // Albums route to /music/artist/{aslug}/{album_slug}. Falls back to the
@@ -231,6 +301,59 @@ function albumToRowItem(al: {
     available: al.available,
     poster_src: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
   } as unknown as AlbumRowItem
+}
+
+// Grouped TV event → rail card. Poster is the show's; the subtitle carries
+// the event ("New show", "New season 3 · 8 episodes", "S05E12 · Title").
+// `year` stays empty so ContentRow falls through to `sub`, and `key` keeps
+// v-for happy when one show has two event cards.
+function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
+  return {
+    id: e.media_item_id,
+    key: `${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
+    title: e.title,
+    year: '',
+    sub: tvEntrySub(e),
+    media_type: 'tv',
+    slug: e.slug,
+    created_at: e.added_at,
+    available: true,
+  } as unknown as MediaItem
+}
+
+function tvEntrySub(e: RecentTVEntry): string {
+  const eps = (n: number, word = 'episode') => `${n} ${word}${n === 1 ? '' : 's'}`
+  switch (e.kind) {
+    case 'series':
+      return e.season_count > 1 ? `New show · ${e.season_count} seasons` : `New show · ${eps(e.episode_count)}`
+    case 'season':
+      return e.season_number === 0 ? `New · ${eps(e.episode_count, 'special')}` : `New season ${e.season_number} · ${eps(e.episode_count)}`
+    case 'episodes':
+      return e.season_number === 0 ? `${eps(e.episode_count, 'new special')}` : `Season ${e.season_number} · ${e.episode_count} new episodes`
+    case 'episode': {
+      const code = `S${String(e.season_number).padStart(2, '0')}E${String(e.episode_number).padStart(2, '0')}`
+      return e.episode_title ? `${code} · ${e.episode_title}` : code
+    }
+  }
+}
+
+// Artist event → rail card. id is the artist's media item id so the default
+// /api/media/{id}/image/poster lookup and mediaUrl routing both work.
+function artistToRowItem(ar: RecentArtistEntry): MediaItem {
+  const sub = ar.kind === 'new'
+    ? 'New artist'
+    : ar.new_album_count > 1
+      ? `${ar.new_album_count} new releases`
+      : `New: ${ar.latest_album_title || 'release'}`
+  return {
+    id: ar.media_item_id,
+    title: ar.name,
+    year: '',
+    sub,
+    media_type: 'music',
+    slug: ar.slug,
+    available: true,
+  } as unknown as MediaItem
 }
 
 function onPlayContinue(item: ContinueWatchingItem) {

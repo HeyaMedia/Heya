@@ -25,16 +25,35 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodGet, "/api/media", "list-media", "Paginated media items by type", "Media")),
 		func(ctx context.Context, in *struct {
 			Type string `query:"type" enum:"movie,tv,music,book,comic,podcast,radio" example:"movie" doc:"Media type bucket"`
+			Sort string `query:"sort" enum:"title,added" default:"title" doc:"title = alphabetical, added = newest first"`
 			Pagination
 		}) (*JSONOutput[[]service.MediaItemView], error) {
 			if in.Type == "" {
 				return nil, huma.Error400BadRequest("?type= parameter is required")
 			}
-			views, err := app.ListMedia(ctx, sqlc.MediaType(in.Type), in.Limit, in.Offset)
+			list := app.ListMedia
+			if in.Sort == "added" {
+				list = app.ListMediaRecent
+			}
+			views, err := list(ctx, sqlc.MediaType(in.Type), in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return cachedJSON(views, 30), nil
+		})
+
+	// The TV rail groups file arrivals Plex-style (new series / new season /
+	// new episodes) instead of listing bare shows — a static path segment, so
+	// it must register before /api/media/{id} can swallow it as a slug.
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/tv/recently-added", "recently-added-tv", "Grouped recently-added TV entries", "Media")),
+		func(ctx context.Context, in *struct {
+			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
+		}) (*JSONOutput[[]service.RecentlyAddedTVEntry], error) {
+			entries, err := app.ListRecentlyAddedTV(ctx, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(entries, 30), nil
 		})
 
 	// /enriched returns the two enriched-view shapes under a discriminated

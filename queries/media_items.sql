@@ -36,6 +36,14 @@ WHERE media_type = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
 
+-- name: ListMediaItemsByTypeRecent :many
+-- Same page shape as ListMediaItemsByType but newest-first — powers the
+-- home "Recently Added" rails (created_at is when the first file matched).
+SELECT * FROM media_items
+WHERE media_type = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2 OFFSET $3;
+
 -- name: UpdateMediaItem :one
 UPDATE media_items
 SET title = $2, sort_title = $3, year = $4, description = $5,

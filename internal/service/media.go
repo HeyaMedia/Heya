@@ -39,13 +39,34 @@ type EpisodeFileEntry struct {
 // canonical title when the library is set to English. Falls back to en,
 // then to the raw title.
 func (a *App) ListMedia(ctx context.Context, mediaType sqlc.MediaType, limit, offset int32) ([]MediaItemView, error) {
+	return a.listMedia(ctx, mediaType, limit, offset, false)
+}
+
+// ListMediaRecent is ListMedia ordered newest-first (by created_at) — the
+// home "Recently Added" rails. The default alphabetical order only *looked*
+// recent while whole libraries arrived in one import burst.
+func (a *App) ListMediaRecent(ctx context.Context, mediaType sqlc.MediaType, limit, offset int32) ([]MediaItemView, error) {
+	return a.listMedia(ctx, mediaType, limit, offset, true)
+}
+
+func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, offset int32, recentFirst bool) ([]MediaItemView, error) {
 	q := sqlc.New(a.db)
 
-	items, err := q.ListMediaItemsByType(ctx, sqlc.ListMediaItemsByTypeParams{
-		MediaType: mediaType,
-		Limit:     limit,
-		Offset:    offset,
-	})
+	var items []sqlc.MediaItem
+	var err error
+	if recentFirst {
+		items, err = q.ListMediaItemsByTypeRecent(ctx, sqlc.ListMediaItemsByTypeRecentParams{
+			MediaType: mediaType,
+			Limit:     limit,
+			Offset:    offset,
+		})
+	} else {
+		items, err = q.ListMediaItemsByType(ctx, sqlc.ListMediaItemsByTypeParams{
+			MediaType: mediaType,
+			Limit:     limit,
+			Offset:    offset,
+		})
+	}
 	if err != nil {
 		return nil, fmt.Errorf("listing media items: %w", err)
 	}

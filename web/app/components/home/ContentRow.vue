@@ -14,7 +14,7 @@
     <div class="row-scroll" ref="scrollEl">
       <div
         v-for="(item, i) in items"
-        :key="item.id"
+        :key="item.key ?? item.id"
         class="card-tile"
         :class="{ unavailable: item.available === false }"
         :style="{ width: `${tileWidth || 168}px`, flexShrink: 0 }"
@@ -41,7 +41,9 @@ defineProps<{
   subtitle?: string
   // `poster_src` overrides the default `/api/media/{id}/image/poster` lookup —
   // needed for album rows whose covers live under a different endpoint.
-  items: (MediaItem & { sub?: string; poster_src?: string })[]
+  // `key` overrides the v-for key — needed for rows where the same media
+  // item can appear more than once (e.g. two episode drops of one show).
+  items: (MediaItem & { sub?: string; poster_src?: string; key?: string })[]
   tileWidth?: number
   aspect?: string
   more?: string
