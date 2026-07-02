@@ -73,9 +73,23 @@
       </div>
 
       <div class="roulette-wheel">
-        <div class="wheel-frame" :class="{ spinning }">
-          <Poster v-if="wheelItem" :idx="wheelIdx" :src="usePosterUrl(wheelItem.id)" :aspect="'2/3'" />
+        <div class="wheel-frame" :class="{ spinning, settled }">
+          <!-- Slot reel: a vertical strip of posters translated with a long
+               ease-out; the pick sits at the end of the strip. Motion-blurred
+               while moving, snaps crisp on arrival. -->
+          <div
+            v-if="reel.length"
+            class="wheel-reel"
+            :class="{ moving: spinning }"
+            :style="{ transform: `translateY(${reelOffset}px)`, transitionDuration: spinning ? `${SPIN_MS}ms` : '0ms' }"
+            @transitionend="onReelLanded"
+          >
+            <div v-for="(m, i) in reel" :key="`${i}-${m.id}`" class="wheel-cell">
+              <img :src="usePosterUrl(m.id) ?? ''" alt="" @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')">
+            </div>
+          </div>
           <div v-else class="wheel-empty">?</div>
+          <div class="wheel-sheen" v-if="spinning" />
         </div>
       </div>
     </div>
@@ -83,8 +97,8 @@
 </template>
 
 <script setup lang="ts">
-// "Roulette" — decision-paralysis killer. Filters narrow the pool, the wheel
-// flips through your own posters and lands somewhere. The pick's detail is
+// "Roulette" — decision-paralysis killer. Filters narrow the pool, a slot
+// reel of your own posters decelerates onto the pick. The pick's detail is
 // fetched on settle so Play can start the actual file.
 import { useQuery } from '@tanstack/vue-query'
 
@@ -142,14 +156,19 @@ function toggleGenre(g: string) {
   genreFilter.value = next
 }
 
+// --- Slot reel -------------------------------------------------------------
+const SPIN_MS = 2600
+const REEL_LEN = 14 // posters flown past before the pick lands
+const CELL_H = 372 // 248px wide frame × 3/2
+
 const spinning = ref(false)
 const settled = ref(false)
 const pick = ref<EnrichedMovie | null>(null)
-const wheelItem = ref<EnrichedMovie | null>(null)
-const wheelIdx = ref(0)
+const reel = ref<EnrichedMovie[]>([])
+const reelOffset = ref(0)
 const pickFileId = ref<number | null>(null)
-let spinTimer: ReturnType<typeof setTimeout> | null = null
 let reducedMotion = false
+let landedGuard: ReturnType<typeof setTimeout> | null = null
 
 function spin() {
   const p = pool.value
@@ -157,30 +176,44 @@ function spin() {
   settled.value = false
   pickFileId.value = null
   pick.value = p[Math.floor(Math.random() * p.length)] ?? null
+  if (!pick.value) return
 
   if (reducedMotion || p.length < 4) {
+    reel.value = [pick.value]
+    reelOffset.value = 0
     settle()
     return
   }
 
-  spinning.value = true
-  // Flip through random posters with a decelerating cadence, then land.
-  const steps = 16
-  let step = 0
-  const tick = () => {
-    step++
-    wheelItem.value = step >= steps
-      ? pick.value
-      : p[Math.floor(Math.random() * p.length)] ?? null
-    wheelIdx.value = step
-    if (step >= steps) { settle(); return }
-    spinTimer = setTimeout(tick, 45 + step * step * 1.6)
-  }
-  tick()
+  // Strip of random posters, current pick landing at the end. Start above
+  // the frame (offset 0 shows cell 0), then let one long transition carry it
+  // to the final cell.
+  const strip: EnrichedMovie[] = []
+  for (let i = 0; i < REEL_LEN; i++) strip.push(p[Math.floor(Math.random() * p.length)]!)
+  strip.push(pick.value)
+  reel.value = strip
+  reelOffset.value = 0
+
+  // Two frames so the reset offset paints before the transition arms.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      spinning.value = true
+      reelOffset.value = -(strip.length - 1) * CELL_H
+      // transitionend can be swallowed if the tab loses focus mid-spin —
+      // a guard timeout makes sure the wheel always lands.
+      if (landedGuard) clearTimeout(landedGuard)
+      landedGuard = setTimeout(() => onReelLanded(), SPIN_MS + 400)
+    })
+  })
+}
+
+function onReelLanded() {
+  if (!spinning.value) return
+  if (landedGuard) { clearTimeout(landedGuard); landedGuard = null }
+  settle()
 }
 
 async function settle() {
-  wheelItem.value = pick.value
   spinning.value = false
   settled.value = true
   if (!pick.value) return
@@ -205,7 +238,7 @@ onMounted(() => {
   reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 })
 onUnmounted(() => {
-  if (spinTimer) clearTimeout(spinTimer)
+  if (landedGuard) clearTimeout(landedGuard)
 })
 </script>
 
@@ -235,7 +268,7 @@ onUnmounted(() => {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 250px;
+  grid-template-columns: minmax(0, 1fr) 248px;
   align-items: center;
   gap: 56px;
   height: 100%;
@@ -310,24 +343,54 @@ onUnmounted(() => {
 }
 .roulette-wheel { justify-self: end; }
 .wheel-frame {
-  width: 250px;
+  position: relative;
+  width: 248px;
+  height: 372px;
   border-radius: var(--r-md);
   overflow: hidden;
+  background: var(--bg-2);
   box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
   transition: box-shadow 0.3s;
 }
 .wheel-frame.spinning {
-  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 40px rgba(230, 185, 74, 0.25), 0 0 0 1px rgba(230, 185, 74, 0.3);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 48px rgba(230, 185, 74, 0.35), 0 0 0 1px rgba(230, 185, 74, 0.4);
+}
+.wheel-frame.settled { animation: wheel-pop 0.4s cubic-bezier(0.2, 1.6, 0.4, 1); }
+@keyframes wheel-pop {
+  0% { transform: scale(0.985); }
+  60% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+.wheel-reel {
+  will-change: transform;
+  transition-property: transform;
+  transition-timing-function: cubic-bezier(0.12, 0.75, 0.16, 1);
+}
+.wheel-reel.moving { filter: blur(2px) brightness(1.05); }
+.wheel-cell {
+  width: 248px;
+  height: 372px;
+}
+.wheel-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.wheel-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(7,7,10,0.55), transparent 30%, transparent 70%, rgba(7,7,10,0.55));
 }
 .wheel-empty {
-  aspect-ratio: 2 / 3;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: var(--font-mono);
   font-size: 64px;
   color: var(--fg-4);
-  background: var(--bg-2);
 }
 @media (max-width: 900px) {
   .roulette-inner { grid-template-columns: 1fr; gap: 20px; padding: 24px 20px; align-content: center; }

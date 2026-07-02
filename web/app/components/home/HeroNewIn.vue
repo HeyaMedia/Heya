@@ -14,13 +14,15 @@
 
     <div class="newin-inner">
       <div class="newin-lead">
-        <div class="newin-eyebrow">New in your library</div>
-        <template v-if="featured">
-          <NuxtLink :to="`/tv/${featured.slug}`" class="newin-title-link">
-            <h1 class="newin-title">{{ featured.title }}</h1>
-          </NuxtLink>
-          <p class="newin-featured-sub">{{ entrySub(featured) }} · {{ relTime(featured.added_at) }}</p>
-        </template>
+        <div>
+          <div class="newin-eyebrow">New in your library</div>
+          <template v-if="featured">
+            <NuxtLink :to="`/tv/${featured.slug}`" class="newin-title-link">
+              <h1 class="newin-title">{{ featured.title }}</h1>
+            </NuxtLink>
+            <p class="newin-featured-sub">{{ entrySub(featured) }} · {{ relTime(featured.added_at) }}</p>
+          </template>
+        </div>
         <p class="newin-sum">{{ summary }}</p>
       </div>
 
@@ -29,17 +31,15 @@
           v-for="ev in feed"
           :key="ev.key"
           :to="ev.to"
-          class="newin-row"
+          class="newin-card"
         >
-          <img class="newin-row-art" :src="ev.art" alt="" @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')">
-          <div class="newin-row-body">
-            <div class="newin-row-title">{{ ev.title }}</div>
-            <div class="newin-row-sub">{{ ev.sub }}</div>
+          <div class="newin-card-art">
+            <img :src="ev.art" alt="" @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')">
+            <span class="newin-card-kind">{{ ev.kind }}</span>
           </div>
-          <div class="newin-row-side">
-            <span class="newin-row-kind">{{ ev.kind }}</span>
-            <span class="newin-row-time">{{ ev.time }}</span>
-          </div>
+          <div class="newin-card-title">{{ ev.title }}</div>
+          <div class="newin-card-sub">{{ ev.sub }}</div>
+          <div class="newin-card-time">{{ ev.time }}</div>
         </NuxtLink>
       </div>
     </div>
@@ -47,9 +47,9 @@
 </template>
 
 <script setup lang="ts">
-// "New" — the library pulse. One featured drop plus a compact feed of the
-// latest arrivals across TV and music, each stamped with what it is and when
-// it landed. Feeds entirely off data the page already fetched.
+// "New" — the library pulse. A featured drop up top, the latest arrivals as
+// a horizontal shelf of cards along the bottom, each stamped with what it is
+// and when it landed. Feeds entirely off data the page already fetched.
 import type { MediaItem } from '~~/shared/types'
 
 export interface RecentTVEntry {
@@ -116,7 +116,7 @@ interface FeedRow { key: string; to: string; art: string; title: string; sub: st
 
 const feed = computed<FeedRow[]>(() => {
   const rows: FeedRow[] = []
-  for (const e of props.tv.slice(0, 8)) {
+  for (const e of props.tv.slice(0, 10)) {
     if (featured.value && e === featured.value) continue
     rows.push({
       key: `tv-${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
@@ -139,7 +139,7 @@ const feed = computed<FeedRow[]>(() => {
       time: '',
     })
   }
-  return rows.slice(0, 5)
+  return rows.slice(0, 8)
 })
 </script>
 
@@ -158,18 +158,22 @@ const feed = computed<FeedRow[]>(() => {
   inset: 0;
   background:
     linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.72) 45%, rgba(12,12,16,0.3) 100%),
-    linear-gradient(to top, var(--bg-1) 0%, transparent 40%);
+    linear-gradient(to top, var(--bg-1) 0%, rgba(12,12,16,0.75) 30%, transparent 60%);
 }
 .newin-inner {
   position: relative;
   z-index: 2;
-  display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(0, 560px);
-  align-items: center;
-  gap: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   height: 100%;
-  padding: 48px 40px;
-  max-width: 1240px;
+  padding: 44px 40px 24px;
+}
+.newin-lead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
 }
 .newin-eyebrow {
   font-family: var(--font-mono);
@@ -177,99 +181,104 @@ const feed = computed<FeedRow[]>(() => {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--gold);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .newin-title-link { color: inherit; text-decoration: none; }
 .newin-title-link:hover .newin-title { color: var(--gold); }
 .newin-title {
-  font-size: 44px;
+  font-size: 38px;
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.05;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   text-wrap: balance;
   transition: color 0.15s;
 }
 .newin-featured-sub {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--fg-1);
-  margin: 0 0 18px;
+  margin: 0;
 }
 .newin-sum {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--fg-2);
-  margin: 0;
+  margin: 0 0 4px;
+  text-align: right;
+  flex-shrink: 0;
 }
 .newin-feed {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-top: 16px;
 }
-.newin-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px 8px 8px;
-  border-radius: var(--r-md);
-  background: rgba(7, 7, 10, 0.5);
-  border: 1px solid var(--border);
+.newin-feed::-webkit-scrollbar { display: none; }
+.newin-card {
+  width: 118px;
+  flex-shrink: 0;
   color: inherit;
   text-decoration: none;
-  transition: background 0.15s, border-color 0.15s;
 }
-.newin-row:hover {
-  background: rgba(19, 19, 24, 0.75);
+.newin-card-art {
+  position: relative;
+  width: 118px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  transition: transform 0.15s, border-color 0.15s;
+}
+.newin-card:hover .newin-card-art {
+  transform: translateY(-2px);
   border-color: var(--border-strong);
 }
-.newin-row-art {
-  width: 34px;
-  height: 50px;
+.newin-card-art img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: var(--r-xs);
-  background: var(--bg-3);
-  flex-shrink: 0;
+  display: block;
 }
-.newin-row-body { min-width: 0; flex: 1; }
-.newin-row-title {
-  font-size: 13.5px;
+.newin-card-kind {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  background: rgba(7, 7, 10, 0.8);
+  border: 1px solid rgba(230, 185, 74, 0.35);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+.newin-card-title {
+  font-size: 12px;
   font-weight: 600;
+  margin-top: 7px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.newin-row-sub {
-  font-size: 12px;
+.newin-card-sub {
+  font-size: 10.5px;
   color: var(--fg-2);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.newin-row-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-  flex-shrink: 0;
-}
-.newin-row-kind {
+.newin-card-time {
   font-family: var(--font-mono);
   font-size: 9.5px;
-  letter-spacing: 0.12em;
-  color: var(--gold);
-  border: 1px solid rgba(230, 185, 74, 0.3);
-  border-radius: 999px;
-  padding: 2px 7px;
-}
-.newin-row-time {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
   color: var(--fg-3);
+  margin-top: 2px;
 }
 @media (max-width: 900px) {
-  .newin-inner { grid-template-columns: 1fr; gap: 18px; padding: 24px 20px; align-content: center; }
-  .newin-title { font-size: 32px; }
-  .newin-row:nth-child(n+4) { display: none; }
+  .newin-inner { padding: 20px; }
+  .newin-title { font-size: 28px; }
+  .newin-sum { display: none; }
 }
 </style>

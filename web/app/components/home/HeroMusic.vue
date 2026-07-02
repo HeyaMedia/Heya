@@ -16,37 +16,44 @@
       <div class="music-bg-gradient" :class="{ playing }" />
     </div>
 
-    <div class="music-inner">
+    <!-- Playing: now-playing lead + big art. -->
+    <div v-if="playing && currentTrack" class="music-inner playing">
       <div class="music-lead">
-        <div class="music-eyebrow">{{ playing ? 'Now playing' : 'Music' }}</div>
+        <div class="music-eyebrow">Now playing</div>
+        <h1 class="music-title">{{ currentTrack.title }}</h1>
+        <p class="music-sub">{{ currentTrack.artist }}<span v-if="currentTrack.album"> · {{ currentTrack.album }}</span></p>
+        <div class="music-actions">
+          <NuxtLink to="/music" class="btn btn-primary">
+            <Icon name="music" :size="16" />
+            Open player
+          </NuxtLink>
+        </div>
+      </div>
+      <div class="music-now-art" v-if="currentTrack.poster">
+        <img :src="currentTrack.poster" alt="">
+      </div>
+    </div>
 
-        <template v-if="playing && currentTrack">
-          <h1 class="music-title">{{ currentTrack.title }}</h1>
-          <p class="music-sub">{{ currentTrack.artist }}<span v-if="currentTrack.album"> · {{ currentTrack.album }}</span></p>
-          <div class="music-actions">
-            <NuxtLink to="/music" class="btn btn-primary">
-              <Icon name="music" :size="16" />
-              Open player
-            </NuxtLink>
-          </div>
-        </template>
-
-        <template v-else>
+    <!-- Idle: lead on top, horizontal shelf of the newest albums below. -->
+    <div v-else class="music-inner idle">
+      <div class="music-lead-row">
+        <div>
+          <div class="music-eyebrow">Music</div>
           <h1 class="music-title">Pick up the needle</h1>
           <p class="music-sub" v-if="artists[0]">{{ artistLine }}</p>
-          <div class="music-actions">
-            <NuxtLink to="/music" class="btn btn-primary">
-              <Icon name="play" :size="16" />
-              Open Music
-            </NuxtLink>
-            <NuxtLink to="/music/library" class="btn btn-ghost">Library</NuxtLink>
-          </div>
-        </template>
+        </div>
+        <div class="music-actions">
+          <NuxtLink to="/music" class="btn btn-primary">
+            <Icon name="play" :size="16" />
+            Open Music
+          </NuxtLink>
+          <NuxtLink to="/music/library" class="btn btn-ghost">Library</NuxtLink>
+        </div>
       </div>
 
-      <div class="music-shelf" v-if="!playing">
+      <div class="music-shelf">
         <NuxtLink
-          v-for="(al, i) in albums.slice(0, 4)"
+          v-for="(al, i) in albums.slice(0, 8)"
           :key="al.id"
           :to="albumTo(al)"
           class="music-cover"
@@ -59,17 +66,14 @@
           </div>
         </NuxtLink>
       </div>
-      <div class="music-shelf-art" v-else-if="currentTrack?.poster">
-        <img :src="currentTrack.poster" alt="">
-      </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 // "Music" — now-playing front and center with the live spectrum as the hero
-// background; idle, a quiet shelf of the newest albums. The visualizer is the
-// existing engine-fed VisualizerSpectrum — no extra audio nodes.
+// background; idle, a horizontal shelf of the newest albums. The visualizer
+// is the existing engine-fed VisualizerSpectrum — no extra audio nodes.
 import type { MediaItem } from '~~/shared/types'
 
 type Albumish = MediaItem & { sub?: string; poster_src?: string; artist_slug?: string; album_slug?: string }
@@ -120,7 +124,7 @@ function albumTo(al: MediaItem) {
   inset: 0;
   background:
     linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.5) 55%, transparent 100%),
-    linear-gradient(to top, var(--bg-1) 0%, transparent 42%);
+    linear-gradient(to top, var(--bg-1) 0%, rgba(12,12,16,0.7) 25%, transparent 55%);
 }
 .music-bg-gradient.playing {
   background:
@@ -130,13 +134,27 @@ function albumTo(al: MediaItem) {
 .music-inner {
   position: relative;
   z-index: 2;
+  height: 100%;
+}
+.music-inner.playing {
   display: grid;
   grid-template-columns: minmax(300px, 1fr) auto;
   align-items: center;
   gap: 48px;
-  height: 100%;
   padding: 48px 40px;
   max-width: 1240px;
+}
+.music-inner.idle {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 44px 40px 24px;
+}
+.music-lead-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
 }
 .music-eyebrow {
   font-family: var(--font-mono);
@@ -144,31 +162,36 @@ function albumTo(al: MediaItem) {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--gold);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .music-title {
-  font-size: 44px;
+  font-size: 38px;
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.05;
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   text-wrap: balance;
 }
+.music-inner.playing .music-title { font-size: 44px; margin-bottom: 10px; }
 .music-sub {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--fg-1);
-  margin: 0 0 24px;
+  margin: 0;
 }
-.music-actions { display: flex; gap: 10px; }
+.music-inner.playing .music-sub { font-size: 15px; margin-bottom: 24px; }
+.music-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .music-shelf {
-  display: grid;
-  grid-template-columns: repeat(2, 150px);
+  display: flex;
   gap: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-top: 16px;
 }
+.music-shelf::-webkit-scrollbar { display: none; }
 .music-cover {
   position: relative;
-  width: 150px;
-  aspect-ratio: 1;
+  width: 208px;
+  flex-shrink: 0;
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--bg-3);
@@ -178,40 +201,40 @@ function albumTo(al: MediaItem) {
   transition: transform 0.15s, border-color 0.15s;
 }
 .music-cover:hover { transform: translateY(-2px); border-color: var(--border-strong); }
-.music-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .music-cover-label {
   position: absolute;
   inset: auto 0 0 0;
-  padding: 20px 10px 8px;
+  padding: 24px 10px 8px;
   background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
 }
 .music-cover-title {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .music-cover-artist {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.music-shelf-art {
+.music-now-art {
   width: 240px;
   aspect-ratio: 1;
   border-radius: var(--r-lg);
   overflow: hidden;
   box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08);
 }
-.music-shelf-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.music-now-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 @media (max-width: 900px) {
-  .music-inner { grid-template-columns: 1fr; gap: 20px; padding: 24px 20px; align-content: center; }
-  .music-title { font-size: 32px; }
-  .music-shelf { grid-template-columns: repeat(2, 120px); }
-  .music-cover { width: 120px; }
-  .music-shelf-art { display: none; }
+  .music-inner.idle { padding: 20px; }
+  .music-inner.playing { grid-template-columns: 1fr; gap: 20px; padding: 24px 20px; align-content: center; }
+  .music-title { font-size: 28px; }
+  .music-lead-row { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .music-cover { width: 150px; }
+  .music-now-art { display: none; }
 }
 </style>

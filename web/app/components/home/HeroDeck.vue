@@ -1,7 +1,7 @@
 <template>
   <section class="hero-deck">
     <!-- Mode tabs: quiet mono rail, gold = active, star pins the default. -->
-    <nav class="deck-tabs" v-if="visibleModes.length > 1 && mode !== 'game'">
+    <nav class="deck-tabs" v-if="visibleModes.length > 1">
       <button
         v-for="m in visibleModes"
         :key="m.id"
@@ -41,7 +41,6 @@
       />
       <HeroMusic v-else-if="mode === 'music'" :albums="albums" :artists="artists" />
       <HeroRoulette v-else-if="mode === 'roulette'" />
-      <HeroGame v-else-if="mode === 'game'" :posters="gamePosters" @exit="setMode((pinned as HeroMode) || 'featured')" />
     </div>
   </section>
 </template>
@@ -52,7 +51,7 @@ import type { HeroItem, HeroPlayInfo } from '~/components/home/HeroA.vue'
 import type { UpNextItem } from '~/components/home/UpNextRow.vue'
 import type { RecentTVEntry } from '~/components/home/HeroNewIn.vue'
 
-export type HeroMode = 'featured' | 'tonight' | 'new' | 'music' | 'roulette' | 'game'
+export type HeroMode = 'featured' | 'tonight' | 'new' | 'music' | 'roulette'
 
 const props = defineProps<{
   items: HeroItem[]
@@ -118,44 +117,23 @@ watch(() => props.pinnedMode, (m) => {
 watchEffect(() => {
   if (userTouched) return
   const want = pinned.value
-  if (want && want !== 'game' && visibleIds.value.has(want)) mode.value = want as HeroMode
+  if (want && visibleIds.value.has(want)) mode.value = want as HeroMode
 })
 
 // Never sit on a mode whose tab has disappeared (its data emptied out or a
 // stale pin points at something this library doesn't have) — fall back to
 // Featured instead of rendering an empty shell.
 watch(visibleIds, (ids) => {
-  if (mode.value !== 'game' && !ids.has(mode.value)) mode.value = 'featured'
+  if (!ids.has(mode.value)) mode.value = 'featured'
 })
-
-// Poster pool for the game — whatever slides we have on hand.
-const gamePosters = computed(() =>
-  props.items.slice(0, 12).map(i => usePosterUrl(i.id)).filter((s): s is string => !!s))
-
-// ↑↑↓↓←→←→BA — the hero remembers the old ways.
-const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a']
-let progress = 0
-function onKonami(e: KeyboardEvent) {
-  if (mode.value === 'game') return
-  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key
-  progress = k === KONAMI[progress] ? progress + 1 : (k === KONAMI[0] ? 1 : 0)
-  if (progress === KONAMI.length) {
-    progress = 0
-    mode.value = 'game'
-  }
-}
 
 onMounted(() => {
   try {
     // Seed from the device mirror; the guarded watchEffect above applies it
     // once (and only when) the mode's tab is visible.
     const ls = localStorage.getItem(LS_KEY)
-    if (ls && !pinned.value && ls !== 'game') pinned.value = ls
+    if (ls && !pinned.value) pinned.value = ls
   } catch { /* private mode */ }
-  window.addEventListener('keydown', onKonami)
-})
-onUnmounted(() => {
-  window.removeEventListener('keydown', onKonami)
 })
 </script>
 
