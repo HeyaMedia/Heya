@@ -139,41 +139,21 @@ interface MusicHomeBody {
   recent_albums: RecentAlbumRow[]
   recent_artists: RecentArtistRow[]
 }
-interface PageStub { total: number }
+interface MusicCounts { artists: number; albums: number; tracks: number }
 
-// Counts — three lightweight calls, one per entity. We only need `total`, so
-// limit=1 keeps the payload tiny.
-const artistsCount = useQuery({
-  queryKey: ['music', 'library', 'count', 'artists'],
-  queryFn: async () => {
-    const r = await $heya('/api/music/artists', { query: { limit: 1, offset: 0 } }) as unknown as PageStub
-    return r.total
-  },
-  staleTime: 1000 * 60 * 5,
-})
-const albumsCount = useQuery({
-  queryKey: ['music', 'library', 'count', 'albums'],
-  queryFn: async () => {
-    const r = await $heya('/api/music/albums', { query: { limit: 1, offset: 0 } }) as unknown as PageStub
-    return r.total
-  },
-  staleTime: 1000 * 60 * 5,
-})
-const tracksCount = useQuery({
-  queryKey: ['music', 'library', 'count', 'tracks'],
-  queryFn: async () => {
-    const r = await $heya('/api/music/tracks', { query: { limit: 1, offset: 0 } }) as unknown as PageStub
-    return r.total
-  },
+// Counts — one dedicated endpoint. The old limit=1 list calls each ran the
+// full list pipeline (join + sort of the whole table) server-side just to
+// read `total`; the tracks one alone cost ~900ms per landing view.
+const countsQuery = useQuery({
+  queryKey: ['music', 'library', 'counts'],
+  queryFn: async () => await $heya('/api/music/counts') as unknown as MusicCounts,
   staleTime: 1000 * 60 * 5,
 })
 
-const artistCount = computed(() => artistsCount.data.value ?? 0)
-const albumCount = computed(() => albumsCount.data.value ?? 0)
-const trackCount = computed(() => tracksCount.data.value ?? 0)
-const statsLoading = computed(() =>
-  artistsCount.isLoading.value || albumsCount.isLoading.value || tracksCount.isLoading.value,
-)
+const artistCount = computed(() => countsQuery.data.value?.artists ?? 0)
+const albumCount = computed(() => countsQuery.data.value?.albums ?? 0)
+const trackCount = computed(() => countsQuery.data.value?.tracks ?? 0)
+const statsLoading = computed(() => countsQuery.isLoading.value)
 
 // Recent shelves come from the existing music-home aggregator (single call).
 const homeQuery = useQuery({

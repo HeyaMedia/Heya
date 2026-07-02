@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -51,39 +52,72 @@ func (a *App) GetDashboardStats(ctx context.Context) DashboardStats {
 	a.db.QueryRow(ctx, "SELECT count(*) FROM people").Scan(&stats.TotalPeople)
 	a.db.QueryRow(ctx, "SELECT count(*) FROM library_files").Scan(&stats.TotalFiles)
 
-	// Missing = user-facing units with no file left on disk. For music the
-	// media_item is the artist, which stays present while it has *any* live
-	// file — so missing albums (every track's file gone) and orphan tracks
-	// (gone, but their album still has live tracks) must be counted too, or
-	// the count reads 0 and the cleanup button greys out. See
-	// CleanupMissingMedia for the matching deletes.
-	a.db.QueryRow(ctx, `
-		SELECT
-		  (SELECT count(*) FROM media_items mi WHERE NOT EXISTS (
-		      SELECT 1 FROM library_files lf
-		      WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL))
-		+ (SELECT count(*) FROM albums a WHERE NOT EXISTS (
-		      SELECT 1 FROM tracks t
-		      JOIN track_files tf ON tf.track_id = t.id
-		      JOIN library_files lf ON lf.id = tf.library_file_id
-		      WHERE t.album_id = a.id AND lf.deleted_at IS NULL))
-		+ (SELECT count(*) FROM tracks t
-		   WHERE NOT EXISTS (
-		      SELECT 1 FROM track_files tf
-		      JOIN library_files lf ON lf.id = tf.library_file_id
-		      WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-		     AND EXISTS (
-		      SELECT 1 FROM tracks t2
-		      JOIN track_files tf2 ON tf2.track_id = t2.id
-		      JOIN library_files lf2 ON lf2.id = tf2.library_file_id
-		      WHERE t2.album_id = t.album_id AND lf2.deleted_at IS NULL))
-	`).Scan(&stats.MissingCount)
+	stats.MissingCount = a.missingCountCached(ctx)
 
 	pending, running := a.QueueCounts(ctx)
 	stats.QueuePending = pending
 	stats.QueueRunning = running
 
 	return stats
+}
+
+// missingCountCached returns the dashboard missing_count through a short TTL
+// cache — the underlying anti-joins cost ~750ms at scale and the value only
+// changes on scan/cleanup, so per-render recomputation is wasted work.
+func (a *App) missingCountCached(ctx context.Context) int {
+	a.missingCountMu.Lock()
+	defer a.missingCountMu.Unlock()
+	if !a.missingCountAt.IsZero() && time.Since(a.missingCountAt) < 5*time.Minute {
+		return a.missingCount
+	}
+
+	// Missing = user-facing units with no file left on disk. For music the
+	// media_item is the artist, which stays present while it has *any* live
+	// file — so missing albums (every track's file gone) and orphan tracks
+	// (gone, but their album still has live tracks) must be counted too, or
+	// the count reads 0 and the cleanup button greys out. See
+	// CleanupMissingMedia for the matching deletes.
+	//
+	// The music buckets drive from the ~dozens of soft-deleted rows (via the
+	// idx_library_files_deleted partial index) instead of joining all of
+	// library_files: track_files.library_file_id is NOT NULL + FK CASCADE, so
+	// "file is live" ≡ "file is not in the soft-deleted set". The old
+	// join-everything shape wasn't just slow (~2.3s) — under default
+	// parallelism its hash join overflowed the k8s pod's /dev/shm and the
+	// query ERRORED, silently zeroing the count. NOT EXISTS (not NOT IN):
+	// a NULL in the anti-join side would silently zero a bucket again.
+	var count int
+	err := a.db.QueryRow(ctx, `
+		WITH live_albums AS MATERIALIZED (
+		  SELECT DISTINCT t.album_id
+		  FROM track_files tf JOIN tracks t ON t.id = tf.track_id
+		  WHERE NOT EXISTS (SELECT 1 FROM library_files d
+		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
+		),
+		live_tracks AS MATERIALIZED (
+		  SELECT DISTINCT tf.track_id
+		  FROM track_files tf
+		  WHERE NOT EXISTS (SELECT 1 FROM library_files d
+		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
+		)
+		SELECT
+		  (SELECT count(*) FROM media_items mi WHERE NOT EXISTS (
+		      SELECT 1 FROM library_files lf
+		      WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL))
+		+ (SELECT count(*) FROM albums a
+		   WHERE NOT EXISTS (SELECT 1 FROM live_albums la WHERE la.album_id = a.id))
+		+ (SELECT count(*) FROM tracks t
+		   WHERE NOT EXISTS (SELECT 1 FROM live_tracks lt WHERE lt.track_id = t.id)
+		     AND EXISTS (SELECT 1 FROM live_albums la WHERE la.album_id = t.album_id))
+	`).Scan(&count)
+	if err != nil {
+		log.Warn().Err(err).Msg("dashboard missing_count query failed")
+		return a.missingCount // stale beats silently-zero
+	}
+
+	a.missingCount = count
+	a.missingCountAt = time.Now()
+	return count
 }
 
 // ListMissingMedia returns the user-facing units with no file left on disk:
@@ -93,7 +127,18 @@ func (a *App) GetDashboardStats(ctx context.Context) DashboardStats {
 // apart from media_items, whose id space overlaps. Orphan tracks inside
 // otherwise-present albums are cleaned but not listed individually.
 func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) {
+	// The albums arm drives from the soft-deleted set like missingCountCached
+	// (same live_albums shape — keep the two consistent so the dashboard count
+	// and this list never diverge). The old join-everything form hash-joined
+	// all of library_files (~1.3s, and erroring on /dev/shm under default
+	// parallelism).
 	rows, err := a.db.Query(ctx, `
+		WITH live_albums AS MATERIALIZED (
+		  SELECT DISTINCT t.album_id
+		  FROM track_files tf JOIN tracks t ON t.id = tf.track_id
+		  WHERE NOT EXISTS (SELECT 1 FROM library_files d
+		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
+		)
 		SELECT mi.id, mi.title, mi.year, mi.media_type::text, mi.poster_path, mi.slug
 		FROM media_items mi
 		WHERE NOT EXISTS (
@@ -104,10 +149,7 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 		SELECT a.id, a.title, a.year, 'album', '', a.slug
 		FROM albums a
 		WHERE NOT EXISTS (
-			SELECT 1 FROM tracks t
-			JOIN track_files tf ON tf.track_id = t.id
-			JOIN library_files lf ON lf.id = tf.library_file_id
-			WHERE t.album_id = a.id AND lf.deleted_at IS NULL
+			SELECT 1 FROM live_albums la WHERE la.album_id = a.id
 		)
 		ORDER BY 2
 		LIMIT 50

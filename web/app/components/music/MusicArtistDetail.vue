@@ -305,7 +305,11 @@ import type { AlbumView, Artist, ArtistTopTrackRow, MediaDetail, TrackView } fro
 import type { Track } from '~/composables/usePlayer'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
-const props = defineProps<{ mediaId: number }>()
+// slug keys + addresses the detail query so it shares the vue-query cache
+// entry with the parent page's ['media','detail',slug] fetch — keying by
+// mediaId created a second cache entry and re-ran the heaviest endpoint on
+// every artist page view, sequentially after the page's own copy.
+const props = defineProps<{ mediaId: number; slug: string }>()
 
 const route = useRoute()
 const { play, queue, formatTime } = usePlayer()
@@ -348,8 +352,8 @@ interface SonicSimilarArtistRow {
 
 const { $heya } = useNuxtApp()
 const detailQuery = useQuery({
-  queryKey: ['media', 'detail', () => props.mediaId],
-  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: String(props.mediaId) } })) as MediaDetail,
+  queryKey: ['media', 'detail', () => props.slug],
+  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: props.slug } })) as MediaDetail,
   staleTime: 1000 * 60 * 5,
 })
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
@@ -612,7 +616,7 @@ if (import.meta.client) {
   const off = bus.on('media.updated', (e) => {
     const payload = e.payload as { media_item_id?: number } | undefined
     if (payload?.media_item_id === props.mediaId) {
-      queryClient.invalidateQueries({ queryKey: ['media', 'detail', props.mediaId] })
+      queryClient.invalidateQueries({ queryKey: ['media', 'detail', props.slug] })
       queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'similar', artistSlugForQueries.value] })
       queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'sonic-similar', artistSlugForQueries.value, { limit: 12 }] })
       queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'top-tracks', artistSlugForQueries.value, { limit: 25 }] })

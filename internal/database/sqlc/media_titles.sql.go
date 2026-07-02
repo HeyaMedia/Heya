@@ -91,6 +91,61 @@ func (q *Queries) GetMediaTitleByLanguage(ctx context.Context, arg GetMediaTitle
 	return i, err
 }
 
+const getMediaTitlesByLanguageBatch = `-- name: GetMediaTitlesByLanguageBatch :many
+SELECT DISTINCT ON (media_item_id) id, media_item_id, title, language, country, title_type, source
+FROM media_titles
+WHERE media_item_id = ANY($1::bigint[])
+  AND (language = $2 OR language LIKE $2 || '-%')
+ORDER BY
+  media_item_id,
+  CASE WHEN language = $2 THEN 0 ELSE 1 END,
+  CASE title_type
+    WHEN 'official' THEN 0
+    WHEN 'original' THEN 1
+    WHEN 'romanized' THEN 2
+    WHEN 'alternative' THEN 3
+    ELSE 4
+  END,
+  id
+`
+
+type GetMediaTitlesByLanguageBatchParams struct {
+	MediaItemIds []int64 `json:"media_item_ids"`
+	Language     string  `json:"language"`
+}
+
+// Batched GetMediaTitleByLanguage for the list endpoints: one query per page
+// of items instead of one per item (the home rails paid ~60 sequential
+// round trips per load). DISTINCT ON keeps exactly the row the single-item
+// ORDER BY would have picked for each item.
+func (q *Queries) GetMediaTitlesByLanguageBatch(ctx context.Context, arg GetMediaTitlesByLanguageBatchParams) ([]MediaTitle, error) {
+	rows, err := q.db.Query(ctx, getMediaTitlesByLanguageBatch, arg.MediaItemIds, arg.Language)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MediaTitle{}
+	for rows.Next() {
+		var i MediaTitle
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaItemID,
+			&i.Title,
+			&i.Language,
+			&i.Country,
+			&i.TitleType,
+			&i.Source,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMediaTitles = `-- name: ListMediaTitles :many
 SELECT id, media_item_id, title, language, country, title_type, source FROM media_titles WHERE media_item_id = $1 ORDER BY language, title_type
 `

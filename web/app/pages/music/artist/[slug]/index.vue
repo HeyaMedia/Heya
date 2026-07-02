@@ -28,7 +28,7 @@ const loading = computed(() => detailQuery.isPending.value)
 </script>
 
 <template>
-  <MusicArtistDetail v-if="mediaId && mediaType === 'music'" :media-id="mediaId" />
+  <MusicArtistDetail v-if="mediaId && mediaType === 'music'" :media-id="mediaId" :slug="slug" />
   <MediaDetailView v-else-if="mediaId" :media-id="mediaId" />
   <div v-else-if="loading" style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--fg-3)">
     Loading…

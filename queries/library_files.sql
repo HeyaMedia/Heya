@@ -9,7 +9,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (library_id, path) DO UPDATE
 SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
-    media_info = '{}'::jsonb, keyframes = NULL,
+    media_info = '{}'::jsonb, keyframes = NULL, video_height = 0,
     deleted_at = NULL, updated_at = now()
 RETURNING *;
 
@@ -55,8 +55,19 @@ SET status = $2, media_item_id = $3, error_message = $4, updated_at = now()
 WHERE id = $1;
 
 -- name: UpdateLibraryFileMediaInfo :exec
+-- video_height is denormalized from the ffprobe payload here — the single
+-- writer of media_info (ffprobe worker, service/probe, matcher/music all come
+-- through this query), so the derived column can't drift. The browse pages
+-- read it via ListMediaResolutions instead of digging through media_info
+-- jsonb per row (which cost ~1.5s/page at 71k probed files).
 UPDATE library_files
-SET media_info = $2, updated_at = now()
+SET media_info = $2,
+    video_height = COALESCE(
+      (SELECT (s->>'height')::int
+       FROM jsonb_array_elements($2::jsonb->'streams') AS s
+       WHERE s->>'codec_type' = 'video'
+       LIMIT 1), 0),
+    updated_at = now()
 WHERE id = $1;
 
 -- name: UpdateLibraryFileKeyframes :exec
@@ -111,6 +122,16 @@ SELECT path FROM library_files WHERE library_id = $1 AND deleted_at IS NULL;
 -- name: ListLibraryFilesByMediaItem :many
 SELECT * FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDER BY path ASC;
 
+-- name: ListLibraryFileSizesByMediaItem :many
+-- Narrow variant for the media-detail response, which only renders id+size:
+-- SELECT * detoasts media_info/parse_result/keyframes jsonb for every file —
+-- ~30MB and ~750ms for a big music artist. COLLATE "C" keeps the first row
+-- (the FE's playable file) deterministic while skipping the expensive
+-- en_US.utf8 collation on long common-prefix paths.
+SELECT id, size FROM library_files
+WHERE media_item_id = $1 AND deleted_at IS NULL
+ORDER BY path COLLATE "C" ASC;
+
 -- name: ListEpisodeFiles :many
 SELECT id, size, parse_result FROM library_files
 WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'
@@ -162,21 +183,18 @@ SET path = $2, mtime = $3, parse_result = $4, deleted_at = NULL, updated_at = no
 WHERE id = $1;
 
 -- name: ListMediaResolutions :many
-SELECT lf.media_item_id,
-       max(
-         COALESCE(
-           (SELECT (s->>'height')::int
-            FROM jsonb_array_elements(lf.media_info->'streams') AS s
-            WHERE s->>'codec_type' = 'video'
-            LIMIT 1),
-           0
-         )
-       )::int AS max_height
-FROM library_files lf
-WHERE lf.media_item_id = ANY(@media_item_ids::bigint[])
-  AND lf.deleted_at IS NULL
-  AND lf.media_info IS NOT NULL
-GROUP BY lf.media_item_id;
+-- Reads the denormalized video_height (written by UpdateLibraryFileMediaInfo,
+-- backfilled by migration 00037) instead of unpacking media_info jsonb per
+-- row: the jsonb variant seq-scanned 673k rows and detoasted 71k ffprobe
+-- payloads per TV browse (~1.5s). Served index-only by
+-- idx_library_files_media_item_height. Keep the ::int cast — it pins the
+-- sqlc row shape to MaxHeight int32.
+SELECT media_item_id,
+       max(video_height)::int AS max_height
+FROM library_files
+WHERE media_item_id = ANY(@media_item_ids::bigint[])
+  AND deleted_at IS NULL
+GROUP BY media_item_id;
 
 -- name: ListUnprobedProbeableFiles :many
 -- Files that are already known (not 'pending' — those flow through ProcessFile)

@@ -140,17 +140,22 @@ func (q *Queries) ListMediaRecommendationsWithLibrary(ctx context.Context, media
 }
 
 const listTopRecommendations = `-- name: ListTopRecommendations :many
-SELECT mr.external_ids, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
+WITH agg AS (
+  SELECT mr.external_ids, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
+         count(*)::int AS source_count
+  FROM media_recommendations mr
+  GROUP BY mr.external_ids, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date
+  ORDER BY count(*) DESC, mr.vote_average DESC
+  LIMIT $1
+)
+SELECT agg.external_ids, agg.title, agg.poster_path, agg.media_type, agg.vote_average, agg.release_date,
   mi.id as local_media_item_id,
   mi.slug as local_slug,
   mi.poster_path as local_poster_path,
-  count(DISTINCT mr.media_item_id)::int as source_count
-FROM media_recommendations mr
-LEFT JOIN media_items mi ON mi.external_ids @> mr.external_ids AND mr.external_ids != '{}'
-GROUP BY mr.external_ids, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
-         mi.id, mi.slug, mi.poster_path
-ORDER BY source_count DESC, mr.vote_average DESC
-LIMIT $1
+  agg.source_count
+FROM agg
+LEFT JOIN media_items mi ON mi.external_ids @> agg.external_ids AND agg.external_ids != '{}'
+ORDER BY agg.source_count DESC, agg.vote_average DESC
 `
 
 type ListTopRecommendationsRow struct {
@@ -166,7 +171,14 @@ type ListTopRecommendationsRow struct {
 	SourceCount      int32          `json:"source_count"`
 }
 
-// Top recommendations for home page: items recommended by multiple sources, weighted by vote
+// Top recommendations for home page: items recommended by multiple sources,
+// weighted by vote. Aggregate media_recommendations alone first, then join
+// media_items only for the top-N groups — the inlined form ran one GIN probe
+// per rec row (30k) and count(DISTINCT) forced a 30k-row jsonb-keyed sort
+// (~900ms vs ~35ms). count(*) is equivalent to count(DISTINCT media_item_id):
+// the UNIQUE (media_item_id, title, media_type) constraint (which the upsert
+// in CreateMediaRecommendation depends on) plus title/media_type in the GROUP
+// BY means one media_item_id can't repeat within a group.
 func (q *Queries) ListTopRecommendations(ctx context.Context, limit int32) ([]ListTopRecommendationsRow, error) {
 	rows, err := q.db.Query(ctx, listTopRecommendations, limit)
 	if err != nil {

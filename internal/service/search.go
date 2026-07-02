@@ -84,12 +84,15 @@ func (a *App) SearchQuick(ctx context.Context, query string) (QuickSearchResult,
 	go func() {
 		defer wg.Done()
 		items, err := q.SearchPeople(ctx, sqlc.SearchPeopleParams{
-			Lower: query, Limit: quickPeopleLimit, Offset: 0,
+			Query: query, Limit: quickPeopleLimit, Offset: 0,
 		})
 		if err != nil || len(items) == 0 {
 			return
 		}
-		total, _ := q.SearchPeopleCount(ctx, query)
+		total := int64(len(items))
+		if int32(len(items)) == quickPeopleLimit {
+			total, _ = q.SearchPeopleCount(ctx, query)
+		}
 		set("people", items, total)
 	}()
 
@@ -103,7 +106,10 @@ func (a *App) SearchQuick(ctx context.Context, query string) (QuickSearchResult,
 		if err != nil || len(items) == 0 {
 			return
 		}
-		total, _ := q.SearchAlbumsCount(ctx, query)
+		total := int64(len(items))
+		if int32(len(items)) == quickAlbumsLimit {
+			total, _ = q.SearchAlbumsCount(ctx, query)
+		}
 		set("albums", items, total)
 	}()
 
@@ -112,12 +118,15 @@ func (a *App) SearchQuick(ctx context.Context, query string) (QuickSearchResult,
 	go func() {
 		defer wg.Done()
 		items, err := q.SearchTracks(ctx, sqlc.SearchTracksParams{
-			Lower: query, Limit: quickTracksLimit, Offset: 0,
+			Query: query, Limit: quickTracksLimit, Offset: 0,
 		})
 		if err != nil || len(items) == 0 {
 			return
 		}
-		total, _ := q.SearchTracksCount(ctx, query)
+		total := int64(len(items))
+		if int32(len(items)) == quickTracksLimit {
+			total, _ = q.SearchTracksCount(ctx, query)
+		}
 		set("tracks", items, total)
 	}()
 
@@ -174,10 +183,13 @@ func (a *App) SearchByType(ctx context.Context, query string, mediaType string, 
 
 	case "people":
 		items, err := q.SearchPeople(ctx, sqlc.SearchPeopleParams{
-			Lower: query, Limit: limit, Offset: offset,
+			Query: query, Limit: limit, Offset: offset,
 		})
 		if err != nil {
 			return SearchBucket{}, err
+		}
+		if offset == 0 && int32(len(items)) < limit {
+			return SearchBucket{Items: items, Total: int64(len(items))}, nil
 		}
 		total, _ := q.SearchPeopleCount(ctx, query)
 		return SearchBucket{Items: items, Total: total}, nil
@@ -189,15 +201,21 @@ func (a *App) SearchByType(ctx context.Context, query string, mediaType string, 
 		if err != nil {
 			return SearchBucket{}, err
 		}
+		if offset == 0 && int32(len(items)) < limit {
+			return SearchBucket{Items: items, Total: int64(len(items))}, nil
+		}
 		total, _ := q.SearchAlbumsCount(ctx, query)
 		return SearchBucket{Items: items, Total: total}, nil
 
 	case "tracks":
 		items, err := q.SearchTracks(ctx, sqlc.SearchTracksParams{
-			Lower: query, Limit: limit, Offset: offset,
+			Query: query, Limit: limit, Offset: offset,
 		})
 		if err != nil {
 			return SearchBucket{}, err
+		}
+		if offset == 0 && int32(len(items)) < limit {
+			return SearchBucket{Items: items, Total: int64(len(items))}, nil
 		}
 		total, _ := q.SearchTracksCount(ctx, query)
 		return SearchBucket{Items: items, Total: total}, nil

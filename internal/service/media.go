@@ -56,10 +56,12 @@ func (a *App) ListMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 		unavailable[id] = true
 	}
 
-	resolveTitle := a.preferredTitleResolver(ctx, q)
+	overlay := a.preferredTitleOverlay(ctx, q, items)
 	views := make([]MediaItemView, len(items))
 	for i, item := range items {
-		item.Title = resolveTitle(item.ID, item.LibraryID, item.Title)
+		if t := overlay[item.ID]; t != "" {
+			item.Title = t
+		}
 		views[i] = MediaItemView{
 			MediaItem: item,
 			Available: !unavailable[item.ID],
@@ -67,6 +69,59 @@ func (a *App) ListMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 	}
 
 	return views, nil
+}
+
+// preferredTitleOverlay is the batched form of preferredTitleResolver for
+// list pages: two queries per distinct preferred language (wanted language +
+// an 'en' fallback for the misses) instead of one per item — the home rails
+// paid ~60 sequential round trips per load through the per-item resolver.
+// Returns mediaItemID → overlay title; absent keys mean "keep the raw title".
+func (a *App) preferredTitleOverlay(ctx context.Context, q *sqlc.Queries, items []sqlc.MediaItem) map[int64]string {
+	libLang := map[int64]string{}
+	idsByLang := map[string][]int64{}
+	for _, it := range items {
+		lang, cached := libLang[it.LibraryID]
+		if !cached {
+			if lib, err := q.GetLibraryByID(ctx, it.LibraryID); err == nil {
+				lang = metadata.ParseSettings(lib.Settings).PreferredLanguage
+			}
+			libLang[it.LibraryID] = lang
+		}
+		if lang != "" {
+			idsByLang[lang] = append(idsByLang[lang], it.ID)
+		}
+	}
+
+	out := map[int64]string{}
+	for lang, ids := range idsByLang {
+		if rows, err := q.GetMediaTitlesByLanguageBatch(ctx, sqlc.GetMediaTitlesByLanguageBatchParams{MediaItemIds: ids, Language: lang}); err == nil {
+			for _, r := range rows {
+				if r.Title != "" {
+					out[r.MediaItemID] = r.Title
+				}
+			}
+		}
+		if lang == "en" {
+			continue
+		}
+		var missed []int64
+		for _, id := range ids {
+			if _, ok := out[id]; !ok {
+				missed = append(missed, id)
+			}
+		}
+		if len(missed) == 0 {
+			continue
+		}
+		if rows, err := q.GetMediaTitlesByLanguageBatch(ctx, sqlc.GetMediaTitlesByLanguageBatchParams{MediaItemIds: missed, Language: "en"}); err == nil {
+			for _, r := range rows {
+				if r.Title != "" {
+					out[r.MediaItemID] = r.Title
+				}
+			}
+		}
+	}
+	return out
 }
 
 // preferredTitleResolver returns a closure that overlays the library's
@@ -130,9 +185,12 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		}
 	}
 
+	// Narrow query on purpose: the response renders only id+size, and the
+	// full rows detoast media_info/parse_result jsonb for every file (~30MB
+	// and ~750ms for a large music artist).
 	hasFiles := false
 	var mediaFiles []map[string]any
-	if files, filesErr := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); filesErr == nil && len(files) > 0 {
+	if files, filesErr := q.ListLibraryFileSizesByMediaItem(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); filesErr == nil && len(files) > 0 {
 		hasFiles = true
 		for _, f := range files {
 			mediaFiles = append(mediaFiles, map[string]any{
@@ -143,6 +201,11 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 	}
 
 	result := map[string]any{"media_item": item, "available": hasFiles, "files": mediaFiles}
+
+	// TV episode files are consumed twice (available-seasons derivation in
+	// the switch below + the episode_files map at the end) — fetch once, the
+	// rows carry ~2MB of parse_result jsonb on a long-running series.
+	var tvEpisodeFiles []sqlc.ListEpisodeFilesRow
 
 	// Type-specific data
 	switch item.MediaType {
@@ -165,6 +228,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 
 			availableSeasons := map[int]bool{}
 			if epFiles, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); err == nil {
+				tvEpisodeFiles = epFiles
 				for _, f := range epFiles {
 					if len(f.ParseResult) == 0 {
 						continue
@@ -333,13 +397,11 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		result["external_ratings"] = ratings
 	}
 
-	// Episode file map (TV only)
-	if item.MediaType == sqlc.MediaTypeTv {
-		if epFiles, epErr := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); epErr == nil && len(epFiles) > 0 {
-			episodeFileMap := BuildEpisodeFileMap(epFiles)
-			if len(episodeFileMap) > 0 {
-				result["episode_files"] = episodeFileMap
-			}
+	// Episode file map (TV only) — reuses the fetch from the TV branch above.
+	if item.MediaType == sqlc.MediaTypeTv && len(tvEpisodeFiles) > 0 {
+		episodeFileMap := BuildEpisodeFileMap(tvEpisodeFiles)
+		if len(episodeFileMap) > 0 {
+			result["episode_files"] = episodeFileMap
 		}
 	}
 

@@ -31,5 +31,26 @@ ORDER BY
   id
 LIMIT 1;
 
+-- name: GetMediaTitlesByLanguageBatch :many
+-- Batched GetMediaTitleByLanguage for the list endpoints: one query per page
+-- of items instead of one per item (the home rails paid ~60 sequential
+-- round trips per load). DISTINCT ON keeps exactly the row the single-item
+-- ORDER BY would have picked for each item.
+SELECT DISTINCT ON (media_item_id) *
+FROM media_titles
+WHERE media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[])
+  AND (language = sqlc.arg(language) OR language LIKE sqlc.arg(language) || '-%')
+ORDER BY
+  media_item_id,
+  CASE WHEN language = sqlc.arg(language) THEN 0 ELSE 1 END,
+  CASE title_type
+    WHEN 'official' THEN 0
+    WHEN 'original' THEN 1
+    WHEN 'romanized' THEN 2
+    WHEN 'alternative' THEN 3
+    ELSE 4
+  END,
+  id;
+
 -- name: DeleteMediaTitlesByItem :exec
 DELETE FROM media_titles WHERE media_item_id = $1;

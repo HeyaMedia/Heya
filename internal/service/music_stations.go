@@ -37,11 +37,25 @@ type StationResponse struct {
 }
 
 // LibraryRadio: N random tracks from across the music library.
+// Sample-first (TABLESAMPLE) with a mandatory full-scan fallback: on a small
+// library the 2% page sample can return fewer than limit rows (or none), and
+// the full query is cheap exactly there.
 func (a *App) LibraryRadio(ctx context.Context, limit int32) (*StationResponse, error) {
 	limit = clampStationLimit(limit)
-	rows, err := sqlc.New(a.db).ListRandomMusicTracks(ctx, limit)
+	q := sqlc.New(a.db)
+	rows, err := q.ListRandomMusicTracks(ctx, limit)
 	if err != nil {
 		return nil, fmt.Errorf("library radio: %w", err)
+	}
+	if int32(len(rows)) < limit {
+		full, fullErr := q.ListRandomMusicTracksFull(ctx, limit)
+		if fullErr != nil {
+			return nil, fmt.Errorf("library radio: %w", fullErr)
+		}
+		rows = make([]sqlc.ListRandomMusicTracksRow, len(full))
+		for i, r := range full {
+			rows[i] = sqlc.ListRandomMusicTracksRow(r)
+		}
 	}
 	tracks := make([]StationTrack, len(rows))
 	for i, r := range rows {
@@ -51,14 +65,31 @@ func (a *App) LibraryRadio(ctx context.Context, limit int32) (*StationResponse, 
 }
 
 // DeepCuts: tracks the user has never (or barely) played.
+// Sample-first with a mandatory fallback: the sampled variant under-fills on
+// small libraries (empty sample) AND on heavily-played ones (the never-played
+// anti-join empties it) — the original fewest-plays-first query covers both.
 func (a *App) DeepCuts(ctx context.Context, userID int64, limit int32) (*StationResponse, error) {
 	limit = clampStationLimit(limit)
-	rows, err := sqlc.New(a.db).ListDeepCutsForUser(ctx, sqlc.ListDeepCutsForUserParams{
+	q := sqlc.New(a.db)
+	rows, err := q.ListDeepCutsForUser(ctx, sqlc.ListDeepCutsForUserParams{
 		UserID:     userID,
 		TrackLimit: limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("deep cuts: %w", err)
+	}
+	if int32(len(rows)) < limit {
+		full, fullErr := q.ListDeepCutsForUserFull(ctx, sqlc.ListDeepCutsForUserFullParams{
+			UserID:     userID,
+			TrackLimit: limit,
+		})
+		if fullErr != nil {
+			return nil, fmt.Errorf("deep cuts: %w", fullErr)
+		}
+		rows = make([]sqlc.ListDeepCutsForUserRow, len(full))
+		for i, r := range full {
+			rows[i] = sqlc.ListDeepCutsForUserRow(r)
+		}
 	}
 	tracks := make([]StationTrack, len(rows))
 	for i, r := range rows {

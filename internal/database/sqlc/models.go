@@ -430,6 +430,7 @@ type LibraryFile struct {
 	ContentHash  string             `json:"content_hash"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	VideoHeight  int32              `json:"video_height"`
 }
 
 type LibraryNfoDir struct {

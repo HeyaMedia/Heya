@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -81,6 +82,20 @@ func ConnectWithOptions(ctx context.Context, databaseURL string, opts Options) (
 
 	cfg.MaxConns = opts.MaxConns
 	cfg.MinConns = opts.MinConns
+
+	// pgvector 0.8+: let HNSW scans keep iterating (relaxed order) instead of
+	// silently truncating at hnsw.ef_search tuples. Without this, any KNN
+	// query whose LIMIT exceeds ef_search (40 by default) — e.g. the radio
+	// builder's over-fetch — returns ~46 rows no matter the LIMIT once the
+	// planner picks the HNSW index. Best-effort: older pgvector (or a DB
+	// without the extension) doesn't know the GUC, and that must not break
+	// connecting.
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if _, err := conn.Exec(ctx, "SET hnsw.iterative_scan = 'relaxed_order'"); err != nil {
+			return nil //nolint:nilerr // unsupported GUC — feature simply stays off
+		}
+		return nil
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

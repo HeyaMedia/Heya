@@ -16,14 +16,25 @@ SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_typ
        mi.id AS artist_media_item_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug
-FROM albums a
+FROM (
+  SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits
+  FROM albums al
+  WHERE (
+      lower(al.title) % lower($1)
+      OR al.search_vector @@ websearch_to_tsquery('simple', $1)
+      OR lower(al.title) ILIKE lower($1) || '%'
+    )
+  ORDER BY
+    greatest(
+      similarity(lower(al.title), lower($1)),
+      ts_rank(al.search_vector, websearch_to_tsquery('simple', $1)),
+      CASE WHEN lower(al.title) ILIKE lower($1) || '%' THEN 1.0 ELSE 0.0 END
+    ) DESC,
+    al.title ASC
+  LIMIT $2 OFFSET $3
+) a
 JOIN artists ar ON ar.id = a.artist_id
 JOIN media_items mi ON mi.id = ar.media_item_id
-WHERE (
-    lower(a.title) % lower($1)
-    OR a.search_vector @@ websearch_to_tsquery('simple', $1)
-    OR lower(a.title) ILIKE lower($1) || '%'
-  )
 ORDER BY
   greatest(
     similarity(lower(a.title), lower($1)),
@@ -31,7 +42,6 @@ ORDER BY
     CASE WHEN lower(a.title) ILIKE lower($1) || '%' THEN 1.0 ELSE 0.0 END
   ) DESC,
   a.title ASC
-LIMIT $2 OFFSET $3
 `
 
 type SearchAlbumsParams struct {
@@ -81,6 +91,10 @@ type SearchAlbumsRow struct {
 	ArtistSlug         string             `json:"artist_slug"`
 }
 
+// All three match arms stay (the % arm is the only typo path — 'nevermnd'
+// matches 42 albums via % and zero via tsvector/prefix). The derived table
+// ranks + limits over albums alone so the artists/media_items joins run as
+// pkey nested loops on <= LIMIT rows instead of hash joins over every artist.
 func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]SearchAlbumsRow, error) {
 	rows, err := q.db.Query(ctx, searchAlbums, arg.Lower, arg.Limit, arg.Offset)
 	if err != nil {
@@ -429,25 +443,23 @@ SELECT p.id, p.external_ids, p.name, p.also_known_as, p.biography, p.birthday, p
        (SELECT count(*) FROM media_crew WHERE person_id = p.id)::int AS crew_count
 FROM people p
 WHERE (
-    lower(p.name) % lower($1)
-    OR p.search_vector @@ websearch_to_tsquery('simple', $1)
+    p.search_vector @@ websearch_to_tsquery('simple', $1)
     OR lower(p.name) ILIKE lower($1) || '%'
   )
 ORDER BY
   greatest(
-    similarity(lower(p.name), lower($1)),
     ts_rank(p.search_vector, websearch_to_tsquery('simple', $1)),
     CASE WHEN lower(p.name) ILIKE lower($1) || '%' THEN 1.0 ELSE 0.0 END
   ) DESC,
   p.popularity DESC,
   p.name ASC
-LIMIT $2 OFFSET $3
+LIMIT $3 OFFSET $2
 `
 
 type SearchPeopleParams struct {
-	Lower  string `json:"lower"`
-	Limit  int32  `json:"limit"`
+	Query  string `json:"query"`
 	Offset int32  `json:"offset"`
+	Limit  int32  `json:"limit"`
 }
 
 type SearchPeopleRow struct {
@@ -476,8 +488,14 @@ type SearchPeopleRow struct {
 	CrewCount          int32              `json:"crew_count"`
 }
 
+// No trigram % arm here (unlike the other buckets): at 101k people rows it
+// forced a parallel seq scan on every search (~150ms items + ~150ms count);
+// without it both queries take the BitmapOr(tsvector + prefix) path (~20ms).
+// Typo tolerance narrows to token/prefix matches — the tsvector arm indexes
+// also_known_as aliases at weight B, which covers most alias fuzziness.
+// The count query must keep the same arms so totals match the items.
 func (q *Queries) SearchPeople(ctx context.Context, arg SearchPeopleParams) ([]SearchPeopleRow, error) {
-	rows, err := q.db.Query(ctx, searchPeople, arg.Lower, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, searchPeople, arg.Query, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -524,14 +542,13 @@ const searchPeopleCount = `-- name: SearchPeopleCount :one
 SELECT count(*)
 FROM people p
 WHERE (
-    lower(p.name) % lower($1)
-    OR p.search_vector @@ websearch_to_tsquery('simple', $1)
+    p.search_vector @@ websearch_to_tsquery('simple', $1)
     OR lower(p.name) ILIKE lower($1) || '%'
   )
 `
 
-func (q *Queries) SearchPeopleCount(ctx context.Context, lower string) (int64, error) {
-	row := q.db.QueryRow(ctx, searchPeopleCount, lower)
+func (q *Queries) SearchPeopleCount(ctx context.Context, query string) (int64, error) {
+	row := q.db.QueryRow(ctx, searchPeopleCount, query)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -546,29 +563,36 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.f
        mi.title AS artist_name,
        mi.slug AS artist_slug,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
-FROM tracks t
+FROM (
+  SELECT tr.id, tr.album_id, tr.disc_number, tr.track_number, tr.title, tr.duration, tr.file_path, tr.lyrics_path, tr.search_vector, tr.library_file_id, tr.external_ids, tr.isrc, tr.recording_mbid, tr.preview_url, tr.explicit, tr.artist_credits
+  FROM tracks tr
+  WHERE (
+      tr.search_vector @@ websearch_to_tsquery('simple', $1)
+      OR lower(tr.title) ILIKE lower($1) || '%'
+    )
+  ORDER BY
+    greatest(
+      ts_rank(tr.search_vector, websearch_to_tsquery('simple', $1)),
+      CASE WHEN lower(tr.title) ILIKE lower($1) || '%' THEN 1.0 ELSE 0.0 END
+    ) DESC,
+    tr.title ASC
+  LIMIT $3 OFFSET $2
+) t
 JOIN albums a ON a.id = t.album_id
 JOIN artists ar ON ar.id = a.artist_id
 JOIN media_items mi ON mi.id = ar.media_item_id
-WHERE (
-    lower(t.title) % lower($1)
-    OR t.search_vector @@ websearch_to_tsquery('simple', $1)
-    OR lower(t.title) ILIKE lower($1) || '%'
-  )
 ORDER BY
   greatest(
-    similarity(lower(t.title), lower($1)),
     ts_rank(t.search_vector, websearch_to_tsquery('simple', $1)),
     CASE WHEN lower(t.title) ILIKE lower($1) || '%' THEN 1.0 ELSE 0.0 END
   ) DESC,
   t.title ASC
-LIMIT $2 OFFSET $3
 `
 
 type SearchTracksParams struct {
-	Lower  string `json:"lower"`
-	Limit  int32  `json:"limit"`
+	Query  string `json:"query"`
 	Offset int32  `json:"offset"`
+	Limit  int32  `json:"limit"`
 }
 
 type SearchTracksRow struct {
@@ -597,8 +621,17 @@ type SearchTracksRow struct {
 	Available         bool        `json:"available"`
 }
 
+// Two deliberate deviations from the generic search shape (measured on the
+// 240k-track prod dataset — 1.46s -> ~50ms worst common term):
+//   - No trigram % arm: it forced a parallel seq scan over all tracks, and
+//     short-word typos fall below the 0.3 similarity threshold anyway, so it
+//     contributed nothing the tsvector + prefix arms don't cover here.
+//     SearchTracksCount drops the same arm so totals stay consistent.
+//   - Derived table: ranks + limits over tracks alone, then joins album/
+//     artist and computes the availability EXISTS on <= LIMIT rows. Inlined,
+//     the planner hashes the EXISTS over ALL 673k library_files per search.
 func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]SearchTracksRow, error) {
-	rows, err := q.db.Query(ctx, searchTracks, arg.Lower, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, searchTracks, arg.Query, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -645,14 +678,13 @@ const searchTracksCount = `-- name: SearchTracksCount :one
 SELECT count(*)
 FROM tracks t
 WHERE (
-    lower(t.title) % lower($1)
-    OR t.search_vector @@ websearch_to_tsquery('simple', $1)
+    t.search_vector @@ websearch_to_tsquery('simple', $1)
     OR lower(t.title) ILIKE lower($1) || '%'
   )
 `
 
-func (q *Queries) SearchTracksCount(ctx context.Context, lower string) (int64, error) {
-	row := q.db.QueryRow(ctx, searchTracksCount, lower)
+func (q *Queries) SearchTracksCount(ctx context.Context, query string) (int64, error) {
+	row := q.db.QueryRow(ctx, searchTracksCount, query)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

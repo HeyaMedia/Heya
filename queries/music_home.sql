@@ -141,25 +141,38 @@ LIMIT $2;
 -- name: ListArtistsByGenre :many
 -- Artists whose albums include the given genre, library scoped to music.
 -- This drives the "More in <genre>" no-images list — the FE renders it as
--- an artist-name list with album/track counts. The DISTINCT lift keeps one
--- row per artist even when several of their albums share the genre.
-SELECT DISTINCT a.id                                                                   AS artist_id,
-                a.name                                                                  AS artist_name,
-                mi.id                                                                   AS media_item_id,
-                mi.slug                                                                 AS artist_slug,
-                mi.poster_path                                                          AS poster_path,
-                (SELECT count(*) FROM albums al2 WHERE al2.artist_id = a.id)            AS album_count,
-                (SELECT count(*) FROM tracks t   JOIN albums al3 ON al3.id = t.album_id
-                                                  WHERE al3.artist_id = a.id)           AS track_count
-FROM artists a
-JOIN albums       al ON al.artist_id = a.id
-JOIN media_items  mi ON mi.id = a.media_item_id
-JOIN libraries    l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-  AND sqlc.arg(genre)::text = ANY(al.genres)
-  AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-ORDER BY a.name ASC
-LIMIT $1;
+-- an artist-name list with album/track counts.
+-- Dedup + limit happen in the inner subquery so the count subqueries run
+-- once per OUTPUT row (the LIMIT) instead of once per (artist × genre-album)
+-- join row — 5,150 joins rows for 'Electronic' made the original ~1.3s;
+-- this shape measures ~95ms on the same data. a.id tie-break: duplicate
+-- artist names exist; keeps the LIMIT boundary deterministic regardless of
+-- DISTINCT plan shape.
+SELECT sub.artist_id,
+       sub.artist_name,
+       sub.media_item_id,
+       sub.artist_slug,
+       sub.poster_path,
+       (SELECT count(*) FROM albums al2 WHERE al2.artist_id = sub.artist_id) AS album_count,
+       (SELECT count(*) FROM tracks t JOIN albums al3 ON al3.id = t.album_id
+                                       WHERE al3.artist_id = sub.artist_id)  AS track_count
+FROM (
+    SELECT DISTINCT a.id           AS artist_id,
+                    a.name         AS artist_name,
+                    mi.id          AS media_item_id,
+                    mi.slug        AS artist_slug,
+                    mi.poster_path AS poster_path
+    FROM artists a
+    JOIN albums       al ON al.artist_id = a.id
+    JOIN media_items  mi ON mi.id = a.media_item_id
+    JOIN libraries    l  ON l.id  = mi.library_id
+    WHERE l.media_type = 'music'
+      AND sqlc.arg(genre)::text = ANY(al.genres)
+      AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
+    ORDER BY a.name ASC, a.id ASC
+    LIMIT $1
+) sub
+ORDER BY sub.artist_name ASC, sub.artist_id ASC;
 
 -- name: MostPlayedAlbumsInRange :many
 -- "Most Played in <month>" — albums ordered by # of play_events landing on

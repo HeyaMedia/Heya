@@ -102,13 +102,12 @@ func (q *Queries) CountAlbumsByArtistSlug(ctx context.Context, slug string) (int
 }
 
 const countMusicAlbums = `-- name: CountMusicAlbums :one
-SELECT count(*) FROM albums al
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
+SELECT count(*) FROM albums
 `
 
+// Bare count: albums exist only under music libraries (created solely by the
+// music matcher), so the artists/media_items/libraries joins filtered nothing
+// while costing 2.3k per-artist index probes.
 func (q *Queries) CountMusicAlbums(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countMusicAlbums)
 	var count int64
@@ -117,12 +116,11 @@ func (q *Queries) CountMusicAlbums(ctx context.Context) (int64, error) {
 }
 
 const countMusicArtists = `-- name: CountMusicArtists :one
-SELECT count(*) FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
+SELECT count(*) FROM artists
 `
 
+// Bare count — artists rows are created solely by the music matcher, so they
+// exist only under music libraries and the joins filtered nothing.
 func (q *Queries) CountMusicArtists(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countMusicArtists)
 	var count int64
@@ -131,14 +129,12 @@ func (q *Queries) CountMusicArtists(ctx context.Context) (int64, error) {
 }
 
 const countMusicTracks = `-- name: CountMusicTracks :one
-SELECT count(*) FROM tracks t
-JOIN albums      al ON al.id = t.album_id
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
+SELECT count(*) FROM tracks
 `
 
+// Bare count — tracks exist only under music libraries; see CountMusicAlbums.
+// The joined form ran 50k per-album index probes (~200-370ms) on every Songs
+// page navigation.
 func (q *Queries) CountMusicTracks(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countMusicTracks)
 	var count int64
@@ -2036,18 +2032,21 @@ func (q *Queries) ListArtistsByLibrary(ctx context.Context, libraryID int64) ([]
 }
 
 const listMusicAlbums = `-- name: ListMusicAlbums :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits,
-       a.name           AS artist_name,
-       mi.slug          AS artist_slug,
-       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
-       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
-FROM albums al
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC
-LIMIT $1 OFFSET $2
+SELECT sub.id, sub.artist_id, sub.title, sub.slug, sub.year, sub.musicbrainz_id, sub.album_type, sub.genres, sub.cover_path, sub.release_date, sub.label, sub.country, sub.barcode, sub.total_tracks, sub.total_discs, sub.tags, sub.integrated_lufs, sub.true_peak_db, sub.loudness_range_db, sub.loudness_analyzed_at, sub.search_vector, sub.catalog_no, sub.explicit, sub.original_title, sub.secondary_types, sub.styles, sub.language, sub.duration_seconds, sub.isrcs, sub.rating, sub.popularity, sub.listeners, sub.playcount, sub.external_ids, sub.artist_credits, sub.artist_name, sub.artist_slug,
+       (SELECT count(*) FROM tracks t WHERE t.album_id = sub.id) AS track_count,
+       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = sub.id AND lf.deleted_at IS NULL) AS available
+FROM (
+    SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits,
+           a.name  AS artist_name,
+           mi.slug AS artist_slug
+    FROM albums al
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_items mi ON mi.id = a.media_item_id
+    WHERE mi.media_type = 'music'
+    ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC, al.id ASC
+    LIMIT $1 OFFSET $2
+) sub
+ORDER BY lower(sub.artist_name) ASC, sub.year ASC, lower(sub.title) ASC, sub.id ASC
 `
 
 type ListMusicAlbumsParams struct {
@@ -2101,6 +2100,16 @@ type ListMusicAlbumsRow struct {
 // so the Albums grid can render "Title — Artist" without a second round-trip.
 // album_slug is unique within the artist; artist_slug routes to the artist
 // detail page.
+//
+// Perf notes (do not "simplify"):
+//   - The derived table bounds the top-N sort before the per-album
+//     track_count/available subplans run; mi.media_type replaces the libraries
+//     join (equivalent: library_id NOT NULL FK, media_type mirrors the
+//     library) whose row misestimate forced a serial nested loop over all 51k
+//     albums. Do NOT swap the predicate without the wrap — that plan hashes
+//     the EXISTS over all library_files (measured 12x regression).
+//   - al.id tie-break: duplicate (name, year, title) sort keys exist, so
+//     OFFSET pagination needs it to stay deterministic across plan changes.
 func (q *Queries) ListMusicAlbums(ctx context.Context, arg ListMusicAlbumsParams) ([]ListMusicAlbumsRow, error) {
 	rows, err := q.db.Query(ctx, listMusicAlbums, arg.Limit, arg.Offset)
 	if err != nil {
@@ -2275,29 +2284,33 @@ func (q *Queries) ListMusicArtists(ctx context.Context, arg ListMusicArtistsPara
 }
 
 const listMusicTracks = `-- name: ListMusicTracks :many
-SELECT t.id              AS track_id,
-       t.title           AS track_title,
-       t.duration        AS duration,
-       t.disc_number     AS disc_number,
-       t.track_number    AS track_number,
-       al.id             AS album_id,
-       al.title          AS album_title,
-       al.slug           AS album_slug,
-       al.cover_path     AS album_cover_path,
-       al.year           AS album_year,
-       a.id              AS artist_id,
-       a.name            AS artist_name,
-       mi.slug           AS artist_slug,
-       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
-FROM tracks t
-JOIN albums      al ON al.id = t.album_id
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC,
-         t.disc_number ASC, t.track_number ASC
-LIMIT $1 OFFSET $2
+SELECT page.track_id, page.track_title, page.duration, page.disc_number, page.track_number, page.album_id, page.album_title, page.album_slug, page.album_cover_path, page.album_year, page.artist_id, page.artist_name, page.artist_slug,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = page.track_id AND lf.deleted_at IS NULL) AS available
+FROM (
+  SELECT t.id              AS track_id,
+         t.title           AS track_title,
+         t.duration        AS duration,
+         t.disc_number     AS disc_number,
+         t.track_number    AS track_number,
+         al.id             AS album_id,
+         al.title          AS album_title,
+         al.slug           AS album_slug,
+         al.cover_path     AS album_cover_path,
+         al.year           AS album_year,
+         a.id              AS artist_id,
+         a.name            AS artist_name,
+         mi.slug           AS artist_slug
+  FROM tracks t
+  JOIN albums      al ON al.id = t.album_id
+  JOIN artists     a  ON a.id  = al.artist_id
+  JOIN media_items mi ON mi.id = a.media_item_id
+  WHERE mi.media_type = 'music'
+  ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC,
+           t.disc_number ASC, t.track_number ASC, t.id ASC
+  LIMIT $1 OFFSET $2
+) page
+ORDER BY lower(page.artist_name) ASC, page.album_year ASC, lower(page.album_title) ASC,
+         page.disc_number ASC, page.track_number ASC, page.track_id ASC
 `
 
 type ListMusicTracksParams struct {
@@ -2326,6 +2339,18 @@ type ListMusicTracksRow struct {
 // title, duration, album title, artist name, slugs for navigation, and the
 // album cover for the thumbnail. album_slug + artist_slug together address
 // the album cover endpoint without an ID lookup.
+//
+// Perf notes (do not "simplify"):
+//   - mi.media_type filter (not JOIN libraries + l.media_type): accurate stats
+//     let the planner pick an incremental-sort plan instead of materializing
+//     all 240k joined tracks per page. Equivalent because media_items.media_type
+//     mirrors its library's media_type and library_id is a NOT NULL FK.
+//   - The derived-table wrap is mandatory: it keeps the availability EXISTS a
+//     per-row index lookup on the page's rows only. Inlined, the planner flips
+//     it to a hashed subplan that seq-scans all track_files x library_files.
+//   - The outer ORDER BY re-sorts only the page rows (cheap) and guarantees
+//     output order — SQL does not promise derived-table order preservation.
+//   - t.id tie-break keeps OFFSET page boundaries deterministic.
 func (q *Queries) ListMusicTracks(ctx context.Context, arg ListMusicTracksParams) ([]ListMusicTracksRow, error) {
 	rows, err := q.db.Query(ctx, listMusicTracks, arg.Limit, arg.Offset)
 	if err != nil {
@@ -2367,13 +2392,13 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
        EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
-FROM albums al
+FROM (
+  SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits FROM albums ORDER BY id DESC LIMIT $1
+) al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
+WHERE mi.media_type = 'music'
 ORDER BY al.id DESC
-LIMIT $1
 `
 
 type ListRecentlyAddedAlbumsRow struct {
@@ -2418,8 +2443,12 @@ type ListRecentlyAddedAlbumsRow struct {
 	Available          bool               `json:"available"`
 }
 
-// Newest albums across every music library, paginated. Newest = highest
-// album id since albums get IDENTITY-generated IDs in insert order.
+// Newest albums across every music library. Newest = highest album id since
+// albums get IDENTITY-generated IDs in insert order. The derived table pins
+// the plan to a backward albums_pkey scan (LIMIT before joins) AND keeps the
+// EXISTS below a cheap per-row probe — without it the planner hashes the
+// entire track_files x library_files join (measured 1.26s vs 1.9ms). Keep the
+// outer ORDER BY: plan-order preservation through the joins is not guaranteed.
 func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, limit int32) ([]ListRecentlyAddedAlbumsRow, error) {
 	rows, err := q.db.Query(ctx, listRecentlyAddedAlbums, limit)
 	if err != nil {
@@ -2641,6 +2670,63 @@ func (q *Queries) ListStaleArtistsByLibrary(ctx context.Context, arg ListStaleAr
 			&i.Deathday,
 			&i.Birthplace,
 			&i.Tags,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTrackFilesByAlbum = `-- name: ListTrackFilesByAlbum :many
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
+FROM track_files tf
+JOIN tracks t ON t.id = tf.track_id
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE t.album_id = $1 AND lf.deleted_at IS NULL
+ORDER BY tf.track_id ASC, tf.quality_score DESC, tf.id ASC
+`
+
+// Whole-album batch of ListTrackFilesByTrack — the album detail page groups
+// these by track_id instead of issuing one query per track (up to 210 round
+// trips on the biggest album). Within each track_id the order matches
+// ListTrackFilesByTrack: best quality first.
+func (q *Queries) ListTrackFilesByAlbum(ctx context.Context, albumID int64) ([]TrackFile, error) {
+	rows, err := q.db.Query(ctx, listTrackFilesByAlbum, albumID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TrackFile{}
+	for rows.Next() {
+		var i TrackFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.TrackID,
+			&i.LibraryFileID,
+			&i.Format,
+			&i.QualityScore,
+			&i.BitrateKbps,
+			&i.SampleRateHz,
+			&i.BitDepth,
+			&i.Channels,
+			&i.Duration,
+			&i.SizeBytes,
+			&i.LyricsPath,
+			&i.IntegratedLufs,
+			&i.TruePeakDb,
+			&i.LoudnessRangeDb,
+			&i.SamplePeakDb,
+			&i.LoudnessAnalyzedAt,
+			&i.CreatedAt,
+			&i.IntroEndMs,
+			&i.OutroStartMs,
+			&i.FadeStartMs,
+			&i.SilenceStartMs,
+			&i.BoundariesAnalyzedAt,
 		); err != nil {
 			return nil, err
 		}

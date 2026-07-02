@@ -79,7 +79,7 @@ func (q *Queries) DeleteLibraryFilesByPath(ctx context.Context, arg DeleteLibrar
 }
 
 const getLibraryFileByID = `-- name: GetLibraryFileByID :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files WHERE id = $1
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files WHERE id = $1
 `
 
 func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile, error) {
@@ -102,12 +102,13 @@ func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile
 		&i.ContentHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.VideoHeight,
 	)
 	return i, err
 }
 
 const getLibraryFileByPath = `-- name: GetLibraryFileByPath :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files WHERE library_id = $1 AND path = $2
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files WHERE library_id = $1 AND path = $2
 `
 
 type GetLibraryFileByPathParams struct {
@@ -135,6 +136,7 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 		&i.ContentHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.VideoHeight,
 	)
 	return i, err
 }
@@ -227,7 +229,7 @@ func (q *Queries) ListAllLibraryFilePaths(ctx context.Context, libraryID int64) 
 }
 
 const listDeletedFilesBySize = `-- name: ListDeletedFilesBySize :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
 WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
   AND deleted_at > now() - interval '7 days'
 ORDER BY deleted_at DESC
@@ -270,6 +272,7 @@ func (q *Queries) ListDeletedFilesBySize(ctx context.Context, arg ListDeletedFil
 			&i.ContentHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.VideoHeight,
 		); err != nil {
 			return nil, err
 		}
@@ -282,7 +285,7 @@ func (q *Queries) ListDeletedFilesBySize(ctx context.Context, arg ListDeletedFil
 }
 
 const listDeletedLibraryFiles = `-- name: ListDeletedLibraryFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
 WHERE library_id = $1 AND deleted_at IS NOT NULL
 ORDER BY deleted_at DESC
 LIMIT $2 OFFSET $3
@@ -320,6 +323,7 @@ func (q *Queries) ListDeletedLibraryFiles(ctx context.Context, arg ListDeletedLi
 			&i.ContentHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.VideoHeight,
 		); err != nil {
 			return nil, err
 		}
@@ -363,8 +367,44 @@ func (q *Queries) ListEpisodeFiles(ctx context.Context, mediaItemID pgtype.Int8)
 	return items, nil
 }
 
+const listLibraryFileSizesByMediaItem = `-- name: ListLibraryFileSizesByMediaItem :many
+SELECT id, size FROM library_files
+WHERE media_item_id = $1 AND deleted_at IS NULL
+ORDER BY path COLLATE "C" ASC
+`
+
+type ListLibraryFileSizesByMediaItemRow struct {
+	ID   int64 `json:"id"`
+	Size int64 `json:"size"`
+}
+
+// Narrow variant for the media-detail response, which only renders id+size:
+// SELECT * detoasts media_info/parse_result/keyframes jsonb for every file —
+// ~30MB and ~750ms for a big music artist. COLLATE "C" keeps the first row
+// (the FE's playable file) deterministic while skipping the expensive
+// en_US.utf8 collation on long common-prefix paths.
+func (q *Queries) ListLibraryFileSizesByMediaItem(ctx context.Context, mediaItemID pgtype.Int8) ([]ListLibraryFileSizesByMediaItemRow, error) {
+	rows, err := q.db.Query(ctx, listLibraryFileSizesByMediaItem, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLibraryFileSizesByMediaItemRow{}
+	for rows.Next() {
+		var i ListLibraryFileSizesByMediaItemRow
+		if err := rows.Scan(&i.ID, &i.Size); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLibraryFiles = `-- name: ListLibraryFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
 WHERE library_id = $1 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
@@ -402,6 +442,7 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 			&i.ContentHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.VideoHeight,
 		); err != nil {
 			return nil, err
 		}
@@ -414,7 +455,7 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 }
 
 const listLibraryFilesByMediaItem = `-- name: ListLibraryFilesByMediaItem :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDER BY path ASC
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDER BY path ASC
 `
 
 func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID pgtype.Int8) ([]LibraryFile, error) {
@@ -443,6 +484,7 @@ func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID p
 			&i.ContentHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.VideoHeight,
 		); err != nil {
 			return nil, err
 		}
@@ -455,7 +497,7 @@ func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID p
 }
 
 const listLibraryFilesByStatus = `-- name: ListLibraryFilesByStatus :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
 WHERE library_id = $1 AND status = $4 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
@@ -499,6 +541,7 @@ func (q *Queries) ListLibraryFilesByStatus(ctx context.Context, arg ListLibraryF
 			&i.ContentHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.VideoHeight,
 		); err != nil {
 			return nil, err
 		}
@@ -560,21 +603,12 @@ func (q *Queries) ListLibraryFilesForScan(ctx context.Context, libraryID int64) 
 }
 
 const listMediaResolutions = `-- name: ListMediaResolutions :many
-SELECT lf.media_item_id,
-       max(
-         COALESCE(
-           (SELECT (s->>'height')::int
-            FROM jsonb_array_elements(lf.media_info->'streams') AS s
-            WHERE s->>'codec_type' = 'video'
-            LIMIT 1),
-           0
-         )
-       )::int AS max_height
-FROM library_files lf
-WHERE lf.media_item_id = ANY($1::bigint[])
-  AND lf.deleted_at IS NULL
-  AND lf.media_info IS NOT NULL
-GROUP BY lf.media_item_id
+SELECT media_item_id,
+       max(video_height)::int AS max_height
+FROM library_files
+WHERE media_item_id = ANY($1::bigint[])
+  AND deleted_at IS NULL
+GROUP BY media_item_id
 `
 
 type ListMediaResolutionsRow struct {
@@ -582,6 +616,12 @@ type ListMediaResolutionsRow struct {
 	MaxHeight   int32       `json:"max_height"`
 }
 
+// Reads the denormalized video_height (written by UpdateLibraryFileMediaInfo,
+// backfilled by migration 00037) instead of unpacking media_info jsonb per
+// row: the jsonb variant seq-scanned 673k rows and detoasted 71k ffprobe
+// payloads per TV browse (~1.5s). Served index-only by
+// idx_library_files_media_item_height. Keep the ::int cast — it pins the
+// sqlc row shape to MaxHeight int32.
 func (q *Queries) ListMediaResolutions(ctx context.Context, mediaItemIds []int64) ([]ListMediaResolutionsRow, error) {
 	rows, err := q.db.Query(ctx, listMediaResolutions, mediaItemIds)
 	if err != nil {
@@ -603,7 +643,7 @@ func (q *Queries) ListMediaResolutions(ctx context.Context, mediaItemIds []int64
 }
 
 const listRetryableUnmatchedFiles = `-- name: ListRetryableUnmatchedFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
 WHERE library_id = $1
   AND deleted_at IS NULL
   AND status = 'unmatched'
@@ -648,6 +688,7 @@ func (q *Queries) ListRetryableUnmatchedFiles(ctx context.Context, arg ListRetry
 			&i.ContentHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.VideoHeight,
 		); err != nil {
 			return nil, err
 		}
@@ -660,7 +701,7 @@ func (q *Queries) ListRetryableUnmatchedFiles(ctx context.Context, arg ListRetry
 }
 
 const listUnprobedProbeableFiles = `-- name: ListUnprobedProbeableFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
 WHERE library_id = $1
   AND deleted_at IS NULL
   AND status <> 'pending'
@@ -705,6 +746,7 @@ func (q *Queries) ListUnprobedProbeableFiles(ctx context.Context, arg ListUnprob
 			&i.ContentHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.VideoHeight,
 		); err != nil {
 			return nil, err
 		}
@@ -862,7 +904,13 @@ func (q *Queries) UpdateLibraryFileKeyframes(ctx context.Context, arg UpdateLibr
 
 const updateLibraryFileMediaInfo = `-- name: UpdateLibraryFileMediaInfo :exec
 UPDATE library_files
-SET media_info = $2, updated_at = now()
+SET media_info = $2,
+    video_height = COALESCE(
+      (SELECT (s->>'height')::int
+       FROM jsonb_array_elements($2::jsonb->'streams') AS s
+       WHERE s->>'codec_type' = 'video'
+       LIMIT 1), 0),
+    updated_at = now()
 WHERE id = $1
 `
 
@@ -871,6 +919,11 @@ type UpdateLibraryFileMediaInfoParams struct {
 	MediaInfo []byte `json:"media_info"`
 }
 
+// video_height is denormalized from the ffprobe payload here — the single
+// writer of media_info (ffprobe worker, service/probe, matcher/music all come
+// through this query), so the derived column can't drift. The browse pages
+// read it via ListMediaResolutions instead of digging through media_info
+// jsonb per row (which cost ~1.5s/page at 71k probed files).
 func (q *Queries) UpdateLibraryFileMediaInfo(ctx context.Context, arg UpdateLibraryFileMediaInfoParams) error {
 	_, err := q.db.Exec(ctx, updateLibraryFileMediaInfo, arg.ID, arg.MediaInfo)
 	return err
@@ -921,9 +974,9 @@ VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (library_id, path) DO UPDATE
 SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
-    media_info = '{}'::jsonb, keyframes = NULL,
+    media_info = '{}'::jsonb, keyframes = NULL, video_height = 0,
     deleted_at = NULL, updated_at = now()
-RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at
+RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height
 `
 
 type UpsertLibraryFileParams struct {
@@ -967,6 +1020,7 @@ func (q *Queries) UpsertLibraryFile(ctx context.Context, arg UpsertLibraryFilePa
 		&i.ContentHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.VideoHeight,
 	)
 	return i, err
 }

@@ -47,6 +47,15 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return cachedJSON(page, 30), nil
 		})
 
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/counts", "music-counts", "Artist/album/track totals", "Music")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[*service.MusicCounts], error) {
+			counts, err := app.GetMusicCounts(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(counts, 30), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home", "music-home", "Music homepage feed", "Music")),
 		func(ctx context.Context, in *struct {
 			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"24"`

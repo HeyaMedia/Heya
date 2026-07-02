@@ -433,6 +433,18 @@ JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
 ORDER BY tf.quality_score DESC, tf.id ASC;
 
+-- name: ListTrackFilesByAlbum :many
+-- Whole-album batch of ListTrackFilesByTrack — the album detail page groups
+-- these by track_id instead of issuing one query per track (up to 210 round
+-- trips on the biggest album). Within each track_id the order matches
+-- ListTrackFilesByTrack: best quality first.
+SELECT tf.*
+FROM track_files tf
+JOIN tracks t ON t.id = tf.track_id
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE t.album_id = $1 AND lf.deleted_at IS NULL
+ORDER BY tf.track_id ASC, tf.quality_score DESC, tf.id ASC;
+
 -- name: GetTrackFileByLibraryFileID :one
 SELECT * FROM track_files WHERE library_file_id = $1;
 
@@ -467,10 +479,9 @@ ORDER BY lower(coalesce(NULLIF(a.sort_name, ''), a.name)) ASC
 LIMIT $1 OFFSET $2;
 
 -- name: CountMusicArtists :one
-SELECT count(*) FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music';
+-- Bare count — artists rows are created solely by the music matcher, so they
+-- exist only under music libraries and the joins filtered nothing.
+SELECT count(*) FROM artists;
 
 -- name: GetMusicArtistBySlug :one
 -- Direct artist lookup by media-item slug. Same row shape as ListMusicArtists
@@ -545,62 +556,88 @@ WHERE mi.slug = $1;
 -- so the Albums grid can render "Title — Artist" without a second round-trip.
 -- album_slug is unique within the artist; artist_slug routes to the artist
 -- detail page.
-SELECT al.*,
-       a.name           AS artist_name,
-       mi.slug          AS artist_slug,
-       (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
-       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
-FROM albums al
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC
-LIMIT $1 OFFSET $2;
+--
+-- Perf notes (do not "simplify"):
+--  * The derived table bounds the top-N sort before the per-album
+--    track_count/available subplans run; mi.media_type replaces the libraries
+--    join (equivalent: library_id NOT NULL FK, media_type mirrors the
+--    library) whose row misestimate forced a serial nested loop over all 51k
+--    albums. Do NOT swap the predicate without the wrap — that plan hashes
+--    the EXISTS over all library_files (measured 12x regression).
+--  * al.id tie-break: duplicate (name, year, title) sort keys exist, so
+--    OFFSET pagination needs it to stay deterministic across plan changes.
+SELECT sub.*,
+       (SELECT count(*) FROM tracks t WHERE t.album_id = sub.id) AS track_count,
+       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = sub.id AND lf.deleted_at IS NULL) AS available
+FROM (
+    SELECT al.*,
+           a.name  AS artist_name,
+           mi.slug AS artist_slug
+    FROM albums al
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_items mi ON mi.id = a.media_item_id
+    WHERE mi.media_type = 'music'
+    ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC, al.id ASC
+    LIMIT $1 OFFSET $2
+) sub
+ORDER BY lower(sub.artist_name) ASC, sub.year ASC, lower(sub.title) ASC, sub.id ASC;
 
 -- name: CountMusicAlbums :one
-SELECT count(*) FROM albums al
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music';
+-- Bare count: albums exist only under music libraries (created solely by the
+-- music matcher), so the artists/media_items/libraries joins filtered nothing
+-- while costing 2.3k per-artist index probes.
+SELECT count(*) FROM albums;
 
 -- name: ListMusicTracks :many
 -- Flat listing for the Songs tab. Carries everything the row needs:
 -- title, duration, album title, artist name, slugs for navigation, and the
 -- album cover for the thumbnail. album_slug + artist_slug together address
 -- the album cover endpoint without an ID lookup.
-SELECT t.id              AS track_id,
-       t.title           AS track_title,
-       t.duration        AS duration,
-       t.disc_number     AS disc_number,
-       t.track_number    AS track_number,
-       al.id             AS album_id,
-       al.title          AS album_title,
-       al.slug           AS album_slug,
-       al.cover_path     AS album_cover_path,
-       al.year           AS album_year,
-       a.id              AS artist_id,
-       a.name            AS artist_name,
-       mi.slug           AS artist_slug,
-       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
-FROM tracks t
-JOIN albums      al ON al.id = t.album_id
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC,
-         t.disc_number ASC, t.track_number ASC
-LIMIT $1 OFFSET $2;
+--
+-- Perf notes (do not "simplify"):
+--  * mi.media_type filter (not JOIN libraries + l.media_type): accurate stats
+--    let the planner pick an incremental-sort plan instead of materializing
+--    all 240k joined tracks per page. Equivalent because media_items.media_type
+--    mirrors its library's media_type and library_id is a NOT NULL FK.
+--  * The derived-table wrap is mandatory: it keeps the availability EXISTS a
+--    per-row index lookup on the page's rows only. Inlined, the planner flips
+--    it to a hashed subplan that seq-scans all track_files x library_files.
+--  * The outer ORDER BY re-sorts only the page rows (cheap) and guarantees
+--    output order — SQL does not promise derived-table order preservation.
+--  * t.id tie-break keeps OFFSET page boundaries deterministic.
+SELECT page.*,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = page.track_id AND lf.deleted_at IS NULL) AS available
+FROM (
+  SELECT t.id              AS track_id,
+         t.title           AS track_title,
+         t.duration        AS duration,
+         t.disc_number     AS disc_number,
+         t.track_number    AS track_number,
+         al.id             AS album_id,
+         al.title          AS album_title,
+         al.slug           AS album_slug,
+         al.cover_path     AS album_cover_path,
+         al.year           AS album_year,
+         a.id              AS artist_id,
+         a.name            AS artist_name,
+         mi.slug           AS artist_slug
+  FROM tracks t
+  JOIN albums      al ON al.id = t.album_id
+  JOIN artists     a  ON a.id  = al.artist_id
+  JOIN media_items mi ON mi.id = a.media_item_id
+  WHERE mi.media_type = 'music'
+  ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC,
+           t.disc_number ASC, t.track_number ASC, t.id ASC
+  LIMIT $1 OFFSET $2
+) page
+ORDER BY lower(page.artist_name) ASC, page.album_year ASC, lower(page.album_title) ASC,
+         page.disc_number ASC, page.track_number ASC, page.track_id ASC;
 
 -- name: CountMusicTracks :one
-SELECT count(*) FROM tracks t
-JOIN albums      al ON al.id = t.album_id
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music';
+-- Bare count — tracks exist only under music libraries; see CountMusicAlbums.
+-- The joined form ran 50k per-album index probes (~200-370ms) on every Songs
+-- page navigation.
+SELECT count(*) FROM tracks;
 
 -- name: GetPrimaryTrackFile :one
 -- The single best file for a track: highest quality_score, smallest id as
@@ -617,20 +654,24 @@ LIMIT 1;
 SELECT * FROM track_files WHERE id = $1;
 
 -- name: ListRecentlyAddedAlbums :many
--- Newest albums across every music library, paginated. Newest = highest
--- album id since albums get IDENTITY-generated IDs in insert order.
+-- Newest albums across every music library. Newest = highest album id since
+-- albums get IDENTITY-generated IDs in insert order. The derived table pins
+-- the plan to a backward albums_pkey scan (LIMIT before joins) AND keeps the
+-- EXISTS below a cheap per-row probe — without it the planner hashes the
+-- entire track_files x library_files join (measured 1.26s vs 1.9ms). Keep the
+-- outer ORDER BY: plan-order preservation through the joins is not guaranteed.
 SELECT al.*,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
        EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
-FROM albums al
+FROM (
+  SELECT * FROM albums ORDER BY id DESC LIMIT $1
+) al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-ORDER BY al.id DESC
-LIMIT $1;
+WHERE mi.media_type = 'music'
+ORDER BY al.id DESC;
 
 -- name: ListRecentlyAddedArtists :many
 -- Newest artists across every music library — uses discography_enriched_at

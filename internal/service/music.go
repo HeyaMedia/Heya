@@ -121,6 +121,35 @@ func (a *App) ListMusicArtists(ctx context.Context, limit, offset int32) (*Music
 	return &MusicListPage[sqlc.ListMusicArtistsRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
 }
 
+// MusicCounts is the read shape for /api/music/counts — the music library
+// landing page's stat tiles. A dedicated endpoint so the FE doesn't run three
+// full list pipelines (limit=1) just to read .total off each; the tracks list
+// alone cost ~900ms per landing view that way.
+type MusicCounts struct {
+	Artists int64 `json:"artists"`
+	Albums  int64 `json:"albums"`
+	Tracks  int64 `json:"tracks"`
+}
+
+// GetMusicCounts returns the artist/album/track totals across every music
+// library.
+func (a *App) GetMusicCounts(ctx context.Context) (*MusicCounts, error) {
+	q := sqlc.New(a.db)
+	artists, err := q.CountMusicArtists(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("counting artists: %w", err)
+	}
+	albums, err := q.CountMusicAlbums(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("counting albums: %w", err)
+	}
+	tracks, err := q.CountMusicTracks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("counting tracks: %w", err)
+	}
+	return &MusicCounts{Artists: artists, Albums: albums, Tracks: tracks}, nil
+}
+
 // ListMusicAlbums returns albums across every music library, paginated.
 func (a *App) ListMusicAlbums(ctx context.Context, limit, offset int32) (*MusicListPage[sqlc.ListMusicAlbumsRow], error) {
 	limit, offset = clampMusicPage(limit, offset)
@@ -194,10 +223,21 @@ func (a *App) assembleAlbumDetail(ctx context.Context, q *sqlc.Queries, album sq
 		return nil, fmt.Errorf("media item not found: %w", err)
 	}
 
+	// One whole-album files query grouped by track — the per-track loop paid
+	// up to 210 sequential round trips on the biggest album. The batch comes
+	// back best-quality-first within each track, matching ListTrackFilesByTrack.
 	tracks, _ := q.ListTracksByAlbum(ctx, album.ID)
+	allFiles, _ := q.ListTrackFilesByAlbum(ctx, album.ID)
+	filesByTrack := make(map[int64][]sqlc.TrackFile, len(tracks))
+	for _, f := range allFiles {
+		filesByTrack[f.TrackID] = append(filesByTrack[f.TrackID], f)
+	}
 	views := make([]TrackView, 0, len(tracks))
 	for _, t := range tracks {
-		files, _ := q.ListTrackFilesByTrack(ctx, t.ID)
+		files := filesByTrack[t.ID]
+		if files == nil {
+			files = []sqlc.TrackFile{} // keep JSON "files": [] for fileless tracks
+		}
 		views = append(views, TrackView{Track: t, Files: files})
 	}
 

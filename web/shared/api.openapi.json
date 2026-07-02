@@ -3675,6 +3675,10 @@
           },
           "updated_at": {
             "$ref": "#/components/schemas/Timestamptz"
+          },
+          "video_height": {
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
@@ -3693,7 +3697,8 @@
           "has_trickplay",
           "content_hash",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "video_height"
         ],
         "type": "object"
       },
@@ -8568,6 +8573,38 @@
           "artist",
           "artist_slug",
           "media_item_id"
+        ],
+        "type": "object"
+      },
+      "MusicCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MusicCounts.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "albums": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "artists": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tracks": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artists",
+          "albums",
+          "tracks"
         ],
         "type": "object"
       },
@@ -24982,6 +25019,49 @@
           }
         ],
         "summary": "Tracks in a BPM band",
+        "tags": [
+          "Music"
+        ]
+      }
+    },
+    "/api/music/counts": {
+      "get": {
+        "operationId": "music-counts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicCounts"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Artist/album/track totals",
         "tags": [
           "Music"
         ]

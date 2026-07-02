@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -64,6 +65,13 @@ type App struct {
 	// Wall-clock start time, captured once in New. Drives the uptime metric
 	// surfaced via /api/admin/system.
 	startedAt time.Time
+
+	// TTL cache for the dashboard missing_count — the three-bucket anti-join
+	// costs ~750ms at prod scale and only changes on scan/cleanup, so the
+	// dashboard shouldn't recompute it per render. Guarded by missingCountMu.
+	missingCountMu sync.Mutex
+	missingCount   int
+	missingCountAt time.Time
 }
 
 // StartedAt returns the wall-clock time at which the App was constructed.

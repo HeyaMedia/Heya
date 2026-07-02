@@ -10,6 +10,16 @@ import (
 )
 
 const listDeepCutsForUser = `-- name: ListDeepCutsForUser :many
+WITH cand AS (
+    SELECT t.id
+    FROM tracks t TABLESAMPLE SYSTEM (2)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM play_events pe
+        WHERE pe.track_id = t.id AND pe.user_id = $1
+    )
+    ORDER BY random()
+    LIMIT $2
+)
 SELECT t.id              AS track_id,
        t.title           AS track_title,
        t.duration        AS duration,
@@ -23,19 +33,14 @@ SELECT t.id              AS track_id,
        a.id              AS artist_id,
        a.name            AS artist_name,
        mi.slug           AS artist_slug
-FROM tracks t
+FROM cand
+JOIN tracks t ON t.id = cand.id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
-LEFT JOIN LATERAL (
-    SELECT count(*) AS plays
-    FROM play_events pe
-    WHERE pe.track_id = t.id AND pe.user_id = $1
-) up ON true
 WHERE l.media_type = 'music'
-ORDER BY coalesce(up.plays, 0) ASC, random()
-LIMIT $2
+ORDER BY random()
 `
 
 type ListDeepCutsForUserParams struct {
@@ -59,9 +64,13 @@ type ListDeepCutsForUserRow struct {
 	ArtistSlug     string `json:"artist_slug"`
 }
 
-// Deep Cuts: tracks the user has never played (or barely played). Sorted by
-// the user's play_count ascending (zero-play first), then randomized within
-// the bucket so back-to-back taps give different results.
+// Deep Cuts: random never-played tracks, sample-first. TABLESAMPLE SYSTEM (2)
+// yields ~4.8k candidate tracks on a 240k-track library; the NOT EXISTS
+// anti-join against the user's play_events filters played ones. The original
+// per-track lateral count(*) ran 240k probes per tap (~1s); this measures
+// ~11ms. Callers MUST fall back to ListDeepCutsForUserFull when fewer than
+// limit rows come back (small library: sample can be empty; fully-played
+// library: the anti-join empties it).
 func (q *Queries) ListDeepCutsForUser(ctx context.Context, arg ListDeepCutsForUserParams) ([]ListDeepCutsForUserRow, error) {
 	rows, err := q.db.Query(ctx, listDeepCutsForUser, arg.UserID, arg.TrackLimit)
 	if err != nil {
@@ -96,8 +105,7 @@ func (q *Queries) ListDeepCutsForUser(ctx context.Context, arg ListDeepCutsForUs
 	return items, nil
 }
 
-const listRandomMusicTracks = `-- name: ListRandomMusicTracks :many
-
+const listDeepCutsForUserFull = `-- name: ListDeepCutsForUserFull :many
 SELECT t.id              AS track_id,
        t.title           AS track_title,
        t.duration        AS duration,
@@ -116,9 +124,102 @@ JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
+LEFT JOIN LATERAL (
+    SELECT count(*) AS plays
+    FROM play_events pe
+    WHERE pe.track_id = t.id AND pe.user_id = $1
+) up ON true
+WHERE l.media_type = 'music'
+ORDER BY coalesce(up.plays, 0) ASC, random()
+LIMIT $2
+`
+
+type ListDeepCutsForUserFullParams struct {
+	UserID     int64 `json:"user_id"`
+	TrackLimit int32 `json:"track_limit"`
+}
+
+type ListDeepCutsForUserFullRow struct {
+	TrackID        int64  `json:"track_id"`
+	TrackTitle     string `json:"track_title"`
+	Duration       int32  `json:"duration"`
+	DiscNumber     int32  `json:"disc_number"`
+	TrackNumber    int32  `json:"track_number"`
+	AlbumID        int64  `json:"album_id"`
+	AlbumTitle     string `json:"album_title"`
+	AlbumSlug      string `json:"album_slug"`
+	AlbumCoverPath string `json:"album_cover_path"`
+	AlbumYear      string `json:"album_year"`
+	ArtistID       int64  `json:"artist_id"`
+	ArtistName     string `json:"artist_name"`
+	ArtistSlug     string `json:"artist_slug"`
+}
+
+// Fallback for ListDeepCutsForUser: the original fewest-plays-first shape,
+// used when the sampled variant under-fills.
+func (q *Queries) ListDeepCutsForUserFull(ctx context.Context, arg ListDeepCutsForUserFullParams) ([]ListDeepCutsForUserFullRow, error) {
+	rows, err := q.db.Query(ctx, listDeepCutsForUserFull, arg.UserID, arg.TrackLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeepCutsForUserFullRow{}
+	for rows.Next() {
+		var i ListDeepCutsForUserFullRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRandomMusicTracks = `-- name: ListRandomMusicTracks :many
+
+WITH cand AS (
+    SELECT t.id
+    FROM tracks t TABLESAMPLE SYSTEM (2)
+    ORDER BY random()
+    LIMIT $1
+)
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug
+FROM cand
+JOIN tracks t ON t.id = cand.id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
 ORDER BY random()
-LIMIT $1
 `
 
 type ListRandomMusicTracksRow struct {
@@ -143,6 +244,11 @@ type ListRandomMusicTracksRow struct {
 // (≤ 100) and we benefit from per-tap variety more than from cache locality.
 // Library Radio: N random tracks pulled from across the music library. Joins
 // the album+artist context so the FE renders self-contained rows.
+// Sample-first: TABLESAMPLE SYSTEM (2) yields ~4.8k candidate tracks on a
+// 240k-track library, so the join+shuffle touches thousands of rows instead
+// of materializing the whole library (measured 463ms -> 6ms). Callers MUST
+// fall back to ListRandomMusicTracksFull when fewer than limit rows come
+// back — on a tiny library the 2% page sample can be empty.
 func (q *Queries) ListRandomMusicTracks(ctx context.Context, limit int32) ([]ListRandomMusicTracksRow, error) {
 	rows, err := q.db.Query(ctx, listRandomMusicTracks, limit)
 	if err != nil {
@@ -177,7 +283,7 @@ func (q *Queries) ListRandomMusicTracks(ctx context.Context, limit int32) ([]Lis
 	return items, nil
 }
 
-const listTracksByYearRange = `-- name: ListTracksByYearRange :many
+const listRandomMusicTracksFull = `-- name: ListRandomMusicTracksFull :many
 SELECT t.id              AS track_id,
        t.title           AS track_title,
        t.duration        AS duration,
@@ -197,16 +303,99 @@ JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
-  AND al.year ~ '^[0-9]{4}'
-  AND substring(al.year FROM 1 FOR 4)::int BETWEEN $1::int AND $2::int
 ORDER BY random()
-LIMIT $3
+LIMIT $1
+`
+
+type ListRandomMusicTracksFullRow struct {
+	TrackID        int64  `json:"track_id"`
+	TrackTitle     string `json:"track_title"`
+	Duration       int32  `json:"duration"`
+	DiscNumber     int32  `json:"disc_number"`
+	TrackNumber    int32  `json:"track_number"`
+	AlbumID        int64  `json:"album_id"`
+	AlbumTitle     string `json:"album_title"`
+	AlbumSlug      string `json:"album_slug"`
+	AlbumCoverPath string `json:"album_cover_path"`
+	AlbumYear      string `json:"album_year"`
+	ArtistID       int64  `json:"artist_id"`
+	ArtistName     string `json:"artist_name"`
+	ArtistSlug     string `json:"artist_slug"`
+}
+
+// Fallback for ListRandomMusicTracks on small libraries: the original
+// materialize-everything shape — cheap exactly when the sample under-fills.
+func (q *Queries) ListRandomMusicTracksFull(ctx context.Context, limit int32) ([]ListRandomMusicTracksFullRow, error) {
+	rows, err := q.db.Query(ctx, listRandomMusicTracksFull, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRandomMusicTracksFullRow{}
+	for rows.Next() {
+		var i ListRandomMusicTracksFullRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTracksByYearRange = `-- name: ListTracksByYearRange :many
+WITH cand_albums AS (
+    SELECT al.id
+    FROM albums al
+    WHERE al.year ~ '^[0-9]{4}'
+      AND substring(al.year FROM 1 FOR 4)::int BETWEEN $2::int AND $3::int
+    ORDER BY random()
+    LIMIT 100
+)
+SELECT t.id              AS track_id,
+       t.title           AS track_title,
+       t.duration        AS duration,
+       t.disc_number     AS disc_number,
+       t.track_number    AS track_number,
+       al.id             AS album_id,
+       al.title          AS album_title,
+       al.slug           AS album_slug,
+       al.cover_path     AS album_cover_path,
+       al.year           AS album_year,
+       a.id              AS artist_id,
+       a.name            AS artist_name,
+       mi.slug           AS artist_slug
+FROM tracks t
+JOIN cand_albums ca ON ca.id = t.album_id
+JOIN albums      al ON al.id = t.album_id
+JOIN artists     a  ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+ORDER BY random()
+LIMIT $1
 `
 
 type ListTracksByYearRangeParams struct {
+	TrackLimit int32 `json:"track_limit"`
 	MinYear    int32 `json:"min_year"`
 	MaxYear    int32 `json:"max_year"`
-	TrackLimit int32 `json:"track_limit"`
 }
 
 type ListTracksByYearRangeRow struct {
@@ -226,11 +415,15 @@ type ListTracksByYearRangeRow struct {
 }
 
 // Time Travel: random tracks whose album year falls within [min,max]
-// inclusive. Tracks with empty year strings are filtered out — they can't
-// be placed on a timeline. Treats year as text since that's how the column
-// is stored; the regex pattern catches 4-digit years.
+// inclusive. Treats year as text since that's how the column is stored; the
+// regex pattern catches 4-digit years (and matches the partial predicate of
+// idx_albums_year_prefix, which also fixes the row estimate on the cast).
+// Two-phase pick: bound the album pool to 100 random matches first so the
+// randomized track sort works on ~1k rows instead of the whole decade's
+// tracks (~97k joined rows for the 2010s). For sparse ranges (<100 matching
+// albums) the pool is exhaustive, so semantics are unchanged.
 func (q *Queries) ListTracksByYearRange(ctx context.Context, arg ListTracksByYearRangeParams) ([]ListTracksByYearRangeRow, error) {
-	rows, err := q.db.Query(ctx, listTracksByYearRange, arg.MinYear, arg.MaxYear, arg.TrackLimit)
+	rows, err := q.db.Query(ctx, listTracksByYearRange, arg.TrackLimit, arg.MinYear, arg.MaxYear)
 	if err != nil {
 		return nil, err
 	}
