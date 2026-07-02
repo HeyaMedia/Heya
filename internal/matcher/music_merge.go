@@ -13,8 +13,8 @@ import (
 
 // findCanonicalSibling looks for an existing artist row that represents
 // the same person/group as `artistID` after enrichment resolved them.
-// Returns nil when no sibling matches — caller proceeds with a normal
-// in-place UPDATE in that case.
+// Returns (nil, false) when no sibling matches — caller proceeds with a
+// normal in-place UPDATE in that case.
 //
 // Checks in priority order:
 //  1. MBID match (excluding self) — strongest signal when upstream
@@ -25,21 +25,27 @@ import (
 //     name we'd write already exists on a sibling row (e.g. apple-keyed
 //     hit returning name="花冷え。" while the sibling row already has it).
 //
-// A nil return on a non-NoRows error is logged and treated as "proceed
-// with the UPDATE" — the worst case is we hit the unique constraint and
-// fail this enrich, not data corruption.
-func (m *Matcher) findCanonicalSibling(ctx context.Context, artistID int64, newMBID, postName, postDisambig string) *sqlc.Artist {
+// contradicted=true means the name path DID find the tuple's owner, but its
+// established MBID contradicts newMBID — two proven-distinct acts (e.g. the
+// pair upsertMusicArtist deliberately split). The caller must neither merge
+// nor adopt the identity: writing (postName, postDisambig) would land exactly
+// on the sibling's uq_artists_name_disambig slot.
+//
+// A (nil, false) return on a non-NoRows error is logged and treated as
+// "proceed with the UPDATE" — the worst case is we hit the unique constraint
+// and fail this enrich, not data corruption.
+func (m *Matcher) findCanonicalSibling(ctx context.Context, artistID int64, newMBID, postName, postDisambig string) (sibling *sqlc.Artist, contradicted bool) {
 	// MBID path — strongest signal, but only for a real id. Empty is skipped by
 	// the guard; a synthetic heya.media placeholder ("dddddddd-…") would match
 	// any other row carrying the same placeholder and fuse unrelated artists,
 	// so it's excluded too (the SQL also guards `musicbrainz_id != ''`).
 	if newMBID != "" && !isSyntheticMBID(newMBID) {
-		sibling, err := m.q.GetArtistByMusicBrainzIDExcludingID(ctx, sqlc.GetArtistByMusicBrainzIDExcludingIDParams{
+		found, err := m.q.GetArtistByMusicBrainzIDExcludingID(ctx, sqlc.GetArtistByMusicBrainzIDExcludingIDParams{
 			Mbid:      newMBID,
 			ExcludeID: artistID,
 		})
 		if err == nil {
-			return &sibling
+			return &found, false
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			log.Warn().Err(err).Str("mbid", newMBID).Msg("dup-artist MBID lookup failed")
@@ -52,19 +58,30 @@ func (m *Matcher) findCanonicalSibling(ctx context.Context, artistID int64, newM
 	// (HANABIE / 花冷え。 carrying the same "metalcore band" disambig) while
 	// dropping the ambiguous case. The SQL also guards `disambiguation != ''`.
 	if postName != "" && postDisambig != "" {
-		sibling, err := m.q.GetArtistByNameAndDisambiguationExcludingID(ctx, sqlc.GetArtistByNameAndDisambiguationExcludingIDParams{
+		found, err := m.q.GetArtistByNameAndDisambiguationExcludingID(ctx, sqlc.GetArtistByNameAndDisambiguationExcludingIDParams{
 			Lower:     postName,
 			Lower_2:   postDisambig,
 			ExcludeID: artistID,
 		})
 		if err == nil {
-			return &sibling
+			if newMBID != "" && found.MusicbrainzID != "" && found.MusicbrainzID != newMBID &&
+				!isSyntheticMBID(newMBID) && !isSyntheticMBID(found.MusicbrainzID) {
+				// Both rows hold real, differing MBIDs — name equality must
+				// not overrule that (it would re-fuse the pair the upsert
+				// split, folding one act's discography into the other).
+				log.Warn().Int64("artist_id", artistID).Str("new_mbid", newMBID).
+					Int64("sibling_id", found.ID).Str("sibling_mbid", found.MusicbrainzID).
+					Str("name", postName).
+					Msg("name/disambig sibling holds a contradicting MBID; refusing merge")
+				return nil, true
+			}
+			return &found, false
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			log.Warn().Err(err).Str("name", postName).Msg("dup-artist name lookup failed")
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // mergeArtistInto folds the src artist's children into dst. Used by

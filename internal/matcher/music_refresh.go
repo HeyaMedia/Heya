@@ -114,7 +114,20 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 	if postDisambig == "" {
 		postDisambig = artist.Disambiguation
 	}
-	if canonical := m.findCanonicalSibling(ctx, artistID, newMBID, postName, postDisambig); canonical != nil {
+	canonical, contradicted := m.findCanonicalSibling(ctx, artistID, newMBID, postName, postDisambig)
+	if contradicted {
+		// The (postName, postDisambig) tuple we'd write belongs to an artist
+		// whose established MBID contradicts ours — proven-distinct acts, so
+		// neither merging nor adopting the identity is safe (the UPDATE below
+		// would trip uq_artists_name_disambig). Same treatment as the identity
+		// guard above: keep the local identity, negative-cache, skip.
+		if markErr := m.q.MarkArtistDiscographyEnriched(ctx, artistID); markErr != nil {
+			log.Warn().Err(markErr).Int64("artist_id", artistID).Msg("MarkArtistDiscographyEnriched failed")
+		}
+		res.Skipped = true
+		return res, nil
+	}
+	if canonical != nil {
 		if mergeErr := m.mergeArtistInto(ctx, canonical.ID, artistID); mergeErr != nil {
 			return res, fmt.Errorf("merge artist %d into %d: %w", artistID, canonical.ID, mergeErr)
 		}

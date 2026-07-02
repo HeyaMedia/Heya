@@ -46,8 +46,9 @@ func TestFindCanonicalSibling(t *testing.T) {
 		// case): distinct names so creation doesn't collide, same MBID.
 		src := seedBareArtist(t, ctx, qtx, libID, "HANABIE", "metalcore band", realMBID)
 		dst := seedBareArtist(t, ctx, qtx, libID, "花冷え。", "metalcore band", realMBID)
-		got := m.findCanonicalSibling(ctx, src, realMBID, "花冷え。", "metalcore band")
+		got, contradicted := m.findCanonicalSibling(ctx, src, realMBID, "花冷え。", "metalcore band")
 		require.NotNil(t, got)
+		require.False(t, contradicted)
 		require.Equal(t, dst, got.ID)
 	})
 
@@ -55,32 +56,56 @@ func TestFindCanonicalSibling(t *testing.T) {
 		src := seedBareArtist(t, ctx, qtx, libID, "Avicii folder", "", "")
 		seedBareArtist(t, ctx, qtx, libID, "Alicia Keys", "", "")
 		// post-enrich resolved name collides, but no MBID and no disambiguation.
-		require.Nil(t, m.findCanonicalSibling(ctx, src, "", "Alicia Keys", ""))
+		got, contradicted := m.findCanonicalSibling(ctx, src, "", "Alicia Keys", "")
+		require.Nil(t, got)
+		require.False(t, contradicted)
 	})
 
 	t.Run("synthetic MBID does NOT merge", func(t *testing.T) {
 		src := seedBareArtist(t, ctx, qtx, libID, "Synth A", "", synthMBID)
 		seedBareArtist(t, ctx, qtx, libID, "Synth B", "", synthMBID)
-		require.Nil(t, m.findCanonicalSibling(ctx, src, synthMBID, "Synth B", ""))
+		got, contradicted := m.findCanonicalSibling(ctx, src, synthMBID, "Synth B", "")
+		require.Nil(t, got)
+		require.False(t, contradicted)
 	})
 
 	t.Run("same name + matching non-empty disambig merges", func(t *testing.T) {
 		src := seedBareArtist(t, ctx, qtx, libID, "Dup Latin", "metalcore band", "")
 		dst := seedBareArtist(t, ctx, qtx, libID, "Dup", "metalcore band", "")
-		got := m.findCanonicalSibling(ctx, src, "", "Dup", "metalcore band")
+		got, contradicted := m.findCanonicalSibling(ctx, src, "", "Dup", "metalcore band")
 		require.NotNil(t, got)
+		require.False(t, contradicted)
 		require.Equal(t, dst, got.ID)
 	})
 
 	t.Run("same name + empty disambig does NOT merge (the 666 case)", func(t *testing.T) {
 		src := seedBareArtist(t, ctx, qtx, libID, "666 a", "", "")
 		seedBareArtist(t, ctx, qtx, libID, "666", "", "")
-		require.Nil(t, m.findCanonicalSibling(ctx, src, "", "666", ""))
+		got, contradicted := m.findCanonicalSibling(ctx, src, "", "666", "")
+		require.Nil(t, got)
+		require.False(t, contradicted)
 	})
 
 	t.Run("same name + different disambig does NOT merge (the Ado case)", func(t *testing.T) {
 		src := seedBareArtist(t, ctx, qtx, libID, "Ado", "techno", "")
 		seedBareArtist(t, ctx, qtx, libID, "Ado", "Japanese vocalist", "")
-		require.Nil(t, m.findCanonicalSibling(ctx, src, "", "Ado", "techno"))
+		got, contradicted := m.findCanonicalSibling(ctx, src, "", "Ado", "techno")
+		require.Nil(t, got)
+		require.False(t, contradicted)
+	})
+
+	t.Run("name+disambig sibling with contradicting MBID does NOT merge", func(t *testing.T) {
+		// The pair upsertMusicArtist deliberately split (chimera vs real act):
+		// a no-MBID upstream record whose (name, disambig) lands on the
+		// sibling's tuple must not re-fuse them — both rows hold real,
+		// differing MBIDs. contradicted=true also tells RefreshMusicArtist to
+		// skip instead of tripping uq_artists_name_disambig on the UPDATE.
+		const srcMBID = "1a2b3c4d-5678-49ab-8cde-0f1234567890"
+		const otherMBID = "9c7902b0-1234-4e0e-8a8d-abcdefabcdef"
+		src := seedBareArtist(t, ctx, qtx, libID, "Split Src", "shared disambig", srcMBID)
+		seedBareArtist(t, ctx, qtx, libID, "Split Twin", "shared disambig", otherMBID)
+		got, contradicted := m.findCanonicalSibling(ctx, src, srcMBID, "Split Twin", "shared disambig")
+		require.Nil(t, got)
+		require.True(t, contradicted)
 	})
 }
