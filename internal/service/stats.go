@@ -258,6 +258,13 @@ func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
+	// Cleanup just changed the answer — drop the cached missing_count so the
+	// dashboard's next render recomputes instead of serving the pre-cleanup
+	// value for up to the TTL (the FE refetches stats right after cleanup).
+	a.missingCountMu.Lock()
+	a.missingCountAt = time.Time{}
+	a.missingCountMu.Unlock()
+
 	log.Info().Int("count", total).Msg("cleaned up missing media")
 	return total, nil
 }
