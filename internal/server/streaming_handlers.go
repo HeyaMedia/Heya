@@ -53,6 +53,45 @@ func handleDirectStream(app *service.App) http.HandlerFunc {
 	}
 }
 
+// handleExtraStream range-serves a media extra's video file (trailer,
+// featurette, …). Same shape as handleDirectStream but resolved through
+// media_extras — extras aren't library_files, they carry their own absolute
+// file_path.
+func handleExtraStream(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid extra id")
+			return
+		}
+
+		extra, err := app.GetMediaExtra(r.Context(), id)
+		if err != nil || extra.FilePath == "" {
+			writeError(w, http.StatusNotFound, "extra not found")
+			return
+		}
+
+		ct := contentTypeFromExt(filepath.Ext(extra.FilePath))
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Accept-Ranges", "bytes")
+
+		if vfs.IsSMBPath(extra.FilePath) {
+			serveVFSFile(w, r, extra.FilePath)
+			return
+		}
+
+		f, err := os.Open(extra.FilePath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot open file")
+			return
+		}
+		defer func() { _ = f.Close() }()
+
+		stat, _ := f.Stat()
+		http.ServeContent(w, r, extra.FilePath, stat.ModTime(), f)
+	}
+}
+
 func handleHLSMaster(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)

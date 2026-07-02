@@ -13157,6 +13157,15 @@
         ],
         "type": "object"
       },
+      "UISettings": {
+        "additionalProperties": false,
+        "properties": {
+          "pinned_hero_mode": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "UnmatchedFile": {
         "additionalProperties": false,
         "properties": {
@@ -14216,10 +14225,14 @@
           },
           "playback": {
             "$ref": "#/components/schemas/PlaybackSettings"
+          },
+          "ui": {
+            "$ref": "#/components/schemas/UISettings"
           }
         },
         "required": [
-          "playback"
+          "playback",
+          "ui"
         ],
         "type": "object"
       },
@@ -15812,6 +15825,50 @@
         "summary": "Scalar-rendered API reference",
         "tags": [
           "System"
+        ]
+      }
+    },
+    "/api/extras/{id}/stream": {
+      "get": {
+        "operationId": "extra-stream",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Media extra video stream (trailer/featurette, range-served bytes)",
+        "tags": [
+          "Streaming"
         ]
       }
     },

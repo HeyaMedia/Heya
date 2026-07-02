@@ -1,6 +1,19 @@
 <template>
   <div class="scroll" style="height: 100%">
-    <HeroA :items="heroItems" :movies="movieDetails" :play-info="heroPlayInfo" @play="onHeroPlay" />
+    <HeroDeck
+      :items="heroItems"
+      :movies="movieDetails"
+      :play-info="heroPlayInfo"
+      :trailers="heroTrailers"
+      :up-next-items="upNextItems"
+      :tv-entries="tvQuery.data.value ?? []"
+      :albums="recentAlbums"
+      :artists="recentArtists"
+      :pinned-mode="pinnedHeroMode"
+      @play="onHeroPlay"
+      @play-up-next="onPlayUpNext"
+      @pin="onPinHeroMode"
+    />
 
     <div class="page-pad">
       <ContinueWatchingRow
@@ -228,7 +241,28 @@ const continueWatching = computed<ContinueWatchingItem[]>(() => continueWatching
 // since it depends on the recent-watched query landing first.
 const movieDetails = ref<Record<number, Movie>>({})
 const heroPlayInfo = ref<Record<number, HeroPlayInfo>>({})
+const heroTrailers = ref<Record<number, number>>({})
 const upNextItems = ref<UpNextItem[]>([])
+
+// Pinned hero mode — server-persisted in user settings so it follows the
+// user across devices. The deck itself mirrors to localStorage for instant
+// paint; this query is the authority.
+interface MeSettings { playback?: Record<string, unknown>; ui?: { pinned_hero_mode?: string } }
+const settingsQuery = useQuery({
+  queryKey: ['me', 'settings'],
+  queryFn: async () => (await $heya('/api/me/settings')) as MeSettings,
+  staleTime: 1000 * 60 * 5,
+})
+const pinnedHeroMode = computed(() => settingsQuery.data.value?.ui?.pinned_hero_mode ?? undefined)
+
+async function onPinHeroMode(mode: string) {
+  const current = settingsQuery.data.value ?? {}
+  const next: MeSettings = { ...current, ui: { ...current.ui, pinned_hero_mode: mode } }
+  try {
+    await $heya('/api/me/settings', { method: 'PUT', body: next as never })
+    queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
+  } catch { /* localStorage mirror still holds it for this device */ }
+}
 
 // No longer rendered as its own row — kept only so Recommended For You can
 // exclude titles the user already favorited (the Loved sidebar views cover
@@ -258,12 +292,26 @@ const loading = computed(() =>
   moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value || musicHomeQuery.isPending.value
 )
 
+// Chip per TV show: what the newest grouped event for that show was, so the
+// hero slide can say WHY it's featured ("New season", "New episode", …).
+const tvChipByShow = computed<Record<number, string>>(() => {
+  const out: Record<number, string> = {}
+  for (const e of tvQuery.data.value ?? []) {
+    if (out[e.media_item_id]) continue
+    out[e.media_item_id]
+      = e.kind === 'series' ? 'New show'
+        : e.kind === 'season' ? `New season ${e.season_number}`
+          : e.kind === 'episodes' ? 'New episodes' : 'New episode'
+  }
+  return out
+})
+
 const heroItems = computed(() => {
   // Hero only spotlights playable titles — never feature something whose
   // files were removed from disk.
   const combined = [
-    ...recentMovies.value.filter(i => i.available !== false).map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
-    ...recentTVShows.value.map(i => ({ ...i, _sort: new Date(i.created_at).getTime() })),
+    ...recentMovies.value.filter(i => i.available !== false).map(i => ({ ...i, chip: 'New film', _sort: new Date(i.created_at).getTime() })),
+    ...recentTVShows.value.map(i => ({ ...i, chip: tvChipByShow.value[i.id], _sort: new Date(i.created_at).getTime() })),
   ]
   combined.sort((a, b) => b._sort - a._sort)
   return combined.slice(0, 5)
@@ -394,6 +442,7 @@ async function rebuildUpNext() {
       const up = await $heya('/api/media/{id}/up-next', { path: { id: row.media_item_id as never } }) as {
         has_next: boolean; file_id?: number; episode_id?: number
         season_number?: number; episode_number?: number; episode_title?: string
+        runtime?: number
       }
       return { row, up }
     })
@@ -413,6 +462,7 @@ async function rebuildUpNext() {
       season_number: sNum, episode_number: eNum, episode_label: label,
       play_file_id: up.file_id,
       episode_id: up.episode_id,
+      runtime_minutes: up.runtime,
     })
   }
   upNextItems.value = entries.slice(0, 20)
@@ -427,6 +477,9 @@ async function rebuildHeroDetails() {
     if (movieDetails.value[item.id]) continue // already fetched in this session
     try {
       const detail = await $heya('/api/media/{id}', { path: { id: String(item.id) } }) as MediaDetail
+      // Local trailer file → hero trailer takeover for this slide.
+      const trailer = detail.extras?.find(x => x.extra_type === 'trailer' && x.file_path)
+      if (trailer) heroTrailers.value[item.id] = trailer.id
       if (detail.movie) {
         movieDetails.value[item.id] = detail.movie
         const fileId = detail.files?.[0]?.id ?? null

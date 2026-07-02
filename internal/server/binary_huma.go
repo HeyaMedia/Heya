@@ -50,6 +50,9 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}", "stream-direct", "Direct video stream (range-served bytes)", "Streaming"),
 		wrapStreamAs[streamFileInput](handleDirectStream(app)))
 
+	huma.Register(api, securedBinary(http.MethodGet, "/api/extras/{id}/stream", "extra-stream", "Media extra video stream (trailer/featurette, range-served bytes)", "Streaming"),
+		wrapStreamAs[idBinaryInput](handleExtraStream(app)))
+
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/hls/master.m3u8", "stream-hls-master", "HLS master playlist", "Streaming"),
 		wrapStreamAs[streamFileInput](handleHLSMaster(app)))
 

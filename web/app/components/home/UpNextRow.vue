@@ -54,6 +54,9 @@ export interface UpNextItem {
   // Episode primary key — let the watch route surface "S01E03 · Episode
   // title" in the activity panel via entity_type=episode + entity_id.
   episode_id?: number
+  // Episode runtime — the hero "Tonight" planner sums these for its
+  // session-length estimate.
+  runtime_minutes?: number
 }
 
 defineProps<{ items: UpNextItem[] }>()

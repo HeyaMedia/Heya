@@ -10,6 +10,16 @@ import (
 // UserSettings holds all per-user settings.
 type UserSettings struct {
 	Playback PlaybackSettings `json:"playback"`
+	UI       UISettings       `json:"ui"`
+}
+
+// UISettings holds small frontend preferences that should follow the user
+// across devices (unlike localStorage). Kept flat and optional — absent
+// fields mean "app default".
+type UISettings struct {
+	// PinnedHeroMode is the home-hero mode to show on page load
+	// (featured / tonight / new / music / roulette). Empty = featured.
+	PinnedHeroMode string `json:"pinned_hero_mode,omitempty"`
 }
 
 // PlaybackSettings holds playback-related user preferences.
