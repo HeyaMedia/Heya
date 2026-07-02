@@ -86,10 +86,34 @@ func (t *Trigger) enforceMaxRuntimes(ctx context.Context) {
 }
 
 func (t *Trigger) enforceTaskMaxRuntime(ctx context.Context, taskID string, maxRuntimeMinutes int32) error {
+	def, ok := taskdefs.ByID(taskID)
+	if !ok {
+		return nil
+	}
 	kinds := taskdefs.TaskKinds(taskID)
 	if len(kinds) == 0 {
 		return nil
 	}
+
+	if def.Pump {
+		// Pump kickoffs own their window: every wake they check max runtime
+		// (and the manual "drain everything" exemption) and wind the run
+		// down gracefully, stamping the scheduled_tasks row — cancelling
+		// their jobs from here would race that wind-down and cancel the
+		// centroid follow-ups the pump deliberately preserves. While the
+		// pump is alive, leave its jobs alone. If the pump died (crashed,
+		// discarded after repeated failures), fall through and reap the
+		// orphaned work jobs once they outlive the window.
+		_, active, err := queueops.ActiveKickoffSource(ctx, t.db, def.KickoffKind, taskID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return nil
+		}
+		kinds = def.WorkKinds
+	}
+
 	exceeded, err := queueops.ScheduledTaskExceededRuntime(ctx, t.db, taskID, kinds, maxRuntimeMinutes)
 	if err != nil {
 		return err
@@ -147,7 +171,7 @@ func (t *Trigger) tick(ctx context.Context) {
 		if !inTimeWindow(now, row.DailyStartTime, row.DailyEndTime) {
 			continue
 		}
-		if err := t.TriggerNow(ctx, row.ID); err != nil {
+		if err := t.TriggerNow(ctx, row.ID, false); err != nil {
 			log.Warn().Err(err).Str("task", row.ID).Msg("scheduler: trigger failed")
 			continue
 		}
@@ -165,29 +189,62 @@ func (t *Trigger) tick(ctx context.Context) {
 
 // TriggerNow inserts the kickoff job for the named scheduled task.
 // UniqueByArgs short-circuits if a kickoff for the same task is already
-// queued or running, so concurrent "Run Now" clicks coalesce.
-func (t *Trigger) TriggerNow(ctx context.Context, taskID string) error {
+// queued or running, so concurrent "Run Now" clicks coalesce — and a cron
+// firing during an active run skips its window the same way.
+//
+// manual marks user-initiated runs ("Run Now" / CLI). Manual runs carry
+// {"source":"manual"} in the job metadata (not the args, so uniqueness
+// still coalesces them with scheduled runs) and are exempt from
+// max-runtime enforcement: they keep going until there's nothing left.
+// When a manual trigger coalesces with an already-active scheduled run,
+// the active run is upgraded to manual — the user asked for a full drain,
+// so silently no-oping would be wrong.
+func (t *Trigger) TriggerNow(ctx context.Context, taskID string, manual bool) error {
+	var args river.JobArgs
 	switch taskID {
 	case "scan_libraries":
-		_, err := t.river.Insert(ctx, worker.KickoffLibraryScanArgs{ScheduledTaskID: taskID}, nil)
-		return err
+		args = worker.KickoffLibraryScanArgs{ScheduledTaskID: taskID}
 	case "refresh_stale_items":
-		_, err := t.river.Insert(ctx, worker.KickoffRefreshStaleArgs{ScheduledTaskID: taskID}, nil)
-		return err
+		args = worker.KickoffRefreshStaleArgs{ScheduledTaskID: taskID}
 	case "scan_music_loudness":
-		_, err := t.river.Insert(ctx, worker.KickoffMusicLoudnessArgs{ScheduledTaskID: taskID}, nil)
-		return err
+		args = worker.KickoffMusicLoudnessArgs{ScheduledTaskID: taskID}
 	case "generate_trickplay":
-		_, err := t.river.Insert(ctx, worker.KickoffTrickplayArgs{ScheduledTaskID: taskID}, nil)
-		return err
+		args = worker.KickoffTrickplayArgs{ScheduledTaskID: taskID}
 	case "generate_thumbnails":
-		_, err := t.river.Insert(ctx, worker.KickoffThumbnailsArgs{ScheduledTaskID: taskID}, nil)
-		return err
+		args = worker.KickoffThumbnailsArgs{ScheduledTaskID: taskID}
 	case "analyze_music_facets":
-		_, err := t.river.Insert(ctx, worker.KickoffSonicAnalysisArgs{ScheduledTaskID: taskID}, nil)
+		args = worker.KickoffSonicAnalysisArgs{ScheduledTaskID: taskID}
+	default:
+		return fmt.Errorf("unknown task: %s", taskID)
+	}
+
+	var opts *river.InsertOpts
+	if manual {
+		opts = &river.InsertOpts{Metadata: []byte(`{"source": "manual"}`)}
+	}
+	res, err := t.river.Insert(ctx, args, opts)
+	if err != nil {
 		return err
 	}
-	return fmt.Errorf("unknown task: %s", taskID)
+	if manual && res.UniqueSkippedAsDuplicate {
+		if def, ok := taskdefs.ByID(taskID); ok {
+			n, err := queueops.MarkActiveKickoffManual(ctx, t.db, def.KickoffKind, taskID)
+			if err != nil {
+				log.Warn().Err(err).Str("task", taskID).Msg("scheduler: upgrade active kickoff to manual failed")
+			}
+			if err == nil && n == 0 {
+				// The run we coalesced against finished between our insert
+				// and the upgrade — without this the click silently no-ops.
+				// The uniqueness hold is gone, so a fresh insert wins now.
+				_, err := t.river.Insert(ctx, args, opts)
+				return err
+			}
+			if n > 0 {
+				log.Info().Str("task", taskID).Msg("scheduler: upgraded active kickoff run to manual (full drain)")
+			}
+		}
+	}
+	return nil
 }
 
 // EnqueueLibraryScan inserts kickoff_library_scan for one library.

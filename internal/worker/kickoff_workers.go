@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/riverqueue/river"
@@ -393,12 +395,190 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 }
 
 // ---------------------------------------------------------------------------
+// kickoff pumps (music loudness + sonic analysis)
+// ---------------------------------------------------------------------------
+
+// The loudness and sonic kickoffs are "pumps": instead of fanning out one
+// bounded batch and finishing (which stranded the rest of the backlog until
+// the next cron window), the kickoff job stays active for the whole run —
+// snoozing between wakes, topping the work queue up wave by wave until the
+// backlog drains. Consequences that the rest of the design leans on:
+//
+//   - The kickoff row's uniqueness hold (uniqueWhileActive) spans the run,
+//     so a cron firing during an active run coalesces into it — the window
+//     is skipped rather than stacking a second run.
+//   - The row's created_at is the run's start time and its metadata is the
+//     run's memory: sweep cursors, enqueue counters, and the manual/
+//     scheduled source marker all survive snoozes and even process
+//     restarts (an orphaned 'running' row is rescued on boot and resumes).
+//   - Manual runs ("Run Now" → metadata source=manual) drain everything;
+//     cron-started runs additionally stop when the task's max-runtime
+//     window closes. The pump checks the window itself on every wake, so
+//     it winds down gracefully and stamps the scheduled_tasks row.
+//   - The pending sets are swept in id order exactly once per run (cursor
+//     in metadata), so an item whose work job fails permanently is passed
+//     over instead of being re-listed and re-enqueued forever.
+const (
+	pumpSnoozeInterval = 30 * time.Second
+	// pumpMaxErrStreak is how many consecutive failing wakes a run
+	// survives before it's declared dead. One-off DB blips shouldn't kill
+	// a days-long drain; a persistent fault shouldn't wedge the task.
+	pumpMaxErrStreak = 10
+)
+
+// pumpState is the pump's cross-wake memory, persisted in the kickoff job
+// row's metadata. Loudness uses both cursors; sonic only TrackCursor.
+//
+// Skipped counts sweep items whose insert coalesced with a job owned by
+// another task (unique keys are per-entity, so e.g. a library scan's
+// loudness hand-offs occupy the same slot but are invisible to this run's
+// scoped counts) or whose insert errored. If any were skipped, the finish
+// path re-runs the sweep once from zero (FinalSweep) so work that the
+// other owner dropped — a cancelled scan, a max-runtime kill — still gets
+// picked up instead of being silently stranded past the cursor.
+type pumpState struct {
+	Source      string `json:"source,omitempty"`
+	Enqueued    int    `json:"enqueued,omitempty"`
+	Failed      int    `json:"failed,omitempty"`
+	ErrStreak   int    `json:"err_streak,omitempty"`
+	Skipped     int    `json:"skipped,omitempty"`
+	FinalSweep  bool   `json:"final_sweep,omitempty"`
+	TrackCursor int64  `json:"track_cursor,omitempty"`
+	AlbumCursor int64  `json:"album_cursor,omitempty"`
+}
+
+func readPumpState(metadata []byte) pumpState {
+	var st pumpState
+	if len(metadata) > 0 {
+		_ = json.Unmarshal(metadata, &st)
+	}
+	return st
+}
+
+// patch serializes the keys the pump owns. Source is deliberately absent:
+// MarkActiveKickoffManual may flip it mid-run, and the jsonb || merge must
+// not undo that upgrade with the stale value read at wake start.
+func (st pumpState) patch() []byte {
+	b, err := json.Marshal(map[string]any{
+		"enqueued":     st.Enqueued,
+		"failed":       st.Failed,
+		"err_streak":   st.ErrStreak,
+		"skipped":      st.Skipped,
+		"final_sweep":  st.FinalSweep,
+		"track_cursor": st.TrackCursor,
+		"album_cursor": st.AlbumCursor,
+	})
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+// restartSweep resets the cursors for the one-time verification pass over
+// items that were skipped (coalesced with another owner's job or failed to
+// insert). Returns false once the final sweep has already run — the pump
+// finishes rather than looping.
+func (st *pumpState) restartSweep() bool {
+	if st.Skipped == 0 || st.FinalSweep {
+		return false
+	}
+	st.FinalSweep = true
+	st.Skipped = 0
+	st.TrackCursor = 0
+	st.AlbumCursor = 0
+	return true
+}
+
+// pumpSnooze persists the pump's state and puts the kickoff back to
+// sleep. JobSnooze doesn't consume attempts, so a MaxAttempts=1 kickoff
+// can wake indefinitely.
+func pumpSnooze(ctx context.Context, db *pgxpool.Pool, jobID int64, taskID string, st pumpState) error {
+	if err := queueops.MergeJobMetadata(ctx, db, jobID, st.patch()); err != nil {
+		log.Warn().Err(err).Str("task", taskID).Msg("kickoff pump: persist state failed")
+	}
+	return river.JobSnooze(pumpSnoozeInterval)
+}
+
+// pumpActiveCount returns how many of the task's own work jobs of one kind
+// are still pending or running. Jobs the same kind owes to other owners
+// (e.g. a library scan's loudness hand-off) are excluded — the pump only
+// waits on work it fanned out.
+func pumpActiveCount(ctx context.Context, db *pgxpool.Pool, taskID, kind string) (int, error) {
+	if taskID == "" {
+		counts, err := queueops.CountByKinds(ctx, db, []string{kind})
+		return counts.Pending + counts.Running, err
+	}
+	counts, err := queueops.CountScheduledTask(ctx, db, taskID, []string{kind})
+	return counts.Pending + counts.Running, err
+}
+
+// pumpShouldStop reports whether a cron-started run must wind down: the
+// task was disabled mid-run, or it outlived its max-runtime window. Manual
+// runs never expire — only a user cancel stops them. The task row is
+// re-read on every wake so a mid-run settings change takes effect.
+func pumpShouldStop(ctx context.Context, q *sqlc.Queries, taskID, source string, runStarted time.Time) (bool, string) {
+	if source == queueops.KickoffSourceManual || taskID == "" {
+		return false, ""
+	}
+	task, err := q.GetScheduledTask(ctx, taskID)
+	if err != nil {
+		return false, ""
+	}
+	if !task.Enabled {
+		return true, "task disabled"
+	}
+	if task.MaxRuntimeMinutes > 0 && time.Since(runStarted) > time.Duration(task.MaxRuntimeMinutes)*time.Minute {
+		return true, "max runtime reached"
+	}
+	return false, ""
+}
+
+// pumpInterrupted handles a context death mid-wake (user cancel, process
+// shutdown, job timeout): persist the cursors best-effort and yield with a
+// zero snooze. This can't escape a user cancel — River finalizes a
+// snoozing job as cancelled when cancel_attempted_at is stamped in its
+// metadata — while a plain shutdown parks the row 'available' so the run
+// resumes right where it left off on the next boot. Run bookkeeping for
+// the cancel case is stamped by service.CancelTask, which reads the
+// kickoff row before cancelling it.
+func pumpInterrupted(ctx context.Context, db *pgxpool.Pool, jobID int64, taskID string, st pumpState) error {
+	_ = ctx // dead by definition here; persist on a short background context
+	persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := queueops.MergeJobMetadata(persistCtx, db, jobID, st.patch()); err != nil {
+		log.Warn().Err(err).Str("task", taskID).Msg("kickoff pump: persist state on interrupt failed")
+	}
+	return river.JobSnooze(0)
+}
+
+// pumpTransientFailure bumps the run's error streak and snoozes instead
+// of failing the single-attempt kickoff. Past pumpMaxErrStreak the run
+// fails for real (finishKickoff stamps the error, MaxAttempts=1 discards).
+func pumpTransientFailure(ctx context.Context, db *pgxpool.Pool, q *sqlc.Queries, jobID int64, taskID string, st pumpState, runStarted time.Time, cause error) error {
+	if ctx.Err() != nil {
+		return pumpInterrupted(ctx, db, jobID, taskID, st)
+	}
+	st.ErrStreak++
+	if st.ErrStreak >= pumpMaxErrStreak {
+		log.Error().Err(cause).Str("task", taskID).Msg("kickoff pump: giving up after repeated failures")
+		finishKickoff(ctx, q, taskID, runStarted, st.Enqueued, st.Failed, cause)
+		return cause
+	}
+	log.Warn().Err(cause).Str("task", taskID).Int("err_streak", st.ErrStreak).Msg("kickoff pump: transient failure, snoozing")
+	if err := queueops.MergeJobMetadata(ctx, db, jobID, st.patch()); err != nil {
+		log.Warn().Err(err).Str("task", taskID).Msg("kickoff pump: persist state failed")
+	}
+	return river.JobSnooze(pumpSnoozeInterval)
+}
+
+// ---------------------------------------------------------------------------
 // kickoff_music_loudness
 // ---------------------------------------------------------------------------
 
-// Per-tick caps. The scan_track_loudness queue is MaxWorkers=1 so it'll
-// chew through the backlog at ~30s/track regardless. Bounding the
-// enqueue keeps the River job table from ballooning on a fresh import.
+// Per-wave caps. The scan_track_loudness queue is MaxWorkers=1 so it'll
+// chew through the backlog at ~30s/track regardless. The pump keeps at
+// most one wave in River at a time and tops it up as it drains, so the
+// job table stays bounded no matter how large the backlog is.
 const (
 	kickoffLoudnessTrackBatch = 500
 	kickoffLoudnessAlbumBatch = 200
@@ -411,55 +591,114 @@ type KickoffMusicLoudnessWorker struct {
 }
 
 func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[KickoffMusicLoudnessArgs]) error {
-	startedAt := time.Now()
 	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
+	st := readPumpState(job.Metadata)
+	trackKind := ScanTrackLoudnessArgs{}.Kind()
+	albumKind := ScanAlbumLoudnessArgs{}.Kind()
 
-	tracks, err := q.ListTrackFilesPendingLoudness(ctx, kickoffLoudnessTrackBatch)
+	if ctx.Err() != nil {
+		return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
+	}
+
+	if stop, reason := pumpShouldStop(ctx, q, taskID, st.Source, job.CreatedAt); stop {
+		cancelled, _ := queueops.CancelPendingByScheduledTask(ctx, w.DB, taskID, []string{trackKind, albumKind})
+		log.Info().Str("task", taskID).Str("reason", reason).Int64("cancelled_pending", cancelled).Msg("kickoff_music_loudness: winding down")
+		finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
+		return nil
+	}
+
+	// Track phase: keep one wave of per-track jobs topped up, sweeping the
+	// pending set in id order exactly once.
+	trackActive, err := pumpActiveCount(ctx, w.DB, taskID, trackKind)
 	if err != nil {
-		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
-		return err
+		return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
 	}
-	albums, err := q.ListAlbumsPendingLoudness(ctx, kickoffLoudnessAlbumBatch)
-	if err != nil {
-		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
-		return err
+	tracksListed := -1 // -1: wave full, sweep not consulted this wake
+	if want := kickoffLoudnessTrackBatch - trackActive; want > 0 {
+		rows, err := q.ListTrackFilesPendingLoudness(ctx, sqlc.ListTrackFilesPendingLoudnessParams{
+			AfterID:  st.TrackCursor,
+			RowLimit: int32(want),
+		})
+		if err != nil {
+			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+		}
+		tracksListed = len(rows)
+		for _, row := range rows {
+			if ctx.Err() != nil {
+				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
+			}
+			w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Path)
+			res, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: row.ID, ScheduledTaskID: taskID}, nil)
+			switch {
+			case err != nil:
+				log.Warn().Err(err).Int64("track_file_id", row.ID).Msg("kickoff_music_loudness: enqueue track failed")
+				st.Failed++
+				st.Skipped++
+			case res.UniqueSkippedAsDuplicate:
+				st.Skipped++
+			default:
+				st.Enqueued++
+			}
+			st.TrackCursor = row.ID
+		}
+	}
+	tracksDone := trackActive == 0 && tracksListed == 0
+
+	// Album phase: only starts once the track sweep has drained, so album
+	// eligibility (all tracks measured) is stable and one monotonic pass is
+	// complete. Albums that finished *during* this run were already
+	// enqueued by the track worker's cascade; the unique args make this
+	// sweep coalesce with those.
+	if tracksDone {
+		albumActive, err := pumpActiveCount(ctx, w.DB, taskID, albumKind)
+		if err != nil {
+			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+		}
+		albumsListed := -1
+		if want := kickoffLoudnessAlbumBatch - albumActive; want > 0 {
+			rows, err := q.ListAlbumsPendingLoudness(ctx, sqlc.ListAlbumsPendingLoudnessParams{
+				AfterID:  st.AlbumCursor,
+				RowLimit: int32(want),
+			})
+			if err != nil {
+				return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+			}
+			albumsListed = len(rows)
+			for _, row := range rows {
+				if ctx.Err() != nil {
+					return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
+				}
+				w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Title)
+				res, err := rc.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: row.ID, ScheduledTaskID: taskID}, nil)
+				switch {
+				case err != nil:
+					log.Warn().Err(err).Int64("album_id", row.ID).Msg("kickoff_music_loudness: enqueue album failed")
+					st.Failed++
+					st.Skipped++
+				case res.UniqueSkippedAsDuplicate:
+					st.Skipped++
+				default:
+					st.Enqueued++
+				}
+				st.AlbumCursor = row.ID
+			}
+		}
+		if albumActive == 0 && albumsListed == 0 {
+			if st.restartSweep() {
+				log.Info().Str("task", taskID).Msg("kickoff_music_loudness: re-sweeping for items skipped during the run")
+				st.ErrStreak = 0
+				return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+			}
+			log.Info().Str("task", taskID).Int("enqueued", st.Enqueued).Int("failed", st.Failed).Msg("kickoff_music_loudness: backlog drained")
+			finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
+			return nil
+		}
 	}
 
-	enqueued, failed := 0, 0
-	for _, row := range tracks {
-		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
-			return err
-		}
-		w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Path)
-		if _, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: row.ID, ScheduledTaskID: taskID}, nil); err != nil {
-			log.Warn().Err(err).Int64("track_file_id", row.ID).Msg("kickoff_music_loudness: enqueue track failed")
-			failed++
-			continue
-		}
-		enqueued++
-	}
-	for _, row := range albums {
-		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
-			return err
-		}
-		w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Title)
-		if _, err := rc.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: row.ID, ScheduledTaskID: taskID}, nil); err != nil {
-			log.Warn().Err(err).Int64("album_id", row.ID).Msg("kickoff_music_loudness: enqueue album failed")
-			failed++
-			continue
-		}
-		enqueued++
-	}
-
-	if enqueued > 0 {
-		log.Info().Int("enqueued", enqueued).Msg("kickoff_music_loudness: jobs enqueued")
-	}
-	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
-	return nil
+	st.ErrStreak = 0
+	return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 }
 
 // ---------------------------------------------------------------------------
@@ -574,10 +813,9 @@ func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[Kicko
 // service layer. Wired up by the App at startup.
 type SonicEnabledFn func(ctx context.Context) bool
 
-// sonicKickoffBatch caps how many tracks one kickoff enqueues so a fresh
-// 100k-track library doesn't dump 100k jobs into River in one shot.
-// Subsequent kickoffs (next cron firing or another Run Now click after
-// the batch drains) will pick up the remainder.
+// sonicKickoffBatch caps the pump's in-flight wave so a fresh 100k-track
+// library doesn't dump 100k jobs into River in one shot. The pump tops
+// the wave up as it drains until the whole backlog is analyzed.
 const sonicKickoffBatch = 1000
 
 type KickoffSonicAnalysisWorker struct {
@@ -588,42 +826,83 @@ type KickoffSonicAnalysisWorker struct {
 }
 
 func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[KickoffSonicAnalysisArgs]) error {
-	startedAt := time.Now()
 	taskID := job.Args.ScheduledTaskID
 	q := sqlc.New(w.DB)
+	st := readPumpState(job.Metadata)
+	kind := AnalyzeTrackFacetsArgs{}.Kind()
 
+	if ctx.Err() != nil {
+		return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
+	}
+
+	// Checked on every wake, so toggling the setting off mid-run stops the
+	// pump; only the in-flight wave (bounded) is left to drain.
 	if w.Enabled != nil && !w.Enabled(ctx) {
-		log.Info().Msg("kickoff_sonic_analysis: skipped — disabled in settings")
-		finishKickoff(ctx, q, taskID, startedAt, 0, 0, nil)
+		log.Info().Msg("kickoff_sonic_analysis: disabled in settings — stopping")
+		finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
+		return nil
+	}
+
+	if stop, reason := pumpShouldStop(ctx, q, taskID, st.Source, job.CreatedAt); stop {
+		// Pending centroid refreshes are left alone: they're quick and keep
+		// artist/album centroids consistent with the tracks already analyzed.
+		cancelled, _ := queueops.CancelPendingByScheduledTask(ctx, w.DB, taskID, []string{kind})
+		log.Info().Str("task", taskID).Str("reason", reason).Int64("cancelled_pending", cancelled).Msg("kickoff_sonic_analysis: winding down")
+		finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
 		return nil
 	}
 
 	rc := river.ClientFromContext[pgx.Tx](ctx)
-	ids, err := q.ListPendingAnalysisTracks(ctx, sqlc.ListPendingAnalysisTracksParams{
-		MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
-		AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
-		LimitCount:         sonicKickoffBatch,
-	})
+	active, err := pumpActiveCount(ctx, w.DB, taskID, kind)
 	if err != nil {
-		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
-		return err
+		return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+	}
+	listed := -1 // -1: wave full, sweep not consulted this wake
+	if want := sonicKickoffBatch - active; want > 0 {
+		ids, err := q.ListPendingAnalysisTracks(ctx, sqlc.ListPendingAnalysisTracksParams{
+			AfterID:            st.TrackCursor,
+			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+			AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+			LimitCount:         int32(want),
+		})
+		if err != nil {
+			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+		}
+		listed = len(ids)
+		if len(ids) > 0 {
+			w.Progress.Set("analyze_music_facets", "kickoff_sonic_analysis", "queueing tracks…")
+		}
+		for _, id := range ids {
+			if ctx.Err() != nil {
+				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
+			}
+			res, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: id, ScheduledTaskID: taskID}, nil)
+			switch {
+			case err != nil:
+				log.Warn().Err(err).Int64("track_id", id).Msg("kickoff_sonic_analysis: enqueue failed")
+				st.Failed++
+				st.Skipped++
+			case res.UniqueSkippedAsDuplicate:
+				st.Skipped++
+			default:
+				st.Enqueued++
+			}
+			st.TrackCursor = id
+		}
+	}
+	if active == 0 && listed == 0 {
+		if st.restartSweep() {
+			log.Info().Str("task", taskID).Msg("kickoff_sonic_analysis: re-sweeping for items skipped during the run")
+			st.ErrStreak = 0
+			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+		}
+		// Centroid refreshes cascade from the per-track jobs and are quick;
+		// the run doesn't wait on them.
+		log.Info().Str("task", taskID).Int("enqueued", st.Enqueued).Int("failed", st.Failed).Msg("kickoff_sonic_analysis: backlog drained")
+		finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
+		return nil
 	}
 
-	enqueued, failed := 0, 0
-	w.Progress.Set("analyze_music_facets", "kickoff_sonic_analysis", "queueing tracks…")
-	for _, id := range ids {
-		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
-			return err
-		}
-		if _, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: id, ScheduledTaskID: taskID}, nil); err != nil {
-			log.Warn().Err(err).Int64("track_id", id).Msg("kickoff_sonic_analysis: enqueue failed")
-			failed++
-			continue
-		}
-		enqueued++
-	}
-
-	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
-	return nil
+	st.ErrStreak = 0
+	return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 }

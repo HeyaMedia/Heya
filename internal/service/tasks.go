@@ -2,13 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/taskdefs"
+	"github.com/rs/zerolog/log"
 )
 
 // TaskStats holds completion counts for a scheduled task.
@@ -220,24 +223,58 @@ func (a *App) UpdateScheduledTask(ctx context.Context, taskID string, enabled bo
 // kickoff worker is responsible for fanning out the actual per-item
 // work. UniqueByArgs on the kickoff jobs short-circuits if one is
 // already queued or running, so repeated clicks coalesce.
+//
+// Every call through here is user-initiated ("Run Now" button, CLI), so
+// the run is marked manual: it drains the whole backlog and ignores the
+// task's max-runtime window. Cron-started runs go through the scheduler's
+// trigger loop directly and keep the window.
 func (a *App) TriggerTask(ctx context.Context, taskID string) error {
 	if a.scheduler == nil {
 		return ErrSchedulerUnavailable
 	}
-	return a.scheduler.TriggerNow(ctx, taskID)
+	return a.scheduler.TriggerNow(ctx, taskID, true)
 }
 
 // CancelTask cancels queued / running River jobs associated with a scheduled
 // task. Kickoff workers stamp scheduled_task_id into every child job they fan
 // out; unscoped watcher/manual/view jobs sharing the same worker kinds are left
 // alone.
+//
+// A pump kickoff spends nearly its whole run snoozed, and cancelling a
+// snoozed row finalizes it directly — the pump never gets to stamp the
+// run's outcome. So the bookkeeping ("stopped", duration, item counts) is
+// written here, from a snapshot of the kickoff row taken before the cancel.
 func (a *App) CancelTask(ctx context.Context, taskID string) error {
 	kinds := taskdefs.TaskKinds(taskID)
 	if len(kinds) == 0 {
 		return nil
 	}
-	_, err := a.CancelScheduledTaskJobs(ctx, taskID, kinds)
-	return err
+	var run *queueops.ActiveKickoffRun
+	if def, ok := taskdefs.ByID(taskID); ok && def.Pump {
+		run, _ = queueops.GetActiveKickoff(ctx, a.db, def.KickoffKind, taskID)
+	}
+	if _, err := a.CancelScheduledTaskJobs(ctx, taskID, kinds); err != nil {
+		return err
+	}
+	if run != nil {
+		var counters struct {
+			Enqueued int `json:"enqueued"`
+			Failed   int `json:"failed"`
+		}
+		_ = json.Unmarshal(run.Metadata, &counters)
+		if _, err := a.db.Exec(ctx, `
+			UPDATE scheduled_tasks
+			   SET last_run_at = $2,
+			       last_run_result = 'stopped',
+			       last_run_duration_sec = $3,
+			       last_run_items_processed = $4,
+			       last_run_items_total = $5
+			 WHERE id = $1
+		`, taskID, run.CreatedAt, int32(time.Since(run.CreatedAt).Seconds()), counters.Enqueued, counters.Enqueued+counters.Failed); err != nil {
+			log.Warn().Err(err).Str("task", taskID).Msg("cancel task: stamp stopped run failed")
+		}
+	}
+	return nil
 }
 
 // QueryTrickplayItems returns trickplay generation items with pagination.

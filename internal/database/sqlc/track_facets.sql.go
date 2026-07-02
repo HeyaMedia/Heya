@@ -252,29 +252,37 @@ SELECT t.id
 FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
 WHERE t.file_path != ''
-  AND t.duration <= $1::int
+  AND t.id > $1::bigint
+  AND t.duration <= $2::int
   AND NOT EXISTS (
     SELECT 1 FROM track_files tfile
     WHERE tfile.track_id = t.id
-      AND tfile.duration > $1::int
+      AND tfile.duration > $2::int
   )
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $2::int)
+  AND (tf.track_id IS NULL OR tf.analyzer_version < $3::int)
 ORDER BY t.id ASC
-LIMIT $3::int
+LIMIT $4::int
 `
 
 type ListPendingAnalysisTracksParams struct {
+	AfterID            int64 `json:"after_id"`
 	MaxDurationSeconds int32 `json:"max_duration_seconds"`
 	AnalyzerVersion    int32 `json:"analyzer_version"`
 	LimitCount         int32 `json:"limit_count"`
 }
 
 // Fan-out source for kickoff_sonic_analysis. Returns up to `limit_count`
-// track IDs whose facets row is missing or older than the requested
-// analyzer_version. Mirrors NextTrackForAnalysis' eligibility filter so
-// the kickoff doesn't enqueue jobs the worker would just skip.
+// track IDs (above the pump's after_id cursor) whose facets row is missing
+// or older than the requested analyzer_version. Mirrors
+// NextTrackForAnalysis' eligibility filter so the kickoff doesn't enqueue
+// jobs the worker would just skip.
 func (q *Queries) ListPendingAnalysisTracks(ctx context.Context, arg ListPendingAnalysisTracksParams) ([]int64, error) {
-	rows, err := q.db.Query(ctx, listPendingAnalysisTracks, arg.MaxDurationSeconds, arg.AnalyzerVersion, arg.LimitCount)
+	rows, err := q.db.Query(ctx, listPendingAnalysisTracks,
+		arg.AfterID,
+		arg.MaxDurationSeconds,
+		arg.AnalyzerVersion,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1253,5 +1261,31 @@ func (q *Queries) UpsertTrackFacets(ctx context.Context, arg UpsertTrackFacetsPa
 		arg.Waveform,
 		arg.AnalyzerVersion,
 	)
+	return err
+}
+
+const upsertTrackFacetsStub = `-- name: UpsertTrackFacetsStub :exec
+INSERT INTO track_facets (track_id, analyzer_version)
+VALUES ($1, $2)
+ON CONFLICT (track_id) DO UPDATE SET
+    analyzed_at      = now(),
+    analyzer_version = EXCLUDED.analyzer_version
+`
+
+type UpsertTrackFacetsStubParams struct {
+	TrackID         int64 `json:"track_id"`
+	AnalyzerVersion int32 `json:"analyzer_version"`
+}
+
+// Failure marker: a permanently-broken track (decode error, unreadable file)
+// gets a facets row stamped at the current analyzer version so the pending
+// sweep stops re-picking it every run; bumping AnalyzerVersion invalidates
+// stubs along with real rows. This can't reuse UpsertTrackFacets with
+// zero-value params — pgvector rejects 0-dimension vectors, so that write
+// always errored and broken tracks churned forever. Existing embeddings from
+// a previous successful version are deliberately kept (still useful for
+// similarity) — only the version/timestamp advance.
+func (q *Queries) UpsertTrackFacetsStub(ctx context.Context, arg UpsertTrackFacetsStubParams) error {
+	_, err := q.db.Exec(ctx, upsertTrackFacetsStub, arg.TrackID, arg.AnalyzerVersion)
 	return err
 }

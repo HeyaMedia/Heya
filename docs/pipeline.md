@@ -142,6 +142,35 @@ into every child job; `/api/tasks/{id}/cancel`, runtime counts, and max-runtime
 enforcement use that marker so watcher/manual/view jobs sharing the same worker
 kinds are left alone.
 
+The two music tasks (`scan_music_loudness`, `analyze_music_facets`, flagged
+`Pump: true` in taskdefs) don't fan out one bounded batch and finish — their
+kickoff is a **pump** that stays active for the whole run, snoozing between
+wakes (`river.JobSnooze`, no attempt cost) and topping the work queue up wave
+by wave (500 tracks / 200 albums; 1000 sonic tracks) until the backlog drains.
+The pending set is swept in id order exactly once per run via cursors kept in
+the kickoff job's metadata, so permanently-failing items can't churn. Because
+the kickoff row stays active, its unique-while-active hold makes a cron firing
+during a run coalesce (the window is skipped), and the row's `created_at` +
+metadata survive restarts — an orphaned run is rescued on boot and resumes.
+
+Runs have a **source**: "Run Now" / CLI triggers insert the kickoff with
+`{"source":"manual"}` metadata (scheduler cron firings carry no source).
+Manual runs drain the entire backlog and are exempt from max-runtime
+enforcement; cron-started runs stop when the backlog drains *or* the task's
+max-runtime window closes (or the task is disabled), whichever comes first —
+the pump checks all of that on every wake and winds down gracefully. The
+scheduler's enforcement loop skips pump tasks entirely while their kickoff is
+alive (the pump owns its window; non-pump tasks keep the pre-pump enforcement
+unchanged) and only reaps orphaned work jobs if the pump died. A "Run Now"
+click during an active cron-started run upgrades that run to manual instead
+of no-oping. Cancelling a pump run stamps the scheduled_tasks row with
+`stopped` from `service.CancelTask` (a snoozed kickoff is finalized directly,
+so the pump can't stamp it itself). Before declaring the backlog drained, a
+pump whose sweep skipped items (inserts that coalesced with jobs owned by
+another task — e.g. a library scan's loudness hand-offs — or failed inserts)
+re-runs the sweep once from zero, so work dropped by the other owner isn't
+stranded past the cursor.
+
 **Trickplay + thumbnails are kickoff-driven only.** Never trigger them inline
 from the scan pipeline. Trickplay defaults off per-library.
 

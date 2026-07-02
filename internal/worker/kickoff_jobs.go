@@ -237,8 +237,9 @@ func inTaskWindow(now time.Time, startStr, endStr string) bool {
 // or failure) so the tasks page reflects when the kickoff last fired
 // and how many work jobs it enqueued.
 //
-// items is the count of work jobs successfully enqueued; if itemsFailed
-// > 0 the result is "partial".
+// items is the count of work jobs successfully enqueued (failures are
+// NOT included — callers count those separately in itemsFailed); if
+// itemsFailed > 0 the result is "partial".
 func finishKickoff(ctx context.Context, q *sqlc.Queries, taskID string, startedAt time.Time, items, itemsFailed int, runErr error) {
 	if taskID == "" {
 		return
@@ -272,8 +273,8 @@ func finishKickoff(ctx context.Context, q *sqlc.Queries, taskID string, startedA
 		LastRunAt:             pgtype.Timestamptz{Time: startedAt, Valid: true},
 		LastRunResult:         result,
 		LastRunDurationSec:    int32(completedAt.Sub(startedAt).Seconds()),
-		LastRunItemsProcessed: int32(items - itemsFailed),
-		LastRunItemsTotal:     int32(items),
+		LastRunItemsProcessed: int32(items),
+		LastRunItemsTotal:     int32(items + itemsFailed),
 		NextRunAt:             pgtype.Timestamptz{Time: nextRun, Valid: true},
 	}); err != nil {
 		log.Warn().Err(err).Str("task", taskID).Msg("kickoff: update scheduled_tasks row failed")

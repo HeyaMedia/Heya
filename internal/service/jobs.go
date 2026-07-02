@@ -415,6 +415,12 @@ func (a *App) CancelScheduledTaskJobs(ctx context.Context, taskID string, kinds 
 				}
 			}
 		}
+		// A pump kickoff caught mid-wake may have inserted more work between
+		// the pending sweep above and its own cancellation — sweep once more
+		// so a freshly-topped wave doesn't survive the cancel.
+		if extra, err := queueops.CancelPendingByScheduledTask(ctx, a.db, taskID, kinds); err == nil {
+			cancelled += extra
+		}
 	}
 	return cancelled, nil
 }

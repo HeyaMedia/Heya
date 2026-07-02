@@ -92,15 +92,24 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 	if analyzeErr != nil {
 		// Persist a stub row so a permanently-broken track (decode
 		// error, unreadable file) doesn't get re-picked on every
-		// kickoff. Bumping AnalyzerVersion forces a retry.
+		// kickoff. Bumping AnalyzerVersion forces a retry, and
+		// `heya analyze reset` clears stubs manually. Only written on
+		// the FINAL attempt — an earlier attempt still has a retry
+		// coming, and a transient blip shouldn't mark the track
+		// analyzed. Skipped when the context died: a cancelled or
+		// shut-down job says nothing about the track itself.
 		log.Warn().Err(analyzeErr).
 			Int64("track_id", row.ID).
 			Str("file", row.FilePath).
 			Msg("analyze_track_facets: analyze failed")
-		_ = q.UpsertTrackFacets(ctx, sqlc.UpsertTrackFacetsParams{
-			TrackID:         row.ID,
-			AnalyzerVersion: currentVersion,
-		})
+		if ctx.Err() == nil && job.Attempt >= job.MaxAttempts {
+			if stubErr := q.UpsertTrackFacetsStub(ctx, sqlc.UpsertTrackFacetsStubParams{
+				TrackID:         row.ID,
+				AnalyzerVersion: currentVersion,
+			}); stubErr != nil {
+				log.Warn().Err(stubErr).Int64("track_id", row.ID).Msg("analyze_track_facets: stub write failed")
+			}
+		}
 		return analyzeErr
 	}
 

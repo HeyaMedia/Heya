@@ -1869,6 +1869,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND al.loudness_analyzed_at IS NULL
+  AND al.id > $1::bigint
   AND NOT EXISTS (
     SELECT 1 FROM tracks t
     JOIN track_files tf ON tf.track_id = t.id
@@ -1881,8 +1882,13 @@ WHERE l.media_type = 'music'
     SELECT 1 FROM tracks t WHERE t.album_id = al.id
   )
 ORDER BY al.id
-LIMIT $1
+LIMIT $2::int
 `
+
+type ListAlbumsPendingLoudnessParams struct {
+	AfterID  int64 `json:"after_id"`
+	RowLimit int32 `json:"row_limit"`
+}
 
 type ListAlbumsPendingLoudnessRow struct {
 	ID    int64  `json:"id"`
@@ -1890,9 +1896,11 @@ type ListAlbumsPendingLoudnessRow struct {
 }
 
 // Albums whose track loudness is fully populated but their own album-level
-// loudness has not yet been measured. The album worker picks these up.
-func (q *Queries) ListAlbumsPendingLoudness(ctx context.Context, limit int32) ([]ListAlbumsPendingLoudnessRow, error) {
-	rows, err := q.db.Query(ctx, listAlbumsPendingLoudness, limit)
+// loudness has not yet been measured. Cursor-swept (after_id) by the kickoff
+// pump's album phase, which only starts once the track sweep has drained —
+// at that point eligibility is stable, so a single monotonic pass is complete.
+func (q *Queries) ListAlbumsPendingLoudness(ctx context.Context, arg ListAlbumsPendingLoudnessParams) ([]ListAlbumsPendingLoudnessRow, error) {
+	rows, err := q.db.Query(ctx, listAlbumsPendingLoudness, arg.AfterID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -2913,10 +2921,16 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lf.deleted_at IS NULL
+  AND tf.id > $1::bigint
   AND (tf.integrated_lufs IS NULL OR tf.boundaries_analyzed_at IS NULL)
 ORDER BY tf.id
-LIMIT $1
+LIMIT $2::int
 `
+
+type ListTrackFilesPendingLoudnessParams struct {
+	AfterID  int64 `json:"after_id"`
+	RowLimit int32 `json:"row_limit"`
+}
 
 type ListTrackFilesPendingLoudnessRow struct {
 	ID            int64  `json:"id"`
@@ -2926,12 +2940,13 @@ type ListTrackFilesPendingLoudnessRow struct {
 }
 
 // Files in music libraries missing loudness OR boundary analysis (and not
-// soft-deleted). The track-loudness worker pulls from here as a backstop in
-// case the FFProbeWorker hand-off missed something, and to backfill boundaries
-// on tracks scanned before boundary detection existed. The worker only computes
-// whichever piece is actually missing, so re-listing already-loud tracks is cheap.
-func (q *Queries) ListTrackFilesPendingLoudness(ctx context.Context, limit int32) ([]ListTrackFilesPendingLoudnessRow, error) {
-	rows, err := q.db.Query(ctx, listTrackFilesPendingLoudness, limit)
+// soft-deleted). The kickoff pump sweeps this with an id cursor (after_id)
+// so one run visits each candidate exactly once — a file whose loudness job
+// failed permanently (lufs stays NULL) is passed over instead of being
+// re-enqueued in a loop. The worker only computes whichever piece is actually
+// missing, so re-listing already-loud tracks is cheap.
+func (q *Queries) ListTrackFilesPendingLoudness(ctx context.Context, arg ListTrackFilesPendingLoudnessParams) ([]ListTrackFilesPendingLoudnessRow, error) {
+	rows, err := q.db.Query(ctx, listTrackFilesPendingLoudness, arg.AfterID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

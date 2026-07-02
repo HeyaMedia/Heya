@@ -729,10 +729,11 @@ UPDATE track_files
 
 -- name: ListTrackFilesPendingLoudness :many
 -- Files in music libraries missing loudness OR boundary analysis (and not
--- soft-deleted). The track-loudness worker pulls from here as a backstop in
--- case the FFProbeWorker hand-off missed something, and to backfill boundaries
--- on tracks scanned before boundary detection existed. The worker only computes
--- whichever piece is actually missing, so re-listing already-loud tracks is cheap.
+-- soft-deleted). The kickoff pump sweeps this with an id cursor (after_id)
+-- so one run visits each candidate exactly once — a file whose loudness job
+-- failed permanently (lufs stays NULL) is passed over instead of being
+-- re-enqueued in a loop. The worker only computes whichever piece is actually
+-- missing, so re-listing already-loud tracks is cheap.
 SELECT tf.id, tf.library_file_id, tf.track_id, lf.path
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
@@ -743,9 +744,10 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lf.deleted_at IS NULL
+  AND tf.id > sqlc.arg(after_id)::bigint
   AND (tf.integrated_lufs IS NULL OR tf.boundaries_analyzed_at IS NULL)
 ORDER BY tf.id
-LIMIT $1;
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: UpdateAlbumLoudness :exec
 UPDATE albums
@@ -757,7 +759,9 @@ UPDATE albums
 
 -- name: ListAlbumsPendingLoudness :many
 -- Albums whose track loudness is fully populated but their own album-level
--- loudness has not yet been measured. The album worker picks these up.
+-- loudness has not yet been measured. Cursor-swept (after_id) by the kickoff
+-- pump's album phase, which only starts once the track sweep has drained —
+-- at that point eligibility is stable, so a single monotonic pass is complete.
 SELECT al.id, al.title
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
@@ -765,6 +769,7 @@ JOIN media_items mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND al.loudness_analyzed_at IS NULL
+  AND al.id > sqlc.arg(after_id)::bigint
   AND NOT EXISTS (
     SELECT 1 FROM tracks t
     JOIN track_files tf ON tf.track_id = t.id
@@ -777,7 +782,7 @@ WHERE l.media_type = 'music'
     SELECT 1 FROM tracks t WHERE t.album_id = al.id
   )
 ORDER BY al.id
-LIMIT $1;
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListAlbumTrackFilesForLoudness :many
 -- Returns one file path per track in disc/track order. Album worker concats

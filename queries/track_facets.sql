@@ -37,6 +37,21 @@ ON CONFLICT (track_id) DO UPDATE SET
     analyzed_at       = now(),
     analyzer_version  = EXCLUDED.analyzer_version;
 
+-- name: UpsertTrackFacetsStub :exec
+-- Failure marker: a permanently-broken track (decode error, unreadable file)
+-- gets a facets row stamped at the current analyzer version so the pending
+-- sweep stops re-picking it every run; bumping AnalyzerVersion invalidates
+-- stubs along with real rows. This can't reuse UpsertTrackFacets with
+-- zero-value params — pgvector rejects 0-dimension vectors, so that write
+-- always errored and broken tracks churned forever. Existing embeddings from
+-- a previous successful version are deliberately kept (still useful for
+-- similarity) — only the version/timestamp advance.
+INSERT INTO track_facets (track_id, analyzer_version)
+VALUES ($1, $2)
+ON CONFLICT (track_id) DO UPDATE SET
+    analyzed_at      = now(),
+    analyzer_version = EXCLUDED.analyzer_version;
+
 -- name: GetTrackFacets :one
 SELECT * FROM track_facets WHERE track_id = $1;
 
@@ -84,13 +99,15 @@ WHERE t.id = $1;
 
 -- name: ListPendingAnalysisTracks :many
 -- Fan-out source for kickoff_sonic_analysis. Returns up to `limit_count`
--- track IDs whose facets row is missing or older than the requested
--- analyzer_version. Mirrors NextTrackForAnalysis' eligibility filter so
--- the kickoff doesn't enqueue jobs the worker would just skip.
+-- track IDs (above the pump's after_id cursor) whose facets row is missing
+-- or older than the requested analyzer_version. Mirrors
+-- NextTrackForAnalysis' eligibility filter so the kickoff doesn't enqueue
+-- jobs the worker would just skip.
 SELECT t.id
 FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
 WHERE t.file_path != ''
+  AND t.id > sqlc.arg(after_id)::bigint
   AND t.duration <= sqlc.arg(max_duration_seconds)::int
   AND NOT EXISTS (
     SELECT 1 FROM track_files tfile

@@ -2,6 +2,7 @@ package queueops
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,6 +40,107 @@ type DB interface {
 type RuntimeCounts struct {
 	Pending int
 	Running int
+}
+
+// KickoffSourceManual marks a kickoff run started by a user's "Run Now"
+// (UI button or CLI) rather than the cron trigger loop. Stored under the
+// "source" key of the kickoff job's metadata — metadata is not part of
+// River's unique key, so a manual and a scheduled kickoff still coalesce.
+// Manual runs are exempt from max-runtime enforcement: they drain the
+// whole backlog no matter how long it takes.
+const KickoffSourceManual = "manual"
+
+// kickoffActiveStates matches worker.uniqueWhileActive — the states in
+// which at most one kickoff per (kind, args) can exist.
+const kickoffActiveStates = `('available', 'pending', 'running', 'retryable', 'scheduled')`
+
+// ActiveKickoffSource returns the metadata source ("manual" or "") of the
+// task's active kickoff job, plus whether one exists at all. Uniqueness
+// guarantees at most one active kickoff per task, but ORDER BY id DESC
+// keeps the answer deterministic even if that invariant is ever violated.
+func ActiveKickoffSource(ctx context.Context, db DB, kickoffKind, taskID string) (source string, active bool, err error) {
+	if kickoffKind == "" || taskID == "" {
+		return "", false, nil
+	}
+	err = db.QueryRow(ctx, `
+		SELECT COALESCE(metadata->>'source', '') FROM river_job
+		WHERE kind = $1
+		  AND args->>'scheduled_task_id' = $2
+		  AND state IN `+kickoffActiveStates+`
+		ORDER BY id DESC
+		LIMIT 1
+	`, kickoffKind, taskID).Scan(&source)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return source, true, nil
+}
+
+// MarkActiveKickoffManual upgrades the task's active kickoff run to
+// manual. Used when a "Run Now" click coalesces with an already-active
+// (cron-started) kickoff: the user asked for a full drain, so the run
+// sheds its max-runtime window instead of silently no-oping.
+func MarkActiveKickoffManual(ctx context.Context, db DB, kickoffKind, taskID string) (int64, error) {
+	if kickoffKind == "" || taskID == "" {
+		return 0, nil
+	}
+	tag, err := db.Exec(ctx, `
+		UPDATE river_job
+		   SET metadata = metadata || '{"source": "manual"}'::jsonb
+		 WHERE kind = $1
+		   AND args->>'scheduled_task_id' = $2
+		   AND state IN `+kickoffActiveStates+`
+	`, kickoffKind, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MergeJobMetadata merges a JSON object into one job's metadata. The ||
+// merge preserves keys the patch doesn't mention (notably "source", which
+// MarkActiveKickoffManual may flip concurrently), so pump state writes
+// can't clobber a mid-run manual upgrade.
+func MergeJobMetadata(ctx context.Context, db DB, jobID int64, patch []byte) error {
+	_, err := db.Exec(ctx, `
+		UPDATE river_job SET metadata = metadata || $2::jsonb WHERE id = $1
+	`, jobID, patch)
+	return err
+}
+
+// ActiveKickoffRun is a snapshot of a task's active kickoff row — enough
+// to stamp run bookkeeping when the run is cancelled from outside. (A
+// snoozed pump row is finalized directly by cancellation, so the pump
+// never gets to write its own last_run stats.)
+type ActiveKickoffRun struct {
+	JobID     int64
+	CreatedAt time.Time
+	Metadata  []byte
+}
+
+func GetActiveKickoff(ctx context.Context, db DB, kickoffKind, taskID string) (*ActiveKickoffRun, error) {
+	if kickoffKind == "" || taskID == "" {
+		return nil, nil
+	}
+	var run ActiveKickoffRun
+	err := db.QueryRow(ctx, `
+		SELECT id, created_at, metadata FROM river_job
+		WHERE kind = $1
+		  AND args->>'scheduled_task_id' = $2
+		  AND state IN `+kickoffActiveStates+`
+		ORDER BY id DESC
+		LIMIT 1
+	`, kickoffKind, taskID).Scan(&run.JobID, &run.CreatedAt, &run.Metadata)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
 }
 
 func CountByKinds(ctx context.Context, db DB, kinds []string) (RuntimeCounts, error) {
