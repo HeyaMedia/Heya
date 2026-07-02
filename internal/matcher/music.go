@@ -623,12 +623,58 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 	return matched, unmatched, errored, artistID
 }
 
-func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, disambig, mbid, biography, sortName string) (sqlc.Artist, error) {
+// resolveMusicArtist tries every identity we have against the existing rows:
+// artists.musicbrainz_id first, then the library's media_items external_ids
+// mbid (which can diverge from the artists row — see
+// GetArtistByLibraryMediaItemMBID), then (name, disambiguation).
+//
+// mbidConflict reports that the library's media_item slot for this MBID is
+// held by an artist whose own non-empty musicbrainz_id CONTRADICTS it — an
+// identity chimera, usually left behind by a bad upstream merge that stamped
+// one act's external ids onto another act's media_item. The caller must not
+// write the mbid key into a new media_item's external_ids (it would trip
+// idx_media_items_mbid_unique on every scan, forever), and must not adopt the
+// squatter either (that would fuse two acts' discographies).
+func (m *Matcher) resolveMusicArtist(ctx context.Context, libraryID int64, name, disambig, mbid string) (artist sqlc.Artist, found, mbidConflict bool) {
 	if mbid != "" {
 		if existing, err := m.q.GetArtistByMusicBrainzID(ctx, mbid); err == nil {
-			return existing, nil
+			return existing, true, false
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			log.Warn().Err(err).Str("mbid", mbid).Msg("artist MBID lookup error")
+		}
+
+		squatter, err := m.q.GetArtistByLibraryMediaItemMBID(ctx, sqlc.GetArtistByLibraryMediaItemMBIDParams{
+			LibraryID: libraryID,
+			Mbid:      mbid,
+		})
+		switch {
+		case err == nil && (squatter.MusicbrainzID == "" || squatter.MusicbrainzID == mbid):
+			// The media_item already claims this MBID and its artist row
+			// doesn't contradict it — same act, the artists row just never got
+			// the backfill. Adopt (and backfill) instead of colliding on
+			// idx_media_items_mbid_unique.
+			if squatter.MusicbrainzID == "" {
+				if updated, updErr := m.q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
+					ID:             squatter.ID,
+					MusicbrainzID:  mbid,
+					Name:           squatter.Name,
+					SortName:       squatter.SortName,
+					Disambiguation: squatter.Disambiguation,
+					Biography:      squatter.Biography,
+				}); updErr == nil {
+					return updated, true, false
+				}
+			}
+			return squatter, true, false
+		case err == nil:
+			mbidConflict = true
+			log.Warn().Str("mbid", mbid).Str("artist", name).
+				Int64("squatter_artist_id", squatter.ID).
+				Str("squatter_name", squatter.Name).
+				Str("squatter_mbid", squatter.MusicbrainzID).
+				Msg("MBID already claimed by another artist's media_item; creating artist without media-item mbid")
+		case !errors.Is(err, pgx.ErrNoRows):
+			log.Warn().Err(err).Str("mbid", mbid).Msg("artist media-item MBID lookup error")
 		}
 	}
 
@@ -648,19 +694,30 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 					Biography:      existing.Biography,
 				})
 				if updErr == nil {
-					return updated, nil
+					return updated, true, mbidConflict
 				}
 			}
-			return existing, nil
+			return existing, true, mbidConflict
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			log.Warn().Err(err).Str("name", name).Msg("artist name lookup error")
 		}
 	}
 
+	return sqlc.Artist{}, false, mbidConflict
+}
+
+func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, disambig, mbid, biography, sortName string) (sqlc.Artist, error) {
+	artist, found, mbidConflict := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid)
+	if found {
+		return artist, nil
+	}
+
 	extIDs := map[string]string{}
 	if mbid != "" {
 		extIDs["musicbrainz_artist"] = mbid
-		extIDs["mbid"] = mbid
+		if !mbidConflict {
+			extIDs["mbid"] = mbid
+		}
 	}
 	extJSON, _ := json.Marshal(extIDs)
 
@@ -674,17 +731,9 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 	if err != nil {
 		// Race recovery: a concurrent worker may have created the same artist
 		// (same MBID, same library_id → trips idx_media_items_mbid_unique).
-		// Re-query and use the winner.
-		if mbid != "" {
-			if existing, lookErr := m.q.GetArtistByMusicBrainzID(ctx, mbid); lookErr == nil {
-				return existing, nil
-			}
-		}
-		if existing, lookErr := m.q.GetArtistByNameAndDisambiguation(ctx, sqlc.GetArtistByNameAndDisambiguationParams{
-			Lower:   name,
-			Lower_2: disambig,
-		}); lookErr == nil {
-			return existing, nil
+		// Re-resolve through every identity and use the winner.
+		if winner, ok, _ := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid); ok {
+			return winner, nil
 		}
 		return sqlc.Artist{}, fmt.Errorf("creating media item: %w", err)
 	}
@@ -704,7 +753,7 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 		sortName = name
 	}
 
-	artist, err := m.q.CreateArtist(ctx, sqlc.CreateArtistParams{
+	created, err := m.q.CreateArtist(ctx, sqlc.CreateArtistParams{
 		MediaItemID:    item.ID,
 		MusicbrainzID:  mbid,
 		Name:           name,
@@ -713,12 +762,18 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 		Biography:      biography,
 	})
 	if err != nil {
-		if existing, lookErr := m.q.GetArtistByMediaItemID(ctx, item.ID); lookErr == nil {
-			return existing, nil
+		// Don't leave the just-created media_item behind: an orphaned row
+		// holding the mbid key would squat idx_media_items_mbid_unique and
+		// block this artist from ever being created again.
+		if delErr := m.q.DeleteMediaItem(ctx, item.ID); delErr != nil {
+			log.Warn().Err(delErr).Int64("media_item", item.ID).Msg("cleanup of orphaned artist media_item failed")
+		}
+		if winner, ok, _ := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid); ok {
+			return winner, nil
 		}
 		return sqlc.Artist{}, fmt.Errorf("creating artist: %w", err)
 	}
-	return artist, nil
+	return created, nil
 }
 
 // cachedEnrichArtist returns the cached heya.media result for an artist or

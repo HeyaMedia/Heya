@@ -58,6 +58,28 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		res.Skipped = true
 		return res, nil
 	}
+	// Identity guard: when both sides carry a real MBID and they disagree, the
+	// upstream record describes a DIFFERENT artist than the locally established
+	// identity — adopting its name/ids would clobber this row with another act
+	// (the Big Red Machine → "Taylor Swift" chimera: a bad upstream merge
+	// renamed the local artist and stamped the other act's external ids onto
+	// the media_item, squatting idx_media_items_mbid_unique for the whole
+	// library). Keep the local identity, negative-cache, and let a corrected
+	// upstream record (same MBID) heal things on a later refresh.
+	if upstreamMBID := detail.ExternalIDs["mbid"]; artist.MusicbrainzID != "" && upstreamMBID != "" &&
+		upstreamMBID != artist.MusicbrainzID &&
+		!isSyntheticMBID(artist.MusicbrainzID) && !isSyntheticMBID(upstreamMBID) {
+		log.Warn().Int64("artist_id", artistID).Str("artist", artist.Name).
+			Str("local_mbid", artist.MusicbrainzID).Str("upstream_mbid", upstreamMBID).
+			Str("upstream_name", detail.ArtistName).Str("upstream_slug", detail.HeyaSlug).
+			Msg("upstream artist record contradicts local MBID; skipping enrich to avoid identity clobber")
+		if markErr := m.q.MarkArtistDiscographyEnriched(ctx, artistID); markErr != nil {
+			log.Warn().Err(markErr).Int64("artist_id", artistID).Msg("MarkArtistDiscographyEnriched failed")
+		}
+		res.Skipped = true
+		return res, nil
+	}
+
 	res.HeyaProviderID = "heya:" + detail.HeyaSlug
 	res.PosterURL = detail.PosterURL
 	res.BackdropURL = detail.BackdropURL

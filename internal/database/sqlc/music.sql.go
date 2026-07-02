@@ -779,6 +779,61 @@ func (q *Queries) GetArtistByID(ctx context.Context, id int64) (Artist, error) {
 	return i, err
 }
 
+const getArtistByLibraryMediaItemMBID = `-- name: GetArtistByLibraryMediaItemMBID :one
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.library_id = $1
+  AND mi.external_ids->>'mbid' = $2::text
+LIMIT 1
+`
+
+type GetArtistByLibraryMediaItemMBIDParams struct {
+	LibraryID int64  `json:"library_id"`
+	Mbid      string `json:"mbid"`
+}
+
+// Finds the artist whose parent media_item already claims this MBID in
+// external_ids for the library — the row a CreateMediaItem with the same
+// mbid would collide with on idx_media_items_mbid_unique. The artists row
+// can disagree (enrich merges upstream ids onto the media_item but never
+// rewrites a non-empty artists.musicbrainz_id), so the squatter is only
+// discoverable through this join.
+func (q *Queries) GetArtistByLibraryMediaItemMBID(ctx context.Context, arg GetArtistByLibraryMediaItemMBIDParams) (Artist, error) {
+	row := q.db.QueryRow(ctx, getArtistByLibraryMediaItemMBID, arg.LibraryID, arg.Mbid)
+	var i Artist
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.MusicbrainzID,
+		&i.Name,
+		&i.SortName,
+		&i.Disambiguation,
+		&i.Biography,
+		&i.SearchVector,
+		&i.DiscographyEnrichedAt,
+		&i.CoverArtEnrichedAt,
+		&i.Listeners,
+		&i.Playcount,
+		&i.Popularity,
+		&i.Annotation,
+		&i.Urls,
+		&i.WikipediaLinks,
+		&i.Profiles,
+		&i.Aliases,
+		&i.Groups,
+		&i.Members,
+		&i.ArtistType,
+		&i.BeginDate,
+		&i.BeginYear,
+		&i.EndDate,
+		&i.Ended,
+		&i.Deathday,
+		&i.Birthplace,
+		&i.Tags,
+	)
+	return i, err
+}
+
 const getArtistByMediaItemID = `-- name: GetArtistByMediaItemID :one
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags FROM artists WHERE media_item_id = $1
 `

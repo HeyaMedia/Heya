@@ -70,6 +70,19 @@ UPDATE media_items SET external_ids = $2 WHERE id = $1;
 -- name: GetArtistByMusicBrainzID :one
 SELECT * FROM artists WHERE musicbrainz_id = $1 AND musicbrainz_id != '';
 
+-- name: GetArtistByLibraryMediaItemMBID :one
+-- Finds the artist whose parent media_item already claims this MBID in
+-- external_ids for the library — the row a CreateMediaItem with the same
+-- mbid would collide with on idx_media_items_mbid_unique. The artists row
+-- can disagree (enrich merges upstream ids onto the media_item but never
+-- rewrites a non-empty artists.musicbrainz_id), so the squatter is only
+-- discoverable through this join.
+SELECT a.* FROM artists a
+JOIN media_items mi ON mi.id = a.media_item_id
+WHERE mi.library_id = sqlc.arg(library_id)
+  AND mi.external_ids->>'mbid' = sqlc.arg(mbid)::text
+LIMIT 1;
+
 -- name: GetArtistByNameAndDisambiguation :one
 SELECT * FROM artists
 WHERE lower(name) = lower($1) AND lower(disambiguation) = lower($2)
