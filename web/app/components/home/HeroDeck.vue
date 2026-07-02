@@ -89,6 +89,7 @@ const visibleModes = computed(() => {
 })
 
 function setMode(m: HeroMode) {
+  userTouched = true
   mode.value = m
 }
 
@@ -100,16 +101,31 @@ function togglePin() {
 
 // The pinned mode arrives twice: instantly from localStorage (pre-paint) and
 // authoritatively from /api/me/settings (cross-device). Apply either as long
-// as the user hasn't already clicked a tab this visit.
+// as the user hasn't already clicked a tab this visit — but only when the
+// mode's tab is actually visible: a pinned "Tonight" with an empty queue
+// must not open onto a blank hero. Data loads async, so this re-runs as
+// tabs appear and applies the pin the moment its data lands.
 let userTouched = false
+const visibleIds = computed(() => new Set<string>(visibleModes.value.map(m => m.id)))
+
 watch(() => props.pinnedMode, (m) => {
   if (m === undefined) return
   pinned.value = m
-  if (!userTouched && m && m !== 'game') mode.value = m as HeroMode
+  // Reconcile the device mirror with the server (pin changed elsewhere).
+  try { localStorage.setItem(LS_KEY, m) } catch { /* private mode */ }
 }, { immediate: true })
 
-const stopWatch = watch(mode, (_, old) => {
-  if (old !== undefined) userTouched = true
+watchEffect(() => {
+  if (userTouched) return
+  const want = pinned.value
+  if (want && want !== 'game' && visibleIds.value.has(want)) mode.value = want as HeroMode
+})
+
+// Never sit on a mode whose tab has disappeared (its data emptied out or a
+// stale pin points at something this library doesn't have) — fall back to
+// Featured instead of rendering an empty shell.
+watch(visibleIds, (ids) => {
+  if (mode.value !== 'game' && !ids.has(mode.value)) mode.value = 'featured'
 })
 
 // Poster pool for the game — whatever slides we have on hand.
@@ -131,14 +147,15 @@ function onKonami(e: KeyboardEvent) {
 
 onMounted(() => {
   try {
+    // Seed from the device mirror; the guarded watchEffect above applies it
+    // once (and only when) the mode's tab is visible.
     const ls = localStorage.getItem(LS_KEY)
-    if (ls && !userTouched && ls !== 'game') { pinned.value = ls; mode.value = ls as HeroMode }
+    if (ls && !pinned.value && ls !== 'game') pinned.value = ls
   } catch { /* private mode */ }
   window.addEventListener('keydown', onKonami)
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKonami)
-  stopWatch()
 })
 </script>
 

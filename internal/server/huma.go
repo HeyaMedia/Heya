@@ -180,6 +180,8 @@ func allowsQueryToken(op *huma.Operation) bool {
 	switch {
 	case op.Path == "/api/stream/{file_id}":
 		return true
+	case op.Path == "/api/extras/{id}/stream":
+		return true
 	case strings.HasPrefix(op.Path, "/api/stream/{file_id}/hls/"):
 		return true
 	case op.Path == "/api/stream/{file_id}/subtitles/{index}":

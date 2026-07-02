@@ -229,7 +229,10 @@ function armTrailer() {
     // Takeover: the rotation timer stops; the trailer owns the slide until
     // it ends (advance) or errors (resume rotation in place).
     if (timeout) { clearTimeout(timeout); timeout = null }
-    trailerSrc.value = `/api/extras/${extraID}/stream`
+    // Native <video> requests can't carry the Authorization header — pass
+    // the session token in the query, same as the player's stream URLs.
+    const { token } = useAuth()
+    trailerSrc.value = `/api/extras/${extraID}/stream?token=${token.value}`
   }, TRAILER_LINGER)
 }
 
