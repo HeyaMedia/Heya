@@ -509,18 +509,27 @@ func (st *pumpState) continueAsManual() {
 	st.AlbumCursor = 0
 }
 
-// pumpClaimFinish claims the finishing marker ahead of completing the
-// kickoff and reports whether a concurrent Run-Now upgrade beat the claim
-// — in which case the pump must abandon completion and keep draining as a
-// manual run. Upgrades arriving after the claim are rejected (see
-// MarkActiveKickoffManual) and start a fresh run instead, so an upgrade
-// can never be silently swallowed by a completing pump.
-func pumpClaimFinish(ctx context.Context, db *pgxpool.Pool, jobID int64) (upgradedToManual bool, err error) {
-	source, err := queueops.ClaimKickoffFinish(ctx, db, jobID)
+// pumpFinishHandshake claims the finishing marker ahead of ANY pump
+// completion — drained, wind-down, disabled, or error give-up. It returns
+// proceed=false when the claim reveals a Run-Now upgrade that landed
+// mid-wake on a cron run: st has been reoriented as a fresh manual drain
+// and the caller must keep the run alive. With proceed=true the caller
+// completes, and upgrades arriving from now on are rejected by
+// MarkActiveKickoffManual's finishing guard (their TriggerNow starts a
+// fresh run instead) — so a click can never land on a completing row and
+// be silently swallowed. Runs already manual always proceed: the claim
+// still blocks late upgrades, but their own source can't distinguish a
+// new click from the old state, and re-aborting on it would loop forever.
+func pumpFinishHandshake(ctx context.Context, db *pgxpool.Pool, jobID int64, st *pumpState) (proceed bool, err error) {
+	live, err := queueops.ClaimKickoffFinish(ctx, db, jobID)
 	if err != nil {
 		return false, err
 	}
-	return source == queueops.KickoffSourceManual, nil
+	if st.Source != queueops.KickoffSourceManual && live == queueops.KickoffSourceManual {
+		st.continueAsManual()
+		return false, nil
+	}
+	return true, nil
 }
 
 // pumpSnooze persists the pump's state and puts the kickoff back to
@@ -587,13 +596,23 @@ func pumpInterrupted(ctx context.Context, db *pgxpool.Pool, jobID int64, taskID 
 
 // pumpTransientFailure bumps the run's error streak and snoozes instead
 // of failing the single-attempt kickoff. Past pumpMaxErrStreak the run
-// fails for real (finishKickoff stamps the error, MaxAttempts=1 discards).
+// fails for real (finishKickoff stamps the error, MaxAttempts=1 discards)
+// — through the finishing handshake, so a Run Now that landed mid-wake
+// restarts the drain ("user poked it, try again") instead of dying with
+// the run, and one arriving later starts a fresh run.
 func pumpTransientFailure(ctx context.Context, db *pgxpool.Pool, q *sqlc.Queries, jobID int64, taskID string, st pumpState, runStarted time.Time, cause error) error {
 	if ctx.Err() != nil {
 		return pumpInterrupted(ctx, db, jobID, taskID, st)
 	}
 	st.ErrStreak++
 	if st.ErrStreak >= pumpMaxErrStreak {
+		// A claim error is ignored: the run is already dying of repeated
+		// failures, and the claim was best-effort protection on top.
+		if proceed, err := pumpFinishHandshake(ctx, db, jobID, &st); err == nil && !proceed {
+			log.Info().Str("task", taskID).Msg("kickoff pump: error give-up aborted — run upgraded to manual mid-wake")
+			st.ErrStreak = 0
+			return pumpSnooze(ctx, db, jobID, taskID, st)
+		}
 		log.Error().Err(cause).Str("task", taskID).Msg("kickoff pump: giving up after repeated failures")
 		finishKickoff(ctx, q, taskID, runStarted, st.Enqueued, st.Failed, cause)
 		return cause
@@ -637,12 +656,11 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 	}
 
 	if stop, reason := pumpShouldStop(ctx, q, taskID, st.Source, job.CreatedAt); stop {
-		switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
+		switch proceed, err := pumpFinishHandshake(ctx, w.DB, job.ID, &st); {
 		case err != nil:
 			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
-		case upgraded:
+		case !proceed:
 			log.Info().Str("task", taskID).Msg("kickoff_music_loudness: wind-down aborted — run upgraded to manual mid-wake")
-			st.continueAsManual()
 			st.ErrStreak = 0
 			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 		}
@@ -734,16 +752,13 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 				st.ErrStreak = 0
 				return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 			}
-			if st.Source != queueops.KickoffSourceManual {
-				switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
-				case err != nil:
-					return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
-				case upgraded:
-					log.Info().Str("task", taskID).Msg("kickoff_music_loudness: finish aborted — run upgraded to manual mid-wake")
-					st.continueAsManual()
-					st.ErrStreak = 0
-					return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
-				}
+			switch proceed, err := pumpFinishHandshake(ctx, w.DB, job.ID, &st); {
+			case err != nil:
+				return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+			case !proceed:
+				log.Info().Str("task", taskID).Msg("kickoff_music_loudness: finish aborted — run upgraded to manual mid-wake")
+				st.ErrStreak = 0
+				return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 			}
 			log.Info().Str("task", taskID).Int("enqueued", st.Enqueued).Int("failed", st.Failed).Msg("kickoff_music_loudness: backlog drained")
 			finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
@@ -890,20 +905,29 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 	}
 
 	// Checked on every wake, so toggling the setting off mid-run stops the
-	// pump; only the in-flight wave (bounded) is left to drain.
+	// pump; only the in-flight wave (bounded) is left to drain. Goes
+	// through the finishing handshake like every completion — a mid-wake
+	// upgrade just defers the (inevitable, feature's off) finish by one
+	// wake rather than being swallowed by it.
 	if w.Enabled != nil && !w.Enabled(ctx) {
+		switch proceed, err := pumpFinishHandshake(ctx, w.DB, job.ID, &st); {
+		case err != nil:
+			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+		case !proceed:
+			st.ErrStreak = 0
+			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+		}
 		log.Info().Msg("kickoff_sonic_analysis: disabled in settings — stopping")
 		finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
 		return nil
 	}
 
 	if stop, reason := pumpShouldStop(ctx, q, taskID, st.Source, job.CreatedAt); stop {
-		switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
+		switch proceed, err := pumpFinishHandshake(ctx, w.DB, job.ID, &st); {
 		case err != nil:
 			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
-		case upgraded:
+		case !proceed:
 			log.Info().Str("task", taskID).Msg("kickoff_sonic_analysis: wind-down aborted — run upgraded to manual mid-wake")
-			st.continueAsManual()
 			st.ErrStreak = 0
 			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 		}
@@ -959,16 +983,13 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 			st.ErrStreak = 0
 			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 		}
-		if st.Source != queueops.KickoffSourceManual {
-			switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
-			case err != nil:
-				return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
-			case upgraded:
-				log.Info().Str("task", taskID).Msg("kickoff_sonic_analysis: finish aborted — run upgraded to manual mid-wake")
-				st.continueAsManual()
-				st.ErrStreak = 0
-				return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
-			}
+		switch proceed, err := pumpFinishHandshake(ctx, w.DB, job.ID, &st); {
+		case err != nil:
+			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+		case !proceed:
+			log.Info().Str("task", taskID).Msg("kickoff_sonic_analysis: finish aborted — run upgraded to manual mid-wake")
+			st.ErrStreak = 0
+			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
 		}
 		// Centroid refreshes cascade from the per-track jobs and are quick;
 		// the run doesn't wait on them.
