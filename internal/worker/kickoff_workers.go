@@ -606,9 +606,20 @@ func pumpTransientFailure(ctx context.Context, db *pgxpool.Pool, q *sqlc.Queries
 	}
 	st.ErrStreak++
 	if st.ErrStreak >= pumpMaxErrStreak {
-		// A claim error is ignored: the run is already dying of repeated
-		// failures, and the claim was best-effort protection on top.
-		if proceed, err := pumpFinishHandshake(ctx, db, jobID, &st); err == nil && !proceed {
+		proceed, hErr := pumpFinishHandshake(ctx, db, jobID, &st)
+		switch {
+		case hErr != nil:
+			// The give-up REQUIRES a successful claim — completing
+			// unmarked would let a late Run-Now land on the dying row and
+			// vanish. The claim is a single-row UPDATE by primary key; if
+			// even that fails, snooze and retry the give-up next wake
+			// (the streak stays ≥ max, so it re-enters here; a healthy
+			// wake in between resets it instead). If the claim actually
+			// committed but its result was lost, the snooze patch clears
+			// the stray marker, so upgrades aren't blocked meanwhile.
+			log.Warn().Err(hErr).Str("task", taskID).Msg("kickoff pump: finishing claim failed, deferring give-up")
+			return pumpSnooze(ctx, db, jobID, taskID, st)
+		case !proceed:
 			log.Info().Str("task", taskID).Msg("kickoff pump: error give-up aborted — run upgraded to manual mid-wake")
 			st.ErrStreak = 0
 			return pumpSnooze(ctx, db, jobID, taskID, st)
