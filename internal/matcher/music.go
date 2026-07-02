@@ -623,22 +623,40 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 	return matched, unmatched, errored, artistID
 }
 
+// artistResolution is resolveMusicArtist's verdict on the identities we hold
+// for an incoming artist.
+type artistResolution struct {
+	artist sqlc.Artist
+	found  bool
+	// mbidSquatted: the library's media_item slot for this MBID
+	// (idx_media_items_mbid_unique) is held by an artist whose own non-empty
+	// musicbrainz_id CONTRADICTS it — an identity chimera, usually left behind
+	// by a bad upstream merge that stamped one act's external ids onto another
+	// act's media_item. The caller must not write the mbid key into a new
+	// media_item's external_ids (it would trip the index on every scan,
+	// forever), and must not adopt the squatter either (that would fuse two
+	// acts' discographies).
+	mbidSquatted bool
+	// nameTaken: the exact (name, disambiguation) tuple belongs to an artist
+	// whose established MBID contradicts ours — a different act (or a chimera
+	// row). Adoption is refused; the caller must disambiguate the tuple before
+	// creating or it trips uq_artists_name_disambig.
+	nameTaken bool
+}
+
 // resolveMusicArtist tries every identity we have against the existing rows:
 // artists.musicbrainz_id first, then the library's media_items external_ids
 // mbid (which can diverge from the artists row — see
-// GetArtistByLibraryMediaItemMBID), then (name, disambiguation).
-//
-// mbidConflict reports that the library's media_item slot for this MBID is
-// held by an artist whose own non-empty musicbrainz_id CONTRADICTS it — an
-// identity chimera, usually left behind by a bad upstream merge that stamped
-// one act's external ids onto another act's media_item. The caller must not
-// write the mbid key into a new media_item's external_ids (it would trip
-// idx_media_items_mbid_unique on every scan, forever), and must not adopt the
-// squatter either (that would fuse two acts' discographies).
-func (m *Matcher) resolveMusicArtist(ctx context.Context, libraryID int64, name, disambig, mbid string) (artist sqlc.Artist, found, mbidConflict bool) {
+// GetArtistByLibraryMediaItemMBID), then (name, disambiguation). A real,
+// non-synthetic MBID disagreement on either of the latter two vetoes
+// adoption: the MBID is the strongest identity we hold, and name equality
+// must not overrule it.
+func (m *Matcher) resolveMusicArtist(ctx context.Context, libraryID int64, name, disambig, mbid string) artistResolution {
+	var res artistResolution
+
 	if mbid != "" {
 		if existing, err := m.q.GetArtistByMusicBrainzID(ctx, mbid); err == nil {
-			return existing, true, false
+			return artistResolution{artist: existing, found: true}
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			log.Warn().Err(err).Str("mbid", mbid).Msg("artist MBID lookup error")
 		}
@@ -662,12 +680,12 @@ func (m *Matcher) resolveMusicArtist(ctx context.Context, libraryID int64, name,
 					Disambiguation: squatter.Disambiguation,
 					Biography:      squatter.Biography,
 				}); updErr == nil {
-					return updated, true, false
+					return artistResolution{artist: updated, found: true}
 				}
 			}
-			return squatter, true, false
+			return artistResolution{artist: squatter, found: true}
 		case err == nil:
-			mbidConflict = true
+			res.mbidSquatted = true
 			log.Warn().Str("mbid", mbid).Str("artist", name).
 				Int64("squatter_artist_id", squatter.ID).
 				Str("squatter_name", squatter.Name).
@@ -683,7 +701,20 @@ func (m *Matcher) resolveMusicArtist(ctx context.Context, libraryID int64, name,
 			Lower:   name,
 			Lower_2: disambig,
 		})
-		if err == nil {
+		switch {
+		case err == nil && mbid != "" && existing.MusicbrainzID != "" && existing.MusicbrainzID != mbid &&
+			!isSyntheticMBID(mbid) && !isSyntheticMBID(existing.MusicbrainzID):
+			// Exact (name, disambiguation) match, but the row's established
+			// MBID contradicts ours. Same-name adoption here would fuse two
+			// acts' discographies — including re-adopting the very chimera the
+			// squatter branch above just refused. Refuse; the caller creates a
+			// separate row under a disambiguated tuple.
+			res.nameTaken = true
+			log.Warn().Str("mbid", mbid).Str("artist", name).
+				Int64("existing_artist_id", existing.ID).
+				Str("existing_mbid", existing.MusicbrainzID).
+				Msg("(name, disambiguation) held by an artist with a contradicting MBID; refusing name-based adoption")
+		case err == nil:
 			if mbid != "" && existing.MusicbrainzID == "" {
 				updated, updErr := m.q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
 					ID:             existing.ID,
@@ -694,28 +725,43 @@ func (m *Matcher) resolveMusicArtist(ctx context.Context, libraryID int64, name,
 					Biography:      existing.Biography,
 				})
 				if updErr == nil {
-					return updated, true, mbidConflict
+					res.artist, res.found = updated, true
+					return res
 				}
 			}
-			return existing, true, mbidConflict
-		} else if !errors.Is(err, pgx.ErrNoRows) {
+			res.artist, res.found = existing, true
+			return res
+		case !errors.Is(err, pgx.ErrNoRows):
 			log.Warn().Err(err).Str("name", name).Msg("artist name lookup error")
 		}
 	}
 
-	return sqlc.Artist{}, false, mbidConflict
+	return res
 }
 
 func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, disambig, mbid, biography, sortName string) (sqlc.Artist, error) {
-	artist, found, mbidConflict := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid)
-	if found {
-		return artist, nil
+	res := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid)
+	if res.found {
+		return res.artist, nil
+	}
+
+	if res.nameTaken {
+		// The (name, disambiguation) tuple belongs to a contradicting-MBID
+		// artist — creating under it would trip uq_artists_name_disambig.
+		// Stamp a short MBID marker into the disambiguation; the next enrich
+		// (same MBID passes the identity guard) replaces it with the
+		// upstream's real disambiguation.
+		marker := mbid
+		if len(marker) > 8 {
+			marker = marker[:8]
+		}
+		disambig = strings.TrimSpace(disambig + " (mbid " + marker + ")")
 	}
 
 	extIDs := map[string]string{}
 	if mbid != "" {
 		extIDs["musicbrainz_artist"] = mbid
-		if !mbidConflict {
+		if !res.mbidSquatted {
 			extIDs["mbid"] = mbid
 		}
 	}
@@ -732,8 +778,8 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 		// Race recovery: a concurrent worker may have created the same artist
 		// (same MBID, same library_id → trips idx_media_items_mbid_unique).
 		// Re-resolve through every identity and use the winner.
-		if winner, ok, _ := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid); ok {
-			return winner, nil
+		if rr := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid); rr.found {
+			return rr.artist, nil
 		}
 		return sqlc.Artist{}, fmt.Errorf("creating media item: %w", err)
 	}
@@ -768,8 +814,8 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 		if delErr := m.q.DeleteMediaItem(ctx, item.ID); delErr != nil {
 			log.Warn().Err(delErr).Int64("media_item", item.ID).Msg("cleanup of orphaned artist media_item failed")
 		}
-		if winner, ok, _ := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid); ok {
-			return winner, nil
+		if rr := m.resolveMusicArtist(ctx, libraryID, name, disambig, mbid); rr.found {
+			return rr.artist, nil
 		}
 		return sqlc.Artist{}, fmt.Errorf("creating artist: %w", err)
 	}

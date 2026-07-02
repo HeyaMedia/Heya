@@ -99,6 +99,44 @@ func TestUpsertMusicArtistMBIDSquatter(t *testing.T) {
 		require.Equal(t, mbid, got.MusicbrainzID, "musicbrainz_id backfilled from the media_item claim")
 	})
 
+	t.Run("conflicting squatter is not re-adopted via name match", func(t *testing.T) {
+		// Same chimera, but this time the (name, disambiguation) tuple matches
+		// exactly (both empty disambig) — the name lookup would return the very
+		// row the squatter branch refused. The MBID contradiction must veto
+		// name adoption, and the new row needs a disambiguated tuple or it
+		// trips uq_artists_name_disambig.
+		const ourMBID = "11111111-aaaa-bbbb-cccc-222222222222"
+		const theirMBID = "33333333-dddd-eeee-ffff-444444444444"
+		squatterID, _ := seedArtistWithItemIDs(t, ctx, qtx, libID,
+			"Phoenix Chimera", "", theirMBID,
+			map[string]string{"mbid": ourMBID})
+
+		got, err := m.upsertMusicArtist(ctx, libID, "Phoenix Chimera", "", ourMBID, "", "")
+		require.NoError(t, err)
+		require.NotEqual(t, squatterID, got.ID, "name match must not overrule the MBID contradiction")
+		require.Equal(t, ourMBID, got.MusicbrainzID)
+		require.Contains(t, got.Disambiguation, "(mbid 11111111)", "tuple disambiguated to dodge uq_artists_name_disambig")
+		ids := itemExternalIDs(t, ctx, qtx, got.MediaItemID)
+		require.NotContains(t, ids, "mbid")
+	})
+
+	t.Run("same name with contradicting MBID and no squat stays separate", func(t *testing.T) {
+		// The legit two-acts-one-name case (e.g. "666"): the existing row has a
+		// different established MBID but nothing squats the media_items index,
+		// so the new artist keeps its mbid key.
+		const mbidA = "55555555-aaaa-bbbb-cccc-666666666666"
+		const mbidB = "77777777-dddd-eeee-ffff-888888888888"
+		existingID, _ := seedArtistWithItemIDs(t, ctx, qtx, libID,
+			"666", "", mbidA, map[string]string{})
+
+		got, err := m.upsertMusicArtist(ctx, libID, "666", "", mbidB, "", "")
+		require.NoError(t, err)
+		require.NotEqual(t, existingID, got.ID, "different act — must not fuse")
+		require.Equal(t, mbidB, got.MusicbrainzID)
+		ids := itemExternalIDs(t, ctx, qtx, got.MediaItemID)
+		require.Equal(t, mbidB, ids["mbid"], "no squat — the mbid key is kept")
+	})
+
 	t.Run("no squatter creates normally with the mbid key", func(t *testing.T) {
 		const mbid = "aaaaaaaa-1111-2222-3333-444444444444"
 		got, err := m.upsertMusicArtist(ctx, libID, "Fresh Act", "", mbid, "", "")
