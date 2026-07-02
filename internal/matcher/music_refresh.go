@@ -80,11 +80,6 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		return res, nil
 	}
 
-	res.HeyaProviderID = "heya:" + detail.HeyaSlug
-	res.PosterURL = detail.PosterURL
-	res.BackdropURL = detail.BackdropURL
-	res.ArtistImages = detail.ArtistImages
-
 	// Artist row: only overwrite fields when the new value is non-empty
 	// (UpdateArtistEnrichedFields handles that at the SQL level).
 	newMBID := artist.MusicbrainzID
@@ -137,6 +132,14 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		artist = *canonical
 		artistID = canonical.ID
 	}
+
+	// The upstream payload only reaches the result AFTER every identity gate
+	// has passed — a skip return must never carry another act's artwork or
+	// slug, or the enrich worker would enqueue the wrong artist's images.
+	res.HeyaProviderID = "heya:" + detail.HeyaSlug
+	res.PosterURL = detail.PosterURL
+	res.BackdropURL = detail.BackdropURL
+	res.ArtistImages = detail.ArtistImages
 
 	// Persist the canonical heya.media slug on the parent media_item.
 	// Stable lookup key for future refreshes — heya.media accepts

@@ -248,7 +248,13 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	//    slots from heya.media's pool. Already-used remote URLs are
 	//    skipped so repeated refreshes don't re-download the same file.
 	local := detectLocalMusicAssets(ctx, q, w.DataDir, item.ID)
-	remote := rankRemoteArtistImages(res.ArtistImages, res.PosterURL, res.BackdropURL)
+	// A skipped refresh (no upstream record, or an identity-conflict guard
+	// fired) carries no trustworthy upstream artwork — only fill gaps from
+	// the remote pool when the refresh actually adopted the record.
+	remote := remoteArtistImages{}
+	if !res.Skipped {
+		remote = rankRemoteArtistImages(res.ArtistImages, res.PosterURL, res.BackdropURL)
+	}
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	queueArtistArtworkGaps(ctx, client, item, string(item.MediaType), local, remote)
 	_ = q.MarkEnrichImagesDone(ctx, item.ID)
