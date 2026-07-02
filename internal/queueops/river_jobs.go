@@ -83,6 +83,11 @@ func ActiveKickoffSource(ctx context.Context, db DB, kickoffKind, taskID string)
 // manual. Used when a "Run Now" click coalesces with an already-active
 // (cron-started) kickoff: the user asked for a full drain, so the run
 // sheds its max-runtime window instead of silently no-oping.
+//
+// Rows that have claimed "finishing" (ClaimKickoffFinish) are excluded:
+// their pump has already committed to completing and will never re-read
+// the source, so an upgrade would be silently lost. Returning 0 instead
+// tells TriggerNow to start a fresh manual run once the row completes.
 func MarkActiveKickoffManual(ctx context.Context, db DB, kickoffKind, taskID string) (int64, error) {
 	if kickoffKind == "" || taskID == "" {
 		return 0, nil
@@ -93,11 +98,34 @@ func MarkActiveKickoffManual(ctx context.Context, db DB, kickoffKind, taskID str
 		 WHERE kind = $1
 		   AND args->>'scheduled_task_id' = $2
 		   AND state IN `+kickoffActiveStates+`
+		   AND NOT COALESCE((metadata->>'finishing')::boolean, false)
 	`, kickoffKind, taskID)
 	if err != nil {
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// ClaimKickoffFinish atomically stamps the kickoff row as finishing and
+// returns its live source. This serializes a pump's wind-down against a
+// concurrent Run-Now upgrade: an upgrade that committed first is visible
+// in the returned source (the pump aborts the wind-down and continues as
+// a manual full drain); one that arrives after the claim is rejected by
+// MarkActiveKickoffManual's finishing guard, so its TriggerNow starts a
+// fresh manual run instead. A pump that aborts (or resumes after a crash
+// mid-finish) clears the claim via its next state patch.
+func ClaimKickoffFinish(ctx context.Context, db DB, jobID int64) (string, error) {
+	var source string
+	err := db.QueryRow(ctx, `
+		UPDATE river_job
+		   SET metadata = metadata || '{"finishing": true}'::jsonb
+		 WHERE id = $1
+		 RETURNING COALESCE(metadata->>'source', '')
+	`, jobID).Scan(&source)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return source, err
 }
 
 // MergeJobMetadata merges a JSON object into one job's metadata. The ||

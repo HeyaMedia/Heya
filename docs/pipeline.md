@@ -163,7 +163,11 @@ scheduler's enforcement loop skips pump tasks entirely while their kickoff is
 alive (the pump owns its window; non-pump tasks keep the pre-pump enforcement
 unchanged) and only reaps orphaned work jobs if the pump died. A "Run Now"
 click during an active cron-started run upgrades that run to manual instead
-of no-oping. Cancelling a pump run stamps the scheduled_tasks row with
+of no-oping; the upgrade and the pump's completion are serialized through a
+"finishing" claim on the kickoff row (`queueops.ClaimKickoffFinish`), so an
+upgrade landing mid-wake either flips the run to a full manual drain or is
+rejected and starts a fresh manual run — it can never be silently swallowed
+by a completing pump. Cancelling a pump run stamps the scheduled_tasks row with
 `stopped` from `service.CancelTask` (a snoozed kickoff is finalized directly,
 so the pump can't stamp it itself). Before declaring the backlog drained, a
 pump whose sweep skipped items (inserts that coalesced with jobs owned by

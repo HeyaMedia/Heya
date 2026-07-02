@@ -226,25 +226,42 @@ func (t *Trigger) TriggerNow(ctx context.Context, taskID string, manual bool) er
 	if err != nil {
 		return err
 	}
-	if manual && res.UniqueSkippedAsDuplicate {
-		if def, ok := taskdefs.ByID(taskID); ok {
-			n, err := queueops.MarkActiveKickoffManual(ctx, t.db, def.KickoffKind, taskID)
-			if err != nil {
-				log.Warn().Err(err).Str("task", taskID).Msg("scheduler: upgrade active kickoff to manual failed")
-			}
-			if err == nil && n == 0 {
-				// The run we coalesced against finished between our insert
-				// and the upgrade — without this the click silently no-ops.
-				// The uniqueness hold is gone, so a fresh insert wins now.
-				_, err := t.river.Insert(ctx, args, opts)
-				return err
-			}
-			if n > 0 {
-				log.Info().Str("task", taskID).Msg("scheduler: upgraded active kickoff run to manual (full drain)")
-			}
+	if !manual || !res.UniqueSkippedAsDuplicate {
+		return nil
+	}
+	def, ok := taskdefs.ByID(taskID)
+	if !ok {
+		return nil
+	}
+	// The insert coalesced with an active run — upgrade that run to manual
+	// so it drains fully instead of silently no-oping. The retry loop
+	// covers the finishing handshake: a pump that has claimed "finishing"
+	// rejects the upgrade (MarkActiveKickoffManual matches 0 rows) and
+	// completes within milliseconds, after which a fresh manual insert
+	// wins. Either way the click is never swallowed.
+	for attempt := 0; attempt < 5; attempt++ {
+		n, err := queueops.MarkActiveKickoffManual(ctx, t.db, def.KickoffKind, taskID)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			log.Info().Str("task", taskID).Msg("scheduler: upgraded active kickoff run to manual (full drain)")
+			return nil
+		}
+		res, err := t.river.Insert(ctx, args, opts)
+		if err != nil {
+			return err
+		}
+		if !res.UniqueSkippedAsDuplicate {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	return nil
+	return fmt.Errorf("task %s: the active run is finishing — retry in a moment", taskID)
 }
 
 // EnqueueLibraryScan inserts kickoff_library_scan for one library.

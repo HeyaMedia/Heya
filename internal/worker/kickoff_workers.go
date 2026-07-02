@@ -458,6 +458,11 @@ func readPumpState(metadata []byte) pumpState {
 // patch serializes the keys the pump owns. Source is deliberately absent:
 // MarkActiveKickoffManual may flip it mid-run, and the jsonb || merge must
 // not undo that upgrade with the stale value read at wake start.
+// "finishing" is always reset: it's only meaningful between a
+// ClaimKickoffFinish and the completion that follows it (no patch is
+// written in that window), so any patched wake is by definition a run
+// that continues — including one that aborted a wind-down or resumed
+// after a crash mid-finish — and must accept upgrades again.
 func (st pumpState) patch() []byte {
 	b, err := json.Marshal(map[string]any{
 		"enqueued":     st.Enqueued,
@@ -465,6 +470,7 @@ func (st pumpState) patch() []byte {
 		"err_streak":   st.ErrStreak,
 		"skipped":      st.Skipped,
 		"final_sweep":  st.FinalSweep,
+		"finishing":    false,
 		"track_cursor": st.TrackCursor,
 		"album_cursor": st.AlbumCursor,
 	})
@@ -487,6 +493,34 @@ func (st *pumpState) restartSweep() bool {
 	st.TrackCursor = 0
 	st.AlbumCursor = 0
 	return true
+}
+
+// continueAsManual reorients an in-flight run after a mid-wake Run-Now
+// upgrade beat the completion claim: sweep everything still pending from
+// scratch, exactly like a freshly-started manual run would. (The row's
+// source is already "manual" — MarkActiveKickoffManual wrote it — so only
+// the in-memory copy and the sweep state need resetting; the next state
+// patch clears the finishing claim.)
+func (st *pumpState) continueAsManual() {
+	st.Source = queueops.KickoffSourceManual
+	st.Skipped = 0
+	st.FinalSweep = false
+	st.TrackCursor = 0
+	st.AlbumCursor = 0
+}
+
+// pumpClaimFinish claims the finishing marker ahead of completing the
+// kickoff and reports whether a concurrent Run-Now upgrade beat the claim
+// — in which case the pump must abandon completion and keep draining as a
+// manual run. Upgrades arriving after the claim are rejected (see
+// MarkActiveKickoffManual) and start a fresh run instead, so an upgrade
+// can never be silently swallowed by a completing pump.
+func pumpClaimFinish(ctx context.Context, db *pgxpool.Pool, jobID int64) (upgradedToManual bool, err error) {
+	source, err := queueops.ClaimKickoffFinish(ctx, db, jobID)
+	if err != nil {
+		return false, err
+	}
+	return source == queueops.KickoffSourceManual, nil
 }
 
 // pumpSnooze persists the pump's state and puts the kickoff back to
@@ -603,6 +637,15 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 	}
 
 	if stop, reason := pumpShouldStop(ctx, q, taskID, st.Source, job.CreatedAt); stop {
+		switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
+		case err != nil:
+			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+		case upgraded:
+			log.Info().Str("task", taskID).Msg("kickoff_music_loudness: wind-down aborted — run upgraded to manual mid-wake")
+			st.continueAsManual()
+			st.ErrStreak = 0
+			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+		}
 		cancelled, _ := queueops.CancelPendingByScheduledTask(ctx, w.DB, taskID, []string{trackKind, albumKind})
 		log.Info().Str("task", taskID).Str("reason", reason).Int64("cancelled_pending", cancelled).Msg("kickoff_music_loudness: winding down")
 		finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
@@ -690,6 +733,17 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 				log.Info().Str("task", taskID).Msg("kickoff_music_loudness: re-sweeping for items skipped during the run")
 				st.ErrStreak = 0
 				return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+			}
+			if st.Source != queueops.KickoffSourceManual {
+				switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
+				case err != nil:
+					return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+				case upgraded:
+					log.Info().Str("task", taskID).Msg("kickoff_music_loudness: finish aborted — run upgraded to manual mid-wake")
+					st.continueAsManual()
+					st.ErrStreak = 0
+					return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+				}
 			}
 			log.Info().Str("task", taskID).Int("enqueued", st.Enqueued).Int("failed", st.Failed).Msg("kickoff_music_loudness: backlog drained")
 			finishKickoff(ctx, q, taskID, job.CreatedAt, st.Enqueued, st.Failed, nil)
@@ -844,6 +898,15 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 	}
 
 	if stop, reason := pumpShouldStop(ctx, q, taskID, st.Source, job.CreatedAt); stop {
+		switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
+		case err != nil:
+			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+		case upgraded:
+			log.Info().Str("task", taskID).Msg("kickoff_sonic_analysis: wind-down aborted — run upgraded to manual mid-wake")
+			st.continueAsManual()
+			st.ErrStreak = 0
+			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+		}
 		// Pending centroid refreshes are left alone: they're quick and keep
 		// artist/album centroids consistent with the tracks already analyzed.
 		cancelled, _ := queueops.CancelPendingByScheduledTask(ctx, w.DB, taskID, []string{kind})
@@ -895,6 +958,17 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 			log.Info().Str("task", taskID).Msg("kickoff_sonic_analysis: re-sweeping for items skipped during the run")
 			st.ErrStreak = 0
 			return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+		}
+		if st.Source != queueops.KickoffSourceManual {
+			switch upgraded, err := pumpClaimFinish(ctx, w.DB, job.ID); {
+			case err != nil:
+				return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
+			case upgraded:
+				log.Info().Str("task", taskID).Msg("kickoff_sonic_analysis: finish aborted — run upgraded to manual mid-wake")
+				st.continueAsManual()
+				st.ErrStreak = 0
+				return pumpSnooze(ctx, w.DB, job.ID, taskID, st)
+			}
 		}
 		// Centroid refreshes cascade from the per-track jobs and are quick;
 		// the run doesn't wait on them.
