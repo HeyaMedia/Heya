@@ -86,8 +86,24 @@ func (a *App) missingCountCached(ctx context.Context) int {
 	// parallelism its hash join overflowed the k8s pod's /dev/shm and the
 	// query ERRORED, silently zeroing the count. NOT EXISTS (not NOT IN):
 	// a NULL in the anti-join side would silently zero a bucket again.
+	// Serial execution on purpose: parallel workers allocate DSM segments in
+	// the postgres pod's /dev/shm (64Mi k8s default), and under concurrent
+	// shm pressure even a small resize fails with SQLSTATE 53100 — observed
+	// live. A serial plan allocates none, costs ~150ms extra here, and this
+	// value sits behind a 5-minute cache. SET LOCAL scopes it to this tx.
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("dashboard missing_count begin failed")
+		return a.missingCount
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
+		log.Warn().Err(err).Msg("dashboard missing_count setup failed")
+		return a.missingCount
+	}
+
 	var count int
-	err := a.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		WITH live_albums AS MATERIALIZED (
 		  SELECT DISTINCT t.album_id
 		  FROM track_files tf JOIN tracks t ON t.id = tf.track_id
@@ -114,6 +130,7 @@ func (a *App) missingCountCached(ctx context.Context) int {
 		log.Warn().Err(err).Msg("dashboard missing_count query failed")
 		return a.missingCount // stale beats silently-zero
 	}
+	_ = tx.Commit(ctx)
 
 	a.missingCount = count
 	a.missingCountAt = time.Now()
@@ -129,10 +146,19 @@ func (a *App) missingCountCached(ctx context.Context) int {
 func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) {
 	// The albums arm drives from the soft-deleted set like missingCountCached
 	// (same live_albums shape — keep the two consistent so the dashboard count
-	// and this list never diverge). The old join-everything form hash-joined
-	// all of library_files (~1.3s, and erroring on /dev/shm under default
-	// parallelism).
-	rows, err := a.db.Query(ctx, `
+	// and this list never diverge). Serial execution for the same reason as
+	// missingCountCached: parallel DSM segments intermittently fail against
+	// the pod's tiny /dev/shm.
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
+		return nil, err
+	}
+
+	rows, err := tx.Query(ctx, `
 		WITH live_albums AS MATERIALIZED (
 		  SELECT DISTINCT t.album_id
 		  FROM track_files tf JOIN tracks t ON t.id = tf.track_id
@@ -165,6 +191,8 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 		rows.Scan(&m.ID, &m.Title, &m.Year, &m.MediaType, &m.PosterPath, &m.Slug)
 		items = append(items, m)
 	}
+	rows.Close()
+	_ = tx.Commit(ctx)
 
 	return items, nil
 }
@@ -189,6 +217,12 @@ func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Same /dev/shm insurance as missingCountCached — the anti-join DELETE
+	// scans can plan parallel workers too.
+	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
+		return 0, err
+	}
 
 	total := 0
 
