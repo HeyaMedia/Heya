@@ -9,6 +9,7 @@ import (
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/jellyfin"
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/service"
 )
@@ -17,13 +18,16 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 	mux := http.NewServeMux()
 	BuildAPI(mux, app, cfg, opts...)
 
-	// SPA is the only non-/api route — anything that doesn't match a Huma
-	// operation falls through here.
-	mux.Handle("/", spaHandler())
+	o := collectOptions(opts...)
+
+	// The catch-all is the Jellyfin-compatible surface wrapped around the
+	// SPA: when the jellyfin.enabled toggle is on it claims its route tree
+	// (/System/*, /Users/*, /Items/*, /socket, /emby/*...), everything else
+	// — and everything when off — falls through to the SPA exactly as
+	// before. See internal/jellyfin.
+	mux.Handle("/", jellyfin.NewMiddleware(app, o.hub, spaHandler()))
 
 	handler := withMiddleware(mux)
-
-	o := collectOptions(opts...)
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
 		Handler: handler,
@@ -63,6 +67,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerAdminRoutes(api, app, o.logBuf)
 	registerAdminSystemRoutes(api, app, o.hub)
 	registerTailscaleRoutes(api, app, cfg)
+	registerJellyfinConfigRoutes(api, app)
 	registerLibraryRoutes(api, app)
 	registerJobRoutes(api, app)
 	registerTaskRoutes(api, app)

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/karbowiak/heya/internal/jellyfin"
 	tsnetwrap "github.com/karbowiak/heya/internal/tailscale"
 
 	"github.com/rs/zerolog/log"
@@ -62,7 +63,16 @@ var devProxyCmd = &cobra.Command{
 
 		mux := http.NewServeMux()
 		mux.Handle("/api/", apiProxy)
-		mux.Handle("/", webProxy)
+		// Jellyfin-compatible surface: exact route-table matches (and only
+		// those — /search etc. stay with Nuxt) go to the Go backend. See
+		// internal/jellyfin.ClaimsPath.
+		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if jellyfin.ClaimsPath(r.URL.Path) {
+				apiProxy.ServeHTTP(w, r)
+				return
+			}
+			webProxy.ServeHTTP(w, r)
+		}))
 
 		// tsnet via the production wrapper, fronting the proxy handler. We
 		// only construct the node here; the backend opens/closes its listeners

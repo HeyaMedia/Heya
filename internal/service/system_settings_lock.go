@@ -15,6 +15,8 @@ package service
 // (opensubtitles credentials, etc.) the write proceeds normally.
 func (a *App) SystemSettingEnvLock(key string) (envVar string, locked bool) {
 	switch key {
+	case jfKeyEnabled:
+		return a.config.Jellyfin.Enabled.EnvLock()
 	case tsKeyEnabled:
 		return a.config.Tailscale.Enabled.EnvLock()
 	case tsKeyHTTPS:

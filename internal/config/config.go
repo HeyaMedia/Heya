@@ -53,11 +53,23 @@ type Config struct {
 	TranscodeCacheDir   Field[string]
 	TranscodeCacheMaxGB Field[int]
 	Tailscale           TailscaleConfig
+	Jellyfin            JellyfinConfig
 	// Podcast Index API credentials. Sign up at https://api.podcastindex.org
 	// — free tier covers personal-use traffic comfortably. When empty the
 	// /api/podcasts trending+search endpoints will surface a clear error.
 	PodcastIndexKey    Field[string] `json:"-"` // never exposed via API
 	PodcastIndexSecret Field[string] `json:"-"`
+}
+
+// JellyfinConfig gates the Jellyfin-compatible API surface (internal/jellyfin)
+// — a second route tree (/System/*, /Users/*, /Items/*, /socket, /emby/*) that
+// lets stock Jellyfin clients (Infuse, Finamp, Streamyfin, jellyfin-web...)
+// talk to Heya as if it were a Jellyfin server. Enabled follows the standard
+// env > db > default merge: settable from the UI, locked when the env var is
+// present. The routes are always mounted; the flag is checked per-request, so
+// UI flips take effect without a restart.
+type JellyfinConfig struct {
+	Enabled Field[bool]
 }
 
 // TailscaleConfig holds the env-sourced tailscale knobs. Enabled/HTTPS/Funnel
@@ -99,6 +111,9 @@ func Load() *Config {
 		TranscodeCacheMaxGB: envInt("HEYA_TRANSCODE_CACHE_MAX_GB", 50),
 		PodcastIndexKey:     envString("HEYA_PODCAST_INDEX_KEY", ""),
 		PodcastIndexSecret:  envString("HEYA_PODCAST_INDEX_SECRET", ""),
+		Jellyfin: JellyfinConfig{
+			Enabled: envBool("HEYA_JELLYFIN_API_ENABLED", false),
+		},
 		Tailscale: TailscaleConfig{
 			Enabled:  envBool("HEYA_TAILSCALE_ENABLED", false),
 			Hostname: envString("HEYA_TAILSCALE_HOSTNAME", "heya"),
@@ -182,6 +197,7 @@ var sourceFields = []sourceField{
 	{"transcoder.hwaccel", func(c *Config) SourceEntry { return c.HWAccel.Entry() }},
 	{"transcoder.cache_dir", func(c *Config) SourceEntry { return c.TranscodeCacheDir.Entry() }},
 	{"transcoder.cache_max_gb", func(c *Config) SourceEntry { return c.TranscodeCacheMaxGB.Entry() }},
+	{"jellyfin.enabled", func(c *Config) SourceEntry { return c.Jellyfin.Enabled.Entry() }},
 	{"tailscale.enabled", func(c *Config) SourceEntry { return c.Tailscale.Enabled.Entry() }},
 	{"tailscale.hostname", func(c *Config) SourceEntry { return c.Tailscale.Hostname.Entry() }},
 	{"tailscale.state_dir", func(c *Config) SourceEntry { return c.Tailscale.StateDir.Entry() }},

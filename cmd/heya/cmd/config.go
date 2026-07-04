@@ -69,6 +69,7 @@ func configValues(c *config.Config) map[string]string {
 		"transcoder.hwaccel":      c.HWAccel.Value,
 		"transcoder.cache_dir":    c.TranscodeCacheDir.Value,
 		"transcoder.cache_max_gb": strconv.Itoa(c.TranscodeCacheMaxGB.Value),
+		"jellyfin.enabled":        strconv.FormatBool(c.Jellyfin.Enabled.Value),
 		"tailscale.enabled":       strconv.FormatBool(c.Tailscale.Enabled.Value),
 		"tailscale.hostname":      c.Tailscale.Hostname.Value,
 		"tailscale.state_dir":     c.Tailscale.StateDir.Value,
