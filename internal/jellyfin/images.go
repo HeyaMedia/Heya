@@ -62,9 +62,16 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 			target += fmt.Sprintf("?sort=%d", index)
 		}
 
+	// In every branch below: a query error is a 500 (retryable — Feishin's
+	// cover-art request storms surfaced transient errors being served as
+	// 404s, which clients cache as "no image"), only a missing row is a 404.
 	case KindSeason:
 		rows, err := s.app.JFListSeasons(ctx, 0, []int64{id})
-		if err != nil || len(rows) == 0 {
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if len(rows) == 0 {
 			http.NotFound(w, r)
 			return
 		}
@@ -73,7 +80,11 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 
 	case KindEpisode:
 		rows, _, err := s.app.JFListEpisodes(ctx, sqlc.JFListEpisodesParams{OnlyIds: []int64{id}})
-		if err != nil || len(rows) == 0 {
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if len(rows) == 0 {
 			http.NotFound(w, r)
 			return
 		}
@@ -98,7 +109,11 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 
 	case KindAlbum:
 		rows, _, err := s.app.JFListAlbums(ctx, sqlc.JFListAlbumsParams{OnlyIds: []int64{id}})
-		if err != nil || len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].Slug == "" {
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].Slug == "" {
 			http.NotFound(w, r)
 			return
 		}
@@ -106,7 +121,11 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 
 	case KindTrack:
 		rows, _, err := s.app.JFListTracks(ctx, sqlc.JFListTracksParams{OnlyIds: []int64{id}})
-		if err != nil || len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].AlbumSlug == "" {
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].AlbumSlug == "" {
 			http.NotFound(w, r)
 			return
 		}
