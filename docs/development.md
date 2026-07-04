@@ -2,6 +2,25 @@
 
 Day-to-day workflows for building, running, and debugging Heya.
 
+## First-time setup
+
+```bash
+git clone git@github.com:HeyaMedia/Heya.git
+cd Heya
+cp .env.example .env        # tweak the values you care about
+make db-up                  # start Postgres on :5440
+make build                  # frontend (bun) + Go binary → ./bin/heya
+./bin/heya setup            # guided wizard — migrations, admin user, first library
+./bin/heya serve            # http://localhost:8080
+```
+
+Configuration lives in `.env` (see `.env.example` for every supported key,
+layered as `.env` → `.env.local` → process env). Anything declared in env is
+locked in the Settings UI with a tooltip naming the env var —
+`HEYA_LIBRARY_<N>_*` even declares libraries declaratively for Docker/k8s.
+Add libraries via the UI (Settings → Libraries) or CLI
+(`./bin/heya library add …`); Heya scans, matches, and enriches from there.
+
 ## Daily dev
 
 ```bash

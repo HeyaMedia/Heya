@@ -1,3 +1,9 @@
+# Daily dev:   make db-up                 → Postgres only (:5440)
+# Full stack:  docker compose up -d       → Postgres + released Heya on :8080
+#
+# The heya service runs the published image (ghcr.io, tag `latest`). Update it
+# with `docker compose pull heya && docker compose up -d heya`. Don't run it
+# alongside `make dev` — both want :8080.
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -10,3 +16,40 @@ services:
       - "5440:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heya -d heya"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  heya:
+    image: ghcr.io/heyamedia/heya:latest
+    container_name: heya
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      HEYA_DATABASE_URL: postgres://heya:heya@postgres:5432/heya?sslmode=disable
+      # First-boot admin bootstrap (ignored once an admin user exists):
+      # HEYA_ADMIN_USERNAME: admin
+      # HEYA_ADMIN_EMAIL: admin@example.com
+      # HEYA_ADMIN_PASSWORD: change-me
+      # Declare libraries from env — name/paths/type lock in the UI, all other
+      # per-library tunables stay UI-editable (see .env.example):
+      # HEYA_LIBRARY_0_NAME: Movies
+      # HEYA_LIBRARY_0_PATHS: /storage/Movies
+      # HEYA_LIBRARY_0_TYPE: movie
+      # Intel/AMD hardware transcode (pair with the devices block below):
+      # HEYA_HWACCEL: vaapi
+    volumes:
+      # Tailscale state, transcode cache, sonic models — keep this persistent.
+      - ./data/heya:/data
+      # Mount your media, then add it as a library (UI or HEYA_LIBRARY_* above):
+      # - /path/to/media:/storage/Movies:ro
+    # Intel/AMD hardware transcode — pass the render node through. NVIDIA and
+    # OpenVINO GPU image variants: see docs/deployment.md.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    restart: unless-stopped

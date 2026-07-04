@@ -2,7 +2,7 @@
 
 Heya ships as a single self-contained binary (embedded Nuxt SPA + API + WS).
 Production runs it from a container. There are **three image flavours**, all
-published to `ghcr.io/<owner>/<repo>` on every `vX.Y.Z` tag:
+published to `ghcr.io/heyamedia/heya` on every `vX.Y.Z` tag:
 
 | Tag | Arch | ONNX (sonic-analysis) | Video transcode | Run flag |
 | --- | --- | --- | --- | --- |
@@ -19,12 +19,28 @@ Postgres is always external — point at it with `HEYA_DATABASE_URL`. Data
 (Tailscale state, transcode cache, sonic-analysis models, OpenVINO kernel
 cache) lives under `/data`; mount a volume there.
 
+## Docker Compose
+
+The repo's [`docker-compose.yml`](../docker-compose.yml) runs the full stack:
+pgvector Postgres plus the released base image on `:8080`.
+
+```bash
+docker compose up -d                                  # Postgres + heya:latest
+docker compose pull heya && docker compose up -d heya # update to newest latest
+```
+
+The compose file carries commented-out blocks for the common extras — admin
+bootstrap, declarative `HEYA_LIBRARY_<N>_*` libraries, media mounts, and
+`/dev/dri` passthrough for hardware transcode. Uncomment what you need.
+(`make db-up` starts only the `postgres` service — that's the dev flow, and it
+shares this file.)
+
 ## Base image — CPU + Intel/AMD transcode
 
 ```bash
 docker run -p 8080:8080 -v $PWD/data:/data \
   -e HEYA_DATABASE_URL='postgres://heya:heya@db:5432/heya?sslmode=disable' \
-  ghcr.io/<owner>/<repo>:latest
+  ghcr.io/heyamedia/heya:latest
 ```
 
 Hardware **video transcode** (Intel Arc/iGPU + AMD) needs only the render node
@@ -37,7 +53,7 @@ docker run -p 8080:8080 -v $PWD/data:/data \
   --group-add "$(getent group render | cut -d: -f3)" \
   -e HEYA_HWACCEL=vaapi \
   -e HEYA_DATABASE_URL=... \
-  ghcr.io/<owner>/<repo>:latest
+  ghcr.io/heyamedia/heya:latest
 ```
 
 `HEYA_HWACCEL` ∈ `auto|none|vaapi|qsv|nvenc|videotoolbox`. On a host with more
@@ -58,7 +74,7 @@ the host; the CUDA *driver* libs are injected by `--gpus all`, while the CUDA
 ```bash
 docker run --gpus all -p 8080:8080 -v $PWD/data:/data \
   -e HEYA_DATABASE_URL=... \
-  ghcr.io/<owner>/<repo>:latest-cuda
+  ghcr.io/heyamedia/heya:latest-cuda
 ```
 
 The image defaults `HEYA_SONIC_ACCELERATOR=cuda` and `HEYA_HWACCEL=nvenc`; both
@@ -76,7 +92,7 @@ docker run -p 8080:8080 -v $PWD/data:/data \
   --device /dev/dri:/dev/dri \
   --group-add "$(getent group render | cut -d: -f3)" \
   -e HEYA_DATABASE_URL=... \
-  ghcr.io/<owner>/<repo>:latest-openvino
+  ghcr.io/heyamedia/heya:latest-openvino
 ```
 
 Defaults: `HEYA_SONIC_ACCELERATOR=openvino`, `HEYA_SONIC_OPENVINO_DEVICE=GPU`
