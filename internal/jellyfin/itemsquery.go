@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"context"
+	"hash/fnv"
 	"net/http"
 	"sort"
 	"strconv"
@@ -321,9 +322,21 @@ func (s *Server) queryMultiType(ctx context.Context, userID int64, serverID stri
 		merged = append(merged, res.Items...)
 		total += res.TotalRecordCount
 	}
-	sort.SliceStable(merged, func(i, j int) bool {
-		return dtoLess(merged[i], merged[j], req.sortBy, req.sortDesc)
-	})
+	if req.sortBy == "random" {
+		// Each sub-query shuffled its own type (seeded md5 in SQL), but those
+		// per-type orders can't be interleaved into one shuffle. Re-key the
+		// merged set on a stable hash of the item id + the same daily seed, so
+		// the cross-type order is shuffled yet consistent across paginated
+		// requests within the session.
+		seed := randSeed(userID)
+		sort.SliceStable(merged, func(i, j int) bool {
+			return randKey(merged[i].ID, seed) < randKey(merged[j].ID, seed)
+		})
+	} else {
+		sort.SliceStable(merged, func(i, j int) bool {
+			return dtoLess(merged[i], merged[j], req.sortBy, req.sortDesc)
+		})
+	}
 	if req.startIndex > 0 && req.startIndex < len(merged) {
 		merged = merged[req.startIndex:]
 	} else if req.startIndex >= len(merged) {
@@ -788,6 +801,16 @@ func trackSort(s string) string {
 // same shuffle.
 func randSeed(userID int64) string {
 	return strconv.FormatInt(userID, 10) + time.Now().UTC().Format("2006-01-02")
+}
+
+// randKey is the cross-type shuffle key: a stable hash of an item id and the
+// daily seed. Deterministic, so paginated multi-type random requests keep a
+// consistent order the way the per-type SQL md5 shuffle does.
+func randKey(id, seed string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(id))
+	_, _ = h.Write([]byte(seed))
+	return h.Sum64()
 }
 
 func keys(m map[int64]bool) []int64 {
