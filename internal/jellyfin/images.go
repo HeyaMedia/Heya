@@ -13,8 +13,11 @@ import (
 
 // Image delivery. Anonymous, like Jellyfin's own image endpoints and Heya's
 // /api/media/{id}/image/{type} — <img> tags carry no auth headers. Every
-// request 302-redirects to the matching native Heya image endpoint, which
-// owns the full pipeline (media_assets walk, resizer, passive-mode proxy).
+// request is dispatched IN-PROCESS to the matching native Heya image
+// endpoint, which owns the full pipeline (media_assets walk, resizer,
+// passive-mode proxy). Bytes come back directly, like real Jellyfin — a 302
+// was tried first and broke Feishin, which doesn't follow image redirects.
+// Only remote still URLs (heya.media assets never downloaded) still redirect.
 
 // jellyfin ImageType → Heya asset type. Unknown types 404 (upstream does the
 // same for types an item lacks).
@@ -30,12 +33,11 @@ var imageTypeMap = map[string]string{
 
 // GET /Items/{itemId}/Images/{imageType} and .../{imageIndex}
 //
-// Rather than resolve + serve here, redirect to Heya's own image endpoints.
+// Rather than resolve + serve here, dispatch to Heya's own image endpoints.
 // Those are the source of truth: they run the media_assets walk, the on-disk
 // resizer, AND the passive-mode image proxy (proxiedImage) that fetches bytes
 // from an upstream Heya when the local data dir has none. Serving locally here
-// bypassed that proxy and 404'd in passive/dev deployments. A 302 costs one
-// hop; image requests are anonymous so no auth is lost.
+// bypassed that proxy and 404'd in passive/dev deployments.
 func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Params) {
 	ctx := r.Context()
 	kind, id, err := DecodeID(p["itemId"])
@@ -136,7 +138,29 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 		return
 	}
 
-	http.Redirect(w, r, appendResizeQuery(target, r), http.StatusFound)
+	s.serveNativeImage(w, r, appendResizeQuery(target, r))
+}
+
+// serveNativeImage re-routes the request to a native image endpoint through
+// the full server mux, in-process — the response bytes stream straight back
+// to the client with no redirect hop. Falls back to a 302 when no native
+// handler is mounted (unit tests, exotic embeddings).
+func (s *Server) serveNativeImage(w http.ResponseWriter, r *http.Request, target string) {
+	if s.native == nil {
+		http.Redirect(w, r, target, http.StatusFound)
+		return
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	r2 := r.Clone(r.Context())
+	r2.URL.Path = u.Path
+	r2.URL.RawPath = ""
+	r2.URL.RawQuery = u.RawQuery
+	r2.RequestURI = ""
+	s.native.ServeHTTP(w, r2)
 }
 
 // hasImage reports whether a media item has a resolvable image of the given

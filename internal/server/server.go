@@ -24,8 +24,12 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 	// SPA: when the jellyfin.enabled toggle is on it claims its route tree
 	// (/System/*, /Users/*, /Items/*, /socket, /emby/*...), everything else
 	// — and everything when off — falls through to the SPA exactly as
-	// before. See internal/jellyfin.
-	mux.Handle("/", jellyfin.NewMiddleware(app, o.hub, spaHandler()))
+	// before. See internal/jellyfin. SetNative hands it the finished mux so
+	// its image endpoints can dispatch to the native /api image pipeline
+	// in-process instead of 302-redirecting (Feishin ignores redirects).
+	jf := jellyfin.NewMiddleware(app, o.hub, spaHandler())
+	mux.Handle("/", jf)
+	jf.SetNative(mux)
 
 	handler := withMiddleware(mux)
 	srv := &http.Server{

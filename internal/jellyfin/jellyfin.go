@@ -36,10 +36,22 @@ type Server struct {
 	hub  *eventhub.Hub
 	rt   *router
 	next http.Handler
+	// native is the full server mux (/api/* included), set via SetNative
+	// after mount. Image requests dispatch through it in-process so the
+	// native pipeline (media_assets walk, resizer, passive-mode proxy)
+	// serves bytes directly — some clients (Feishin) don't follow image
+	// redirects, and real Jellyfin serves bytes, not 302s.
+	native http.Handler
 
 	socketsMu sync.RWMutex
 	sockets   map[*socketConn]struct{}
 }
+
+// SetNative hands the middleware the fully-built server mux for in-process
+// dispatch to native endpoints. Called once from internal/server.New after
+// the mux is assembled (it can't be passed at construction — the middleware
+// is itself part of the mux).
+func (s *Server) SetNative(h http.Handler) { s.native = h }
 
 // NewMiddleware mounts the Jellyfin surface in front of next (the SPA
 // catch-all). It also seeds the enabled-flag's DB overlay — done here, not in
