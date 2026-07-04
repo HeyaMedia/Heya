@@ -294,7 +294,10 @@ func (r itemsRequest) searchTypes() []string {
 
 // queryMultiType fans a multi-type request out into one single-type
 // sub-request per type (each recurses through the single-level switch),
-// then merges, sorts by name, and paginates the combined set.
+// then merges honoring the REQUESTED sort — this path serves multi-type
+// browse as well as search, so it must not silently collapse to name order.
+// A failing sub-query propagates: a DB error is surfaced, never masked as a
+// short result set.
 func (s *Server) queryMultiType(ctx context.Context, userID int64, serverID string, req itemsRequest, types []string) (queryResult[baseItemDto], error) {
 	merged := []baseItemDto{}
 	total := 0
@@ -307,13 +310,13 @@ func (s *Server) queryMultiType(ctx context.Context, userID int64, serverID stri
 		}
 		res, err := s.queryItems(ctx, userID, serverID, sub)
 		if err != nil {
-			continue // one level failing shouldn't empty the whole search
+			return queryResult[baseItemDto]{Items: []baseItemDto{}, StartIndex: req.startIndex}, err
 		}
 		merged = append(merged, res.Items...)
 		total += res.TotalRecordCount
 	}
 	sort.SliceStable(merged, func(i, j int) bool {
-		return strings.ToLower(merged[i].SortName) < strings.ToLower(merged[j].SortName)
+		return dtoLess(merged[i], merged[j], req.sortBy, req.sortDesc)
 	})
 	if req.startIndex > 0 && req.startIndex < len(merged) {
 		merged = merged[req.startIndex:]
@@ -324,6 +327,54 @@ func (s *Server) queryMultiType(ctx context.Context, userID int64, serverID stri
 		merged = merged[:req.limit]
 	}
 	return queryResult[baseItemDto]{Items: merged, TotalRecordCount: total, StartIndex: req.startIndex}, nil
+}
+
+// dtoLess orders two dtos by the same key the per-level SQL used, so the
+// merged page matches what a single-level query would have returned. Unknown
+// or random sorts fall back to SortName; SortName is always the tiebreaker.
+// A missing keyed value (nil pointer) sorts LAST in both directions, matching
+// the SQL's NULLS LAST — so nil handling is resolved before the desc flip.
+func dtoLess(a, b baseItemDto, sortBy string, desc bool) bool {
+	var aNil, bNil bool
+	cmp := 0
+	switch sortBy {
+	case "added":
+		aNil, bNil = a.DateCreated == nil, b.DateCreated == nil
+		if !aNil && !bNil {
+			cmp = a.DateCreated.Compare(*b.DateCreated)
+		}
+	case "premiere":
+		aNil, bNil = a.PremiereDate == nil, b.PremiereDate == nil
+		if !aNil && !bNil {
+			cmp = a.PremiereDate.Compare(*b.PremiereDate)
+		}
+	case "year":
+		aNil, bNil = a.ProductionYear == nil, b.ProductionYear == nil
+		if !aNil && !bNil {
+			cmp = int(*a.ProductionYear - *b.ProductionYear)
+		}
+	case "rating":
+		aNil, bNil = a.CommunityRating == nil, b.CommunityRating == nil
+		if !aNil && !bNil {
+			switch {
+			case *a.CommunityRating < *b.CommunityRating:
+				cmp = -1
+			case *a.CommunityRating > *b.CommunityRating:
+				cmp = 1
+			}
+		}
+	}
+	// Exactly one value missing → that dto sorts last, regardless of direction.
+	if aNil != bNil {
+		return bNil // a precedes b iff b is the nil one
+	}
+	if cmp == 0 {
+		cmp = strings.Compare(strings.ToLower(a.SortName), strings.ToLower(b.SortName))
+	}
+	if desc {
+		return cmp > 0
+	}
+	return cmp < 0
 }
 
 // queryItems executes a parsed /Items request for user and returns the
