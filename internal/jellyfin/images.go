@@ -224,7 +224,11 @@ func (dw *imageDispatchWriter) Write(b []byte) (int, error) {
 var remoteImageClient = &http.Client{
 	Timeout: 20 * time.Second,
 	Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		// Deliberately NO Proxy: an HTTP(S)_PROXY env var would tunnel the
+		// request through the proxy — the dial guard would then vet the
+		// proxy's address while the proxy fetches the private target,
+		// bypassing the SSRF protection entirely. CDN image fetches don't
+		// need proxy support; the guard's integrity does.
 		DialContext: (&net.Dialer{
 			Timeout: 10 * time.Second,
 			Control: func(_, address string, _ syscall.RawConn) error {

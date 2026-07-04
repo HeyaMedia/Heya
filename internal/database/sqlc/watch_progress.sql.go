@@ -424,6 +424,27 @@ func (q *Queries) MarkEpisodeWatched(ctx context.Context, arg MarkEpisodeWatched
 	return err
 }
 
+const markEpisodesWatched = `-- name: MarkEpisodesWatched :exec
+INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
+SELECT $1, 'episode', eid, true, now()
+FROM unnest($2::bigint[]) AS eid
+ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now()
+`
+
+type MarkEpisodesWatchedParams struct {
+	UserID  int64   `json:"user_id"`
+	Column2 []int64 `json:"column_2"`
+}
+
+// Bulk mark a specific set of episodes watched. Season/show bulk-mark resolves
+// to only the episodes we actually hold a file for (see presentEpisodeIDs), so
+// unaired catalog episodes are never pre-marked — otherwise a later-arriving
+// episode would show as already watched.
+func (q *Queries) MarkEpisodesWatched(ctx context.Context, arg MarkEpisodesWatchedParams) error {
+	_, err := q.db.Exec(ctx, markEpisodesWatched, arg.UserID, arg.Column2)
+	return err
+}
+
 const markMovieWatched = `-- name: MarkMovieWatched :exec
 INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
 VALUES ($1, 'movie', $2, true, now())

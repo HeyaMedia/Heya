@@ -20,6 +20,16 @@ ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, up
 -- name: UnmarkEpisodeWatched :exec
 DELETE FROM user_watch_progress WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = $2;
 
+-- name: MarkEpisodesWatched :exec
+-- Bulk mark a specific set of episodes watched. Season/show bulk-mark resolves
+-- to only the episodes we actually hold a file for (see presentEpisodeIDs), so
+-- unaired catalog episodes are never pre-marked — otherwise a later-arriving
+-- episode would show as already watched.
+INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
+SELECT $1, 'episode', eid, true, now()
+FROM unnest($2::bigint[]) AS eid
+ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now();
+
 -- name: IsEpisodeWatched :one
 SELECT EXISTS(
   SELECT 1 FROM user_watch_progress WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = $2 AND completed = true
