@@ -304,10 +304,16 @@ func (s *Server) queryMultiType(ctx context.Context, userID int64, serverID stri
 	for _, t := range types {
 		sub := req
 		sub.types = []string{t}
-		sub.startIndex = 0 // paginate after merge
-		if req.limit > 0 {
-			sub.limit = req.startIndex + req.limit // enough to cover the page
-		}
+		sub.startIndex = 0
+		// Fetch each type's FULL matching set, not startIndex+limit rows: the
+		// merge sort key (dtoLess) need not match a sub-query's SQL order
+		// (episodes always sort by season/episode; random is per-type), so a
+		// per-type limit would drop rows that belong in the merged page but
+		// sit past that limit in the sub-query's own order. A search term
+		// keeps each set small; an unfiltered multi-type browse fetches whole
+		// types, consistent with how single-type unlimited browse already
+		// behaves (Finamp pulls whole catalogs the same way).
+		sub.limit = 0
 		res, err := s.queryItems(ctx, userID, serverID, sub)
 		if err != nil {
 			return queryResult[baseItemDto]{Items: []baseItemDto{}, StartIndex: req.startIndex}, err
