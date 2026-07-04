@@ -286,10 +286,7 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		if err != nil {
 			return empty, err
 		}
-		dec, err := s.videoDecorations(ctx, userID)
-		if err != nil {
-			return empty, err
-		}
+		dec := s.favoriteDecor(ctx, userID, "season")
 		items := make([]baseItemDto, 0, len(rows))
 		for _, row := range rows {
 			items = append(items, s.dtoFromSeasonRow(row, serverID, dec))
@@ -350,7 +347,7 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		if err != nil {
 			return empty, err
 		}
-		dec := &videoDecor{favorites: map[int64]bool{}}
+		dec := s.favoriteDecor(ctx, userID, "album")
 		items := make([]baseItemDto, 0, len(rows))
 		for _, row := range rows {
 			items = append(items, s.dtoFromAlbumRow(row, serverID, dec))
@@ -382,7 +379,7 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		if err != nil {
 			return empty, err
 		}
-		dec := &videoDecor{favorites: map[int64]bool{}}
+		dec := s.favoriteDecor(ctx, userID, "track")
 		items := make([]baseItemDto, 0, len(rows))
 		for _, row := range rows {
 			items = append(items, s.dtoFromTrackRow(row, serverID, dec))
@@ -435,8 +432,9 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 			if err != nil {
 				return queryResult[baseItemDto]{Items: []baseItemDto{}}, err
 			}
+			seasonDec := s.favoriteDecor(ctx, userID, "season")
 			for _, row := range rows {
-				found[EncodeID(KindSeason, row.ID)] = s.dtoFromSeasonRow(row, serverID, dec)
+				found[EncodeID(KindSeason, row.ID)] = s.dtoFromSeasonRow(row, serverID, seasonDec)
 			}
 		case KindEpisode:
 			rows, _, err := s.app.JFListEpisodes(ctx, sqlc.JFListEpisodesParams{OnlyIds: ids})
@@ -453,16 +451,18 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 			if err != nil {
 				return queryResult[baseItemDto]{Items: []baseItemDto{}}, err
 			}
+			albumDec := s.favoriteDecor(ctx, userID, "album")
 			for _, row := range rows {
-				found[EncodeID(KindAlbum, row.ID)] = s.dtoFromAlbumRow(row, serverID, dec)
+				found[EncodeID(KindAlbum, row.ID)] = s.dtoFromAlbumRow(row, serverID, albumDec)
 			}
 		case KindTrack:
 			rows, _, err := s.app.JFListTracks(ctx, sqlc.JFListTracksParams{OnlyIds: ids})
 			if err != nil {
 				return queryResult[baseItemDto]{Items: []baseItemDto{}}, err
 			}
+			trackDec := s.favoriteDecor(ctx, userID, "track")
 			for _, row := range rows {
-				found[EncodeID(KindTrack, row.ID)] = s.dtoFromTrackRow(row, serverID, dec)
+				found[EncodeID(KindTrack, row.ID)] = s.dtoFromTrackRow(row, serverID, trackDec)
 			}
 		case KindLibrary:
 			libs, err := s.app.ListLibraries(ctx)
@@ -492,14 +492,21 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 	return queryResult[baseItemDto]{Items: items, TotalRecordCount: len(items)}, nil
 }
 
-// episodeDecorations loads the episode-favorites set (episode pages don't
-// need the heavier movie/series sets that videoDecorations pulls).
-func (s *Server) episodeDecorations(ctx context.Context, userID int64) *videoDecor {
-	favs, err := s.app.JFFavoriteIDs(ctx, userID, "episode")
+// favoriteDecor loads just the favorites set for one entity type — the
+// lightweight decoration for kinds that don't need the movie/series sets
+// videoDecorations pulls. Each favoritable kind has its own id-space
+// ("episode", "season", "album", "track"), matching what handleSetFavorite
+// writes; mixing sets would cross-match unrelated int64 ids.
+func (s *Server) favoriteDecor(ctx context.Context, userID int64, entityType string) *videoDecor {
+	favs, err := s.app.JFFavoriteIDs(ctx, userID, entityType)
 	if err != nil {
 		favs = map[int64]bool{}
 	}
 	return &videoDecor{favorites: favs}
+}
+
+func (s *Server) episodeDecorations(ctx context.Context, userID int64) *videoDecor {
+	return s.favoriteDecor(ctx, userID, "episode")
 }
 
 // videoDecorations loads the per-user id-sets once per request.

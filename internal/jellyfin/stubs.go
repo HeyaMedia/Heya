@@ -148,7 +148,7 @@ func (s *Server) handleGenres(w http.ResponseWriter, r *http.Request, _ Params) 
 	serverID := s.serverID(r)
 	items := make([]baseItemDto, 0, len(names))
 	for _, n := range names {
-		items = append(items, baseItemDto{
+		dto := baseItemDto{
 			Name:              n,
 			ID:                EncodeID(KindGenre, hashName(n)),
 			ServerID:          serverID,
@@ -160,7 +160,8 @@ func (s *Server) handleGenres(w http.ResponseWriter, r *http.Request, _ Params) 
 			LocationType:      "FileSystem",
 			ImageTags:         map[string]string{},
 			BackdropImageTags: []string{},
-		})
+		}
+		items = append(items, dto.done())
 	}
 	writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: items, TotalRecordCount: len(items)})
 }

@@ -94,10 +94,8 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request, _ Params) 
 	}
 
 	var movieIDs, episodeIDs []int64
-	dec := &videoDecor{
-		favorites: map[int64]bool{},
-		progress:  map[int64]sqlc.JFListWatchProgressByIDsRow{},
-	}
+	dec := s.favoriteDecor(ctx, u.ID, "media_item")
+	dec.progress = map[int64]sqlc.JFListWatchProgressByIDsRow{}
 	for _, row := range rows {
 		pr := sqlc.JFListWatchProgressByIDsRow{
 			EntityID:        row.EntityID,

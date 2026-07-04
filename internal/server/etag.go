@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/karbowiak/heya/internal/jellyfin"
 )
 
 // etagBufferLimit caps how much body we'll buffer to compute an ETag. Above
@@ -27,6 +29,14 @@ const etagBufferLimit = 1 << 20 // 1 MiB
 func withETag(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// The Jellyfin-compatible surface must never be ETagged: a real
+		// Jellyfin doesn't 304 its API JSON, and strict clients (Infuse)
+		// error on the empty conditional body they've never seen from a
+		// real server. /api/* short-circuits before the route-table match.
+		if !strings.HasPrefix(r.URL.Path, "/api/") && jellyfin.ClaimsPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

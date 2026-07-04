@@ -295,7 +295,7 @@ func (s *Server) dtoFromTrackRow(row sqlc.JFListTracksRow, serverID string, dec 
 
 // dtoFromLibrary renders a library as a Jellyfin "view" (CollectionFolder).
 func (s *Server) dtoFromLibrary(lib sqlc.Library, serverID string) baseItemDto {
-	return baseItemDto{
+	dto := baseItemDto{
 		Name:              lib.Name,
 		ServerID:          serverID,
 		ID:                EncodeID(KindLibrary, lib.ID),
@@ -312,6 +312,7 @@ func (s *Server) dtoFromLibrary(lib sqlc.Library, serverID string) baseItemDto {
 		BackdropImageTags: []string{},
 		UserData:          &userDataDto{Key: EncodeID(KindLibrary, lib.ID)},
 	}
+	return dto.done()
 }
 
 func collectionType(mt sqlc.MediaType) string {
