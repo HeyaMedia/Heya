@@ -22,6 +22,9 @@ import SettingsSidebar from '~/components/settings/SettingsSidebar.vue'
       </div>
       <BottomNav />
       <ConfirmDialog />
+      <!-- Same phone player mount as layouts/default.vue — music keeps
+           playing while the user pokes at Settings, so the bar follows. -->
+      <MobilePlayerHost />
     </div>
   </TooltipProvider>
 </template>

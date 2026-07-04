@@ -108,13 +108,14 @@ a { color: inherit; text-decoration: none; }
   .app-main { padding-bottom: calc(var(--bottomnav-h) + var(--safe-bottom)); }
 }
 
-/* When the global MiniPlayer (layouts/default.vue) is docked above
-   BottomNav, .app-main needs extra bottom padding so page content — on any
-   route, not just /music — clears both bars instead of rendering underneath
-   the mini player. `.has-miniplayer` is only ever applied on phone (see
-   default.vue), so this is unconditional on the class rather than nested in
-   the 720px query, but it only ever fires there in practice. */
-.app.has-miniplayer .app-main {
+/* When the phone MiniPlayer is docked above BottomNav, .app-main needs
+   extra bottom padding so page content — on any route, in any layout —
+   clears both bars instead of rendering underneath the mini player.
+   Keyed on :has() rather than a bound class so every layout that mounts
+   MobilePlayerHost (default.vue, settings.vue) gets it for free: the
+   .global-miniplayer-dock element only exists on phone while a track is
+   loaded (see MobilePlayerHost.vue). */
+.app:has(.global-miniplayer-dock) .app-main {
   padding-bottom: calc(var(--bottomnav-h) + var(--miniplayer-h) + var(--safe-bottom));
 }
 
