@@ -206,7 +206,7 @@ func (s *Server) handleNextUp(w http.ResponseWriter, r *http.Request, _ Params) 
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		dec := &videoDecor{}
+		dec := s.episodeDecorations(ctx, u.ID)
 		s.loadProgress(ctx, u.ID, "episode", epIDs, dec)
 		byID := map[int64]baseItemDto{}
 		for _, row := range rows {

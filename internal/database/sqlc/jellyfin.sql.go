@@ -362,6 +362,7 @@ SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year,
        ts.genres AS series_genres,
        ts.rating AS series_rating,
        ts.first_air_date AS series_first_air_date,
+       ts.last_air_date AS series_last_air_date,
        ts.status AS series_status,
        ts.number_of_episodes AS series_episode_count,
        ts.number_of_seasons AS series_season_count,
@@ -433,6 +434,7 @@ type JFListLibraryItemsRow struct {
 	SeriesGenres        []string           `json:"series_genres"`
 	SeriesRating        pgtype.Numeric     `json:"series_rating"`
 	SeriesFirstAirDate  pgtype.Date        `json:"series_first_air_date"`
+	SeriesLastAirDate   pgtype.Date        `json:"series_last_air_date"`
 	SeriesStatus        pgtype.Text        `json:"series_status"`
 	SeriesEpisodeCount  pgtype.Int4        `json:"series_episode_count"`
 	SeriesSeasonCount   pgtype.Int4        `json:"series_season_count"`
@@ -495,6 +497,7 @@ func (q *Queries) JFListLibraryItems(ctx context.Context, arg JFListLibraryItems
 			&i.SeriesGenres,
 			&i.SeriesRating,
 			&i.SeriesFirstAirDate,
+			&i.SeriesLastAirDate,
 			&i.SeriesStatus,
 			&i.SeriesEpisodeCount,
 			&i.SeriesSeasonCount,

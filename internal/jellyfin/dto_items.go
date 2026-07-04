@@ -3,21 +3,24 @@ package jellyfin
 import "time"
 
 // baseItemDto is the hand-written subset of Jellyfin's 153-field BaseItemDto
-// that shipping clients actually read. Optional scalars are pointers/omitzero
-// so absent stays absent (clients distinguish "no rating" from 0); slices and
-// maps that clients index unconditionally are always emitted.
+// that shipping clients actually read. Optional scalars are pointers so
+// absent stays absent (clients distinguish "no rating" from 0); slices and
+// maps that clients index unconditionally are always emitted. Optional dates
+// are pointers, NOT omitzero: the goccy codec ignores that tag and a
+// serialized zero time renders as year 1 in clients ("2009 - 1901" on
+// series cards — caught via jellyfin-web).
 type baseItemDto struct {
 	Name              string       `json:"Name"`
 	OriginalTitle     string       `json:"OriginalTitle,omitempty"`
 	ServerID          string       `json:"ServerId"`
 	ID                string       `json:"Id"`
 	Etag              string       `json:"Etag,omitempty"`
-	DateCreated       time.Time    `json:"DateCreated,omitzero"`
+	DateCreated       *time.Time   `json:"DateCreated,omitempty"`
 	CanDelete         bool         `json:"CanDelete"`
 	CanDownload       bool         `json:"CanDownload"`
 	SortName          string       `json:"SortName,omitempty"`
-	PremiereDate      time.Time    `json:"PremiereDate,omitzero"`
-	EndDate           time.Time    `json:"EndDate,omitzero"`
+	PremiereDate      *time.Time   `json:"PremiereDate,omitempty"`
+	EndDate           *time.Time   `json:"EndDate,omitempty"`
 	Overview          string       `json:"Overview,omitempty"`
 	Taglines          []string     `json:"Taglines"`
 	Genres            []string     `json:"Genres"`
@@ -55,6 +58,23 @@ type baseItemDto struct {
 	ImageTags               map[string]string `json:"ImageTags"`
 	BackdropImageTags       []string          `json:"BackdropImageTags"`
 	PrimaryImageAspectRatio *float64          `json:"PrimaryImageAspectRatio,omitempty"`
+
+	// Always-present arrays: upstream serializes these on every full dto and
+	// jellyfin-web 10.8's detail page reads .length on them unguarded — their
+	// absence hangs the page on a TypeError (found via the CDP console tap).
+	People              []any          `json:"People"`
+	Studios             []nameGuidPair `json:"Studios"`
+	GenreItems          []nameGuidPair `json:"GenreItems"`
+	Tags                []string       `json:"Tags"`
+	ExternalUrls        []externalURL  `json:"ExternalUrls"`
+	RemoteTrailers      []any          `json:"RemoteTrailers"`
+	ProductionLocations []string       `json:"ProductionLocations"`
+	LockedFields        []string       `json:"LockedFields"`
+}
+
+type externalURL struct {
+	Name string `json:"Name"`
+	URL  string `json:"Url"`
 }
 
 type nameGuidPair struct {
@@ -65,14 +85,14 @@ type nameGuidPair struct {
 // userDataDto mirrors Jellyfin's UserItemDataDto. Key is an opaque per-item
 // cache key clients persist; ours is the item id.
 type userDataDto struct {
-	PlaybackPositionTicks int64     `json:"PlaybackPositionTicks"`
-	PlayCount             int32     `json:"PlayCount"`
-	IsFavorite            bool      `json:"IsFavorite"`
-	Played                bool      `json:"Played"`
-	PlayedPercentage      *float64  `json:"PlayedPercentage,omitempty"`
-	UnplayedItemCount     *int32    `json:"UnplayedItemCount,omitempty"`
-	LastPlayedDate        time.Time `json:"LastPlayedDate,omitzero"`
-	Key                   string    `json:"Key"`
+	PlaybackPositionTicks int64      `json:"PlaybackPositionTicks"`
+	PlayCount             int32      `json:"PlayCount"`
+	IsFavorite            bool       `json:"IsFavorite"`
+	Played                bool       `json:"Played"`
+	PlayedPercentage      *float64   `json:"PlayedPercentage,omitempty"`
+	UnplayedItemCount     *int32     `json:"UnplayedItemCount,omitempty"`
+	LastPlayedDate        *time.Time `json:"LastPlayedDate,omitempty"`
+	Key                   string     `json:"Key"`
 }
 
 const ticksPerSecond int64 = 10_000_000

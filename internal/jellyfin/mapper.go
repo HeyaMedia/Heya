@@ -16,6 +16,39 @@ import (
 // media_assets walk decides what actually serves), and backdrop tags exist
 // only for the entity kinds that have backdrops (movies, series, artists).
 
+// done fills the always-present arrays (see dto_items.go) and derives
+// GenreItems from Genres. Every mapper returns through it.
+func (d baseItemDto) done() baseItemDto {
+	if d.People == nil {
+		d.People = []any{}
+	}
+	if d.Studios == nil {
+		d.Studios = []nameGuidPair{}
+	}
+	if d.Tags == nil {
+		d.Tags = []string{}
+	}
+	if d.ExternalUrls == nil {
+		d.ExternalUrls = []externalURL{}
+	}
+	if d.RemoteTrailers == nil {
+		d.RemoteTrailers = []any{}
+	}
+	if d.ProductionLocations == nil {
+		d.ProductionLocations = []string{}
+	}
+	if d.LockedFields == nil {
+		d.LockedFields = []string{}
+	}
+	if d.GenreItems == nil {
+		d.GenreItems = make([]nameGuidPair, 0, len(d.Genres))
+		for _, g := range d.Genres {
+			d.GenreItems = append(d.GenreItems, nameGuidPair{Name: g, ID: EncodeID(KindGenre, hashName(g))})
+		}
+	}
+	return d
+}
+
 // videoDecor carries the per-user sets one request needs to decorate video
 // dtos: loaded once per handler call, O(1) per item.
 type videoDecor struct {
@@ -70,6 +103,9 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		dto.CommunityRating = ratingPtr(row.SeriesRating)
 		dto.PremiereDate = dateTime(row.SeriesFirstAirDate)
 		dto.Status = seriesStatus(row.SeriesStatus.String)
+		if dto.Status == "Ended" {
+			dto.EndDate = dateTime(row.SeriesLastAirDate)
+		}
 		dto.BackdropImageTags = []string{etagFromTime(row.UpdatedAt)}
 		dto.PrimaryImageAspectRatio = &aspectPoster
 		if row.SeriesEpisodeCount.Valid && row.SeriesEpisodeCount.Int32 > 0 {
@@ -103,7 +139,7 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		dto.MediaType = "Unknown"
 		dto.IsFolder = true
 	}
-	return dto
+	return dto.done()
 }
 
 func (s *Server) dtoFromSeasonRow(row sqlc.JFListSeasonsRow, serverID string, dec *videoDecor) baseItemDto {
@@ -136,7 +172,7 @@ func (s *Server) dtoFromSeasonRow(row sqlc.JFListSeasonsRow, serverID string, de
 	if dec != nil {
 		dto.UserData = plainUserData(row.ID, dec)
 	}
-	return dto
+	return dto.done()
 }
 
 func (s *Server) dtoFromEpisodeRow(row sqlc.JFListEpisodesRow, serverID string, dec *videoDecor) baseItemDto {
@@ -172,7 +208,7 @@ func (s *Server) dtoFromEpisodeRow(row sqlc.JFListEpisodesRow, serverID string, 
 	if dec != nil {
 		dto.UserData = episodeUserData(row.ID, dec)
 	}
-	return dto
+	return dto.done()
 }
 
 func (s *Server) dtoFromAlbumRow(row sqlc.JFListAlbumsRow, serverID string, dec *videoDecor) baseItemDto {
@@ -213,7 +249,7 @@ func (s *Server) dtoFromAlbumRow(row sqlc.JFListAlbumsRow, serverID string, dec 
 	if dec != nil {
 		dto.UserData = plainUserData(row.ID, dec)
 	}
-	return dto
+	return dto.done()
 }
 
 func (s *Server) dtoFromTrackRow(row sqlc.JFListTracksRow, serverID string, dec *videoDecor) baseItemDto {
@@ -254,7 +290,7 @@ func (s *Server) dtoFromTrackRow(row sqlc.JFListTracksRow, serverID string, dec 
 	if dec != nil {
 		dto.UserData = plainUserData(row.ID, dec)
 	}
-	return dto
+	return dto.done()
 }
 
 // dtoFromLibrary renders a library as a Jellyfin "view" (CollectionFolder).
@@ -338,7 +374,7 @@ func seriesUserData(id int64, dec *videoDecor) *userDataDto {
 }
 
 func episodeUserData(id int64, dec *videoDecor) *userDataDto {
-	ud := &userDataDto{Key: strconv.FormatInt(id, 10)}
+	ud := &userDataDto{Key: strconv.FormatInt(id, 10), IsFavorite: dec.favorites[id]}
 	if p, ok := dec.progress[id]; ok {
 		ud.PlaybackPositionTicks = secondsToTicks(p.ProgressSeconds)
 		ud.Played = p.Completed
@@ -363,18 +399,20 @@ func plainUserData(id int64, dec *videoDecor) *userDataDto {
 
 // --- small converters ---
 
-func tsTime(ts pgtype.Timestamptz) time.Time {
+func tsTime(ts pgtype.Timestamptz) *time.Time {
 	if !ts.Valid {
-		return time.Time{}
+		return nil
 	}
-	return ts.Time.UTC()
+	t := ts.Time.UTC()
+	return &t
 }
 
-func dateTime(d pgtype.Date) time.Time {
+func dateTime(d pgtype.Date) *time.Time {
 	if !d.Valid {
-		return time.Time{}
+		return nil
 	}
-	return d.Time.UTC()
+	t := d.Time.UTC()
+	return &t
 }
 
 func etagFromTime(ts pgtype.Timestamptz) string {

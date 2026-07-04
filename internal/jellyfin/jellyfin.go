@@ -174,6 +174,53 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodPost, "/Sessions/Capabilities/Full", s.requireAuth(s.handleSessionsCapabilities))
 	rt.handle(http.MethodPost, "/Sessions/Viewing", s.requireAuth(s.handleSessionsViewing))
 
+	// Small real conveniences.
+	rt.handle(http.MethodGet, "/GetUtcTime", s.handleGetUtcTime)
+	rt.handle(http.MethodGet, "/Playback/BitrateTest", s.requireAuth(s.handleBitrateTest))
+	rt.handle(http.MethodGet, "/Items/Counts", s.requireAuth(s.handleItemCounts))
+	rt.handle(http.MethodGet, "/Search/Hints", s.requireAuth(s.handleSearchHints))
+	rt.handle(http.MethodGet, "/Items/{itemId}/Download", s.requireAuth(s.handleItemDownload))
+	rt.handle(http.MethodGet, "/Items/{itemId}/File", s.requireAuth(s.handleItemDownload))
+	rt.handle(http.MethodGet, "/Genres", s.requireAuth(s.handleGenres))
+	rt.handle(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}", s.handleSubtitleStream)
+	rt.handle(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/Stream.{routeFormat}", s.handleSubtitleStream)
+
+	// Graceful "feature off" stubs — see stubs.go. A probing client must
+	// conclude "disabled", never "broken".
+	rt.handle(http.MethodGet, "/System/Endpoint", s.requireAuth(s.handleSystemEndpoint))
+	rt.handle(http.MethodGet, "/LiveTv/Info", s.requireAuth(s.handleLiveTvInfo))
+	rt.handle(http.MethodGet, "/Auth/Providers", s.requireAdmin(s.handleAuthProviders))
+	rt.handle(http.MethodGet, "/Auth/PasswordResetProviders", s.requireAdmin(s.handlePasswordResetProviders))
+	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeMedia", s.requireAuth(s.handleThemeMedia))
+	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeSongs", s.requireAuth(s.handleThemeSongsOrVideos))
+	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeVideos", s.requireAuth(s.handleThemeSongsOrVideos))
+	rt.handle(http.MethodGet, "/Items/{itemId}/Ancestors", s.requireAuth(s.stubEmptyArray))
+	rt.handle(http.MethodGet, "/Items/{itemId}/CriticReviews", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Items/Suggestions", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Videos/{itemId}/AdditionalParts", s.requireAuth(s.handleAdditionalParts))
+	rt.handle(http.MethodGet, "/Devices", s.requireAdmin(s.handleDevices))
+	rt.handle(http.MethodGet, "/ScheduledTasks", s.requireAdmin(s.stubEmptyArray))
+	rt.handle(http.MethodGet, "/Plugins", s.requireAdmin(s.stubEmptyArray))
+	rt.handle(http.MethodGet, "/Packages", s.requireAdmin(s.stubEmptyArray))
+	rt.handle(http.MethodGet, "/Channels", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Persons", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Studios", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Years", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/MusicGenres", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Shows/Upcoming", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Movies/Recommendations", s.requireAuth(s.stubEmptyArray))
+	rt.handle(http.MethodGet, "/UserViews/GroupingOptions", s.requireAuth(s.stubEmptyArray))
+
+	// Remote-control command acks: we have no command channel to other
+	// players yet, and Jellyfin itself 204s commands to gone sessions.
+	rt.handle(http.MethodPost, "/Sessions/{sessionId}/Command", s.requireAuth(s.stubNoContent))
+	rt.handle(http.MethodPost, "/Sessions/{sessionId}/Command/{command}", s.requireAuth(s.stubNoContent))
+	rt.handle(http.MethodPost, "/Sessions/{sessionId}/Message", s.requireAuth(s.stubNoContent))
+	rt.handle(http.MethodPost, "/Sessions/{sessionId}/Playing", s.requireAuth(s.stubNoContent))
+	rt.handle(http.MethodPost, "/Sessions/{sessionId}/Playing/{command}", s.requireAuth(s.stubNoContent))
+	rt.handle(http.MethodPost, "/Sessions/{sessionId}/System/{command}", s.requireAuth(s.stubNoContent))
+	rt.handle(http.MethodPost, "/Sessions/{sessionId}/Viewing", s.requireAuth(s.stubNoContent))
+
 	// WebSocket. "/socket" isn't part of the REST spec; the manifest lists
 	// it as an extra.
 	rt.handle(http.MethodGet, "/socket", s.handleSocket)

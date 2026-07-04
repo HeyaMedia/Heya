@@ -319,7 +319,7 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		if err != nil {
 			return empty, err
 		}
-		dec := &videoDecor{}
+		dec := s.episodeDecorations(ctx, userID)
 		s.loadProgress(ctx, userID, "episode", episodeIDs(rows), dec)
 		items := make([]baseItemDto, 0, len(rows))
 		for _, row := range rows {
@@ -443,7 +443,7 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 			if err != nil {
 				return queryResult[baseItemDto]{Items: []baseItemDto{}}, err
 			}
-			epDec := &videoDecor{}
+			epDec := s.episodeDecorations(ctx, userID)
 			s.loadProgress(ctx, userID, "episode", episodeIDs(rows), epDec)
 			for _, row := range rows {
 				found[EncodeID(KindEpisode, row.ID)] = s.dtoFromEpisodeRow(row, serverID, epDec)
@@ -490,6 +490,16 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 		}
 	}
 	return queryResult[baseItemDto]{Items: items, TotalRecordCount: len(items)}, nil
+}
+
+// episodeDecorations loads the episode-favorites set (episode pages don't
+// need the heavier movie/series sets that videoDecorations pulls).
+func (s *Server) episodeDecorations(ctx context.Context, userID int64) *videoDecor {
+	favs, err := s.app.JFFavoriteIDs(ctx, userID, "episode")
+	if err != nil {
+		favs = map[int64]bool{}
+	}
+	return &videoDecor{favorites: favs}
 }
 
 // videoDecorations loads the per-user id-sets once per request.

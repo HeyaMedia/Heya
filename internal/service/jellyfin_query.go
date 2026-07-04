@@ -147,6 +147,20 @@ func (a *App) JFUserVideoSets(ctx context.Context, userID int64) (watchedMovies,
 	return watchedMovies, watchedSeries, favorites, showCounts, nil
 }
 
+// JFFavoriteIDs returns the favorited entity-id set for one entity type
+// ("episode", "track", "album", ... — "media_item" comes via JFUserVideoSets).
+func (a *App) JFFavoriteIDs(ctx context.Context, userID int64, entityType string) (map[int64]bool, error) {
+	ids, err := sqlc.New(a.db).ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: entityType})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
 // JFWatchProgressByIDs returns progress rows for a page of entities.
 // entityType ∈ {"movie", "episode"}.
 func (a *App) JFWatchProgressByIDs(ctx context.Context, userID int64, entityType string, ids []int64) (map[int64]sqlc.JFListWatchProgressByIDsRow, error) {
