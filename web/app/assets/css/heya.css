@@ -46,6 +46,7 @@
   /* topbar / playbar metrics */
   --topbar-h: 60px;
   --playbar-h: 88px;
+  --bottomnav-h: 56px;
   --music-sidebar-w: 256px;
   --music-queue-w: 320px;
 
@@ -93,6 +94,17 @@ a { color: inherit; text-decoration: none; }
 .app-main {
   position: relative;
   overflow: hidden;
+}
+
+/* Phone: BottomNav is fixed-position and floats over whatever sits at the
+   bottom of the viewport. .app-main is border-box sized by the `.app` grid
+   row, so this padding shrinks its content box — any scrollable child sized
+   off it (the shared `.scroll` height:100% convention, or a flex child in
+   layouts/settings.vue that also carries this class) stops short of the
+   BottomNav strip instead of rendering underneath it. One rule covers both
+   layouts/default.vue and layouts/settings.vue since they share this class. */
+@media (max-width: 720px) {
+  .app-main { padding-bottom: calc(var(--bottomnav-h) + var(--safe-bottom)); }
 }
 
 /* === Scrollbars === */

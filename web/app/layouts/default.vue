@@ -11,6 +11,7 @@
       <div class="app-main">
         <slot />
       </div>
+      <BottomNav />
       <ConfirmDialog />
     </div>
   </TooltipProvider>

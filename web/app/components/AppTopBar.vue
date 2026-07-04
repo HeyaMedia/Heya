@@ -119,7 +119,7 @@
         </Teleport>
       </div>
       <AppTooltip label="Cast">
-        <button class="btn-icon"><Icon name="cast" :size="18" /></button>
+        <button class="btn-icon topbar-cast-btn"><Icon name="cast" :size="18" /></button>
       </AppTooltip>
 
       <!-- Activity indicator -->
@@ -128,6 +128,7 @@
         :width="320"
         trigger-class="btn-icon activity-btn"
         trigger-title="Activity"
+        content-class="activity-panel"
       >
         <template #trigger>
           <svg v-if="hasActivity" class="activity-ring" viewBox="0 0 36 36" preserveAspectRatio="xMidYMid meet">
@@ -344,8 +345,15 @@ const activityOpen = ref(false)
 // useElementBounding + useWindowSize so resizes stay anchored.
 const { bottom: swBottom, right: swRight } = useElementBounding(searchWrapRef)
 const { width: vw } = useWindowSize()
+const { isPhone } = useViewport()
 const searchDropdownTop = computed(() => swBottom.value + 8)
-const searchDropdownRight = computed(() => vw.value - swRight.value)
+// On phone the search-wrap flex-grows to fill the topbar (see the phone
+// media query below), so its measured right edge sits close to the
+// viewport edge — anchoring the dropdown's `right` off that would push its
+// (now near-viewport-width) left edge off-screen. Pin it to a flat 8px
+// inset instead, matching the `.search-dropdown` phone width override
+// (min(460px, 100vw - 16px)) so it's centered with even margins.
+const searchDropdownRight = computed(() => isPhone.value ? 8 : vw.value - swRight.value)
 
 interface Section {
   key: 'movies' | 'tv' | 'music' | 'books' | 'albums' | 'tracks' | 'collections' | 'people'
@@ -619,20 +627,9 @@ const jobsByKind = computed(() => {
     .sort((a, b) => b.count - a.count)
 })
 
-const tabs = [
-  { to: '/', label: 'Home', icon: 'home', match: ['/'] },
-  { to: '/movies', label: 'Movies', icon: 'film', match: ['/movies'] },
-  { to: '/tv', label: 'TV', icon: 'tv', match: ['/tv'] },
-  { to: '/music', label: 'Music', icon: 'music', match: ['/music'] },
-  { to: '/books', label: 'Books', icon: 'book', match: ['/books'] },
-]
-
-function isActive(t: typeof tabs[0]) {
-  if (t.to === '/' && route.path === '/') return true
-  if (t.to !== '/' && route.path.startsWith(t.to)) return true
-  if (t.to === '/movies' && route.path.startsWith('/media/')) return true
-  return false
-}
+// Tab source + active-matching logic live in useNavTabs() — shared with
+// BottomNav.vue's phone tab strip so the two never drift apart.
+const { tabs, isActive } = useNavTabs()
 
 // Both the search-wrap (trigger) and the teleported dropdown count as
 // "inside" — without ignore, clicking a result row would close before the
@@ -865,6 +862,46 @@ watch(() => route.fullPath, () => { closeDropdown() })
 .dropdown-leave-active { transition: opacity 0.1s ease, transform 0.1s ease; }
 .dropdown-enter-from { opacity: 0; transform: translateY(-4px) scale(0.98); }
 .dropdown-leave-to { opacity: 0; transform: translateY(-2px); }
+
+/* Phone (<=720px): BottomNav.vue takes over the tab row, so the topbar
+   collapses to brand + search + activity + avatar. Desktop rule above is
+   untouched — everything mobile-specific is gated behind this query. */
+@media (max-width: 720px) {
+  .topbar {
+    /* Was `1fr auto 1fr` to center .topbar-tabs; with the tabs row hidden
+       there's nothing to center, so give the brand a content-sized column
+       and hand everything else to topbar-right. */
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    padding: 0 16px;
+  }
+  .topbar-tabs { display: none; }
+  /* Drop the wordmark, keep the gold ring mark — reclaims width for the
+     search input, which is the thing that actually needs the room. */
+  .brand-name { display: none; }
+  .topbar-right {
+    /* Desktop hugs the right edge (`justify-self: end`) inside an equal-
+       width flex column; on phone the column should fill so the flex-grow
+       search-wrap below has real space to expand into. */
+    justify-self: stretch;
+  }
+  /* Dev-only query-cache toggle and the (currently inert) cast button
+     aren't part of the required phone set (brand/search/activity/avatar)
+     — hide them so the search input gets the width instead. */
+  .qcp-nav-btn,
+  .topbar-cast-btn { display: none; }
+  .search-wrap.open {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+  /* Teleported to <body> (see script comment above) but still compiled
+     with this SFC's scope id since the <Teleport> lives in this template —
+     unlike AppMenu/reka-portaled content, this scoped rule does reach it. */
+  .search-dropdown {
+    width: min(460px, calc(100vw - 16px));
+  }
+}
 </style>
 
 <!--
@@ -881,6 +918,15 @@ watch(() => route.fullPath, () => { closeDropdown() })
    AppMenu's data-v scope id — not this component's. Anything that needs to
    land on the button itself (not its slot contents) has to be unscoped. */
 .activity-btn { position: relative; }
+
+/* The panel itself (AppMenu's `content-class="activity-panel"`) is also
+   portaled — same reasoning. `:width="320"` on AppMenu sets an inline
+   `width: 320px` on the AppSurface element; max-width still clamps the used
+   value on top of that regardless of the inline/stylesheet origin mismatch,
+   so this keeps the panel from overflowing a 390px phone viewport. */
+@media (max-width: 720px) {
+  .activity-panel { max-width: calc(100vw - 16px); }
+}
 
 .activity-ring {
   position: absolute;

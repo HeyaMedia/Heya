@@ -20,6 +20,7 @@ import SettingsSidebar from '~/components/settings/SettingsSidebar.vue'
           </div>
         </main>
       </div>
+      <BottomNav />
       <ConfirmDialog />
     </div>
   </TooltipProvider>
