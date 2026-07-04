@@ -828,6 +828,10 @@ export interface UpdateMediaMetadataRequest {
   last_air_date?: string
   networks?: string[]
   original_name?: string
+  // Music-only (artist row) — title doubles as the artist name.
+  sort_name?: string
+  disambiguation?: string
+  biography?: string
 }
 
 export interface ProviderSearchResult {

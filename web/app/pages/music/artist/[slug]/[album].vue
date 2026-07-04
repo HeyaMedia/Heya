@@ -60,6 +60,32 @@ if (import.meta.client) {
   onBeforeUnmount(() => { off() })
 }
 
+const { user } = useAuth()
+const isAdmin = computed(() => user.value?.is_admin === true)
+const showAlbumEdit = ref(false)
+const showAlbumIdentify = ref(false)
+
+function invalidateAlbum() {
+  queryClient.invalidateQueries({ queryKey: ['music', 'album', artistSlug.value, albumSlug.value] })
+}
+
+function onAlbumSaved() {
+  showAlbumEdit.value = false
+  invalidateAlbum()
+}
+
+function onAlbumIdentifyRequest() {
+  showAlbumEdit.value = false
+  showAlbumIdentify.value = true
+}
+
+function onAlbumIdentified() {
+  showAlbumIdentify.value = false
+  // The artist refresh runs async on the queue; media.updated invalidates
+  // again when it lands. This picks up the immediate MBID stamp.
+  invalidateAlbum()
+}
+
 const album = computed(() => detail.value?.album)
 watch(album, (a) => {
   if (a?.id && a.id > 0) albumRatings.load(a.id).catch(() => 0)
@@ -249,8 +275,25 @@ function isDiscBoundary(idx: number) {
         >
           <Icon name="radio" :size="18" />
         </button>
+        <button v-if="isAdmin" class="hero-round" title="Edit Metadata" @click="showAlbumEdit = true">
+          <Icon name="pencil" :size="17" />
+        </button>
       </div>
     </section>
+
+    <MetadataAlbumEditDialog
+      :album="album"
+      :show="showAlbumEdit"
+      @saved="onAlbumSaved"
+      @identify="onAlbumIdentifyRequest"
+      @close="showAlbumEdit = false"
+    />
+    <MetadataAlbumIdentifyDialog
+      :album="album ?? null"
+      :show="showAlbumIdentify"
+      @applied="onAlbumIdentified"
+      @close="showAlbumIdentify = false"
+    />
 
     <section class="tracklist page-pad">
       <div class="list-rows">

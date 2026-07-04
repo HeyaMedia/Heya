@@ -35,6 +35,10 @@ type UpdateMediaMetadataReq struct {
 	FirstAirDate     *string           `json:"first_air_date"`
 	LastAirDate      *string           `json:"last_air_date"`
 	OriginalName     *string           `json:"original_name"`
+	// Music-only (artist row). Title doubles as the artist name.
+	SortName       *string `json:"sort_name"`
+	Disambiguation *string `json:"disambiguation"`
+	Biography      *string `json:"biography"`
 }
 
 // UpdateEpisodeReq holds the fields that can be patched on an episode.
@@ -213,6 +217,36 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 					return fmt.Errorf("updating tv metadata: %w", err)
 				}
 			}
+		case sqlc.MediaTypeMusic:
+			artist, aErr := q.GetArtistByMediaItemID(ctx, mediaItemID)
+			if aErr == nil {
+				name := artist.Name
+				if req.Title != nil && *req.Title != "" {
+					name = *req.Title
+				}
+				sortName := artist.SortName
+				if req.SortName != nil {
+					sortName = *req.SortName
+				}
+				disambig := artist.Disambiguation
+				if req.Disambiguation != nil {
+					disambig = *req.Disambiguation
+				}
+				bio := artist.Biography
+				if req.Biography != nil {
+					bio = *req.Biography
+				}
+				if _, err := q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
+					ID:             artist.ID,
+					MusicbrainzID:  artist.MusicbrainzID,
+					Name:           name,
+					SortName:       sortName,
+					Disambiguation: disambig,
+					Biography:      bio,
+				}); err != nil {
+					return fmt.Errorf("updating artist metadata: %w", err)
+				}
+			}
 		}
 
 		// Stamp 'user' provenance for the fields the user actually set, so a later
@@ -260,6 +294,15 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 		}
 		if req.LastAirDate != nil {
 			edited = append(edited, "last_air_date")
+		}
+		if req.SortName != nil {
+			edited = append(edited, "sort_name")
+		}
+		if req.Disambiguation != nil {
+			edited = append(edited, "disambiguation")
+		}
+		if req.Biography != nil {
+			edited = append(edited, "biography")
 		}
 		if len(edited) > 0 {
 			if err := q.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{
@@ -577,6 +620,10 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 		return fmt.Errorf("metadata fetch failed: %w", err)
 	}
 
+	if item.MediaType == sqlc.MediaTypeMusic {
+		return a.applyIdentifyMusic(ctx, item, detail)
+	}
+
 	var kind metadata.MediaKind
 	switch item.MediaType {
 	case sqlc.MediaTypeMovie:
@@ -644,6 +691,57 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 		return fmt.Errorf("commit re-identify: %w", err)
 	}
 	return nil
+}
+
+// applyIdentifyMusic re-points a music artist at a different upstream record.
+// Unlike the movie/TV path it does NOT rebuild rows inline: it stamps the
+// chosen MusicBrainz id on the artist row and enqueues a forced enrich, which
+// re-fetches by that MBID and reuses the refresh pipeline's merge machinery
+// (findCanonicalSibling folds this row into an existing local artist when the
+// new identity is already present — the safe path for chimera repairs, where
+// writing media_items.external_ids here would trip idx_media_items_mbid_unique
+// instead). Name / bio / albums / top-tracks all adopt on that refresh.
+func (a *App) applyIdentifyMusic(ctx context.Context, item sqlc.MediaItem, detail *metadata.MediaDetail) error {
+	newMBID := detail.ExternalIDs["mbid"]
+	if newMBID == "" {
+		return fmt.Errorf("selected match has no MusicBrainz id yet — heya.media could not resolve it; try again once the upstream record is enriched")
+	}
+
+	q := sqlc.New(a.db)
+	artist, err := q.GetArtistByMediaItemID(ctx, item.ID)
+	if err != nil {
+		return fmt.Errorf("artist for media item %d not found: %w", item.ID, err)
+	}
+
+	if _, err := q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
+		ID:             artist.ID,
+		MusicbrainzID:  newMBID,
+		Name:           artist.Name,
+		SortName:       artist.SortName,
+		Disambiguation: artist.Disambiguation,
+		Biography:      artist.Biography,
+	}); err != nil {
+		return fmt.Errorf("stamp artist mbid: %w", err)
+	}
+
+	// An explicit re-identify means the user wants the new record's identity —
+	// lift any user-edit locks on the identity fields so the refresh adopts it.
+	fp := map[string]string{}
+	if len(item.FieldProvenance) > 0 {
+		_ = json.Unmarshal(item.FieldProvenance, &fp)
+	}
+	for _, f := range []string{"title", "sort_name", "disambiguation", "biography"} {
+		delete(fp, f)
+	}
+	blob, _ := json.Marshal(fp)
+	if err := q.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{
+		ID:              item.ID,
+		FieldProvenance: blob,
+	}); err != nil {
+		return fmt.Errorf("clear identity provenance: %w", err)
+	}
+
+	return worker.EnqueueEnrichForce(ctx, a.river, item.ID, item.MediaType, worker.EnrichSourceForced)
 }
 
 // DeleteMediaAsset removes a media asset and its file from disk, updating poster/backdrop if needed.

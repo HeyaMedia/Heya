@@ -67,8 +67,19 @@
 
       <div class="me-content scroll">
         <template v-if="mode === 'media'">
+          <MetadataEditorMusicGeneral
+            v-if="activeTab === 'general' && isMusic"
+            v-model:form="form"
+            :detail="detail"
+          />
+          <MetadataEditorAlbums
+            v-if="activeTab === 'albums' && isMusic"
+            :albums="detail.albums || []"
+            :artist-slug="detail.media_item.slug"
+            @refresh="fetchDetail"
+          />
           <MetadataEditorGeneral
-            v-if="activeTab === 'general'"
+            v-if="activeTab === 'general' && !isMusic"
             v-model:form="form"
             :media-type="detail.media_item.media_type"
             :detail="detail"
@@ -209,7 +220,20 @@ const allTabs = [
   { key: 'subtitles', label: 'Subtitles', icon: 'subtitles', modes: ['media', 'episode'] },
 ]
 
-const visibleTabs = computed(() => allTabs.filter(t => t.modes.includes(mode.value)))
+// Music media items are artists — most movie/TV tabs don't apply, and albums
+// get their own tab (album rows have no media_item of their own).
+const musicTabs = [
+  { key: 'general', label: 'General', icon: 'pencil' },
+  { key: 'albums', label: 'Albums', icon: 'music' },
+  { key: 'images', label: 'Images', icon: 'grid' },
+]
+
+const isMusic = computed(() => detail.value?.media_item?.media_type === 'music')
+
+const visibleTabs = computed(() => {
+  if (mode.value === 'media' && isMusic.value) return musicTabs
+  return allTabs.filter(t => t.modes.includes(mode.value))
+})
 
 const activeSeason = computed(() => {
   if (!props.seasonId || !detail.value?.seasons) return null
@@ -264,6 +288,7 @@ const headerOriginalTitle = computed(() => {
 const headerBadge = computed(() => {
   if (mode.value === 'episode') return 'Episode'
   if (mode.value === 'season') return 'Season'
+  if (isMusic.value) return 'Artist'
   return detail.value?.media_item?.media_type || ''
 })
 
@@ -329,6 +354,15 @@ const dirty = computed(() => JSON.stringify(form.value) !== initialForm.value)
 
 function buildMediaForm(d: any) {
   const mi = d.media_item
+  if (mi.media_type === 'music') {
+    const artist = d.artist
+    return {
+      title: mi.title,
+      sort_name: artist?.sort_name || '',
+      disambiguation: artist?.disambiguation || '',
+      biography: artist?.biography || '',
+    }
+  }
   const movie = d.movie
   const tv = d.tv_series
   return {
@@ -440,6 +474,24 @@ async function save() {
         method: 'PUT',
         path: { id: props.mediaId, episode_id: props.episodeId },
         body: form.value as any,
+      })
+      await fetchDetail()
+    } catch { /* empty */ }
+    return
+  }
+
+  if (mode.value === 'media' && isMusic.value) {
+    const body: UpdateMediaMetadataRequest = {
+      title: form.value.title,
+      sort_name: form.value.sort_name,
+      disambiguation: form.value.disambiguation,
+      biography: form.value.biography,
+    }
+    try {
+      await $heya('/api/media/{id}/metadata', {
+        method: 'PUT',
+        path: { id: props.mediaId },
+        body: body as any,
       })
       await fetchDetail()
     } catch { /* empty */ }

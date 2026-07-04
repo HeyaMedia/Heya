@@ -113,6 +113,45 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return cachedJSON(detail, 30), nil
 		})
 
+	// --- Album metadata editor (admin) ---
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/music/albums/{id}", "update-album-metadata", "Edit album metadata fields", "Metadata Editor")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body service.UpdateAlbumReq
+		}) (*JSONOutput[sqlc.Album], error) {
+			updated, err := app.UpdateAlbumMetadata(ctx, in.ID, in.Body)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[sqlc.Album]{Body: updated}, nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/music/albums/{id}/identify", "album-identify-search", "heya.media album search for re-identification", "Metadata Editor")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Q string `query:"q" maxLength:"200" doc:"Title query (defaults to the album title)"`
+		}) (*JSONOutput[identifyBody], error) {
+			result, err := app.AlbumIdentifySearch(ctx, in.ID, in.Q)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[identifyBody]{Body: identifyBody{Results: result.Results}}, nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/music/albums/{id}/identify", "apply-album-identify", "Pin the album to a chosen MusicBrainz release group and refresh the artist", "Metadata Editor")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				ProviderName string `json:"provider_name" minLength:"1" maxLength:"32"`
+				ProviderID   string `json:"provider_id" minLength:"1" maxLength:"256"`
+			}
+		}) (*StatusOutput, error) {
+			if err := app.ApplyAlbumIdentify(ctx, in.ID, in.Body.ProviderName, in.Body.ProviderID); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("identified"), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}/similar", "similar-artists", "Artists similar by metadata (Last.fm / ListenBrainz)", "Music")),
 		func(ctx context.Context, in *struct {
 			Slug string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"miles-davis"`

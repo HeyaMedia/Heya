@@ -85,6 +85,9 @@
         >
           <Icon name="radio" :size="18" />
         </button>
+        <button v-if="isAdmin" class="hero-round" title="Edit Metadata" @click="showMetadataEditor = true">
+          <Icon name="pencil" :size="17" />
+        </button>
       </div>
     </section>
 
@@ -297,6 +300,13 @@
       <span class="alias-label">Also known as</span>
       <span class="alias-list">{{ artist.aliases!.join(' · ') }}</span>
     </div>
+
+    <MetadataEditorModal
+      v-if="detail"
+      :media-id="detail.media_item.id"
+      :show="showMetadataEditor"
+      @close="onEditorClose"
+    />
   </div>
 </template>
 
@@ -330,6 +340,18 @@ async function startArtistRadio() {
 
 const bioOpen = ref(false)
 const ttExpanded = ref(false)
+
+const { user } = useAuth()
+const isAdmin = computed(() => user.value?.is_admin === true)
+const showMetadataEditor = ref(false)
+const queryClient = useQueryClient()
+
+function onEditorClose() {
+  showMetadataEditor.value = false
+  // Edits and refreshes land server-side; drop the cached detail so the
+  // page (and this component) re-reads the updated artist.
+  queryClient.invalidateQueries({ queryKey: ['media', 'detail', props.slug] })
+}
 
 interface SimilarArtistRow {
   name: string
@@ -610,7 +632,6 @@ async function playTopAll(shuffle: boolean) {
 }
 
 if (import.meta.client) {
-  const queryClient = useQueryClient()
   const bus = useEventBus()
   bus.connect()
   const off = bus.on('media.updated', (e) => {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -160,15 +161,63 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		}
 	}
 
+	// User-edited identity fields win over upstream (media_items.field_provenance
+	// == "user", stamped by the metadata editor; music maps artist name→title).
+	// Blanking the value makes UpdateArtistEnrichedFields' CASE-WHEN keep the
+	// local column. A re-identify lifts these locks before enqueueing, so an
+	// explicitly chosen record still adopts fully.
+	upName, upSort, upDisambig, upBio := detail.ArtistName, detail.ArtistSortName, detail.ArtistDisambiguation, detail.ArtistBio
+	parentItem, parentItemErr := m.q.GetMediaItemByID(ctx, artist.MediaItemID)
+	if parentItemErr == nil {
+		fp := ParseFieldProvenance(parentItem.FieldProvenance)
+		if fp.UserLocked("title") {
+			upName = ""
+		}
+		if fp.UserLocked("sort_name") {
+			upSort = ""
+		}
+		if fp.UserLocked("disambiguation") {
+			upDisambig = ""
+		}
+		if fp.UserLocked("biography") {
+			upBio = ""
+		}
+	}
+
 	if err := m.q.UpdateArtistEnrichedFields(ctx, sqlc.UpdateArtistEnrichedFieldsParams{
 		ID:      artistID,
 		Column2: newMBID,
-		Column3: detail.ArtistName,
-		Column4: detail.ArtistSortName,
-		Column5: detail.ArtistDisambiguation,
-		Column6: detail.ArtistBio,
+		Column3: upName,
+		Column4: upSort,
+		Column5: upDisambig,
+		Column6: upBio,
 	}); err != nil {
 		return res, fmt.Errorf("update artist %d: %w", artistID, err)
+	}
+
+	// Keep the parent media_item's title in step with the adopted artist name —
+	// grids and search read media_items.title, not artists.name. Matters after
+	// a re-identify, where the whole point is shedding the old identity. The
+	// slug stays put (user-facing URLs are stable by design).
+	if upName != "" && parentItemErr == nil && parentItem.Title != upName {
+		if _, err := m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+			ID:               parentItem.ID,
+			Title:            upName,
+			SortTitle:        strings.ToLower(upName),
+			Year:             parentItem.Year,
+			Description:      parentItem.Description,
+			PosterPath:       parentItem.PosterPath,
+			BackdropPath:     parentItem.BackdropPath,
+			ExternalIds:      parentItem.ExternalIds,
+			Tagline:          parentItem.Tagline,
+			OriginalTitle:    parentItem.OriginalTitle,
+			OriginalLanguage: parentItem.OriginalLanguage,
+			Status:           parentItem.Status,
+			ProviderKind:     parentItem.ProviderKind,
+			HeyaSlug:         parentItem.HeyaSlug,
+		}); err != nil {
+			log.Warn().Err(err).Int64("media_item_id", parentItem.ID).Msg("sync media_item title to artist name failed")
+		}
 	}
 
 	// Extended artist metadata — all the post-00019 columns. Failures here

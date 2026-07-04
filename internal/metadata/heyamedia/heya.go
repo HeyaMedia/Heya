@@ -141,7 +141,7 @@ func heyaKind(kind metadata.MediaKind) string {
 		return "tv"
 	case metadata.KindMusic:
 		// heya.media indexes artists (with embedded discography) as the
-		// music entry point; album-level search isn't available yet.
+		// music entry point; album-level search goes through SearchAlbums.
 		return "artist"
 	case metadata.KindBook:
 		return "book"
@@ -200,6 +200,22 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 	if err != nil {
 		return nil, err
 	}
+	return mapHitsToResults(apiKind, hits), nil
+}
+
+// SearchAlbums executes /api/v1/search with type=album, optionally scoped to
+// an artist name. Hit ids are MusicBrainz release-group ids (mbid:<uuid>), so
+// the returned ProviderIDs look like "heya:album:mbid:<uuid>". Used by the
+// metadata editor's per-album re-identify.
+func (p *HeyaProvider) SearchAlbums(ctx context.Context, title, artist string) ([]metadata.SearchResult, error) {
+	hits, err := p.searchHits(ctx, "album", title, "", artist, 20)
+	if err != nil {
+		return nil, err
+	}
+	return mapHitsToResults("album", hits), nil
+}
+
+func mapHitsToResults(apiKind string, hits []SearchHit) []metadata.SearchResult {
 	results := make([]metadata.SearchResult, 0, len(hits))
 	for _, h := range hits {
 		providerID := "heya:" + apiKind + ":" + h.ID
@@ -225,7 +241,7 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 			Enriched:     h.Enriched,
 		})
 	}
-	return results, nil
+	return results
 }
 
 // searchHits is the shared lookup used by Search() and SearchArtistBest().
