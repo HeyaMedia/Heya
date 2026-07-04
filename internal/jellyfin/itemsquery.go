@@ -517,8 +517,12 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 			if err != nil {
 				return queryResult[baseItemDto]{Items: []baseItemDto{}}, err
 			}
-			for _, lib := range libs {
-				for _, id := range ids {
+			for _, id := range ids {
+				if id == 0 { // the aggregate root folder
+					found[EncodeID(KindLibrary, 0)] = s.rootFolderDto(serverID)
+					continue
+				}
+				for _, lib := range libs {
 					if lib.ID == id {
 						found[EncodeID(KindLibrary, lib.ID)] = s.dtoFromLibrary(lib, serverID)
 					}

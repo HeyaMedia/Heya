@@ -382,6 +382,30 @@ func (s *Server) dtoFromTrackRow(row sqlc.JFListTracksRow, serverID string, dec 
 	return dto.done()
 }
 
+// rootFolderDto is the aggregate root folder (Jellyfin's AggregateFolder) —
+// the one item every server has. Its id is the KindLibrary 0 sentinel, which
+// is also what dtoFromLibrary emits as every view's ParentId.
+func (s *Server) rootFolderDto(serverID string) baseItemDto {
+	id := EncodeID(KindLibrary, 0)
+	dto := baseItemDto{
+		Name:              "Media Folders",
+		ServerID:          serverID,
+		ID:                id,
+		Etag:              tag32("etag-root", 0),
+		Taglines:          []string{},
+		Genres:            []string{},
+		IsFolder:          true,
+		Type:              "AggregateFolder",
+		MediaType:         "Unknown",
+		LocationType:      "FileSystem",
+		Path:              "/",
+		ImageTags:         map[string]string{},
+		BackdropImageTags: []string{},
+		UserData:          &userDataDto{Key: id},
+	}
+	return dto.done()
+}
+
 // dtoFromLibrary renders a library as a Jellyfin "view" (CollectionFolder).
 func (s *Server) dtoFromLibrary(lib sqlc.Library, serverID string) baseItemDto {
 	dto := baseItemDto{

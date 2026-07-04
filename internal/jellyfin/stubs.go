@@ -29,6 +29,29 @@ func (s *Server) stubNoContent(w http.ResponseWriter, _ *http.Request, _ Params)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) stubNotFound(w http.ResponseWriter, _ *http.Request, _ Params) {
+	w.WriteHeader(http.StatusNotFound)
+}
+
+// Startup wizard endpoints. A Heya server is configured through Heya itself,
+// so from the Jellyfin surface the wizard is always complete — and upstream
+// locks every /Startup route behind 401 once it is.
+func (s *Server) handleStartupLocked(w http.ResponseWriter, _ *http.Request, _ Params) {
+	w.WriteHeader(http.StatusUnauthorized)
+}
+
+// GET /System/ActivityLog/Entries — Heya's activity feed isn't mapped onto
+// Jellyfin's yet; an empty page is a valid answer (fresh servers have one).
+func (s *Server) handleActivityLogEntries(w http.ResponseWriter, _ *http.Request, _ Params) {
+	writeJSON(w, http.StatusOK, map[string]any{"Items": []any{}, "TotalRecordCount": 0, "StartIndex": 0})
+}
+
+// GET /web/ConfigurationPages — no plugins, no pages. /web/ConfigurationPage
+// (singular, ?name=) therefore always 404s.
+func (s *Server) handleConfigurationPages(w http.ResponseWriter, _ *http.Request, _ Params) {
+	writeJSON(w, http.StatusOK, []any{})
+}
+
 // GET /System/Endpoint — network locality hints; clients only branch UI on it.
 func (s *Server) handleSystemEndpoint(w http.ResponseWriter, _ *http.Request, _ Params) {
 	writeJSON(w, http.StatusOK, map[string]bool{"IsLocal": false, "IsInNetwork": true})
@@ -95,14 +118,17 @@ func (s *Server) handleGetUtcTime(w http.ResponseWriter, _ *http.Request, _ Para
 }
 
 // GET /Playback/BitrateTest?size= — clients measure bandwidth against this
-// before picking a bitrate. Serve random bytes, capped sanely.
+// before picking a bitrate. Upstream validates size to [1, 100_000_000] with
+// a 400 (its [Range] attribute) and defaults to 100 KiB.
 func (s *Server) handleBitrateTest(w http.ResponseWriter, r *http.Request, _ Params) {
-	size, _ := strconv.ParseInt(queryCI(r, "size"), 10, 64)
-	if size <= 0 {
-		size = 1 << 20
-	}
-	if size > 32<<20 {
-		size = 32 << 20
+	size := int64(102400)
+	if raw := queryCI(r, "size"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 1 || parsed > 100_000_000 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		size = parsed
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))

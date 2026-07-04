@@ -3,17 +3,14 @@ package jellyfin
 import (
 	"bytes"
 	"compress/gzip"
-	_ "embed"
 	"encoding/json"
 	"io"
 	"strings"
 	"testing"
 )
 
-//go:embed spec/jellyfin-openapi-10.11.11.json.gz
-var specGz []byte
-
-// specOperations parses the vendored spec into "METHOD /Path" keys.
+// specOperations parses the vendored spec (specGz, embedded in spec.go) into
+// "METHOD /Path" keys.
 func specOperations(t *testing.T) map[string]bool {
 	t.Helper()
 	zr, err := gzip.NewReader(bytes.NewReader(specGz))

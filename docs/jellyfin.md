@@ -66,6 +66,25 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
 ## Testing
 
 - `go test ./internal/jellyfin/` — unit + coverage-manifest tests.
+- `bun tools/jellyfin-conformance.ts` — a black-box port of the official
+  server's integration suite (`jellyfin/jellyfin`,
+  `tests/Jellyfin.Server.Integration.Tests` @ release-10.11.z): same test
+  names, same requests, same expected statuses. Runs against any live
+  server, so the same suite validates both sides:
+
+  ```bash
+  bun tools/jellyfin-conformance.ts                       # Heya (:8080, admin/admin)
+  JF_URL=https://jf.example JF_USER=u JF_PASS=p \
+    bun tools/jellyfin-conformance.ts                     # real Jellyfin oracle
+  ```
+
+  Current score: **71 pass / 0 fail on both Heya and a real Jellyfin**
+  (23 skips: wizard tests need a pristine server, test-plugin and /Encoder
+  echo tests need upstream's compiled-in test assembly, and mutating tests
+  — library/user create-delete — only run with `JF_ALLOW_MUTATIONS=1`,
+  never against production). Heya answers mutations with validated 403s
+  ("not allowed"), never a lying 204, so the mutation-gated tests are
+  expected to fail against Heya by design.
 - `bun tools/jellyfin-smoke.ts [base] [user] [pw]` — 48-assertion protocol
   walk (discovery → login → browse → PlaybackInfo → stream bytes →
   playstate → resume → favorites → websocket → logout) against a running
@@ -75,13 +94,19 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
   Watching / Latest), series → season → episode browse, item detail,
   favorites, and actual `<video>` playback with progress reporting.
 
+Dev-topology note: the lowercase-path routes (`/web/*`, `/api-docs/*`,
+`/robots.txt`) are claimed via `ClaimsPath`, which the **dev-proxy** compiles
+in — after adding routes, restart the dev-proxy pane (`r` in mprocs) or run
+the suite against the backend directly (`JF_URL=http://127.0.0.1:3050`).
+
 ## Client matrix
 
 | Client | Status | Notes |
 | --- | --- | --- |
 | jellyfin-web 10.8 | ✅ verified | login, home, browse, detail, playback, playstate |
 | @jellyfin-protocol smoke | ✅ 48/48 | tools/jellyfin-smoke.ts |
-| Infuse | 🔜 expected OK | direct play + byte ranges (no transcode needed per Firecore) |
+| upstream integration suite (ported) | ✅ 71/71 | tools/jellyfin-conformance.ts — same score as real Jellyfin |
+| Infuse | ✅ verified | add server, browse, all image types, HDR direct play; episode lists need `fields=MediaSources` |
 | Streamyfin / Findroid | 🔜 untested | 10.10+ API users |
 | Finamp | 🔜 untested | universal audio + lyrics implemented |
 
@@ -102,15 +127,16 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
 
 `tools/jellyfin-diff.ts` compares Heya's responses *structurally* (key
 presence + JSON types — what strict decoders actually break on) against a
-real Jellyfin over the client call sequence. Bring one up with the same
-media and run it:
+real Jellyfin over the client call sequence: auth → views → movie grid →
+detail → PlaybackInfo → series → seasons → episodes → NextUp → resume.
+Both servers are env-configured (never hardcode credentials):
 
 ```bash
-docker run -d --name jf-real -p 8097:8096 -v /path/to/media:/media:ro jellyfin/jellyfin
-# complete the wizard (admin/admin) + add /media as a movie library, then:
-bun tools/jellyfin-diff.ts
+JF_REAL_URL=https://jf.example JF_REAL_USER=u JF_REAL_PASS=p \
+JF_HEYA_URL=http://127.0.0.1:8080 bun tools/jellyfin-diff.ts
 ```
 
 This harness caught the Infuse breakers: `null` where upstream emits empty
-arrays, ETag 304s upstream never sends, and MediaSources/MediaStreams
-missing from item detail.
+arrays, ETag 304s upstream never sends, MediaSources/MediaStreams missing
+from item detail, and `fields=MediaSources` being ignored on episode lists
+(which broke Infuse's entire show page).

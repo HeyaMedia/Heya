@@ -132,8 +132,15 @@ func (s *Server) buildRouter() *router {
 	// (/Items/{itemId}).
 	rt.handle(http.MethodGet, "/UserViews", s.requireAuth(s.handleUserViews))
 	rt.handle(http.MethodGet, "/Items/Latest", s.requireAuth(s.handleItemsLatest))
+	rt.handle(http.MethodGet, "/Items/Root", s.requireAuth(s.handleItemsRoot))
 	rt.handle(http.MethodGet, "/Items", s.requireAuth(s.handleItems))
 	rt.handle(http.MethodGet, "/Items/{itemId}", s.requireAuth(s.handleItemByID))
+	rt.handle(http.MethodGet, "/Items/{itemId}/Intros", s.requireAuth(s.handleItemIntros))
+	rt.handle(http.MethodGet, "/Items/{itemId}/LocalTrailers", s.requireAuth(s.handleItemExtrasArray))
+	rt.handle(http.MethodGet, "/Items/{itemId}/SpecialFeatures", s.requireAuth(s.handleItemExtrasArray))
+	// Item deletion: 404 unknown, 403 known — never a mutating 204.
+	rt.handle(http.MethodDelete, "/Items/{itemId}", s.requireAuth(s.handleDeleteItems))
+	rt.handle(http.MethodDelete, "/Items", s.requireAuth(s.handleDeleteItems))
 	rt.handle(http.MethodGet, "/UserItems/Resume", s.requireAuth(s.handleResume))
 	rt.handle(http.MethodGet, "/Shows/NextUp", s.requireAuth(s.handleNextUp))
 	rt.handle(http.MethodGet, "/Shows/{seriesId}/Seasons", s.requireAuth(s.handleShowSeasons))
@@ -152,8 +159,13 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Users/{userId}/Views", s.requireAuth(s.handleUserViews))
 	rt.handle(http.MethodGet, "/Users/{userId}/Items/Resume", s.requireAuth(s.handleResume))
 	rt.handle(http.MethodGet, "/Users/{userId}/Items/Latest", s.requireAuth(s.handleItemsLatest))
+	rt.handle(http.MethodGet, "/Users/{userId}/Items/Root", s.requireAuth(s.handleItemsRoot))
 	rt.handle(http.MethodGet, "/Users/{userId}/Items", s.requireAuth(s.handleItems))
 	rt.handle(http.MethodGet, "/Users/{userId}/Items/{itemId}", s.requireAuth(s.handleItemByID))
+	rt.handle(http.MethodGet, "/Users/{userId}/Items/{itemId}/Intros", s.requireAuth(s.handleItemIntros))
+	rt.handle(http.MethodGet, "/Users/{userId}/Items/{itemId}/LocalTrailers", s.requireAuth(s.handleItemExtrasArray))
+	rt.handle(http.MethodGet, "/Users/{userId}/Items/{itemId}/SpecialFeatures", s.requireAuth(s.handleItemExtrasArray))
+	rt.handle(http.MethodGet, "/Users/{userId}/Items/{itemId}/Lyrics", s.requireAuth(s.handleUserItemLyrics))
 
 	// Playback negotiation + delivery. The HEAD registrations exist because
 	// the upstream spec declares them; the router also HEAD→GET falls back.
@@ -191,11 +203,12 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodPost, "/DisplayPreferences/{displayPreferencesId}", s.requireAuth(s.handleSetDisplayPreferences))
 	rt.handle(http.MethodGet, "/Items/Filters", s.requireAuth(s.handleItemFilters))
 	rt.handle(http.MethodGet, "/Items/Filters2", s.requireAuth(s.handleItemFilters2))
-	rt.handle(http.MethodGet, "/Items/{itemId}/Similar", s.requireAuth(s.handleSimilar))
-	rt.handle(http.MethodGet, "/Movies/{itemId}/Similar", s.requireAuth(s.handleSimilar))
-	rt.handle(http.MethodGet, "/Shows/{itemId}/Similar", s.requireAuth(s.handleSimilar))
-	rt.handle(http.MethodGet, "/Albums/{itemId}/Similar", s.requireAuth(s.handleSimilar))
-	rt.handle(http.MethodGet, "/Artists/{itemId}/Similar", s.requireAuth(s.handleSimilar))
+	rt.handle(http.MethodGet, "/Items/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
+	rt.handle(http.MethodGet, "/Movies/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
+	rt.handle(http.MethodGet, "/Shows/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
+	rt.handle(http.MethodGet, "/Albums/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
+	rt.handle(http.MethodGet, "/Artists/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
+	rt.handle(http.MethodGet, "/Trailers/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
 	rt.handle(http.MethodGet, "/Audio/{itemId}/Lyrics", s.requireAuth(s.handleLyrics))
 	rt.handle(http.MethodGet, "/Sessions", s.requireAuth(s.handleSessionsList))
 	rt.handle(http.MethodPost, "/Sessions/Capabilities", s.requireAuth(s.handleSessionsCapabilities))
@@ -203,8 +216,16 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodPost, "/Sessions/Viewing", s.requireAuth(s.handleSessionsViewing))
 
 	// Library structure — Infuse fetches this during add-server to enumerate
-	// libraries; a 404 aborts its add flow.
+	// libraries; a 404 aborts its add flow. Mutations are validated like
+	// upstream, then answered 403: Heya manages libraries itself.
 	rt.handle(http.MethodGet, "/Library/VirtualFolders", s.requireAuth(s.handleVirtualFolders))
+	rt.handle(http.MethodPost, "/Library/VirtualFolders", s.requireAdmin(s.handleAddVirtualFolder))
+	rt.handle(http.MethodDelete, "/Library/VirtualFolders", s.requireAdmin(s.handleDeleteVirtualFolder))
+	rt.handle(http.MethodPost, "/Library/VirtualFolders/Name", s.requireAdmin(s.handleRenameVirtualFolder))
+	rt.handle(http.MethodPost, "/Library/VirtualFolders/LibraryOptions", s.requireAdmin(s.handleUpdateLibraryOptions))
+	rt.handle(http.MethodPost, "/Library/VirtualFolders/Paths", s.requireAdmin(s.handleAddMediaPath))
+	rt.handle(http.MethodPost, "/Library/VirtualFolders/Paths/Update", s.requireAdmin(s.handleUpdateMediaPath))
+	rt.handle(http.MethodDelete, "/Library/VirtualFolders/Paths", s.requireAdmin(s.handleRemoveMediaPath))
 
 	// Small real conveniences.
 	rt.handle(http.MethodGet, "/GetUtcTime", s.handleGetUtcTime)
@@ -223,12 +244,31 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/LiveTv/Info", s.requireAuth(s.handleLiveTvInfo))
 	rt.handle(http.MethodGet, "/Auth/Providers", s.requireAdmin(s.handleAuthProviders))
 	rt.handle(http.MethodGet, "/Auth/PasswordResetProviders", s.requireAdmin(s.handlePasswordResetProviders))
-	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeMedia", s.requireAuth(s.handleThemeMedia))
-	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeSongs", s.requireAuth(s.handleThemeSongsOrVideos))
-	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeVideos", s.requireAuth(s.handleThemeSongsOrVideos))
-	rt.handle(http.MethodGet, "/Items/{itemId}/Ancestors", s.requireAuth(s.stubEmptyArray))
-	rt.handle(http.MethodGet, "/Items/{itemId}/CriticReviews", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeMedia", s.requireAuth(s.requireItem(s.handleThemeMedia)))
+	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeSongs", s.requireAuth(s.requireItem(s.handleThemeSongsOrVideos)))
+	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeVideos", s.requireAuth(s.requireItem(s.handleThemeSongsOrVideos)))
+	rt.handle(http.MethodGet, "/Items/{itemId}/Ancestors", s.requireAuth(s.requireItem(s.stubEmptyArray)))
+	rt.handle(http.MethodGet, "/Items/{itemId}/CriticReviews", s.requireAuth(s.requireItem(s.stubEmptyQueryResult)))
 	rt.handle(http.MethodGet, "/Items/Suggestions", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/System/ActivityLog/Entries", s.requireAdmin(s.handleActivityLogEntries))
+	rt.handle(http.MethodGet, "/web/ConfigurationPages", s.requireAuth(s.handleConfigurationPages))
+	rt.handle(http.MethodGet, "/web/ConfigurationPage", s.stubNotFound)
+	rt.handle(http.MethodPost, "/LiveTv/TunerHosts", s.requireAuth(s.stubNotFound))
+
+	// Startup wizard: a Heya server is configured through Heya itself, so the
+	// wizard is always complete — upstream locks these behind 401 then.
+	rt.handle(http.MethodGet, "/Startup/User", s.handleStartupLocked)
+	rt.handle(http.MethodPost, "/Startup/User", s.handleStartupLocked)
+	rt.handle(http.MethodGet, "/Startup/Configuration", s.handleStartupLocked)
+	rt.handle(http.MethodPost, "/Startup/Configuration", s.handleStartupLocked)
+	rt.handle(http.MethodPost, "/Startup/Complete", s.handleStartupLocked)
+	rt.handle(http.MethodGet, "/Startup/FirstUser", s.handleStartupLocked)
+
+	// Served like a real server: the vendored 10.11 spec, and robots (a
+	// personal media server wants no crawler; see spec.go).
+	rt.handle(http.MethodGet, "/api-docs/openapi.json", s.handleOpenAPISpec)
+	rt.handle(http.MethodGet, "/robots.txt", s.handleRobotsRedirect)
+	rt.handle(http.MethodGet, "/web/robots.txt", s.handleRobotsTxt)
 	rt.handle(http.MethodGet, "/Videos/{itemId}/AdditionalParts", s.requireAuth(s.handleAdditionalParts))
 	rt.handle(http.MethodGet, "/Devices", s.requireAdmin(s.handleDevices))
 	rt.handle(http.MethodGet, "/ScheduledTasks", s.requireAdmin(s.stubEmptyArray))

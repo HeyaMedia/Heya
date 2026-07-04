@@ -38,15 +38,24 @@ var extraRoutes = map[string]bool{
 	"GET /embywebsocket": true,
 	// Legacy pre-10.9 user-scoped aliases still emitted by older client code
 	// paths; gone from the 10.11 spec but still answered by upstream.
-	"GET /Users/{userId}/Views":                     true,
-	"GET /Users/{userId}/Items":                     true,
-	"GET /Users/{userId}/Items/{itemId}":            true,
-	"GET /Users/{userId}/Items/Resume":              true,
-	"GET /Users/{userId}/Items/Latest":              true,
-	"POST /Users/{userId}/FavoriteItems/{itemId}":   true,
-	"DELETE /Users/{userId}/FavoriteItems/{itemId}": true,
-	"POST /Users/{userId}/PlayedItems/{itemId}":     true,
-	"DELETE /Users/{userId}/PlayedItems/{itemId}":   true,
+	"GET /Users/{userId}/Views":                          true,
+	"GET /Users/{userId}/Items":                          true,
+	"GET /Users/{userId}/Items/{itemId}":                 true,
+	"GET /Users/{userId}/Items/Resume":                   true,
+	"GET /Users/{userId}/Items/Latest":                   true,
+	"POST /Users/{userId}/FavoriteItems/{itemId}":        true,
+	"DELETE /Users/{userId}/FavoriteItems/{itemId}":      true,
+	"POST /Users/{userId}/PlayedItems/{itemId}":          true,
+	"DELETE /Users/{userId}/PlayedItems/{itemId}":        true,
+	"GET /Users/{userId}/Items/Root":                     true,
+	"GET /Users/{userId}/Items/{itemId}/Intros":          true,
+	"GET /Users/{userId}/Items/{itemId}/LocalTrailers":   true,
+	"GET /Users/{userId}/Items/{itemId}/SpecialFeatures": true,
+	"GET /Users/{userId}/Items/{itemId}/Lyrics":          true,
+	// Served like a real server, but not REST-spec operations.
+	"GET /api-docs/openapi.json": true,
+	"GET /robots.txt":            true,
+	"GET /web/robots.txt":        true,
 }
 
 var manifest = map[string]manifestEntry{
@@ -55,12 +64,12 @@ var manifest = map[string]manifestEntry{
 	"DELETE /Branding/Splashscreen":                                 {Status: opPlanned, Tag: "Image"},
 	"DELETE /Collections/{collectionId}/Items":                      {Status: opOutOfScope, Tag: "Collection"},
 	"DELETE /Devices":                                               {Status: opPlanned, Tag: "Devices"},
-	"DELETE /Items":                                                 {Status: opPlanned, Tag: "Library"},
-	"DELETE /Items/{itemId}":                                        {Status: opPlanned, Tag: "Library"},
+	"DELETE /Items":                                                 {Status: opImplemented, Tag: "Library"}, // 404 unknown, 403 known: no deletes via this surface
+	"DELETE /Items/{itemId}":                                        {Status: opImplemented, Tag: "Library"}, // 404 unknown, 403 known: no deletes via this surface
 	"DELETE /Items/{itemId}/Images/{imageType}":                     {Status: opPlanned, Tag: "Image"},
 	"DELETE /Items/{itemId}/Images/{imageType}/{imageIndex}":        {Status: opPlanned, Tag: "Image"},
-	"DELETE /Library/VirtualFolders":                                {Status: opOutOfScope, Tag: "LibraryStructure"},
-	"DELETE /Library/VirtualFolders/Paths":                          {Status: opOutOfScope, Tag: "LibraryStructure"},
+	"DELETE /Library/VirtualFolders":                                {Status: opStubbed, Tag: "LibraryStructure"}, // validated, then 403: Heya-managed
+	"DELETE /Library/VirtualFolders/Paths":                          {Status: opStubbed, Tag: "LibraryStructure"}, // validated, then 403: Heya-managed
 	"DELETE /LiveTv/ListingProviders":                               {Status: opOutOfScope, Tag: "LiveTv"},
 	"DELETE /LiveTv/Recordings/{recordingId}":                       {Status: opOutOfScope, Tag: "LiveTv"},
 	"DELETE /LiveTv/SeriesTimers/{timerId}":                         {Status: opOutOfScope, Tag: "LiveTv"},
@@ -143,15 +152,15 @@ var manifest = map[string]manifestEntry{
 	"GET /Items/{itemId}/Images/{imageType}/{imageIndex}":           {Status: opImplemented, Tag: "Image"},
 	"GET /Items/{itemId}/Images/{imageType}/{imageIndex}/{tag}/{format}/{maxWidth}/{maxHeight}/{percentPlayed}/{unplayedCount}": {Status: opPlanned, Tag: "Image"},
 	"GET /Items/{itemId}/InstantMix":                            {Status: opPlanned, Tag: "InstantMix"},
-	"GET /Items/{itemId}/Intros":                                {Status: opPlanned, Tag: "UserLibrary"},
-	"GET /Items/{itemId}/LocalTrailers":                         {Status: opPlanned, Tag: "UserLibrary"},
+	"GET /Items/{itemId}/Intros":                                {Status: opImplemented, Tag: "UserLibrary"}, // empty: no cinema intros feature
+	"GET /Items/{itemId}/LocalTrailers":                         {Status: opImplemented, Tag: "UserLibrary"}, // empty array after real validation
 	"GET /Items/{itemId}/MetadataEditor":                        {Status: opOutOfScope, Tag: "ItemUpdate"},
 	"GET /Items/{itemId}/PlaybackInfo":                          {Status: opImplemented, Tag: "MediaInfo"},
 	"GET /Items/{itemId}/RemoteImages":                          {Status: opOutOfScope, Tag: "RemoteImage"},
 	"GET /Items/{itemId}/RemoteImages/Providers":                {Status: opOutOfScope, Tag: "RemoteImage"},
 	"GET /Items/{itemId}/RemoteSearch/Subtitles/{language}":     {Status: opPlanned, Tag: "Subtitle"},
 	"GET /Items/{itemId}/Similar":                               {Status: opImplemented, Tag: "Library"},
-	"GET /Items/{itemId}/SpecialFeatures":                       {Status: opPlanned, Tag: "UserLibrary"},
+	"GET /Items/{itemId}/SpecialFeatures":                       {Status: opImplemented, Tag: "UserLibrary"}, // empty array after real validation
 	"GET /Items/{itemId}/ThemeMedia":                            {Status: opStubbed, Tag: "Library"},
 	"GET /Items/{itemId}/ThemeSongs":                            {Status: opStubbed, Tag: "Library"},
 	"GET /Items/{itemId}/ThemeVideos":                           {Status: opStubbed, Tag: "Library"},
@@ -159,7 +168,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Items/Filters":                                        {Status: opImplemented, Tag: "Filter"},
 	"GET /Items/Filters2":                                       {Status: opImplemented, Tag: "Filter"},
 	"GET /Items/Latest":                                         {Status: opImplemented, Tag: "UserLibrary"},
-	"GET /Items/Root":                                           {Status: opPlanned, Tag: "UserLibrary"},
+	"GET /Items/Root":                                           {Status: opImplemented, Tag: "UserLibrary"},
 	"GET /Items/Suggestions":                                    {Status: opStubbed, Tag: "Suggestions"},
 	"GET /Libraries/AvailableOptions":                           {Status: opPlanned, Tag: "Library"},
 	"GET /Library/MediaFolders":                                 {Status: opPlanned, Tag: "Library"},
@@ -235,16 +244,16 @@ var manifest = map[string]manifestEntry{
 	"GET /Shows/NextUp":                                         {Status: opImplemented, Tag: "TvShows"},
 	"GET /Shows/Upcoming":                                       {Status: opStubbed, Tag: "TvShows"},
 	"GET /Songs/{itemId}/InstantMix":                            {Status: opPlanned, Tag: "InstantMix"},
-	"GET /Startup/Configuration":                                {Status: opOutOfScope, Tag: "Startup"},
-	"GET /Startup/FirstUser":                                    {Status: opOutOfScope, Tag: "Startup"},
-	"GET /Startup/User":                                         {Status: opOutOfScope, Tag: "Startup"},
+	"GET /Startup/Configuration":                                {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
+	"GET /Startup/FirstUser":                                    {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
+	"GET /Startup/User":                                         {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
 	"GET /Studios":                                              {Status: opStubbed, Tag: "Studios"},
 	"GET /Studios/{name}":                                       {Status: opPlanned, Tag: "Studios"},
 	"GET /Studios/{name}/Images/{imageType}":                    {Status: opPlanned, Tag: "Image"},
 	"GET /Studios/{name}/Images/{imageType}/{imageIndex}":       {Status: opPlanned, Tag: "Image"},
 	"GET /SyncPlay/{id}":                                        {Status: opOutOfScope, Tag: "SyncPlay"},
 	"GET /SyncPlay/List":                                        {Status: opOutOfScope, Tag: "SyncPlay"},
-	"GET /System/ActivityLog/Entries":                           {Status: opOutOfScope, Tag: "ActivityLog"},
+	"GET /System/ActivityLog/Entries":                           {Status: opStubbed, Tag: "ActivityLog"}, // empty page: feed not mapped yet
 	"GET /System/Configuration":                                 {Status: opOutOfScope, Tag: "Configuration"},
 	"GET /System/Configuration/{key}":                           {Status: opOutOfScope, Tag: "Configuration"},
 	"GET /System/Configuration/MetadataOptions/Default":         {Status: opOutOfScope, Tag: "Configuration"},
@@ -257,7 +266,7 @@ var manifest = map[string]manifestEntry{
 	"GET /System/Ping":                                          {Status: opImplemented, Tag: "System"},
 	"GET /Tmdb/ClientConfiguration":                             {Status: opOutOfScope, Tag: "Tmdb"},
 	"GET /Trailers":                                             {Status: opPlanned, Tag: "Trailers"},
-	"GET /Trailers/{itemId}/Similar":                            {Status: opPlanned, Tag: "Library"},
+	"GET /Trailers/{itemId}/Similar":                            {Status: opImplemented, Tag: "Library"},
 	"GET /UserImage":                                            {Status: opPlanned, Tag: "Image"},
 	"GET /UserItems/{itemId}/UserData":                          {Status: opPlanned, Tag: "Items"},
 	"GET /UserItems/Resume":                                     {Status: opImplemented, Tag: "Items"},
@@ -282,8 +291,8 @@ var manifest = map[string]manifestEntry{
 	"GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/Stream.{routeFormat}": {Status: opImplemented, Tag: "Subtitle"},
 	"GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}":                           {Status: opImplemented, Tag: "Subtitle"},
 	"GET /Videos/{videoId}/{mediaSourceId}/Attachments/{index}":                                                            {Status: opPlanned, Tag: "VideoAttachments"},
-	"GET /web/ConfigurationPage":  {Status: opOutOfScope, Tag: "Dashboard"},
-	"GET /web/ConfigurationPages": {Status: opOutOfScope, Tag: "Dashboard"},
+	"GET /web/ConfigurationPage":  {Status: opStubbed, Tag: "Dashboard"}, // 404: no plugin pages
+	"GET /web/ConfigurationPages": {Status: opStubbed, Tag: "Dashboard"}, // []: no plugins
 	"GET /Years":                  {Status: opStubbed, Tag: "Years"},
 	"GET /Years/{year}":           {Status: opPlanned, Tag: "Years"},
 	"HEAD /Artists/{name}/Images/{imageType}/{imageIndex}": {Status: opPlanned, Tag: "Image"},
@@ -343,11 +352,11 @@ var manifest = map[string]manifestEntry{
 	"POST /Library/Refresh":                                       {Status: opPlanned, Tag: "Library"},
 	"POST /Library/Series/Added":                                  {Status: opPlanned, Tag: "Library"},
 	"POST /Library/Series/Updated":                                {Status: opPlanned, Tag: "Library"},
-	"POST /Library/VirtualFolders":                                {Status: opOutOfScope, Tag: "LibraryStructure"},
-	"POST /Library/VirtualFolders/LibraryOptions":                 {Status: opOutOfScope, Tag: "LibraryStructure"},
-	"POST /Library/VirtualFolders/Name":                           {Status: opOutOfScope, Tag: "LibraryStructure"},
-	"POST /Library/VirtualFolders/Paths":                          {Status: opOutOfScope, Tag: "LibraryStructure"},
-	"POST /Library/VirtualFolders/Paths/Update":                   {Status: opOutOfScope, Tag: "LibraryStructure"},
+	"POST /Library/VirtualFolders":                                {Status: opStubbed, Tag: "LibraryStructure"}, // 403: Heya-managed
+	"POST /Library/VirtualFolders/LibraryOptions":                 {Status: opStubbed, Tag: "LibraryStructure"}, // validated, then 403: Heya-managed
+	"POST /Library/VirtualFolders/Name":                           {Status: opStubbed, Tag: "LibraryStructure"}, // validated, then 403: Heya-managed
+	"POST /Library/VirtualFolders/Paths":                          {Status: opStubbed, Tag: "LibraryStructure"}, // validated, then 404: Heya-managed
+	"POST /Library/VirtualFolders/Paths/Update":                   {Status: opStubbed, Tag: "LibraryStructure"}, // validated, then 403: Heya-managed
 	"POST /LiveStreams/Close":                                     {Status: opPlanned, Tag: "MediaInfo"},
 	"POST /LiveStreams/Open":                                      {Status: opPlanned, Tag: "MediaInfo"},
 	"POST /LiveTv/ChannelMappings":                                {Status: opOutOfScope, Tag: "LiveTv"},
@@ -357,7 +366,7 @@ var manifest = map[string]manifestEntry{
 	"POST /LiveTv/SeriesTimers/{timerId}":                         {Status: opOutOfScope, Tag: "LiveTv"},
 	"POST /LiveTv/Timers":                                         {Status: opOutOfScope, Tag: "LiveTv"},
 	"POST /LiveTv/Timers/{timerId}":                               {Status: opOutOfScope, Tag: "LiveTv"},
-	"POST /LiveTv/TunerHosts":                                     {Status: opOutOfScope, Tag: "LiveTv"},
+	"POST /LiveTv/TunerHosts":                                     {Status: opStubbed, Tag: "LiveTv"}, // 404: no LiveTV
 	"POST /LiveTv/Tuners/{tunerId}/Reset":                         {Status: opOutOfScope, Tag: "LiveTv"},
 	"POST /Packages/Installed/{name}":                             {Status: opOutOfScope, Tag: "Package"},
 	"POST /PlayingItems/{itemId}":                                 {Status: opPlanned, Tag: "Playstate"},
@@ -392,10 +401,10 @@ var manifest = map[string]manifestEntry{
 	"POST /Sessions/Playing/Progress":                             {Status: opImplemented, Tag: "Playstate"},
 	"POST /Sessions/Playing/Stopped":                              {Status: opImplemented, Tag: "Playstate"},
 	"POST /Sessions/Viewing":                                      {Status: opImplemented, Tag: "Session"},
-	"POST /Startup/Complete":                                      {Status: opOutOfScope, Tag: "Startup"},
-	"POST /Startup/Configuration":                                 {Status: opOutOfScope, Tag: "Startup"},
+	"POST /Startup/Complete":                                      {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
+	"POST /Startup/Configuration":                                 {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
 	"POST /Startup/RemoteAccess":                                  {Status: opOutOfScope, Tag: "Startup"},
-	"POST /Startup/User":                                          {Status: opOutOfScope, Tag: "Startup"},
+	"POST /Startup/User":                                          {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
 	"POST /SyncPlay/Buffering":                                    {Status: opOutOfScope, Tag: "SyncPlay"},
 	"POST /SyncPlay/Join":                                         {Status: opOutOfScope, Tag: "SyncPlay"},
 	"POST /SyncPlay/Leave":                                        {Status: opOutOfScope, Tag: "SyncPlay"},
