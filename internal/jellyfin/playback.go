@@ -183,9 +183,10 @@ func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request, p Pa
 		return
 	}
 
-	// Video: probe-backed source description + transcode decision.
-	caps := capsFromProfile(req.DeviceProfile)
-	src, plan := s.videoMediaSource(ctx, target, token, caps)
+	// Video: probe-backed source description + transcode decision. Caps are
+	// derived against the file's own video codec inside videoMediaSource, so
+	// a codec-scoped DeviceProfile restriction can't leak across codecs.
+	src, plan, caps := s.videoMediaSource(ctx, target, token, req.DeviceProfile)
 	directOK := src.SupportsDirectPlay
 
 	if !directOK && src.SupportsTranscoding {
@@ -210,7 +211,7 @@ func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request, p Pa
 // shared by PlaybackInfo and by /Items/{id} detail hydration (upstream
 // includes MediaSources on the detail dto and Infuse builds its playability
 // decision from it).
-func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token string, caps transcoder.ClientCapabilities) (mediaSourceInfo, transcoder.PlaybackPlan) {
+func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token string, profile *deviceProfile) (mediaSourceInfo, transcoder.PlaybackPlan, transcoder.ClientCapabilities) {
 	file, err := s.app.EnsureFileProbed(ctx, target.file.ID)
 	if err != nil {
 		file = target.file
@@ -220,6 +221,7 @@ func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token 
 		_ = json.Unmarshal(file.MediaInfo, &info)
 	}
 
+	caps := capsFromProfile(profile, videoCodecOf(&info))
 	tInfo := toTranscoderInfo(&info)
 	plan := transcoder.Decide(&tInfo, caps)
 	directOK := plan.Action == transcoder.ActionDirectPlay && !vfs.IsSMBPath(file.Path)
@@ -251,7 +253,17 @@ func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token 
 		RequiredHTTPHeaders:        map[string]string{},
 		DefaultAudioStreamIndex:    defAudio,
 		DefaultSubtitleStreamIndex: defSub,
-	}, plan
+	}, plan, caps
+}
+
+// videoCodecOf returns the first video stream's codec name (lowercased).
+func videoCodecOf(info *mediaprobe.MediaInfo) string {
+	for _, st := range info.Streams {
+		if st.CodecType == "video" {
+			return strings.ToLower(st.CodecName)
+		}
+	}
+	return ""
 }
 
 // attachVideoSource decorates a detail dto with its MediaSources, matching
@@ -261,7 +273,7 @@ func (s *Server) attachVideoSource(ctx context.Context, dto *baseItemDto, itemID
 	if !ok || (target.entityType != "movie" && target.entityType != "episode") {
 		return
 	}
-	src, _ := s.videoMediaSource(ctx, target, TokenFrom(ctx), transcoder.DefaultClientCaps)
+	src, _, _ := s.videoMediaSource(ctx, target, TokenFrom(ctx), nil)
 	dto.MediaSources = []mediaSourceInfo{src}
 	dto.MediaStreams = src.MediaStreams
 	dto.Container = src.Container

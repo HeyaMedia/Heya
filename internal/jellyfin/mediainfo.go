@@ -284,12 +284,13 @@ func langName(code string) string {
 	}
 }
 
-// capsFromProfile maps a Jellyfin DeviceProfile onto Heya's transcoder
-// capability flags. DirectPlayProfiles say what the device decodes natively;
-// CodecProfile VideoRangeType conditions say which HDR flavors survive
-// display. Absent profile → conservative defaults (h264/mp4/aac), matching
-// what DecideForHLS assumes for unknown clients.
-func capsFromProfile(p *deviceProfile) transcoder.ClientCapabilities {
+// capsFromProfile maps a Jellyfin DeviceProfile onto Heya's transcoder caps
+// FOR A SPECIFIC file video codec. ClientCapabilities carries global HDR
+// booleans, so range restrictions must be resolved against the file being
+// decided — a "HEVC only SDR" CodecProfile must not disable HDR for an AV1
+// file, and vice versa. videoCodec is the file's video codec (lowercased);
+// "" means "unknown", in which case only codec-agnostic conditions apply.
+func capsFromProfile(p *deviceProfile, videoCodec string) transcoder.ClientCapabilities {
 	caps := transcoder.DefaultClientCaps
 	if p == nil {
 		return caps
@@ -324,29 +325,32 @@ func capsFromProfile(p *deviceProfile) transcoder.ClientCapabilities {
 			caps.SupportsAC3 = true
 		}
 	}
-	// HDR passthrough. A device that direct-plays HEVC Main 10 decodes the
-	// 10-bit bitstream and passes the transfer function (PQ/HLG) straight to
-	// the display — it does NOT need to tonemap. Jellyfin clients that handle
-	// HDR express this by NOT restricting VideoRangeType, so the correct
-	// default for an HEVC-capable client is "handles HDR10 + HLG" (forcing
-	// these off led to an unnecessary, and on 4K failing, tonemap transcode).
-	// DoVi stays opt-in — profile 5 needs explicit support.
-	if caps.SupportsHEVC {
+	// HDR passthrough default. A device that direct-plays the file's HDR-
+	// capable codec (HEVC Main 10 / AV1) decodes the 10-bit bitstream and
+	// passes the transfer function (PQ/HLG) straight to the display — it does
+	// NOT need to tonemap. Jellyfin clients that handle HDR signal this by
+	// NOT restricting VideoRangeType, so the correct default is "handles
+	// HDR10 + HLG" (forcing these off caused an unnecessary, and on 4K
+	// failing, tonemap transcode). DoVi stays opt-in — profile 5 needs
+	// explicit support. HDR is meaningless for h264 (always SDR), so gate the
+	// default on the file's codec.
+	hevcFile := strings.Contains(videoCodec, "hevc") || strings.Contains(videoCodec, "h265")
+	av1File := strings.Contains(videoCodec, "av1")
+	if (hevcFile && caps.SupportsHEVC) || (av1File && caps.SupportsAV1) {
 		caps.SupportsHDR10 = true
 		caps.SupportsHLG = true
 	}
-	// An explicit VideoRangeType condition on an HDR-capable codec profile is
-	// AUTHORITATIVE and can turn the default OFF: an EqualsAny condition is
-	// the client's allow-list (a stream must match it to direct-play), so an
-	// SDR-only decoder ("EqualsAny SDR") correctly disables passthrough and
-	// gets a tonemap. NotEquals conditions are a deny-list. Range conditions
-	// on SDR-only codecs (h264) are irrelevant to HDR and skipped.
+	// An explicit VideoRangeType condition on the CodecProfile governing the
+	// file's codec is AUTHORITATIVE and can turn the default OFF: EqualsAny is
+	// the allow-list (a stream must match it to direct-play), so an SDR-only
+	// decoder ("EqualsAny SDR") correctly disables passthrough → tonemap;
+	// NotEquals is a deny-list. Conditions scoped to a DIFFERENT codec than
+	// the file are skipped so they can't leak across codecs.
 	for _, cp := range p.CodecProfiles {
 		if cp.Type != "" && !strings.EqualFold(cp.Type, "Video") {
 			continue
 		}
-		codec := strings.ToLower(cp.Codec)
-		if codec != "" && !strings.Contains(codec, "hevc") && !strings.Contains(codec, "h265") && !strings.Contains(codec, "av1") {
+		if !codecProfileApplies(cp.Codec, videoCodec) {
 			continue
 		}
 		for _, c := range cp.Conditions {
@@ -357,7 +361,6 @@ func capsFromProfile(p *deviceProfile) transcoder.ClientCapabilities {
 			has := func(s string) bool { return strings.Contains(v, s) }
 			isDoVi := has("dovi") || has("dolby")
 			if strings.HasPrefix(strings.ToLower(c.Condition), "notequal") {
-				// Deny-list: turn off exactly what's named.
 				if has("hdr10") {
 					caps.SupportsHDR10 = false
 				}
@@ -369,14 +372,37 @@ func capsFromProfile(p *deviceProfile) transcoder.ClientCapabilities {
 				}
 				continue
 			}
-			// Allow-list (EqualsAny / Equals): the supported set is exactly
-			// what's named — anything absent is unsupported.
 			caps.SupportsHDR10 = has("hdr10")
 			caps.SupportsHLG = has("hlg")
 			caps.SupportsDoVi = isDoVi
 		}
 	}
 	return caps
+}
+
+// codecProfileApplies reports whether a CodecProfile's Codec field (which may
+// be empty or a comma-list like "h264,hevc") governs the file's video codec.
+// Empty Codec = applies to all video codecs.
+func codecProfileApplies(profileCodec, fileCodec string) bool {
+	profileCodec = strings.ToLower(strings.TrimSpace(profileCodec))
+	if profileCodec == "" {
+		return true
+	}
+	if fileCodec == "" {
+		return false // codec-specific condition, unknown file codec → don't apply
+	}
+	for _, c := range strings.Split(profileCodec, ",") {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		// h265 and hevc are the same codec under two names.
+		if c == fileCodec ||
+			(c == "h265" && fileCodec == "hevc") || (c == "hevc" && fileCodec == "h265") {
+			return true
+		}
+	}
+	return false
 }
 
 // audioCapsFromContainers parses the /Audio/{id}/universal Container param
