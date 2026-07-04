@@ -397,11 +397,6 @@ function recPosterUrl(r: any): string {
   return `/api/tmdb/image${r.poster_path}?size=w342`
 }
 
-function formatVote(v: any): string {
-  const n = typeof v === 'number' ? v : parseFloat(String(v))
-  return isNaN(n) ? '' : n.toFixed(1)
-}
-
 function openVideo(key: string, title: string) {
   videoModal.value = { key, title }
 }
@@ -767,12 +762,6 @@ function seasonSubtitle(s: any): string {
   const y = formatYear(s.air_date)
   if (y) parts.push(y)
   return parts.join(' · ')
-}
-
-function formatDate(d: string) {
-  if (!d) return ''
-  try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
-  catch { return d }
 }
 
 function formatYear(d: string) { return d?.slice(0, 4) || '' }

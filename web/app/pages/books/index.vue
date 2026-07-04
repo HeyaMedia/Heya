@@ -80,7 +80,7 @@
                 </div>
               </div>
               <div>{{ item.year }}</div>
-              <div class="list-added">{{ formatDate(item.created_at) }}</div>
+              <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
             </div>
           </RecycleScroller>
         </div>
@@ -118,11 +118,6 @@ const sorted = computed(() => {
 })
 
 const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted)
-
-function formatDate(d: string) {
-  if (!d) return ''
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
 
 onMounted(async () => {
   const { $heya } = useNuxtApp()

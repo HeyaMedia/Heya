@@ -159,7 +159,7 @@
               <div>{{ item.year }}</div>
               <div>{{ item.rating ? item.rating.toFixed(1) : '–' }}</div>
               <div class="list-status">{{ item.status || '–' }}</div>
-              <div class="list-added">{{ formatDate(item.created_at) }}</div>
+              <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
             </div>
             </AppContextMenu>
           </RecycleScroller>
@@ -399,11 +399,6 @@ async function loadLists() {
     const { $heya } = useNuxtApp()
     userLists.value = await $heya('/api/me/lists') as UserList[]
   } catch { /* ignore */ }
-}
-
-function formatDate(d: string) {
-  if (!d) return ''
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 onMounted(async () => {

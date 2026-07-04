@@ -18,11 +18,6 @@ const emit = defineEmits<{
   toggleWatched: []
 }>()
 
-function formatDate(d: string) {
-  if (!d) return ''
-  try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
-  catch { return d }
-}
 </script>
 
 <template>

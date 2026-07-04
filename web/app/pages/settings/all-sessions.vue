@@ -11,7 +11,7 @@ const sessions = ref<AdminSession[]>([])
 const loading = ref(true)
 const kindFilter = ref<'' | 'session' | 'api_token'>('')
 const userFilter = ref<string>('')
-const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const { flash } = useFlash()
 
 async function load() {
   loading.value = true
@@ -183,18 +183,11 @@ onMounted(load)
       </div>
     </SettingsSection>
 
-    <div v-if="flash" class="sv2-flash" :class="flash.kind">
-      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
-      {{ flash.text }}
-    </div>
+    <SettingsFlash :flash="flash" />
   </div>
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -202,7 +195,7 @@ onMounted(load)
   margin-bottom: 28px;
 }
 
-.loading-state, .empty-state {
+.loading-state {
   display: flex; align-items: center; gap: 8px;
   color: var(--fg-3); font-size: 12.5px;
   padding: 14px 16px;
@@ -279,13 +272,4 @@ onMounted(load)
   color: var(--bad);
 }
 
-.sv2-flash {
-  margin-top: 16px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sv2-flash.ok  { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

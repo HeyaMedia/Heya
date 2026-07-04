@@ -419,13 +419,6 @@ function onEsc() {
   else inputEl.value?.blur()
 }
 
-function formatDuration(sec: number): string {
-  if (!sec || sec < 0) return ''
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
 // --- Play actions ---
 async function playAlbum(al: AlbumRow) {
   try {

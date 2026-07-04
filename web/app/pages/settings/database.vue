@@ -20,14 +20,6 @@ async function load() {
   }
 }
 
-function fmtBytes(b?: number) {
-  if (!b) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0; let n = b
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++ }
-  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`
-}
-
 const totalDbSize = computed(() => {
   // tick is read to force re-evaluation when the timer fires.
   void tick.value
@@ -138,11 +130,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
-.loading-state, .empty-state {
+.loading-state {
   display: flex; align-items: center; gap: 8px;
   color: var(--fg-3); font-size: 12.5px;
   padding: 14px 16px;

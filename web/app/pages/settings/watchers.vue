@@ -191,11 +191,7 @@ function lastFetchedText(): string {
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
-.loading-state, .empty-state {
+.loading-state {
   display: flex; align-items: center; gap: 8px;
   color: var(--fg-3); font-size: 12.5px;
   padding: 14px 16px;

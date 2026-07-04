@@ -21,7 +21,7 @@ const limit = 50
 const expanded = ref<number | null>(null)
 const loading = ref(true)
 const busy = ref<'' | 'rescue' | 'completed' | 'all' | 'kind'>('')
-const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const { flash } = useFlash()
 const tick = ref(0)
 setInterval(() => { tick.value++ }, 1000)
 
@@ -178,10 +178,6 @@ function timeAgoAt(iso: string | null | undefined, now: number): string {
 function timeAgo(iso?: string | null): string {
   void tick.value
   return timeAgoAt(iso, Date.now())
-}
-
-function formatDate(d: string) {
-  return new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })
 }
 
 function formatArgs(raw: string) {
@@ -355,14 +351,14 @@ onMounted(async () => {
               <span class="dkey">ID</span>
               <span class="dval mono">{{ j.id }}</span>
               <span class="dkey">Created</span>
-              <span class="dval">{{ formatDate(j.created_at) }}</span>
+              <span class="dval">{{ formatDateTime(j.created_at) }}</span>
               <template v-if="j.attempted_at">
                 <span class="dkey">Last attempt</span>
-                <span class="dval">{{ formatDate(j.attempted_at) }}</span>
+                <span class="dval">{{ formatDateTime(j.attempted_at) }}</span>
               </template>
               <template v-if="j.finalized_at">
                 <span class="dkey">Finalized</span>
-                <span class="dval">{{ formatDate(j.finalized_at) }}</span>
+                <span class="dval">{{ formatDateTime(j.finalized_at) }}</span>
               </template>
             </div>
             <div v-if="j.args && j.args !== '{}'" class="detail-block">
@@ -384,18 +380,11 @@ onMounted(async () => {
       </div>
     </SettingsSection>
 
-    <div v-if="flash" class="sv2-flash" :class="flash.kind">
-      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
-      {{ flash.text }}
-    </div>
+    <SettingsFlash :flash="flash" />
   </div>
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -437,15 +426,6 @@ onMounted(async () => {
 .filter-pill.cancelled .filter-count { color: var(--bad); }
 .filter-pill.completed .filter-count { color: var(--fg-3); }
 .filter-pill.clear { font-size: 10px; gap: 4px; color: var(--fg-3); text-transform: none; }
-
-.empty-state {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--fg-3); font-size: 12.5px;
-  padding: 14px 16px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
 
 .job-table {
   background: var(--bg-2);
@@ -541,32 +521,5 @@ onMounted(async () => {
   cursor: pointer;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
-.sv2-btn.ghost {
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--fg-2);
-}
-.sv2-btn.ghost:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  color: var(--fg-0);
-}
-.sv2-btn.danger {
-  border: 1px solid rgba(217,107,107,0.30);
-  background: rgba(217,107,107,0.06);
-  color: var(--bad);
-}
-.sv2-btn.danger:hover:not(:disabled) {
-  background: rgba(217,107,107,0.12);
-}
-.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.sv2-flash {
-  margin-top: 16px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sv2-flash.ok { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

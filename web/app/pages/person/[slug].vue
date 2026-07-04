@@ -46,7 +46,7 @@
           <div class="hero-meta-row" v-if="data.person.birthday || data.person.place_of_birth || data.person.deathday">
             <template v-if="data.person.birthday">
               <Icon name="cake" :size="14" style="color: var(--fg-3)" />
-              <span>{{ formatDate(data.person.birthday) }}<template v-if="age">, age {{ age }}</template></span>
+              <span>{{ formatDateLong(data.person.birthday) }}<template v-if="age">, age {{ age }}</template></span>
             </template>
             <template v-if="data.person.place_of_birth">
               <span class="dot" />
@@ -55,7 +55,7 @@
             </template>
             <template v-if="data.person.deathday">
               <span class="dot" />
-              <span style="color: var(--fg-3)">Died {{ formatDate(data.person.deathday) }}</span>
+              <span style="color: var(--fg-3)">Died {{ formatDateLong(data.person.deathday) }}</span>
             </template>
           </div>
 
@@ -613,12 +613,6 @@ const knownForFilterOptions = computed(() => {
 const activeFilterOptions = computed(() =>
   scope.value === 'library' ? filterOptions.value : knownForFilterOptions.value,
 )
-
-function formatDate(d: string) {
-  if (!d) return ''
-  try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) }
-  catch { return d }
-}
 
 onMounted(async () => {
   try {

@@ -208,12 +208,6 @@ async function playFrom(idx: number) {
   await play(rowToTrack(target))
 }
 
-function formatRunTime(seconds: number) {
-  if (seconds < 3600) return formatTime(seconds)
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
 </script>
 
 <style scoped>

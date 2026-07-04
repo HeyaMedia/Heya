@@ -298,10 +298,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
 .loading-state { display: flex; align-items: center; gap: 8px; color: var(--fg-3); font-size: 13px; padding: 20px 0; }
 
 .tab-bar {
@@ -498,19 +494,4 @@ onMounted(load)
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.sv2-btn.primary {
-  background: var(--gold);
-  color: #1a1408;
-}
-.sv2-btn.primary:hover:not(:disabled) { background: var(--gold-deep); }
-.sv2-btn.ghost {
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--fg-2);
-}
-.sv2-btn.ghost:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  color: var(--fg-0);
-}
-.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

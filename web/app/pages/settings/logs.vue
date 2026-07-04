@@ -19,7 +19,7 @@ const loading = ref(true)
 const paused = ref(false)
 const autoScroll = ref(true)
 const droppedWhilePaused = ref(0)
-const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const { flash } = useFlash()
 
 const search = ref('')
 const enabledLevels = ref<Set<Level>>(new Set(LEVELS))
@@ -314,10 +314,7 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
       </div>
     </div>
 
-    <div v-if="flash" class="sv2-flash" :class="flash.kind">
-      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
-      {{ flash.text }}
-    </div>
+    <SettingsFlash :flash="flash" style="margin-top: 12px" />
   </div>
 </template>
 
@@ -330,8 +327,6 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
 }
 
 .sv2-page-head { margin-bottom: 16px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
 .inline-link { color: var(--gold); text-decoration: none; }
 .inline-link:hover { text-decoration: underline; }
 
@@ -512,21 +507,7 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.sv2-btn.ghost { border: 1px solid var(--border); background: var(--bg-2); color: var(--fg-2); }
-.sv2-btn.ghost:hover:not(:disabled) { border-color: var(--border-strong); color: var(--fg-0); }
 .sv2-btn.warn  { border: 1px solid rgba(230, 185, 74, 0.40); background: var(--gold-soft); color: var(--gold); }
 .sv2-btn.warn:hover:not(:disabled) { background: rgba(230, 185, 74, 0.18); }
-.sv2-btn.primary { background: var(--gold); color: #1a1408; }
-.sv2-btn.primary:hover:not(:disabled) { background: var(--gold-deep); }
-.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.sv2-flash {
-  margin-top: 12px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sv2-flash.ok  { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

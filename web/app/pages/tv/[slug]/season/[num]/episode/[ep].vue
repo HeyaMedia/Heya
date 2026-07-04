@@ -41,7 +41,7 @@
           <h1 class="ep-title">{{ episode.preferred_title || episode.title || `Episode ${episode.episode_number}` }}</h1>
 
           <div class="hero-meta-row">
-            <span v-if="episode.air_date">{{ formatDate(episode.air_date) }}</span>
+            <span v-if="episode.air_date">{{ formatDateLong(episode.air_date) }}</span>
             <template v-if="episode.runtime_minutes">
               <span class="dot" />
               <span>{{ episode.runtime_minutes }}m</span>
@@ -244,12 +244,6 @@ function play() {
 function episodeLink(ep: any) {
   const num = currentSeasonNum.value === 0 ? 'specials' : String(currentSeasonNum.value)
   return `/tv/${slug.value}/season/${num}/episode/${ep.episode_number}`
-}
-
-function formatDate(d: string) {
-  if (!d) return ''
-  try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) }
-  catch { return d }
 }
 
 async function loadWatchState() {

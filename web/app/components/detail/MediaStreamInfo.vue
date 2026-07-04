@@ -35,10 +35,6 @@ function formatDuration(s: number) {
   const m = Math.floor((s % 3600) / 60)
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
-function formatSize(bytes: number) {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
-  return `${(bytes / 1e6).toFixed(0)} MB`
-}
 function formatBitrate(bps: number) {
   if (!bps) return ''
   if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)} Mbps`
@@ -52,7 +48,7 @@ function playbackLabel(action: string) {
 <template>
   <div class="stream-details">
     <div class="stream-header">
-      <span class="stream-header-main">{{ stream.container.toUpperCase() }} &middot; {{ formatSize(stream.size) }}</span>
+      <span class="stream-header-main">{{ stream.container.toUpperCase() }} &middot; {{ formatBytes(stream.size) }}</span>
       <span v-if="stream.playback" class="playback-decision" :class="`pd-${stream.playback.action}`">{{ playbackLabel(stream.playback.action) }}</span>
     </div>
     <div class="stream-subhead">{{ formatBitrate(stream.bit_rate) }} &middot; {{ formatDuration(stream.duration) }}</div>

@@ -689,12 +689,6 @@ async function toggleListItem(l: any) {
 
 watch(showListModal, (v) => { if (v) loadLists() })
 
-function formatDate(d: string) {
-  if (!d) return ''
-  try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
-  catch { return d }
-}
-
 function formatRuntime(mins: number) {
   if (!mins) return ''
   const h = Math.floor(mins / 60)
@@ -709,11 +703,6 @@ function formatMoney(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`
   return n.toLocaleString()
-}
-
-function formatVote(v: any) {
-  const n = typeof v === 'number' ? v : parseFloat(String(v))
-  return isNaN(n) ? '' : n.toFixed(1)
 }
 
 async function loadStreamInfo() {

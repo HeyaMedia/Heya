@@ -146,10 +146,6 @@ async function changePassword() {
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
 .profile-card {
   display: flex;
   align-items: center;
@@ -234,10 +230,4 @@ async function changePassword() {
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.sv2-btn.primary {
-  background: var(--gold);
-  color: #1a1408;
-}
-.sv2-btn.primary:hover:not(:disabled) { background: var(--gold-deep); }
-.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

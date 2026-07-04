@@ -187,13 +187,6 @@ watch([artistSlug, albumSlug], loadSonicSimilar, { immediate: true })
 
 function primaryFile(t: TrackView): TrackFile | null { return t.files[0] ?? null }
 
-function formatRunTime(seconds: number) {
-  if (seconds < 3600) return formatTime(seconds)
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
-
 function isDiscBoundary(idx: number) {
   if (idx === 0) return false
   const prev = tracks.value[idx - 1]

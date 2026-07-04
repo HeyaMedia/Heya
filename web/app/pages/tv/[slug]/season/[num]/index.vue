@@ -277,12 +277,6 @@ function playEpisode(ep: any) {
   navigateTo(`/watch/${fileId}?${params}`)
 }
 
-function formatDate(d: string) {
-  if (!d) return ''
-  try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
-  catch { return d }
-}
-
 function formatYear(d: string) { return d?.slice(0, 4) || '' }
 
 // Trigger watch-state load whenever detail data arrives.

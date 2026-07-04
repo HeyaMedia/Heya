@@ -410,12 +410,6 @@ async function onSaveAsPlaylist() {
   }
 }
 
-function formatDuration(sec: number): string {
-  if (!sec || sec < 0) return ''
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
 function formatTotalDuration(rows: RichTrackRow[]): string {
   const total = rows.reduce((acc, r) => acc + (r.duration || 0), 0)
   const m = Math.round(total / 60)

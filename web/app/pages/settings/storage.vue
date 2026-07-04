@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { timeAgo as timeAgoBase } from '~/composables/useFormat'
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import type { components } from '#open-fetch-schemas/heya'
@@ -11,7 +12,7 @@ const storage = ref<Storage | null>(null)
 const loading = ref(true)
 const clearing = ref(false)
 const scanning = ref(false)
-const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const { flash } = useFlash()
 const tick = ref(0)
 let tickTimer: ReturnType<typeof setInterval> | null = null
 
@@ -59,13 +60,6 @@ async function clearCache() {
   }
 }
 
-function fmtBytes(b?: number) {
-  if (!b) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0; let n = b
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++ }
-  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`
-}
 function fmtMB(mb?: number) {
   if (!mb) return '0 MB'
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
@@ -87,11 +81,7 @@ function usageFor(path: string) {
 function timeAgo(iso: string): string {
   // Read tick to keep "scanned 2m ago" current without remounting nodes.
   void tick.value
-  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (sec < 60) return `${sec}s ago`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  return `${Math.floor(sec / 86400)}d ago`
+  return timeAgoBase(iso)
 }
 
 const totalScanned = computed(() => storage.value?.library_disk_usage?.length ?? 0)
@@ -237,20 +227,14 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
       </SettingsSection>
     </template>
 
-    <div v-if="flash" class="sv2-flash" :class="flash.kind">
-      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
-      {{ flash.text }}
-    </div>
+    <SettingsFlash :flash="flash" />
   </div>
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
 .sv2-page-desc code { font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); }
 
-.loading-state, .empty-state {
+.loading-state {
   display: flex; align-items: center; gap: 8px;
   color: var(--fg-3); font-size: 12.5px;
   padding: 14px 16px;
@@ -348,29 +332,4 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
 }
 .link-arrow:hover { color: var(--gold); }
 
-.sv2-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px; font-weight: 500;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-.sv2-btn.danger {
-  border: 1px solid rgba(217,107,107,0.30);
-  background: rgba(217,107,107,0.06);
-  color: var(--bad);
-}
-.sv2-btn.danger:hover:not(:disabled) { background: rgba(217,107,107,0.12); }
-.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.sv2-flash {
-  margin-top: 16px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sv2-flash.ok  { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

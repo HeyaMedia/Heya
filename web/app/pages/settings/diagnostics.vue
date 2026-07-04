@@ -11,7 +11,7 @@ const sys = ref<Sys | null>(null)
 const logLevel = ref<LogLevel | null>(null)
 const loading = ref(true)
 const setting = ref(false)
-const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const { flash } = useFlash()
 
 // History of last ~60 samples for sparklines. We pull /api/admin/system every
 // 2s; a 60-sample window = the last ~2 minutes of runtime activity.
@@ -55,13 +55,6 @@ async function setLogLevel(level: string) {
   }
 }
 
-function fmtBytes(b?: number) {
-  if (b == null) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0; let n = b
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++ }
-  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`
-}
 function fmtNs(ns?: number) {
   if (ns == null || ns === 0) return '—'
   if (ns < 1_000) return `${ns} ns`
@@ -208,18 +201,11 @@ onBeforeUnmount(() => {
       </SettingsSection>
     </template>
 
-    <div v-if="flash" class="sv2-flash" :class="flash.kind">
-      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
-      {{ flash.text }}
-    </div>
+    <SettingsFlash :flash="flash" />
   </div>
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
 .loading-state {
   display: flex; align-items: center; gap: 8px;
   color: var(--fg-3); font-size: 12.5px;
@@ -304,13 +290,4 @@ onBeforeUnmount(() => {
 
 .mono { font-family: var(--font-mono); }
 
-.sv2-flash {
-  margin-top: 16px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sv2-flash.ok  { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

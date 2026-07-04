@@ -23,7 +23,7 @@ const rawOpen = ref(false)
 const rawLoading = ref(false)
 const rawJSON = ref('')
 const rawError = ref('')
-const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const { flash } = useFlash()
 
 let unsubscribe: (() => void) | null = null
 
@@ -295,18 +295,11 @@ watch(cfg, (next) => {
       </div>
     </SettingsSection>
 
-    <div v-if="flash" class="sv2-flash" :class="flash.kind">
-      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
-      {{ flash.text }}
-    </div>
+    <SettingsFlash :flash="flash" />
   </div>
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
 .loading-state {
   display: flex; align-items: center; gap: 8px;
   color: var(--fg-3); font-size: 12.5px;
@@ -455,33 +448,6 @@ watch(cfg, (next) => {
 }
 .raw-err { color: var(--bad); }
 
-.sv2-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 12px;
-  border-radius: var(--r-sm);
-  font-size: 11.5px; font-weight: 500;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-.sv2-btn.ghost { border: 1px solid var(--border); background: var(--bg-2); color: var(--fg-2); }
-.sv2-btn.ghost:hover:not(:disabled) { border-color: var(--border-strong); color: var(--fg-0); }
-.sv2-btn.danger {
-  border: 1px solid rgba(217,107,107,0.30);
-  background: rgba(217,107,107,0.06);
-  color: var(--bad);
-}
-.sv2-btn.danger:hover:not(:disabled) { background: rgba(217,107,107,0.12); }
-.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
 .mono { font-family: var(--font-mono); }
 
-.sv2-flash {
-  margin-top: 16px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sv2-flash.ok  { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

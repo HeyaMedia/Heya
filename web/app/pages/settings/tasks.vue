@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { timeAgo as timeAgoBase } from '~/composables/useFormat'
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import type { components } from '#open-fetch-schemas/heya'
@@ -11,7 +12,7 @@ const { taskProgress: liveTaskProgress } = useEventBus()
 const tasks = ref<TaskResponse[]>([])
 const queueStatus = ref<QueueStatus | null>(null)
 const itemsModalTask = ref<string | null>(null)
-const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
+const { flash } = useFlash()
 const tick = ref(0)
 
 let queuePoll: ReturnType<typeof setInterval> | null = null
@@ -119,12 +120,7 @@ function timeAgo(dateStr?: string | null) {
   // remounting the DOM element (the old `:key="tick"` pattern jittered
   // the table layout each refresh).
   void tick.value
-  if (!dateStr) return 'never'
-  const sec = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
-  if (sec < 60) return `${sec}s ago`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  return `${Math.floor(sec / 86400)}d ago`
+  return timeAgoBase(dateStr)
 }
 
 function formatDate(d?: string | null) {
@@ -386,10 +382,7 @@ onBeforeUnmount(() => {
       </div>
     </SettingsSection>
 
-    <div v-if="flash" class="sv2-flash" :class="flash.kind">
-      <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
-      {{ flash.text }}
-    </div>
+    <SettingsFlash :flash="flash" />
 
     <TaskItemsModal
       v-if="itemsModalTask"
@@ -401,18 +394,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
-.empty-state {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--fg-3); font-size: 12.5px;
-  padding: 14px 16px;
-  background: var(--bg-2); border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
-
 /* queue panel */
 .queue-panel {
   display: grid;
@@ -611,23 +592,5 @@ onBeforeUnmount(() => {
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 .sv2-btn.ghost { border: 1px solid var(--border); background: var(--bg-1); color: var(--fg-2); }
-.sv2-btn.ghost:hover { border-color: var(--border-strong); color: var(--fg-0); }
-.sv2-btn.primary { background: var(--gold); color: #1a1408; }
-.sv2-btn.primary:hover { background: var(--gold-deep); }
-.sv2-btn.danger {
-  border: 1px solid rgba(217,107,107,0.30);
-  background: rgba(217,107,107,0.06);
-  color: var(--bad);
-}
-.sv2-btn.danger:hover { background: rgba(217,107,107,0.12); }
 
-.sv2-flash {
-  margin-top: 16px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.sv2-flash.ok { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.err { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
 </style>

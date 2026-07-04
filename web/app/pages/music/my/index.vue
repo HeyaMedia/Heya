@@ -222,13 +222,6 @@ const isLoading = computed(() =>
     || lovedAlbumsQuery.isLoading.value,
 )
 
-function formatDuration(sec: number): string {
-  if (!sec || sec < 0) return ''
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
 async function playLovedAlbum(al: LovedAlbumRow) {
   try {
     const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {

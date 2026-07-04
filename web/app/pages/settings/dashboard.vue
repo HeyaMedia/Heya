@@ -126,13 +126,6 @@ const subsystemTone = computed<'good' | 'warn' | 'bad'>(() => {
   return ready.value.status === 'ok' ? 'good' : 'bad'
 })
 
-function fmtBytes(b?: number) {
-  if (b == null || b === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0; let n = b
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++ }
-  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`
-}
 function fmtMB(mb?: number) {
   if (mb == null) return '—'
   if (mb < 1024) return `${mb} MB`
@@ -162,15 +155,6 @@ function taskBadge(t: TaskResponse): { state: 'ok' | 'warn' | 'error' | 'idle', 
   if (t.last_run_result === 'error') return { state: 'error', label: 'error' }
   if ((t.stats?.failed ?? 0) > 0) return { state: 'warn', label: 'partial' }
   return { state: 'ok', label: 'scheduled' }
-}
-
-function timeAgo(ts?: string | null) {
-  if (!ts) return 'never'
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-  if (sec < 60) return `${sec}s ago`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  return `${Math.floor(sec / 86400)}d ago`
 }
 
 const buildKv = computed(() => [
@@ -455,10 +439,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.sv2-page-head { margin-bottom: 28px; }
-.sv2-page-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-.sv2-page-desc { margin: 6px 0 0; font-size: 13px; color: var(--fg-3); line-height: 1.55; }
-
 .tiles {
   display: grid;
   gap: 8px;
@@ -555,14 +535,6 @@ onMounted(async () => {
 .state-pill.retryable { border-color: rgba(230,185,74,0.3); }
 .state-pill.discarded { border-color: rgba(217,107,107,0.3); }
 
-.empty-state {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--fg-3); font-size: 12.5px;
-  padding: 14px 16px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
 .empty-state.err { color: var(--bad); background: rgba(217,107,107,0.06); border-color: rgba(217,107,107,0.25); margin-top: 10px; }
 
 .accel-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -644,11 +616,4 @@ onMounted(async () => {
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.sv2-btn.danger {
-  border: 1px solid rgba(217,107,107,0.30);
-  background: rgba(217,107,107,0.06);
-  color: var(--bad);
-}
-.sv2-btn.danger:hover:not(:disabled) { background: rgba(217,107,107,0.12); }
-.sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
