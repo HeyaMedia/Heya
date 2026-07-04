@@ -117,4 +117,19 @@ const open = defineModel<boolean>('open', { default: false })
 .app-context-item[data-state="open"] .app-context-sub-arrow {
   opacity: 1;
 }
+
+/* Touch pass — reka's ContextMenuTrigger already opens on long-press for
+   touch/pen pointers (700ms default `pressOpenDelay`, see
+   node_modules/reka-ui/src/ContextMenu/ContextMenuTrigger.vue), so no extra
+   JS is needed here. Coarse pointers just need comfortable tap targets. */
+@media (pointer: coarse) {
+  .app-context-menu {
+    max-width: 320px;
+  }
+  .app-context-item {
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+}
 </style>

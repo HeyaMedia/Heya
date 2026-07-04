@@ -35,6 +35,7 @@ tooltip / context menu / etc. — each wraps reka-ui primitives, uses
 | **`AppTooltip`** | `TooltipRoot/Trigger/Portal/Content/Arrow` | Hover labels on icon-only buttons. Wrap the trigger; pass `label` (or use `#content` slot for richer body). The default layout already mounts `<TooltipProvider :delay-duration="400" :skip-delay-duration="200">` so all instances share the same hover-delay feel. |
 | **`AppSlider`** | `SliderRoot/Track/Range/Thumb` | Linear value inputs (volume, gain). Single-value `v-model:number`. `bipolar` styles the fill from centre outward — pair with symmetric min/max like ±12 dB. |
 | **`AppDialog`** | `DialogRoot/Portal/Overlay/Content/Title/Close` | Generic modals — "Add to list", video-player popups, search panels. `title`, `description`, `size` (sm/md/lg/xl/full), `closable`, slots: default body + optional `#footer`. Pass `prevent-auto-focus` for display-only dialogs (video player) where reka's default focus-on-first-button is distracting. |
+| **`AppSheet`** | `DrawerRoot/Portal/Overlay/Content/Handle/Title` | Bottom sheet for phone/tablet (music now-playing, queue, filter panels). `v-model:open`, `title?`, `size` (`'auto'` = content height capped at `92dvh`, `'full'` = `92dvh`), `handle` (default `true`). Slots: default body (wrapped in `.scroll`), `#header` (replaces the title row). Swipe-down-to-dismiss is the Drawer primitive's own behavior — no extra wiring. z-index 400 (above `.surface`'s 200 and the playbar's 40, below `AppSelect`'s 5100). |
 | **`ConfirmDialog`** + **`useConfirm()`** | `AlertDialogRoot/...` | Destructive confirms only. Promise-based: `await confirm({title, message, destructive: true})`. ConfirmDialog is mounted once in the default layout; you only call `useConfirm()`. |
 | **`PathBrowser`** | (uses `useElementBounding`, `onClickOutside`) | Local filesystem path picker. Renders inline (not portaled) so it doesn't trip a parent modal's click-outside. |
 
@@ -135,3 +136,51 @@ globally). Tracks have no slug so they stay ID-addressed.
 `useAlbumCoverUrl(artistSlug, albumSlug)` is the canonical FE composable —
 every list row already carries both fields, so call sites just pass them
 through.
+
+## Responsive conventions
+
+Full plan in [docs/responsive-plan.md](responsive-plan.md). The ratified
+pieces every package builds on:
+
+### Breakpoints
+
+Three literal `max-width` values — CSS custom properties can't appear inside
+a media query, so these numbers are hardcoded at every call site, not derived
+from a token:
+
+| Name   | Query                        | Meaning                           |
+| ------ | ---------------------------- | ---------------------------------- |
+| phone  | `@media (max-width: 720px)`  | single-column, bottom nav, sheets  |
+| tablet | `@media (max-width: 960px)`  | collapse side panels, keep top nav |
+| narrow | `@media (max-width: 1200px)` | desktop, tightened padding         |
+
+Touch affordances key off `@media (pointer: coarse)`, not width — a touch
+laptop at desktop width still wants bigger tap targets, and a mouse-driven
+narrow window doesn't.
+
+### `useViewport()`
+
+`app/composables/useViewport.ts` wraps VueUse's `useMediaQuery` as a shared
+singleton (one set of `matchMedia` listeners for the whole app, module-level
+cache):
+
+```ts
+const { isPhone, isTablet, isDesktop, isCoarse } = useViewport()
+// isPhone: <=720px, isTablet: 720.02-960px, isDesktop: >960px — mutually
+// exclusive JS tiers whose edges sit exactly on the CSS breakpoints above
+// (the CSS queries overlap by design for progressive tightening; the JS
+// tiers partition). isCoarse: matchMedia('(pointer: coarse)'), width-
+// independent.
+```
+
+Guards `import.meta.server` like the rest of the SSR-sensitive composables
+(`useMediaSession`, `usePlayer`) even though the app is `ssr:false` — Nuxt
+still evaluates composables during the shell's prerender pass.
+
+### Desktop-unchanged guardrail
+
+Every mobile behavior lands behind a breakpoint media query or an
+`isPhone`/`isCoarse` conditional — never as a change to the unconditional
+desktop rule. Before/after screenshots of a page at desktop width must be
+pixel-identical for any package that touches shared chrome (`heya.css`,
+layouts, `App*` primitives). Spot-check with Heya Eye at `1600×1000`.
