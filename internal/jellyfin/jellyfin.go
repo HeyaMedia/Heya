@@ -202,6 +202,10 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodPost, "/Sessions/Capabilities/Full", s.requireAuth(s.handleSessionsCapabilities))
 	rt.handle(http.MethodPost, "/Sessions/Viewing", s.requireAuth(s.handleSessionsViewing))
 
+	// Library structure — Infuse fetches this during add-server to enumerate
+	// libraries; a 404 aborts its add flow.
+	rt.handle(http.MethodGet, "/Library/VirtualFolders", s.requireAuth(s.handleVirtualFolders))
+
 	// Small real conveniences.
 	rt.handle(http.MethodGet, "/GetUtcTime", s.handleGetUtcTime)
 	rt.handle(http.MethodGet, "/Playback/BitrateTest", s.requireAuth(s.handleBitrateTest))

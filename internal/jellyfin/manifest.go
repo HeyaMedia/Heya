@@ -164,7 +164,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Libraries/AvailableOptions":                           {Status: opPlanned, Tag: "Library"},
 	"GET /Library/MediaFolders":                                 {Status: opPlanned, Tag: "Library"},
 	"GET /Library/PhysicalPaths":                                {Status: opPlanned, Tag: "Library"},
-	"GET /Library/VirtualFolders":                               {Status: opOutOfScope, Tag: "LibraryStructure"},
+	"GET /Library/VirtualFolders":                               {Status: opImplemented, Tag: "LibraryStructure"},
 	"GET /LiveTv/ChannelMappingOptions":                         {Status: opOutOfScope, Tag: "LiveTv"},
 	"GET /LiveTv/Channels":                                      {Status: opOutOfScope, Tag: "LiveTv"},
 	"GET /LiveTv/Channels/{channelId}":                          {Status: opOutOfScope, Tag: "LiveTv"},
