@@ -498,13 +498,6 @@ func dateTime(d pgtype.Date) *time.Time {
 	return &t
 }
 
-func etagFromTime(ts pgtype.Timestamptz) string {
-	if !ts.Valid {
-		return "0"
-	}
-	return strconv.FormatInt(ts.Time.Unix(), 16)
-}
-
 func ratingPtr(n pgtype.Numeric) *float32 {
 	if !n.Valid {
 		return nil
