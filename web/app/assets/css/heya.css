@@ -47,6 +47,7 @@
   --topbar-h: 60px;
   --playbar-h: 88px;
   --bottomnav-h: 56px;
+  --miniplayer-h: 64px;
   --music-sidebar-w: 256px;
   --music-queue-w: 320px;
 
@@ -105,6 +106,16 @@ a { color: inherit; text-decoration: none; }
    layouts/default.vue and layouts/settings.vue since they share this class. */
 @media (max-width: 720px) {
   .app-main { padding-bottom: calc(var(--bottomnav-h) + var(--safe-bottom)); }
+}
+
+/* When the global MiniPlayer (layouts/default.vue) is docked above
+   BottomNav, .app-main needs extra bottom padding so page content — on any
+   route, not just /music — clears both bars instead of rendering underneath
+   the mini player. `.has-miniplayer` is only ever applied on phone (see
+   default.vue), so this is unconditional on the class rather than nested in
+   the 720px query, but it only ever fires there in practice. */
+.app.has-miniplayer .app-main {
+  padding-bottom: calc(var(--bottomnav-h) + var(--miniplayer-h) + var(--safe-bottom));
 }
 
 /* === Scrollbars === */

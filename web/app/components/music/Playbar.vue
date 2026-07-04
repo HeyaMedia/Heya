@@ -192,10 +192,6 @@ const {
   toggleQueue, toggleLyrics, formatTime,
 } = usePlayer()
 
-// Bridge OS media keys / lock-screen transport to the player. Mounted here
-// because the Playbar is the one always-present music surface.
-useMediaSession()
-
 // Visualizer overlay toggle (fullscreen host is mounted at the shell level).
 const vis = useVisualizer()
 

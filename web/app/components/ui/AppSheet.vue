@@ -30,7 +30,15 @@
   <DrawerRoot v-model:open="open">
     <DrawerPortal>
       <DrawerOverlay class="app-sheet-overlay" />
-      <DrawerContent class="surface app-sheet-content" :class="`app-sheet-${size}`">
+      <!-- open-auto-focus is prevented unconditionally: sheets are touch-first
+           surfaces, and reka's default focus-on-first-focusable paints a
+           browser focus ring on whatever link/button happens to be first
+           (and would summon the soft keyboard if it were an input). -->
+      <DrawerContent
+        class="surface app-sheet-content"
+        :class="`app-sheet-${size}`"
+        @open-auto-focus.prevent
+      >
         <DrawerHandle v-if="handle" class="app-sheet-handle" />
 
         <slot name="header">
