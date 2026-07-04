@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -212,10 +214,56 @@ func (dw *imageDispatchWriter) Write(b []byte) (int, error) {
 }
 
 // remoteImageClient fetches never-downloaded remote assets (heya.media CDN
-// covers/stills) for proxying. Bounded so a stalled CDN can't pin handlers.
-var remoteImageClient = &http.Client{Timeout: 20 * time.Second}
+// covers/stills) for proxying. The URLs come from DB metadata, not the
+// request — but metadata is only semi-trusted (NFO files can carry artwork
+// URLs), and this runs on an ANONYMOUS endpoint, so treat it as an SSRF
+// surface: the dialer rejects loopback/private/link-local/CGNAT targets at
+// connect time (post-DNS — rebinding-safe, and it covers every redirect
+// hop), and responses are image-typed and size-capped. Timeout bounds a
+// stalled CDN so it can't pin handlers.
+var remoteImageClient = &http.Client{
+	Timeout: 20 * time.Second,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout: 10 * time.Second,
+			Control: func(_, address string, _ syscall.RawConn) error {
+				return rejectNonPublicDial(address)
+			},
+		}).DialContext,
+	},
+}
+
+// rejectNonPublicDial refuses connections to addresses an anonymous caller
+// must never be able to make this server fetch from.
+func rejectNonPublicDial(address string) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("remote image dial to unresolved host %q", host)
+	}
+	// 100.64.0.0/10 (CGNAT) is what tailnets squat on — private in practice.
+	inCGNAT := false
+	if v4 := ip.To4(); v4 != nil {
+		inCGNAT = v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || inCGNAT {
+		return fmt.Errorf("remote image dial to non-public address %s refused", ip)
+	}
+	return nil
+}
+
+const remoteImageMaxBytes = 32 << 20 // no legitimate cover/still is larger
 
 func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL string) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		http.NotFound(w, r)
+		return
+	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, rawURL, nil)
 	if err != nil {
 		http.NotFound(w, r)
@@ -227,21 +275,20 @@ func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL
 		return
 	}
 	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		http.NotFound(w, r) // remote miss = no image
+	ct := res.Header.Get("Content-Type")
+	if res.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "image/") {
+		http.NotFound(w, r) // remote miss or non-image = no image
 		return
 	}
 	h := w.Header()
-	if ct := res.Header.Get("Content-Type"); ct != "" {
-		h.Set("Content-Type", ct)
-	}
+	h.Set("Content-Type", ct)
 	if cl := res.Header.Get("Content-Length"); cl != "" {
 		h.Set("Content-Length", cl)
 	}
 	h.Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusOK)
 	if r.Method != http.MethodHead {
-		_, _ = io.Copy(w, res.Body)
+		_, _ = io.Copy(w, io.LimitReader(res.Body, remoteImageMaxBytes))
 	}
 }
 

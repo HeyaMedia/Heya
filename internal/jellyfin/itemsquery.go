@@ -28,6 +28,15 @@ type itemsRequest struct {
 	ids        []string
 	searchTerm string
 
+	// Artist scoping: AlbumArtistIds / ArtistIds / ContributingArtistIds.
+	// Music clients (Feishin) fetch an artist's discography as
+	// /Items?IncludeItemTypes=MusicAlbum&AlbumArtistIds={id} — ignoring the
+	// filter returned the ENTIRE library on every artist page.
+	// artistFiltered with artistID 0 means "filter present but matches
+	// nothing" (a foreign id) → empty result, never everything.
+	artistID       int64
+	artistFiltered bool
+
 	// fields is the client's Fields= request (lowercased tokens). Most dto
 	// fields are always emitted, but the expensive per-item ones
 	// (MediaSources/MediaStreams) attach only on request, like upstream.
@@ -72,6 +81,18 @@ func parseItemsRequest(r *http.Request) itemsRequest {
 		for _, tok := range strings.Split(ids, ",") {
 			if tok = strings.TrimSpace(tok); tok != "" {
 				req.ids = append(req.ids, tok)
+			}
+		}
+	}
+
+	if raw := firstNonEmpty(queryCI(r, "albumArtistIds"), queryCI(r, "artistIds"), queryCI(r, "contributingArtistIds")); raw != "" {
+		req.artistFiltered = true
+		for _, tok := range strings.Split(raw, ",") {
+			// Heya's albums/tracks hang off ONE artist media item; the first
+			// resolvable id wins (clients send exactly one from artist pages).
+			if id, err := DecodeIDKind(strings.TrimSpace(tok), KindItem); err == nil {
+				req.artistID = id
+				break
 			}
 		}
 	}
@@ -367,6 +388,12 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 			Lim:      lim,
 			Off:      off,
 		}
+		if req.artistFiltered {
+			if req.artistID == 0 {
+				return empty, nil
+			}
+			params.ArtistMediaItemID = req.artistID
+		}
 		if req.hasParent {
 			switch req.parentKind {
 			case KindItem:
@@ -396,6 +423,12 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 			RandSeed: randSeed(userID),
 			Lim:      lim,
 			Off:      off,
+		}
+		if req.artistFiltered {
+			if req.artistID == 0 {
+				return empty, nil
+			}
+			params.ArtistMediaItemID = req.artistID
 		}
 		if req.hasParent {
 			switch req.parentKind {

@@ -144,17 +144,14 @@ const season = computed(() => {
   return allSeasons.value.find((s: any) => s.season_number === currentSeasonNum.value) || null
 })
 
-// Only surface episodes we actually have a file for. A currently-airing
-// season carries the full metadata episode list from the provider (e.g. all
-// 10 from TMDB) even when just episode 1 has aired/downloaded — rendering the
-// unreleased rest as empty cards is misleading. Presence comes from the
-// `episode_files` map already on the detail doc (see `episodeFileId`).
-// Fallback: if nothing resolves as present (e.g. a season pack parsed without
-// per-episode numbers), show the full list rather than an empty season.
+// Only surface episodes we actually have a file for. A currently-airing season
+// carries the full metadata episode list from the provider (e.g. all 10 from
+// TMDB) even when just episode 1 has aired/downloaded — rendering the
+// unreleased rest as empty cards is misleading. `presentEpisodes` derives this
+// from the detail doc's `episode_files` map (with a full-list fallback).
 const episodes = computed(() => {
-  const all = [...((season.value as any)?.episodes || [])].sort((a: any, b: any) => a.episode_number - b.episode_number)
-  const present = all.filter((ep: any) => episodeFileId(ep) != null)
-  return present.length ? present : all
+  const eps = presentEpisodes(detail.value?.episode_files as any, currentSeasonNum.value, (season.value as any)?.episodes) as any[]
+  return eps.slice().sort((a: any, b: any) => a.episode_number - b.episode_number)
 })
 
 const seasonTitle = computed(() => {
@@ -180,7 +177,9 @@ const allWatched = computed(() => episodes.value.length > 0 && watchedCount.valu
 function isWatched(epId: number) { return watchedEpisodes.value.has(epId) }
 
 function isSeasonWatched(s: any) {
-  const eps = s.episodes || []
+  // Only the episodes we hold count toward "watched" — an airing season is
+  // fully watched once every present episode is, not once the unaired rest is.
+  const eps = presentEpisodes(detail.value?.episode_files as any, s.season_number, s.episodes)
   if (!eps.length) return false
   return eps.every((ep: any) => watchedEpisodes.value.has(ep.id))
 }

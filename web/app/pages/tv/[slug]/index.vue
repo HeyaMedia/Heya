@@ -32,9 +32,9 @@
             <Icon name="star" :size="14" style="color: var(--gold)" />
             <span style="color: var(--gold)">{{ rating }}/10</span>
             <span class="dot" />
-            <span>{{ detail.tv_series?.number_of_seasons }} season{{ detail.tv_series?.number_of_seasons !== 1 ? 's' : '' }}</span>
+            <span>{{ presentSeasonCount }} season{{ presentSeasonCount !== 1 ? 's' : '' }}</span>
             <span class="dot" />
-            <span>{{ detail.tv_series?.number_of_episodes }} episodes</span>
+            <span>{{ presentEpisodeTotal }} episode{{ presentEpisodeTotal !== 1 ? 's' : '' }}</span>
           </div>
 
           <div v-if="genres.length" style="display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0">
@@ -316,6 +316,22 @@ const displaySeasons = computed(() => {
   return [...detail.value.seasons].sort((a: any, b: any) => a.season_number - b.season_number)
 })
 
+// Hero counts reflect what we actually hold, not the provider catalog
+// (tv_series.number_of_episodes counts unaired episodes too — 30 for Silo when
+// we only have 22). Regular seasons only; specials (season 0) are excluded to
+// match the catalog convention the hero used before. `detail.seasons` is
+// already limited to seasons we have files for (server-side availableSeasons),
+// so its regular-season count is our season count.
+const regularSeasons = computed(() =>
+  (detail.value?.seasons || []).filter((s: any) => s.season_number > 0))
+
+const presentSeasonCount = computed(() => regularSeasons.value.length)
+
+const presentEpisodeTotal = computed(() =>
+  regularSeasons.value.reduce(
+    (sum: number, s: any) => sum + presentEpisodeCount(detail.value?.episode_files as any, s.season_number, s.episodes),
+    0))
+
 const rating = computed(() => {
   const r = detail.value?.tv_series?.rating
   if (r == null || r === '') return null
@@ -453,28 +469,37 @@ async function toggleSeasonFavorite(s: any) {
 const seasonStates = ref<Map<number, { season_id: number; total_episodes: number; watched_episodes: number }>>(new Map())
 
 const showFullyWatched = computed(() => {
-  if (seasonStates.value.size === 0) return false
-  for (const s of seasonStates.value.values()) {
-    if (s.total_episodes === 0 || s.watched_episodes < s.total_episodes) return false
-  }
-  return true
+  const seasons = detail.value?.seasons || []
+  if (seasons.length === 0 || seasonStates.value.size === 0) return false
+  return seasons.every((s: any) => seasonFullyWatched(s))
 })
 
-function seasonWatchInfo(s: any): { remaining: number } | null {
+// Watched math is against the present-episode total, not the provider catalog —
+// otherwise an airing season reads "8 remaining" over unaired episodes while its
+// subtitle says "2 eps". watched is clamped to that total ("mark season watched"
+// flags the whole catalog, so raw watched_episodes can exceed what we hold).
+function seasonPresentWatch(s: any): { total: number, watched: number } {
+  const total = presentEpisodeCount(detail.value?.episode_files as any, s.season_number, s.episodes)
   const info = seasonStates.value.get(s.id)
-  if (!info || info.total_episodes === 0) return null
-  return { remaining: info.total_episodes - info.watched_episodes }
+  const watched = Math.min(info?.watched_episodes ?? 0, total)
+  return { total, watched }
+}
+
+function seasonWatchInfo(s: any): { remaining: number } | null {
+  const { total, watched } = seasonPresentWatch(s)
+  if (total === 0) return null
+  return { remaining: total - watched }
 }
 
 function seasonWatchPct(s: any): number {
-  const info = seasonStates.value.get(s.id)
-  if (!info || info.total_episodes === 0) return 0
-  return Math.round((info.watched_episodes / info.total_episodes) * 100)
+  const { total, watched } = seasonPresentWatch(s)
+  if (total === 0) return 0
+  return Math.round((watched / total) * 100)
 }
 
 function seasonFullyWatched(s: any): boolean {
-  const info = seasonStates.value.get(s.id)
-  return !!info && info.total_episodes > 0 && info.watched_episodes >= info.total_episodes
+  const { total, watched } = seasonPresentWatch(s)
+  return total > 0 && watched >= total
 }
 
 async function toggleSeasonWatched(s: any) {
@@ -518,7 +543,8 @@ function seasonLabel(s: any) {
 
 function seasonSubtitle(s: any): string {
   const parts: string[] = []
-  if (s.episodes?.length) parts.push(`${s.episodes.length} ep${s.episodes.length !== 1 ? 's' : ''}`)
+  const n = presentEpisodeCount(detail.value?.episode_files as any, s.season_number, s.episodes)
+  if (n) parts.push(`${n} ep${n !== 1 ? 's' : ''}`)
   const y = formatYear(s.air_date)
   if (y) parts.push(y)
   return parts.join(' · ')
