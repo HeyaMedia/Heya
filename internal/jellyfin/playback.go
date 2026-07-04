@@ -216,6 +216,15 @@ func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token 
 	if err != nil {
 		file = target.file
 	}
+	return s.mediaSourceForFile(file, target.title, token, profile)
+}
+
+// mediaSourceForFile renders a MediaSourceInfo from a library file's stored
+// probe data, without triggering a probe — the list-decoration path
+// (fields=MediaSources over a whole episode page) must not fan out into
+// per-item ffprobe runs. Callers that can afford a probe (PlaybackInfo,
+// detail) go through videoMediaSource, which EnsureFileProbed's first.
+func (s *Server) mediaSourceForFile(file sqlc.LibraryFile, name, token string, profile *deviceProfile) (mediaSourceInfo, transcoder.PlaybackPlan, transcoder.ClientCapabilities) {
 	var info mediaprobe.MediaInfo
 	if len(file.MediaInfo) > 0 {
 		_ = json.Unmarshal(file.MediaInfo, &info)
@@ -238,7 +247,7 @@ func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token 
 		Type:                       "Default",
 		Container:                  containerOf(file.Path),
 		Size:                       file.Size,
-		Name:                       target.title,
+		Name:                       name,
 		ETag:                       tag32("etag-source", file.ID),
 		RunTimeTicks:               int64(info.Duration * float64(ticksPerSecond)),
 		SupportsDirectPlay:         directOK,

@@ -202,3 +202,17 @@ FROM user_watch_progress
 WHERE user_id = sqlc.arg(user_id)
   AND entity_type = sqlc.arg(entity_type)
   AND entity_id = ANY(sqlc.arg(entity_ids)::bigint[]);
+
+-- name: JFLibraryFilesByIDs :many
+-- Batch hydration of library files for list-level MediaSources decoration
+-- (fields=MediaSources on /Shows/{id}/Episodes and friends).
+SELECT * FROM library_files
+WHERE id = ANY(sqlc.arg(ids)::bigint[]) AND deleted_at IS NULL;
+
+-- name: JFBestVideoFilesForItems :many
+-- Best playable file per movie media item, batched: matched files win, then
+-- path order — the same pick JFMovieFileID makes one item at a time.
+SELECT DISTINCT ON (media_item_id) *
+FROM library_files
+WHERE media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[]) AND deleted_at IS NULL
+ORDER BY media_item_id, (status = 'matched') DESC, path ASC;

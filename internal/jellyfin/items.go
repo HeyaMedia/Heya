@@ -143,20 +143,35 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request, _ Params) 
 		}
 	}
 
+	req := parseItemsRequest(r)
 	byID := map[string]baseItemDto{}
 	if len(movieIDs) > 0 {
 		mrows, _, err := s.app.JFListLibraryItems(ctx, sqlc.JFListLibraryItemsParams{MediaType: sqlc.MediaTypeMovie, OnlyIds: movieIDs})
 		if err == nil {
-			for _, mr := range mrows {
-				byID["m"+strconv.FormatInt(mr.ID, 10)] = s.dtoFromMediaItemRow(mr, serverID, dec)
+			dtos := make([]baseItemDto, len(mrows))
+			for i, mr := range mrows {
+				dtos[i] = s.dtoFromMediaItemRow(mr, serverID, dec)
+			}
+			if req.wantsSources() {
+				s.attachMovieSources(ctx, mrows, dtos, TokenFrom(ctx), req)
+			}
+			for i, mr := range mrows {
+				byID["m"+strconv.FormatInt(mr.ID, 10)] = dtos[i]
 			}
 		}
 	}
 	if len(episodeIDs) > 0 {
 		erows, _, err := s.app.JFListEpisodes(ctx, sqlc.JFListEpisodesParams{OnlyIds: episodeIDs})
 		if err == nil {
-			for _, er := range erows {
-				byID["e"+strconv.FormatInt(er.ID, 10)] = s.dtoFromEpisodeRow(er, serverID, dec)
+			dtos := make([]baseItemDto, len(erows))
+			for i, er := range erows {
+				dtos[i] = s.dtoFromEpisodeRow(er, serverID, dec)
+			}
+			if req.wantsSources() {
+				s.attachEpisodeSources(ctx, erows, dtos, TokenFrom(ctx), req)
+			}
+			for i, er := range erows {
+				byID["e"+strconv.FormatInt(er.ID, 10)] = dtos[i]
 			}
 		}
 	}
@@ -236,9 +251,16 @@ func (s *Server) handleNextUp(w http.ResponseWriter, r *http.Request, _ Params) 
 		}
 		dec := s.episodeDecorations(ctx, u.ID)
 		s.loadProgress(ctx, u.ID, "episode", epIDs, dec)
+		dtos := make([]baseItemDto, len(rows))
+		for i, row := range rows {
+			dtos[i] = s.dtoFromEpisodeRow(row, serverID, dec)
+		}
+		if req := parseItemsRequest(r); req.wantsSources() {
+			s.attachEpisodeSources(ctx, rows, dtos, TokenFrom(ctx), req)
+		}
 		byID := map[int64]baseItemDto{}
-		for _, row := range rows {
-			byID[row.ID] = s.dtoFromEpisodeRow(row, serverID, dec)
+		for i, row := range rows {
+			byID[row.ID] = dtos[i]
 		}
 		for _, id := range epIDs { // preserve series-recency order
 			if dto, ok := byID[id]; ok {

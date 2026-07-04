@@ -92,20 +92,22 @@ func bitDepthOf(bitsStr, pixFmt string) int {
 func buildMediaStreams(fileID int64, token string, info *mediaprobe.MediaInfo) (streams []mediaStream, defaultAudio, defaultSub *int) {
 	for _, s := range info.Streams {
 		ms := mediaStream{
-			Codec:              s.CodecName,
-			Index:              s.Index,
-			Profile:            s.Profile,
-			Language:           s.Tags["language"],
-			Title:              s.Tags["title"],
-			TimeBase:           "1/1000",
-			ColorTransfer:      s.ColorTransfer,
-			ColorPrimaries:     s.ColorPrimaries,
-			ColorSpace:         s.ColorSpace,
-			PixelFormat:        s.PixFmt,
-			AudioSpatialFormat: "None",
-			LocalizedDefault:   "Default",
-			LocalizedExternal:  "External",
-			LocalizedForced:    "Forced",
+			Codec:                    s.CodecName,
+			Index:                    s.Index,
+			Profile:                  s.Profile,
+			Language:                 s.Tags["language"],
+			Title:                    s.Tags["title"],
+			TimeBase:                 "1/1000",
+			ColorTransfer:            s.ColorTransfer,
+			ColorPrimaries:           s.ColorPrimaries,
+			ColorSpace:               s.ColorSpace,
+			PixelFormat:              s.PixFmt,
+			AudioSpatialFormat:       "None",
+			LocalizedDefault:         "Default",
+			LocalizedExternal:        "External",
+			LocalizedForced:          "Forced",
+			LocalizedUndefined:       "Undefined",
+			LocalizedHearingImpaired: "Hearing Impaired",
 		}
 		if d := s.Disposition; d != nil {
 			ms.IsDefault = d.Default == 1

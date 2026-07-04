@@ -210,6 +210,52 @@ func (a *App) JFEpisodeFileID(ctx context.Context, seriesMediaItemID int64, seas
 	return entry.FileID, ok, nil
 }
 
+// JFEpisodeFileEntries returns the full s{n}e{n} → file-entry map for one
+// series — the batch form of JFEpisodeFileID, for decorating a whole episode
+// list (fields=MediaSources) with one query instead of one per episode.
+func (a *App) JFEpisodeFileEntries(ctx context.Context, seriesMediaItemID int64) (map[string]EpisodeFileEntry, error) {
+	files, err := sqlc.New(a.db).ListEpisodeFiles(ctx, pgtype.Int8{Int64: seriesMediaItemID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	return BuildEpisodeFileMap(files), nil
+}
+
+// JFLibraryFilesByIDs batch-hydrates library files, keyed by id.
+func (a *App) JFLibraryFilesByIDs(ctx context.Context, ids []int64) (map[int64]sqlc.LibraryFile, error) {
+	if len(ids) == 0 {
+		return map[int64]sqlc.LibraryFile{}, nil
+	}
+	rows, err := sqlc.New(a.db).JFLibraryFilesByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]sqlc.LibraryFile, len(rows))
+	for _, f := range rows {
+		out[f.ID] = f
+	}
+	return out, nil
+}
+
+// JFBestVideoFiles returns the primary playable file per movie media item,
+// batched — the same matched-first pick JFMovieFileID makes for one item.
+func (a *App) JFBestVideoFiles(ctx context.Context, mediaItemIDs []int64) (map[int64]sqlc.LibraryFile, error) {
+	if len(mediaItemIDs) == 0 {
+		return map[int64]sqlc.LibraryFile{}, nil
+	}
+	rows, err := sqlc.New(a.db).JFBestVideoFilesForItems(ctx, mediaItemIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]sqlc.LibraryFile, len(rows))
+	for _, f := range rows {
+		if f.MediaItemID.Valid {
+			out[f.MediaItemID.Int64] = f
+		}
+	}
+	return out, nil
+}
+
 // JFMovieFileID returns the primary playable file for a movie media item
 // (first non-deleted match, mirroring what the FE plays).
 func (a *App) JFMovieFileID(ctx context.Context, mediaItemID int64) (sqlc.LibraryFile, bool, error) {

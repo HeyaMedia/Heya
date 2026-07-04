@@ -28,6 +28,11 @@ type itemsRequest struct {
 	ids        []string
 	searchTerm string
 
+	// fields is the client's Fields= request (lowercased tokens). Most dto
+	// fields are always emitted, but the expensive per-item ones
+	// (MediaSources/MediaStreams) attach only on request, like upstream.
+	fields map[string]bool
+
 	sortBy   string
 	sortDesc bool
 
@@ -43,6 +48,7 @@ func parseItemsRequest(r *http.Request) itemsRequest {
 	req := itemsRequest{
 		searchTerm: queryCI(r, "searchTerm"),
 		recursive:  strings.EqualFold(queryCI(r, "recursive"), "true"),
+		fields:     parseFields(r),
 	}
 
 	if pid := queryCI(r, "parentId"); pid != "" {
@@ -103,6 +109,28 @@ func parseItemsRequest(r *http.Request) itemsRequest {
 		req.filterFavorite = true
 	}
 	return req
+}
+
+// parseFields reads the Fields= comma list into a lowercased set.
+func parseFields(r *http.Request) map[string]bool {
+	raw := queryCI(r, "fields")
+	if raw == "" {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, tok := range strings.Split(raw, ",") {
+		if tok = strings.TrimSpace(strings.ToLower(tok)); tok != "" {
+			out[tok] = true
+		}
+	}
+	return out
+}
+
+// wantsSources reports whether the request asked for per-item media info
+// (fields=MediaSources or MediaStreams) — the trigger for list-level source
+// decoration.
+func (r itemsRequest) wantsSources() bool {
+	return r.fields["mediasources"] || r.fields["mediastreams"]
 }
 
 // mapSort translates Jellyfin SortBy/SortOrder onto the SQL sort switch.
@@ -272,6 +300,9 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		for _, row := range rows {
 			items = append(items, s.dtoFromMediaItemRow(row, serverID, dec))
 		}
+		if mediaType == sqlc.MediaTypeMovie && req.wantsSources() {
+			s.attachMovieSources(ctx, rows, items, TokenFrom(ctx), req)
+		}
 		return queryResult[baseItemDto]{Items: items, TotalRecordCount: int(total), StartIndex: req.startIndex}, nil
 
 	case levelSeasons:
@@ -321,6 +352,9 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		items := make([]baseItemDto, 0, len(rows))
 		for _, row := range rows {
 			items = append(items, s.dtoFromEpisodeRow(row, serverID, dec))
+		}
+		if req.wantsSources() {
+			s.attachEpisodeSources(ctx, rows, items, TokenFrom(ctx), req)
 		}
 		return queryResult[baseItemDto]{Items: items, TotalRecordCount: int(total), StartIndex: req.startIndex}, nil
 
@@ -423,8 +457,15 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 				if mt == sqlc.MediaTypeMovie {
 					s.loadProgress(ctx, userID, "movie", rowIDs(rows), dec)
 				}
-				for _, row := range rows {
-					found[EncodeID(KindItem, row.ID)] = s.dtoFromMediaItemRow(row, serverID, dec)
+				dtos := make([]baseItemDto, len(rows))
+				for i, row := range rows {
+					dtos[i] = s.dtoFromMediaItemRow(row, serverID, dec)
+				}
+				if mt == sqlc.MediaTypeMovie && req.wantsSources() {
+					s.attachMovieSources(ctx, rows, dtos, TokenFrom(ctx), req)
+				}
+				for i, row := range rows {
+					found[EncodeID(KindItem, row.ID)] = dtos[i]
 				}
 			}
 		case KindSeason:
@@ -443,8 +484,15 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 			}
 			epDec := s.episodeDecorations(ctx, userID)
 			s.loadProgress(ctx, userID, "episode", episodeIDs(rows), epDec)
-			for _, row := range rows {
-				found[EncodeID(KindEpisode, row.ID)] = s.dtoFromEpisodeRow(row, serverID, epDec)
+			dtos := make([]baseItemDto, len(rows))
+			for i, row := range rows {
+				dtos[i] = s.dtoFromEpisodeRow(row, serverID, epDec)
+			}
+			if req.wantsSources() {
+				s.attachEpisodeSources(ctx, rows, dtos, TokenFrom(ctx), req)
+			}
+			for i, row := range rows {
+				found[EncodeID(KindEpisode, row.ID)] = dtos[i]
 			}
 		case KindAlbum:
 			rows, _, err := s.app.JFListAlbums(ctx, sqlc.JFListAlbumsParams{OnlyIds: ids})

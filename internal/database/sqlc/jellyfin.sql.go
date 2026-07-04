@@ -11,6 +11,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const jFBestVideoFilesForItems = `-- name: JFBestVideoFilesForItems :many
+SELECT DISTINCT ON (media_item_id) id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height
+FROM library_files
+WHERE media_item_id = ANY($1::bigint[]) AND deleted_at IS NULL
+ORDER BY media_item_id, (status = 'matched') DESC, path ASC
+`
+
+// Best playable file per movie media item, batched: matched files win, then
+// path order — the same pick JFMovieFileID makes one item at a time.
+func (q *Queries) JFBestVideoFilesForItems(ctx context.Context, mediaItemIds []int64) ([]LibraryFile, error) {
+	rows, err := q.db.Query(ctx, jFBestVideoFilesForItems, mediaItemIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryFile{}
+	for rows.Next() {
+		var i LibraryFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.MediaItemID,
+			&i.ParseResult,
+			&i.Status,
+			&i.ErrorMessage,
+			&i.DeletedAt,
+			&i.MediaInfo,
+			&i.Keyframes,
+			&i.HasTrickplay,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.VideoHeight,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const jFCountAlbums = `-- name: JFCountAlbums :one
 SELECT count(*)
 FROM albums al
@@ -148,6 +195,51 @@ func (q *Queries) JFCountTracks(ctx context.Context, arg JFCountTracksParams) (i
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const jFLibraryFilesByIDs = `-- name: JFLibraryFilesByIDs :many
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
+WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL
+`
+
+// Batch hydration of library files for list-level MediaSources decoration
+// (fields=MediaSources on /Shows/{id}/Episodes and friends).
+func (q *Queries) JFLibraryFilesByIDs(ctx context.Context, ids []int64) ([]LibraryFile, error) {
+	rows, err := q.db.Query(ctx, jFLibraryFilesByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LibraryFile{}
+	for rows.Next() {
+		var i LibraryFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.Path,
+			&i.Size,
+			&i.Mtime,
+			&i.MediaItemID,
+			&i.ParseResult,
+			&i.Status,
+			&i.ErrorMessage,
+			&i.DeletedAt,
+			&i.MediaInfo,
+			&i.Keyframes,
+			&i.HasTrickplay,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.VideoHeight,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const jFListAlbums = `-- name: JFListAlbums :many

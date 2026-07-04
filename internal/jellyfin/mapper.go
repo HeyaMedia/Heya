@@ -239,12 +239,18 @@ func (s *Server) dtoFromSeasonRow(row sqlc.JFListSeasonsRow, serverID string, de
 		SeriesName:              row.SeriesTitle,
 		SeriesID:                EncodeID(KindItem, row.SeriesMediaItemID),
 		SeriesPrimaryImageTag:   tag32("img-item", row.SeriesMediaItemID),
+		ParentBackdropItemID:    EncodeID(KindItem, row.SeriesMediaItemID),
+		ParentBackdropImageTags: []string{tag32("img-backdrop", row.SeriesMediaItemID)},
 		LocationType:            "FileSystem",
 		PremiereDate:            dateTime(row.AirDate),
 		ImageTags:               map[string]string{"Primary": tag32("img-season", row.ID)},
 		BackdropImageTags:       []string{},
 		ChildCount:              &count,
 		PrimaryImageAspectRatio: &aspectPoster,
+	}
+	if row.AirDate.Valid {
+		y := int32(row.AirDate.Time.Year())
+		dto.ProductionYear = &y
 	}
 	if dec != nil {
 		dto.UserData = plainUserData(row.ID, dec)
@@ -276,11 +282,17 @@ func (s *Server) dtoFromEpisodeRow(row sqlc.JFListEpisodesRow, serverID string, 
 		SeasonID:                EncodeID(KindSeason, row.SeasonID),
 		SeasonName:              seasonName(row.SeasonTitle, seasonNum),
 		SeriesPrimaryImageTag:   tag32("img-item", row.SeriesMediaItemID),
+		ParentBackdropItemID:    EncodeID(KindItem, row.SeriesMediaItemID),
+		ParentBackdropImageTags: []string{tag32("img-backdrop", row.SeriesMediaItemID)},
 		LocationType:            "FileSystem",
 		PremiereDate:            dateTime(row.AirDate),
 		ImageTags:               map[string]string{"Primary": tag32("img-episode", row.ID)},
 		BackdropImageTags:       []string{},
 		PrimaryImageAspectRatio: &aspectStill,
+	}
+	if row.AirDate.Valid {
+		y := int32(row.AirDate.Time.Year())
+		dto.ProductionYear = &y
 	}
 	if dec != nil {
 		dto.UserData = episodeUserData(row.ID, dec)

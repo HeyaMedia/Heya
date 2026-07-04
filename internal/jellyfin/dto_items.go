@@ -41,6 +41,10 @@ type baseItemDto struct {
 	SeasonID              string `json:"SeasonId,omitempty"`
 	SeasonName            string `json:"SeasonName,omitempty"`
 	SeriesPrimaryImageTag string `json:"SeriesPrimaryImageTag,omitempty"`
+	// Parent art references: seasons/episodes point at the series' backdrop so
+	// clients can dress their detail headers, exactly like upstream.
+	ParentBackdropItemID    string   `json:"ParentBackdropItemId,omitempty"`
+	ParentBackdropImageTags []string `json:"ParentBackdropImageTags,omitempty"`
 
 	Album                string         `json:"Album,omitempty"`
 	AlbumID              string         `json:"AlbumId,omitempty"`
@@ -94,6 +98,7 @@ type baseItemDto struct {
 	MediaStreams []mediaStream     `json:"MediaStreams,omitempty"`
 	Container    string            `json:"Container,omitempty"`
 	VideoType    string            `json:"VideoType,omitempty"`
+	HasSubtitles *bool             `json:"HasSubtitles,omitempty"`
 	IsHD         *bool             `json:"IsHD,omitempty"`
 	Width        int               `json:"Width,omitempty"`
 	Height       int               `json:"Height,omitempty"`

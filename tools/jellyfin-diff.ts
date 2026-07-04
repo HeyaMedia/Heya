@@ -3,27 +3,42 @@
 // For each endpoint both servers answer, compare the JSON *structurally*:
 // which keys exist and what JSON type they hold. Decoders break on missing
 // keys and type mismatches, not on differing values.
+//
+// Config via env (never hardcode credentials here):
+//   JF_REAL_URL / JF_REAL_USER / JF_REAL_PASS   — reference Jellyfin server
+//   JF_HEYA_URL / JF_HEYA_USER / JF_HEYA_PASS   — Heya under test
+// Defaults: Heya at http://127.0.0.1:8080 with admin/admin.
 
-const REAL = 'http://127.0.0.1:8097'
-const HEYA = 'http://127.0.0.1:8099'
+const REAL = process.env.JF_REAL_URL ?? 'http://127.0.0.1:8097'
+const HEYA = process.env.JF_HEYA_URL ?? 'http://127.0.0.1:8080'
 const AUTH = 'MediaBrowser Client="DiffProbe", Device="bun", DeviceId="diff-1", Version="1.0.0"'
 
 type Ctx = { base: string; token: string; userId: string }
 
-async function login(base: string): Promise<Ctx> {
+function creds(which: 'REAL' | 'HEYA') {
+  return {
+    user: process.env[`JF_${which}_USER`] ?? 'admin',
+    pass: process.env[`JF_${which}_PASS`] ?? 'admin',
+  }
+}
+
+// Jellyfin 12 rejects X-Emby-Authorization (400); the modern Authorization:
+// MediaBrowser form works on 10.x and 12.x both, and on Heya.
+async function loginRaw(base: string, which: 'REAL' | 'HEYA'): Promise<{ ctx: Ctx; envelope: any }> {
+  const c = creds(which)
   const res = await fetch(base + '/Users/AuthenticateByName', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Emby-Authorization': AUTH },
-    body: JSON.stringify({ Username: 'admin', Pw: 'admin' }),
+    headers: { 'Content-Type': 'application/json', Authorization: AUTH },
+    body: JSON.stringify({ Username: c.user, Pw: c.pass }),
   })
+  if (!res.ok) throw new Error(`login ${base} failed: ${res.status} ${await res.text()}`)
   const j = await res.json()
-  return { base, token: j.AccessToken, userId: j.User.Id }
+  return { ctx: { base, token: j.AccessToken, userId: j.User.Id }, envelope: j }
 }
 
 async function get(ctx: Ctx, path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  headers.set('Authorization', AUTH.replace(/"$/, `", Token="${ctx.token}"`).replace('MediaBrowser ', 'MediaBrowser ')  )
-  headers.set('X-Emby-Authorization', AUTH + `, Token="${ctx.token}"`)
+  headers.set('Authorization', AUTH + `, Token="${ctx.token}"`)
   if (init.body) headers.set('Content-Type', 'application/json')
   const res = await fetch(ctx.base + path, { ...init, headers })
   const text = await res.text()
@@ -63,7 +78,7 @@ function diff(label: string, real: any, mine: any) {
   if (!missing.length && !typeMismatch.length) console.log('  structurally compatible ✓')
   if (missing.length) {
     console.log(`  MISSING in Heya (${missing.length}):`)
-    for (const m of missing.slice(0, 60)) console.log(`    - ${m}`)
+    for (const m of missing.slice(0, 80)) console.log(`    - ${m}`)
   }
   if (typeMismatch.length) {
     console.log(`  TYPE MISMATCH (${typeMismatch.length}):`)
@@ -72,21 +87,8 @@ function diff(label: string, real: any, mine: any) {
   if (extra.length) console.log(`  (heya-only keys: ${extra.length} — harmless)`)
 }
 
-// One login per server — Jellyfin keeps a single session per DeviceId, so a
-// second AuthenticateByName with the same DeviceId invalidates the first
-// token (Heya is lenient here; noted as a semantic difference).
-async function loginRaw(base: string): Promise<{ ctx: Ctx; envelope: any }> {
-  const res = await fetch(base + '/Users/AuthenticateByName', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Emby-Authorization': AUTH },
-    body: JSON.stringify({ Username: 'admin', Pw: 'admin' }),
-  })
-  const j = await res.json()
-  return { ctx: { base, token: j.AccessToken, userId: j.User.Id }, envelope: j }
-}
-
-const { ctx: real, envelope: rAuth } = await loginRaw(REAL)
-const { ctx: heya, envelope: hAuth } = await loginRaw(HEYA)
+const { ctx: real, envelope: rAuth } = await loginRaw(REAL, 'REAL')
+const { ctx: heya, envelope: hAuth } = await loginRaw(HEYA, 'HEYA')
 diff('POST /Users/AuthenticateByName', rAuth, hAuth)
 
 for (const path of ['/System/Info/Public', '/UserViews', '/UserViews/GroupingOptions', '/Users/Me']) {
@@ -121,7 +123,57 @@ const itemsQS = (id: string) => `/Items?parentId=${id}&includeItemTypes=Movie&re
     get(real, `/Items/Latest?parentId=${rView.Id}&limit=3`),
     get(heya, `/Items/Latest?parentId=${hView.Id}&limit=3`),
   ])
-  diff('GET /Items/Latest', rl.json, hl.json)
+  diff('GET /Items/Latest (movies)', rl.json, hl.json)
+}
+
+// TV show flow — the exact request sequence Infuse fires when opening a show:
+// series detail → Seasons → Episodes → episode detail. Plus NextUp + Latest.
+{
+  const rTv = rViews.Items.find((v: any) => v.CollectionType === 'tvshows')
+  const hTv = hViews.Items.find((v: any) => v.CollectionType === 'tvshows')
+  if (rTv && hTv) {
+    const seriesQS = (id: string) => `/Items?parentId=${id}&includeItemTypes=Series&recursive=true&sortBy=SortName&limit=5&fields=PrimaryImageAspectRatio,Overview`
+    const [rs, hs] = await Promise.all([get(real, seriesQS(rTv.Id)), get(heya, seriesQS(hTv.Id))])
+    diff('GET /Items (series grid)', rs.json, hs.json)
+
+    const rSeries = rs.json.Items[0]
+    const hSeries = hs.json.Items[0]
+    const [rd, hd] = await Promise.all([get(real, `/Items/${rSeries.Id}`), get(heya, `/Items/${hSeries.Id}`)])
+    diff('GET /Items/{id} (series detail)', rd.json, hd.json)
+
+    const [rse, hse] = await Promise.all([
+      get(real, `/Shows/${rSeries.Id}/Seasons?fields=PrimaryImageAspectRatio,Overview`),
+      get(heya, `/Shows/${hSeries.Id}/Seasons?fields=PrimaryImageAspectRatio,Overview`),
+    ])
+    diff('GET /Shows/{id}/Seasons', rse.json, hse.json)
+
+    const [rep, hep] = await Promise.all([
+      get(real, `/Shows/${rSeries.Id}/Episodes?fields=PrimaryImageAspectRatio,Overview,MediaSources`),
+      get(heya, `/Shows/${hSeries.Id}/Episodes?fields=PrimaryImageAspectRatio,Overview,MediaSources`),
+    ])
+    diff('GET /Shows/{id}/Episodes', rep.json, hep.json)
+
+    const rEp = rep.json?.Items?.[0]
+    const hEp = hep.json?.Items?.[0]
+    if (rEp && hEp) {
+      const [red, hed] = await Promise.all([get(real, `/Items/${rEp.Id}`), get(heya, `/Items/${hEp.Id}`)])
+      diff('GET /Items/{id} (episode detail)', red.json, hed.json)
+    }
+
+    const [rnu, hnu] = await Promise.all([
+      get(real, `/Shows/NextUp?fields=PrimaryImageAspectRatio,Overview&limit=10`),
+      get(heya, `/Shows/NextUp?fields=PrimaryImageAspectRatio,Overview&limit=10`),
+    ])
+    diff('GET /Shows/NextUp', rnu.json, hnu.json)
+
+    const [rl, hl] = await Promise.all([
+      get(real, `/Items/Latest?parentId=${rTv.Id}&limit=3`),
+      get(heya, `/Items/Latest?parentId=${hTv.Id}&limit=3`),
+    ])
+    diff('GET /Items/Latest (tv)', rl.json, hl.json)
+  } else {
+    console.log('\n(skipping TV flow — one side has no tvshows view)')
+  }
 }
 
 const [rr, hr] = await Promise.all([get(real, '/UserItems/Resume'), get(heya, '/UserItems/Resume')])
