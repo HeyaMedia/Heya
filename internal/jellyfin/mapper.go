@@ -33,23 +33,25 @@ func dashedGUID(id string) string {
 	return id[0:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:32]
 }
 
-// sanitizePath strips embedded credentials from a scheme://user:pass@host
-// path (SMB shares carry guest:guest). Real Jellyfin sends server-internal
-// paths clients ignore; leaking credentials to every client is both a
-// security problem and something SMB-aware clients (Infuse) may act on.
+// sanitizePath reduces a storage path to a server-internal-looking absolute
+// path — stripping any scheme://authority (e.g. smb://guest:guest@host).
+// Two reasons:
+//   - security: never leak share hosts or embedded credentials to clients.
+//   - compatibility: real Jellyfin sends server-local paths (/media/...) that
+//     clients know they can't reach, and stream over HTTP. An smb:// path
+//     signals "reachable share" to SMB-aware clients (Infuse), which then try
+//     to connect directly and fail the whole add. Presenting just the path
+//     component keeps them on the HTTP stream path.
 func sanitizePath(p string) string {
-	scheme := strings.Index(p, "://")
-	if scheme < 0 {
-		return p
+	i := strings.Index(p, "://")
+	if i < 0 {
+		return p // already a plain local path
 	}
-	rest := p[scheme+3:]
-	if at := strings.IndexByte(rest, '@'); at >= 0 {
-		// Only strip when the '@' is in the authority (before the first '/').
-		if slash := strings.IndexByte(rest, '/'); slash < 0 || at < slash {
-			return p[:scheme+3] + rest[at+1:]
-		}
+	rest := p[i+3:] // strip scheme
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		return rest[slash:] // drop the authority, keep the leading-slash path
 	}
-	return p
+	return "/" + rest
 }
 
 // Mapping from Heya rows to BaseItemDto. Per the repo convention, image tags
