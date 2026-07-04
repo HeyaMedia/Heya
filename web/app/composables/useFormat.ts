@@ -20,10 +20,11 @@ export function formatRunTime(seconds: number): string {
   return `${h}h ${m}m`
 }
 
-// Media file size, decimal units: "1.24 GB" / "743 MB".
+// Media file size, decimal units: "1.24 GB" / "743 MB" / "512 KB".
 export function formatBytes(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`
-  return `${(bytes / 1e6).toFixed(0)} MB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+  return `${(bytes / 1e3).toFixed(0)} KB`
 }
 
 // Adaptive binary-unit size for settings/ops pages: "0 B", "3.4 MB", "12 GB".
@@ -69,14 +70,20 @@ export function formatDateTime(d: string): string {
   return new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })
 }
 
-// Relative time: "42s ago" / "5m ago" / "3h ago" / "12d ago"; "never" when
-// missing. Not reactive — pages that live-update bind a ticker at the call
-// site (see settings/tasks.vue).
-export function timeAgo(ts?: string | null): string {
-  if (!ts) return 'never'
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-  if (sec < 60) return `${sec}s ago`
+// Relative time: "just now" under a minute, then "5m ago" / "3h ago" /
+// "12d ago", falling back to a locale date past 30 days. Accepts plain ISO
+// strings or pgtype.Timestamptz-shaped {Time, Valid} objects (lists carry
+// those); returns "—" for missing/invalid input. Not reactive — pages that
+// live-update bind a ticker at the call site (see settings/tasks.vue).
+export function timeAgo(ts?: string | { Time?: string, Valid?: boolean } | null): string {
+  const raw = typeof ts === 'string' ? ts : ts?.Valid === false ? undefined : ts?.Time
+  if (!raw) return '—'
+  const t = new Date(raw).getTime()
+  if (Number.isNaN(t)) return '—'
+  const sec = Math.floor((Date.now() - t) / 1000)
+  if (sec < 60) return 'just now'
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  return `${Math.floor(sec / 86400)}d ago`
+  if (sec < 86400 * 30) return `${Math.floor(sec / 86400)}d ago`
+  return new Date(raw).toLocaleDateString()
 }

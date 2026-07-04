@@ -22,7 +22,7 @@
           </div>
           <div class="mi-row">
             <span class="mi-label">Size</span>
-            <span class="mi-value">{{ formatSize(file.size) }}</span>
+            <span class="mi-value">{{ formatBytes(file.size) }}</span>
           </div>
           <div v-if="file.container" class="mi-row">
             <span class="mi-label">Container</span>
@@ -131,12 +131,9 @@ function videoStreams(f: FileInfo) { return (f.streams || []).filter(s => s.code
 function audioStreams(f: FileInfo) { return (f.streams || []).filter(s => s.codec_type === 'audio') }
 function subtitleStreams(f: FileInfo) { return (f.streams || []).filter(s => s.codec_type === 'subtitle') }
 
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + ' GB'
-  if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB'
-  return (bytes / 1e3).toFixed(0) + ' KB'
-}
-
+// File size uses the shared decimal formatBytes from useFormat.ts
+// (auto-imported). formatDuration stays local — this pane wants the
+// "1h 24m 5s" shape, not the shared m:ss track-length one.
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)

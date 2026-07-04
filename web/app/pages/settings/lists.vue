@@ -73,23 +73,8 @@ async function remove(l: UserList) {
   }
 }
 
-function timeAgo(ts: { Time?: string } | string | undefined): string {
-  // Lists carry pgtype.Timestamptz which JSON-encodes as {Time, Valid}. Be
-  // permissive in case the shape ever flattens to a string.
-  const raw = typeof ts === 'string' ? ts : ts?.Time
-  if (!raw) return '—'
-  const t = new Date(raw).getTime()
-  if (Number.isNaN(t)) return '—'
-  const s = Math.floor((Date.now() - t) / 1000)
-  if (s < 60) return 'just now'
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  if (d < 30) return `${d}d ago`
-  return new Date(raw).toLocaleDateString()
-}
+// timeAgo comes from useFormat.ts (auto-imported); it unwraps the
+// pgtype.Timestamptz {Time, Valid} shape that lists carry.
 
 function mediaTypeIcon(t: string): string {
   switch (t) {

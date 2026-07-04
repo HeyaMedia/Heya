@@ -127,69 +127,7 @@
 
     <div class="detail-body-below">
       <!-- Cast & Crew -->
-      <TabsRoot v-if="detail.cast?.length || detail.crew?.length" v-model="peopleTab" class="detail-section">
-        <div class="section-row-head" style="margin-bottom: 0">
-          <TabsList class="tab-bar" style="margin-bottom: 0">
-            <TabsTrigger value="cast" class="tab-btn">
-              Cast <span class="tab-count">{{ detail.cast?.length || 0 }}</span>
-            </TabsTrigger>
-            <TabsTrigger value="crew" class="tab-btn">
-              Crew <span class="tab-count">{{ detail.crew?.length || 0 }}</span>
-            </TabsTrigger>
-          </TabsList>
-          <div v-if="peopleTab === 'cast' && castOverflows" class="scroll-controls">
-            <button class="scroll-ctrl-btn" @click="scrollCast('left')"><Icon name="chevleft" :size="14" /></button>
-            <button class="scroll-ctrl-btn" @click="scrollCast('right')"><Icon name="chevright" :size="14" /></button>
-            <button v-if="detail.cast && detail.cast.length > 8" class="scroll-ctrl-btn expand" @click="castExpanded = !castExpanded">
-              <Icon name="chevdown" :size="14" :style="{ transform: castExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
-            </button>
-          </div>
-        </div>
-
-        <TabsContent value="cast" style="margin-top: 16px">
-          <!-- Scroll mode -->
-          <div v-if="!castExpanded" ref="castScrollEl" class="hscroll">
-            <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-              <MediaCard
-                :idx="c.id"
-                :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
-                aspect="2/3"
-                :title="c.name"
-                :subtitle="c.character"
-              />
-            </NuxtLink>
-          </div>
-          <!-- Expanded grid mode -->
-          <div v-else class="cast-grid">
-            <NuxtLink v-for="c in detail.cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-              <MediaCard
-                :idx="c.id"
-                :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
-                aspect="2/3"
-                :title="c.name"
-                :subtitle="c.character"
-              />
-            </NuxtLink>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="crew" style="margin-top: 16px">
-          <div v-for="dept in crewByDepartment" :key="dept.name" class="crew-dept">
-            <div class="crew-dept-label">{{ dept.name }}</div>
-            <div class="crew-dept-grid">
-              <NuxtLink v-for="c in dept.members" :key="`${c.id}-${c.job}`" :to="personUrl(c)" class="crew-card">
-                <MediaCard
-                  :idx="c.id"
-                  :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
-                  aspect="2/3"
-                  :title="c.name"
-                  :subtitle="c.job"
-                />
-              </NuxtLink>
-            </div>
-          </div>
-        </TabsContent>
-      </TabsRoot>
+      <CastCrewTabs v-if="detail.cast?.length || detail.crew?.length" :cast="detail.cast" :crew="detail.crew" />
 
       <!-- Extras -->
       <div v-if="groupedExtras.length" class="detail-section">
@@ -302,31 +240,7 @@
     </div>
 
     <!-- List modal -->
-    <AppDialog v-model="showListModal" title="Add to List" size="sm">
-      <div v-if="!showCreateList">
-        <button
-          v-for="l in userLists" :key="l.id"
-          class="list-option" :class="{ active: l.contains }"
-          @click="toggleListItem(l)"
-        >
-          <Icon :name="l.contains ? 'check' : 'plus'" :size="14" />
-          <span>{{ l.name }}</span>
-          <span class="list-option-count">{{ l.item_count }}</span>
-        </button>
-        <div v-if="!userLists.length" style="padding: 16px 0; color: var(--fg-3); font-size: 13px; text-align: center">No lists yet</div>
-        <button class="list-create-btn" @click="showCreateList = true">
-          <Icon name="plus" :size="14" /> Create new list
-        </button>
-      </div>
-      <div v-else>
-        <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
-        <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
-        <div style="display: flex; gap: 8px; margin-top: 12px">
-          <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
-          <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
-        </div>
-      </div>
-    </AppDialog>
+    <AddToListDialog v-model:open="showListModal" :media-item-id="detail.media_item.id" />
 
     <MetadataEditorModal
       v-if="detail"
@@ -340,7 +254,6 @@
 <script setup lang="ts">
 import type { MediaDetail, MediaExtra, StreamInfoResponse } from '~~/shared/types'
 import { useQuery } from '@tanstack/vue-query'
-import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
@@ -368,30 +281,10 @@ const movieEntityId = computed(() => detail.value?.media_item.id ?? 0)
 const { inProgress: resumeInProgress } = useWatchResume('movie', movieEntityId)
 
 const streamInfo = ref<StreamInfoResponse | null>(null)
-const peopleTab = ref<'cast' | 'crew'>('cast')
-const castExpanded = ref(false)
-const castScrollEl = ref<HTMLElement | null>(null)
-const castOverflows = ref(false)
 const videoModal = ref<{ key: string; title: string } | null>(null)
 const showMetadataEditor = ref(false)
 const extrasExpanded = reactive<Record<string, boolean>>({})
 const extrasRefs: Record<string, HTMLElement> = {}
-
-function checkCastOverflow() {
-  nextTick(() => {
-    if (castScrollEl.value) {
-      castOverflows.value = castScrollEl.value.scrollWidth > castScrollEl.value.clientWidth
-    } else {
-      castOverflows.value = (detail.value?.cast?.length || 0) > 8
-    }
-  })
-}
-
-function scrollCast(dir: 'left' | 'right') {
-  if (!castScrollEl.value) return
-  const amount = castScrollEl.value.clientWidth * 0.75
-  castScrollEl.value.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
-}
 
 const recsExpanded = ref(false)
 const recsScrollEl = ref<HTMLElement | null>(null)
@@ -435,91 +328,16 @@ function openVideo(key: string, title: string) {
   videoModal.value = { key, title }
 }
 
-// Crossfade backdrops
-const showA = ref(true)
-const backdropA = ref<string | null>(null)
-const backdropB = ref<string | null>(null)
-const backdropIdx = ref(0)
-const carouselPaused = ref(false)
-
-const BACKDROP_INTERVAL = 8000
-let bdTimeout: ReturnType<typeof setTimeout> | null = null
-let bdStart = 0
-let bdRemaining = BACKDROP_INTERVAL
-
-const backdropAssets = computed(() => {
-  if (!detail.value?.assets) return []
-  const seen = new Set<number>()
-  return detail.value.assets
-    .filter(a => a.asset_type === 'backdrop' && a.sort_order < 1000)
-    .sort((a, b) => a.sort_order - b.sort_order)
-    .filter(a => { if (seen.has(a.sort_order)) return false; seen.add(a.sort_order); return true })
-})
-
-function getBackdropUrl(idx: number) {
-  if (backdropAssets.value.length > 0) {
-    const asset = backdropAssets.value[idx % backdropAssets.value.length]!
-    return `/api/media/${detail.value?.media_item.id}/image/backdrop?sort=${asset.sort_order}`
-  }
-  return detail.value ? useBackdropUrl(detail.value.media_item.id) : null
-}
-
-async function advanceBackdrop() {
-  if (backdropAssets.value.length <= 1) return
-  backdropIdx.value = (backdropIdx.value + 1) % backdropAssets.value.length
-  const url = getBackdropUrl(backdropIdx.value)
-  if (showA.value) { backdropB.value = url } else { backdropA.value = url }
-  await nextTick()
-  showA.value = !showA.value
-}
-
-function startCarouselTimer() {
-  bdStart = Date.now()
-  bdRemaining = BACKDROP_INTERVAL
-  bdTimeout = setTimeout(() => {
-    advanceBackdrop()
-    startCarouselTimer()
-  }, BACKDROP_INTERVAL)
-}
-
-function pauseCarousel() {
-  carouselPaused.value = true
-  if (bdTimeout) clearTimeout(bdTimeout)
-  bdRemaining -= Date.now() - bdStart
-}
-
-function resumeCarousel() {
-  carouselPaused.value = false
-  bdStart = Date.now()
-  bdTimeout = setTimeout(() => {
-    advanceBackdrop()
-    startCarouselTimer()
-  }, bdRemaining)
-}
-
-function jumpToBackdrop(idx: number) {
-  if (idx === backdropIdx.value) return
-  if (bdTimeout) clearTimeout(bdTimeout)
-  backdropIdx.value = idx
-  const url = getBackdropUrl(idx)
-  if (showA.value) { backdropB.value = url } else { backdropA.value = url }
-  showA.value = !showA.value
-  if (!carouselPaused.value) startCarouselTimer()
-}
+// Crossfade backdrops — shared carousel engine.
+const {
+  showA, backdropA, backdropB, backdropIdx, carouselPaused, backdropAssets,
+  pauseCarousel, resumeCarousel, jumpToBackdrop, seedCarousel, openBackdropLightbox,
+} = useBackdropCarousel(detail, { maxSortOrder: 1000 })
 
 // Lightbox openers
 function openPosterLightbox() {
   const src = usePosterUrl(detail.value!.media_item.id)
   if (src) lightbox.open(src)
-}
-
-function openBackdropLightbox() {
-  const urls = backdropAssets.value.map((_, i) => getBackdropUrl(i)!)
-  if (urls.length) lightbox.open(urls, backdropIdx.value)
-  else {
-    const src = useBackdropUrl(detail.value!.media_item.id)
-    if (src) lightbox.open(src)
-  }
 }
 
 const rating = computed(() => {
@@ -538,25 +356,6 @@ const certification = computed(() => {
 })
 
 const genres = computed(() => detail.value?.movie?.genres || [])
-
-const crewByDepartment = computed(() => {
-  const crew = detail.value?.crew || []
-  const depts = new Map<string, any[]>()
-  for (const c of crew) {
-    const d = c.department || 'Other'
-    if (!depts.has(d)) depts.set(d, [])
-    depts.get(d)!.push(c)
-  }
-  const order = ['Directing', 'Writing', 'Production', 'Camera', 'Sound', 'Editing', 'Art', 'Costume & Make-Up', 'Visual Effects', 'Lighting', 'Crew']
-  const sorted: { name: string; members: any[] }[] = []
-  for (const name of order) {
-    if (depts.has(name)) sorted.push({ name, members: depts.get(name)! })
-  }
-  for (const [name, members] of depts.entries()) {
-    if (!order.includes(name)) sorted.push({ name, members })
-  }
-  return sorted
-})
 
 const groupedExtras = computed(() => {
   if (!detail.value?.extras?.length) return []
@@ -639,55 +438,8 @@ async function loadState() {
   } catch { /* empty */ }
 }
 
-// User lists
+// User lists — AddToListDialog owns loading/creation/toggling.
 const showListModal = ref(false)
-const showCreateList = ref(false)
-const newListName = ref('')
-const newListDesc = ref('')
-const userLists = ref<any[]>([])
-
-async function loadLists() {
-  if (!detail.value) return
-  try {
-    const { $heya } = useNuxtApp()
-    userLists.value = await $heya('/api/me/lists', {
-      query: { media_item_id: detail.value.media_item.id },
-    }) as any[]
-  } catch { /* empty */ }
-}
-
-async function createList() {
-  if (!newListName.value.trim()) return
-  const { $heya } = useNuxtApp()
-  await $heya('/api/me/lists', {
-    method: 'POST',
-    body: { name: newListName.value.trim(), description: newListDesc.value.trim() } as any,
-  })
-  newListName.value = ''
-  newListDesc.value = ''
-  showCreateList.value = false
-  await loadLists()
-}
-
-async function toggleListItem(l: any) {
-  if (!detail.value) return
-  const { $heya } = useNuxtApp()
-  if (l.contains) {
-    await $heya('/api/me/lists/{id}/items/{media_id}', {
-      method: 'DELETE',
-      path: { id: l.id, media_id: detail.value.media_item.id },
-    })
-  } else {
-    await $heya('/api/me/lists/{id}/items', {
-      method: 'POST',
-      path: { id: l.id },
-      body: { media_item_id: detail.value.media_item.id } as any,
-    })
-  }
-  await loadLists()
-}
-
-watch(showListModal, (v) => { if (v) loadLists() })
 
 function formatRuntime(mins: number) {
   if (!mins) return ''
@@ -724,33 +476,18 @@ async function loadStreamInfo() {
 watch(detail, async (d) => {
   if (!d) return
   await nextTick()
-  backdropA.value = getBackdropUrl(0)
-  backdropB.value = getBackdropUrl(0)
-  if (bdTimeout) clearTimeout(bdTimeout)
-  if (backdropAssets.value.length > 1) {
-    startCarouselTimer()
-  }
+  seedCarousel()
   loadState()
   loadStreamInfo()
-  checkCastOverflow()
   checkRecsOverflow()
 }, { immediate: true })
-
-onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 </script>
 
 <style scoped>
-/* Hero — matches TV detail page */
-.hero-section { position: relative; min-height: 520px; }
-.hero-bg { position: absolute; inset: 0; overflow: hidden; }
-.hero-bg-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1.5s ease; }
-.hero-bg-img.visible { opacity: 1; }
-.hero-bg-fade {
-  position: absolute; inset: 0;
-  background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.7) 40%, rgba(12,12,16,0.4) 100%),
-    linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
-}
+/* Hero — matches TV detail page. The shared backdrop/carousel/zoom chrome
+   (.hero-bg*, .bd-*, .hero-expand, .zoom-btn, .hero-side, .detail-body-below,
+   .scroll-controls, .hscroll) lives in heya.css; only per-page deltas here. */
+.hero-section { min-height: 520px; }
 .hero-content {
   position: relative; z-index: 2;
   display: grid; grid-template-columns: 260px minmax(0, 1fr) 260px;
@@ -759,7 +496,6 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .hero-left { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
 .hero-poster { position: relative; }
 .hero-info { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
-.hero-side { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
 
 .detail-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .detail-title { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0 0 4px; }
@@ -780,131 +516,12 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .collection-badge strong { color: var(--fg-0); font-weight: 500; }
 .collection-badge:hover strong { color: var(--gold); }
 
-/* Backdrop indicators */
-.bd-indicators {
-  position: absolute;
-  bottom: 24px;
-  right: 48px;
-  z-index: 4;
-  display: flex;
-  gap: 5px;
-}
-.bd-bar {
-  width: 28px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255,255,255,0.2);
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.bd-bar:hover { background: rgba(255,255,255,0.4); }
-.bd-bar.active { background: rgba(255,255,255,0.12); }
-.bd-bar.active::after {
-  content: '';
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  background: var(--gold);
-  border-radius: 2px;
-  animation: bd-fill 8s linear forwards;
-}
-.bd-bar.paused::after { animation-play-state: paused; }
-@keyframes bd-fill { from { width: 0; } to { width: 100%; } }
-
-/* Expand button */
-.hero-expand {
-  position: absolute;
-  bottom: 24px;
-  right: 16px;
-  z-index: 4;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--r-sm);
-  background: rgba(0,0,0,0.4);
-  border: 1px solid rgba(255,255,255,0.1);
-  color: rgba(255,255,255,0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.15s;
-  opacity: 0;
-}
-.hero-section:hover .hero-expand { opacity: 1; }
-.hero-expand:hover { background: rgba(0,0,0,0.6); color: #fff; }
-
-/* Zoom button on images */
-.zoom-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-sm);
-  background: rgba(0,0,0,0.55);
-  color: rgba(255,255,255,0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
-  cursor: zoom-in;
-  z-index: 2;
-}
-.zoom-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
-.zoom-btn.round { border-radius: 50%; top: 2px; right: 2px; width: 20px; height: 20px; }
-.zoom-btn.crew-zoom { top: 0; right: 0; width: 16px; height: 16px; }
-.hero-poster:hover .zoom-btn,
-.cast-photo-wrap:hover .zoom-btn,
-.crew-photo-wrap:hover .zoom-btn { opacity: 1; }
-
-/* Cast / crew photo wrap */
-.cast-photo-wrap { position: relative; width: 90px; height: 90px; border-radius: 50%; overflow: hidden; margin: 0 auto; }
-.crew-photo-wrap { position: relative; width: 38px; height: 38px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
-
 /* Body */
-.detail-body-below { padding: 0 48px 80px; }
 .detail-section { margin-top: 36px; }
 .section-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 
-/* Tabs */
-.tab-bar { display: flex; gap: 4px; }
-.tab-btn { padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; color: var(--fg-2); background: none; border: none; cursor: pointer; transition: all 0.15s; }
-.tab-btn:hover { background: rgba(255,255,255,0.04); }
-.tab-btn[data-state="active"] { background: var(--bg-3); color: var(--fg-0); font-weight: 600; }
+/* Count badge in section labels (extras group heads) */
 .tab-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); margin-left: 4px; }
-
-/* Scroll controls (top-right of section header) */
-.scroll-controls { display: flex; gap: 4px; align-items: center; }
-.scroll-ctrl-btn {
-  width: 28px; height: 28px; border-radius: var(--r-sm);
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
-  color: var(--fg-2);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s;
-}
-.scroll-ctrl-btn:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); border-color: var(--border-strong); }
-.scroll-ctrl-btn.expand { margin-left: 2px; }
-
-.hscroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
-.hscroll::-webkit-scrollbar { display: none; }
-
-/* Cast cards — portrait headshot tiles with name/character overlaid via
-   MediaCard so they match the rest of the card vocabulary. */
-.cast-card { width: 120px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
-.cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }
-.cast-grid .cast-card { width: auto; }
-
-/* Crew — same treatment as cast, grouped by department. */
-.crew-dept { margin-bottom: 20px; }
-.crew-dept-label {
-  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3);
-  margin-bottom: 8px; padding-left: 2px;
-}
-.crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }
-.crew-card { text-decoration: none; color: inherit; display: block; }
 
 /* Extras */
 .extras-group { margin-top: 18px; }
@@ -955,30 +572,6 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
 .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 18px; }
 .rec-grid .rec-card { width: auto; }
 
-/* AppDialog supplies the dialog chrome — only the row + input styles
-   below are still consumed by the list-add panel. */
-.modal-input {
-  width: 100%; padding: 10px 14px; background: var(--bg-3); border: 1px solid var(--border);
-  border-radius: var(--r-md); color: var(--fg-0); font-size: 14px; outline: none;
-}
-.modal-input:focus { border-color: var(--gold); }
-
-.list-option {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 10px 12px; border-radius: var(--r-sm); font-size: 13px;
-  color: var(--fg-1); transition: background 0.12s; text-align: left;
-}
-.list-option:hover { background: rgba(255,255,255,0.04); }
-.list-option.active { color: var(--gold); }
-.list-option-count { margin-left: auto; font-size: 10px; font-family: var(--font-mono); color: var(--fg-4); }
-
-.list-create-btn {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 10px 12px; margin-top: 4px; border-top: 1px solid var(--border);
-  font-size: 13px; color: var(--fg-2); transition: color 0.12s;
-}
-.list-create-btn:hover { color: var(--gold); }
-
 @media (max-width: 1200px) {
   .hero-content { grid-template-columns: 240px minmax(0, 1fr); }
   .hero-side { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 14px; }
@@ -992,8 +585,5 @@ onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
   .hero-left { flex-direction: column; }
   .hero-ratings { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
   .detail-title { font-size: 32px; }
-  .detail-body-below { padding: 0 20px 60px; }
-  .bd-indicators { right: 20px; bottom: 16px; }
-  .hero-expand { display: none; }
 }
 </style>

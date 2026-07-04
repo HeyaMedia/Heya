@@ -138,15 +138,6 @@ function initials(u: { username: string }): string {
   return u.username.slice(0, 2).toUpperCase()
 }
 
-function timeAgo(iso: string): string {
-  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (sec < 60) return 'just now'
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  if (sec < 86400 * 30) return `${Math.floor(sec / 86400)}d ago`
-  return new Date(iso).toLocaleDateString()
-}
-
 onMounted(load)
 </script>
 

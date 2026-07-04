@@ -10,7 +10,7 @@ const mediaItemId = computed(() => {
   return id ? Number(id) : null
 })
 const title = computed(() => (route.query.title as string) || '')
-// `?t=<seconds>` lets callers (e.g. ResumeDialog) request playback start
+// `?t=<seconds>` lets callers (e.g. continue-watching tiles) request playback start
 // at a specific offset. Captured once at mount so a downstream router push
 // doesn't move the seek target after the user starts scrubbing.
 const startTime = computed(() => {

@@ -635,29 +635,18 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* Hero — mirrors movies/[slug] + tv/[slug] hero pattern. Same three-column
-   grid (portrait | info | sidebar), same backdrop-crossfade chrome, same
-   gradient fade. Person pages don't have proper backdrops so we recycle
-   the profile gallery photos with heavy blur via `.hero-bg-img` filter.
-   No min-height here — the hero shrinks to fit the actual content so we
-   don't leave a 100px void between the portrait and the filmography
-   section when the bio is short. */
-.hero-section { position: relative; }
-.hero-bg { position: absolute; inset: 0; overflow: hidden; }
+/* Hero — mirrors movies/[slug] + tv/[slug] hero pattern. The shared
+   backdrop chrome (.hero-section, .hero-bg*, .hero-side) lives in heya.css.
+   Person pages deliberately have NO min-height on .hero-section — the hero
+   shrinks to fit the actual content so we don't leave a 100px void between
+   the portrait and the filmography section when the bio is short.
+   Person pages don't have proper backdrops so we recycle the profile
+   gallery photos with heavy blur via the `.hero-bg-img` filter below. */
 .hero-bg-img {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  opacity: 0; transition: opacity 1.5s ease;
   /* Heavy blur + darkening — the foreground portrait remains the focal
      point. Scale slightly so the blur doesn't expose the photo edge. */
   filter: blur(30px) brightness(0.45) saturate(0.85);
   transform: scale(1.08);
-}
-.hero-bg-img.visible { opacity: 1; }
-.hero-bg-fade {
-  position: absolute; inset: 0;
-  background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.7) 40%, rgba(12,12,16,0.4) 100%),
-    linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
 }
 
 .hero-content {
@@ -667,7 +656,6 @@ onMounted(async () => {
 }
 .hero-left { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
 .hero-info { display: flex; flex-direction: column; min-width: 0; }
-.hero-side { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
 
 /* Portrait photo — same poster treatment as movie/tv hero. 2:3 aspect
    with a subtle shadow + frame so it pops against the blurred backdrop. */
@@ -684,15 +672,9 @@ onMounted(async () => {
   background: linear-gradient(135deg, var(--bg-4), var(--bg-3));
   font-size: 56px; font-weight: 600; color: var(--fg-2);
 }
-.zoom-btn {
-  position: absolute; top: 10px; right: 10px;
-  width: 28px; height: 28px; border-radius: var(--r-sm);
-  background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.7);
-  display: flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity 0.15s, background 0.15s;
-  cursor: zoom-in; z-index: 2;
-}
-.zoom-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+/* Base .zoom-btn chrome comes from heya.css; nudge it off the portrait
+   frame a touch further than the poster default (8px). */
+.zoom-btn { top: 10px; right: 10px; }
 .hero-portrait:hover .zoom-btn { opacity: 1; }
 
 /* Profile strip — horizontal row inside the hero-info column, below the

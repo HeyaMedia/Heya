@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { timeAgo as timeAgoBase } from '~/composables/useFormat'
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import type { components } from '#open-fetch-schemas/heya'
@@ -165,19 +166,10 @@ const tileTones = computed(() => ({
   completed:  'neutral',
 } as const))
 
-function timeAgoAt(iso: string | null | undefined, now: number): string {
-  if (!iso) return '—'
-  const sec = Math.floor((now - new Date(iso).getTime()) / 1000)
-  if (sec < 1) return 'just now'
-  if (sec < 60) return `${sec}s ago`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`
-  return `${Math.floor(sec / 86400)}d ago`
-}
 // Bound to `tick` so it re-evaluates each second without remounting the cell.
 function timeAgo(iso?: string | null): string {
   void tick.value
-  return timeAgoAt(iso, Date.now())
+  return timeAgoBase(iso)
 }
 
 function formatArgs(raw: string) {

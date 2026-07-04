@@ -10,6 +10,7 @@
 // auth-scoped /api/sessions/active endpoint (own-only for non-admins).
 
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { formatTime } from './useHeyaPlayer'
 
 export interface ActiveSession {
   session_id: string
@@ -75,15 +76,6 @@ export function useActiveSessions() {
   }
 
   const sessions = computed<ActiveSession[]>(() => query.data.value ?? [])
-
-  function formatTime(s: number): string {
-    const total = Math.max(0, Math.floor(s))
-    const h = Math.floor(total / 3600)
-    const m = Math.floor((total % 3600) / 60)
-    const sec = total % 60
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-    return `${m}:${String(sec).padStart(2, '0')}`
-  }
 
   function progressPct(s: ActiveSession): number {
     if (s.total_seconds <= 0) return 0

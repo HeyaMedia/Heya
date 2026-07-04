@@ -41,69 +41,97 @@
           </div>
         </div>
         <div class="toggle-list">
-          <label class="toggle-row" @click.prevent="toggleBool('watch')">
+          <div class="toggle-row" @click="toggleBool('watch')">
             <div class="toggle-info">
               <span class="toggle-name">Watch for file changes</span>
               <span class="toggle-desc">Automatically scan when files are added or removed</span>
             </div>
-            <div class="toggle-switch" :class="{ on: local.watch }">
-              <div class="toggle-knob" />
-            </div>
-          </label>
-          <label class="toggle-row" @click.prevent="toggleBool('fetch_ratings')">
+            <AppSwitch
+              :model-value="local.watch"
+              size="sm"
+              aria-label="Watch for file changes"
+              @click.stop
+              @update:model-value="toggleBool('watch')"
+            />
+          </div>
+          <div class="toggle-row" @click="toggleBool('fetch_ratings')">
             <div class="toggle-info">
               <span class="toggle-name">Fetch external ratings</span>
               <span class="toggle-desc">Pull IMDb, TMDB, and other ratings from heya.media</span>
             </div>
-            <div class="toggle-switch" :class="{ on: local.fetch_ratings }">
-              <div class="toggle-knob" />
-            </div>
-          </label>
-          <label v-if="mediaType === 'movie'" class="toggle-row" @click.prevent="toggleBool('auto_collections')">
+            <AppSwitch
+              :model-value="local.fetch_ratings"
+              size="sm"
+              aria-label="Fetch external ratings"
+              @click.stop
+              @update:model-value="toggleBool('fetch_ratings')"
+            />
+          </div>
+          <div v-if="mediaType === 'movie'" class="toggle-row" @click="toggleBool('auto_collections')">
             <div class="toggle-info">
               <span class="toggle-name">Auto collections</span>
               <span class="toggle-desc">Group movies by franchise automatically</span>
             </div>
-            <div class="toggle-switch" :class="{ on: local.auto_collections }">
-              <div class="toggle-knob" />
-            </div>
-          </label>
-          <label class="toggle-row" @click.prevent="toggleBool('save_nfo')">
+            <AppSwitch
+              :model-value="local.auto_collections"
+              size="sm"
+              aria-label="Auto collections"
+              @click.stop
+              @update:model-value="toggleBool('auto_collections')"
+            />
+          </div>
+          <div class="toggle-row" @click="toggleBool('save_nfo')">
             <div class="toggle-info">
               <span class="toggle-name">Write NFO files</span>
               <span class="toggle-desc">Save metadata as NFO files alongside media</span>
             </div>
-            <div class="toggle-switch" :class="{ on: local.save_nfo }">
-              <div class="toggle-knob" />
-            </div>
-          </label>
-          <label class="toggle-row" @click.prevent="toggleBool('save_images')">
+            <AppSwitch
+              :model-value="local.save_nfo"
+              size="sm"
+              aria-label="Write NFO files"
+              @click.stop
+              @update:model-value="toggleBool('save_nfo')"
+            />
+          </div>
+          <div class="toggle-row" @click="toggleBool('save_images')">
             <div class="toggle-info">
               <span class="toggle-name">Write artwork files</span>
               <span class="toggle-desc">Save poster and backdrop images to media directories</span>
             </div>
-            <div class="toggle-switch" :class="{ on: local.save_images }">
-              <div class="toggle-knob" />
-            </div>
-          </label>
-          <label v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click.prevent="toggleBool('enable_trickplay')">
+            <AppSwitch
+              :model-value="local.save_images"
+              size="sm"
+              aria-label="Write artwork files"
+              @click.stop
+              @update:model-value="toggleBool('save_images')"
+            />
+          </div>
+          <div v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click="toggleBool('enable_trickplay')">
             <div class="toggle-info">
               <span class="toggle-name">Trickplay thumbnails</span>
               <span class="toggle-desc">Generate seek preview sprites for the video player</span>
             </div>
-            <div class="toggle-switch" :class="{ on: local.enable_trickplay }">
-              <div class="toggle-knob" />
-            </div>
-          </label>
-          <label v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click.prevent="toggleBool('generate_thumbnails')">
+            <AppSwitch
+              :model-value="local.enable_trickplay"
+              size="sm"
+              aria-label="Trickplay thumbnails"
+              @click.stop
+              @update:model-value="toggleBool('enable_trickplay')"
+            />
+          </div>
+          <div v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click="toggleBool('generate_thumbnails')">
             <div class="toggle-info">
               <span class="toggle-name">Generate missing thumbnails</span>
               <span class="toggle-desc">Extract video frames for extras and episodes without artwork</span>
             </div>
-            <div class="toggle-switch" :class="{ on: local.generate_thumbnails }">
-              <div class="toggle-knob" />
-            </div>
-          </label>
+            <AppSwitch
+              :model-value="local.generate_thumbnails"
+              size="sm"
+              aria-label="Generate missing thumbnails"
+              @click.stop
+              @update:model-value="toggleBool('generate_thumbnails')"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -419,33 +447,4 @@ const countries = [
 .toggle-info { flex: 1; min-width: 0; }
 .toggle-name { display: block; font-size: 13px; font-weight: 500; color: var(--fg-1); }
 .toggle-desc { display: block; font-size: 11px; color: var(--fg-3); margin-top: 1px; }
-
-.toggle-switch {
-  width: 38px;
-  height: 22px;
-  border-radius: 12px;
-  background: var(--bg-5);
-  position: relative;
-  transition: background 0.2s ease;
-  flex-shrink: 0;
-}
-
-.toggle-switch.on { background: var(--gold); }
-
-.toggle-knob {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--fg-0);
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  transition: transform 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.toggle-switch.on .toggle-knob {
-  transform: translateX(16px);
-  background: #1a1408;
-}
 </style>

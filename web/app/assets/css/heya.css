@@ -383,6 +383,96 @@ a { color: inherit; text-decoration: none; }
 .credit-val { color: var(--fg-1); line-height: 1.55; }
 .detail-section { margin-top: 56px; }
 
+/* === Detail hero (movies / tv / MediaDetailView / person scaffolds) ===
+   Chrome shared verbatim by the detail-page heroes: crossfade backdrop pair,
+   carousel indicator bars, expand/zoom buttons, body padding, section scroll
+   controls. Only rules identical across all consumers live here — per-page
+   deltas (hero grid columns, min-height, person-page blur, tab styling) stay
+   scoped in the page components and win via the data-v attribute selector.
+   Note: `.hero-content`, `.hero-left`, `.hero-poster` are deliberately NOT
+   globalized — home HeroA, the music pages, and the season/episode pages
+   reuse those class names with different layouts. */
+.hero-section { position: relative; }
+.hero-bg { position: absolute; inset: 0; overflow: hidden; }
+.hero-bg-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1.5s ease; }
+.hero-bg-img.visible { opacity: 1; }
+.hero-bg-fade {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.7) 40%, rgba(12,12,16,0.4) 100%),
+    linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
+}
+.hero-side { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
+
+/* Backdrop carousel indicators */
+.bd-indicators {
+  position: absolute; bottom: 24px; right: 48px; z-index: 4;
+  display: flex; gap: 5px;
+}
+.bd-bar {
+  width: 28px; height: 3px; border-radius: 2px;
+  background: rgba(255,255,255,0.2); position: relative; overflow: hidden;
+  cursor: pointer; transition: background 0.15s;
+}
+.bd-bar:hover { background: rgba(255,255,255,0.4); }
+.bd-bar.active { background: rgba(255,255,255,0.12); }
+.bd-bar.active::after {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--gold); border-radius: 2px;
+  animation: bd-fill 8s linear forwards;
+}
+.bd-bar.paused::after { animation-play-state: paused; }
+@keyframes bd-fill { from { width: 0; } to { width: 100%; } }
+
+/* Expand-backdrop button (bottom-right of hero, revealed on hover) */
+.hero-expand {
+  position: absolute; bottom: 24px; right: 16px; z-index: 4;
+  width: 30px; height: 30px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.6);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s; opacity: 0;
+}
+.hero-section:hover .hero-expand { opacity: 1; }
+.hero-expand:hover { background: rgba(0,0,0,0.6); color: #fff; }
+
+/* Zoom button overlaid on hero images (poster / portrait) */
+.zoom-btn {
+  position: absolute; top: 8px; right: 8px;
+  width: 28px; height: 28px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.7);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s, background 0.15s;
+  cursor: zoom-in; z-index: 2;
+}
+.zoom-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+.hero-poster:hover .zoom-btn { opacity: 1; }
+
+/* Detail body below the hero */
+.detail-body-below { padding: 0 48px 80px; }
+
+/* Section-header scroll controls (chev left/right + expand toggle) */
+.scroll-controls { display: flex; gap: 4px; align-items: center; }
+.scroll-ctrl-btn {
+  width: 28px; height: 28px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  color: var(--fg-2);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s;
+}
+.scroll-ctrl-btn:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); border-color: var(--border-strong); }
+.scroll-ctrl-btn.expand { margin-left: 2px; }
+
+/* Horizontal card scroller */
+.hscroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+.hscroll::-webkit-scrollbar { display: none; }
+
+@media (max-width: 900px) {
+  .detail-body-below { padding: 0 20px 60px; }
+  .bd-indicators { right: 20px; bottom: 16px; }
+  .hero-expand { display: none; }
+}
+
 .media-info { display: flex; flex-direction: column; max-width: 720px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md); }
 .mi-row { display: grid; grid-template-columns: 140px 1fr; padding: 12px 18px; font-size: 13px; border-bottom: 1px solid var(--border); }
 .mi-row:last-child { border-bottom: 0; }

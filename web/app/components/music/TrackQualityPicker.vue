@@ -27,7 +27,7 @@
           <span v-if="f.bitrate_kbps > 0">{{ f.bitrate_kbps }} kbps</span>
           <span v-if="f.sample_rate_hz > 0">{{ Math.round(f.sample_rate_hz / 1000) }} kHz</span>
           <span v-if="f.channels > 0">{{ f.channels }}ch</span>
-          <span v-if="f.size_bytes > 0">{{ formatBytes(f.size_bytes) }}</span>
+          <span v-if="f.size_bytes > 0">{{ fmtBytes(f.size_bytes) }}</span>
         </div>
       </div>
       <Icon v-if="f.id === selectedId" name="check" :size="12" class="qp-item-check" />
@@ -58,12 +58,7 @@ function chipLabel(f?: TrackFile): string {
   return parts.join(' ')
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
+// fmtBytes (binary-adaptive) comes from useFormat.ts (auto-imported).
 </script>
 
 <style scoped>

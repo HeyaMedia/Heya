@@ -43,57 +43,9 @@ async function revoke(s: AdminSession) {
   }
 }
 
-function describeAgent(ua: string): string {
-  if (!ua) return 'Unknown device'
-  let browser = 'Unknown'
-  if (/Edg\//.test(ua)) browser = 'Edge'
-  else if (/Chrome\//.test(ua) && !/Chromium/.test(ua)) browser = 'Chrome'
-  else if (/Firefox\//.test(ua)) browser = 'Firefox'
-  else if (/Safari\//.test(ua) && !/Chrome/.test(ua)) browser = 'Safari'
-  else if (/heya-cli/i.test(ua)) browser = 'Heya CLI'
-  else if (/curl|wget|HTTPie|Go-http-client|python-requests/i.test(ua)) browser = 'Script'
-
-  let os = 'Unknown OS'
-  if (/Mac OS X|Macintosh/.test(ua)) os = 'macOS'
-  else if (/Windows NT/.test(ua)) os = 'Windows'
-  else if (/Android/.test(ua)) os = 'Android'
-  else if (/iPhone|iPad|iPod/.test(ua)) os = 'iOS'
-  else if (/Linux/.test(ua)) os = 'Linux'
-
-  return `${browser} · ${os}`
-}
-
-function agentIcon(s: AdminSession): string {
-  if (s.kind === 'api_token') return 'key'
-  const ua = s.user_agent ?? ''
-  if (/iPhone|iPad|iPod|Android/.test(ua)) return 'pulse'
-  if (/heya-cli|curl|wget|HTTPie|Go-http-client|python-requests/i.test(ua)) return 'wrench'
-  return 'cpu'
-}
-
-function timeAgo(iso: string): string {
-  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (sec < 30) return 'just now'
-  if (sec < 60) return `${sec}s ago`
-  const m = Math.floor(sec / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  if (d < 30) return `${d}d ago`
-  return new Date(iso).toLocaleDateString()
-}
-
-function formatExpiry(iso?: string | null): string {
-  if (!iso) return 'no expiry'
-  const ms = new Date(iso).getTime() - Date.now()
-  if (ms <= 0) return 'expired'
-  const d = Math.floor(ms / 86400000)
-  if (d < 1) return 'expires today'
-  if (d < 30) return `expires in ${d}d`
-  if (d < 365) return `expires in ${Math.floor(d / 30)}mo`
-  return `expires in ${Math.floor(d / 365)}y`
-}
+// describeAgent / agentIcon / formatExpiry come from useUserAgent.ts,
+// timeAgo from useFormat.ts — all auto-imported. agentIcon takes the raw
+// UA string; API tokens pick "key" at the call site.
 
 const filtered = computed(() => sessions.value.filter(s => {
   if (kindFilter.value && s.kind !== kindFilter.value) return false
@@ -155,7 +107,7 @@ onMounted(load)
 
       <div v-else class="sess-list">
         <div v-for="s in filtered" :key="s.id" class="sess-card" :class="s.kind">
-          <div class="sess-icon" :class="s.kind"><Icon :name="agentIcon(s)" :size="16" /></div>
+          <div class="sess-icon" :class="s.kind"><Icon :name="s.kind === 'api_token' ? 'key' : agentIcon(s.user_agent ?? '')" :size="16" /></div>
           <div class="sess-body">
             <div class="sess-row">
               <span class="sess-user">{{ s.username }}</span>

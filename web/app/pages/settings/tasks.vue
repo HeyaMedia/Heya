@@ -339,12 +339,16 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="d-schedule">
-              <label class="toggle-row" @click="toggleEnabled(t)">
+              <div class="toggle-row" @click="toggleEnabled(t)">
                 <span class="toggle-label">Enable schedule</span>
-                <button class="toggle-sw" :class="{ on: t.enabled }">
-                  <span class="toggle-knob" />
-                </button>
-              </label>
+                <AppSwitch
+                  :model-value="t.enabled"
+                  size="sm"
+                  aria-label="Enable schedule"
+                  @click.stop
+                  @update:model-value="toggleEnabled(t)"
+                />
+              </div>
               <div v-if="t.enabled" class="d-config">
                 <div class="cfg-field">
                   <label class="cfg-label">Time window</label>
@@ -549,20 +553,6 @@ onBeforeUnmount(() => {
   cursor: pointer; user-select: none;
 }
 .toggle-label { font-size: 12.5px; color: var(--fg-1); }
-.toggle-sw {
-  width: 36px; height: 20px; border-radius: 10px;
-  background: var(--bg-3); border: 1px solid var(--border);
-  position: relative; cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-.toggle-sw.on { background: var(--gold); border-color: var(--gold); }
-.toggle-knob {
-  width: 16px; height: 16px; border-radius: 50%;
-  background: white; position: absolute; top: 1px; left: 1px;
-  transition: transform 0.15s ease;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-}
-.toggle-sw.on .toggle-knob { transform: translateX(16px); }
 
 .d-config { display: flex; gap: 24px; margin-top: 10px; flex-wrap: wrap; }
 .cfg-field { display: flex; flex-direction: column; gap: 4px; }
