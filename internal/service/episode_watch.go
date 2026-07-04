@@ -55,22 +55,28 @@ func (a *App) MarkSeasonWatched(ctx context.Context, userID, seasonID int64) err
 // touch — the episodes the user can actually see in the listing. When
 // seasonID != 0 the result is limited to that season.
 //
-// This MUST match the read side's definition of "present" so mark/unmark stay
-// in lockstep with what's displayed. That definition lives in the FE
-// `presentEpisodes` composable (web/app/composables/useEpisodePresence.ts) and
-// is applied per season: keep episodes whose s{season}e{episode} key is in the
-// episode_files map (BuildEpisodeFileMap), but fall back to the whole season
-// when none resolve (e.g. a season pack parsed without per-episode numbers) so
-// a season we surface as watchable is never a no-op to mark. The fallback only
-// fires for a season with zero identifiable files — exactly the case where the
-// listing already shows every episode — so a normal airing season (some files
-// present) still marks only the episodes we hold, never the unaired catalog.
+// This MUST match the read side's definition of "visible" so mark/unmark stay
+// in lockstep with what's displayed. Two gates, mirroring the read path:
+//
+//  1. Season visibility (BuildAvailableSeasonSet): GetMediaDetail hides any
+//     season we hold no files for (when the set is non-empty). Those seasons
+//     are skipped entirely here — a fully-unaired future season must never be
+//     bulk-marked, whether swept by mark-show or named directly by
+//     mark-season (e.g. via a Jellyfin client).
+//  2. Episode presence within a visible season: keep episodes whose
+//     s{season}e{episode} key is in the episode_files map
+//     (BuildEpisodeFileMap), falling back to the whole season when none
+//     resolve (a season pack parsed without per-episode numbers) — exactly
+//     the FE `presentEpisodes` fallback, which shows every episode of such a
+//     season. A normal airing season (some files resolve) still marks only
+//     the episodes we hold, never the unaired catalog tail.
 func (a *App) presentEpisodeIDs(ctx context.Context, q *sqlc.Queries, series sqlc.TvSeries, seasonID int64) ([]int64, error) {
 	files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: series.MediaItemID, Valid: true})
 	if err != nil {
 		return nil, err
 	}
 	efMap := BuildEpisodeFileMap(files)
+	availableSeasons := BuildAvailableSeasonSet(files)
 
 	seasons, err := q.ListTVSeasonsBySeries(ctx, series.ID)
 	if err != nil {
@@ -86,8 +92,8 @@ func (a *App) presentEpisodeIDs(ctx context.Context, q *sqlc.Queries, series sql
 		return nil, err
 	}
 
-	// Group episodes per season so the present-or-fall-back-to-all decision is
-	// made per season, matching presentEpisodes().
+	// Group episodes per season so both gates apply per season, matching the
+	// read path.
 	bySeason := make(map[int64][]sqlc.TvEpisode)
 	for _, ep := range eps {
 		if seasonID != 0 && ep.SeasonID != seasonID {
@@ -99,6 +105,12 @@ func (a *App) presentEpisodeIDs(ctx context.Context, q *sqlc.Queries, series sql
 	var ids []int64
 	for sID, seasonEps := range bySeason {
 		sn := seasonNumByID[sID]
+		// Gate 1: hidden season (no files at all) → untouchable.
+		if len(availableSeasons) > 0 && !availableSeasons[int(sn)] {
+			continue
+		}
+		// Gate 2: present episodes, falling back to the whole (visible)
+		// season when no per-episode keys resolve.
 		var present []int64
 		for _, ep := range seasonEps {
 			if _, ok := efMap[fmt.Sprintf("s%de%d", sn, ep.EpisodeNumber)]; ok {

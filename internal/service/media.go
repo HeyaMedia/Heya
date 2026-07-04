@@ -250,23 +250,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 			availableSeasons := map[int]bool{}
 			if epFiles, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); err == nil {
 				tvEpisodeFiles = epFiles
-				for _, f := range epFiles {
-					if len(f.ParseResult) == 0 {
-						continue
-					}
-					var pr struct {
-						Parsed struct {
-							Release struct {
-								Seasons []int `json:"seasons"`
-							} `json:"release"`
-						} `json:"parsed"`
-					}
-					if json.Unmarshal(f.ParseResult, &pr) == nil {
-						for _, s := range pr.Parsed.Release.Seasons {
-							availableSeasons[s] = true
-						}
-					}
-				}
+				availableSeasons = BuildAvailableSeasonSet(epFiles)
 			}
 
 			type episodeView struct {
@@ -945,6 +929,35 @@ func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []Alb
 		views = append(views, AlbumView{Album: album, Tracks: tv})
 	}
 	return views
+}
+
+// BuildAvailableSeasonSet parses library file parse results into the set of
+// season numbers we hold at least one file for. This is the season-level
+// visibility gate: GetMediaDetail hides seasons outside the set (when
+// non-empty), and bulk watch actions must skip the same seasons so hidden
+// catalog episodes never get marked. Coarser than BuildEpisodeFileMap on
+// purpose — a season pack parsed without per-episode numbers still claims
+// its season here.
+func BuildAvailableSeasonSet(files []sqlc.ListEpisodeFilesRow) map[int]bool {
+	set := map[int]bool{}
+	for _, f := range files {
+		if len(f.ParseResult) == 0 {
+			continue
+		}
+		var pr struct {
+			Parsed struct {
+				Release struct {
+					Seasons []int `json:"seasons"`
+				} `json:"release"`
+			} `json:"parsed"`
+		}
+		if json.Unmarshal(f.ParseResult, &pr) == nil {
+			for _, s := range pr.Parsed.Release.Seasons {
+				set[s] = true
+			}
+		}
+	}
+	return set
 }
 
 // BuildEpisodeFileMap parses library file parse results to build a map
