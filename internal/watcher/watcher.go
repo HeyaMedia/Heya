@@ -28,13 +28,16 @@ import (
 
 const debounceDelay = 2 * time.Second
 
-// watchWalkTimeout bounds the initial recursive directory walk when arming a
-// watcher. A healthy tree — even a large one — walks well under this; a network
-// mount that has stalled would otherwise block forever in a Getdents syscall
-// that neither context nor a deadline can interrupt. On timeout we give up
+// watchWalkStallTimeout bounds *stalls* in the recursive directory walk when
+// arming a watcher — not total walk time. A big tree under heavy I/O pressure
+// (degraded pool, concurrent write storm) can legitimately take minutes to
+// walk and must still arm eventually; a stalled network mount or suspended
+// pool instead blocks forever in a Getdents syscall that neither context nor
+// a deadline can interrupt, which shows up as the walk visiting nothing at
+// all. Only when a full window passes with zero new entries do we give up
 // live-watching that path (periodic rescans still catch changes) rather than
-// wedge the whole watcher subsystem.
-const watchWalkTimeout = 60 * time.Second
+// wedge the whole watcher subsystem. A var so tests can shrink the window.
+var watchWalkStallTimeout = 60 * time.Second
 
 type LibraryWatcher struct {
 	libraryID int64
@@ -383,32 +386,48 @@ func (m *Manager) enqueueRescan(_ context.Context, libraryID int64) {
 	})
 }
 
-// addRecursiveBounded runs addRecursive with a timeout. The walk issues
+// addRecursiveBounded runs addRecursive with a stall watchdog. The walk issues
 // blocking Getdents syscalls that neither context nor a deadline can interrupt
-// once a mount stalls, so it runs in a goroutine that we abandon on timeout.
+// once a mount stalls, so it runs in a goroutine that we abandon on stall.
 // The orphaned goroutine holds no locks and returns (into a buffered channel)
 // if the mount ever recovers, so it can't wedge anything — worst case one
-// leaked goroutine per stalled arm attempt. A timeout is surfaced as an error
-// so the caller skips live-watching that path.
+// leaked goroutine per stalled arm attempt. Total walk time is unbounded on
+// purpose: a huge tree on a slow or busy disk keeps making progress and must
+// arm eventually. Only a window with zero visited entries — the stalled-mount
+// signature — is surfaced as an error so the caller skips live-watching that
+// path.
 // recursiveWalkFn is the walk implementation, overridable in tests so the
-// arm/unwatch race can be exercised deterministically.
+// arm/unwatch race and the stall watchdog can be exercised deterministically.
 var recursiveWalkFn = addRecursive
 
 func addRecursiveBounded(ctx context.Context, fsw *fsnotify.Watcher, root string) error {
+	var visited atomic.Int64
 	done := make(chan error, 1)
-	go func() { done <- recursiveWalkFn(fsw, root) }()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(watchWalkTimeout):
-		return fmt.Errorf("recursive watch of %s timed out after %s (stalled mount?)", vfs.RedactPath(root), watchWalkTimeout)
-	case <-ctx.Done():
-		return ctx.Err()
+	walk := recursiveWalkFn // capture before spawning: the goroutine may outlive a test's stub swap
+	go func() { done <- walk(fsw, root, &visited) }()
+
+	ticker := time.NewTicker(watchWalkStallTimeout)
+	defer ticker.Stop()
+	var last int64
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ticker.C:
+			if n := visited.Load(); n == last {
+				return fmt.Errorf("recursive watch of %s stalled after %d entries (no progress in %s; stalled mount?)", vfs.RedactPath(root), n, watchWalkStallTimeout)
+			} else {
+				last = n
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
-func addRecursive(fsw *fsnotify.Watcher, root string) error {
+func addRecursive(fsw *fsnotify.Watcher, root string, visited *atomic.Int64) error {
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		visited.Add(1)
 		if err != nil {
 			return nil
 		}
