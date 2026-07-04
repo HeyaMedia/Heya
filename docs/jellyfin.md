@@ -109,6 +109,7 @@ the suite against the backend directly (`JF_URL=http://127.0.0.1:3050`).
 | Infuse | ✅ verified | add server, browse, all image types, HDR direct play; episode lists need `fields=MediaSources` |
 | Streamyfin / Findroid | 🔜 untested | 10.10+ API users |
 | Finamp | 🔜 untested | universal audio + lyrics implemented |
+| Jellyfin Media Player | ❌ won't support | JMP ships no UI of its own — it loads `{server}/web/index.html` (the server-hosted jellyfin-web) in an old embedded Chromium. Supporting it means Heya hosting a second, foreign web app; deliberately declined. It gets Heya's SPA, which its engine can't run (`to.matched.at is not a function`). |
 
 ## Known gaps
 
