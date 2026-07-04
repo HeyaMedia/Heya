@@ -4242,7 +4242,7 @@ UPDATE track_files
 
 type UpdateTrackFileFingerprintParams struct {
 	ID                      int64       `json:"id"`
-	Chromaprint             pgtype.Text `json:"chromaprint"`
+	Chromaprint             pgtype.Text `json:"-"`
 	ChromaprintAlgorithm    pgtype.Int2 `json:"chromaprint_algorithm"`
 	ChromaprintDurationSecs pgtype.Int4 `json:"chromaprint_duration_secs"`
 }

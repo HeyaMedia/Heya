@@ -824,7 +824,7 @@ type TrackFile struct {
 	FadeStartMs             pgtype.Int4        `json:"fade_start_ms"`
 	SilenceStartMs          pgtype.Int4        `json:"silence_start_ms"`
 	BoundariesAnalyzedAt    pgtype.Timestamptz `json:"boundaries_analyzed_at"`
-	Chromaprint             pgtype.Text        `json:"chromaprint"`
+	Chromaprint             pgtype.Text        `json:"-"`
 	ChromaprintAlgorithm    pgtype.Int2        `json:"chromaprint_algorithm"`
 	ChromaprintDurationSecs pgtype.Int4        `json:"chromaprint_duration_secs"`
 	FingerprintedAt         pgtype.Timestamptz `json:"fingerprinted_at"`

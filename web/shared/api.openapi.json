@@ -12814,9 +12814,6 @@
             "format": "int32",
             "type": "integer"
           },
-          "chromaprint": {
-            "$ref": "#/components/schemas/Text"
-          },
           "chromaprint_algorithm": {
             "$ref": "#/components/schemas/Int2"
           },
@@ -12915,7 +12912,6 @@
           "fade_start_ms",
           "silence_start_ms",
           "boundaries_analyzed_at",
-          "chromaprint",
           "chromaprint_algorithm",
           "chromaprint_duration_secs",
           "fingerprinted_at"
