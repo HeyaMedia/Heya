@@ -51,9 +51,12 @@ func (q *Queries) CountPendingAnalysis(ctx context.Context, arg CountPendingAnal
 }
 
 const countTracksByMood = `-- name: CountTracksByMood :one
-SELECT count(*)::bigint
-FROM track_facets
-WHERE (mood_tags->>$1::text)::real > $2::real
+SELECT count(DISTINCT (al.artist_id, lower(t.title)))::bigint
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+WHERE (tf.mood_tags->>$1::text)::real > $2::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 `
 
 type CountTracksByMoodParams struct {
@@ -62,7 +65,10 @@ type CountTracksByMoodParams struct {
 }
 
 // Count tracks scoring above a threshold for one mood tag (e.g. 'mood_happy').
-// Powers the Browse > Moods tile counts.
+// Powers the Browse > Moods tile counts. Counts distinct recordings —
+// (artist, lowercased title) — not track rows, so the tile agrees with the
+// deduped drilldown list (libraries often hold the same recording on several
+// releases: original single, remix singles, compilations).
 func (q *Queries) CountTracksByMood(ctx context.Context, arg CountTracksByMoodParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countTracksByMood, arg.MoodKey, arg.Threshold)
 	var column_1 int64
@@ -71,11 +77,14 @@ func (q *Queries) CountTracksByMood(ctx context.Context, arg CountTracksByMoodPa
 }
 
 const countTracksByTempoBand = `-- name: CountTracksByTempoBand :one
-SELECT count(*)::bigint
-FROM track_facets
-WHERE bpm IS NOT NULL
-  AND bpm >= $1::real
-  AND bpm <  $2::real
+SELECT count(DISTINCT (al.artist_id, lower(t.title)))::bigint
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+WHERE tf.bpm IS NOT NULL
+  AND tf.bpm >= $1::real
+  AND tf.bpm <  $2::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 `
 
 type CountTracksByTempoBandParams struct {
@@ -84,7 +93,8 @@ type CountTracksByTempoBandParams struct {
 }
 
 // Count tracks whose BPM falls in [min, max). Half-open so adjacent bands
-// partition cleanly with no double-counting.
+// partition cleanly with no double-counting. Distinct-recording counting for
+// the same reason as CountTracksByMood.
 func (q *Queries) CountTracksByTempoBand(ctx context.Context, arg CountTracksByTempoBandParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countTracksByTempoBand, arg.MinBpm, arg.MaxBpm)
 	var column_1 int64
@@ -201,12 +211,15 @@ func (q *Queries) GetTrackWaveform(ctx context.Context, trackID int64) ([]float3
 
 const listGenreBuckets = `-- name: ListGenreBuckets :many
 SELECT (elem->>'name')::text     AS genre_name,
-       count(*)::bigint          AS track_count
+       count(DISTINCT (al.artist_id, lower(t.title)))::bigint AS track_count
 FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
 CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
 WHERE (elem->>'score')::real >= $1::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 GROUP BY (elem->>'name')
-HAVING count(*) >= $2::bigint
+HAVING count(DISTINCT (al.artist_id, lower(t.title))) >= $2::bigint
 ORDER BY track_count DESC, (elem->>'name') ASC
 LIMIT $3
 `
@@ -302,30 +315,37 @@ func (q *Queries) ListPendingAnalysisTracks(ctx context.Context, arg ListPending
 }
 
 const listTracksByGenre = `-- name: ListTracksByGenre :many
-SELECT t.id              AS track_id,
-       t.title           AS track_title,
-       t.duration        AS duration,
-       t.disc_number     AS disc_number,
-       t.track_number    AS track_number,
-       al.id             AS album_id,
-       al.title          AS album_title,
-       al.slug           AS album_slug,
-       al.cover_path     AS album_cover_path,
-       al.year           AS album_year,
-       a.id              AS artist_id,
-       a.name            AS artist_name,
-       mi.slug           AS artist_slug,
-       ((elem->>'score')::real) AS score
-FROM track_facets tf
-JOIN tracks      t  ON t.id = tf.track_id
-JOIN albums      al ON al.id = t.album_id
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
-WHERE (elem->>'name') = $1::text
-  AND (elem->>'score')::real >= $2::real
-  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-ORDER BY (elem->>'score')::real DESC, t.id ASC
+SELECT track_id, track_title, duration, disc_number, track_number, album_id, album_title, album_slug, album_cover_path, album_year, artist_id, artist_name, artist_slug, score FROM (
+    SELECT DISTINCT ON (a.id, lower(t.title))
+           t.id              AS track_id,
+           t.title           AS track_title,
+           t.duration        AS duration,
+           t.disc_number     AS disc_number,
+           t.track_number    AS track_number,
+           al.id             AS album_id,
+           al.title          AS album_title,
+           al.slug           AS album_slug,
+           al.cover_path     AS album_cover_path,
+           al.year           AS album_year,
+           a.id              AS artist_id,
+           a.name            AS artist_name,
+           mi.slug           AS artist_slug,
+           ((elem->>'score')::real) AS score
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_items mi ON mi.id = a.media_item_id
+    CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+    WHERE (elem->>'name') = $1::text
+      AND (elem->>'score')::real >= $2::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    ORDER BY a.id, lower(t.title),
+             (t.duration > 0) DESC,
+             (elem->>'score')::real DESC,
+             al.year ASC NULLS LAST, t.id ASC
+) dedup
+ORDER BY score DESC, track_id ASC
 LIMIT $4 OFFSET $3
 `
 
@@ -353,6 +373,10 @@ type ListTracksByGenreRow struct {
 	Score          float32 `json:"score"`
 }
 
+// Deduped to one row per recording — (artist, lowercased title) — because the
+// same track commonly exists on several releases (original single + each
+// remix single + compilations). The surviving copy prefers a known duration,
+// then the highest genre score, then the earliest release.
 func (q *Queries) ListTracksByGenre(ctx context.Context, arg ListTracksByGenreParams) ([]ListTracksByGenreRow, error) {
 	rows, err := q.db.Query(ctx, listTracksByGenre,
 		arg.GenreName,
@@ -394,28 +418,35 @@ func (q *Queries) ListTracksByGenre(ctx context.Context, arg ListTracksByGenrePa
 }
 
 const listTracksByMood = `-- name: ListTracksByMood :many
-SELECT t.id              AS track_id,
-       t.title           AS track_title,
-       t.duration        AS duration,
-       t.disc_number     AS disc_number,
-       t.track_number    AS track_number,
-       al.id             AS album_id,
-       al.title          AS album_title,
-       al.slug           AS album_slug,
-       al.cover_path     AS album_cover_path,
-       al.year           AS album_year,
-       a.id              AS artist_id,
-       a.name            AS artist_name,
-       mi.slug           AS artist_slug,
-       ((tf.mood_tags->>$1::text)::real) AS score
-FROM track_facets tf
-JOIN tracks      t  ON t.id = tf.track_id
-JOIN albums      al ON al.id = t.album_id
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-WHERE (tf.mood_tags->>$1::text)::real > $2::real
-  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-ORDER BY (tf.mood_tags->>$1::text)::real DESC, t.id ASC
+SELECT track_id, track_title, duration, disc_number, track_number, album_id, album_title, album_slug, album_cover_path, album_year, artist_id, artist_name, artist_slug, score FROM (
+    SELECT DISTINCT ON (a.id, lower(t.title))
+           t.id              AS track_id,
+           t.title           AS track_title,
+           t.duration        AS duration,
+           t.disc_number     AS disc_number,
+           t.track_number    AS track_number,
+           al.id             AS album_id,
+           al.title          AS album_title,
+           al.slug           AS album_slug,
+           al.cover_path     AS album_cover_path,
+           al.year           AS album_year,
+           a.id              AS artist_id,
+           a.name            AS artist_name,
+           mi.slug           AS artist_slug,
+           ((tf.mood_tags->>$1::text)::real) AS score
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_items mi ON mi.id = a.media_item_id
+    WHERE (tf.mood_tags->>$1::text)::real > $2::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    ORDER BY a.id, lower(t.title),
+             (t.duration > 0) DESC,
+             (tf.mood_tags->>$1::text)::real DESC,
+             al.year ASC NULLS LAST, t.id ASC
+) dedup
+ORDER BY score DESC, track_id ASC
 LIMIT $4 OFFSET $3
 `
 
@@ -444,6 +475,10 @@ type ListTracksByMoodRow struct {
 }
 
 // High-scoring tracks for one mood tag, paginated, with album+artist context.
+// Deduped to one row per recording — (artist, lowercased title) — because the
+// same track commonly exists on several releases (original single + each
+// remix single + compilations). The surviving copy prefers a known duration,
+// then the highest mood score, then the earliest release.
 func (q *Queries) ListTracksByMood(ctx context.Context, arg ListTracksByMoodParams) ([]ListTracksByMoodRow, error) {
 	rows, err := q.db.Query(ctx, listTracksByMood,
 		arg.MoodKey,
@@ -485,30 +520,36 @@ func (q *Queries) ListTracksByMood(ctx context.Context, arg ListTracksByMoodPara
 }
 
 const listTracksByTempoBand = `-- name: ListTracksByTempoBand :many
-SELECT t.id              AS track_id,
-       t.title           AS track_title,
-       t.duration        AS duration,
-       t.disc_number     AS disc_number,
-       t.track_number    AS track_number,
-       al.id             AS album_id,
-       al.title          AS album_title,
-       al.slug           AS album_slug,
-       al.cover_path     AS album_cover_path,
-       al.year           AS album_year,
-       a.id              AS artist_id,
-       a.name            AS artist_name,
-       mi.slug           AS artist_slug,
-       tf.bpm            AS bpm
-FROM track_facets tf
-JOIN tracks      t  ON t.id = tf.track_id
-JOIN albums      al ON al.id = t.album_id
-JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
-WHERE tf.bpm IS NOT NULL
-  AND tf.bpm >= $1::real
-  AND tf.bpm <  $2::real
-  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-ORDER BY tf.bpm ASC, t.id ASC
+SELECT track_id, track_title, duration, disc_number, track_number, album_id, album_title, album_slug, album_cover_path, album_year, artist_id, artist_name, artist_slug, bpm FROM (
+    SELECT DISTINCT ON (a.id, lower(t.title))
+           t.id              AS track_id,
+           t.title           AS track_title,
+           t.duration        AS duration,
+           t.disc_number     AS disc_number,
+           t.track_number    AS track_number,
+           al.id             AS album_id,
+           al.title          AS album_title,
+           al.slug           AS album_slug,
+           al.cover_path     AS album_cover_path,
+           al.year           AS album_year,
+           a.id              AS artist_id,
+           a.name            AS artist_name,
+           mi.slug           AS artist_slug,
+           tf.bpm            AS bpm
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_items mi ON mi.id = a.media_item_id
+    WHERE tf.bpm IS NOT NULL
+      AND tf.bpm >= $1::real
+      AND tf.bpm <  $2::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    ORDER BY a.id, lower(t.title),
+             (t.duration > 0) DESC,
+             al.year ASC NULLS LAST, t.id ASC
+) dedup
+ORDER BY bpm ASC, track_id ASC
 LIMIT $4 OFFSET $3
 `
 
@@ -536,6 +577,8 @@ type ListTracksByTempoBandRow struct {
 	Bpm            pgtype.Float4 `json:"bpm"`
 }
 
+// Deduped to one row per recording — see ListTracksByGenre. The surviving
+// copy prefers a known duration, then the earliest release.
 func (q *Queries) ListTracksByTempoBand(ctx context.Context, arg ListTracksByTempoBandParams) ([]ListTracksByTempoBandRow, error) {
 	rows, err := q.db.Query(ctx, listTracksByTempoBand,
 		arg.MinBpm,

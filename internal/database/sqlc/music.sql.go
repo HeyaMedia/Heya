@@ -4180,14 +4180,23 @@ func (q *Queries) UpdateTrackFileLoudness(ctx context.Context, arg UpdateTrackFi
 }
 
 const updateTrackFileProbeData = `-- name: UpdateTrackFileProbeData :exec
-UPDATE track_files
-   SET bitrate_kbps   = $2,
-       sample_rate_hz = $3,
-       bit_depth      = $4,
-       channels       = $5,
-       duration       = $6,
-       quality_score  = $7
- WHERE id = $1
+WITH updated AS (
+    UPDATE track_files
+       SET bitrate_kbps   = $2,
+           sample_rate_hz = $3,
+           bit_depth      = $4,
+           channels       = $5,
+           duration       = $6,
+           quality_score  = $7
+     WHERE track_files.id = $1
+     RETURNING track_files.track_id, track_files.duration
+)
+UPDATE tracks t
+   SET duration = u.duration
+  FROM updated u
+ WHERE t.id = u.track_id
+   AND t.duration = 0
+   AND u.duration > 0
 `
 
 type UpdateTrackFileProbeDataParams struct {
@@ -4202,7 +4211,9 @@ type UpdateTrackFileProbeDataParams struct {
 
 // Called by FFProbeWorker after probing an audio file. Updates the per-file
 // physical properties and the refined quality_score that incorporates real
-// bitrate / sample rate / bit depth.
+// bitrate / sample rate / bit depth. Also backfills tracks.duration when
+// upstream metadata left it 0 — ffprobe is ground truth, and the FE renders
+// tracks.duration everywhere (0 shows as "0:00").
 func (q *Queries) UpdateTrackFileProbeData(ctx context.Context, arg UpdateTrackFileProbeDataParams) error {
 	_, err := q.db.Exec(ctx, updateTrackFileProbeData,
 		arg.ID,
