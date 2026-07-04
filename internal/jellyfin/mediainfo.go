@@ -324,6 +324,18 @@ func capsFromProfile(p *deviceProfile) transcoder.ClientCapabilities {
 			caps.SupportsAC3 = true
 		}
 	}
+	// HDR passthrough. A device that direct-plays HEVC Main 10 decodes the
+	// 10-bit bitstream and passes the transfer function (PQ/HLG) straight to
+	// the display — it does NOT need to tonemap. Jellyfin clients express
+	// this by NOT restricting VideoRangeType, so the correct default for an
+	// HEVC-capable client is "handles HDR10 + HLG". Forcing these off led to
+	// an unnecessary (and, on 4K, failing) tonemap transcode. DoVi stays
+	// opt-in — profile 5 needs explicit client support. An explicit
+	// VideoRangeType condition still refines the set below.
+	if caps.SupportsHEVC {
+		caps.SupportsHDR10 = true
+		caps.SupportsHLG = true
+	}
 	for _, cp := range p.CodecProfiles {
 		for _, c := range cp.Conditions {
 			if !strings.EqualFold(c.Property, "VideoRangeType") {
