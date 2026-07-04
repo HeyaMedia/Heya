@@ -225,13 +225,21 @@ WHERE tf.track_embedding IS NOT NULL
 ORDER BY tf.track_embedding <=> $1
 LIMIT sqlc.arg(track_limit);
 
+-- Recording identity for browse dedupe: (artist, lowercased title, ~15s
+-- duration band). The same recording reappears across releases (original
+-- single + each remix single + compilations) with near-identical duration;
+-- a live cut, re-record, or different mix that shares the title differs in
+-- length and stays a separate row. tracks.recording_mbid would be exact but
+-- is populated on a few hundred rows out of 400k, so it can't carry this.
+-- Duration-0 copies (file not probed yet) land in their own band until the
+-- reprobe pump backfills them.
+
 -- name: CountTracksByMood :one
 -- Count tracks scoring above a threshold for one mood tag (e.g. 'mood_happy').
--- Powers the Browse > Moods tile counts. Counts distinct recordings —
--- (artist, lowercased title) — not track rows, so the tile agrees with the
--- deduped drilldown list (libraries often hold the same recording on several
--- releases: original single, remix singles, compilations).
-SELECT count(DISTINCT (al.artist_id, lower(t.title)))::bigint
+-- Powers the Browse > Moods tile counts. Counts distinct recordings (see
+-- recording-identity note above), not track rows, so the tile agrees with
+-- the deduped drilldown list.
+SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
 FROM track_facets tf
 JOIN tracks t  ON t.id = tf.track_id
 JOIN albums al ON al.id = t.album_id
@@ -240,12 +248,11 @@ WHERE (tf.mood_tags->>sqlc.arg(mood_key)::text)::real > sqlc.arg(threshold)::rea
 
 -- name: ListTracksByMood :many
 -- High-scoring tracks for one mood tag, paginated, with album+artist context.
--- Deduped to one row per recording — (artist, lowercased title) — because the
--- same track commonly exists on several releases (original single + each
--- remix single + compilations). The surviving copy prefers a known duration,
--- then the highest mood score, then the earliest release.
+-- Deduped to one row per recording (see recording-identity note above). The
+-- surviving copy prefers a known duration, then the highest mood score, then
+-- the earliest release.
 SELECT * FROM (
-    SELECT DISTINCT ON (a.id, lower(t.title))
+    SELECT DISTINCT ON (a.id, lower(t.title), t.duration / 15)
            t.id              AS track_id,
            t.title           AS track_title,
            t.duration        AS duration,
@@ -267,8 +274,7 @@ SELECT * FROM (
     JOIN media_items mi ON mi.id = a.media_item_id
     WHERE (tf.mood_tags->>sqlc.arg(mood_key)::text)::real > sqlc.arg(threshold)::real
       AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-    ORDER BY a.id, lower(t.title),
-             (t.duration > 0) DESC,
+    ORDER BY a.id, lower(t.title), t.duration / 15,
              (tf.mood_tags->>sqlc.arg(mood_key)::text)::real DESC,
              al.year ASC NULLS LAST, t.id ASC
 ) dedup
@@ -282,7 +288,7 @@ LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
 -- twice instead of pushing them through a derived table — sqlc's planner can't
 -- resolve LATERAL-aliased columns and would refuse to generate this query.
 SELECT (elem->>'name')::text     AS genre_name,
-       count(DISTINCT (al.artist_id, lower(t.title)))::bigint AS track_count
+       count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint AS track_count
 FROM track_facets tf
 JOIN tracks t  ON t.id = tf.track_id
 JOIN albums al ON al.id = t.album_id
@@ -290,17 +296,15 @@ CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
 WHERE (elem->>'score')::real >= sqlc.arg(min_score)::real
   AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 GROUP BY (elem->>'name')
-HAVING count(DISTINCT (al.artist_id, lower(t.title))) >= sqlc.arg(min_tracks)::bigint
+HAVING count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15)) >= sqlc.arg(min_tracks)::bigint
 ORDER BY track_count DESC, (elem->>'name') ASC
 LIMIT sqlc.arg(bucket_limit);
 
 -- name: ListTracksByGenre :many
--- Deduped to one row per recording — (artist, lowercased title) — because the
--- same track commonly exists on several releases (original single + each
--- remix single + compilations). The surviving copy prefers a known duration,
--- then the highest genre score, then the earliest release.
+-- Deduped to one row per recording (see recording-identity note above). The
+-- surviving copy prefers the highest genre score, then the earliest release.
 SELECT * FROM (
-    SELECT DISTINCT ON (a.id, lower(t.title))
+    SELECT DISTINCT ON (a.id, lower(t.title), t.duration / 15)
            t.id              AS track_id,
            t.title           AS track_title,
            t.duration        AS duration,
@@ -324,8 +328,7 @@ SELECT * FROM (
     WHERE (elem->>'name') = sqlc.arg(genre_name)::text
       AND (elem->>'score')::real >= sqlc.arg(min_score)::real
       AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-    ORDER BY a.id, lower(t.title),
-             (t.duration > 0) DESC,
+    ORDER BY a.id, lower(t.title), t.duration / 15,
              (elem->>'score')::real DESC,
              al.year ASC NULLS LAST, t.id ASC
 ) dedup
@@ -336,7 +339,7 @@ LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
 -- Count tracks whose BPM falls in [min, max). Half-open so adjacent bands
 -- partition cleanly with no double-counting. Distinct-recording counting for
 -- the same reason as CountTracksByMood.
-SELECT count(DISTINCT (al.artist_id, lower(t.title)))::bigint
+SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
 FROM track_facets tf
 JOIN tracks t  ON t.id = tf.track_id
 JOIN albums al ON al.id = t.album_id
@@ -346,10 +349,10 @@ WHERE tf.bpm IS NOT NULL
   AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL);
 
 -- name: ListTracksByTempoBand :many
--- Deduped to one row per recording — see ListTracksByGenre. The surviving
--- copy prefers a known duration, then the earliest release.
+-- Deduped to one row per recording (see recording-identity note above). The
+-- surviving copy prefers the earliest release.
 SELECT * FROM (
-    SELECT DISTINCT ON (a.id, lower(t.title))
+    SELECT DISTINCT ON (a.id, lower(t.title), t.duration / 15)
            t.id              AS track_id,
            t.title           AS track_title,
            t.duration        AS duration,
@@ -373,8 +376,7 @@ SELECT * FROM (
       AND tf.bpm >= sqlc.arg(min_bpm)::real
       AND tf.bpm <  sqlc.arg(max_bpm)::real
       AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-    ORDER BY a.id, lower(t.title),
-             (t.duration > 0) DESC,
+    ORDER BY a.id, lower(t.title), t.duration / 15,
              al.year ASC NULLS LAST, t.id ASC
 ) dedup
 ORDER BY bpm ASC, track_id ASC
