@@ -760,6 +760,37 @@ WHERE l.media_type = 'music'
 ORDER BY tf.id
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: UpdateTrackFileFingerprint :exec
+-- Called by ScanTrackFingerprintWorker once chromaprint extraction finishes.
+-- Only written on success — a failed extraction leaves the row pending so the
+-- next pump run retries it (same convention as loudness).
+UPDATE track_files
+   SET chromaprint               = $2,
+       chromaprint_algorithm     = $3,
+       chromaprint_duration_secs = $4,
+       fingerprinted_at          = now()
+ WHERE id = $1;
+
+-- name: ListTrackFilesPendingFingerprint :many
+-- Files in music libraries missing a chromaprint (and not soft-deleted).
+-- The kickoff pump sweeps this with an id cursor (after_id) so one run visits
+-- each candidate exactly once — a file whose fingerprint job failed
+-- permanently is passed over instead of being re-enqueued in a loop.
+SELECT tf.id, tf.library_file_id, tf.track_id, lf.path
+FROM track_files tf
+JOIN library_files lf ON lf.id = tf.library_file_id
+JOIN tracks t  ON t.id  = tf.track_id
+JOIN albums al ON al.id = t.album_id
+JOIN artists a ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+  AND lf.deleted_at IS NULL
+  AND tf.id > sqlc.arg(after_id)::bigint
+  AND tf.fingerprinted_at IS NULL
+ORDER BY tf.id
+LIMIT sqlc.arg(row_limit)::int;
+
 -- name: UpdateAlbumLoudness :exec
 UPDATE albums
    SET integrated_lufs      = $2,

@@ -12814,6 +12814,15 @@
             "format": "int32",
             "type": "integer"
           },
+          "chromaprint": {
+            "$ref": "#/components/schemas/Text"
+          },
+          "chromaprint_algorithm": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "chromaprint_duration_secs": {
+            "$ref": "#/components/schemas/Int4"
+          },
           "created_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -12823,6 +12832,9 @@
           },
           "fade_start_ms": {
             "$ref": "#/components/schemas/Int4"
+          },
+          "fingerprinted_at": {
+            "$ref": "#/components/schemas/Timestamptz"
           },
           "format": {
             "type": "string"
@@ -12902,7 +12914,11 @@
           "outro_start_ms",
           "fade_start_ms",
           "silence_start_ms",
-          "boundaries_analyzed_at"
+          "boundaries_analyzed_at",
+          "chromaprint",
+          "chromaprint_algorithm",
+          "chromaprint_duration_secs",
+          "fingerprinted_at"
         ],
         "type": "object"
       },
@@ -30022,6 +30038,7 @@
                 "scan_libraries",
                 "refresh_stale_items",
                 "scan_music_loudness",
+                "scan_music_fingerprint",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30095,6 +30112,7 @@
                 "scan_libraries",
                 "refresh_stale_items",
                 "scan_music_loudness",
+                "scan_music_fingerprint",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30151,6 +30169,7 @@
                 "scan_libraries",
                 "refresh_stale_items",
                 "scan_music_loudness",
+                "scan_music_fingerprint",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30248,6 +30267,7 @@
                 "scan_libraries",
                 "refresh_stale_items",
                 "scan_music_loudness",
+                "scan_music_fingerprint",
                 "analyze_music_facets"
               ],
               "type": "string"

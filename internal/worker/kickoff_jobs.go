@@ -135,6 +135,22 @@ func (KickoffMusicLoudnessArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// KickoffMusicFingerprintArgs enqueues scan_track_fingerprint for music
+// files missing a chromaprint. Same snooze-loop pump shape as loudness,
+// single phase (no album-level aggregation).
+type KickoffMusicFingerprintArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (KickoffMusicFingerprintArgs) Kind() string { return "kickoff_music_fingerprint" }
+func (KickoffMusicFingerprintArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "kickoff_music_fingerprint",
+		MaxAttempts: 1,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 // KickoffTrickplayArgs replaces scheduler.GenerateTrickplayTask.
 // Finds library_files with has_trickplay=false on a library where
 // enable_trickplay is set, and enqueues one trickplay_file job per

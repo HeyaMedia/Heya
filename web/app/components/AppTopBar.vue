@@ -552,6 +552,7 @@ const TASK_LABELS: Record<string, { label: string, icon: string }> = {
   scan_libraries:       { label: 'Library Scan',     icon: 'folder' },
   refresh_stale_items:  { label: 'Metadata Refresh', icon: 'refresh' },
   scan_music_loudness:  { label: 'Loudness Scan',    icon: 'eq' },
+  scan_music_fingerprint: { label: 'Fingerprint Scan', icon: 'eq' },
   analyze_music_facets: { label: 'Sonic Analysis',   icon: 'eq' },
   // Synthetic buckets.
   transcoding:          { label: 'Transcoding',      icon: 'film' },
@@ -586,6 +587,7 @@ const TASK_KINDS_BY_TASK: Record<string, string[]> = {
   scan_libraries:       ['kickoff_library_scan', 'process_file', 'ffprobe', 'detect_local_assets', 'metadata_match'],
   refresh_stale_items:  ['kickoff_refresh_stale', 'enrich_media_item'],
   scan_music_loudness:  ['kickoff_music_loudness', 'scan_track_loudness', 'scan_album_loudness'],
+  scan_music_fingerprint: ['kickoff_music_fingerprint', 'scan_track_fingerprint'],
   generate_trickplay:   ['kickoff_trickplay', 'trickplay_file'],
   generate_thumbnails:  ['kickoff_thumbnails', 'thumbnail_extra'],
   analyze_music_facets: ['kickoff_sonic_analysis', 'analyze_track_facets', 'refresh_artist_centroids', 'refresh_album_centroids'],

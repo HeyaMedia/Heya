@@ -164,6 +164,23 @@ func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 		}
 	}
 
+	var fpTotal, fpDone int
+	row = a.db.QueryRow(ctx, `
+		SELECT
+			count(*),
+			count(*) FILTER (WHERE tf.fingerprinted_at IS NOT NULL)
+		FROM track_files tf
+		JOIN library_files lf ON lf.id = tf.library_file_id
+		WHERE lf.deleted_at IS NULL
+	`)
+	if row.Scan(&fpTotal, &fpDone) == nil {
+		stats["scan_music_fingerprint"] = TaskStats{
+			Complete: fpDone,
+			Pending:  fpTotal - fpDone,
+			Total:    fpTotal,
+		}
+	}
+
 	// Universe: tracks with a primary file whose duration is within the
 	// analyzer's cap. Mirrors the scheduler's NextTrackForAnalysis filter
 	// (both tracks.duration AND every track_files.duration must be ≤ cap;
@@ -562,6 +579,82 @@ func (a *App) QueryLoudnessItems(ctx context.Context, status string, limit, offs
 		if lufs != nil {
 			s = "complete"
 			detail = strconv.FormatFloat(*lufs, 'f', 1, 64) + " LUFS"
+		}
+		items = append(items, TaskItem{
+			ID:     id,
+			Name:   filepath.Base(path),
+			Path:   path,
+			Status: s,
+			Detail: detail,
+		})
+	}
+
+	if items == nil {
+		items = []TaskItem{}
+	}
+
+	return &TaskItemsResult{
+		Items:    items,
+		Total:    total,
+		Complete: complete,
+		Pending:  total - complete,
+	}, nil
+}
+
+// QueryFingerprintItems returns track_files paginated by chromaprint state.
+// "complete" rows have fingerprinted_at stamped; "pending" rows are still
+// waiting on the fingerprint queue.
+func (a *App) QueryFingerprintItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
+	var total, complete int
+	err := a.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE tf.fingerprinted_at IS NOT NULL)
+		FROM track_files tf
+		JOIN library_files lf ON lf.id = tf.library_file_id
+		WHERE lf.deleted_at IS NULL
+	`).Scan(&total, &complete)
+	if err != nil {
+		return nil, err
+	}
+
+	statusFilter := ""
+	switch status {
+	case "complete":
+		statusFilter = "AND tf.fingerprinted_at IS NOT NULL"
+	case "pending":
+		statusFilter = "AND tf.fingerprinted_at IS NULL"
+	}
+
+	rows, err := a.db.Query(ctx, `
+		SELECT tf.id, lf.path, tf.fingerprinted_at IS NOT NULL, tf.chromaprint_duration_secs
+		FROM track_files tf
+		JOIN library_files lf ON lf.id = tf.library_file_id
+		WHERE lf.deleted_at IS NULL
+		  `+statusFilter+`
+		ORDER BY tf.fingerprinted_at IS NOT NULL, lf.path ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TaskItem
+	for rows.Next() {
+		var id int64
+		var path string
+		var done bool
+		var windowSecs *int32
+		if err := rows.Scan(&id, &path, &done, &windowSecs); err != nil {
+			continue
+		}
+		s := "pending"
+		detail := ""
+		if done {
+			s = "complete"
+			if windowSecs != nil {
+				detail = strconv.Itoa(int(*windowSecs)) + "s fingerprinted"
+			}
 		}
 		items = append(items, TaskItem{
 			ID:     id,

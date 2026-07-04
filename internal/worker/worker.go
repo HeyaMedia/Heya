@@ -110,6 +110,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &SaveMusicNFOWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanTrackLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanAlbumLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &ScanTrackFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &TrickplayFileWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ThumbnailExtraWorker{DB: cfg.DB, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &AnalyzeTrackFacetsWorker{DB: cfg.DB, Holder: cfg.SonicHolder, Progress: cfg.Progress})
@@ -125,6 +126,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &KickoffLibraryScanWorker{DB: cfg.DB, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffRefreshStaleWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffMusicLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &KickoffMusicFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffTrickplayWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffThumbnailsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffSonicAnalysisWorker{DB: cfg.DB, Enabled: cfg.SonicEnabled, Progress: cfg.Progress})
@@ -171,12 +173,13 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"save_music_nfo": {MaxWorkers: 1},
 
 			// CPU/heavy work (one at a time so they can't starve scans).
-			"scan_track_loudness": {MaxWorkers: 1}, // ebur128 ~10-20× real-time
-			"scan_album_loudness": {MaxWorkers: 1}, // concat demuxer + ebur128
-			"trickplay":           {MaxWorkers: 1}, // ffmpeg sprites
-			"thumbnails":          {MaxWorkers: 1}, // ffmpeg thumbnail extraction
-			"sonic_analysis":      {MaxWorkers: 1}, // full model bundle (Discogs heads + EffNet base + classifier heads + CLAP audio) held by AnalyzerHolder singleton; ~hundreds of MB resident
-			"transcode":           {MaxWorkers: 1},
+			"scan_track_loudness":    {MaxWorkers: 1}, // ebur128 ~10-20× real-time
+			"scan_album_loudness":    {MaxWorkers: 1}, // concat demuxer + ebur128
+			"scan_track_fingerprint": {MaxWorkers: 1}, // chromaprint, first 120s only
+			"trickplay":              {MaxWorkers: 1}, // ffmpeg sprites
+			"thumbnails":             {MaxWorkers: 1}, // ffmpeg thumbnail extraction
+			"sonic_analysis":         {MaxWorkers: 1}, // full model bundle (Discogs heads + EffNet base + classifier heads + CLAP audio) held by AnalyzerHolder singleton; ~hundreds of MB resident
+			"transcode":              {MaxWorkers: 1},
 
 			// Sonic centroid refreshes (cheap; own queue so they don't
 			// block the next track analysis).
@@ -190,11 +193,12 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 
 			// Kickoffs (each their own queue, UniqueByArgs so click-spam
 			// is a no-op while one is queued/running).
-			"kickoff_refresh_stale":  {MaxWorkers: 1},
-			"kickoff_music_loudness": {MaxWorkers: 1},
-			"kickoff_trickplay":      {MaxWorkers: 1},
-			"kickoff_thumbnails":     {MaxWorkers: 1},
-			"kickoff_sonic_analysis": {MaxWorkers: 1},
+			"kickoff_refresh_stale":     {MaxWorkers: 1},
+			"kickoff_music_loudness":    {MaxWorkers: 1},
+			"kickoff_music_fingerprint": {MaxWorkers: 1},
+			"kickoff_trickplay":         {MaxWorkers: 1},
+			"kickoff_thumbnails":        {MaxWorkers: 1},
+			"kickoff_sonic_analysis":    {MaxWorkers: 1},
 
 			// Misc.
 			"soft_delete":      {MaxWorkers: 1},

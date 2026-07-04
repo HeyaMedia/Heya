@@ -1217,7 +1217,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 }
 
 const getPrimaryTrackFile = `-- name: GetPrimaryTrackFile :one
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
@@ -1255,6 +1255,10 @@ func (q *Queries) GetPrimaryTrackFile(ctx context.Context, trackID int64) (Track
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
+		&i.Chromaprint,
+		&i.ChromaprintAlgorithm,
+		&i.ChromaprintDurationSecs,
+		&i.FingerprintedAt,
 	)
 	return i, err
 }
@@ -1423,7 +1427,7 @@ func (q *Queries) GetTrackDetailByID(ctx context.Context, id int64) (GetTrackDet
 }
 
 const getTrackFileByID = `-- name: GetTrackFileByID :one
-SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at FROM track_files WHERE id = $1
+SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at, chromaprint, chromaprint_algorithm, chromaprint_duration_secs, fingerprinted_at FROM track_files WHERE id = $1
 `
 
 func (q *Queries) GetTrackFileByID(ctx context.Context, id int64) (TrackFile, error) {
@@ -1453,12 +1457,16 @@ func (q *Queries) GetTrackFileByID(ctx context.Context, id int64) (TrackFile, er
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
+		&i.Chromaprint,
+		&i.ChromaprintAlgorithm,
+		&i.ChromaprintDurationSecs,
+		&i.FingerprintedAt,
 	)
 	return i, err
 }
 
 const getTrackFileByLibraryFileID = `-- name: GetTrackFileByLibraryFileID :one
-SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at FROM track_files WHERE library_file_id = $1
+SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at, chromaprint, chromaprint_algorithm, chromaprint_duration_secs, fingerprinted_at FROM track_files WHERE library_file_id = $1
 `
 
 func (q *Queries) GetTrackFileByLibraryFileID(ctx context.Context, libraryFileID int64) (TrackFile, error) {
@@ -1488,6 +1496,10 @@ func (q *Queries) GetTrackFileByLibraryFileID(ctx context.Context, libraryFileID
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
+		&i.Chromaprint,
+		&i.ChromaprintAlgorithm,
+		&i.ChromaprintDurationSecs,
+		&i.FingerprintedAt,
 	)
 	return i, err
 }
@@ -2745,7 +2757,7 @@ func (q *Queries) ListStaleArtistsByLibrary(ctx context.Context, arg ListStaleAr
 }
 
 const listTrackFilesByAlbum = `-- name: ListTrackFilesByAlbum :many
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
 FROM track_files tf
 JOIN tracks t ON t.id = tf.track_id
 JOIN library_files lf ON lf.id = tf.library_file_id
@@ -2790,6 +2802,10 @@ func (q *Queries) ListTrackFilesByAlbum(ctx context.Context, albumID int64) ([]T
 			&i.FadeStartMs,
 			&i.SilenceStartMs,
 			&i.BoundariesAnalyzedAt,
+			&i.Chromaprint,
+			&i.ChromaprintAlgorithm,
+			&i.ChromaprintDurationSecs,
+			&i.FingerprintedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2802,7 +2818,7 @@ func (q *Queries) ListTrackFilesByAlbum(ctx context.Context, albumID int64) ([]T
 }
 
 const listTrackFilesByArtist = `-- name: ListTrackFilesByArtist :many
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 JOIN tracks t ON t.id = tf.track_id
@@ -2846,6 +2862,10 @@ func (q *Queries) ListTrackFilesByArtist(ctx context.Context, artistID int64) ([
 			&i.FadeStartMs,
 			&i.SilenceStartMs,
 			&i.BoundariesAnalyzedAt,
+			&i.Chromaprint,
+			&i.ChromaprintAlgorithm,
+			&i.ChromaprintDurationSecs,
+			&i.FingerprintedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2858,7 +2878,7 @@ func (q *Queries) ListTrackFilesByArtist(ctx context.Context, artistID int64) ([
 }
 
 const listTrackFilesByTrack = `-- name: ListTrackFilesByTrack :many
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
@@ -2899,6 +2919,68 @@ func (q *Queries) ListTrackFilesByTrack(ctx context.Context, trackID int64) ([]T
 			&i.FadeStartMs,
 			&i.SilenceStartMs,
 			&i.BoundariesAnalyzedAt,
+			&i.Chromaprint,
+			&i.ChromaprintAlgorithm,
+			&i.ChromaprintDurationSecs,
+			&i.FingerprintedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTrackFilesPendingFingerprint = `-- name: ListTrackFilesPendingFingerprint :many
+SELECT tf.id, tf.library_file_id, tf.track_id, lf.path
+FROM track_files tf
+JOIN library_files lf ON lf.id = tf.library_file_id
+JOIN tracks t  ON t.id  = tf.track_id
+JOIN albums al ON al.id = t.album_id
+JOIN artists a ON a.id  = al.artist_id
+JOIN media_items mi ON mi.id = a.media_item_id
+JOIN libraries   l  ON l.id  = mi.library_id
+WHERE l.media_type = 'music'
+  AND lf.deleted_at IS NULL
+  AND tf.id > $1::bigint
+  AND tf.fingerprinted_at IS NULL
+ORDER BY tf.id
+LIMIT $2::int
+`
+
+type ListTrackFilesPendingFingerprintParams struct {
+	AfterID  int64 `json:"after_id"`
+	RowLimit int32 `json:"row_limit"`
+}
+
+type ListTrackFilesPendingFingerprintRow struct {
+	ID            int64  `json:"id"`
+	LibraryFileID int64  `json:"library_file_id"`
+	TrackID       int64  `json:"track_id"`
+	Path          string `json:"path"`
+}
+
+// Files in music libraries missing a chromaprint (and not soft-deleted).
+// The kickoff pump sweeps this with an id cursor (after_id) so one run visits
+// each candidate exactly once — a file whose fingerprint job failed
+// permanently is passed over instead of being re-enqueued in a loop.
+func (q *Queries) ListTrackFilesPendingFingerprint(ctx context.Context, arg ListTrackFilesPendingFingerprintParams) ([]ListTrackFilesPendingFingerprintRow, error) {
+	rows, err := q.db.Query(ctx, listTrackFilesPendingFingerprint, arg.AfterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTrackFilesPendingFingerprintRow{}
+	for rows.Next() {
+		var i ListTrackFilesPendingFingerprintRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryFileID,
+			&i.TrackID,
+			&i.Path,
 		); err != nil {
 			return nil, err
 		}
@@ -4149,6 +4231,35 @@ func (q *Queries) UpdateTrackFileBoundaries(ctx context.Context, arg UpdateTrack
 	return err
 }
 
+const updateTrackFileFingerprint = `-- name: UpdateTrackFileFingerprint :exec
+UPDATE track_files
+   SET chromaprint               = $2,
+       chromaprint_algorithm     = $3,
+       chromaprint_duration_secs = $4,
+       fingerprinted_at          = now()
+ WHERE id = $1
+`
+
+type UpdateTrackFileFingerprintParams struct {
+	ID                      int64       `json:"id"`
+	Chromaprint             pgtype.Text `json:"chromaprint"`
+	ChromaprintAlgorithm    pgtype.Int2 `json:"chromaprint_algorithm"`
+	ChromaprintDurationSecs pgtype.Int4 `json:"chromaprint_duration_secs"`
+}
+
+// Called by ScanTrackFingerprintWorker once chromaprint extraction finishes.
+// Only written on success — a failed extraction leaves the row pending so the
+// next pump run retries it (same convention as loudness).
+func (q *Queries) UpdateTrackFileFingerprint(ctx context.Context, arg UpdateTrackFileFingerprintParams) error {
+	_, err := q.db.Exec(ctx, updateTrackFileFingerprint,
+		arg.ID,
+		arg.Chromaprint,
+		arg.ChromaprintAlgorithm,
+		arg.ChromaprintDurationSecs,
+	)
+	return err
+}
+
 const updateTrackFileLoudness = `-- name: UpdateTrackFileLoudness :exec
 UPDATE track_files
    SET integrated_lufs      = $2,
@@ -4330,7 +4441,7 @@ ON CONFLICT (library_file_id) DO UPDATE
         quality_score = EXCLUDED.quality_score,
         lyrics_path = EXCLUDED.lyrics_path,
         size_bytes = EXCLUDED.size_bytes
-RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at
+RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at, chromaprint, chromaprint_algorithm, chromaprint_duration_secs, fingerprinted_at
 `
 
 type UpsertTrackFileParams struct {
@@ -4380,6 +4491,10 @@ func (q *Queries) UpsertTrackFile(ctx context.Context, arg UpsertTrackFileParams
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
+		&i.Chromaprint,
+		&i.ChromaprintAlgorithm,
+		&i.ChromaprintDurationSecs,
+		&i.FingerprintedAt,
 	)
 	return i, err
 }

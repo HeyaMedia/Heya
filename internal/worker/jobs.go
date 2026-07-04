@@ -318,6 +318,25 @@ func (ScanTrackLoudnessArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// ScanTrackFingerprintArgs computes a chromaprint audio fingerprint for a
+// single file and writes it back to its track_files row. Light CPU work
+// (decodes ≤120s), runs on its own queue at MaxWorkers=1 like the other
+// analysis passes.
+type ScanTrackFingerprintArgs struct {
+	TrackFileID     int64  `json:"track_file_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (ScanTrackFingerprintArgs) Kind() string { return "scan_track_fingerprint" }
+func (ScanTrackFingerprintArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "scan_track_fingerprint",
+		MaxAttempts: 2,
+		Priority:    PriorityAnalysis,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 // ScanAlbumLoudnessArgs concatenates every primary track file in an album
 // via ffmpeg's concat demuxer and runs ebur128 over the union — the correct
 // way to measure album loudness (averaging per-track LUFS is mathematically
