@@ -70,6 +70,13 @@ type JobKindSummaryRow struct {
 	Count int    `json:"count"`
 }
 
+// hiddenJobKind is River-managed periodic noise (fires every 30s forever)
+// that would drown out real work in the Jobs UI. Excluded from the default
+// list and both summaries; an explicit kind=debounce_sweep filter still
+// returns the rows. The WS activity ticker excludes it independently
+// (eventhub/periodic.go).
+const hiddenJobKind = "debounce_sweep"
+
 // ListJobs returns a filtered, ordered page of river jobs.
 func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, offset int) (JobListResult, error) {
 	where := "WHERE 1=1"
@@ -85,6 +92,8 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, of
 		where += " AND kind = $" + strconv.Itoa(argIdx)
 		args = append(args, kind)
 		argIdx++
+	} else {
+		where += " AND kind <> '" + hiddenJobKind + "'"
 	}
 
 	var total int
@@ -250,7 +259,7 @@ func (a *App) MetadataQueueStatus(ctx context.Context) (MetadataQueueStatus, err
 
 // JobSummary returns per-state job counts.
 func (a *App) JobSummary(ctx context.Context) ([]JobSummaryRow, error) {
-	rows, err := a.db.Query(ctx, "SELECT state, count(*) FROM river_job GROUP BY state ORDER BY state")
+	rows, err := a.db.Query(ctx, "SELECT state, count(*) FROM river_job WHERE kind <> '"+hiddenJobKind+"' GROUP BY state ORDER BY state")
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +278,7 @@ func (a *App) JobSummary(ctx context.Context) ([]JobSummaryRow, error) {
 
 // JobKindSummary returns per-kind job counts, ordered by kind.
 func (a *App) JobKindSummary(ctx context.Context) ([]JobKindSummaryRow, error) {
-	rows, err := a.db.Query(ctx, "SELECT kind, count(*) FROM river_job GROUP BY kind ORDER BY kind")
+	rows, err := a.db.Query(ctx, "SELECT kind, count(*) FROM river_job WHERE kind <> '"+hiddenJobKind+"' GROUP BY kind ORDER BY kind")
 	if err != nil {
 		return nil, err
 	}
