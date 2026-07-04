@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -55,6 +56,28 @@ func (rt *router) handle(method, pattern string, h handlerFunc) {
 		segs:    splitPattern(pattern),
 		handler: h,
 	})
+}
+
+// finalize orders routes literal-first so "/Items/Filters2" can never be
+// shadowed by "/Items/{itemId}" regardless of registration order. Fewer
+// params = more specific; stable sort preserves registration order among
+// equally-specific patterns.
+func (rt *router) finalize() {
+	sort.SliceStable(rt.routes, func(i, j int) bool {
+		return rt.routes[i].paramCount() < rt.routes[j].paramCount()
+	})
+}
+
+func (r *route) paramCount() int {
+	n := 0
+	for _, seg := range r.segs {
+		for _, part := range seg.parts {
+			if part.param != "" {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // patterns returns "METHOD /Spec/Cased/Path" strings for the coverage tests.

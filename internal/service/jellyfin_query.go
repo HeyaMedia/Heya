@@ -214,6 +214,27 @@ func (a *App) JFMovieFileID(ctx context.Context, mediaItemID int64) (sqlc.Librar
 	return sqlc.LibraryFile{}, false, nil
 }
 
+// JFSimilarLocalItemIDs returns local media_item ids recommended for the
+// given item, best-rated first (media_recommendations rows that matched a
+// library item by external ids).
+func (a *App) JFSimilarLocalItemIDs(ctx context.Context, mediaItemID int64, limit int32) ([]int64, error) {
+	rows, err := sqlc.New(a.db).ListMediaRecommendationsWithLibrary(ctx, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int64, 0, limit)
+	for _, r := range rows {
+		if !r.LocalMediaItemID.Valid {
+			continue
+		}
+		out = append(out, r.LocalMediaItemID.Int64)
+		if int32(len(out)) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // emptyNotNil keeps pgx happy: a nil []int64 binds as NULL, and
 // cardinality(NULL) is NULL, which would disable the "0 = filter off"
 // convention. Always bind at least an empty array.

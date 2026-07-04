@@ -98,6 +98,35 @@ func TestRouterCaseInsensitiveAndEmby(t *testing.T) {
 	}
 }
 
+// TestLiteralRoutePrecedence: literal paths must beat param siblings no
+// matter the registration order — regression for /Items/Filters2 being
+// swallowed by /Items/{itemId}.
+func TestLiteralRoutePrecedence(t *testing.T) {
+	rt := newRouter()
+	var hit string
+	rt.handle(http.MethodGet, "/Items/{itemId}", func(http.ResponseWriter, *http.Request, Params) { hit = "param" })
+	rt.handle(http.MethodGet, "/Items/Filters2", func(http.ResponseWriter, *http.Request, Params) { hit = "literal" })
+	rt.finalize()
+
+	h, _, ok := rt.match(http.MethodGet, "/Items/Filters2")
+	if !ok {
+		t.Fatal("no match for /Items/Filters2")
+	}
+	h(nil, nil, nil)
+	if hit != "literal" {
+		t.Fatalf("literal route shadowed by param route (hit=%q)", hit)
+	}
+
+	h, p, ok := rt.match(http.MethodGet, "/Items/abc123")
+	if !ok {
+		t.Fatal("no match for /Items/abc123")
+	}
+	h(nil, nil, p)
+	if hit != "param" || p["itemId"] != "abc123" {
+		t.Fatalf("param route broken after sort (hit=%q, p=%v)", hit, p)
+	}
+}
+
 func TestClaimsPathPrecision(t *testing.T) {
 	// Jellyfin-shaped paths are claimed...
 	for _, p := range []string{"/System/Info/Public", "/system/ping", "/Users/AuthenticateByName", "/emby/System/Info/Public", "/socket"} {

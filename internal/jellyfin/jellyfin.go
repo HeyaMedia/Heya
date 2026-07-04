@@ -23,6 +23,7 @@ package jellyfin
 import (
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/service"
@@ -34,6 +35,9 @@ type Server struct {
 	hub  *eventhub.Hub
 	rt   *router
 	next http.Handler
+
+	socketsMu sync.RWMutex
+	sockets   map[*socketConn]struct{}
 }
 
 // NewMiddleware mounts the Jellyfin surface in front of next (the SPA
@@ -47,6 +51,9 @@ func NewMiddleware(app *service.App, hub *eventhub.Hub, next http.Handler) *Serv
 		if app.JellyfinEnabled() {
 			log.Info().Str("component", "jellyfin").Str("advertised_version", jellyfinVersion).Msg("jellyfin-compatible api enabled")
 		}
+	}
+	if app != nil && hub != nil {
+		go s.bridgeEvents()
 	}
 	return s
 }
@@ -141,11 +148,38 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodPost, "/Sessions/Playing/Stopped", s.requireAuth(s.handlePlaying(playStopped)))
 	rt.handle(http.MethodPost, "/Sessions/Playing/Ping", s.requireAuth(s.handlePlayingPing))
 
+	// Userdata: favorites + played flags (with legacy user-scoped aliases).
+	rt.handle(http.MethodPost, "/UserFavoriteItems/{itemId}", s.requireAuth(s.handleSetFavorite(true)))
+	rt.handle(http.MethodDelete, "/UserFavoriteItems/{itemId}", s.requireAuth(s.handleSetFavorite(false)))
+	rt.handle(http.MethodPost, "/UserPlayedItems/{itemId}", s.requireAuth(s.handleSetPlayed(true)))
+	rt.handle(http.MethodDelete, "/UserPlayedItems/{itemId}", s.requireAuth(s.handleSetPlayed(false)))
+	rt.handle(http.MethodPost, "/Users/{userId}/FavoriteItems/{itemId}", s.requireAuth(s.handleSetFavorite(true)))
+	rt.handle(http.MethodDelete, "/Users/{userId}/FavoriteItems/{itemId}", s.requireAuth(s.handleSetFavorite(false)))
+	rt.handle(http.MethodPost, "/Users/{userId}/PlayedItems/{itemId}", s.requireAuth(s.handleSetPlayed(true)))
+	rt.handle(http.MethodDelete, "/Users/{userId}/PlayedItems/{itemId}", s.requireAuth(s.handleSetPlayed(false)))
+
+	// Display preferences, filters, similar, lyrics, session listing.
+	rt.handle(http.MethodGet, "/DisplayPreferences/{displayPreferencesId}", s.requireAuth(s.handleGetDisplayPreferences))
+	rt.handle(http.MethodPost, "/DisplayPreferences/{displayPreferencesId}", s.requireAuth(s.handleSetDisplayPreferences))
+	rt.handle(http.MethodGet, "/Items/Filters", s.requireAuth(s.handleItemFilters))
+	rt.handle(http.MethodGet, "/Items/Filters2", s.requireAuth(s.handleItemFilters2))
+	rt.handle(http.MethodGet, "/Items/{itemId}/Similar", s.requireAuth(s.handleSimilar))
+	rt.handle(http.MethodGet, "/Movies/{itemId}/Similar", s.requireAuth(s.handleSimilar))
+	rt.handle(http.MethodGet, "/Shows/{itemId}/Similar", s.requireAuth(s.handleSimilar))
+	rt.handle(http.MethodGet, "/Albums/{itemId}/Similar", s.requireAuth(s.handleSimilar))
+	rt.handle(http.MethodGet, "/Artists/{itemId}/Similar", s.requireAuth(s.handleSimilar))
+	rt.handle(http.MethodGet, "/Audio/{itemId}/Lyrics", s.requireAuth(s.handleLyrics))
+	rt.handle(http.MethodGet, "/Sessions", s.requireAuth(s.handleSessionsList))
+	rt.handle(http.MethodPost, "/Sessions/Capabilities", s.requireAuth(s.handleSessionsCapabilities))
+	rt.handle(http.MethodPost, "/Sessions/Capabilities/Full", s.requireAuth(s.handleSessionsCapabilities))
+	rt.handle(http.MethodPost, "/Sessions/Viewing", s.requireAuth(s.handleSessionsViewing))
+
 	// WebSocket. "/socket" isn't part of the REST spec; the manifest lists
 	// it as an extra.
 	rt.handle(http.MethodGet, "/socket", s.handleSocket)
 	rt.handle(http.MethodGet, "/embywebsocket", s.handleSocket)
 
+	rt.finalize()
 	return rt
 }
 

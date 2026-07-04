@@ -2,11 +2,13 @@ package jellyfin
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	json "github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/rs/zerolog/log"
 )
 
@@ -36,10 +38,16 @@ var socketUpgrader = websocket.Upgrader{
 	CheckOrigin: func(*http.Request) bool { return true },
 }
 
+// socketConn is one connected client, registered for event pushes.
+type socketConn struct {
+	userID int64
+	send   func(msgType string, data any) error
+}
+
 // GET /socket (alias /embywebsocket) — authenticated via ?api_key= (the only
 // form clients use here; headers can't ride a browser WebSocket upgrade).
 func (s *Server) handleSocket(w http.ResponseWriter, r *http.Request, _ Params) {
-	_, _, ok := s.resolve(r)
+	res, _, ok := s.resolve(r)
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
@@ -62,6 +70,10 @@ func (s *Server) handleSocket(w http.ResponseWriter, r *http.Request, _ Params) 
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		return conn.WriteJSON(payload)
 	}
+
+	sc := &socketConn{userID: res.User.ID, send: send}
+	s.registerSocket(sc)
+	defer s.unregisterSocket(sc)
 
 	if err := send("ForceKeepAlive", socketKeepAliveTimeout); err != nil {
 		return
@@ -89,6 +101,83 @@ func (s *Server) handleSocket(w http.ResponseWriter, r *http.Request, _ Params) 
 			// Subscription starts/stops and player commands land here.
 			// Accepting silently is valid protocol behavior; the client
 			// simply receives no events for that subscription.
+		}
+	}
+}
+
+func (s *Server) registerSocket(sc *socketConn) {
+	s.socketsMu.Lock()
+	if s.sockets == nil {
+		s.sockets = map[*socketConn]struct{}{}
+	}
+	s.sockets[sc] = struct{}{}
+	s.socketsMu.Unlock()
+}
+
+func (s *Server) unregisterSocket(sc *socketConn) {
+	s.socketsMu.Lock()
+	delete(s.sockets, sc)
+	s.socketsMu.Unlock()
+}
+
+// broadcastSocket pushes a message to every connected client (userID 0) or
+// to one user's clients. Send errors are ignored — the read loop notices the
+// dead conn and unregisters it.
+func (s *Server) broadcastSocket(userID int64, msgType string, data any) {
+	s.socketsMu.RLock()
+	targets := make([]*socketConn, 0, len(s.sockets))
+	for sc := range s.sockets {
+		if userID == 0 || sc.userID == userID {
+			targets = append(targets, sc)
+		}
+	}
+	s.socketsMu.RUnlock()
+	for _, sc := range targets {
+		_ = sc.send(msgType, data)
+	}
+}
+
+// bridgeEvents forwards Heya event-hub broadcasts to connected Jellyfin
+// sockets in their protocol. Runs for the App lifetime; started once from
+// NewMiddleware when a hub is present.
+func (s *Server) bridgeEvents() {
+	ch := s.hub.Subscribe()
+	defer s.hub.Unsubscribe(ch)
+	ctx := s.app.LifetimeContext()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			if !s.app.JellyfinEnabled() {
+				continue
+			}
+			switch ev.Type {
+			case eventhub.EventScanCompleted, eventhub.EventMediaAdded, eventhub.EventMediaRemoved, eventhub.EventLibraryDeleted:
+				s.broadcastSocket(0, "LibraryChanged", map[string]any{
+					"FoldersAddedTo":     []string{},
+					"FoldersRemovedFrom": []string{},
+					"ItemsAdded":         []string{},
+					"ItemsRemoved":       []string{},
+					"ItemsUpdated":       []string{},
+					"CollectionFolders":  []string{},
+					"IsEmpty":            false,
+				})
+			case eventhub.EventMediaWatched:
+				if p, ok := ev.Payload.(eventhub.WatchPayload); ok {
+					s.broadcastSocket(p.UserID, "UserDataChanged", map[string]any{
+						"UserId": EncodeID(KindUser, p.UserID),
+						"UserDataList": []map[string]any{{
+							"Key":                   strconv.FormatInt(p.MediaItemID, 10),
+							"PlaybackPositionTicks": int64(p.Progress) * ticksPerSecond,
+							"Played":                p.Completed,
+						}},
+					})
+				}
+			}
 		}
 	}
 }
