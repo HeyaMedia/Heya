@@ -205,7 +205,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Localization/Cultures":                                {Status: opPlanned, Tag: "Localization"},
 	"GET /Localization/Options":                                 {Status: opPlanned, Tag: "Localization"},
 	"GET /Localization/ParentalRatings":                         {Status: opPlanned, Tag: "Localization"},
-	"GET /MediaSegments/{itemId}":                               {Status: opPlanned, Tag: "MediaSegments"},
+	"GET /MediaSegments/{itemId}":                               {Status: opStubbed, Tag: "MediaSegments"}, // empty page: no segment extraction
 	"GET /Movies/{itemId}/Similar":                              {Status: opImplemented, Tag: "Library"},
 	"GET /Movies/Recommendations":                               {Status: opStubbed, Tag: "Movies"},
 	"GET /MusicGenres":                                          {Status: opStubbed, Tag: "MusicGenres"},

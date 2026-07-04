@@ -248,7 +248,7 @@ func (s *Server) handleItemDownload(w http.ResponseWriter, r *http.Request, p Pa
 		http.NotFound(w, r)
 		return
 	}
-	serveMediaFile(w, r, target.file.Path)
+	s.serveMediaFile(w, r, target.file.ID, target.file.Path)
 }
 
 // Subtitle delivery addressed the Jellyfin way (item + media source + stream

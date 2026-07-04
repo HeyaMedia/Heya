@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -208,6 +209,17 @@ func (a *App) JFEpisodeFileID(ctx context.Context, seriesMediaItemID int64, seas
 	}
 	entry, ok := BuildEpisodeFileMap(files)[fmt.Sprintf("s%de%d", season, episode)]
 	return entry.FileID, ok, nil
+}
+
+// PassiveMediaUpstream returns the upstream Heya base URL media bytes can be
+// proxied from when this process is in passive mode (borrowed prod DB, no
+// local media files) — the same upstream the image proxy uses. Empty when
+// not passive or unconfigured; callers then serve local bytes only.
+func (a *App) PassiveMediaUpstream() string {
+	if a.config == nil || !a.config.PassiveMode.Value {
+		return ""
+	}
+	return strings.TrimRight(a.config.ImageProxyURL.Value, "/")
 }
 
 // JFEpisodeFileEntries returns the full s{n}e{n} → file-entry map for one

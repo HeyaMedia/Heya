@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -346,7 +347,7 @@ func (s *Server) handleVideoStream(w http.ResponseWriter, r *http.Request, p Par
 			}
 		}
 	}
-	serveMediaFile(w, r, file.Path)
+	s.serveMediaFile(w, r, file.ID, file.Path)
 }
 
 // GET /Audio/{itemId}/stream and stream.{container} — direct track bytes.
@@ -356,7 +357,7 @@ func (s *Server) handleAudioStream(w http.ResponseWriter, r *http.Request, p Par
 		http.NotFound(w, r)
 		return
 	}
-	serveMediaFile(w, r, target.file.Path)
+	s.serveMediaFile(w, r, target.file.ID, target.file.Path)
 }
 
 // GET|HEAD /Audio/{itemId}/universal — capability-negotiated audio. Direct
@@ -372,7 +373,7 @@ func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p 
 	format := containerOf(target.file.Path)
 	caps := audioCapsFromContainers(queryCI(r, "container"))
 	if transcoder.CanPlayDirect(format, caps) {
-		serveMediaFile(w, r, target.file.Path)
+		s.serveMediaFile(w, r, target.file.ID, target.file.Path)
 		return
 	}
 
@@ -380,7 +381,7 @@ func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p 
 	if mgr == nil {
 		// No ffmpeg — serve the original bytes and let the client cope;
 		// better than a hard 500 for formats it might actually handle.
-		serveMediaFile(w, r, target.file.Path)
+		s.serveMediaFile(w, r, target.file.ID, target.file.Path)
 		return
 	}
 	outPath, err := mgr.EnsureAACMP4(r.Context(), target.trackFileID, target.file.Path)
@@ -393,24 +394,34 @@ func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p 
 	http.ServeFile(w, r, outPath)
 }
 
-// serveMediaFile range-serves a local or SMB-backed media file.
-func serveMediaFile(w http.ResponseWriter, r *http.Request, path string) {
+// serveMediaFile range-serves a local or SMB-backed media file. In passive
+// mode (borrowed prod DB, media files on the prod host's disk) a file that
+// isn't present locally is proxied from the upstream Heya's native
+// /api/stream/{fileId} endpoint — the client's token is a session row in the
+// SHARED database, so it authenticates upstream as-is. Same idea as the
+// passive image proxy; without it, dev playback of prod-path media 404s.
+func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, fileID int64, path string) {
 	if path == "" {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", contentTypeForPath(path))
-	w.Header().Set("Accept-Ranges", "bytes")
-
 	if vfs.IsSMBPath(path) {
+		w.Header().Set("Content-Type", contentTypeForPath(path))
+		w.Header().Set("Accept-Ranges", "bytes")
 		serveVFS(w, r, path)
 		return
 	}
 	f, err := os.Open(path) //nolint:gosec // G304: path comes from library_files rows, not request input
 	if err != nil {
+		if upstream := s.app.PassiveMediaUpstream(); upstream != "" && fileID > 0 {
+			s.proxyUpstreamMedia(w, r, upstream, fileID)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}
+	w.Header().Set("Content-Type", contentTypeForPath(path))
+	w.Header().Set("Accept-Ranges", "bytes")
 	defer func() { _ = f.Close() }()
 	stat, err := f.Stat()
 	if err != nil {
@@ -418,6 +429,42 @@ func serveMediaFile(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	http.ServeContent(w, r, path, stat.ModTime(), f)
+}
+
+// passiveMediaClient streams upstream media bytes. No overall timeout — a
+// direct-played film runs for hours; the request context governs lifetime.
+var passiveMediaClient = &http.Client{}
+
+func (s *Server) proxyUpstreamMedia(w http.ResponseWriter, r *http.Request, upstream string, fileID int64) {
+	token := TokenFrom(r.Context())
+	if token == "" {
+		token = extractAuth(r).Token
+	}
+	u := fmt.Sprintf("%s/api/stream/%d?token=%s", upstream, fileID, url.QueryEscape(token))
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u, nil)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if rg := r.Header.Get("Range"); rg != "" {
+		req.Header.Set("Range", rg)
+	}
+	res, err := passiveMediaClient.Do(req)
+	if err != nil {
+		log.Warn().Err(err).Int64("file", fileID).Str("component", "jellyfin").Msg("passive media proxy upstream failed")
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	defer func() { _ = res.Body.Close() }()
+	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"} {
+		if v := res.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	w.WriteHeader(res.StatusCode)
+	if r.Method != http.MethodHead {
+		_, _ = io.Copy(w, res.Body)
+	}
 }
 
 func serveVFS(w http.ResponseWriter, r *http.Request, smbPath string) {
