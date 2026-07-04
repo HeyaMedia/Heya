@@ -326,31 +326,54 @@ func capsFromProfile(p *deviceProfile) transcoder.ClientCapabilities {
 	}
 	// HDR passthrough. A device that direct-plays HEVC Main 10 decodes the
 	// 10-bit bitstream and passes the transfer function (PQ/HLG) straight to
-	// the display — it does NOT need to tonemap. Jellyfin clients express
-	// this by NOT restricting VideoRangeType, so the correct default for an
-	// HEVC-capable client is "handles HDR10 + HLG". Forcing these off led to
-	// an unnecessary (and, on 4K, failing) tonemap transcode. DoVi stays
-	// opt-in — profile 5 needs explicit client support. An explicit
-	// VideoRangeType condition still refines the set below.
+	// the display — it does NOT need to tonemap. Jellyfin clients that handle
+	// HDR express this by NOT restricting VideoRangeType, so the correct
+	// default for an HEVC-capable client is "handles HDR10 + HLG" (forcing
+	// these off led to an unnecessary, and on 4K failing, tonemap transcode).
+	// DoVi stays opt-in — profile 5 needs explicit support.
 	if caps.SupportsHEVC {
 		caps.SupportsHDR10 = true
 		caps.SupportsHLG = true
 	}
+	// An explicit VideoRangeType condition on an HDR-capable codec profile is
+	// AUTHORITATIVE and can turn the default OFF: an EqualsAny condition is
+	// the client's allow-list (a stream must match it to direct-play), so an
+	// SDR-only decoder ("EqualsAny SDR") correctly disables passthrough and
+	// gets a tonemap. NotEquals conditions are a deny-list. Range conditions
+	// on SDR-only codecs (h264) are irrelevant to HDR and skipped.
 	for _, cp := range p.CodecProfiles {
+		if cp.Type != "" && !strings.EqualFold(cp.Type, "Video") {
+			continue
+		}
+		codec := strings.ToLower(cp.Codec)
+		if codec != "" && !strings.Contains(codec, "hevc") && !strings.Contains(codec, "h265") && !strings.Contains(codec, "av1") {
+			continue
+		}
 		for _, c := range cp.Conditions {
 			if !strings.EqualFold(c.Property, "VideoRangeType") {
 				continue
 			}
 			v := strings.ToLower(c.Value)
-			if strings.Contains(v, "hdr10") {
-				caps.SupportsHDR10 = true
+			has := func(s string) bool { return strings.Contains(v, s) }
+			isDoVi := has("dovi") || has("dolby")
+			if strings.HasPrefix(strings.ToLower(c.Condition), "notequal") {
+				// Deny-list: turn off exactly what's named.
+				if has("hdr10") {
+					caps.SupportsHDR10 = false
+				}
+				if has("hlg") {
+					caps.SupportsHLG = false
+				}
+				if isDoVi {
+					caps.SupportsDoVi = false
+				}
+				continue
 			}
-			if strings.Contains(v, "hlg") {
-				caps.SupportsHLG = true
-			}
-			if strings.Contains(v, "dovi") || strings.Contains(v, "dolby") {
-				caps.SupportsDoVi = true
-			}
+			// Allow-list (EqualsAny / Equals): the supported set is exactly
+			// what's named — anything absent is unsupported.
+			caps.SupportsHDR10 = has("hdr10")
+			caps.SupportsHLG = has("hlg")
+			caps.SupportsDoVi = isDoVi
 		}
 	}
 	return caps
