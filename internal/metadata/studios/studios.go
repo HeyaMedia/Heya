@@ -124,6 +124,10 @@ func downloadFile(ctx context.Context, url, dest string) bool {
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 
+// Slugify intentionally differs from internal/slug (it maps "&" → "and"
+// where slug.Generate does not). The slugs key the on-disk studio logo
+// filenames, so the mapping must stay byte-stable across releases — do NOT
+// replace this with slug.Generate or existing logos stop resolving.
 func Slugify(name string) string {
 	s := strings.ToLower(name)
 	s = strings.ReplaceAll(s, "&", "and")

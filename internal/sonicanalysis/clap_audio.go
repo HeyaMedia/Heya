@@ -1,7 +1,6 @@
 package sonicanalysis
 
 import (
-	"context"
 	"fmt"
 	"math"
 
@@ -92,22 +91,6 @@ func (c *clapAudioSession) Embed(melSpec []float32) ([]float32, error) {
 	copy(out, src)
 	l2Normalize(out)
 	return out, nil
-}
-
-// extractClapAudio runs the full audio → embedding pipeline for one
-// file: ffmpeg decode @ 48 kHz → mel-spec → CLAP audio encoder.
-//
-//nolint:unused // staged: single-file path, exposed when CLI tooling adopts it
-func extractClapAudio(ctx context.Context, sess *clapAudioSession, audioPath string) ([]float32, error) {
-	pcm, err := decodePCM(ctx, audioPath, clapSampleRate)
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	if len(pcm) == 0 {
-		return nil, fmt.Errorf("decoded zero samples")
-	}
-	mel := clapMelSpec(pcm)
-	return sess.Embed(mel)
 }
 
 // l2Normalize divides a vector by its L2 norm in-place. Used so that

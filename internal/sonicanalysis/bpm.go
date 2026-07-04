@@ -1,7 +1,6 @@
 package sonicanalysis
 
 import (
-	"context"
 	"fmt"
 	"math"
 
@@ -23,26 +22,10 @@ const (
 	bpmMaxBPM     = 200
 )
 
-// detectBPM runs the full audio → tempo pipeline. Returns the
-// estimated BPM and a "confidence" score in [0,1] (peak strength
-// relative to the autocorrelation noise floor).
-//
-// Currently only wired in via detectBPMFromPCM (called from the
-// extractor); kept exported-style so the path-based variant remains
-// available when callers need to skip the shared decoder.
-//
-//nolint:unused // staged for a future single-file CLI path
-func detectBPM(ctx context.Context, audioPath string) (bpm float64, confidence float64, err error) {
-	pcm, err := decodePCM(ctx, audioPath, bpmSampleRate)
-	if err != nil {
-		return 0, 0, fmt.Errorf("decode: %w", err)
-	}
-	return detectBPMFromPCM(pcm)
-}
-
-// detectBPMFromPCM is the underlying routine, exported into a
-// separate function so the Analyzer can share one decode across
-// BPM + key (both want 16 kHz mono PCM).
+// detectBPMFromPCM estimates the BPM and a "confidence" score in
+// [0,1] (peak strength relative to the autocorrelation noise floor)
+// from 16 kHz mono PCM. A separate function from the decode so the
+// Analyzer can share one decode across BPM + key.
 func detectBPMFromPCM(pcm []float32) (bpm float64, confidence float64, err error) {
 	if len(pcm) < bpmSampleRate*4 {
 		return 0, 0, fmt.Errorf("need at least 4 s of audio, got %.1f s",

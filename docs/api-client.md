@@ -1,19 +1,20 @@
 # Typed API client (OpenAPI → TypeScript)
 
 The Go server's Huma operations generate an OpenAPI 3.1 spec. We commit that
-spec **and** the typed TS client derived from it so PRs surface API-surface
-changes loudly.
+spec so PRs surface API-surface changes loudly. TS types derive from the spec
+at Nuxt build/prepare time (`nuxt-open-fetch`) — there is no separate
+TS-codegen artifact.
 
 ## Regenerating
 
 ```bash
-make gen-api-client          # regenerate web/shared/api.openapi.json + types
+make gen-api-client          # regenerate web/shared/api.openapi.json
 ./bin/heya openapi-spec      # dump just the spec (use -o file to write)
 ```
 
-The lefthook `openapi-drift` hook regenerates the client whenever a
-`*_huma.go` file changes and blocks the commit if the regenerated artifacts
-differ from what's staged — equivalent to the sqlc drift check.
+The lefthook `openapi-drift` hook regenerates the spec whenever a
+`*_huma.go` file changes and blocks the commit if the regenerated spec
+differs from what's staged — equivalent to the sqlc drift check.
 
 ## Files
 

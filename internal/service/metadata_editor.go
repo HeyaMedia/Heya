@@ -45,6 +45,29 @@ type UpdateEpisodeReq struct {
 	AirDate        *string `json:"air_date"`
 }
 
+// updateMediaItemParamsFrom spells every UpdateMediaItem field from the
+// current row. Callers override the one or two fields they're changing —
+// UpdateMediaItem is a full-row write, so any field not copied here would be
+// silently blanked. (Mirrors the builder in internal/worker.)
+func updateMediaItemParamsFrom(item sqlc.MediaItem) sqlc.UpdateMediaItemParams {
+	return sqlc.UpdateMediaItemParams{
+		ID:               item.ID,
+		Title:            item.Title,
+		SortTitle:        item.SortTitle,
+		Year:             item.Year,
+		Description:      item.Description,
+		PosterPath:       item.PosterPath,
+		BackdropPath:     item.BackdropPath,
+		ExternalIds:      item.ExternalIds,
+		Tagline:          item.Tagline,
+		OriginalTitle:    item.OriginalTitle,
+		OriginalLanguage: item.OriginalLanguage,
+		Status:           item.Status,
+		ProviderKind:     item.ProviderKind,
+		HeyaSlug:         item.HeyaSlug,
+	}
+}
+
 // ListLibraryMedia returns media items belonging to a library with optional search.
 func (a *App) ListLibraryMedia(ctx context.Context, libraryID int64, limit, offset int32, query string) ([]sqlc.MediaItem, error) {
 	q := sqlc.New(a.db)
@@ -65,61 +88,37 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 			return fmt.Errorf("media item not found: %w", err)
 		}
 
-		title := item.Title
+		p := updateMediaItemParamsFrom(item)
 		if req.Title != nil {
-			title = *req.Title
+			p.Title = *req.Title
 		}
-		sortTitle := item.SortTitle
 		if req.SortTitle != nil {
-			sortTitle = *req.SortTitle
+			p.SortTitle = *req.SortTitle
 		}
-		year := item.Year
 		if req.Year != nil {
-			year = *req.Year
+			p.Year = *req.Year
 		}
-		desc := item.Description
 		if req.Description != nil {
-			desc = *req.Description
+			p.Description = *req.Description
 		}
-		externalIDs := item.ExternalIds
 		if req.ExternalIDs != nil {
 			b, _ := json.Marshal(req.ExternalIDs)
-			externalIDs = b
+			p.ExternalIds = b
 		}
-		tagline := item.Tagline
 		if req.Tagline != nil {
-			tagline = *req.Tagline
+			p.Tagline = *req.Tagline
 		}
-		origTitle := item.OriginalTitle
 		if req.OriginalTitle != nil {
-			origTitle = *req.OriginalTitle
+			p.OriginalTitle = *req.OriginalTitle
 		}
-		origLang := item.OriginalLanguage
 		if req.OriginalLanguage != nil {
-			origLang = *req.OriginalLanguage
+			p.OriginalLanguage = *req.OriginalLanguage
 		}
-		status := item.Status
 		if req.Status != nil {
-			status = *req.Status
+			p.Status = *req.Status
 		}
 
-		_, err = q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-			ID:               mediaItemID,
-			Title:            title,
-			SortTitle:        sortTitle,
-			Year:             year,
-			Description:      desc,
-			PosterPath:       item.PosterPath,
-			BackdropPath:     item.BackdropPath,
-			ExternalIds:      externalIDs,
-			Tagline:          tagline,
-			OriginalTitle:    origTitle,
-			OriginalLanguage: origLang,
-			Status:           status,
-			ProviderKind:     item.ProviderKind,
-			HeyaSlug:         item.HeyaSlug,
-		})
-		if err != nil {
+		if _, err := q.UpdateMediaItem(ctx, p); err != nil {
 			return fmt.Errorf("updating media item: %w", err)
 		}
 
@@ -601,22 +600,13 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 	txq := q.WithTx(tx)
 
 	externalIDs, _ := json.Marshal(detail.ExternalIDs)
-	if _, err := txq.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-		ID:               mediaItemID,
-		Title:            detail.Title,
-		SortTitle:        strings.ToLower(detail.Title),
-		Year:             detail.Year,
-		Description:      detail.Description,
-		PosterPath:       item.PosterPath,
-		BackdropPath:     item.BackdropPath,
-		ExternalIds:      externalIDs,
-		Tagline:          item.Tagline,
-		OriginalTitle:    item.OriginalTitle,
-		OriginalLanguage: item.OriginalLanguage,
-		Status:           item.Status,
-		ProviderKind:     item.ProviderKind,
-		HeyaSlug:         item.HeyaSlug,
-	}); err != nil {
+	p := updateMediaItemParamsFrom(item)
+	p.Title = detail.Title
+	p.SortTitle = strings.ToLower(detail.Title)
+	p.Year = detail.Year
+	p.Description = detail.Description
+	p.ExternalIds = externalIDs
+	if _, err := txq.UpdateMediaItem(ctx, p); err != nil {
 		return fmt.Errorf("re-identify: update media item: %w", err)
 	}
 

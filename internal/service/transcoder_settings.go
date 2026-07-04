@@ -2,9 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-
-	"github.com/karbowiak/heya/internal/config"
 )
 
 const (
@@ -21,27 +18,24 @@ const (
 // PATCH semantics where only the dirty fields are sent.
 func (a *App) SaveTranscoderSettings(ctx context.Context, hwAccel string, cacheMaxGB int) error {
 	if hwAccel != "" {
-		if err := errIfEnvLockedChanged("transcoder.hwaccel", a.config.HWAccel, hwAccel); err != nil {
+		if err := errIfEnvLockedChanged(transcoderKeyHWAccel, a.config.HWAccel, hwAccel); err != nil {
 			return err
-		}
-		if a.config.HWAccel.Source != config.SourceEnv {
-			buf, _ := json.Marshal(hwAccel)
-			if err := a.SetSystemSetting(ctx, transcoderKeyHWAccel, buf); err != nil {
-				return err
-			}
-			a.config.HWAccel = config.Field[string]{Value: hwAccel, Source: config.SourceDB}
 		}
 	}
 	if cacheMaxGB > 0 {
-		if err := errIfEnvLockedChanged("transcoder.cache_max_gb", a.config.TranscodeCacheMaxGB, cacheMaxGB); err != nil {
+		if err := errIfEnvLockedChanged(transcoderKeyCacheMaxGB, a.config.TranscodeCacheMaxGB, cacheMaxGB); err != nil {
 			return err
 		}
-		if a.config.TranscodeCacheMaxGB.Source != config.SourceEnv {
-			buf, _ := json.Marshal(cacheMaxGB)
-			if err := a.SetSystemSetting(ctx, transcoderKeyCacheMaxGB, buf); err != nil {
-				return err
-			}
-			a.config.TranscodeCacheMaxGB = config.Field[int]{Value: cacheMaxGB, Source: config.SourceDB}
+	}
+
+	if hwAccel != "" {
+		if err := persistAndOverlayField(a, ctx, transcoderKeyHWAccel, &a.config.HWAccel, hwAccel); err != nil {
+			return err
+		}
+	}
+	if cacheMaxGB > 0 {
+		if err := persistAndOverlayField(a, ctx, transcoderKeyCacheMaxGB, &a.config.TranscodeCacheMaxGB, cacheMaxGB); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -50,18 +44,6 @@ func (a *App) SaveTranscoderSettings(ctx context.Context, hwAccel string, cacheM
 // LoadTranscoderFromDB overlays the in-memory snapshot with persisted UI
 // values for any field that wasn't already env-set. Called once at boot.
 func (a *App) LoadTranscoderFromDB(ctx context.Context) {
-	if a.config.HWAccel.Source == config.SourceDefault {
-		if v, ok := a.readStringSetting(ctx, transcoderKeyHWAccel); ok && v != "" {
-			a.config.HWAccel = config.Field[string]{Value: v, Source: config.SourceDB}
-		}
-	}
-	if a.config.TranscodeCacheMaxGB.Source == config.SourceDefault {
-		raw, err := a.GetSystemSetting(ctx, transcoderKeyCacheMaxGB)
-		if err == nil {
-			var v int
-			if json.Unmarshal(raw, &v) == nil && v > 0 {
-				a.config.TranscodeCacheMaxGB = config.Field[int]{Value: v, Source: config.SourceDB}
-			}
-		}
-	}
+	overlayFieldFromDB(a, ctx, &a.config.HWAccel, transcoderKeyHWAccel, func(v string) bool { return v != "" })
+	overlayFieldFromDB(a, ctx, &a.config.TranscodeCacheMaxGB, transcoderKeyCacheMaxGB, func(v int) bool { return v > 0 })
 }

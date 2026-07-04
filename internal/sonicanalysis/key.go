@@ -1,7 +1,6 @@
 package sonicanalysis
 
 import (
-	"context"
 	"fmt"
 	"math"
 
@@ -37,30 +36,18 @@ var (
 	profileMinor = [12]float64{6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17}
 )
 
-// KeyResult is the output of detectKey — a strongly-typed Key plus
-// diagnostic info. KeyResult.Key is the canonical value to persist;
-// Clarity helps callers decide whether to display major/minor.
+// KeyResult is the output of detectKeyFromPCM — a strongly-typed Key
+// plus diagnostic info. KeyResult.Key is the canonical value to
+// persist; Clarity helps callers decide whether to display major/minor.
 type KeyResult struct {
 	Key         Key
 	Clarity     float64 // gap to second-best in [0, 1]
 	Correlation float64 // raw best cosine correlation
 }
 
-func (k KeyResult) String() string { return k.Key.String() }
-
-// detectKey runs the full pipeline. Returns the detected key.
-//
-//nolint:unused // staged: single-file CLI variant; pipeline path uses detectKeyFromPCM
-func detectKey(ctx context.Context, audioPath string) (*KeyResult, error) {
-	pcm, err := decodePCM(ctx, audioPath, bpmSampleRate)
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	return detectKeyFromPCM(pcm)
-}
-
-// detectKeyFromPCM is the underlying routine — exposed so the
-// Analyzer can share one 16 kHz decode across BPM + key.
+// detectKeyFromPCM runs the key-detection pipeline on 16 kHz mono
+// PCM — a separate function from the decode so the Analyzer can share
+// one decode across BPM + key.
 func detectKeyFromPCM(pcm []float32) (*KeyResult, error) {
 	if len(pcm) < keyFFTSize {
 		return nil, fmt.Errorf("audio shorter than one analysis frame (%d s)",

@@ -27,22 +27,10 @@ func registerJobRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/summary", "job-summary", "Job state summary", "Jobs")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.JobSummaryRow], error) {
-			summary, err := app.JobSummary(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return noStoreJSON(summary), nil
-		})
+		simpleGet(app.JobSummary, 0))
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/kinds", "job-kind-summary", "Per-kind job counts", "Jobs")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.JobKindSummaryRow], error) {
-			summary, err := app.JobKindSummary(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return noStoreJSON(summary), nil
-		})
+		simpleGet(app.JobKindSummary, 0))
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/jobs/rescue", "rescue-jobs", "Rescue stuck jobs", "Jobs")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[rescueBody], error) {
@@ -103,22 +91,10 @@ func registerJobRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/schedules", "list-schedules", "Periodic schedules computed from library settings", "Jobs")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ScheduleEntry], error) {
-			entries, err := app.ListSchedules(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return noStoreJSON(entries), nil
-		})
+		simpleGet(app.ListSchedules, 0))
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/queue/metadata", "metadata-queue-status", "Snapshot of the unified metadata enrich queue (pending counts by priority, current item, throughput)", "Jobs")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.MetadataQueueStatus], error) {
-			status, err := app.MetadataQueueStatus(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return noStoreJSON(status), nil
-		})
+		simpleGet(app.MetadataQueueStatus, 0))
 }
 
 // registerTaskRoutes covers /api/tasks/* — the scheduled-task UI for trickplay,

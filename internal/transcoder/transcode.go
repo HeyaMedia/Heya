@@ -74,21 +74,16 @@ func IsFFprobeAvailable() bool {
 }
 
 type TranscodeOpts struct {
-	Input         string
-	InputReader   io.Reader
-	OutputDir     string
-	Profile       Profile
-	HWAccel       HwAccelConfig
-	Keyframes     *Keyframes
-	StartTime     float64
-	Duration      float64
-	AudioTrack    int
-	SubtitleTrack int
-	BurnSubtitles bool
-	SubtitleCodec string
-	StartSegment  int
-	ToneMap       bool
-	UseFMP4       bool
+	Input        string
+	OutputDir    string
+	Profile      Profile
+	HWAccel      HwAccelConfig
+	Keyframes    *Keyframes
+	StartTime    float64
+	AudioTrack   int
+	StartSegment int
+	ToneMap      bool
+	UseFMP4      bool
 
 	// Plan carries surgical fixes (deinterlace, rotation, anamorphic,
 	// HEVC retag, DV EL strip) that the upstream decision layer chose. Nil
@@ -102,9 +97,6 @@ func TranscodeToHLSWithOpts(ctx context.Context, opts TranscodeOpts) error {
 
 	args := buildTranscodeArgs(opts)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	if opts.InputReader != nil {
-		cmd.Stdin = opts.InputReader
-	}
 	return cmd.Run()
 }
 
@@ -117,11 +109,7 @@ func buildTranscodeArgs(opts TranscodeOpts) []string {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", opts.StartTime))
 	}
 
-	if opts.InputReader != nil {
-		args = append(args, "-i", "pipe:0")
-	} else {
-		args = append(args, "-i", opts.Input)
-	}
+	args = append(args, "-i", opts.Input)
 
 	args = appendVideoArgs(args, opts)
 	args = appendAudioArgs(args, opts.Profile)
@@ -382,11 +370,7 @@ func BuildHLSArgs(opts TranscodeOpts, outputDir string) []string {
 		args = append(args, "-ss", fmt.Sprintf("%.6f", opts.StartTime))
 	}
 
-	if opts.InputReader != nil || opts.Input == "pipe:0" {
-		args = append(args, "-i", "pipe:0")
-	} else {
-		args = append(args, "-i", opts.Input)
-	}
+	args = append(args, "-i", opts.Input)
 
 	if opts.UseFMP4 {
 		args = append(args, "-copyts", "-avoid_negative_ts", "disabled")

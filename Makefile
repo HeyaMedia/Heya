@@ -1,6 +1,6 @@
 GOBIN := $(shell go env GOPATH)/bin
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyamedia-client docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyamedia-client deadcode dead-components docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
 
 # Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
 # bumps occasionally break field shapes and we want clients to match.
@@ -60,6 +60,19 @@ test-coverage:
 
 lint:
 	go vet ./...
+
+# Report Go dead-code candidates via x/tools' deadcode analyzer. Needs
+# network on the first run (go run downloads the tool). Output is a list of
+# CANDIDATES for manual review — reflection, build tags, and CLI-only paths
+# produce false positives — so this is a report, not an error gate.
+deadcode:
+	go run golang.org/x/tools/cmd/deadcode@latest ./...
+
+# Report Vue components under web/app/components with zero references in
+# web/app + web/shared (PascalCase/kebab tags, Lazy prefix, imports,
+# resolveComponent strings). Candidates for manual review, not an error gate.
+dead-components:
+	cd web && bun ../tools/dead-components.ts
 
 clean:
 	rm -rf bin/

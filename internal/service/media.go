@@ -530,6 +530,31 @@ func HeightToResolution(h int32) string {
 	}
 }
 
+// formatTS renders a timestamptz in the enriched-list API form
+// ("2006-01-02T15:04:05Z"), or "" when NULL.
+func formatTS(ts pgtype.Timestamptz) string {
+	if !ts.Valid {
+		return ""
+	}
+	return ts.Time.Format("2006-01-02T15:04:05Z")
+}
+
+// formatDate renders a date column as "2006-01-02", or "" when NULL.
+func formatDate(d pgtype.Date) string {
+	if !d.Valid {
+		return ""
+	}
+	return d.Time.Format("2006-01-02")
+}
+
+// ratingFloat converts a numeric rating to float64, or 0 when NULL/invalid.
+func ratingFloat(r pgtype.Numeric) float64 {
+	if f, err := r.Float64Value(); err == nil && f.Valid {
+		return f.Float64
+	}
+	return 0
+}
+
 // ListEnrichedMovies returns enriched movie views with resolution and availability.
 func (a *App) ListEnrichedMovies(ctx context.Context, limit, offset int32) ([]EnrichedMovieView, error) {
 	q := sqlc.New(a.db)
@@ -568,18 +593,10 @@ func (a *App) ListEnrichedMovies(ctx context.Context, limit, offset int32) ([]En
 			RuntimeMinutes:   m.RuntimeMinutes,
 			OriginalLanguage: m.OriginalLanguage,
 			Resolution:       resMap[m.ID],
-		}
-		if m.CreatedAt.Valid {
-			v.CreatedAt = m.CreatedAt.Time.Format("2006-01-02T15:04:05Z")
-		}
-		if m.UpdatedAt.Valid {
-			v.UpdatedAt = m.UpdatedAt.Time.Format("2006-01-02T15:04:05Z")
-		}
-		if f, err := m.Rating.Float64Value(); err == nil && f.Valid {
-			v.Rating = f.Float64
-		}
-		if m.ReleaseDate.Valid {
-			v.ReleaseDate = m.ReleaseDate.Time.Format("2006-01-02")
+			CreatedAt:        formatTS(m.CreatedAt),
+			UpdatedAt:        formatTS(m.UpdatedAt),
+			Rating:           ratingFloat(m.Rating),
+			ReleaseDate:      formatDate(m.ReleaseDate),
 		}
 		if m.CollectionID.Valid {
 			cid := m.CollectionID.Int64
@@ -630,21 +647,11 @@ func (a *App) ListEnrichedTVSeries(ctx context.Context, limit, offset int32) ([]
 			NumberOfSeasons:  s.NumberOfSeasons,
 			NumberOfEpisodes: s.NumberOfEpisodes,
 			Resolution:       resMap[s.ID],
-		}
-		if s.CreatedAt.Valid {
-			v.CreatedAt = s.CreatedAt.Time.Format("2006-01-02T15:04:05Z")
-		}
-		if s.UpdatedAt.Valid {
-			v.UpdatedAt = s.UpdatedAt.Time.Format("2006-01-02T15:04:05Z")
-		}
-		if f, err := s.Rating.Float64Value(); err == nil && f.Valid {
-			v.Rating = f.Float64
-		}
-		if s.FirstAirDate.Valid {
-			v.FirstAirDate = s.FirstAirDate.Time.Format("2006-01-02")
-		}
-		if s.LastAirDate.Valid {
-			v.LastAirDate = s.LastAirDate.Time.Format("2006-01-02")
+			CreatedAt:        formatTS(s.CreatedAt),
+			UpdatedAt:        formatTS(s.UpdatedAt),
+			Rating:           ratingFloat(s.Rating),
+			FirstAirDate:     formatDate(s.FirstAirDate),
+			LastAirDate:      formatDate(s.LastAirDate),
 		}
 		views[i] = v
 	}

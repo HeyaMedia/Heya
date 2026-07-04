@@ -291,6 +291,24 @@ func noStoreJSON[T any](body T) *JSONOutput[T] {
 	}
 }
 
+// simpleGet adapts the ubiquitous zero-input GET handler shape — one service
+// call, 500 with the error text on failure — into a Huma handler func.
+// cacheSeconds > 0 responds with cachedJSON (private, max-age=N); 0 responds
+// with noStoreJSON. Handlers with any extra logic (extra arguments, custom
+// error mapping, response reshaping) should stay hand-written.
+func simpleGet[T any](get func(context.Context) (T, error), cacheSeconds int) func(context.Context, *struct{}) (*JSONOutput[T], error) {
+	return func(ctx context.Context, _ *struct{}) (*JSONOutput[T], error) {
+		v, err := get(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(err.Error())
+		}
+		if cacheSeconds > 0 {
+			return cachedJSON(v, cacheSeconds), nil
+		}
+		return noStoreJSON(v), nil
+	}
+}
+
 const scalarHTML = `<!DOCTYPE html>
 <html>
 <head>

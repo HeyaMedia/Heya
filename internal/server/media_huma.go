@@ -228,13 +228,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 
 	// --- Genres / keywords / collections ---
 	huma.Register(api, secured(op(http.MethodGet, "/api/genres", "list-genres", "All genres with counts", "Discover")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListAllGenresRow], error) {
-			genres, err := app.ListGenres(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return cachedJSON(genres, 60), nil
-		})
+		simpleGet(app.ListGenres, 60))
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/genres/{name}", "get-genre", "Media within a genre", "Discover")),
 		func(ctx context.Context, in *struct {
@@ -282,13 +276,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/collections/browse", "browse-collections", "Browseable collection listing", "Discover")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListCollectionsWithLocalMediaRow], error) {
-			result, err := app.BrowseCollections(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return cachedJSON(result, 60), nil
-		})
+		simpleGet(app.BrowseCollections, 60))
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/collections/{id}", "get-collection", "Collection detail", "Discover")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[service.CollectionResult], error) {

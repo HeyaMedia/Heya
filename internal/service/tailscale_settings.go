@@ -2,11 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/karbowiak/heya/internal/config"
 )
 
 // TailscaleUpdate is the DTO accepted by the API for runtime tailscale
@@ -36,38 +31,32 @@ const (
 func (a *App) SaveTailscaleSettings(ctx context.Context, u TailscaleUpdate) error {
 	cur := a.config.Tailscale
 
-	if err := errIfEnvLockedChanged("tailscale.enabled", cur.Enabled, u.Enabled); err != nil {
+	if err := errIfEnvLockedChanged(tsKeyEnabled, cur.Enabled, u.Enabled); err != nil {
 		return err
 	}
-	if err := errIfEnvLockedChanged("tailscale.https", cur.HTTPS, u.HTTPS); err != nil {
+	if err := errIfEnvLockedChanged(tsKeyHTTPS, cur.HTTPS, u.HTTPS); err != nil {
 		return err
 	}
-	if err := errIfEnvLockedChanged("tailscale.funnel", cur.Funnel, u.Funnel); err != nil {
+	if err := errIfEnvLockedChanged(tsKeyFunnel, cur.Funnel, u.Funnel); err != nil {
 		return err
 	}
 	if u.Hostname != "" {
-		if err := errIfEnvLockedChanged("tailscale.hostname", cur.Hostname, u.Hostname); err != nil {
+		if err := errIfEnvLockedChanged(tsKeyHostname, cur.Hostname, u.Hostname); err != nil {
 			return err
 		}
 	}
 
-	if cur.Enabled.Source != config.SourceEnv {
-		if err := a.writeBoolSetting(ctx, tsKeyEnabled, u.Enabled); err != nil {
-			return err
-		}
+	if err := persistFieldSetting(a, ctx, tsKeyEnabled, cur.Enabled, u.Enabled); err != nil {
+		return err
 	}
-	if cur.HTTPS.Source != config.SourceEnv {
-		if err := a.writeBoolSetting(ctx, tsKeyHTTPS, u.HTTPS); err != nil {
-			return err
-		}
+	if err := persistFieldSetting(a, ctx, tsKeyHTTPS, cur.HTTPS, u.HTTPS); err != nil {
+		return err
 	}
-	if cur.Funnel.Source != config.SourceEnv {
-		if err := a.writeBoolSetting(ctx, tsKeyFunnel, u.Funnel); err != nil {
-			return err
-		}
+	if err := persistFieldSetting(a, ctx, tsKeyFunnel, cur.Funnel, u.Funnel); err != nil {
+		return err
 	}
-	if cur.Hostname.Source != config.SourceEnv && u.Hostname != "" {
-		if err := a.writeStringSetting(ctx, tsKeyHostname, u.Hostname); err != nil {
+	if u.Hostname != "" {
+		if err := persistFieldSetting(a, ctx, tsKeyHostname, cur.Hostname, u.Hostname); err != nil {
 			return err
 		}
 	}
@@ -85,67 +74,8 @@ func (a *App) SaveTailscaleSettings(ctx context.Context, u TailscaleUpdate) erro
 // env provenance; only fields that fell through to defaults get overlaid
 // with whatever the DB has persisted from prior UI changes.
 func (a *App) LoadTailscaleFromDB(ctx context.Context) {
-	if a.config.Tailscale.Enabled.Source == config.SourceDefault {
-		if v, ok := a.readBoolSetting(ctx, tsKeyEnabled); ok {
-			a.config.Tailscale.Enabled = config.Field[bool]{Value: v, Source: config.SourceDB}
-		}
-	}
-	if a.config.Tailscale.HTTPS.Source == config.SourceDefault {
-		if v, ok := a.readBoolSetting(ctx, tsKeyHTTPS); ok {
-			a.config.Tailscale.HTTPS = config.Field[bool]{Value: v, Source: config.SourceDB}
-		}
-	}
-	if a.config.Tailscale.Funnel.Source == config.SourceDefault {
-		if v, ok := a.readBoolSetting(ctx, tsKeyFunnel); ok {
-			a.config.Tailscale.Funnel = config.Field[bool]{Value: v, Source: config.SourceDB}
-		}
-	}
-	if a.config.Tailscale.Hostname.Source == config.SourceDefault {
-		if v, ok := a.readStringSetting(ctx, tsKeyHostname); ok && v != "" {
-			a.config.Tailscale.Hostname = config.Field[string]{Value: v, Source: config.SourceDB}
-		}
-	}
-}
-
-func (a *App) writeBoolSetting(ctx context.Context, key string, v bool) error {
-	buf, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return a.SetSystemSetting(ctx, key, buf)
-}
-
-func (a *App) writeStringSetting(ctx context.Context, key, v string) error {
-	buf, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return a.SetSystemSetting(ctx, key, buf)
-}
-
-func (a *App) readBoolSetting(ctx context.Context, key string) (bool, bool) {
-	raw, err := a.GetSystemSetting(ctx, key)
-	if err != nil {
-		return false, false
-	}
-	var v bool
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return false, false
-	}
-	return v, true
-}
-
-func (a *App) readStringSetting(ctx context.Context, key string) (string, bool) {
-	raw, err := a.GetSystemSetting(ctx, key)
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return "", false
-		}
-		return "", false
-	}
-	var v string
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return "", false
-	}
-	return v, true
+	overlayFieldFromDB(a, ctx, &a.config.Tailscale.Enabled, tsKeyEnabled, nil)
+	overlayFieldFromDB(a, ctx, &a.config.Tailscale.HTTPS, tsKeyHTTPS, nil)
+	overlayFieldFromDB(a, ctx, &a.config.Tailscale.Funnel, tsKeyFunnel, nil)
+	overlayFieldFromDB(a, ctx, &a.config.Tailscale.Hostname, tsKeyHostname, func(v string) bool { return v != "" })
 }

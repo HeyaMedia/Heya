@@ -27,10 +27,8 @@ func (a *App) SaveJellyfinSettings(ctx context.Context, enabled bool) error {
 	if err := errIfEnvLockedChanged(jfKeyEnabled, cur.Enabled, enabled); err != nil {
 		return err
 	}
-	if cur.Enabled.Source != config.SourceEnv {
-		if err := a.writeBoolSetting(ctx, jfKeyEnabled, enabled); err != nil {
-			return err
-		}
+	if err := persistFieldSetting(a, ctx, jfKeyEnabled, cur.Enabled, enabled); err != nil {
+		return err
 	}
 	a.UpdateJellyfinConfig(enabled)
 	return nil
@@ -41,11 +39,7 @@ func (a *App) SaveJellyfinSettings(ctx context.Context, enabled bool) error {
 // fields retain their env provenance; only default-sourced fields get the
 // DB overlay. Safe to call with no DB rows present.
 func (a *App) LoadJellyfinFromDB(ctx context.Context) {
-	if a.config.Jellyfin.Enabled.Source == config.SourceDefault {
-		if v, ok := a.readBoolSetting(ctx, jfKeyEnabled); ok {
-			a.config.Jellyfin.Enabled = config.Field[bool]{Value: v, Source: config.SourceDB}
-		}
-	}
+	overlayFieldFromDB(a, ctx, &a.config.Jellyfin.Enabled, jfKeyEnabled, nil)
 }
 
 // UpdateJellyfinConfig overlays the in-memory jellyfin snapshot after a
@@ -77,7 +71,7 @@ var (
 // cached for the process lifetime.
 func (a *App) JellyfinServerID(ctx context.Context) string {
 	jfServerIDOnce.Do(func() {
-		if v, ok := a.readStringSetting(ctx, jfKeyServerID); ok && len(v) == 32 {
+		if v, ok := readSetting[string](a, ctx, jfKeyServerID); ok && len(v) == 32 {
 			jfServerID = v
 			return
 		}
@@ -88,7 +82,7 @@ func (a *App) JellyfinServerID(ctx context.Context) string {
 			copy(buf, []byte("heya-jellyfin-id"))
 		}
 		id := hex.EncodeToString(buf)
-		_ = a.writeStringSetting(ctx, jfKeyServerID, id)
+		_ = writeSetting(a, ctx, jfKeyServerID, id)
 		jfServerID = id
 	})
 	return jfServerID

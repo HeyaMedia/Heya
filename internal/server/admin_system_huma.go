@@ -166,13 +166,7 @@ func registerAdminSystemRoutes(api huma.API, app *service.App, hub *eventhub.Hub
 
 	// --- Sessions: list + revoke any (admin-wide) ---
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/sessions", "admin-list-sessions", "All sessions across every user", "Admin")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.AdminSessionView], error) {
-			sessions, err := app.ListAllSessionsForAdmin(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return noStoreJSON(sessions), nil
-		})
+		simpleGet(app.ListAllSessionsForAdmin, 0))
 
 	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/admin/sessions/{id}", "admin-revoke-session", "Revoke any session by id", "Admin")),
 		func(ctx context.Context, in *struct {

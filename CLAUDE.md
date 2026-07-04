@@ -91,9 +91,10 @@ them without a discussion.
   routes are `/movies/{slug}`, `/tv/{slug}`, etc. Albums are addressed by
   `(artist_slug, album_slug)`. Tracks have no slug → stay ID-addressed.
 - **Frontend types track the API.** When a Go response shape changes,
-  `make gen-api-client` regenerates `web/shared/api.openapi.json` and the
-  derived TS types. The lefthook `openapi-drift` check blocks the commit if
-  you forgot.
+  `make gen-api-client` regenerates `web/shared/api.openapi.json`. TS types
+  derive from that spec at Nuxt build/prepare time (`nuxt-open-fetch`) — there
+  is no separate codegen artifact. The lefthook `openapi-drift` check blocks
+  the commit if you forgot.
 - **Heya Media aggregator** (`heya.media`) is the upstream metadata source;
   TMDB / TVDB / OMDb / MusicBrainz / OpenLibrary are reached through it, not
   directly. The only client is `internal/metadata/heyamedia/heya.go`.

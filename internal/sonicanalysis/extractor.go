@@ -1,7 +1,6 @@
 package sonicanalysis
 
 import (
-	"context"
 	"fmt"
 )
 
@@ -82,35 +81,4 @@ func meanPool(patchEmbeds []float32, nPatches, embedDim int) []float32 {
 		out[d] *= inv
 	}
 	return out
-}
-
-// extractAllHeads runs every loaded Discogs specialized head on the
-// same mel-spec patches, returning {head: 512-dim mean-pooled vector}.
-//
-//nolint:unused // staged: single-file CLI variant; pipeline path uses extractAllHeadsFromPCM
-func extractAllHeads(
-	ctx context.Context,
-	bank *discogsHeadBank,
-	audioPath string,
-) (vectors map[string][]float32, patches []float32, nPatches int, err error) {
-	pcm, err := decodePCM(ctx, audioPath, melSampleRate)
-	if err != nil {
-		return nil, nil, 0, fmt.Errorf("decode: %w", err)
-	}
-	spec, nFrames := melSpec(pcm)
-	patches, nPatches = slicePatches(spec, nFrames)
-	if nPatches == 0 {
-		return nil, nil, 0, fmt.Errorf("audio shorter than one patch (~2s)")
-	}
-
-	vectors = make(map[string][]float32, len(bank.sessions))
-	for _, h := range bank.Heads() {
-		sess := bank.sessions[h]
-		patchEmbeds, runErr := runBatched(sess, patches, nPatches)
-		if runErr != nil {
-			return nil, nil, 0, fmt.Errorf("%s head: %w", h, runErr)
-		}
-		vectors[h] = meanPool(patchEmbeds, nPatches, discogsEmbedDim)
-	}
-	return vectors, patches, nPatches, nil
 }

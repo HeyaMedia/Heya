@@ -48,13 +48,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/counts", "music-counts", "Artist/album/track totals", "Music")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[*service.MusicCounts], error) {
-			counts, err := app.GetMusicCounts(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return cachedJSON(counts, 30), nil
-		})
+		simpleGet(app.GetMusicCounts, 30))
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home", "music-home", "Music homepage feed", "Music")),
 		func(ctx context.Context, in *struct {
@@ -524,13 +518,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/stations/random-album", "stations-random-album", "One random album, end-to-end", "Music")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[*service.StationResponse], error) {
-			resp, err := app.RandomAlbum(ctx)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return noStoreJSON(resp), nil
-		})
+		simpleGet(app.RandomAlbum, 0))
 
 	// --- Ratings ---
 	// 5-star UI with half-step precision = 1..10 integer underneath. Setting
