@@ -55,8 +55,7 @@ type playTarget struct {
 }
 
 // resolvePlayTarget maps a Jellyfin item id onto the file Heya would play.
-func (s *Server) resolvePlayTarget(r *http.Request, itemID string) (playTarget, bool) {
-	ctx := r.Context()
+func (s *Server) resolvePlayTarget(ctx context.Context, itemID string) (playTarget, bool) {
 	kind, id, err := DecodeID(itemID)
 	if err != nil {
 		return playTarget{}, false
@@ -160,7 +159,7 @@ func pad2(n int32) string {
 // GET|POST /Items/{itemId}/PlaybackInfo
 func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request, p Params) {
 	ctx := r.Context()
-	target, ok := s.resolvePlayTarget(r, p["itemId"])
+	target, ok := s.resolvePlayTarget(r.Context(), p["itemId"])
 	if !ok {
 		writeJSON(w, http.StatusOK, playbackInfoResponse{
 			MediaSources: []mediaSourceInfo{},
@@ -185,6 +184,33 @@ func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request, p Pa
 	}
 
 	// Video: probe-backed source description + transcode decision.
+	caps := capsFromProfile(req.DeviceProfile)
+	src, plan := s.videoMediaSource(ctx, target, token, caps)
+	directOK := src.SupportsDirectPlay
+
+	if !directOK && src.SupportsTranscoding {
+		// Native HLS stack, authenticated by the client's own token.
+		src.TranscodingURL = "/api/stream/" + strconv.FormatInt(target.file.ID, 10) +
+			"/hls/master.m3u8?token=" + url.QueryEscape(token) +
+			"&sid=" + playSessionID + capsQuery(caps)
+		src.TranscodingSubProtocol = "hls"
+		src.TranscodingContainer = "ts"
+		if plan.NeedsFMP4 {
+			src.TranscodingContainer = "mp4"
+		}
+	}
+
+	writeJSON(w, http.StatusOK, playbackInfoResponse{
+		MediaSources:  []mediaSourceInfo{src},
+		PlaySessionID: playSessionID,
+	})
+}
+
+// videoMediaSource builds the full MediaSourceInfo for a video target —
+// shared by PlaybackInfo and by /Items/{id} detail hydration (upstream
+// includes MediaSources on the detail dto and Infuse builds its playability
+// decision from it).
+func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token string, caps transcoder.ClientCapabilities) (mediaSourceInfo, transcoder.PlaybackPlan) {
 	file, err := s.app.EnsureFileProbed(ctx, target.file.ID)
 	if err != nil {
 		file = target.file
@@ -194,10 +220,8 @@ func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request, p Pa
 		_ = json.Unmarshal(file.MediaInfo, &info)
 	}
 
-	caps := capsFromProfile(req.DeviceProfile)
 	tInfo := toTranscoderInfo(&info)
 	plan := transcoder.Decide(&tInfo, caps)
-
 	directOK := plan.Action == transcoder.ActionDirectPlay && !vfs.IsSMBPath(file.Path)
 
 	streams, defAudio, defSub := buildMediaStreams(file.ID, token, &info)
@@ -205,7 +229,7 @@ func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request, p Pa
 		streams = []mediaStream{}
 	}
 
-	src := mediaSourceInfo{
+	return mediaSourceInfo{
 		Protocol:                   "File",
 		ID:                         EncodeID(KindFile, file.ID),
 		Path:                       file.Path,
@@ -227,24 +251,33 @@ func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request, p Pa
 		RequiredHTTPHeaders:        map[string]string{},
 		DefaultAudioStreamIndex:    defAudio,
 		DefaultSubtitleStreamIndex: defSub,
-	}
+	}, plan
+}
 
-	if !directOK && src.SupportsTranscoding {
-		// Native HLS stack, authenticated by the client's own token.
-		src.TranscodingURL = "/api/stream/" + strconv.FormatInt(file.ID, 10) +
-			"/hls/master.m3u8?token=" + url.QueryEscape(token) +
-			"&sid=" + playSessionID + capsQuery(caps)
-		src.TranscodingSubProtocol = "hls"
-		src.TranscodingContainer = "ts"
-		if plan.NeedsFMP4 {
-			src.TranscodingContainer = "mp4"
+// attachVideoSource decorates a detail dto with its MediaSources, matching
+// upstream's full-detail shape.
+func (s *Server) attachVideoSource(ctx context.Context, dto *baseItemDto, itemID string) {
+	target, ok := s.resolvePlayTarget(ctx, itemID)
+	if !ok || (target.entityType != "movie" && target.entityType != "episode") {
+		return
+	}
+	src, _ := s.videoMediaSource(ctx, target, TokenFrom(ctx), transcoder.DefaultClientCaps)
+	dto.MediaSources = []mediaSourceInfo{src}
+	dto.MediaStreams = src.MediaStreams
+	dto.Container = src.Container
+	dto.VideoType = "VideoFile"
+	dto.Path = src.Path
+	dto.Chapters = []any{}
+	dto.Trickplay = map[string]any{}
+	for _, ms := range src.MediaStreams {
+		if ms.Type == "Video" {
+			hd := ms.Height >= 720
+			dto.IsHD = &hd
+			dto.Width = ms.Width
+			dto.Height = ms.Height
+			break
 		}
 	}
-
-	writeJSON(w, http.StatusOK, playbackInfoResponse{
-		MediaSources:  []mediaSourceInfo{src},
-		PlaySessionID: playSessionID,
-	})
 }
 
 func (s *Server) trackMediaSource(target playTarget) mediaSourceInfo {
@@ -270,7 +303,7 @@ func (s *Server) trackMediaSource(target playTarget) mediaSourceInfo {
 // GET /Videos/{itemId}/stream and /Videos/{itemId}/stream.{container} —
 // direct byte delivery; clients build this URL themselves for direct play.
 func (s *Server) handleVideoStream(w http.ResponseWriter, r *http.Request, p Params) {
-	target, ok := s.resolvePlayTarget(r, p["itemId"])
+	target, ok := s.resolvePlayTarget(r.Context(), p["itemId"])
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -289,7 +322,7 @@ func (s *Server) handleVideoStream(w http.ResponseWriter, r *http.Request, p Par
 
 // GET /Audio/{itemId}/stream and stream.{container} — direct track bytes.
 func (s *Server) handleAudioStream(w http.ResponseWriter, r *http.Request, p Params) {
-	target, ok := s.resolvePlayTarget(r, p["itemId"])
+	target, ok := s.resolvePlayTarget(r.Context(), p["itemId"])
 	if !ok || target.entityType != "track" {
 		http.NotFound(w, r)
 		return
@@ -301,7 +334,7 @@ func (s *Server) handleAudioStream(w http.ResponseWriter, r *http.Request, p Par
 // when the client accepts the on-disk format, else on-the-fly AAC fMP4 via
 // the shared audio session manager (same path Heya's own web player uses).
 func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p Params) {
-	target, ok := s.resolvePlayTarget(r, p["itemId"])
+	target, ok := s.resolvePlayTarget(r.Context(), p["itemId"])
 	if !ok || target.entityType != "track" {
 		http.NotFound(w, r)
 		return
@@ -415,7 +448,7 @@ func (s *Server) handlePlaying(phase playPhase) handlerFunc {
 
 func (s *Server) applyPlaystate(r *http.Request, u sqlc.User, report playbackReport, phase playPhase) {
 	ctx := r.Context()
-	target, ok := s.resolvePlayTarget(r, report.ItemID)
+	target, ok := s.resolvePlayTarget(r.Context(), report.ItemID)
 	if !ok {
 		log.Debug().Str("component", "jellyfin").Str("item", report.ItemID).Msg("playstate for unresolvable item ignored")
 		return

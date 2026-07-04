@@ -46,6 +46,29 @@ func (d baseItemDto) done() baseItemDto {
 			d.GenreItems = append(d.GenreItems, nameGuidPair{Name: g, ID: EncodeID(KindGenre, hashName(g))})
 		}
 	}
+	if d.ImageBlurHashes == nil {
+		d.ImageBlurHashes = map[string]map[string]string{}
+	}
+	if d.Chapters == nil {
+		d.Chapters = []any{}
+	}
+	if d.Trickplay == nil {
+		d.Trickplay = map[string]any{}
+	}
+	if d.ProviderIds == nil {
+		d.ProviderIds = map[string]string{}
+	}
+	d.PlayAccess = "Full"
+	d.EnableMediaSourceDisplay = true
+	if d.DisplayPreferencesID == "" {
+		d.DisplayPreferencesID = d.ID
+	}
+	if d.SortName == "" {
+		d.SortName = d.Name
+	}
+	if d.UserData != nil && d.UserData.ItemID == "" {
+		d.UserData.ItemID = d.ID
+	}
 	return d
 }
 
@@ -86,6 +109,11 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 	case sqlc.MediaTypeMovie:
 		dto.Type = "Movie"
 		dto.MediaType = "Video"
+		if row.PrimaryPath != "" {
+			dto.Container = containerOf(row.PrimaryPath)
+			dto.VideoType = "VideoFile"
+			dto.Path = row.PrimaryPath
+		}
 		dto.RunTimeTicks = minutesToTicks(row.MovieRuntimeMinutes.Int32)
 		dto.Genres = orEmpty(row.MovieGenres)
 		dto.CommunityRating = ratingPtr(row.MovieRating)
@@ -311,6 +339,13 @@ func (s *Server) dtoFromLibrary(lib sqlc.Library, serverID string) baseItemDto {
 		ImageTags:         map[string]string{},
 		BackdropImageTags: []string{},
 		UserData:          &userDataDto{Key: EncodeID(KindLibrary, lib.ID)},
+		// Upstream view dtos carry the folder path and a parent (the server
+		// root folder); strict clients read both.
+		ParentID:           EncodeID(KindLibrary, 0),
+		DateLastMediaAdded: tsTime(lib.UpdatedAt),
+	}
+	if len(lib.Paths) > 0 {
+		dto.Path = lib.Paths[0]
 	}
 	return dto.done()
 }

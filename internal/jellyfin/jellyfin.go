@@ -209,7 +209,7 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/MusicGenres", s.requireAuth(s.stubEmptyQueryResult))
 	rt.handle(http.MethodGet, "/Shows/Upcoming", s.requireAuth(s.stubEmptyQueryResult))
 	rt.handle(http.MethodGet, "/Movies/Recommendations", s.requireAuth(s.stubEmptyArray))
-	rt.handle(http.MethodGet, "/UserViews/GroupingOptions", s.requireAuth(s.stubEmptyArray))
+	rt.handle(http.MethodGet, "/UserViews/GroupingOptions", s.requireAuth(s.handleGroupingOptions))
 
 	// Remote-control command acks: we have no command channel to other
 	// players yet, and Jellyfin itself 204s commands to gone sessions.

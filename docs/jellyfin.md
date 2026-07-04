@@ -97,3 +97,20 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
 - Episode images resolve via the series' `media_assets` labels
   (`s{n}e{m}` stills, `season-{n}` posters) — series without enriched
   assets fall back to series art.
+
+## Differential testing against real Jellyfin
+
+`tools/jellyfin-diff.ts` compares Heya's responses *structurally* (key
+presence + JSON types — what strict decoders actually break on) against a
+real Jellyfin over the client call sequence. Bring one up with the same
+media and run it:
+
+```bash
+docker run -d --name jf-real -p 8097:8096 -v /path/to/media:/media:ro jellyfin/jellyfin
+# complete the wizard (admin/admin) + add /media as a movie library, then:
+bun tools/jellyfin-diff.ts
+```
+
+This harness caught the Infuse breakers: `null` where upstream emits empty
+arrays, ETag 304s upstream never sends, and MediaSources/MediaStreams
+missing from item detail.

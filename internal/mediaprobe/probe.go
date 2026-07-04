@@ -41,6 +41,9 @@ type StreamInfo struct {
 	CodecType          string            `json:"codec_type"`
 	CodecTagString     string            `json:"codec_tag_string,omitempty"`
 	Profile            string            `json:"profile,omitempty"`
+	Level              int               `json:"level,omitempty"`
+	RFrameRate         string            `json:"r_frame_rate,omitempty"`
+	AvgFrameRate       string            `json:"avg_frame_rate,omitempty"`
 	Width              int               `json:"width,omitempty"`
 	Height             int               `json:"height,omitempty"`
 	PixFmt             string            `json:"pix_fmt,omitempty"`

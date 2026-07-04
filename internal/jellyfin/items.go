@@ -32,7 +32,13 @@ func (s *Server) handleItemByID(w http.ResponseWriter, r *http.Request, p Params
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, res.Items[0])
+	dto := res.Items[0]
+	// Full detail carries MediaSources for playable video, like upstream —
+	// Infuse decides playability from the detail response.
+	if dto.Type == "Movie" || dto.Type == "Episode" {
+		s.attachVideoSource(r.Context(), &dto, p["itemId"])
+	}
+	writeJSON(w, http.StatusOK, dto)
 }
 
 // GET /UserViews — one view per Heya library.
@@ -45,9 +51,33 @@ func (s *Server) handleUserViews(w http.ResponseWriter, r *http.Request, _ Param
 	serverID := s.serverID(r)
 	items := make([]baseItemDto, 0, len(libs))
 	for _, lib := range libs {
-		items = append(items, s.dtoFromLibrary(lib, serverID))
+		dto := s.dtoFromLibrary(lib, serverID)
+		// ChildCount like upstream: item total for the view. A count query
+		// per view is fine — views are a handful of rows.
+		if _, total, err := s.app.JFListLibraryItems(r.Context(), sqlc.JFListLibraryItemsParams{MediaType: lib.MediaType, LibraryID: lib.ID, Lim: 1}); err == nil {
+			n := int32(total)
+			dto.ChildCount = &n
+		}
+		items = append(items, dto)
 	}
 	writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: items, TotalRecordCount: len(items)})
+}
+
+// GET /UserViews/GroupingOptions — the standalone movie/TV folders a user
+// could group; upstream returns {Name, Id} per eligible library.
+func (s *Server) handleGroupingOptions(w http.ResponseWriter, r *http.Request, _ Params) {
+	libs, err := s.app.ListLibraries(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	out := []nameGuidPair{}
+	for _, lib := range libs {
+		if lib.MediaType == sqlc.MediaTypeMovie || lib.MediaType == sqlc.MediaTypeTv {
+			out = append(out, nameGuidPair{Name: lib.Name, ID: EncodeID(KindLibrary, lib.ID)})
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // GET /Items/Latest — home-screen "Latest in <library>" rails. Returns a bare

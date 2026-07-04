@@ -54,7 +54,7 @@ type baseItemDto struct {
 
 	MediaType               string            `json:"MediaType"`
 	LocationType            string            `json:"LocationType"`
-	ProviderIds             map[string]string `json:"ProviderIds,omitempty"`
+	ProviderIds             map[string]string `json:"ProviderIds"`
 	ImageTags               map[string]string `json:"ImageTags"`
 	BackdropImageTags       []string          `json:"BackdropImageTags"`
 	PrimaryImageAspectRatio *float64          `json:"PrimaryImageAspectRatio,omitempty"`
@@ -70,6 +70,37 @@ type baseItemDto struct {
 	RemoteTrailers      []any          `json:"RemoteTrailers"`
 	ProductionLocations []string       `json:"ProductionLocations"`
 	LockedFields        []string       `json:"LockedFields"`
+
+	// Scaffolding upstream emits on every dto — surfaced by the structural
+	// diff against a real 10.11 server (tools jf-diff harness). Strict
+	// decoders (Infuse) require several of these to exist.
+	ChannelID                any                          `json:"ChannelId"` // always null for library items, like upstream
+	PlayAccess               string                       `json:"PlayAccess"`
+	EnableMediaSourceDisplay bool                         `json:"EnableMediaSourceDisplay"`
+	LocalTrailerCount        int                          `json:"LocalTrailerCount"`
+	SpecialFeatureCount      int                          `json:"SpecialFeatureCount"`
+	DisplayPreferencesID     string                       `json:"DisplayPreferencesId"`
+	LockData                 bool                         `json:"LockData"`
+	ImageBlurHashes          map[string]map[string]string `json:"ImageBlurHashes"`
+	Path                     string                       `json:"Path,omitempty"`
+	DateLastMediaAdded       *time.Time                   `json:"DateLastMediaAdded,omitempty"`
+
+	// Full-detail extras: playable video items carry their MediaSources on
+	// /Items/{id}, exactly like upstream — Infuse builds its "can I play
+	// this" decision from the detail response, not PlaybackInfo alone.
+	// MediaStreams mirrors the primary source's streams at the top level,
+	// again matching upstream's detail shape.
+	MediaSources []mediaSourceInfo `json:"MediaSources,omitempty"`
+	MediaStreams []mediaStream     `json:"MediaStreams,omitempty"`
+	Container    string            `json:"Container,omitempty"`
+	VideoType    string            `json:"VideoType,omitempty"`
+	IsHD         *bool             `json:"IsHD,omitempty"`
+	Width        int               `json:"Width,omitempty"`
+	Height       int               `json:"Height,omitempty"`
+	// No omitempty — empty slice/map must still serialize ([]/{}), which
+	// omitempty would drop. Filled in done().
+	Chapters  []any          `json:"Chapters"`
+	Trickplay map[string]any `json:"Trickplay"`
 }
 
 type externalURL struct {
@@ -92,6 +123,7 @@ type userDataDto struct {
 	PlayedPercentage      *float64   `json:"PlayedPercentage,omitempty"`
 	UnplayedItemCount     *int32     `json:"UnplayedItemCount,omitempty"`
 	LastPlayedDate        *time.Time `json:"LastPlayedDate,omitempty"`
+	ItemID                string     `json:"ItemId"`
 	Key                   string     `json:"Key"`
 }
 

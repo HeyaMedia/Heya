@@ -217,7 +217,7 @@ func (s *Server) handleSearchHints(w http.ResponseWriter, r *http.Request, _ Par
 // GET /Items/{itemId}/Download and /Items/{itemId}/File — full-file
 // delivery; CanDownload is advertised on video and track dtos.
 func (s *Server) handleItemDownload(w http.ResponseWriter, r *http.Request, p Params) {
-	target, ok := s.resolvePlayTarget(r, p["itemId"])
+	target, ok := s.resolvePlayTarget(r.Context(), p["itemId"])
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -235,7 +235,7 @@ func (s *Server) handleSubtitleStream(w http.ResponseWriter, r *http.Request, p 
 		// Some clients echo the item id as the media source; fall back to
 		// resolving the item's file.
 		itemID := firstNonEmpty(p["routeItemId"], p["itemId"])
-		target, ok := s.resolvePlayTarget(r, itemID)
+		target, ok := s.resolvePlayTarget(r.Context(), itemID)
 		if !ok {
 			http.NotFound(w, r)
 			return

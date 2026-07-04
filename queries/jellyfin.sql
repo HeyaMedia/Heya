@@ -25,7 +25,12 @@ SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year,
        ts.number_of_episodes AS series_episode_count,
        ts.number_of_seasons AS series_season_count,
        ar.id AS artist_id,
-       ar.name AS artist_name
+       ar.name AS artist_name,
+       CASE WHEN mi.media_type = 'movie' THEN
+         COALESCE((SELECT lf.path FROM library_files lf
+                   WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL AND lf.status = 'matched'
+                   ORDER BY lf.id LIMIT 1), '')
+       ELSE '' END::text AS primary_path
 FROM media_items mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id

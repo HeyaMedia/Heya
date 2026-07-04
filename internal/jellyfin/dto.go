@@ -112,6 +112,9 @@ type userPolicy struct {
 	EnableAllChannels                bool     `json:"EnableAllChannels"`
 	EnabledFolders                   []string `json:"EnabledFolders"`
 	EnableAllFolders                 bool     `json:"EnableAllFolders"`
+	EnableCollectionManagement       bool     `json:"EnableCollectionManagement"`
+	EnableSubtitleManagement         bool     `json:"EnableSubtitleManagement"`
+	EnableLyricManagement            bool     `json:"EnableLyricManagement"`
 	InvalidLoginAttemptCount         int      `json:"InvalidLoginAttemptCount"`
 	LoginAttemptsBeforeLockout       int      `json:"LoginAttemptsBeforeLockout"`
 	MaxActiveSessions                int      `json:"MaxActiveSessions"`
@@ -132,27 +135,28 @@ type authenticationResult struct {
 }
 
 type sessionInfo struct {
-	PlayState             playerStateInfo    `json:"PlayState"`
-	AdditionalUsers       []any              `json:"AdditionalUsers"`
-	Capabilities          clientCapabilities `json:"Capabilities"`
-	RemoteEndPoint        string             `json:"RemoteEndPoint"`
-	PlayableMediaTypes    []string           `json:"PlayableMediaTypes"`
-	ID                    string             `json:"Id"`
-	UserID                string             `json:"UserId"`
-	UserName              string             `json:"UserName"`
-	Client                string             `json:"Client"`
-	LastActivityDate      time.Time          `json:"LastActivityDate,omitzero"`
-	LastPlaybackCheckIn   time.Time          `json:"LastPlaybackCheckIn,omitzero"`
-	DeviceName            string             `json:"DeviceName"`
-	DeviceID              string             `json:"DeviceId"`
-	ApplicationVersion    string             `json:"ApplicationVersion"`
-	IsActive              bool               `json:"IsActive"`
-	SupportsMediaControl  bool               `json:"SupportsMediaControl"`
-	SupportsRemoteControl bool               `json:"SupportsRemoteControl"`
-	HasCustomDeviceName   bool               `json:"HasCustomDeviceName"`
-	ServerID              string             `json:"ServerId"`
-	SupportedCommands     []string           `json:"SupportedCommands"`
-	NowPlayingQueue       []any              `json:"NowPlayingQueue"`
+	PlayState                playerStateInfo    `json:"PlayState"`
+	AdditionalUsers          []any              `json:"AdditionalUsers"`
+	Capabilities             clientCapabilities `json:"Capabilities"`
+	RemoteEndPoint           string             `json:"RemoteEndPoint"`
+	PlayableMediaTypes       []string           `json:"PlayableMediaTypes"`
+	ID                       string             `json:"Id"`
+	UserID                   string             `json:"UserId"`
+	UserName                 string             `json:"UserName"`
+	Client                   string             `json:"Client"`
+	LastActivityDate         time.Time          `json:"LastActivityDate,omitzero"`
+	LastPlaybackCheckIn      time.Time          `json:"LastPlaybackCheckIn,omitzero"`
+	DeviceName               string             `json:"DeviceName"`
+	DeviceID                 string             `json:"DeviceId"`
+	ApplicationVersion       string             `json:"ApplicationVersion"`
+	IsActive                 bool               `json:"IsActive"`
+	SupportsMediaControl     bool               `json:"SupportsMediaControl"`
+	SupportsRemoteControl    bool               `json:"SupportsRemoteControl"`
+	HasCustomDeviceName      bool               `json:"HasCustomDeviceName"`
+	ServerID                 string             `json:"ServerId"`
+	SupportedCommands        []string           `json:"SupportedCommands"`
+	NowPlayingQueue          []any              `json:"NowPlayingQueue"`
+	NowPlayingQueueFullItems []any              `json:"NowPlayingQueueFullItems"`
 }
 
 type playerStateInfo struct {

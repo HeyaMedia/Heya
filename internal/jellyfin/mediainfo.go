@@ -92,16 +92,20 @@ func bitDepthOf(bitsStr, pixFmt string) int {
 func buildMediaStreams(fileID int64, token string, info *mediaprobe.MediaInfo) (streams []mediaStream, defaultAudio, defaultSub *int) {
 	for _, s := range info.Streams {
 		ms := mediaStream{
-			Codec:          s.CodecName,
-			Index:          s.Index,
-			Profile:        s.Profile,
-			Language:       s.Tags["language"],
-			Title:          s.Tags["title"],
-			TimeBase:       "1/1000",
-			ColorTransfer:  s.ColorTransfer,
-			ColorPrimaries: s.ColorPrimaries,
-			ColorSpace:     s.ColorSpace,
-			PixelFormat:    s.PixFmt,
+			Codec:              s.CodecName,
+			Index:              s.Index,
+			Profile:            s.Profile,
+			Language:           s.Tags["language"],
+			Title:              s.Tags["title"],
+			TimeBase:           "1/1000",
+			ColorTransfer:      s.ColorTransfer,
+			ColorPrimaries:     s.ColorPrimaries,
+			ColorSpace:         s.ColorSpace,
+			PixelFormat:        s.PixFmt,
+			AudioSpatialFormat: "None",
+			LocalizedDefault:   "Default",
+			LocalizedExternal:  "External",
+			LocalizedForced:    "Forced",
 		}
 		if d := s.Disposition; d != nil {
 			ms.IsDefault = d.Default == 1
@@ -121,6 +125,15 @@ func buildMediaStreams(fileID int64, token string, info *mediaprobe.MediaInfo) (
 			ms.IsAVC = s.CodecName == "h264"
 			ms.VideoRange, ms.VideoRangeType = videoRangeOf(s)
 			ms.DisplayTitle = videoDisplayTitle(s, ms.VideoRangeType)
+			ms.Level = float64(s.Level)
+			ms.RefFrames = 1
+			if fr := parseFrameRate(s.RFrameRate); fr > 0 {
+				ms.RealFrameRate = fr
+				ms.ReferenceFrameRate = fr
+			}
+			if fr := parseFrameRate(s.AvgFrameRate); fr > 0 {
+				ms.AverageFrameRate = fr
+			}
 			if s.DisplayAspectRatio != "" {
 				ms.AspectRatio = s.DisplayAspectRatio
 			}
@@ -159,9 +172,28 @@ func buildMediaStreams(fileID int64, token string, info *mediaprobe.MediaInfo) (
 		default:
 			continue
 		}
+		// Upstream always carries a BitRate on av streams; fall back to the
+		// container bitrate when ffprobe has no per-stream figure (mkv).
+		if ms.BitRate == 0 && (ms.Type == "Video" || ms.Type == "Audio") && info.BitRate > 0 {
+			ms.BitRate = info.BitRate
+		}
 		streams = append(streams, ms)
 	}
 	return streams, defaultAudio, defaultSub
+}
+
+// parseFrameRate converts ffprobe's "25/1" rational into a float.
+func parseFrameRate(r string) float32 {
+	num, den, ok := strings.Cut(r, "/")
+	if !ok {
+		return 0
+	}
+	n, err1 := strconv.ParseFloat(num, 64)
+	d, err2 := strconv.ParseFloat(den, 64)
+	if err1 != nil || err2 != nil || d == 0 || n <= 0 {
+		return 0
+	}
+	return float32(n / d)
 }
 
 func videoRangeOf(s mediaprobe.StreamInfo) (videoRange, rangeType string) {
