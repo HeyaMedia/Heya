@@ -8,13 +8,12 @@ import (
 	"strings"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/imageserve"
 )
 
 // Image delivery. Anonymous, like Jellyfin's own image endpoints and Heya's
-// /api/media/{id}/image/{type} — <img> tags carry no auth headers. All
-// resolution funnels into Heya's media_assets walk (App.GetMediaImagePath)
-// and the shared on-disk-cached resizer.
+// /api/media/{id}/image/{type} — <img> tags carry no auth headers. Every
+// request 302-redirects to the matching native Heya image endpoint, which
+// owns the full pipeline (media_assets walk, resizer, passive-mode proxy).
 
 // jellyfin ImageType → Heya asset type. Unknown types 404 (upstream does the
 // same for types an item lacks).
@@ -29,6 +28,13 @@ var imageTypeMap = map[string]string{
 }
 
 // GET /Items/{itemId}/Images/{imageType} and .../{imageIndex}
+//
+// Rather than resolve + serve here, redirect to Heya's own image endpoints.
+// Those are the source of truth: they run the media_assets walk, the on-disk
+// resizer, AND the passive-mode image proxy (proxiedImage) that fetches bytes
+// from an upstream Heya when the local data dir has none. Serving locally here
+// bypassed that proxy and 404'd in passive/dev deployments. A 302 costs one
+// hop; image requests are anonymous so no auth is lost.
 func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Params) {
 	ctx := r.Context()
 	kind, id, err := DecodeID(p["itemId"])
@@ -42,8 +48,7 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 		index, _ = strconv.Atoi(idx)
 	}
 
-	var path string
-	var ok bool
+	target := ""
 	switch kind {
 	case KindItem:
 		assetType, known := imageTypeMap[imgType]
@@ -51,11 +56,10 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 			http.NotFound(w, r)
 			return
 		}
-		sortOrder := -1
+		target = fmt.Sprintf("/api/media/%d/image/%s", id, assetType)
 		if imgType == "backdrop" && index > 0 {
-			sortOrder = index
+			target += fmt.Sprintf("?sort=%d", index)
 		}
-		path, ok = s.app.GetMediaImagePath(ctx, id, assetType, sortOrder, "")
 
 	case KindSeason:
 		rows, err := s.app.JFListSeasons(ctx, 0, []int64{id})
@@ -64,10 +68,7 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 			return
 		}
 		season := rows[0]
-		path, ok = s.app.GetMediaImagePath(ctx, season.SeriesMediaItemID, "poster", -1, fmt.Sprintf("season-%d", season.SeasonNumber))
-		if !ok {
-			path, ok = s.app.GetMediaImagePath(ctx, season.SeriesMediaItemID, "poster", -1, "")
-		}
+		target = fmt.Sprintf("/api/media/%d/image/poster?label=season-%d", season.SeriesMediaItemID, season.SeasonNumber)
 
 	case KindEpisode:
 		rows, _, err := s.app.JFListEpisodes(ctx, sqlc.JFListEpisodesParams{OnlyIds: []int64{id}})
@@ -76,92 +77,51 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 			return
 		}
 		ep := rows[0]
-		label := fmt.Sprintf("s%de%d", ep.SeasonNumber, ep.EpisodeNumber)
-		path, ok = s.app.GetMediaImagePath(ctx, ep.SeriesMediaItemID, "still", -1, label)
-		if !ok {
-			// Upstream falls back to the series art for episodes without
-			// stills; a backdrop reads better than a portrait poster in the
-			// 16:9 slots clients render episodes into.
-			path, ok = s.app.GetMediaImagePath(ctx, ep.SeriesMediaItemID, "backdrop", -1, "")
-		}
-		if !ok {
-			path, ok = s.app.GetMediaImagePath(ctx, ep.SeriesMediaItemID, "poster", -1, "")
-		}
+		target = fmt.Sprintf("/api/media/%d/image/still?label=s%de%d", ep.SeriesMediaItemID, ep.SeasonNumber, ep.EpisodeNumber)
 
 	case KindAlbum:
-		path, ok = s.albumCover(r, w, id)
-		if path == "" && ok {
-			return // redirected
-		}
-
-	case KindTrack:
-		rows, _, err := s.app.JFListTracks(ctx, sqlc.JFListTracksParams{OnlyIds: []int64{id}})
-		if err != nil || len(rows) == 0 {
+		rows, _, err := s.app.JFListAlbums(ctx, sqlc.JFListAlbumsParams{OnlyIds: []int64{id}})
+		if err != nil || len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].Slug == "" {
 			http.NotFound(w, r)
 			return
 		}
-		path, ok = coverFromPath(rows[0].AlbumCoverPath)
-		if !ok && rows[0].AlbumCoverPath != "" {
-			http.Redirect(w, r, rows[0].AlbumCoverPath, http.StatusFound)
+		target = fmt.Sprintf("/api/music/artists/%s/albums/%s/cover", rows[0].ArtistSlug, rows[0].Slug)
+
+	case KindTrack:
+		rows, _, err := s.app.JFListTracks(ctx, sqlc.JFListTracksParams{OnlyIds: []int64{id}})
+		if err != nil || len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].AlbumSlug == "" {
+			http.NotFound(w, r)
 			return
 		}
+		target = fmt.Sprintf("/api/music/artists/%s/albums/%s/cover", rows[0].ArtistSlug, rows[0].AlbumSlug)
 
-	case KindLibrary, KindUser:
-		http.NotFound(w, r)
-		return
-
-	default:
+	default: // KindLibrary, KindUser, ...
 		http.NotFound(w, r)
 		return
 	}
 
-	if !ok || path == "" {
-		http.NotFound(w, r)
-		return
-	}
-	s.app.ImageResizer().Serve(w, r, path, resizeParams(r))
+	http.Redirect(w, r, appendResizeQuery(target, r), http.StatusFound)
 }
 
-// albumCover resolves an album's cover. Local paths serve through the
-// resizer; upstream URLs 302 like Heya's own cover endpoint. Returns
-// ("", true) after writing a redirect.
-func (s *Server) albumCover(r *http.Request, w http.ResponseWriter, albumID int64) (string, bool) {
-	rows, _, err := s.app.JFListAlbums(r.Context(), sqlc.JFListAlbumsParams{OnlyIds: []int64{albumID}})
-	if err != nil || len(rows) == 0 {
-		return "", false
-	}
-	cover := rows[0].CoverPath
-	if path, ok := coverFromPath(cover); ok {
-		return path, true
-	}
-	if cover != "" {
-		http.Redirect(w, r, cover, http.StatusFound)
-		return "", true
-	}
-	// Fall back to the artist's primary image so albums without ripped
-	// covers still render something.
-	path, ok := s.app.GetMediaImagePath(r.Context(), rows[0].ArtistMediaItemID, "poster", -1, "")
-	return path, ok
-}
-
-func coverFromPath(p string) (string, bool) {
-	if p == "" || strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") {
-		return "", false
-	}
-	return p, true
-}
-
-// resizeParams maps Jellyfin's image query params onto the shared resizer.
-func resizeParams(r *http.Request) imageserve.Params {
+// appendResizeQuery carries Jellyfin's image sizing params onto the native
+// image URL as the resizer's own param names (w/h/q).
+func appendResizeQuery(target string, r *http.Request) string {
 	v := url.Values{}
-	if w := firstNonEmpty(queryCI(r, "maxWidth"), queryCI(r, "fillWidth"), queryCI(r, "width")); w != "" {
-		v.Set("w", w)
+	if wv := firstNonEmpty(queryCI(r, "maxWidth"), queryCI(r, "fillWidth"), queryCI(r, "width")); wv != "" {
+		v.Set("w", wv)
 	}
-	if h := firstNonEmpty(queryCI(r, "maxHeight"), queryCI(r, "fillHeight"), queryCI(r, "height")); h != "" {
-		v.Set("h", h)
+	if hv := firstNonEmpty(queryCI(r, "maxHeight"), queryCI(r, "fillHeight"), queryCI(r, "height")); hv != "" {
+		v.Set("h", hv)
 	}
-	if q := queryCI(r, "quality"); q != "" {
-		v.Set("q", q)
+	if qv := queryCI(r, "quality"); qv != "" {
+		v.Set("q", qv)
 	}
-	return imageserve.ParseQuery(v)
+	if len(v) == 0 {
+		return target
+	}
+	sep := "?"
+	if strings.Contains(target, "?") {
+		sep = "&"
+	}
+	return target + sep + v.Encode()
 }
