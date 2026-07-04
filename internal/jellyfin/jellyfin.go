@@ -69,13 +69,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h(w, r, p)
 		return
 	}
-	// A Jellyfin-shaped request (PascalCase first segment) that we don't
-	// route would fall through to the SPA and hand the client HTML — which
-	// reads as a broken server. Log it at WARN so an unhandled client call
-	// is visible instead of silently 200-ing HTML. See jellyfinShaped.
+	// A Jellyfin-shaped request (PascalCase first segment) we don't route
+	// must NOT fall through to the SPA: an HTML body with a 200 makes strict
+	// clients (Infuse) throw "unexpected server response" when they try to
+	// parse it as JSON. Real Jellyfin answers unknown endpoints with a 404,
+	// which clients tolerate. Return that, and log at WARN so the specific
+	// endpoint the client needs is visible (implement it if load-bearing).
+	// SPA routes are all lowercase, so this never shadows the web app.
 	if jellyfinShaped(path) {
 		log.Warn().Str("component", "jellyfin").Str("method", r.Method).Str("path", r.URL.Path).
-			Msg("unrouted Jellyfin-shaped request fell through to SPA — client likely needs this endpoint")
+			Msg("unrouted Jellyfin-shaped request — returning 404 (client may need this endpoint)")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		return
 	}
 	s.next.ServeHTTP(w, r)
 }
@@ -258,7 +264,13 @@ func (s *Server) buildRouter() *router {
 // flag: when disabled, the backend middleware falls through to the (embedded)
 // SPA, which for API-shaped paths is indistinguishable from a 404 to clients.
 func ClaimsPath(path string) bool {
-	return claimsRouter.claims(stripEmbyPrefix(path))
+	p := stripEmbyPrefix(path)
+	// Claim registered routes AND any Jellyfin-shaped path (PascalCase first
+	// segment). The latter is what lets the dev proxy send unimplemented
+	// Jellyfin endpoints to the backend — which answers 404 — instead of to
+	// Nuxt, which would hand the client the SPA's HTML and break it. SPA
+	// routes are lowercase, so this never steals one.
+	return claimsRouter.claims(p) || jellyfinShaped(p)
 }
 
 // claimsRouter is a handler-less route table for ClaimsPath. Handlers bound
