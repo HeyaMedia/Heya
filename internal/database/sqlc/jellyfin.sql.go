@@ -132,6 +132,10 @@ WHERE mi.media_type = $1
   AND (NOT $5::bool OR mi.id = ANY($6::bigint[]))
   AND (NOT $7::bool OR NOT (mi.id = ANY($6::bigint[])))
   AND (NOT $8::bool OR mi.id = ANY($9::bigint[]))
+  -- Mirror JFListLibraryItems: exclude episode-less TV series.
+  AND (mi.media_type <> 'tv' OR EXISTS (
+        SELECT 1 FROM tv_series ts2 JOIN tv_seasons s2 ON s2.series_id = ts2.id
+        WHERE ts2.media_item_id = mi.id))
 `
 
 type JFCountLibraryItemsParams struct {
@@ -493,6 +497,11 @@ WHERE mi.media_type = $1
   AND (NOT $5::bool OR mi.id = ANY($6::bigint[]))
   AND (NOT $7::bool OR NOT (mi.id = ANY($6::bigint[])))
   AND (NOT $8::bool OR mi.id = ANY($9::bigint[]))
+  -- Hide episode-less TV series: enrichment that produced no seasons leaves a
+  -- phantom series (no /Seasons, no /Episodes) that strict clients (Infuse)
+  -- error on. Real Jellyfin never has one — a series exists only from real
+  -- episode files. Series WITH seasons but empty tv_episodes still pass.
+  AND (mi.media_type <> 'tv' OR EXISTS (SELECT 1 FROM tv_seasons s2 WHERE s2.series_id = ts.id))
 ORDER BY
   CASE WHEN $10::text = 'random' THEN md5(mi.id::text || $11::text) END ASC,
   CASE WHEN $10 = 'added'    AND $12::bool     THEN mi.created_at END DESC NULLS LAST,

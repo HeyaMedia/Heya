@@ -49,6 +49,11 @@ WHERE mi.media_type = sqlc.arg(media_type)
   AND (NOT sqlc.arg(filter_played)::bool OR mi.id = ANY(sqlc.arg(played_ids)::bigint[]))
   AND (NOT sqlc.arg(filter_unplayed)::bool OR NOT (mi.id = ANY(sqlc.arg(played_ids)::bigint[])))
   AND (NOT sqlc.arg(filter_favorite)::bool OR mi.id = ANY(sqlc.arg(favorite_ids)::bigint[]))
+  -- Hide episode-less TV series: enrichment that produced no seasons leaves a
+  -- phantom series (no /Seasons, no /Episodes) that strict clients (Infuse)
+  -- error on. Real Jellyfin never has one — a series exists only from real
+  -- episode files. Series WITH seasons but empty tv_episodes still pass.
+  AND (mi.media_type <> 'tv' OR EXISTS (SELECT 1 FROM tv_seasons s2 WHERE s2.series_id = ts.id))
 ORDER BY
   CASE WHEN sqlc.arg(sort_by)::text = 'random' THEN md5(mi.id::text || sqlc.arg(rand_seed)::text) END ASC,
   CASE WHEN sqlc.arg(sort_by) = 'added'    AND sqlc.arg(sort_desc)::bool     THEN mi.created_at END DESC NULLS LAST,
@@ -73,7 +78,11 @@ WHERE mi.media_type = sqlc.arg(media_type)
   AND (sqlc.arg(search)::text = '' OR mi.title ILIKE '%' || sqlc.arg(search) || '%')
   AND (NOT sqlc.arg(filter_played)::bool OR mi.id = ANY(sqlc.arg(played_ids)::bigint[]))
   AND (NOT sqlc.arg(filter_unplayed)::bool OR NOT (mi.id = ANY(sqlc.arg(played_ids)::bigint[])))
-  AND (NOT sqlc.arg(filter_favorite)::bool OR mi.id = ANY(sqlc.arg(favorite_ids)::bigint[]));
+  AND (NOT sqlc.arg(filter_favorite)::bool OR mi.id = ANY(sqlc.arg(favorite_ids)::bigint[]))
+  -- Mirror JFListLibraryItems: exclude episode-less TV series.
+  AND (mi.media_type <> 'tv' OR EXISTS (
+        SELECT 1 FROM tv_series ts2 JOIN tv_seasons s2 ON s2.series_id = ts2.id
+        WHERE ts2.media_item_id = mi.id));
 
 -- name: JFListSeasons :many
 SELECT s.id, s.series_id, s.season_number, s.title, s.overview, s.air_date,
