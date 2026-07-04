@@ -325,7 +325,10 @@ func NormalizeInputPath(inputPath string) string {
 	return path.Clean(slashed)
 }
 
-func GetStorageRoot(segments []string) string {
+// segmentAfterStorage returns the path segment `offset` positions past the
+// "storage" segment (offset 1 = storage root, 2 = collection). Without a
+// "storage" segment it falls back to segments[offset-1].
+func segmentAfterStorage(segments []string, offset int) string {
 	storageIndex := -1
 	for i, seg := range segments {
 		if strings.ToLower(seg) == "storage" {
@@ -334,39 +337,22 @@ func GetStorageRoot(segments []string) string {
 		}
 	}
 
-	if storageIndex == -1 {
-		if len(segments) > 0 {
-			return segments[0]
-		}
-		return ""
+	idx := offset - 1
+	if storageIndex != -1 {
+		idx = storageIndex + offset
 	}
-
-	if storageIndex+1 < len(segments) {
-		return segments[storageIndex+1]
+	if idx < len(segments) {
+		return segments[idx]
 	}
 	return ""
 }
 
+func GetStorageRoot(segments []string) string {
+	return segmentAfterStorage(segments, 1)
+}
+
 func GetCollection(segments []string) string {
-	storageIndex := -1
-	for i, seg := range segments {
-		if strings.ToLower(seg) == "storage" {
-			storageIndex = i
-			break
-		}
-	}
-
-	if storageIndex == -1 {
-		if len(segments) > 1 {
-			return segments[1]
-		}
-		return ""
-	}
-
-	if storageIndex+2 < len(segments) {
-		return segments[storageIndex+2]
-	}
-	return ""
+	return segmentAfterStorage(segments, 2)
 }
 
 func ScoreVideoRelease(title, year, group string, resolution string, sourceCount int, videoCodec string, seasonCount, episodeCount int, releaseHash string) int {
@@ -501,10 +487,15 @@ func CollectPatternTokens(value string, patterns []*regexp.Regexp) []string {
 	return tokens
 }
 
+// looseTokenRE matches token delimited by separators/brackets (or the string
+// edges). HasLooseToken and RemoveLooseToken must share this pattern so
+// CollectLooseTokens → RemoveLooseToken round-trips stay in lockstep.
+func looseTokenRE(token string) *regexp.Regexp {
+	return regexp.MustCompile(`(?i)(?:^|[\s._\-\[\]()])` + regexp.QuoteMeta(token) + `(?:$|[\s._\-\[\]()])`)
+}
+
 func RemoveLooseToken(value, token string) string {
-	escaped := regexp.QuoteMeta(token)
-	re := regexp.MustCompile(`(?i)(?:^|[\s._\-\[\]()])` + escaped + `(?:$|[\s._\-\[\]()])`)
-	return re.ReplaceAllString(value, " ")
+	return looseTokenRE(token).ReplaceAllString(value, " ")
 }
 
 func NormalizeAudioTitle(value string) string {
@@ -523,9 +514,7 @@ func NormalizeAudioTitle(value string) string {
 }
 
 func HasLooseToken(value, token string) bool {
-	escaped := regexp.QuoteMeta(token)
-	re := regexp.MustCompile(`(?i)(?:^|[\s._\-\[\]()])` + escaped + `(?:$|[\s._\-\[\]()])`)
-	return re.MatchString(value)
+	return looseTokenRE(token).MatchString(value)
 }
 
 func CompactStringArray(values []string) []string {

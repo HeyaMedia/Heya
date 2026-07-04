@@ -936,6 +936,35 @@
         ],
         "type": "object"
       },
+      "AlbumIDsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AlbumIDsBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "album_ids": {
+            "description": "List of album IDs to look up",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "album_ids"
+        ],
+        "type": "object"
+      },
       "AlbumResultsBody": {
         "additionalProperties": false,
         "properties": {
@@ -1020,6 +1049,35 @@
         "required": [
           "provider_name",
           "provider_id"
+        ],
+        "type": "object"
+      },
+      "ArtistIDsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ArtistIDsBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "artist_ids": {
+            "description": "List of artist IDs to look up",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "artist_ids"
         ],
         "type": "object"
       },
@@ -1432,91 +1490,6 @@
           "created_at",
           "last_seen_at",
           "current"
-        ],
-        "type": "object"
-      },
-      "Batch-album-ratingsRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/Batch-album-ratingsRequest.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "album_ids": {
-            "items": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "album_ids"
-        ],
-        "type": "object"
-      },
-      "Batch-artist-ratingsRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/Batch-artist-ratingsRequest.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "artist_ids": {
-            "items": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "artist_ids"
-        ],
-        "type": "object"
-      },
-      "Batch-track-ratingsRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/Batch-track-ratingsRequest.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "track_ids": {
-            "description": "List of track IDs to look up",
-            "items": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "track_ids"
         ],
         "type": "object"
       },
@@ -3295,6 +3268,27 @@
         "required": [
           "Int64",
           "Valid"
+        ],
+        "type": "object"
+      },
+      "JellyfinConfigBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JellyfinConfigBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -8818,6 +8812,132 @@
         ],
         "type": "object"
       },
+      "MusicListPageListUserRatedAlbumsRow": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MusicListPageListUserRatedAlbumsRow.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ListUserRatedAlbumsRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "MusicListPageListUserRatedArtistsRow": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MusicListPageListUserRatedArtistsRow.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ListUserRatedArtistsRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "MusicListPageListUserRatedTracksRow": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MusicListPageListUserRatedTracksRow.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ListUserRatedTracksRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
       "MusicMix": {
         "additionalProperties": false,
         "properties": {
@@ -12748,6 +12868,35 @@
         ],
         "type": "object"
       },
+      "TrackIDsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TrackIDsBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "track_ids": {
+            "description": "List of track IDs to look up",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "track_ids"
+        ],
+        "type": "object"
+      },
       "TrackResultsBody": {
         "additionalProperties": false,
         "properties": {
@@ -14082,132 +14231,6 @@
           "codec",
           "bitrate",
           "created_at"
-        ],
-        "type": "object"
-      },
-      "UserRatedAlbumsPage": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/UserRatedAlbumsPage.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ListUserRatedAlbumsRow"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "limit": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "offset": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "total": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
-        ],
-        "type": "object"
-      },
-      "UserRatedArtistsPage": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/UserRatedArtistsPage.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ListUserRatedArtistsRow"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "limit": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "offset": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "total": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
-        ],
-        "type": "object"
-      },
-      "UserRatedTracksPage": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/UserRatedTracksPage.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ListUserRatedTracksRow"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "limit": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "offset": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "total": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
         ],
         "type": "object"
       },
@@ -16218,6 +16241,100 @@
         "summary": "Readiness probe with per-component status",
         "tags": [
           "System"
+        ]
+      }
+    },
+    "/api/jellyfin/config": {
+      "get": {
+        "operationId": "jellyfin-config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JellyfinConfigBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Jellyfin-compatible API config",
+        "tags": [
+          "Jellyfin"
+        ]
+      },
+      "put": {
+        "operationId": "set-jellyfin-config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JellyfinConfigBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JellyfinConfigBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Apply Jellyfin-compatible API config",
+        "tags": [
+          "Jellyfin"
         ]
       }
     },
@@ -20854,11 +20971,13 @@
         "operationId": "list-rated-albums",
         "parameters": [
           {
+            "description": "Filter to ratings at or above N (1..10)",
             "explode": false,
             "in": "query",
             "name": "min_rating",
             "schema": {
               "default": 1,
+              "description": "Filter to ratings at or above N (1..10)",
               "format": "int32",
               "maximum": 10,
               "minimum": 1,
@@ -20904,7 +21023,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserRatedAlbumsPage"
+                  "$ref": "#/components/schemas/MusicListPageListUserRatedAlbumsRow"
                 }
               }
             },
@@ -20946,7 +21065,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Batch-album-ratingsRequest"
+                "$ref": "#/components/schemas/AlbumIDsBody"
               }
             }
           },
@@ -21041,7 +21160,7 @@
             "bearer": null
           }
         ],
-        "summary": "Get user's rating for an album",
+        "summary": "Get user's rating for a album (0 when unrated)",
         "tags": [
           "Me"
         ]
@@ -21104,7 +21223,7 @@
             "bearer": null
           }
         ],
-        "summary": "Rate an album (1..10; 0 clears)",
+        "summary": "Rate a album (1..10; 0 clears)",
         "tags": [
           "Me"
         ]
@@ -21115,11 +21234,13 @@
         "operationId": "list-rated-artists",
         "parameters": [
           {
+            "description": "Filter to ratings at or above N (1..10)",
             "explode": false,
             "in": "query",
             "name": "min_rating",
             "schema": {
               "default": 1,
+              "description": "Filter to ratings at or above N (1..10)",
               "format": "int32",
               "maximum": 10,
               "minimum": 1,
@@ -21165,7 +21286,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserRatedArtistsPage"
+                  "$ref": "#/components/schemas/MusicListPageListUserRatedArtistsRow"
                 }
               }
             },
@@ -21207,7 +21328,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Batch-artist-ratingsRequest"
+                "$ref": "#/components/schemas/ArtistIDsBody"
               }
             }
           },
@@ -21302,7 +21423,7 @@
             "bearer": null
           }
         ],
-        "summary": "Get user's rating for an artist",
+        "summary": "Get user's rating for a artist (0 when unrated)",
         "tags": [
           "Me"
         ]
@@ -21365,7 +21486,7 @@
             "bearer": null
           }
         ],
-        "summary": "Rate an artist (1..10; 0 clears)",
+        "summary": "Rate a artist (1..10; 0 clears)",
         "tags": [
           "Me"
         ]
@@ -21522,7 +21643,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserRatedTracksPage"
+                  "$ref": "#/components/schemas/MusicListPageListUserRatedTracksRow"
                 }
               }
             },
@@ -21551,7 +21672,7 @@
             "bearer": null
           }
         ],
-        "summary": "Paginated tracks the user has rated",
+        "summary": "Paginated rated tracks",
         "tags": [
           "Me"
         ]
@@ -21564,7 +21685,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Batch-track-ratingsRequest"
+                "$ref": "#/components/schemas/TrackIDsBody"
               }
             }
           },
@@ -21604,7 +21725,7 @@
             "bearer": null
           }
         ],
-        "summary": "Bulk lookup of ratings for a list of track IDs",
+        "summary": "Bulk lookup of track ratings",
         "tags": [
           "Me"
         ]

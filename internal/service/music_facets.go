@@ -53,15 +53,24 @@ type KeyView struct {
 // track_facets row yet (analysis pending).
 var ErrNoFacets = errors.New("track has no analyzed facets yet")
 
+// noFacetsErr maps a missing seed row (pgx.ErrNoRows) to ErrNoFacets so
+// handlers can 404; anything else is wrapped with the given context.
+func noFacetsErr(err error, what string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNoFacets
+	}
+	return fmt.Errorf("%s: %w", what, err)
+}
+
 // TrackFacets returns a track's FacetsView. ErrNoFacets if the track
 // hasn't been analyzed yet.
 func (a *App) TrackFacets(ctx context.Context, trackID int64) (*FacetsView, error) {
 	row, err := sqlc.New(a.db).GetTrackFacets(ctx, trackID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNoFacets
-		}
-		return nil, fmt.Errorf("get track facets: %w", err)
+		return nil, noFacetsErr(err, "get track facets")
 	}
 	return facetsViewFromRow(row), nil
 }
@@ -71,10 +80,7 @@ func (a *App) TrackFacets(ctx context.Context, trackID int64) (*FacetsView, erro
 func (a *App) TrackWaveform(ctx context.Context, trackID int64) ([]float32, error) {
 	wf, err := sqlc.New(a.db).GetTrackWaveform(ctx, trackID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNoFacets
-		}
-		return nil, fmt.Errorf("get waveform: %w", err)
+		return nil, noFacetsErr(err, "get waveform")
 	}
 	return wf, nil
 }
@@ -90,10 +96,7 @@ func (a *App) SimilarMusicTracks(ctx context.Context, seedTrackID int64, limit i
 	q := sqlc.New(a.db)
 	seed, err := q.GetTrackFacets(ctx, seedTrackID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNoFacets
-		}
-		return nil, fmt.Errorf("seed facets: %w", err)
+		return nil, noFacetsErr(err, "seed facets")
 	}
 	rows, err := q.SimilarTracksByTrackRich(ctx, sqlc.SimilarTracksByTrackRichParams{
 		TrackEmbedding: seed.TrackEmbedding,
@@ -126,10 +129,7 @@ func (a *App) BuildDJMix(ctx context.Context, seedTrackID int64, limit int32) ([
 	q := sqlc.New(a.db)
 	seed, err := q.GetTrackFacets(ctx, seedTrackID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNoFacets
-		}
-		return nil, fmt.Errorf("seed facets: %w", err)
+		return nil, noFacetsErr(err, "seed facets")
 	}
 	if !seed.Bpm.Valid || !seed.KeyRoot.Valid || !seed.KeyMode.Valid {
 		return nil, fmt.Errorf("seed track is missing bpm or key — cannot mix")
@@ -171,10 +171,7 @@ func (a *App) SimilarMusicArtists(ctx context.Context, seedArtistID int64, limit
 	q := sqlc.New(a.db)
 	seed, err := q.GetArtistCentroid(ctx, seedArtistID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNoFacets
-		}
-		return nil, fmt.Errorf("seed centroid: %w", err)
+		return nil, noFacetsErr(err, "seed centroid")
 	}
 	rows, err := q.SimilarArtists(ctx, sqlc.SimilarArtistsParams{
 		SonicCentroid: seed.SonicCentroid,
@@ -197,10 +194,7 @@ func (a *App) SimilarMusicAlbums(ctx context.Context, seedAlbumID int64, limit i
 	q := sqlc.New(a.db)
 	seed, err := q.GetAlbumCentroid(ctx, seedAlbumID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNoFacets
-		}
-		return nil, fmt.Errorf("seed centroid: %w", err)
+		return nil, noFacetsErr(err, "seed centroid")
 	}
 	rows, err := q.SimilarAlbums(ctx, sqlc.SimilarAlbumsParams{
 		SonicCentroid: seed.SonicCentroid,

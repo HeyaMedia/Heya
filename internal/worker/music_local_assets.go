@@ -115,7 +115,8 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypePoster, posterPath, 0, "", existingLocal)
 		// Mirror to media_items.poster_path so /api/media/{id}/image/poster
 		// returns it directly without the media_assets fallback hop.
-		updatePosterPathColumn(ctx, q, item, posterPath)
+		updateArtworkPathColumns(ctx, q, item, posterPath, item.BackdropPath)
+		item.PosterPath = posterPath
 		result.Poster++
 	}
 
@@ -134,14 +135,15 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 		// / `backdrop2.jpg` style names.
 		first := numbered[0]
 		dst := filepath.Join(cacheDir, "backdrop"+filepath.Ext(first))
-		if err := forceCopyFromFS(source.FS, first, dst); err == nil {
+		if err := copyFromFS(source.FS, first, dst, true); err == nil {
 			primaryBackdrop = dst
 			numbered = numbered[1:] // already promoted; don't re-add as a numbered extra
 		}
 	}
 	if primaryBackdrop != "" {
 		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop, primaryBackdrop, 0, "", existingLocal)
-		updateBackdropPathColumn(ctx, q, item, primaryBackdrop)
+		updateArtworkPathColumns(ctx, q, item, item.PosterPath, primaryBackdrop)
+		item.BackdropPath = primaryBackdrop
 		result.Backdrop++
 	}
 	// Cap the numbered set so primary + extras never exceed
@@ -155,7 +157,7 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 	}
 	for i, extra := range numbered {
 		dst := filepath.Join(cacheDir, "backdrop"+strconv.Itoa(i+1)+filepath.Ext(extra))
-		if err := forceCopyFromFS(source.FS, extra, dst); err == nil {
+		if err := copyFromFS(source.FS, extra, dst, true); err == nil {
 			writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop, dst, int32(i+1), "", existingLocal)
 			result.Backdrop++
 		}
@@ -243,32 +245,13 @@ func copyFirstMatch(fsys fs.FS, candidates []string, cacheDir, baseName string) 
 			continue
 		}
 		dst := filepath.Join(cacheDir, baseName+filepath.Ext(name))
-		if err := forceCopyFromFS(fsys, name, dst); err != nil {
+		if err := copyFromFS(fsys, name, dst, true); err != nil {
 			log.Debug().Err(err).Str("src", name).Str("dst", dst).Msg("local asset copy failed")
 			continue
 		}
 		return dst
 	}
 	return ""
-}
-
-// forceCopyFromFS copies src→dst even if dst already exists. The shared
-// copyFile / findAndCopyFS helpers bail when dst exists, which is the right
-// call for remote downloads but the wrong call for local detection — the
-// whole point of a refresh is to pick up newer/replacement files.
-func forceCopyFromFS(fsys fs.FS, name, dst string) error {
-	in, err := fsys.Open(name)
-	if err != nil {
-		return err
-	}
-	defer in.Close()           //nolint:errcheck // defer-close on read source
-	out, err := os.Create(dst) //nolint:gosec // dst is an internal cache path built from library config
-	if err != nil {
-		return err
-	}
-	defer out.Close() //nolint:errcheck // defer-close on write target
-	_, err = io.Copy(out, in)
-	return err
 }
 
 // findNumberedExtras enumerates suffixed art files in the directory:
@@ -367,58 +350,6 @@ func writeAsset(ctx context.Context, q *sqlc.Queries, mediaItemID int64, assetTy
 		log.Debug().Err(err).Int64("item_id", mediaItemID).Str("asset_type", string(assetType)).Msg("create local media_asset failed")
 	}
 	existingLocal[key] = true
-}
-
-// updatePosterPathColumn mirrors a freshly-detected local poster onto
-// media_items.poster_path so the legacy column-based lookup in
-// /api/media/{id}/image/poster (and the list endpoints) immediately returns
-// the local file without having to fall back to media_assets.
-func updatePosterPathColumn(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, localPath string) {
-	if item.PosterPath == localPath {
-		return
-	}
-	if _, err := q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-		ID:               item.ID,
-		Title:            item.Title,
-		SortTitle:        item.SortTitle,
-		Year:             item.Year,
-		Description:      item.Description,
-		PosterPath:       localPath,
-		BackdropPath:     item.BackdropPath,
-		ExternalIds:      item.ExternalIds,
-		Tagline:          item.Tagline,
-		OriginalTitle:    item.OriginalTitle,
-		OriginalLanguage: item.OriginalLanguage,
-		Status:           item.Status,
-		ProviderKind:     item.ProviderKind,
-		HeyaSlug:         item.HeyaSlug,
-	}); err != nil {
-		log.Debug().Err(err).Int64("item_id", item.ID).Msg("update poster_path failed")
-	}
-}
-
-func updateBackdropPathColumn(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, localPath string) {
-	if item.BackdropPath == localPath {
-		return
-	}
-	if _, err := q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-		ID:               item.ID,
-		Title:            item.Title,
-		SortTitle:        item.SortTitle,
-		Year:             item.Year,
-		Description:      item.Description,
-		PosterPath:       item.PosterPath,
-		BackdropPath:     localPath,
-		ExternalIds:      item.ExternalIds,
-		Tagline:          item.Tagline,
-		OriginalTitle:    item.OriginalTitle,
-		OriginalLanguage: item.OriginalLanguage,
-		Status:           item.Status,
-		ProviderKind:     item.ProviderKind,
-		HeyaSlug:         item.HeyaSlug,
-	}); err != nil {
-		log.Debug().Err(err).Int64("item_id", item.ID).Msg("update backdrop_path failed")
-	}
 }
 
 func ensureDir(path string) error {

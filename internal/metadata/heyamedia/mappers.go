@@ -301,12 +301,8 @@ func mapPersonDoc(body *gen.PersonDocBody) *HeyaPersonResponse {
 // mapCredits translates the generated []gen.Credit into the legacy
 // []HeyaCredit shape used by person_worker.go.
 func mapCredits(items *[]gen.Credit) []HeyaCredit {
-	if items == nil || len(*items) == 0 {
-		return nil
-	}
-	out := make([]HeyaCredit, 0, len(*items))
-	for _, c := range *items {
-		out = append(out, HeyaCredit{
+	return mapSlice(items, func(c gen.Credit) HeyaCredit {
+		return HeyaCredit{
 			Title:        c.Title,
 			Year:         intPtr64AsInt(c.Year),
 			Character:    strPtr(c.Character),
@@ -321,9 +317,8 @@ func mapCredits(items *[]gen.Credit) []HeyaCredit {
 			EpisodeCount: intPtr64AsInt(c.EpisodeCount),
 			Order:        intPtr64AsInt(c.Order),
 			Source:       strPtr(c.Source),
-		})
-	}
-	return out
+		}
+	})
 }
 
 // flattenIDs converts the typed external-ID DTO to the legacy HeyaIDs shape
@@ -346,12 +341,8 @@ func flattenIDs(ids gen.ExternalIDsDTO) HeyaIDs {
 // alive solely because person_worker.go reads it. New artwork mappers
 // emit metadata.ArtworkResult directly — see mapArtworkItems.
 func mapArtworkItemsLegacy(items *[]gen.ArtworkItem) []HeyaArtworkItem {
-	if items == nil || len(*items) == 0 {
-		return nil
-	}
-	out := make([]HeyaArtworkItem, 0, len(*items))
-	for _, it := range *items {
-		out = append(out, HeyaArtworkItem{
+	return mapSlice(items, func(it gen.ArtworkItem) HeyaArtworkItem {
+		return HeyaArtworkItem{
 			URL:    it.Url,
 			Source: it.Source,
 			Aspect: strPtr(it.Aspect),
@@ -359,14 +350,27 @@ func mapArtworkItemsLegacy(items *[]gen.ArtworkItem) []HeyaArtworkItem {
 			Height: intPtr64AsInt(it.Height),
 			Score:  floatPtr(it.Score),
 			Likes:  intPtr64AsInt(it.Likes),
-		})
-	}
-	return out
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
 // Shared sub-mappers
 // ---------------------------------------------------------------------------
+
+// mapSlice converts a generated *[]S into []D via fn, handling the
+// nil/empty/allocate/loop shell every element mapper repeats. Returns nil for
+// nil or empty input — the golden tests pin the resulting JSON.
+func mapSlice[S, D any](in *[]S, fn func(S) D) []D {
+	if in == nil || len(*in) == 0 {
+		return nil
+	}
+	out := make([]D, 0, len(*in))
+	for _, s := range *in {
+		out = append(out, fn(s))
+	}
+	return out
+}
 
 // mergeExternalIDs collapses the typed top-level ExternalIDsDTO with the
 // payload's free-form map. The legacy mapper used the same precedence:
@@ -421,34 +425,25 @@ func mergeExternalIDs(ids gen.ExternalIDsDTO, payloadExt *map[string]string) map
 }
 
 func mapLocalizedTitles(titles *[]gen.LocalizedTitle) []metadata.TitleEntry {
-	if titles == nil {
-		return nil
-	}
-	out := make([]metadata.TitleEntry, 0, len(*titles))
-	for _, t := range *titles {
-		out = append(out, metadata.TitleEntry{
+	return mapSlice(titles, func(t gen.LocalizedTitle) metadata.TitleEntry {
+		return metadata.TitleEntry{
 			Title:     t.Title,
 			Language:  strPtr(t.Language),
 			Country:   strPtr(t.Country),
 			TitleType: strPtr(t.Type),
 			Source:    strPtr(t.Source),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapCast(cast *[]gen.Cast) []metadata.CastMember {
-	if cast == nil {
-		return nil
-	}
-	out := make([]metadata.CastMember, 0, len(*cast))
-	for _, c := range *cast {
+	return mapSlice(cast, func(c gen.Cast) metadata.CastMember {
 		profiles := mapProfileItems(c.ProfileUrls)
 		profilePath := ""
 		if len(profiles) > 0 {
 			profilePath = profiles[0].URL
 		}
-		out = append(out, metadata.CastMember{
+		return metadata.CastMember{
 			ExternalIDs: copyStringMap(mapStr(c.ExternalIds)),
 			Name:        c.Name,
 			Character:   strPtr(c.Character),
@@ -458,23 +453,18 @@ func mapCast(cast *[]gen.Cast) []metadata.CastMember {
 			Profiles:    profiles,
 			Popularity:  floatPtr(c.Popularity),
 			Source:      strPtr(c.Source),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapCrew(crew *[]gen.Crew) []metadata.CrewMember {
-	if crew == nil {
-		return nil
-	}
-	out := make([]metadata.CrewMember, 0, len(*crew))
-	for _, c := range *crew {
+	return mapSlice(crew, func(c gen.Crew) metadata.CrewMember {
 		profiles := mapProfileItems(c.ProfileUrls)
 		profilePath := ""
 		if len(profiles) > 0 {
 			profilePath = profiles[0].URL
 		}
-		out = append(out, metadata.CrewMember{
+		return metadata.CrewMember{
 			ExternalIDs: copyStringMap(mapStr(c.ExternalIds)),
 			Name:        c.Name,
 			Job:         strPtr(c.Job),
@@ -483,9 +473,8 @@ func mapCrew(crew *[]gen.Crew) []metadata.CrewMember {
 			ProfilePath: profilePath,
 			Profiles:    profiles,
 			Source:      strPtr(c.Source),
-		})
-	}
-	return out
+		}
+	})
 }
 
 // mapProfileItems handles the cast/crew profile_urls — different return
@@ -515,12 +504,8 @@ func mapProfileItems(items *[]gen.ArtworkItem) []metadata.ProfileImage {
 // mapArtworkItems is the metadata.ArtworkResult version, used by the
 // artist images pool and FetchArtwork.
 func mapArtworkItems(items *[]gen.ArtworkItem, assetType string) []metadata.ArtworkResult {
-	if items == nil || len(*items) == 0 {
-		return nil
-	}
-	out := make([]metadata.ArtworkResult, 0, len(*items))
-	for _, it := range *items {
-		out = append(out, metadata.ArtworkResult{
+	return mapSlice(items, func(it gen.ArtworkItem) metadata.ArtworkResult {
+		return metadata.ArtworkResult{
 			URL:       it.Url,
 			AssetType: assetType,
 			Language:  strPtr(it.Language),
@@ -530,36 +515,26 @@ func mapArtworkItems(items *[]gen.ArtworkItem, assetType string) []metadata.Artw
 			Width:     intPtr64AsInt(it.Width),
 			Height:    intPtr64AsInt(it.Height),
 			Aspect:    strPtr(it.Aspect),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapKeywords(keywords *[]gen.Keyword) []metadata.KeywordDetail {
-	if keywords == nil {
-		return nil
-	}
-	out := make([]metadata.KeywordDetail, 0, len(*keywords))
-	for _, k := range *keywords {
+	return mapSlice(keywords, func(k gen.Keyword) metadata.KeywordDetail {
 		var kIDs map[string]string
 		if id := intPtr64(k.TmdbId); id != 0 {
 			kIDs = map[string]string{"tmdb": strconv.FormatInt(id, 10)}
 		}
-		out = append(out, metadata.KeywordDetail{
+		return metadata.KeywordDetail{
 			ExternalIDs: kIDs,
 			Name:        k.Name,
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapVideos(videos *[]gen.Video) []metadata.VideoDetail {
-	if videos == nil {
-		return nil
-	}
-	out := make([]metadata.VideoDetail, 0, len(*videos))
-	for _, v := range *videos {
-		out = append(out, metadata.VideoDetail{
+	return mapSlice(videos, func(v gen.Video) metadata.VideoDetail {
+		return metadata.VideoDetail{
 			ProviderKey: strPtr(v.Source),
 			Name:        strPtr(v.Name),
 			Site:        strPtr(v.Site),
@@ -568,32 +543,22 @@ func mapVideos(videos *[]gen.Video) []metadata.VideoDetail {
 			Language:    strPtr(v.Language),
 			Official:    boolPtr(v.Official),
 			PublishedAt: strPtr(v.PublishedAt),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapContentRatings(crs *[]gen.ContentRating) []metadata.CertificationDetail {
-	if crs == nil {
-		return nil
-	}
-	out := make([]metadata.CertificationDetail, 0, len(*crs))
-	for _, cr := range *crs {
-		out = append(out, metadata.CertificationDetail{
+	return mapSlice(crs, func(cr gen.ContentRating) metadata.CertificationDetail {
+		return metadata.CertificationDetail{
 			Country:       strPtr(cr.Country),
 			Certification: cr.Rating,
 			Source:        strPtr(cr.Source),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapRecommendations(recs *[]gen.Recommendation) []metadata.RecommendationDetail {
-	if recs == nil {
-		return nil
-	}
-	out := make([]metadata.RecommendationDetail, 0, len(*recs))
-	for _, r := range *recs {
+	return mapSlice(recs, func(r gen.Recommendation) metadata.RecommendationDetail {
 		// The generated client surfaces TmdbId directly — wrap it back
 		// into the external_ids map the matcher persists.
 		var ext map[string]string
@@ -607,51 +572,40 @@ func mapRecommendations(recs *[]gen.Recommendation) []metadata.RecommendationDet
 		if y := intPtr64(r.Year); y > 0 {
 			releaseDate = strconv.FormatInt(y, 10)
 		}
-		out = append(out, metadata.RecommendationDetail{
+		return metadata.RecommendationDetail{
 			ExternalIDs: ext,
 			Title:       r.Title,
 			PosterPath:  strPtr(r.PosterPath),
 			MediaType:   strPtr(r.MediaType),
 			VoteAverage: floatPtr(r.VoteAverage),
 			ReleaseDate: releaseDate,
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapStudios(refs *[]gen.NamedRef) []metadata.ProductionCompanyDetail {
-	if refs == nil {
-		return nil
-	}
-	out := make([]metadata.ProductionCompanyDetail, 0, len(*refs))
-	for _, s := range *refs {
+	return mapSlice(refs, func(s gen.NamedRef) metadata.ProductionCompanyDetail {
 		var sIDs map[string]string
 		if id := intPtr64(s.Id); id != 0 {
 			sIDs = map[string]string{strPtr(s.Source): strconv.FormatInt(id, 10)}
 		}
-		out = append(out, metadata.ProductionCompanyDetail{
+		return metadata.ProductionCompanyDetail{
 			ExternalIDs:   sIDs,
 			Name:          s.Name,
 			LogoPath:      strPtr(s.LogoUrl),
 			OriginCountry: strPtr(s.Country),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapNamedRefs(refs *[]gen.NamedRef) []metadata.NetworkDetail {
-	if refs == nil {
-		return nil
-	}
-	out := make([]metadata.NetworkDetail, 0, len(*refs))
-	for _, n := range *refs {
+	return mapSlice(refs, func(n gen.NamedRef) metadata.NetworkDetail {
 		nd := metadata.NetworkDetail{Name: n.Name}
 		if id := intPtr64(n.Id); id != 0 {
 			nd.ExternalIDs = map[string]string{"tmdb": strconv.FormatInt(id, 10)}
 		}
-		out = append(out, nd)
-	}
-	return out
+		return nd
+	})
 }
 
 func mapCreators(refs *[]gen.NamedRef) []metadata.CreatorDetail {
@@ -735,23 +689,14 @@ func mapEpisodes(eps []gen.Episode) []metadata.EpisodeDetail {
 }
 
 func mapArtistURLs(urls *[]gen.ArtistURL) []metadata.URLEntry {
-	if urls == nil || len(*urls) == 0 {
-		return nil
-	}
-	out := make([]metadata.URLEntry, 0, len(*urls))
-	for _, u := range *urls {
-		out = append(out, metadata.URLEntry{Type: u.Type, URL: u.Url})
-	}
-	return out
+	return mapSlice(urls, func(u gen.ArtistURL) metadata.URLEntry {
+		return metadata.URLEntry{Type: u.Type, URL: u.Url}
+	})
 }
 
 func mapArtistRelations(rels *[]gen.ArtistMember) []metadata.ArtistRelationEntry {
-	if rels == nil || len(*rels) == 0 {
-		return nil
-	}
-	out := make([]metadata.ArtistRelationEntry, 0, len(*rels))
-	for _, r := range *rels {
-		out = append(out, metadata.ArtistRelationEntry{
+	return mapSlice(rels, func(r gen.ArtistMember) metadata.ArtistRelationEntry {
+		return metadata.ArtistRelationEntry{
 			Name:  r.Name,
 			MBID:  strPtr(r.Mbid),
 			Slug:  strPtr(r.Slug),
@@ -759,26 +704,20 @@ func mapArtistRelations(rels *[]gen.ArtistMember) []metadata.ArtistRelationEntry
 			End:   strPtr(r.End),
 			Ended: boolPtr(r.Ended),
 			Roles: strs(r.Roles),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapTopTracks(tops *[]gen.TopTrack) []metadata.TopTrackEntry {
-	if tops == nil || len(*tops) == 0 {
-		return nil
-	}
-	out := make([]metadata.TopTrackEntry, 0, len(*tops))
-	for _, t := range *tops {
-		out = append(out, metadata.TopTrackEntry{
+	return mapSlice(tops, func(t gen.TopTrack) metadata.TopTrackEntry {
+		return metadata.TopTrackEntry{
 			Title:     t.Title,
 			MBID:      strPtr(t.Mbid),
 			Playcount: intPtr64(t.Playcount),
 			Listeners: intPtr64(t.Listeners),
 			URL:       strPtr(t.Url),
-		})
-	}
-	return out
+		}
+	})
 }
 
 func mapSimilarArtists(sims []gen.SimilarArtist) []metadata.SimilarArtistEntry {
@@ -874,19 +813,14 @@ func mapAlbumTracks(tracks *[]gen.Track) []metadata.TrackDetail {
 }
 
 func mapArtistCredits(credits *[]gen.ArtistCredit) []metadata.ArtistCreditEntry {
-	if credits == nil || len(*credits) == 0 {
-		return nil
-	}
-	out := make([]metadata.ArtistCreditEntry, 0, len(*credits))
-	for _, c := range *credits {
-		out = append(out, metadata.ArtistCreditEntry{
+	return mapSlice(credits, func(c gen.ArtistCredit) metadata.ArtistCreditEntry {
+		return metadata.ArtistCreditEntry{
 			Name:       c.Name,
 			MBID:       strPtr(c.Mbid),
 			Slug:       strPtr(c.Slug),
 			JoinPhrase: strPtr(c.JoinPhrase),
-		})
-	}
-	return out
+		}
+	})
 }
 
 // mapArtwork is the FetchArtwork helper — flattens the per-asset-type

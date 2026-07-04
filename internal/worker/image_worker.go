@@ -121,22 +121,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 	if job.Args.AssetType == "poster" && job.Args.SortOrder == 0 {
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 		if err == nil {
-			q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-				ID:               item.ID,
-				Title:            item.Title,
-				SortTitle:        item.SortTitle,
-				Year:             item.Year,
-				Description:      item.Description,
-				PosterPath:       localPath,
-				BackdropPath:     item.BackdropPath,
-				ExternalIds:      item.ExternalIds,
-				Tagline:          item.Tagline,
-				OriginalTitle:    item.OriginalTitle,
-				OriginalLanguage: item.OriginalLanguage,
-				Status:           item.Status,
-				ProviderKind:     item.ProviderKind,
-				HeyaSlug:         item.HeyaSlug,
-			})
+			updateArtworkPathColumns(ctx, q, item, localPath, item.BackdropPath)
 			log.Info().
 				Int64("item_id", item.ID).
 				Str("media_type", job.Args.MediaType).
@@ -154,22 +139,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 	if job.Args.AssetType == "backdrop" && job.Args.SortOrder == 0 {
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 		if err == nil {
-			q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-				ID:               item.ID,
-				Title:            item.Title,
-				SortTitle:        item.SortTitle,
-				Year:             item.Year,
-				Description:      item.Description,
-				PosterPath:       item.PosterPath,
-				BackdropPath:     localPath,
-				ExternalIds:      item.ExternalIds,
-				Tagline:          item.Tagline,
-				OriginalTitle:    item.OriginalTitle,
-				OriginalLanguage: item.OriginalLanguage,
-				Status:           item.Status,
-				ProviderKind:     item.ProviderKind,
-				HeyaSlug:         item.HeyaSlug,
-			})
+			updateArtworkPathColumns(ctx, q, item, item.PosterPath, localPath)
 		}
 	}
 

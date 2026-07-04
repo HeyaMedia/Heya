@@ -28,6 +28,22 @@ func clampMusicPage(limit, offset int32) (int32, int32) {
 	return limit, offset
 }
 
+// musicPage clamps paging and assembles the shared envelope from a list+count
+// query pair. The count is best-effort (a failed count reports total=0 rather
+// than failing the listing). errCtx labels the list error.
+func musicPage[T any](limit, offset int32, errCtx string,
+	list func(limit, offset int32) ([]T, error),
+	count func() (int64, error),
+) (*MusicListPage[T], error) {
+	limit, offset = clampMusicPage(limit, offset)
+	items, err := list(limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", errCtx, err)
+	}
+	total, _ := count()
+	return &MusicListPage[T]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+}
+
 // GetMusicArtistBySlug returns one artist by its media-item slug. Same row
 // shape as ListMusicArtists so FE consumers don't need to branch when binding
 // header data.
@@ -62,14 +78,12 @@ func (a *App) SimilarMusicArtistsBySlug(ctx context.Context, slug string, limit 
 
 // ListAlbumsByArtistSlug returns one artist's albums, paginated.
 func (a *App) ListAlbumsByArtistSlug(ctx context.Context, slug string, limit, offset int32) (*MusicListPage[sqlc.ListAlbumsByArtistSlugRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-	items, err := q.ListAlbumsByArtistSlug(ctx, sqlc.ListAlbumsByArtistSlugParams{Slug: slug, Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("listing albums for artist %q: %w", slug, err)
-	}
-	total, _ := q.CountAlbumsByArtistSlug(ctx, slug)
-	return &MusicListPage[sqlc.ListAlbumsByArtistSlugRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, fmt.Sprintf("listing albums for artist %q", slug),
+		func(limit, offset int32) ([]sqlc.ListAlbumsByArtistSlugRow, error) {
+			return q.ListAlbumsByArtistSlug(ctx, sqlc.ListAlbumsByArtistSlugParams{Slug: slug, Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountAlbumsByArtistSlug(ctx, slug) })
 }
 
 // MusicTrackDetail is the one-shot read shape for /api/music/tracks/{id}.
@@ -98,27 +112,22 @@ func (a *App) GetMusicTrackDetail(ctx context.Context, trackID int64) (*MusicTra
 
 // ListTracksByArtistSlug returns one artist's tracks (flat, all albums), paginated.
 func (a *App) ListTracksByArtistSlug(ctx context.Context, slug string, limit, offset int32) (*MusicListPage[sqlc.ListTracksByArtistSlugRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-	items, err := q.ListTracksByArtistSlug(ctx, sqlc.ListTracksByArtistSlugParams{Slug: slug, Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("listing tracks for artist %q: %w", slug, err)
-	}
-	total, _ := q.CountTracksByArtistSlug(ctx, slug)
-	return &MusicListPage[sqlc.ListTracksByArtistSlugRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, fmt.Sprintf("listing tracks for artist %q", slug),
+		func(limit, offset int32) ([]sqlc.ListTracksByArtistSlugRow, error) {
+			return q.ListTracksByArtistSlug(ctx, sqlc.ListTracksByArtistSlugParams{Slug: slug, Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountTracksByArtistSlug(ctx, slug) })
 }
 
 // ListMusicArtists returns artists across every music library, paginated.
 func (a *App) ListMusicArtists(ctx context.Context, limit, offset int32) (*MusicListPage[sqlc.ListMusicArtistsRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-
-	items, err := q.ListMusicArtists(ctx, sqlc.ListMusicArtistsParams{Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("listing music artists: %w", err)
-	}
-	total, _ := q.CountMusicArtists(ctx)
-	return &MusicListPage[sqlc.ListMusicArtistsRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, "listing music artists",
+		func(limit, offset int32) ([]sqlc.ListMusicArtistsRow, error) {
+			return q.ListMusicArtists(ctx, sqlc.ListMusicArtistsParams{Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountMusicArtists(ctx) })
 }
 
 // MusicCounts is the read shape for /api/music/counts — the music library
@@ -152,15 +161,12 @@ func (a *App) GetMusicCounts(ctx context.Context) (*MusicCounts, error) {
 
 // ListMusicAlbums returns albums across every music library, paginated.
 func (a *App) ListMusicAlbums(ctx context.Context, limit, offset int32) (*MusicListPage[sqlc.ListMusicAlbumsRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-
-	items, err := q.ListMusicAlbums(ctx, sqlc.ListMusicAlbumsParams{Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("listing music albums: %w", err)
-	}
-	total, _ := q.CountMusicAlbums(ctx)
-	return &MusicListPage[sqlc.ListMusicAlbumsRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, "listing music albums",
+		func(limit, offset int32) ([]sqlc.ListMusicAlbumsRow, error) {
+			return q.ListMusicAlbums(ctx, sqlc.ListMusicAlbumsParams{Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountMusicAlbums(ctx) })
 }
 
 // MusicAlbumDetail is the read shape for /api/music/artists/{a}/albums/{b}.
@@ -420,37 +426,31 @@ func (a *App) ListUserLovedAlbumIDs(ctx context.Context, userID int64) ([]int64,
 // ListUserLovedTracks returns the full enriched track list for the Loved
 // tab. Paginated; ordered most-recently-loved first.
 func (a *App) ListUserLovedTracks(ctx context.Context, userID int64, limit, offset int32) (*MusicListPage[sqlc.ListUserLovedTracksRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-
-	rows, err := q.ListUserLovedTracks(ctx, sqlc.ListUserLovedTracksParams{UserID: userID, Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("list loved tracks: %w", err)
-	}
-	total, _ := q.CountUserLovedTracks(ctx, userID)
-	return &MusicListPage[sqlc.ListUserLovedTracksRow]{Items: rows, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, "list loved tracks",
+		func(limit, offset int32) ([]sqlc.ListUserLovedTracksRow, error) {
+			return q.ListUserLovedTracks(ctx, sqlc.ListUserLovedTracksParams{UserID: userID, Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountUserLovedTracks(ctx, userID) })
 }
 
 // ListUserLovedArtists / ListUserLovedAlbums power the My Media grids.
 func (a *App) ListUserLovedArtists(ctx context.Context, userID int64, limit, offset int32) (*MusicListPage[sqlc.ListUserLovedArtistsRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-	rows, err := q.ListUserLovedArtists(ctx, sqlc.ListUserLovedArtistsParams{UserID: userID, Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("list loved artists: %w", err)
-	}
-	total, _ := q.CountUserLovedArtists(ctx, userID)
-	return &MusicListPage[sqlc.ListUserLovedArtistsRow]{Items: rows, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, "list loved artists",
+		func(limit, offset int32) ([]sqlc.ListUserLovedArtistsRow, error) {
+			return q.ListUserLovedArtists(ctx, sqlc.ListUserLovedArtistsParams{UserID: userID, Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountUserLovedArtists(ctx, userID) })
 }
+
 func (a *App) ListUserLovedAlbums(ctx context.Context, userID int64, limit, offset int32) (*MusicListPage[sqlc.ListUserLovedAlbumsRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-	rows, err := q.ListUserLovedAlbums(ctx, sqlc.ListUserLovedAlbumsParams{UserID: userID, Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("list loved albums: %w", err)
-	}
-	total, _ := q.CountUserLovedAlbums(ctx, userID)
-	return &MusicListPage[sqlc.ListUserLovedAlbumsRow]{Items: rows, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, "list loved albums",
+		func(limit, offset int32) ([]sqlc.ListUserLovedAlbumsRow, error) {
+			return q.ListUserLovedAlbums(ctx, sqlc.ListUserLovedAlbumsParams{UserID: userID, Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountUserLovedAlbums(ctx, userID) })
 }
 
 // GetTrackFile returns a single track_file by id.
@@ -465,13 +465,10 @@ func (a *App) ListTrackFiles(ctx context.Context, trackID int64) ([]sqlc.TrackFi
 
 // ListMusicTracks returns a flat track listing across every music library.
 func (a *App) ListMusicTracks(ctx context.Context, limit, offset int32) (*MusicListPage[sqlc.ListMusicTracksRow], error) {
-	limit, offset = clampMusicPage(limit, offset)
 	q := sqlc.New(a.db)
-
-	items, err := q.ListMusicTracks(ctx, sqlc.ListMusicTracksParams{Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("listing music tracks: %w", err)
-	}
-	total, _ := q.CountMusicTracks(ctx)
-	return &MusicListPage[sqlc.ListMusicTracksRow]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+	return musicPage(limit, offset, "listing music tracks",
+		func(limit, offset int32) ([]sqlc.ListMusicTracksRow, error) {
+			return q.ListMusicTracks(ctx, sqlc.ListMusicTracksParams{Limit: limit, Offset: offset})
+		},
+		func() (int64, error) { return q.CountMusicTracks(ctx) })
 }

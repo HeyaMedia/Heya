@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/rs/zerolog"
@@ -105,13 +106,7 @@ func registerAdminSystemRoutes(api huma.API, app *service.App, hub *eventhub.Hub
 			}
 			out := make([]adminUserView, 0, len(users))
 			for _, u := range users {
-				out = append(out, adminUserView{
-					ID:        u.ID,
-					Username:  u.Username,
-					Email:     u.Email,
-					IsAdmin:   u.IsAdmin,
-					CreatedAt: u.CreatedAt.Time.UTC().Format(time.RFC3339),
-				})
+				out = append(out, toAdminUserView(u))
 			}
 			return noStoreJSON(out), nil
 		})
@@ -129,11 +124,7 @@ func registerAdminSystemRoutes(api huma.API, app *service.App, hub *eventhub.Hub
 			if err != nil {
 				return nil, huma.Error409Conflict(err.Error())
 			}
-			return noStoreJSON(adminUserView{
-				ID: user.ID, Username: user.Username, Email: user.Email,
-				IsAdmin:   user.IsAdmin,
-				CreatedAt: user.CreatedAt.Time.UTC().Format(time.RFC3339),
-			}), nil
+			return noStoreJSON(toAdminUserView(user)), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/admin/users/{id}", "admin-delete-user", "Delete a user (and cascade their sessions)", "Admin")),
@@ -157,11 +148,7 @@ func registerAdminSystemRoutes(api huma.API, app *service.App, hub *eventhub.Hub
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return noStoreJSON(adminUserView{
-				ID: user.ID, Username: user.Username, Email: user.Email,
-				IsAdmin:   user.IsAdmin,
-				CreatedAt: user.CreatedAt.Time.UTC().Format(time.RFC3339),
-			}), nil
+			return noStoreJSON(toAdminUserView(user)), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/users/{id}/password", "admin-reset-user-password", "Reset a user's password (admin override)", "Admin")),
@@ -206,6 +193,16 @@ type adminUserView struct {
 	Email     string `json:"email"`
 	IsAdmin   bool   `json:"is_admin"`
 	CreatedAt string `json:"created_at"`
+}
+
+func toAdminUserView(u sqlc.User) adminUserView {
+	return adminUserView{
+		ID:        u.ID,
+		Username:  u.Username,
+		Email:     u.Email,
+		IsAdmin:   u.IsAdmin,
+		CreatedAt: u.CreatedAt.Time.UTC().Format(time.RFC3339),
+	}
 }
 
 // --- /api/admin/system ---

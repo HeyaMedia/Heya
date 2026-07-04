@@ -37,3 +37,13 @@ func humaServiceErrorStatus(err error, fallbackStatus int) error {
 		return huma.NewError(fallbackStatus, err.Error())
 	}
 }
+
+// facetsErr maps ErrNoFacets to a 404 with per-endpoint copy ("seed track has
+// no facets", …); anything else goes through the shared service-error mapper
+// with the given fallback status.
+func facetsErr(err error, notFoundMsg string, fallbackStatus int) error {
+	if errors.Is(err, service.ErrNoFacets) {
+		return huma.Error404NotFound(notFoundMsg)
+	}
+	return humaServiceErrorStatus(err, fallbackStatus)
+}

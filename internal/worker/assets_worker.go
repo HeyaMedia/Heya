@@ -136,7 +136,9 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	}
 
 	if filePath != "" && !vfs.IsSMBPath(dir) {
-		w.detectSiblingAssets(ctx, q, mediaItemID, dir, base)
+		// Local path: os.DirFS + vfs.Join ≡ os.ReadDir + filepath.Join here,
+		// so the FS-based walker covers both the local and SMB shapes.
+		w.detectSiblingAssetsFS(ctx, q, mediaItemID, os.DirFS(dir), dir, base)
 	} else if source != nil {
 		relDir := vfs.Base(dir)
 		if relDir != vfs.Base(showDir) {
@@ -180,22 +182,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	}
 
 	if newPoster != item.PosterPath || newBackdrop != item.BackdropPath {
-		q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-			ID:               item.ID,
-			Title:            item.Title,
-			SortTitle:        item.SortTitle,
-			Year:             item.Year,
-			Description:      item.Description,
-			PosterPath:       newPoster,
-			BackdropPath:     newBackdrop,
-			ExternalIds:      item.ExternalIds,
-			Tagline:          item.Tagline,
-			OriginalTitle:    item.OriginalTitle,
-			OriginalLanguage: item.OriginalLanguage,
-			Status:           item.Status,
-			ProviderKind:     item.ProviderKind,
-			HeyaSlug:         item.HeyaSlug,
-		})
+		updateArtworkPathColumns(ctx, q, item, newPoster, newBackdrop)
 		log.Info().Str("poster", newPoster).Str("backdrop", newBackdrop).Int64("media_id", mediaItemID).Msg("local images copied to cache")
 	}
 
@@ -283,7 +270,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			seen[key] = true
 			cacheName := nameNoExt + ext
 			destPath := filepath.Join(cacheDir, cacheName)
-			copyFileFromFS(fsys, name, destPath)
+			copyFromFS(fsys, name, destPath, false)
 
 			info, _ := e.Info()
 			size := int64(0)
@@ -308,7 +295,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 				}
 			}
 			destPath := filepath.Join(cacheDir, name)
-			copyFileFromFS(fsys, name, destPath)
+			copyFromFS(fsys, name, destPath, false)
 
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
@@ -337,7 +324,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			seen[key] = true
 
 			destPath := filepath.Join(cacheDir, name)
-			copyFileFromFS(fsys, name, destPath)
+			copyFromFS(fsys, name, destPath, false)
 
 			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
@@ -345,70 +332,6 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 				Source:      "local",
 				LocalPath:   destPath,
 				Label:       seasonLabel,
-			})
-		}
-	}
-}
-
-func (w *DetectLocalAssetsWorker) detectSiblingAssets(ctx context.Context, q *sqlc.Queries, mediaItemID int64, dir, baseName string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-
-	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
-	hasThumb := false
-	for _, a := range existing {
-		if a.AssetType == sqlc.AssetTypeThumb && a.Label == "" {
-			hasThumb = true
-		}
-	}
-
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
-		fullPath := filepath.Join(dir, name)
-
-		if mediafile.IsSubtitleExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
-			lang := extractLanguageCode(nameNoExt, baseName)
-			info, _ := e.Info()
-			size := int64(0)
-			if info != nil {
-				size = info.Size()
-			}
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   sqlc.AssetTypeSubtitle,
-				Source:      "local",
-				LocalPath:   fullPath,
-				Language:    lang,
-				FileSize:    size,
-			})
-		}
-
-		if mediafile.IsLyricsExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   sqlc.AssetTypeLyrics,
-				Source:      "local",
-				LocalPath:   fullPath,
-			})
-		}
-
-		if mediafile.IsImageExt(ext) && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
-			if hasThumb {
-				continue
-			}
-			hasThumb = true
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   sqlc.AssetTypeThumb,
-				Source:      "local",
-				LocalPath:   fullPath,
 			})
 		}
 	}
@@ -580,8 +503,11 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-func copyFileFromFS(fsys fs.FS, name, dst string) error {
-	if fileExists(dst) {
+// copyFromFS copies name from fsys to dst. With overwrite=false the copy
+// bails when dst already exists — right for remote downloads. Local
+// re-detection passes overwrite=true so a refresh picks up replacement files.
+func copyFromFS(fsys fs.FS, name, dst string, overwrite bool) error {
+	if !overwrite && fileExists(dst) {
 		return nil
 	}
 	in, err := fsys.Open(name)
@@ -601,7 +527,7 @@ func copyFileFromFS(fsys fs.FS, name, dst string) error {
 }
 
 func findAndCopyFS(fsys fs.FS, name, dst string) string {
-	if err := copyFileFromFS(fsys, name, dst); err != nil {
+	if err := copyFromFS(fsys, name, dst, false); err != nil {
 		return ""
 	}
 	return dst
