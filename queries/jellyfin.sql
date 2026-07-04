@@ -9,8 +9,15 @@
 -- catalogs that way).
 
 -- name: JFListLibraryItems :many
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year,
-       mi.description, mi.slug, mi.external_ids, mi.status, mi.tagline,
+SELECT mi.id, mi.library_id, mi.media_type,
+       COALESCE((SELECT mt.title FROM media_titles mt
+                 WHERE mt.media_item_id = mi.id AND mt.language = 'en' AND mt.title <> ''
+                 LIMIT 1), mi.title) AS title,
+       mi.sort_title, mi.year,
+       COALESCE((SELECT mo.overview FROM media_overviews mo
+                 WHERE mo.media_item_id = mi.id AND mo.language = 'en' AND mo.overview <> ''
+                 LIMIT 1), mi.description) AS description,
+       mi.slug, mi.external_ids, mi.status, mi.tagline,
        mi.created_at, mi.updated_at,
        m.runtime_minutes AS movie_runtime_minutes,
        m.genres AS movie_genres,
@@ -83,7 +90,14 @@ WHERE (sqlc.arg(series_media_item_id)::bigint = 0 OR ser.media_item_id = sqlc.ar
 ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC;
 
 -- name: JFListEpisodes :many
-SELECT e.id, e.season_id, e.episode_number, e.title, e.overview, e.still_path,
+SELECT e.id, e.season_id, e.episode_number,
+       COALESCE((SELECT et.title FROM episode_titles et
+                 WHERE et.episode_id = e.id AND et.language = 'en' AND et.title <> ''
+                 LIMIT 1), e.title) AS title,
+       COALESCE((SELECT eo.overview FROM episode_overviews eo
+                 WHERE eo.episode_id = e.id AND eo.language = 'en' AND eo.overview <> ''
+                 LIMIT 1), e.overview) AS overview,
+       e.still_path,
        e.runtime_minutes, e.air_date, e.rating, e.is_special,
        s.season_number,
        s.title AS season_title,
