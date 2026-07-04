@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -263,6 +264,68 @@ func (s *Server) resolveLevel(ctx context.Context, req *itemsRequest) (itemLevel
 	return levelNone, ""
 }
 
+// searchTypes returns the item types a request should span. resolveLevel can
+// only pick ONE level, so a request naming several IncludeItemTypes (or a
+// top-level search naming none) must fan out per type and merge — otherwise
+// only the first type's level is ever queried, which is why global search
+// (Infuse sends Movie,Series,Episode,MusicAlbum,Audio,... or nothing)
+// returned nothing.
+func (r itemsRequest) searchTypes() []string {
+	known := map[string]bool{
+		"movie": true, "series": true, "episode": true, "season": true,
+		"musicalbum": true, "audio": true, "musicartist": true, "book": true,
+	}
+	var out []string
+	for _, t := range r.types {
+		if known[strings.ToLower(t)] {
+			out = append(out, t)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	// No explicit types + a search term at library scope (no specific parent):
+	// span the everyday catalog kinds, like a Jellyfin global search.
+	if r.searchTerm != "" && (!r.hasParent || r.parentKind == KindLibrary) {
+		return []string{"Movie", "Series", "Episode", "MusicArtist", "MusicAlbum", "Audio"}
+	}
+	return out
+}
+
+// queryMultiType fans a multi-type request out into one single-type
+// sub-request per type (each recurses through the single-level switch),
+// then merges, sorts by name, and paginates the combined set.
+func (s *Server) queryMultiType(ctx context.Context, userID int64, serverID string, req itemsRequest, types []string) (queryResult[baseItemDto], error) {
+	merged := []baseItemDto{}
+	total := 0
+	for _, t := range types {
+		sub := req
+		sub.types = []string{t}
+		sub.startIndex = 0 // paginate after merge
+		if req.limit > 0 {
+			sub.limit = req.startIndex + req.limit // enough to cover the page
+		}
+		res, err := s.queryItems(ctx, userID, serverID, sub)
+		if err != nil {
+			continue // one level failing shouldn't empty the whole search
+		}
+		merged = append(merged, res.Items...)
+		total += res.TotalRecordCount
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return strings.ToLower(merged[i].SortName) < strings.ToLower(merged[j].SortName)
+	})
+	if req.startIndex > 0 && req.startIndex < len(merged) {
+		merged = merged[req.startIndex:]
+	} else if req.startIndex >= len(merged) {
+		merged = []baseItemDto{}
+	}
+	if req.limit > 0 && len(merged) > req.limit {
+		merged = merged[:req.limit]
+	}
+	return queryResult[baseItemDto]{Items: merged, TotalRecordCount: total, StartIndex: req.startIndex}, nil
+}
+
 // queryItems executes a parsed /Items request for user and returns the
 // Jellyfin list envelope.
 func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, req itemsRequest) (queryResult[baseItemDto], error) {
@@ -271,6 +334,11 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 	// Ids= hydration: group by kind, fetch, return in request order.
 	if len(req.ids) > 0 {
 		return s.queryByIDs(ctx, userID, serverID, req)
+	}
+
+	// Multi-type / typeless search fans out per type and merges.
+	if types := req.searchTypes(); len(types) > 1 {
+		return s.queryMultiType(ctx, userID, serverID, req, types)
 	}
 
 	level, mediaType := s.resolveLevel(ctx, &req)
