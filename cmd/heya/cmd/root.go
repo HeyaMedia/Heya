@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/karbowiak/heya/internal/config"
+	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -13,6 +15,18 @@ import (
 )
 
 var cfg *config.Config
+
+// withApp opens the service layer (connect + migrate + bootstrap), runs fn,
+// and closes it — the shared preamble of nearly every CLI command.
+func withApp(fn func(ctx context.Context, app *service.App) error) error {
+	ctx := context.Background()
+	app, err := service.New(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer app.Close()
+	return fn(ctx, app)
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "heya",

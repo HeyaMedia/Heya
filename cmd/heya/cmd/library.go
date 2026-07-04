@@ -37,31 +37,26 @@ var libraryAddCmd = &cobra.Command{
 			return err
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			q := sqlc.New(app.DBPool())
+			users, err := q.ListUsers(ctx)
+			if err != nil || len(users) == 0 {
+				return fmt.Errorf("no users exist — create a user first with `heya user create`")
+			}
 
-		q := sqlc.New(app.DBPool())
-		users, err := q.ListUsers(ctx)
-		if err != nil || len(users) == 0 {
-			return fmt.Errorf("no users exist — create a user first with `heya user create`")
-		}
+			settings := settingsFromFlags(cmd, mediaTypeStr)
 
-		settings := settingsFromFlags(cmd, mediaTypeStr)
+			lib, err := app.CreateLibrary(ctx, name, mt, paths, users[0].ID, settings)
+			if err != nil {
+				return err
+			}
 
-		lib, err := app.CreateLibrary(ctx, name, mt, paths, users[0].ID, settings)
-		if err != nil {
-			return err
-		}
-
-		ui.Success("Created library: %s (id=%d)", lib.Name, lib.ID)
-		ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
-		ui.Info("Paths", strings.Join(lib.Paths, ", "))
-		printLibrarySettings(lib)
-		return nil
+			ui.Success("Created library: %s (id=%d)", lib.Name, lib.ID)
+			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
+			ui.Info("Paths", strings.Join(lib.Paths, ", "))
+			printLibrarySettings(lib)
+			return nil
+		})
 	},
 }
 
@@ -69,38 +64,33 @@ var libraryListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all libraries",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			libs, err := app.ListLibraries(ctx)
+			if err != nil {
+				return err
+			}
 
-		libs, err := app.ListLibraries(ctx)
-		if err != nil {
-			return err
-		}
+			if ui.JSONMode {
+				return ui.OutputJSON(libs)
+			}
 
-		if ui.JSONMode {
-			return ui.OutputJSON(libs)
-		}
+			if len(libs) == 0 {
+				ui.Warn("No libraries found. Run 'heya library add' to create one.")
+				return nil
+			}
 
-		if len(libs) == 0 {
-			ui.Warn("No libraries found. Run 'heya library add' to create one.")
+			t := ui.NewTable("ID", "NAME", "TYPE", "PATHS")
+			for _, lib := range libs {
+				t.AddRow(
+					strconv.FormatInt(lib.ID, 10),
+					lib.Name,
+					ui.MediaBadge(string(lib.MediaType)),
+					strings.Join(lib.Paths, ", "),
+				)
+			}
+			fmt.Println(t.Render())
 			return nil
-		}
-
-		t := ui.NewTable("ID", "NAME", "TYPE", "PATHS")
-		for _, lib := range libs {
-			t.AddRow(
-				strconv.FormatInt(lib.ID, 10),
-				lib.Name,
-				ui.MediaBadge(string(lib.MediaType)),
-				strings.Join(lib.Paths, ", "),
-			)
-		}
-		fmt.Println(t.Render())
-		return nil
+		})
 	},
 }
 
@@ -117,40 +107,36 @@ var libraryScanCmd = &cobra.Command{
 			return fmt.Errorf("--id or --all is required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
-
-		var libs []sqlc.Library
-		if all {
-			libs, err = app.ListLibraries(ctx)
-			if err != nil {
-				return err
+		return withApp(func(ctx context.Context, app *service.App) error {
+			var libs []sqlc.Library
+			if all {
+				var err error
+				libs, err = app.ListLibraries(ctx)
+				if err != nil {
+					return err
+				}
+			} else {
+				lib, err := app.GetLibrary(ctx, id)
+				if err != nil {
+					return err
+				}
+				libs = []sqlc.Library{lib}
 			}
-		} else {
-			lib, err := app.GetLibrary(ctx, id)
-			if err != nil {
-				return err
+
+			for _, lib := range libs {
+				ui.Header(fmt.Sprintf("Scanning %s", lib.Name))
+				ui.Info("Library", fmt.Sprintf("%s (id=%d)", lib.Name, lib.ID))
+				ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
+
+				app.EnqueueScanLibrary(lib.ID, force)
+				ui.Success("Scan enqueued")
 			}
-			libs = []sqlc.Library{lib}
-		}
 
-		for _, lib := range libs {
-			ui.Header(fmt.Sprintf("Scanning %s", lib.Name))
-			ui.Info("Library", fmt.Sprintf("%s (id=%d)", lib.Name, lib.ID))
-			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
+			fmt.Println()
+			ui.Println(ui.Dim("Jobs will be processed by 'heya serve', or run 'heya queue process'."))
 
-			app.EnqueueScanLibrary(lib.ID, force)
-			ui.Success("Scan enqueued")
-		}
-
-		fmt.Println()
-		ui.Println(ui.Dim("Jobs will be processed by 'heya serve', or run 'heya queue process'."))
-
-		return nil
+			return nil
+		})
 	},
 }
 
@@ -163,19 +149,14 @@ var libraryRemoveCmd = &cobra.Command{
 			return fmt.Errorf("--id is required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			if err := app.DeleteLibrary(ctx, id); err != nil {
+				return err
+			}
 
-		if err := app.DeleteLibrary(ctx, id); err != nil {
-			return err
-		}
-
-		ui.Success("Deleted library: id=%d", id)
-		return nil
+			ui.Success("Deleted library: id=%d", id)
+			return nil
+		})
 	},
 }
 
@@ -188,37 +169,32 @@ var libraryFilesCmd = &cobra.Command{
 			return fmt.Errorf("--id is required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			files, err := app.ListLibraryFiles(ctx, id, 100, 0)
+			if err != nil {
+				return err
+			}
 
-		files, err := app.ListLibraryFiles(ctx, id, 100, 0)
-		if err != nil {
-			return err
-		}
+			if ui.JSONMode {
+				return ui.OutputJSON(files)
+			}
 
-		if ui.JSONMode {
-			return ui.OutputJSON(files)
-		}
+			if len(files) == 0 {
+				ui.Warn("No files found. Run 'heya library scan' first.")
+				return nil
+			}
 
-		if len(files) == 0 {
-			ui.Warn("No files found. Run 'heya library scan' first.")
+			t := ui.NewTable("ID", "STATUS", "PATH")
+			for _, f := range files {
+				t.AddRow(
+					strconv.FormatInt(f.ID, 10),
+					ui.StatusBadge(string(f.Status)),
+					filepath.Base(f.Path),
+				)
+			}
+			fmt.Println(t.Render())
 			return nil
-		}
-
-		t := ui.NewTable("ID", "STATUS", "PATH")
-		for _, f := range files {
-			t.AddRow(
-				strconv.FormatInt(f.ID, 10),
-				ui.StatusBadge(string(f.Status)),
-				filepath.Base(f.Path),
-			)
-		}
-		fmt.Println(t.Render())
-		return nil
+		})
 	},
 }
 
@@ -231,36 +207,31 @@ var libraryStatsCmd = &cobra.Command{
 			return fmt.Errorf("--id is required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			stats, err := app.LibraryFileStats(ctx, id)
+			if err != nil {
+				return err
+			}
 
-		stats, err := app.LibraryFileStats(ctx, id)
-		if err != nil {
-			return err
-		}
+			if ui.JSONMode {
+				return ui.OutputJSON(stats)
+			}
 
-		if ui.JSONMode {
-			return ui.OutputJSON(stats)
-		}
+			if len(stats) == 0 {
+				ui.Warn("No files in library. Run 'heya library scan' first.")
+				return nil
+			}
 
-		if len(stats) == 0 {
-			ui.Warn("No files in library. Run 'heya library scan' first.")
+			t := ui.NewTable("STATUS", "COUNT")
+			for _, s := range stats {
+				t.AddRow(
+					ui.StatusBadge(string(s.Status)),
+					strconv.FormatInt(s.Count, 10),
+				)
+			}
+			fmt.Println(t.Render())
 			return nil
-		}
-
-		t := ui.NewTable("STATUS", "COUNT")
-		for _, s := range stats {
-			t.AddRow(
-				ui.StatusBadge(string(s.Status)),
-				strconv.FormatInt(s.Count, 10),
-			)
-		}
-		fmt.Println(t.Render())
-		return nil
+		})
 	},
 }
 
@@ -268,25 +239,20 @@ var libraryWatchCmd = &cobra.Command{
 	Use:   "watch",
 	Short: "Show watcher status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			status := app.WatcherManager().Status()
+			if len(status) == 0 {
+				ui.Warn("No active watchers. Start the server with 'heya serve' to enable file watching.")
+				return nil
+			}
 
-		status := app.WatcherManager().Status()
-		if len(status) == 0 {
-			ui.Warn("No active watchers. Start the server with 'heya serve' to enable file watching.")
+			t := ui.NewTable("LIBRARY", "PATH")
+			for id, path := range status {
+				t.AddRow(strconv.FormatInt(id, 10), path)
+			}
+			fmt.Println(t.Render())
 			return nil
-		}
-
-		t := ui.NewTable("LIBRARY", "PATH")
-		for id, path := range status {
-			t.AddRow(strconv.FormatInt(id, 10), path)
-		}
-		fmt.Println(t.Render())
-		return nil
+		})
 	},
 }
 
@@ -299,24 +265,19 @@ var libraryInfoCmd = &cobra.Command{
 			return fmt.Errorf("--id is required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			lib, err := app.GetLibrary(ctx, id)
+			if err != nil {
+				return err
+			}
 
-		lib, err := app.GetLibrary(ctx, id)
-		if err != nil {
-			return err
-		}
-
-		ui.Header(lib.Name)
-		ui.Info("ID", strconv.FormatInt(lib.ID, 10))
-		ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
-		ui.Info("Paths", strings.Join(lib.Paths, ", "))
-		printLibrarySettings(lib)
-		return nil
+			ui.Header(lib.Name)
+			ui.Info("ID", strconv.FormatInt(lib.ID, 10))
+			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
+			ui.Info("Paths", strings.Join(lib.Paths, ", "))
+			printLibrarySettings(lib)
+			return nil
+		})
 	},
 }
 
@@ -329,29 +290,24 @@ var librarySettingsCmd = &cobra.Command{
 			return fmt.Errorf("--id is required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			lib, err := app.GetLibrary(ctx, id)
+			if err != nil {
+				return err
+			}
 
-		lib, err := app.GetLibrary(ctx, id)
-		if err != nil {
-			return err
-		}
+			current := metadata.ParseSettings(lib.Settings)
+			updated := applySettingsFlags(cmd, current)
 
-		current := metadata.ParseSettings(lib.Settings)
-		updated := applySettingsFlags(cmd, current)
+			lib, err = app.UpdateLibrarySettings(ctx, id, updated)
+			if err != nil {
+				return err
+			}
 
-		lib, err = app.UpdateLibrarySettings(ctx, id, updated)
-		if err != nil {
-			return err
-		}
-
-		ui.Success("Updated settings for library: %s (id=%d)", lib.Name, lib.ID)
-		printLibrarySettings(lib)
-		return nil
+			ui.Success("Updated settings for library: %s (id=%d)", lib.Name, lib.ID)
+			printLibrarySettings(lib)
+			return nil
+		})
 	},
 }
 

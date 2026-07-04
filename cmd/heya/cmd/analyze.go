@@ -32,10 +32,10 @@ var analyzeCmd = &cobra.Command{
 // models. Derived from cfg.DataDir; not user-tunable beyond DataDir.
 func modelsDir() string { return cfg.DataDir.Value + "/models" }
 
-// withApp constructs a service.App so the CLI shares the same
+// openApp constructs a service.App so the CLI shares the same
 // settings + DB-backed plumbing as the running server. Caller is
 // responsible for app.Close() (or the process exit cleans it up).
-func withApp(ctx context.Context) (*service.App, error) {
+func openApp(ctx context.Context) (*service.App, error) {
 	return service.New(ctx, cfg)
 }
 
@@ -54,7 +54,7 @@ var analyzeStatusCmd = &cobra.Command{
 		defer db.Close()
 		q := sqlc.New(db)
 
-		app, err := withApp(ctx)
+		app, err := openApp(ctx)
 		if err != nil {
 			return err
 		}
@@ -138,7 +138,7 @@ already fanned out into River.`,
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 
-		app, err := withApp(ctx)
+		app, err := openApp(ctx)
 		if err != nil {
 			return err
 		}
@@ -295,7 +295,7 @@ var analyzeWarmupCmd = &cobra.Command{
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 
-		app, err := withApp(ctx)
+		app, err := openApp(ctx)
 		if err != nil {
 			return err
 		}

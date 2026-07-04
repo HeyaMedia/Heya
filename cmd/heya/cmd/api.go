@@ -67,20 +67,13 @@ Non-2xx responses print status + body to stderr and exit non-zero.`,
 }
 
 func init() {
-	apiCmd.Flags().StringVar(&apiBaseURL, "base", envOrDefault("HEYA_API_BASE_URL", "http://localhost:8080"), "Server base URL")
-	apiCmd.Flags().StringVar(&apiUser, "user", envOrDefault("HEYA_API_USER", "admin"), "Login username")
-	apiCmd.Flags().StringVar(&apiPass, "pass", envOrDefault("HEYA_API_PASS", "admin"), "Login password")
+	apiCmd.Flags().StringVar(&apiBaseURL, "base", envOr("HEYA_API_BASE_URL", "http://localhost:8080"), "Server base URL")
+	apiCmd.Flags().StringVar(&apiUser, "user", envOr("HEYA_API_USER", "admin"), "Login username")
+	apiCmd.Flags().StringVar(&apiPass, "pass", envOr("HEYA_API_PASS", "admin"), "Login password")
 	apiCmd.Flags().StringVar(&apiToken, "token", os.Getenv("HEYA_API_TOKEN"), "Bearer token (skips login + cache)")
 	apiCmd.Flags().StringSliceVarP(&apiQuery, "query", "q", nil, "Query param key=value (repeatable)")
 	apiCmd.Flags().BoolVar(&apiRaw, "raw", false, "Stream response bytes verbatim (no JSON pretty-print)")
 	rootCmd.AddCommand(apiCmd)
-}
-
-func envOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 func runAPI(cmd *cobra.Command, args []string) error {

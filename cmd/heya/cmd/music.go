@@ -35,24 +35,19 @@ Idempotent — re-running once the albums have moved is a no-op.`,
 		}
 		folder := args[1]
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
-
-		res, err := app.SplitArtist(ctx, artistID, folder)
-		if err != nil {
-			return err
-		}
-		if !res.Changed() {
-			ui.Warn("No content of artist %d lives under folder %q — nothing to split.", artistID, folder)
+		return withApp(func(ctx context.Context, app *service.App) error {
+			res, err := app.SplitArtist(ctx, artistID, folder)
+			if err != nil {
+				return err
+			}
+			if !res.Changed() {
+				ui.Warn("No content of artist %d lives under folder %q — nothing to split.", artistID, folder)
+				return nil
+			}
+			ui.Success("Split folder %q out of artist %d into %q (artist %d): %d album(s) moved, %d album(s) un-merged; queued for re-enrichment.",
+				folder, artistID, res.NewArtistName, res.NewArtistID, res.AlbumsMoved, res.AlbumsSplit)
 			return nil
-		}
-		ui.Success("Split folder %q out of artist %d into %q (artist %d): %d album(s) moved, %d album(s) un-merged; queued for re-enrichment.",
-			folder, artistID, res.NewArtistName, res.NewArtistID, res.AlbumsMoved, res.AlbumsSplit)
-		return nil
+		})
 	},
 }
 

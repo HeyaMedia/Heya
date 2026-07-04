@@ -32,24 +32,19 @@ var userCreateCmd = &cobra.Command{
 			email = username + "@localhost"
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			user, err := app.CreateUser(ctx, username, email, password, isAdmin)
+			if err != nil {
+				return err
+			}
 
-		user, err := app.CreateUser(ctx, username, email, password, isAdmin)
-		if err != nil {
-			return err
-		}
-
-		role := "user"
-		if user.IsAdmin {
-			role = "admin"
-		}
-		ui.Success("Created %s: %s (id=%d)", role, user.Username, user.ID)
-		return nil
+			role := "user"
+			if user.IsAdmin {
+				role = "admin"
+			}
+			ui.Success("Created %s: %s (id=%d)", role, user.Username, user.ID)
+			return nil
+		})
 	},
 }
 
@@ -57,37 +52,32 @@ var userListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all users",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
-
-		users, err := app.ListUsers(ctx)
-		if err != nil {
-			return err
-		}
-
-		if ui.JSONMode {
-			return ui.OutputJSON(users)
-		}
-
-		if len(users) == 0 {
-			ui.Warn("No users found.")
-			return nil
-		}
-
-		t := ui.NewTable("ID", "USERNAME", "EMAIL", "ROLE")
-		for _, u := range users {
-			role := "user"
-			if u.IsAdmin {
-				role = ui.Bold("admin")
+		return withApp(func(ctx context.Context, app *service.App) error {
+			users, err := app.ListUsers(ctx)
+			if err != nil {
+				return err
 			}
-			t.AddRow(strconv.FormatInt(u.ID, 10), u.Username, u.Email, role)
-		}
-		fmt.Println(t.Render())
-		return nil
+
+			if ui.JSONMode {
+				return ui.OutputJSON(users)
+			}
+
+			if len(users) == 0 {
+				ui.Warn("No users found.")
+				return nil
+			}
+
+			t := ui.NewTable("ID", "USERNAME", "EMAIL", "ROLE")
+			for _, u := range users {
+				role := "user"
+				if u.IsAdmin {
+					role = ui.Bold("admin")
+				}
+				t.AddRow(strconv.FormatInt(u.ID, 10), u.Username, u.Email, role)
+			}
+			fmt.Println(t.Render())
+			return nil
+		})
 	},
 }
 
@@ -100,19 +90,14 @@ var userDeleteCmd = &cobra.Command{
 			return fmt.Errorf("--username is required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			if err := app.DeleteUser(ctx, username); err != nil {
+				return err
+			}
 
-		if err := app.DeleteUser(ctx, username); err != nil {
-			return err
-		}
-
-		ui.Success("Deleted user: %s", username)
-		return nil
+			ui.Success("Deleted user: %s", username)
+			return nil
+		})
 	},
 }
 
@@ -127,19 +112,14 @@ var userResetPasswordCmd = &cobra.Command{
 			return fmt.Errorf("--username and --password are required")
 		}
 
-		ctx := context.Background()
-		app, err := service.New(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer app.Close()
+		return withApp(func(ctx context.Context, app *service.App) error {
+			if err := app.ResetPassword(ctx, username, password); err != nil {
+				return err
+			}
 
-		if err := app.ResetPassword(ctx, username, password); err != nil {
-			return err
-		}
-
-		ui.Success("Password reset for user: %s", username)
-		return nil
+			ui.Success("Password reset for user: %s", username)
+			return nil
+		})
 	},
 }
 
