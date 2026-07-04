@@ -27,13 +27,93 @@ func (a *App) UnmarkEpisodeWatched(ctx context.Context, userID, episodeID int64)
 	})
 }
 
-// MarkSeasonWatched marks all episodes in a season as watched.
+// MarkSeasonWatched marks the episodes we actually hold in a season as watched
+// (the present-episode set — see presentEpisodeIDs), so an unaired episode
+// isn't pre-marked watched before its file ever arrives, which would surface it
+// as already-watched the moment it downloads.
 func (a *App) MarkSeasonWatched(ctx context.Context, userID, seasonID int64) error {
 	q := sqlc.New(a.db)
-	return q.MarkSeasonWatched(ctx, sqlc.MarkSeasonWatchedParams{
-		UserID:   userID,
-		SeasonID: seasonID,
-	})
+	season, err := q.GetTVSeasonByID(ctx, seasonID)
+	if err != nil {
+		return err
+	}
+	series, err := q.GetTVSeriesByID(ctx, season.SeriesID)
+	if err != nil {
+		return err
+	}
+	ids, err := a.presentEpisodeIDs(ctx, q, series, seasonID)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return q.MarkEpisodesWatched(ctx, sqlc.MarkEpisodesWatchedParams{UserID: userID, Column2: ids})
+}
+
+// presentEpisodeIDs returns the IDs of episodes a bulk watch action should
+// touch — the episodes the user can actually see in the listing. When
+// seasonID != 0 the result is limited to that season.
+//
+// This MUST match the read side's definition of "present" so mark/unmark stay
+// in lockstep with what's displayed. That definition lives in the FE
+// `presentEpisodes` composable (web/app/composables/useEpisodePresence.ts) and
+// is applied per season: keep episodes whose s{season}e{episode} key is in the
+// episode_files map (BuildEpisodeFileMap), but fall back to the whole season
+// when none resolve (e.g. a season pack parsed without per-episode numbers) so
+// a season we surface as watchable is never a no-op to mark. The fallback only
+// fires for a season with zero identifiable files — exactly the case where the
+// listing already shows every episode — so a normal airing season (some files
+// present) still marks only the episodes we hold, never the unaired catalog.
+func (a *App) presentEpisodeIDs(ctx context.Context, q *sqlc.Queries, series sqlc.TvSeries, seasonID int64) ([]int64, error) {
+	files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: series.MediaItemID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	efMap := BuildEpisodeFileMap(files)
+
+	seasons, err := q.ListTVSeasonsBySeries(ctx, series.ID)
+	if err != nil {
+		return nil, err
+	}
+	seasonNumByID := make(map[int64]int32, len(seasons))
+	for _, s := range seasons {
+		seasonNumByID[s.ID] = s.SeasonNumber
+	}
+
+	eps, err := q.ListTVEpisodesBySeries(ctx, series.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group episodes per season so the present-or-fall-back-to-all decision is
+	// made per season, matching presentEpisodes().
+	bySeason := make(map[int64][]sqlc.TvEpisode)
+	for _, ep := range eps {
+		if seasonID != 0 && ep.SeasonID != seasonID {
+			continue
+		}
+		bySeason[ep.SeasonID] = append(bySeason[ep.SeasonID], ep)
+	}
+
+	var ids []int64
+	for sID, seasonEps := range bySeason {
+		sn := seasonNumByID[sID]
+		var present []int64
+		for _, ep := range seasonEps {
+			if _, ok := efMap[fmt.Sprintf("s%de%d", sn, ep.EpisodeNumber)]; ok {
+				present = append(present, ep.ID)
+			}
+		}
+		if len(present) == 0 {
+			for _, ep := range seasonEps {
+				ids = append(ids, ep.ID)
+			}
+			continue
+		}
+		ids = append(ids, present...)
+	}
+	return ids, nil
 }
 
 // UnmarkSeasonWatched removes watched marks from all episodes in a season.
@@ -45,13 +125,22 @@ func (a *App) UnmarkSeasonWatched(ctx context.Context, userID, seasonID int64) e
 	})
 }
 
-// MarkShowWatched marks all episodes in a show as watched.
+// MarkShowWatched marks the episodes we actually hold across a show as watched.
+// As with MarkSeasonWatched, unaired catalog episodes are left untouched.
 func (a *App) MarkShowWatched(ctx context.Context, userID, mediaItemID int64) error {
 	q := sqlc.New(a.db)
-	return q.MarkShowWatched(ctx, sqlc.MarkShowWatchedParams{
-		UserID:      userID,
-		MediaItemID: mediaItemID,
-	})
+	series, err := q.GetTVSeriesByMediaItemID(ctx, mediaItemID)
+	if err != nil {
+		return err
+	}
+	ids, err := a.presentEpisodeIDs(ctx, q, series, 0)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return q.MarkEpisodesWatched(ctx, sqlc.MarkEpisodesWatchedParams{UserID: userID, Column2: ids})
 }
 
 // UnmarkShowWatched removes watched marks from all episodes in a show.

@@ -461,43 +461,6 @@ func (q *Queries) MarkMovieWatched(ctx context.Context, arg MarkMovieWatchedPara
 	return err
 }
 
-const markSeasonWatched = `-- name: MarkSeasonWatched :exec
-INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
-SELECT $1, 'episode', e.id, true, now()
-FROM tv_episodes e WHERE e.season_id = $2
-ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now()
-`
-
-type MarkSeasonWatchedParams struct {
-	UserID   int64 `json:"user_id"`
-	SeasonID int64 `json:"season_id"`
-}
-
-func (q *Queries) MarkSeasonWatched(ctx context.Context, arg MarkSeasonWatchedParams) error {
-	_, err := q.db.Exec(ctx, markSeasonWatched, arg.UserID, arg.SeasonID)
-	return err
-}
-
-const markShowWatched = `-- name: MarkShowWatched :exec
-INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
-SELECT $1, 'episode', e.id, true, now()
-FROM tv_episodes e
-JOIN tv_seasons s ON s.id = e.season_id
-JOIN tv_series ts ON ts.id = s.series_id
-WHERE ts.media_item_id = $2
-ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now()
-`
-
-type MarkShowWatchedParams struct {
-	UserID      int64 `json:"user_id"`
-	MediaItemID int64 `json:"media_item_id"`
-}
-
-func (q *Queries) MarkShowWatched(ctx context.Context, arg MarkShowWatchedParams) error {
-	_, err := q.db.Exec(ctx, markShowWatched, arg.UserID, arg.MediaItemID)
-	return err
-}
-
 const unmarkEpisodeWatched = `-- name: UnmarkEpisodeWatched :exec
 DELETE FROM user_watch_progress WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = $2
 `

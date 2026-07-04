@@ -39,12 +39,6 @@ SELECT EXISTS(
 SELECT entity_id AS episode_id FROM user_watch_progress
 WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = ANY($2::bigint[]) AND completed = true;
 
--- name: MarkSeasonWatched :exec
-INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
-SELECT $1, 'episode', e.id, true, now()
-FROM tv_episodes e WHERE e.season_id = $2
-ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now();
-
 -- name: UnmarkSeasonWatched :exec
 DELETE FROM user_watch_progress
 WHERE user_id = $1 AND entity_type = 'episode'
@@ -55,15 +49,6 @@ SELECT count(*)::int AS watched
 FROM user_watch_progress wp
 JOIN tv_episodes e ON e.id = wp.entity_id
 WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true AND e.season_id = $2;
-
--- name: MarkShowWatched :exec
-INSERT INTO user_watch_progress (user_id, entity_type, entity_id, completed, updated_at)
-SELECT $1, 'episode', e.id, true, now()
-FROM tv_episodes e
-JOIN tv_seasons s ON s.id = e.season_id
-JOIN tv_series ts ON ts.id = s.series_id
-WHERE ts.media_item_id = $2
-ON CONFLICT (user_id, entity_type, entity_id) DO UPDATE SET completed = true, updated_at = now();
 
 -- name: UnmarkShowWatched :exec
 DELETE FROM user_watch_progress
