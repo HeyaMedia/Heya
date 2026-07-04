@@ -66,18 +66,3 @@ func TestKeyframesToSegmentTimesShortFile(t *testing.T) {
 	times := KeyframesToSegmentTimes(kf, 4.0)
 	assert.Empty(t, times)
 }
-
-func TestAudioSegmentTimes(t *testing.T) {
-	times := AudioSegmentTimes(10.0, 4.0)
-	assert.Equal(t, []float64{4.0, 8.0}, times)
-}
-
-func TestAudioSegmentTimesZeroDuration(t *testing.T) {
-	assert.Nil(t, AudioSegmentTimes(0, 4.0))
-	assert.Nil(t, AudioSegmentTimes(-1, 4.0))
-}
-
-func TestAudioSegmentTimesDefaultInterval(t *testing.T) {
-	times := AudioSegmentTimes(10.0, 0)
-	assert.Equal(t, []float64{4.0, 8.0}, times)
-}

@@ -600,16 +600,6 @@ func copyFileFromFS(fsys fs.FS, name, dst string) error {
 	return err
 }
 
-func findAndCopy(src, dst string) string {
-	if !fileExists(src) {
-		return ""
-	}
-	if err := copyFile(src, dst); err != nil {
-		return ""
-	}
-	return dst
-}
-
 func findAndCopyFS(fsys fs.FS, name, dst string) string {
 	if err := copyFileFromFS(fsys, name, dst); err != nil {
 		return ""

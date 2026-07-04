@@ -55,15 +55,3 @@ func FormatCodecString(videoCodec, audioCodec string) string {
 	}
 	return fmt.Sprintf("%s,%s", v, a)
 }
-
-func TranscodeCodecString(quality VideoQuality, hwAccel HwAccelConfig, audioCodec string) string {
-	videoStr := "avc1.640028"
-	if strings.Contains(hwAccel.EncoderH264, "hevc") || strings.Contains(hwAccel.EncoderHEVC, "hevc") {
-		videoStr = "hev1.1.6.L120.B0"
-	}
-	audioStr := AudioCodecString(audioCodec)
-	if audioStr == "" {
-		audioStr = "mp4a.40.2"
-	}
-	return fmt.Sprintf("%s,%s", videoStr, audioStr)
-}

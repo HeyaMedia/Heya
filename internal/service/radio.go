@@ -8,9 +8,6 @@ import (
 	"github.com/karbowiak/heya/internal/radiobrowser"
 )
 
-// RadioBrowser exposes the upstream client for HTTP handlers.
-func (a *App) RadioBrowser() *radiobrowser.Client { return a.radioBrowser }
-
 // SearchRadioStations is a thin pass-through to the cached radio-browser
 // client. Lives in the service layer (not in the handler) so future
 // rate-limiting / source-of-truth replacement can hook here.
@@ -28,16 +25,6 @@ func (a *App) RadioCountries(ctx context.Context) ([]radiobrowser.Country, error
 
 func (a *App) RadioTags(ctx context.Context, limit int) ([]radiobrowser.Tag, error) {
 	return a.radioBrowser.Tags(ctx, limit)
-}
-
-func (a *App) RadioStationByUUID(ctx context.Context, uuid string) (*radiobrowser.Station, error) {
-	return a.radioBrowser.GetByUUID(ctx, uuid)
-}
-
-// PostRadioClick lets the user's plays feed into radio-browser's crowd-
-// sourced popularity ranking. Fire-and-forget so we don't hold up playback.
-func (a *App) PostRadioClick(ctx context.Context, uuid string) {
-	a.radioBrowser.PostClick(ctx, uuid)
 }
 
 // ListRadioFavorites returns the user's saved stations, newest first.
@@ -73,13 +60,6 @@ func (a *App) AddRadioFavorite(ctx context.Context, userID int64, s *radiobrowse
 // favorited (database constraint already covers the join).
 func (a *App) RemoveRadioFavorite(ctx context.Context, userID int64, uuid string) error {
 	return sqlc.New(a.db).RemoveRadioFavorite(ctx, sqlc.RemoveRadioFavoriteParams{
-		UserID:      userID,
-		Stationuuid: uuid,
-	})
-}
-
-func (a *App) IsRadioFavorited(ctx context.Context, userID int64, uuid string) (bool, error) {
-	return sqlc.New(a.db).IsRadioFavorited(ctx, sqlc.IsRadioFavoritedParams{
 		UserID:      userID,
 		Stationuuid: uuid,
 	})

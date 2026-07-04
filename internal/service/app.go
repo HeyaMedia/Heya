@@ -434,29 +434,6 @@ func (a *App) QueueCounts(ctx context.Context) (pending, running int) {
 	return
 }
 
-func (a *App) EnqueuePendingFiles(ctx context.Context, libraryID int64) (int, error) {
-	q := sqlc.New(a.db)
-	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
-		LibraryID: libraryID,
-		Limit:     10000,
-		Offset:    0,
-		Status:    sqlc.FileStatusPending,
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	for _, f := range files {
-		a.river.Insert(ctx, worker.ProcessFileArgs{
-			LibraryFileID: f.ID,
-			LibraryID:     libraryID,
-			FilePath:      f.Path,
-		}, nil)
-	}
-
-	return len(files), nil
-}
-
 func (a *App) StartWatchers(ctx context.Context) error {
 	if err := a.watcher.StartAll(ctx); err != nil {
 		return err

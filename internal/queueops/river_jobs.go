@@ -255,10 +255,6 @@ func CountActiveExcludingKind(ctx context.Context, db DB, excludedKind string) (
 	return counts, err
 }
 
-func RunningIDsByKinds(ctx context.Context, db DB, kinds []string) ([]int64, error) {
-	return runningIDsByKinds(ctx, db, kinds, "")
-}
-
 func RunningIDsByScheduledTask(ctx context.Context, db DB, taskID string, kinds []string) ([]int64, error) {
 	if taskID == "" || len(kinds) == 0 {
 		return nil, nil
@@ -273,22 +269,6 @@ func RunningIDsByScheduledTask(ctx context.Context, db DB, taskID string, kinds 
 		return nil, err
 	}
 	return scanJobIDs(rows)
-}
-
-func CancelPendingByKinds(ctx context.Context, db DB, kinds []string) (int64, error) {
-	if len(kinds) == 0 {
-		return 0, nil
-	}
-	tag, err := db.Exec(ctx, `
-		UPDATE river_job
-		   SET state = 'cancelled', finalized_at = now()
-		 WHERE state IN ('available', 'retryable', 'scheduled')
-		   AND kind = ANY($1::text[])
-	`, kinds)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
 }
 
 func CancelPendingByScheduledTask(ctx context.Context, db DB, taskID string, kinds []string) (int64, error) {
@@ -440,22 +420,6 @@ func CancelAllPending(ctx context.Context, db DB) (int64, error) {
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
-}
-
-func runningIDsByKinds(ctx context.Context, db DB, kinds []string, extraPredicate string) ([]int64, error) {
-	if len(kinds) == 0 {
-		return nil, nil
-	}
-	query := `
-		SELECT id FROM river_job
-		WHERE state = 'running'
-		  AND kind = ANY($1::text[])
-	` + extraPredicate
-	rows, err := db.Query(ctx, query, kinds)
-	if err != nil {
-		return nil, err
-	}
-	return scanJobIDs(rows)
 }
 
 func scanJobIDs(rows pgx.Rows) ([]int64, error) {

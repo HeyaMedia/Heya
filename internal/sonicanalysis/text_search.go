@@ -110,13 +110,3 @@ func (t *TextSearcher) ensureLoaded() error {
 	log.Info().Msg("sonicanalysis: CLAP text encoder ready")
 	return nil
 }
-
-// Close destroys the underlying session. Safe to call multiple times.
-func (t *TextSearcher) Close() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.session != nil {
-		t.session.Close()
-		t.session = nil
-	}
-}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/testutil"
 )
 
@@ -277,7 +278,7 @@ func TestPopulateNumericFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			info := &MediaInfo{Format: tt.format}
-			populateNumericFields(info)
+			mediaprobe.PopulateNumericFields(info)
 			if info.Duration != tt.wantDur {
 				t.Errorf("duration = %f, want %f", info.Duration, tt.wantDur)
 			}

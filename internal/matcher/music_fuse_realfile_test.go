@@ -53,7 +53,7 @@ func scanRealAlbum(t *testing.T, ctx context.Context, m *Matcher, qtx *sqlc.Quer
 	if len(files) == 0 {
 		t.Skipf("no flac files in %s", albumDir)
 	}
-	matched, unmatched, errored, aID := m.matchMusicGroup(ctx, libID, files, newEnrichCache())
+	matched, unmatched, errored, aID := m.matchMusicGroup(ctx, libID, files)
 	require.Equal(t, len(files), matched, "every real track must match")
 	require.Zero(t, unmatched)
 	require.Zero(t, errored)

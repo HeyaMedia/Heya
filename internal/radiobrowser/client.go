@@ -298,24 +298,6 @@ func (c *Client) Tags(ctx context.Context, limit int) ([]Tag, error) {
 	return out, nil
 }
 
-// GetByUUID looks up one station by its stable UUID. Used when the FE has
-// a favorite/recent row and needs the live metadata for the player.
-func (c *Client) GetByUUID(ctx context.Context, uuid string) (*Station, error) {
-	q := url.Values{}
-	body, err := c.apiGet(ctx, "/json/stations/byuuid/"+url.PathEscape(uuid), q)
-	if err != nil {
-		return nil, err
-	}
-	var out []Station
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("decode byuuid: %w", err)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return &out[0], nil
-}
-
 // PostClick fires a fire-and-forget click event so radio-browser's
 // crowd-sourced popularity ranking sees our user's plays. Errors are
 // swallowed — the upstream stats degrade gracefully when we miss a beat.

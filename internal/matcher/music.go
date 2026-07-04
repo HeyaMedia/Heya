@@ -41,11 +41,10 @@ func (m *Matcher) matchMusicLibrary(ctx context.Context, libraryID int64) (Match
 	}
 
 	groups := groupMusicFilesByReleaseDir(files)
-	cache := newEnrichCache()
 	touchedArtists := make(map[int64]struct{}, 8)
 
 	for _, group := range groups {
-		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libraryID, group, cache)
+		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libraryID, group)
 		result.Matched += matched
 		result.Unmatched += unmatched
 		result.Errors += errored
@@ -62,33 +61,6 @@ func (m *Matcher) matchMusicLibrary(ctx context.Context, libraryID int64) (Match
 	}
 
 	return result, nil
-}
-
-// enrichCache holds heya.media artist responses for the duration of a single
-// matchMusicLibrary call. Keyed by MBID when known (cheapest lookup), falling
-// back to lower-cased name. Stores both successful and failed lookups (nil
-// value) so we never re-query the same artist twice within one scan.
-type enrichCache struct {
-	byKey map[string]*metadata.MediaDetail
-	known map[string]bool
-}
-
-func newEnrichCache() *enrichCache {
-	return &enrichCache{
-		byKey: make(map[string]*metadata.MediaDetail),
-		known: make(map[string]bool),
-	}
-}
-
-//nolint:unused // reserved for upcoming cached-enrich call sites
-func enrichCacheKey(mbid, name string) string {
-	if mbid != "" {
-		return "mbid:" + mbid
-	}
-	if name != "" {
-		return "name:" + strings.ToLower(name)
-	}
-	return ""
 }
 
 // matchMusicSingleFile processes only the release group containing the given file.
@@ -114,7 +86,7 @@ func (m *Matcher) matchMusicSingleFile(ctx context.Context, file sqlc.LibraryFil
 			group = append(group, s)
 		}
 	}
-	matched, _, _, artistID := m.matchMusicGroup(ctx, libraryID, group, newEnrichCache())
+	matched, _, _, artistID := m.matchMusicGroup(ctx, libraryID, group)
 	return MatchInfo{IsNew: matched > 0, ArtistID: artistID}, nil
 }
 
@@ -157,7 +129,7 @@ func groupMusicFilesByReleaseDir(files []sqlc.LibraryFile) [][]sqlc.LibraryFile 
 	return groups
 }
 
-func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []sqlc.LibraryFile, cache *enrichCache) (matched, unmatched, errored int, artistID int64) {
+func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []sqlc.LibraryFile) (matched, unmatched, errored int, artistID int64) {
 	if len(files) == 0 {
 		return 0, 0, 0, 0
 	}
@@ -295,7 +267,6 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 	// network). EnrichMediaItemWorker picks up the slack asynchronously
 	// after the scan, populating bio / disambiguation / external IDs / album
 	// metadata / track titles + durations from the heya.media response.
-	_ = cache // retained for future per-scan caches; unused after decoupling
 
 	artist, err := m.upsertMusicArtist(ctx, libraryID, artistName, artistDisambig, artistMBID, artistBio, artistSortName)
 	if err != nil {
@@ -820,46 +791,6 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 		return sqlc.Artist{}, fmt.Errorf("creating artist: %w", err)
 	}
 	return created, nil
-}
-
-// cachedEnrichArtist returns the cached heya.media result for an artist or
-// fetches and caches it. Returning nil signals "tried and got nothing" so we
-// don't re-query in the same scan.
-//
-//nolint:unused // reserved for upcoming cached-enrich call sites
-func (m *Matcher) cachedEnrichArtist(ctx context.Context, cache *enrichCache, mbid, name string) *metadata.MediaDetail {
-	keys := []string{}
-	if mbid != "" {
-		keys = append(keys, "mbid:"+mbid)
-	}
-	if name != "" {
-		keys = append(keys, "name:"+strings.ToLower(name))
-	}
-	for _, k := range keys {
-		if cache.known[k] {
-			return cache.byKey[k]
-		}
-	}
-
-	detail := m.enrichArtistFromHeyaMedia(ctx, mbid, name, "")
-	for _, k := range keys {
-		cache.known[k] = true
-		cache.byKey[k] = detail
-	}
-	// Cross-link: if the enriched response includes the MBID and our input was
-	// only a name (or vice-versa), cache under the other key too so a later
-	// release that knows the MBID hits the cache.
-	if detail != nil && detail.ExternalIDs["mbid"] != "" {
-		k := "mbid:" + detail.ExternalIDs["mbid"]
-		cache.known[k] = true
-		cache.byKey[k] = detail
-	}
-	if detail != nil && detail.ArtistName != "" {
-		k := "name:" + strings.ToLower(detail.ArtistName)
-		cache.known[k] = true
-		cache.byKey[k] = detail
-	}
-	return detail
 }
 
 // findEmbeddedAlbum matches a local release against an artist's embedded album

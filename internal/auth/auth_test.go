@@ -3,8 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -78,96 +76,40 @@ func (m *mockSessionLookup) TouchSession(_ context.Context, _ string) error {
 	return nil
 }
 
-func TestMiddlewareValidToken(t *testing.T) {
+func TestResolveSessionValidToken(t *testing.T) {
 	mock := &mockSessionLookup{
 		session: sqlc.Session{TokenHash: TokenHash("validtoken"), UserID: 42},
 		user:    sqlc.User{ID: 42, Username: "alice"},
 	}
 
-	var gotUser sqlc.User
-	var gotOK bool
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUser, gotOK = UserFromContext(r.Context())
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := Middleware(mock)(inner)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer validtoken")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.True(t, gotOK)
-	assert.Equal(t, "alice", gotUser.Username)
+	resolved, err := ResolveSession(context.Background(), mock, "validtoken")
+	require.NoError(t, err)
+	assert.Equal(t, "alice", resolved.User.Username)
+	assert.Equal(t, "validtoken", resolved.Token)
 }
 
-func TestMiddlewareMissingToken(t *testing.T) {
-	mock := &mockSessionLookup{}
-	handler := Middleware(mock)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+func TestResolveSessionMissingToken(t *testing.T) {
+	_, err := ResolveSession(context.Background(), &mockSessionLookup{}, "")
+	assert.ErrorIs(t, err, ErrInvalidSession)
 }
 
-func TestMiddlewareInvalidToken(t *testing.T) {
+func TestResolveSessionInvalidToken(t *testing.T) {
 	mock := &mockSessionLookup{
 		session: sqlc.Session{TokenHash: TokenHash("validtoken"), UserID: 42},
 		user:    sqlc.User{ID: 42},
 	}
-	handler := Middleware(mock)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer wrongtoken")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	_, err := ResolveSession(context.Background(), mock, "wrongtoken")
+	assert.ErrorIs(t, err, ErrInvalidSession)
 }
 
 // A DB-error during session lookup (postgres down, query timeout, etc.)
-// must NOT be reported as 401 — the FE would log the user out for a
-// transient backend blip. Returning 503 keeps the session intact so the
-// next request can succeed once the backend recovers.
-func TestMiddlewareDBErrorReturns503(t *testing.T) {
+// must NOT surface as ErrInvalidSession — the huma auth middleware maps
+// ErrInvalidSession to 401 (FE logs the user out) and anything else to 503
+// (session survives the backend blip). The mock returns pgx.ErrNoRows for
+// unknown tokens because that's how sqlc `:one` queries report absence.
+func TestResolveSessionDBErrorIsNotInvalidSession(t *testing.T) {
 	mock := &mockSessionLookup{err: errors.New("connection refused")}
-	handler := Middleware(mock)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer anything")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
-}
-
-func TestMiddlewareCookieToken(t *testing.T) {
-	mock := &mockSessionLookup{
-		session: sqlc.Session{TokenHash: TokenHash("cookietoken"), UserID: 1},
-		user:    sqlc.User{ID: 1, Username: "bob"},
-	}
-
-	var gotUser sqlc.User
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUser, _ = UserFromContext(r.Context())
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := Middleware(mock)(inner)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_token", Value: "cookietoken"})
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, "bob", gotUser.Username)
+	_, err := ResolveSession(context.Background(), mock, "anything")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrInvalidSession)
 }

@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/rs/zerolog/log"
 )
@@ -37,32 +36,6 @@ func SaveImageToMediaDir(mediaDir, cachedPath, assetType string) error {
 	}
 
 	return copyFile(cachedPath, destPath)
-}
-
-func SaveSeasonPoster(mediaDir string, seasonNum int, cachedPath string) error {
-	seasonDir := filepath.Join(mediaDir, seasonFolderName(seasonNum))
-	if _, err := os.Stat(seasonDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	ext := filepath.Ext(cachedPath)
-	if ext == "" {
-		ext = ".jpg"
-	}
-	destPath := filepath.Join(seasonDir, "season-poster"+ext)
-
-	if _, err := os.Stat(destPath); err == nil {
-		return nil
-	}
-
-	return copyFile(cachedPath, destPath)
-}
-
-func seasonFolderName(num int) string {
-	if num < 10 {
-		return "Season 0" + strings.Repeat("", 0) + string(rune('0'+num))
-	}
-	return "Season " + strings.Repeat("", 0) + string(rune('0'+num/10)) + string(rune('0'+num%10))
 }
 
 func copyFile(src, dst string) error {

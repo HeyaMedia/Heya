@@ -50,10 +50,6 @@ func (r *Resolver) LogoPath(name string) string {
 	return ""
 }
 
-func (r *Resolver) Dir() string {
-	return r.studioDir
-}
-
 func (r *Resolver) Sync(ctx context.Context, names []string) (downloaded, skipped int, err error) {
 	for _, name := range names {
 		if ctx.Err() != nil {

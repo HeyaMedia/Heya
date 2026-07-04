@@ -80,13 +80,6 @@ func EnqueueEnrichForce(ctx context.Context, rc *river.Client[pgx.Tx], itemID in
 	return enqueueEnrich(ctx, rc, itemID, mediaType, source, true, "", 0, 0, 0)
 }
 
-// EnqueueEnrichBatch is the music post-scan fan-out variant. The extra
-// batch context lets the worker emit "Refreshing 17/200 (Calvin Harris)"
-// progress events without consulting River's job table.
-func EnqueueEnrichBatch(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource, batchLibraryID int64, batchTotal, batchPosition int) error {
-	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, "", batchLibraryID, batchTotal, batchPosition)
-}
-
 // EnqueueEnrichTx variant for callers inside a river worker that already
 // have a pgx.Tx context — pulls the River client out of ctx rather than
 // requiring it as an arg.

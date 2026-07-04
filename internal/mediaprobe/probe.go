@@ -119,18 +119,6 @@ func PrimaryAudio(info *MediaInfo) *StreamInfo {
 	return nil
 }
 
-func HasVideo(info *MediaInfo) bool {
-	if info == nil {
-		return false
-	}
-	for _, s := range info.Streams {
-		if s.CodecType == "video" {
-			return true
-		}
-	}
-	return false
-}
-
 func AudioFieldsFrom(info *MediaInfo, audio *StreamInfo) AudioFields {
 	if info == nil || audio == nil {
 		return AudioFields{}

@@ -235,11 +235,6 @@ func (a *App) LibraryFileStats(ctx context.Context, libraryID int64) ([]sqlc.Cou
 	return q.CountLibraryFilesByStatus(ctx, libraryID)
 }
 
-func (a *App) ListMatchCandidates(ctx context.Context, fileID int64) ([]sqlc.MatchCandidate, error) {
-	q := sqlc.New(a.db)
-	return q.ListMatchCandidatesByFile(ctx, fileID)
-}
-
 func (a *App) EnqueueScanLibrary(id int64, force bool) {
 	if a.scheduler == nil {
 		return
@@ -307,21 +302,4 @@ func (a *App) ListLibraryDiskUsage(ctx context.Context) ([]LibraryDiskUsage, err
 		})
 	}
 	return out, nil
-}
-
-func (a *App) ListDeletedFiles(ctx context.Context, libraryID int64, limit, offset int32) ([]sqlc.LibraryFile, error) {
-	q := sqlc.New(a.db)
-	return q.ListDeletedLibraryFiles(ctx, sqlc.ListDeletedLibraryFilesParams{
-		LibraryID: libraryID,
-		Limit:     limit,
-		Offset:    offset,
-	})
-}
-
-func (a *App) PurgeDeletedFiles(ctx context.Context, libraryID int64) error {
-	q := sqlc.New(a.db)
-	return q.PurgeDeletedLibraryFiles(ctx, sqlc.PurgeDeletedLibraryFilesParams{
-		LibraryID: libraryID,
-		DeletedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-	})
 }

@@ -486,15 +486,6 @@ func extractResolution(info *worker.MediaInfo) string {
 	return "1920x1080"
 }
 
-func extractSourceHeight(info *worker.MediaInfo) int {
-	for _, s := range info.Streams {
-		if s.CodecType == "video" && s.Height > 0 {
-			return s.Height
-		}
-	}
-	return 1080
-}
-
 func estimateBandwidth(info *worker.MediaInfo) int64 {
 	if info.BitRate > 0 {
 		return info.BitRate

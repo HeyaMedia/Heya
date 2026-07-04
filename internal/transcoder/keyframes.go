@@ -102,18 +102,3 @@ func KeyframesToSegmentTimes(kf *Keyframes, minDuration float64) []float64 {
 
 	return times
 }
-
-func AudioSegmentTimes(duration float64, interval float64) []float64 {
-	if duration <= 0 {
-		return nil
-	}
-	if interval <= 0 {
-		interval = 4.0
-	}
-
-	var times []float64
-	for t := interval; t < duration; t += interval {
-		times = append(times, t)
-	}
-	return times
-}

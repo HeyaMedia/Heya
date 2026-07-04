@@ -16,48 +16,19 @@ const (
 	Quality4320p
 )
 
-type videoQualitySpec struct {
-	Height     int
-	AvgBitrate map[string]int64
-	MaxBitrate map[string]int64
-}
-
-var videoQualitySpecs = map[VideoQuality]videoQualitySpec{
-	Quality240p:  {Height: 240, AvgBitrate: map[string]int64{"h264": 400_000, "hevc": 300_000, "av1": 200_000}, MaxBitrate: map[string]int64{"h264": 700_000, "hevc": 500_000, "av1": 350_000}},
-	Quality360p:  {Height: 360, AvgBitrate: map[string]int64{"h264": 800_000, "hevc": 600_000, "av1": 400_000}, MaxBitrate: map[string]int64{"h264": 1_400_000, "hevc": 1_000_000, "av1": 700_000}},
-	Quality480p:  {Height: 480, AvgBitrate: map[string]int64{"h264": 1_400_000, "hevc": 1_000_000, "av1": 700_000}, MaxBitrate: map[string]int64{"h264": 2_500_000, "hevc": 1_800_000, "av1": 1_200_000}},
-	Quality720p:  {Height: 720, AvgBitrate: map[string]int64{"h264": 2_800_000, "hevc": 2_000_000, "av1": 1_400_000}, MaxBitrate: map[string]int64{"h264": 4_000_000, "hevc": 3_000_000, "av1": 2_000_000}},
-	Quality1080p: {Height: 1080, AvgBitrate: map[string]int64{"h264": 5_000_000, "hevc": 3_500_000, "av1": 2_500_000}, MaxBitrate: map[string]int64{"h264": 8_000_000, "hevc": 6_000_000, "av1": 4_000_000}},
-	Quality1440p: {Height: 1440, AvgBitrate: map[string]int64{"h264": 9_000_000, "hevc": 6_000_000, "av1": 4_000_000}, MaxBitrate: map[string]int64{"h264": 14_000_000, "hevc": 10_000_000, "av1": 7_000_000}},
-	Quality2160p: {Height: 2160, AvgBitrate: map[string]int64{"h264": 15_000_000, "hevc": 10_000_000, "av1": 7_000_000}, MaxBitrate: map[string]int64{"h264": 20_000_000, "hevc": 15_000_000, "av1": 10_000_000}},
-	Quality4320p: {Height: 4320, AvgBitrate: map[string]int64{"h264": 40_000_000, "hevc": 25_000_000, "av1": 15_000_000}, MaxBitrate: map[string]int64{"h264": 60_000_000, "hevc": 40_000_000, "av1": 25_000_000}},
+var videoQualityHeights = map[VideoQuality]int{
+	Quality240p:  240,
+	Quality360p:  360,
+	Quality480p:  480,
+	Quality720p:  720,
+	Quality1080p: 1080,
+	Quality1440p: 1440,
+	Quality2160p: 2160,
+	Quality4320p: 4320,
 }
 
 func (q VideoQuality) Height() int {
-	if spec, ok := videoQualitySpecs[q]; ok {
-		return spec.Height
-	}
-	return 0
-}
-
-func (q VideoQuality) AvgBitrate(codec string) int64 {
-	if spec, ok := videoQualitySpecs[q]; ok {
-		if br, ok := spec.AvgBitrate[codec]; ok {
-			return br
-		}
-		return spec.AvgBitrate["h264"]
-	}
-	return 0
-}
-
-func (q VideoQuality) MaxBitrate(codec string) int64 {
-	if spec, ok := videoQualitySpecs[q]; ok {
-		if br, ok := spec.MaxBitrate[codec]; ok {
-			return br
-		}
-		return spec.MaxBitrate["h264"]
-	}
-	return 0
+	return videoQualityHeights[q]
 }
 
 func (q VideoQuality) String() string {
@@ -83,41 +54,6 @@ func BuildBitrateLadder(sourceHeight int) []VideoQuality {
 		ladder = append(ladder, Quality240p)
 	}
 	return ladder
-}
-
-type AudioQuality int
-
-const (
-	AudioOriginal AudioQuality = iota
-	Audio128k
-	Audio192k
-	Audio256k
-	Audio384k
-	Audio512k
-)
-
-func (a AudioQuality) Bitrate() int {
-	switch a {
-	case Audio128k:
-		return 128_000
-	case Audio192k:
-		return 192_000
-	case Audio256k:
-		return 256_000
-	case Audio384k:
-		return 384_000
-	case Audio512k:
-		return 512_000
-	default:
-		return 0
-	}
-}
-
-func (a AudioQuality) String() string {
-	if a == AudioOriginal {
-		return "original"
-	}
-	return fmt.Sprintf("%dk", a.Bitrate()/1000)
 }
 
 type Profile struct {
@@ -147,44 +83,4 @@ var Profiles = map[string]Profile{
 func GetProfile(name string) (Profile, bool) {
 	p, ok := Profiles[name]
 	return p, ok
-}
-
-func QualityToProfile(q VideoQuality, hwAccel HwAccelConfig) Profile {
-	codec := hwAccel.EncoderH264
-	if codec == "" {
-		codec = "libx264"
-	}
-	height := q.Height()
-	maxBr := q.MaxBitrate("h264")
-
-	preset := "medium"
-	if height <= 480 {
-		preset = "fast"
-	}
-
-	crf := 22
-	switch {
-	case height >= 2160:
-		crf = 20
-	case height >= 1440:
-		crf = 21
-	case height >= 1080:
-		crf = 22
-	case height >= 720:
-		crf = 23
-	case height >= 480:
-		crf = 24
-	default:
-		crf = 25
-	}
-
-	return Profile{
-		Name:       q.String(),
-		VideoCodec: codec,
-		AudioCodec: "aac",
-		CRF:        crf,
-		MaxBitrate: fmt.Sprintf("%d", maxBr),
-		Preset:     preset,
-		MaxHeight:  height,
-	}
 }

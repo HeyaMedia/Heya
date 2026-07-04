@@ -504,7 +504,3 @@ func (a *App) MoreFromLabelForUser(ctx context.Context, userID int64, limit int3
 	}
 	return &MoreFromLabel{Label: pick, Albums: rows}, nil
 }
-
-// errors.Is referenced for the ErrNoFacets sentinel in GenerateMixesForUser;
-// the import is also used implicitly by callers of As/Is below.
-var _ = errors.Is

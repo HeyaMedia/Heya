@@ -7,20 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/karbowiak/heya/internal/auth"
 	"github.com/rs/zerolog/log"
 )
-
-func adminOnly(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := auth.UserFromContext(r.Context())
-		if !ok || !user.IsAdmin {
-			writeError(w, http.StatusForbidden, "admin access required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
 
 func withMiddleware(h http.Handler) http.Handler {
 	// Outermost first: recovery → logging → CORS → gzip → etag → handler.

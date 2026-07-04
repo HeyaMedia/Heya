@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -110,14 +109,3 @@ func handleRadioStream(app *service.App) http.HandlerFunc {
 		}
 	}
 }
-
-// writeRadioError is a tiny helper for the JSON-style error shape the
-// other stream handlers use. Kept local so this file doesn't reach across
-// package boundaries for one-liner formatting.
-func writeRadioError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `{"error":%q}`, msg)
-}
-
-var _ = writeRadioError // reserved for future use by handler additions

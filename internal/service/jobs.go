@@ -356,48 +356,6 @@ func (a *App) ClearJobsByKind(ctx context.Context, kind, state string) (int64, e
 	return queueops.ClearByKind(ctx, a.db, kind, state)
 }
 
-// CancelJobsByKind cancels every River job whose kind matches one of the
-// provided kinds. It runs in two passes:
-//
-//  1. SQL UPDATE: every available/scheduled/retryable job for those kinds is
-//     immediately marked cancelled — they'll never be picked up.
-//  2. River JobCancel: for any currently-running job, ask River to mark it
-//     for cancellation. River sends LISTEN/NOTIFY to the producer and the
-//     worker's ctx fires Done. Workers that respect ctx.Done() exit
-//     promptly; ones that don't will run to natural completion (River
-//     can't preempt a goroutine, only signal it).
-//
-// Used by the tasks-page Cancel button: cancelling a "task" now means
-// cancelling every queued + running job across the kinds that task
-// fans out into.
-func (a *App) CancelJobsByKind(ctx context.Context, kinds []string) (int64, error) {
-	if len(kinds) == 0 {
-		return 0, nil
-	}
-
-	// Pass 1: bulk-cancel queued/scheduled/retryable rows.
-	cancelled, err := queueops.CancelPendingByKinds(ctx, a.db, kinds)
-	if err != nil {
-		return 0, err
-	}
-
-	// Pass 2: signal running jobs via River so the worker's ctx is
-	// cancelled (LISTEN/NOTIFY → producer → job ctx.Done). Best-effort —
-	// a worker that ignores ctx will run to completion regardless.
-	if a.river != nil {
-		jobIDs, err := queueops.RunningIDsByKinds(ctx, a.db, kinds)
-		if err == nil {
-			for _, jobID := range jobIDs {
-				if _, err := a.river.JobCancel(ctx, jobID); err == nil {
-					cancelled++
-				}
-			}
-		}
-	}
-
-	return cancelled, nil
-}
-
 func (a *App) CancelScheduledTaskJobs(ctx context.Context, taskID string, kinds []string) (int64, error) {
 	if taskID == "" || len(kinds) == 0 {
 		return 0, nil

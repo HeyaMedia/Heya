@@ -113,14 +113,6 @@ func (f *ModelFetcher) LastError() error {
 	return *p
 }
 
-// Ready reports whether every manifest file is present in targetDir
-// AND passes its SHA256 check (or matches its declared Size if no
-// hash is configured). Cheap — pure stat + length check, no
-// network access.
-func (f *ModelFetcher) Ready() bool {
-	return f.State() == FetcherReady
-}
-
 // AllPresent walks the manifest once and reports true only if every
 // file exists locally. Doesn't update state; safe to call at any
 // time.

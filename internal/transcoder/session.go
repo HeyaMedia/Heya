@@ -186,16 +186,6 @@ func (s *TranscodeSession) SegmentStartTime(idx int) float64 {
 	return s.SegmentEnds[idx-1]
 }
 
-func (s *TranscodeSession) SegmentDuration(idx int) float64 {
-	if idx < 0 || idx >= len(s.SegmentEnds) {
-		return 0
-	}
-	if idx == 0 {
-		return s.SegmentEnds[0]
-	}
-	return s.SegmentEnds[idx] - s.SegmentEnds[idx-1]
-}
-
 func (s *TranscodeSession) InitSegmentPath() string {
 	return filepath.Join(s.OutputDir, "init.mp4")
 }
@@ -680,36 +670,6 @@ func (s *TranscodeSession) segmentAlreadyDone(idx int) bool {
 	}
 }
 
-func (s *TranscodeSession) ReadyCount() int {
-	count := 0
-	for i := 0; i < s.TotalSegs; i++ {
-		select {
-		case <-s.segments[i].ch:
-			count++
-		default:
-		}
-	}
-	return count
-}
-
-func (s *TranscodeSession) AllDone() bool {
-	return s.ReadyCount() == s.TotalSegs
-}
-
-func (s *TranscodeSession) IsIdle() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.head == nil {
-		return true
-	}
-	select {
-	case <-s.head.Done:
-		return true
-	default:
-		return false
-	}
-}
-
 func (s *TranscodeSession) Kill() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -765,11 +725,6 @@ func (m *SessionManager) Close() {
 	}
 }
 
-// Builder returns the CommandBuilder used by this session manager.
-func (m *SessionManager) Builder() CommandBuilder {
-	return m.builder
-}
-
 func FormatKey(fileID int64, audioTrack int, sessionID string) string {
 	if sessionID != "" {
 		return fmt.Sprintf("%d:a%d:%s", fileID, audioTrack, sessionID)
@@ -791,18 +746,6 @@ func (m *SessionManager) GetExisting(fileID int64) *TranscodeSession {
 		}
 	}
 	return nil
-}
-
-func (m *SessionManager) KillForFile(fileID int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	prefix := fmt.Sprintf("%d:", fileID)
-	for key, s := range m.sessions {
-		if strings.HasPrefix(key, prefix) {
-			s.Kill()
-			delete(m.sessions, key)
-		}
-	}
 }
 
 func (m *SessionManager) GetOrCreate(fileID int64, filePath string, opts TranscodeOpts, sessionID string, duration float64, kf *Keyframes) *TranscodeSession {

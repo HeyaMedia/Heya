@@ -33,10 +33,6 @@ func ParseFFProbeOutput(data []byte) (*MediaInfo, error) {
 	return mediaprobe.Parse(data)
 }
 
-func populateNumericFields(info *MediaInfo) {
-	mediaprobe.PopulateNumericFields(info)
-}
-
 type FFProbeWorker struct {
 	river.WorkerDefaults[FFProbeArgs]
 	DB       *pgxpool.Pool

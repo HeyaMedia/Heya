@@ -4,7 +4,6 @@ import (
 	"context"
 	"os/exec"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -27,18 +26,6 @@ type HwAccelConfig struct {
 	EncoderHEVC string
 	InputFlags  []string
 	ScaleFilter string
-}
-
-var (
-	detectedAccel HwAccelType
-	detectOnce    sync.Once
-)
-
-func DetectHardwareAccel() HwAccelType {
-	detectOnce.Do(func() {
-		detectedAccel = probeHardwareAccel()
-	})
-	return detectedAccel
 }
 
 func probeHardwareAccel() HwAccelType {

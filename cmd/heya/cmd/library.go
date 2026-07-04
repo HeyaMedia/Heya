@@ -1,15 +1,12 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/service"
@@ -412,72 +409,6 @@ func printLibrarySettings(lib sqlc.Library) {
 	}
 	ui.Info("  Save NFO", strconv.FormatBool(s.SaveNFO))
 	ui.Info("  Save images", strconv.FormatBool(s.SaveImages))
-}
-
-func runInteractiveResolve(ctx context.Context, app *service.App, libraryID int64) {
-	q := sqlc.New(app.DBPool())
-	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
-		LibraryID: libraryID,
-		Status:    sqlc.FileStatusUnmatched,
-		Limit:     100,
-		Offset:    0,
-	})
-	if err != nil || len(files) == 0 {
-		return
-	}
-
-	reader := bufio.NewReader(os.Stdin)
-	total := len(files)
-
-	for i, f := range files {
-		candidates, err := app.ListMatchCandidates(ctx, f.ID)
-		if err != nil || len(candidates) == 0 {
-			continue
-		}
-
-		fmt.Printf("\n[%d/%d] %s\n", i+1, total, filepath.Base(f.Path))
-		if f.ErrorMessage != "" {
-			fmt.Printf("  Note: %s\n", f.ErrorMessage)
-		}
-		fmt.Println("  Candidates:")
-		for j, c := range candidates {
-			fmt.Printf("    %d. %s", j+1, c.Title)
-			if c.Year != "" {
-				fmt.Printf(" (%s)", c.Year)
-			}
-			fmt.Printf(" — %s %s — confidence: %.2f\n", c.ProviderName, c.ProviderID, numericToFloat(c.Confidence))
-		}
-
-		fmt.Printf("  [1-%d] select, [s]kip, [q]uit: ", len(candidates))
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-
-		if input == "q" {
-			fmt.Println("Quitting interactive mode.")
-			return
-		}
-		if input == "s" || input == "" {
-			continue
-		}
-
-		n, err := strconv.Atoi(input)
-		if err != nil || n < 1 || n > len(candidates) {
-			fmt.Println("  Invalid selection, skipping.")
-			continue
-		}
-
-		chosen := candidates[n-1]
-		if err := app.ResolveMatch(ctx, f.ID, chosen.ID); err != nil {
-			fmt.Fprintf(os.Stderr, "  Error resolving: %v\n", err)
-		} else {
-			fmt.Printf("  Matched to: %s\n", chosen.Title)
-		}
-	}
-}
-
-func numericToFloat(n pgtype.Numeric) float64 {
-	f, _ := n.Float64Value()
-	return f.Float64
 }
 
 func init() {

@@ -11,11 +11,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func readJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(v)
-}
-
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }

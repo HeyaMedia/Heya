@@ -68,14 +68,6 @@ func TaskKinds(id string) []string {
 	return kinds
 }
 
-func KindsByTask() map[string][]string {
-	out := make(map[string][]string, len(definitions))
-	for _, def := range definitions {
-		out[def.ID] = TaskKinds(def.ID)
-	}
-	return out
-}
-
 func WorkToTask() map[string]string {
 	out := map[string]string{}
 	owners := map[string]string{}
@@ -109,13 +101,4 @@ func TaskOwnsKind(taskID, kind string) bool {
 		}
 	}
 	return false
-}
-
-func TaskIDByKickoffKind(kind string) (string, bool) {
-	for _, def := range definitions {
-		if def.KickoffKind == kind {
-			return def.ID, true
-		}
-	}
-	return "", false
 }

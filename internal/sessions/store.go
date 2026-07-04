@@ -156,18 +156,6 @@ func (s *Store) Upsert(incoming Session) *Session {
 	return &incoming
 }
 
-// End removes a session from the store. Idempotent — calling it on an
-// already-purged session is a no-op.
-func (s *Store) End(sessionID string) {
-	s.mu.Lock()
-	_, existed := s.data[sessionID]
-	delete(s.data, sessionID)
-	s.mu.Unlock()
-	if existed {
-		s.broadcast()
-	}
-}
-
 // EndForUser tears down a session only when it belongs to userID, so a user
 // can't end another user's live playback session by guessing its (client-chosen)
 // id. Returns whether a session was actually removed.

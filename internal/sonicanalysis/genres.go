@@ -36,6 +36,3 @@ func GenreName(idx int) string {
 	}
 	return discogsGenres[idx]
 }
-
-// GenreCount returns the size of the Discogs class set (400).
-func GenreCount() int { return len(discogsGenres) }

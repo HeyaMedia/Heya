@@ -403,11 +403,6 @@ func (a *App) SetEntityLoved(ctx context.Context, userID int64, entityType strin
 	return false, nil
 }
 
-// SetTrackLoved is the legacy track-specific wrapper.
-func (a *App) SetTrackLoved(ctx context.Context, userID, trackID int64, loved bool) (bool, error) {
-	return a.SetEntityLoved(ctx, userID, "track", trackID, loved)
-}
-
 // ListUserLovedTrackIDs returns every track id the user has loved.
 func (a *App) ListUserLovedTrackIDs(ctx context.Context, userID int64) ([]int64, error) {
 	return sqlc.New(a.db).ListUserLovedTrackIDs(ctx, userID)
@@ -458,19 +453,9 @@ func (a *App) ListUserLovedAlbums(ctx context.Context, userID int64, limit, offs
 	return &MusicListPage[sqlc.ListUserLovedAlbumsRow]{Items: rows, Total: total, Limit: limit, Offset: offset}, nil
 }
 
-// GetTrack returns a single track by id.
-func (a *App) GetTrack(ctx context.Context, id int64) (sqlc.Track, error) {
-	return sqlc.New(a.db).GetTrackByID(ctx, id)
-}
-
 // GetTrackFile returns a single track_file by id.
 func (a *App) GetTrackFile(ctx context.Context, id int64) (sqlc.TrackFile, error) {
 	return sqlc.New(a.db).GetTrackFileByID(ctx, id)
-}
-
-// GetPrimaryTrackFile returns the highest-quality non-deleted file for a track.
-func (a *App) GetPrimaryTrackFile(ctx context.Context, trackID int64) (sqlc.TrackFile, error) {
-	return sqlc.New(a.db).GetPrimaryTrackFile(ctx, trackID)
 }
 
 // ListTrackFiles returns every file for a track, ordered best-first.

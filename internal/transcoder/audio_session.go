@@ -125,12 +125,5 @@ func (m *AudioSessionManager) runFFmpegAAC256(ctx context.Context, source, out s
 	return nil
 }
 
-// Path returns the cache location for a given (id, profile). Used by tests
-// and the cache maintenance path. Returns the path regardless of whether
-// the file exists.
-func (m *AudioSessionManager) Path(trackFileID int64) string {
-	return m.outputPath(trackFileID, audioProfileAAC256)
-}
-
 // ErrNoFFmpeg is returned when ffmpeg isn't on $PATH.
 var ErrNoFFmpeg = errors.New("ffmpeg not found in PATH")

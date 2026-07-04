@@ -55,15 +55,3 @@ func TestTaskOwnsKind(t *testing.T) {
 		t.Fatal("refresh_stale_items unexpectedly owns process_file")
 	}
 }
-
-func TestKickoffLookup(t *testing.T) {
-	for _, def := range Scheduled() {
-		id, ok := TaskIDByKickoffKind(def.KickoffKind)
-		if !ok {
-			t.Fatalf("kickoff kind %q did not resolve", def.KickoffKind)
-		}
-		if id != def.ID {
-			t.Fatalf("kickoff kind %q resolved to %q, want %q", def.KickoffKind, id, def.ID)
-		}
-	}
-}

@@ -8,9 +8,6 @@ import (
 	"github.com/karbowiak/heya/internal/podcastindex"
 )
 
-// PodcastIndex exposes the upstream client to HTTP handlers.
-func (a *App) PodcastIndex() *podcastindex.Client { return a.podcastIndex }
-
 // SearchPodcasts is a thin wrapper around the cached PI client.
 func (a *App) SearchPodcasts(ctx context.Context, query string, max int) ([]podcastindex.Podcast, error) {
 	return a.podcastIndex.Search(ctx, query, max)
@@ -57,13 +54,6 @@ func (a *App) UnsubscribePodcast(ctx context.Context, userID int64, feedURL stri
 	})
 }
 
-func (a *App) IsPodcastSubscribed(ctx context.Context, userID int64, feedURL string) (bool, error) {
-	return sqlc.New(a.db).IsPodcastSubscribed(ctx, sqlc.IsPodcastSubscribedParams{
-		UserID:  userID,
-		FeedUrl: feedURL,
-	})
-}
-
 // RecordPodcastProgress upserts the episode's resume position. Caller picks
 // `completed` based on FE rules (e.g. ≥95% heard, or user-clicked "mark as
 // played"). Returns the persisted row so the FE can echo state immediately.
@@ -104,13 +94,5 @@ func (a *App) ListPodcastContinue(ctx context.Context, userID int64, limit int32
 	return sqlc.New(a.db).ListPodcastContinue(ctx, sqlc.ListPodcastContinueParams{
 		UserID:     userID,
 		TrackLimit: limit,
-	})
-}
-
-func (a *App) GetPodcastEpisodeProgress(ctx context.Context, userID int64, feedURL, episodeGUID string) (sqlc.UserPodcastProgress, error) {
-	return sqlc.New(a.db).GetPodcastEpisodeProgress(ctx, sqlc.GetPodcastEpisodeProgressParams{
-		UserID:      userID,
-		FeedUrl:     feedURL,
-		EpisodeGuid: episodeGUID,
 	})
 }

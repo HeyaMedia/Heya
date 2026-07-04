@@ -64,7 +64,7 @@ func TestMusicTagFusion_LeadProbeNotDoubled(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	matched, _, errored, _ := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f}, newEnrichCache())
+	matched, _, errored, _ := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f})
 	require.Equal(t, 1, matched)
 	require.Zero(t, errored)
 	require.Equal(t, 1, probeCalls, "the lead track must be probed at most once even when the probe fails")
@@ -128,7 +128,7 @@ func TestMusicTagFusion(t *testing.T) {
 		infoByPath[f1.Path] = tagInfo("Scene Artist", "Scene Album", "First Song", "2015", 1)
 		infoByPath[f2.Path] = tagInfo("Scene Artist", "Scene Album", "Second Song", "2015", 2)
 
-		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f1, f2}, newEnrichCache())
+		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f1, f2})
 		require.Equal(t, 2, matched)
 		require.Zero(t, unmatched)
 		require.Zero(t, errored)
@@ -153,7 +153,7 @@ func TestMusicTagFusion(t *testing.T) {
 		infoByPath[f1.Path] = tagInfo("Collapse Artist", "Collapse Album", "Alpha", "2019", 0)
 		infoByPath[f2.Path] = tagInfo("Collapse Artist", "Collapse Album", "Beta", "2019", 0)
 
-		matched, _, errored, _ := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f1, f2}, newEnrichCache())
+		matched, _, errored, _ := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f1, f2})
 		require.Equal(t, 2, matched)
 		require.Zero(t, errored)
 
@@ -181,7 +181,7 @@ func TestMusicTagFusion(t *testing.T) {
 		require.NoError(t, err)
 		// No tag mapping for this path → prober returns nil → path-only.
 
-		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f}, newEnrichCache())
+		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f})
 		require.Equal(t, 1, matched)
 		require.Zero(t, unmatched)
 		require.Zero(t, errored)
@@ -195,7 +195,7 @@ func TestMusicTagFusion(t *testing.T) {
 		f1 := mkFile(dir + "/01.flac")
 		infoByPath[f1.Path] = tagInfo("Unknown Artist", "Some Album", "Whatever", "2020", 1)
 
-		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f1}, newEnrichCache())
+		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f1})
 		require.Zero(t, matched)
 		require.Equal(t, 1, unmatched, "a placeholder artist must leave the file retryable-unmatched")
 		require.Zero(t, errored)
@@ -227,7 +227,7 @@ func TestMusicTagFusion(t *testing.T) {
 		fFlac := mkParsed(dir + "/01 - Song.flac")
 		fMp3 := mkParsed(dir + "/01 - Song.mp3")
 
-		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{fFlac, fMp3}, newEnrichCache())
+		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{fFlac, fMp3})
 		require.Equal(t, 2, matched)
 		require.Zero(t, errored)
 
@@ -245,7 +245,7 @@ func TestMusicTagFusion(t *testing.T) {
 
 		// Pass Hidden first to mimic path-sorted order; reserve-before-fill must
 		// still leave Song at track 1.
-		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{hidden, song}, newEnrichCache())
+		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{hidden, song})
 		require.Equal(t, 2, matched)
 		require.Zero(t, errored)
 
@@ -273,7 +273,7 @@ func TestMusicTagFusion(t *testing.T) {
 			"TITLE":                "Some Song",
 		})
 
-		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f}, newEnrichCache())
+		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f})
 		require.Equal(t, 1, matched)
 		require.Zero(t, errored)
 		require.NotZero(t, artistID)
@@ -299,7 +299,7 @@ func TestMusicTagFusion(t *testing.T) {
 			"TITLE":                     "Song",
 		})
 
-		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f}, newEnrichCache())
+		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f})
 		require.Equal(t, 1, matched)
 		require.Zero(t, errored)
 
@@ -326,7 +326,7 @@ func TestMusicTagFusion(t *testing.T) {
 			"TITLE":               "Song",
 		})
 
-		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f}, newEnrichCache())
+		matched, _, errored, artistID := m.matchMusicGroup(ctx, libID, []sqlc.LibraryFile{f})
 		require.Equal(t, 1, matched)
 		require.Zero(t, errored)
 
