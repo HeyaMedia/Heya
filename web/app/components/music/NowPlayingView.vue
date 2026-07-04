@@ -187,10 +187,11 @@ const artist = computed(() => track.value?.artist ?? '')
 const album = computed(() => track.value?.album ?? '')
 const coverUrl = computed(() => track.value?.poster ?? null)
 const artistSlug = computed(() => {
-  // PlayerTrack carries `artist_id` but not slug today. Best we can do is
-  // skip the link when slug isn't reachable — clicking the title bar still
-  // closes the view.
-  return ''
+  // Mirrors Playbar.vue's artistTo: Track carries `artist_slug` directly.
+  // The template below interpolates this into `/music/${artistSlug}`, so
+  // fold in the `artist/` segment here to land on the real route
+  // (`/music/artist/{slug}`, same as Playbar's link) with a one-line fix.
+  return track.value?.artist_slug ? `artist/${track.value.artist_slug}` : ''
 })
 
 const backdropStyle = computed(() => {
