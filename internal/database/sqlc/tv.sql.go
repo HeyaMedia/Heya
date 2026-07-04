@@ -347,6 +347,42 @@ func (q *Queries) GetTVSeriesByMediaItemID(ctx context.Context, mediaItemID int6
 	return i, err
 }
 
+const listEpisodeNumbersForMediaItems = `-- name: ListEpisodeNumbersForMediaItems :many
+SELECT ts.media_item_id, s.season_number, e.episode_number
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE ts.media_item_id = ANY($1::bigint[])
+`
+
+type ListEpisodeNumbersForMediaItemsRow struct {
+	MediaItemID   int64 `json:"media_item_id"`
+	SeasonNumber  int32 `json:"season_number"`
+	EpisodeNumber int32 `json:"episode_number"`
+}
+
+// Season/episode numbers for many series at once — the catalog side of
+// presentEpisodeTotals (the file side is ListEpisodeFileParses).
+func (q *Queries) ListEpisodeNumbersForMediaItems(ctx context.Context, mediaItemIds []int64) ([]ListEpisodeNumbersForMediaItemsRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeNumbersForMediaItems, mediaItemIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEpisodeNumbersForMediaItemsRow{}
+	for rows.Next() {
+		var i ListEpisodeNumbersForMediaItemsRow
+		if err := rows.Scan(&i.MediaItemID, &i.SeasonNumber, &i.EpisodeNumber); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTVEpisodesBySeason = `-- name: ListTVEpisodesBySeason :many
 SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source FROM tv_episodes WHERE season_id = $1 ORDER BY episode_number ASC
 `

@@ -137,6 +137,19 @@ SELECT id, size, parse_result FROM library_files
 WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'
 ORDER BY path ASC;
 
+-- name: ListEpisodeFileParses :many
+-- Slim multi-item variant of ListEpisodeFiles: only the parsed season/episode
+-- arrays, not the multi-KB parse_result blob. Feeds presentEpisodeTotals —
+-- the show-level watched rollups measure progress against the episodes we
+-- actually hold, and pulling full parse_results for every watched show on a
+-- browse-state load would be megabytes.
+SELECT media_item_id,
+       parse_result->'parsed'->'release'->'seasons'  AS seasons,
+       parse_result->'parsed'->'release'->'episodes' AS episodes
+FROM library_files
+WHERE media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[])
+  AND deleted_at IS NULL AND status = 'matched';
+
 -- name: GetMediaItemByExternalID :one
 -- Link by provider id. Guarded against the empty-object trap: `external_ids @>
 -- '{}'` matches EVERY row, so without the `<> '{}'` filter a stub with no

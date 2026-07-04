@@ -47,12 +47,32 @@ func (a *App) GetUserState(ctx context.Context, userID int64, scope string, seri
 		showCounts, _ := q.ListShowWatchCounts(ctx, userID)
 		favIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "media_item"})
 
+		// Totals are the provider-catalog count (tv_series.number_of_episodes)
+		// which counts unaired episodes too — but bulk-mark only writes the
+		// episodes we hold, so progress/fully-watched must be measured against
+		// present episodes. Overlaying only shows with watch rows bounds the
+		// cost; a zero-watched show renders no badge either way.
+		var watchedIDs []int64
+		for _, s := range showCounts {
+			if s.WatchedEpisodes > 0 {
+				watchedIDs = append(watchedIDs, s.MediaItemID)
+			}
+		}
+		totals, terr := a.presentEpisodeTotals(ctx, q, watchedIDs)
+		if terr != nil {
+			totals = map[int64]int{}
+		}
+
 		shows := make([]ShowWatchState, len(showCounts))
 		for i, s := range showCounts {
+			total := s.TotalEpisodes
+			if t, ok := totals[s.MediaItemID]; ok && s.WatchedEpisodes > 0 {
+				total = int32(t)
+			}
 			shows[i] = ShowWatchState{
 				MediaItemID:     s.MediaItemID,
-				TotalEpisodes:   s.TotalEpisodes,
-				WatchedEpisodes: s.WatchedEpisodes,
+				TotalEpisodes:   total,
+				WatchedEpisodes: min(s.WatchedEpisodes, total),
 			}
 		}
 		result["shows"] = shows

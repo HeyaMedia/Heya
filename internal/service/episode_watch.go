@@ -206,18 +206,145 @@ func (a *App) UnmarkMovieWatched(ctx context.Context, userID, mediaItemID int64)
 	})
 }
 
+// presentEpisodeTotals returns, per media item, how many catalog episodes are
+// actually visible/markable — the count analogue of presentEpisodeIDs (same
+// two gates: season visibility, then per-episode presence with a per-season
+// fallback), batched across items with two slim queries so the browse-state
+// rollups can afford it. Show-level watched state must measure against these
+// totals: bulk-mark only writes present episodes, so measuring against the
+// full provider catalog would leave an airing show permanently "unfinished".
+// Items with no episodes simply have no entry; callers keep their fallback.
+func (a *App) presentEpisodeTotals(ctx context.Context, q *sqlc.Queries, itemIDs []int64) (map[int64]int, error) {
+	if len(itemIDs) == 0 {
+		return map[int64]int{}, nil
+	}
+
+	parses, err := q.ListEpisodeFileParses(ctx, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	type seKey struct{ s, e int }
+	presentKeys := map[int64]map[seKey]bool{}
+	availSeasons := map[int64]map[int]bool{}
+	for _, p := range parses {
+		id := p.MediaItemID.Int64
+		seasons := intsFromJSON(p.Seasons)
+		episodes := intsFromJSON(p.Episodes)
+		for _, s := range seasons {
+			if availSeasons[id] == nil {
+				availSeasons[id] = map[int]bool{}
+			}
+			availSeasons[id][s] = true
+			for _, e := range episodes {
+				if presentKeys[id] == nil {
+					presentKeys[id] = map[seKey]bool{}
+				}
+				presentKeys[id][seKey{s, e}] = true
+			}
+		}
+	}
+
+	eps, err := q.ListEpisodeNumbersForMediaItems(ctx, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	type itemSeason struct {
+		item int64
+		sn   int
+	}
+	catalog := map[itemSeason]int{}
+	present := map[itemSeason]int{}
+	for _, ep := range eps {
+		k := itemSeason{ep.MediaItemID, int(ep.SeasonNumber)}
+		catalog[k]++
+		if presentKeys[ep.MediaItemID][seKey{int(ep.SeasonNumber), int(ep.EpisodeNumber)}] {
+			present[k]++
+		}
+	}
+
+	totals := map[int64]int{}
+	for k, total := range catalog {
+		avail := availSeasons[k.item]
+		// Gate 1: hidden season (no files at all) → contributes nothing.
+		if len(avail) > 0 && !avail[k.sn] {
+			continue
+		}
+		// Gate 2: present episodes, whole-season fallback when none resolve.
+		if n := present[k]; n > 0 {
+			totals[k.item] += n
+		} else {
+			totals[k.item] += total
+		}
+	}
+	return totals, nil
+}
+
+// intsFromJSON coerces a jsonb array scanned into interface{} (pgx decodes to
+// []any of float64) into ints. Nil / non-array / non-numeric input yields nil.
+func intsFromJSON(v any) []int {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]int, 0, len(arr))
+	for _, x := range arr {
+		if f, ok := x.(float64); ok {
+			out = append(out, int(f))
+		}
+	}
+	return out
+}
+
 // UserMediaState holds the fully-watched show IDs and favorited media item IDs.
 type UserMediaState struct {
 	WatchedIDs   []int64 `json:"watched"`
 	FavoritedIDs []int64 `json:"favorited"`
 }
 
-// GetUserMediaState returns all fully-watched show IDs and favorited media item IDs for a user.
+// GetUserMediaState returns all fully-watched show IDs and favorited media
+// item IDs for a user. "Fully watched" is measured against the episodes we
+// actually hold (presentEpisodeTotals), not the provider catalog — bulk-mark
+// only writes present episodes, so an airing show with every held episode
+// watched counts as done.
 func (a *App) GetUserMediaState(ctx context.Context, userID int64) (UserMediaState, error) {
 	q := sqlc.New(a.db)
-	watchedIDs, _ := q.ListFullyWatchedShows(ctx, userID)
+	watchedIDs := a.fullyWatchedShowIDs(ctx, q, userID)
 	favIDs, _ := q.ListFavoritedMediaItemIDs(ctx, userID)
 	return UserMediaState{WatchedIDs: watchedIDs, FavoritedIDs: favIDs}, nil
+}
+
+// fullyWatchedShowIDs lists shows where every present episode is watched.
+// Totals fall back to the catalog count when presentEpisodeTotals has no
+// entry (no parseable files → the UI shows the full catalog too).
+func (a *App) fullyWatchedShowIDs(ctx context.Context, q *sqlc.Queries, userID int64) []int64 {
+	counts, err := q.ListShowWatchCounts(ctx, userID)
+	if err != nil {
+		return []int64{}
+	}
+	var candidateIDs []int64
+	for _, c := range counts {
+		if c.WatchedEpisodes > 0 {
+			candidateIDs = append(candidateIDs, c.MediaItemID)
+		}
+	}
+	totals, err := a.presentEpisodeTotals(ctx, q, candidateIDs)
+	if err != nil {
+		totals = map[int64]int{}
+	}
+	watched := []int64{}
+	for _, c := range counts {
+		if c.WatchedEpisodes == 0 {
+			continue
+		}
+		total := int(c.TotalEpisodes)
+		if t, ok := totals[c.MediaItemID]; ok {
+			total = t
+		}
+		if total > 0 && int(c.WatchedEpisodes) >= total {
+			watched = append(watched, c.MediaItemID)
+		}
+	}
+	return watched
 }
 
 // SeasonWatchInfo contains per-season watched episode counts and IDs.

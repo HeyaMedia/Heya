@@ -72,3 +72,12 @@ SELECT e.* FROM tv_episodes e
 JOIN tv_seasons s ON s.id = e.season_id
 WHERE s.series_id = $1
 ORDER BY s.season_number ASC, e.episode_number ASC;
+
+-- name: ListEpisodeNumbersForMediaItems :many
+-- Season/episode numbers for many series at once — the catalog side of
+-- presentEpisodeTotals (the file side is ListEpisodeFileParses).
+SELECT ts.media_item_id, s.season_number, e.episode_number
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE ts.media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[]);

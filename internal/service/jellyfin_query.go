@@ -128,11 +128,28 @@ func (a *App) JFUserVideoSets(ctx context.Context, userID int64) (watchedMovies,
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	// Same present-episode overlay as the native user-state path: played
+	// state is measured against episodes we hold, not the provider catalog
+	// (bulk-mark never writes unaired episodes).
+	var watchedIDs []int64
+	for _, c := range counts {
+		if c.WatchedEpisodes > 0 {
+			watchedIDs = append(watchedIDs, c.MediaItemID)
+		}
+	}
+	totals, terr := a.presentEpisodeTotals(ctx, q, watchedIDs)
+	if terr != nil {
+		totals = map[int64]int{}
+	}
 	watchedSeries = make(map[int64]bool)
 	showCounts = make(map[int64][2]int32, len(counts))
 	for _, c := range counts {
-		showCounts[c.MediaItemID] = [2]int32{c.WatchedEpisodes, c.TotalEpisodes}
-		if c.TotalEpisodes > 0 && c.WatchedEpisodes >= c.TotalEpisodes {
+		total := c.TotalEpisodes
+		if t, ok := totals[c.MediaItemID]; ok && c.WatchedEpisodes > 0 {
+			total = int32(t)
+		}
+		showCounts[c.MediaItemID] = [2]int32{min(c.WatchedEpisodes, total), total}
+		if total > 0 && c.WatchedEpisodes >= total {
 			watchedSeries[c.MediaItemID] = true
 		}
 	}

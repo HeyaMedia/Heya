@@ -335,6 +335,46 @@ func (q *Queries) ListDeletedLibraryFiles(ctx context.Context, arg ListDeletedLi
 	return items, nil
 }
 
+const listEpisodeFileParses = `-- name: ListEpisodeFileParses :many
+SELECT media_item_id,
+       parse_result->'parsed'->'release'->'seasons'  AS seasons,
+       parse_result->'parsed'->'release'->'episodes' AS episodes
+FROM library_files
+WHERE media_item_id = ANY($1::bigint[])
+  AND deleted_at IS NULL AND status = 'matched'
+`
+
+type ListEpisodeFileParsesRow struct {
+	MediaItemID pgtype.Int8 `json:"media_item_id"`
+	Seasons     interface{} `json:"seasons"`
+	Episodes    interface{} `json:"episodes"`
+}
+
+// Slim multi-item variant of ListEpisodeFiles: only the parsed season/episode
+// arrays, not the multi-KB parse_result blob. Feeds presentEpisodeTotals —
+// the show-level watched rollups measure progress against the episodes we
+// actually hold, and pulling full parse_results for every watched show on a
+// browse-state load would be megabytes.
+func (q *Queries) ListEpisodeFileParses(ctx context.Context, mediaItemIds []int64) ([]ListEpisodeFileParsesRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeFileParses, mediaItemIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEpisodeFileParsesRow{}
+	for rows.Next() {
+		var i ListEpisodeFileParsesRow
+		if err := rows.Scan(&i.MediaItemID, &i.Seasons, &i.Episodes); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEpisodeFiles = `-- name: ListEpisodeFiles :many
 SELECT id, size, parse_result FROM library_files
 WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'

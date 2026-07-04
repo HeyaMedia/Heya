@@ -283,36 +283,6 @@ func (q *Queries) ListFavoritedMediaItemIDs(ctx context.Context, userID int64) (
 	return items, nil
 }
 
-const listFullyWatchedShows = `-- name: ListFullyWatchedShows :many
-SELECT ts.media_item_id
-FROM tv_series ts
-JOIN tv_seasons s ON s.series_id = ts.id
-JOIN tv_episodes e ON e.season_id = s.id
-LEFT JOIN user_watch_progress wp ON wp.entity_id = e.id AND wp.entity_type = 'episode' AND wp.user_id = $1 AND wp.completed = true
-GROUP BY ts.media_item_id
-HAVING count(e.id) > 0 AND count(e.id) = count(wp.entity_id)
-`
-
-func (q *Queries) ListFullyWatchedShows(ctx context.Context, userID int64) ([]int64, error) {
-	rows, err := q.db.Query(ctx, listFullyWatchedShows, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []int64{}
-	for rows.Next() {
-		var media_item_id int64
-		if err := rows.Scan(&media_item_id); err != nil {
-			return nil, err
-		}
-		items = append(items, media_item_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listRecentlyWatched = `-- name: ListRecentlyWatched :many
 SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
        wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
