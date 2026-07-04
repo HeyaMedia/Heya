@@ -232,12 +232,12 @@ func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token 
 	return mediaSourceInfo{
 		Protocol:                   "File",
 		ID:                         EncodeID(KindFile, file.ID),
-		Path:                       file.Path,
+		Path:                       sanitizePath(file.Path),
 		Type:                       "Default",
 		Container:                  containerOf(file.Path),
 		Size:                       file.Size,
 		Name:                       target.title,
-		ETag:                       strconv.FormatInt(file.ID, 16),
+		ETag:                       tag32("etag-source", file.ID),
 		RunTimeTicks:               int64(info.Duration * float64(ticksPerSecond)),
 		SupportsDirectPlay:         directOK,
 		SupportsDirectStream:       directOK,
@@ -266,7 +266,7 @@ func (s *Server) attachVideoSource(ctx context.Context, dto *baseItemDto, itemID
 	dto.MediaStreams = src.MediaStreams
 	dto.Container = src.Container
 	dto.VideoType = "VideoFile"
-	dto.Path = src.Path
+	dto.Path = src.Path // already sanitized in videoMediaSource
 	dto.Chapters = []any{}
 	dto.Trickplay = map[string]any{}
 	for _, ms := range src.MediaStreams {
@@ -284,7 +284,7 @@ func (s *Server) trackMediaSource(target playTarget) mediaSourceInfo {
 	return mediaSourceInfo{
 		Protocol:             "File",
 		ID:                   EncodeID(KindTrackFile, target.trackFileID),
-		Path:                 target.file.Path,
+		Path:                 sanitizePath(target.file.Path),
 		Type:                 "Default",
 		Container:            containerOf(target.file.Path),
 		Size:                 target.file.Size,

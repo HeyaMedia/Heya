@@ -23,6 +23,7 @@ package jellyfin
 import (
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -68,10 +69,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h(w, r, p)
 		return
 	}
-	// OPTIONS preflights for claimed paths are answered by the outer CORS
-	// middleware before reaching here. Everything else that we don't claim
-	// belongs to the SPA.
+	// A Jellyfin-shaped request (PascalCase first segment) that we don't
+	// route would fall through to the SPA and hand the client HTML — which
+	// reads as a broken server. Log it at WARN so an unhandled client call
+	// is visible instead of silently 200-ing HTML. See jellyfinShaped.
+	if jellyfinShaped(path) {
+		log.Warn().Str("component", "jellyfin").Str("method", r.Method).Str("path", r.URL.Path).
+			Msg("unrouted Jellyfin-shaped request fell through to SPA — client likely needs this endpoint")
+	}
 	s.next.ServeHTTP(w, r)
+}
+
+// jellyfinShaped reports whether a path looks like a Jellyfin API call (first
+// segment starts with an uppercase letter) rather than an SPA route (all the
+// Nuxt pages are lowercase). Used only for diagnostic logging.
+func jellyfinShaped(path string) bool {
+	p := strings.TrimPrefix(path, "/")
+	if p == "" {
+		return false
+	}
+	seg := p
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		seg = p[:i]
+	}
+	c := seg[0]
+	return c >= 'A' && c <= 'Z'
 }
 
 // buildRouter registers every implemented route. Patterns are byte-identical

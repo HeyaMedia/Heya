@@ -1,8 +1,10 @@
 package jellyfin
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +12,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
+
+// tag32 renders a stable 32-hex-char tag from a namespace + id. Real Jellyfin
+// Etags and ImageTags are 32-char MD5 hashes; strict clients (Infuse) parse
+// them as hashes, so a short "l6f" is rejected. fnv-128a gives us a
+// deterministic 16-byte digest → 32 hex.
+func tag32(ns string, id int64) string {
+	h := fnv.New128a()
+	_, _ = h.Write([]byte(ns))
+	_, _ = h.Write([]byte(strconv.FormatInt(id, 10)))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// dashedGUID formats a 32-hex id in canonical GUID form (8-4-4-4-12), which
+// is what real Jellyfin uses for UserData.Key.
+func dashedGUID(id string) string {
+	if len(id) != 32 {
+		return id
+	}
+	return id[0:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:32]
+}
+
+// sanitizePath strips embedded credentials from a scheme://user:pass@host
+// path (SMB shares carry guest:guest). Real Jellyfin sends server-internal
+// paths clients ignore; leaking credentials to every client is both a
+// security problem and something SMB-aware clients (Infuse) may act on.
+func sanitizePath(p string) string {
+	scheme := strings.Index(p, "://")
+	if scheme < 0 {
+		return p
+	}
+	rest := p[scheme+3:]
+	if at := strings.IndexByte(rest, '@'); at >= 0 {
+		// Only strip when the '@' is in the authority (before the first '/').
+		if slash := strings.IndexByte(rest, '/'); slash < 0 || at < slash {
+			return p[:scheme+3] + rest[at+1:]
+		}
+	}
+	return p
+}
 
 // Mapping from Heya rows to BaseItemDto. Per the repo convention, image tags
 // are unconditional: every item gets a Primary tag (the image endpoint's
@@ -66,9 +107,15 @@ func (d baseItemDto) done() baseItemDto {
 	if d.SortName == "" {
 		d.SortName = d.Name
 	}
-	if d.UserData != nil && d.UserData.ItemID == "" {
-		d.UserData.ItemID = d.ID
+	if d.UserData != nil {
+		if d.UserData.ItemID == "" {
+			d.UserData.ItemID = d.ID
+		}
+		// Real Jellyfin's UserData.Key is the dashed item GUID; clients key
+		// their local userdata cache on it.
+		d.UserData.Key = dashedGUID(d.ID)
 	}
+	d.Path = sanitizePath(d.Path)
 	return d
 }
 
@@ -90,7 +137,7 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		OriginalTitle:     "",
 		ServerID:          serverID,
 		ID:                EncodeID(KindItem, row.ID),
-		Etag:              etagFromTime(row.UpdatedAt),
+		Etag:              tag32("etag-item", row.ID),
 		DateCreated:       tsTime(row.CreatedAt),
 		CanDownload:       true,
 		SortName:          firstNonEmpty(row.SortTitle, row.Title),
@@ -100,7 +147,7 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		ParentID:          EncodeID(KindLibrary, row.LibraryID),
 		LocationType:      "FileSystem",
 		ProviderIds:       providerIDs(row.ExternalIds, row.MediaType),
-		ImageTags:         map[string]string{"Primary": etagFromTime(row.UpdatedAt)},
+		ImageTags:         map[string]string{"Primary": tag32("img-item", row.ID)},
 		BackdropImageTags: []string{},
 		ProductionYear:    yearPtr(row.Year),
 	}
@@ -118,7 +165,7 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		dto.Genres = orEmpty(row.MovieGenres)
 		dto.CommunityRating = ratingPtr(row.MovieRating)
 		dto.PremiereDate = dateTime(row.MovieReleaseDate)
-		dto.BackdropImageTags = []string{etagFromTime(row.UpdatedAt)}
+		dto.BackdropImageTags = []string{tag32("img-backdrop", row.ID)}
 		dto.PrimaryImageAspectRatio = &aspectPoster
 		if dec != nil {
 			dto.UserData = movieUserData(row.ID, dec)
@@ -134,7 +181,7 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		if dto.Status == "Ended" {
 			dto.EndDate = dateTime(row.SeriesLastAirDate)
 		}
-		dto.BackdropImageTags = []string{etagFromTime(row.UpdatedAt)}
+		dto.BackdropImageTags = []string{tag32("img-backdrop", row.ID)}
 		dto.PrimaryImageAspectRatio = &aspectPoster
 		if row.SeriesEpisodeCount.Valid && row.SeriesEpisodeCount.Int32 > 0 {
 			n := row.SeriesEpisodeCount.Int32
@@ -150,7 +197,7 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		if row.ArtistName.Valid && row.ArtistName.String != "" {
 			dto.Name = row.ArtistName.String
 		}
-		dto.BackdropImageTags = []string{etagFromTime(row.UpdatedAt)}
+		dto.BackdropImageTags = []string{tag32("img-backdrop", row.ID)}
 		dto.PrimaryImageAspectRatio = &aspectSquare
 		if dec != nil {
 			dto.UserData = plainUserData(row.ID, dec)
@@ -177,7 +224,7 @@ func (s *Server) dtoFromSeasonRow(row sqlc.JFListSeasonsRow, serverID string, de
 		Name:                    seasonName(row.Title, n),
 		ServerID:                serverID,
 		ID:                      EncodeID(KindSeason, row.ID),
-		Etag:                    "s" + strconv.FormatInt(row.ID, 16),
+		Etag:                    tag32("etag-season", row.ID),
 		CanDownload:             false,
 		Overview:                row.Overview,
 		Taglines:                []string{},
@@ -189,10 +236,10 @@ func (s *Server) dtoFromSeasonRow(row sqlc.JFListSeasonsRow, serverID string, de
 		ParentID:                EncodeID(KindItem, row.SeriesMediaItemID),
 		SeriesName:              row.SeriesTitle,
 		SeriesID:                EncodeID(KindItem, row.SeriesMediaItemID),
-		SeriesPrimaryImageTag:   "p" + strconv.FormatInt(row.SeriesMediaItemID, 16),
+		SeriesPrimaryImageTag:   tag32("img-item", row.SeriesMediaItemID),
 		LocationType:            "FileSystem",
 		PremiereDate:            dateTime(row.AirDate),
-		ImageTags:               map[string]string{"Primary": "s" + strconv.FormatInt(row.ID, 16)},
+		ImageTags:               map[string]string{"Primary": tag32("img-season", row.ID)},
 		BackdropImageTags:       []string{},
 		ChildCount:              &count,
 		PrimaryImageAspectRatio: &aspectPoster,
@@ -210,7 +257,7 @@ func (s *Server) dtoFromEpisodeRow(row sqlc.JFListEpisodesRow, serverID string, 
 		Name:                    firstNonEmpty(row.Title, fmt.Sprintf("Episode %d", epNum)),
 		ServerID:                serverID,
 		ID:                      EncodeID(KindEpisode, row.ID),
-		Etag:                    "e" + strconv.FormatInt(row.ID, 16),
+		Etag:                    tag32("etag-episode", row.ID),
 		CanDownload:             true,
 		Overview:                row.Overview,
 		Taglines:                []string{},
@@ -226,10 +273,10 @@ func (s *Server) dtoFromEpisodeRow(row sqlc.JFListEpisodesRow, serverID string, 
 		SeriesID:                EncodeID(KindItem, row.SeriesMediaItemID),
 		SeasonID:                EncodeID(KindSeason, row.SeasonID),
 		SeasonName:              seasonName(row.SeasonTitle, seasonNum),
-		SeriesPrimaryImageTag:   "p" + strconv.FormatInt(row.SeriesMediaItemID, 16),
+		SeriesPrimaryImageTag:   tag32("img-item", row.SeriesMediaItemID),
 		LocationType:            "FileSystem",
 		PremiereDate:            dateTime(row.AirDate),
-		ImageTags:               map[string]string{"Primary": "e" + strconv.FormatInt(row.ID, 16)},
+		ImageTags:               map[string]string{"Primary": tag32("img-episode", row.ID)},
 		BackdropImageTags:       []string{},
 		PrimaryImageAspectRatio: &aspectStill,
 	}
@@ -251,7 +298,7 @@ func (s *Server) dtoFromAlbumRow(row sqlc.JFListAlbumsRow, serverID string, dec 
 		Name:                    row.Title,
 		ServerID:                serverID,
 		ID:                      EncodeID(KindAlbum, row.ID),
-		Etag:                    "a" + strconv.FormatInt(row.ID, 16),
+		Etag:                    tag32("etag-album", row.ID),
 		CanDownload:             false,
 		Taglines:                []string{},
 		Genres:                  orEmpty(row.Genres),
@@ -267,7 +314,7 @@ func (s *Server) dtoFromAlbumRow(row sqlc.JFListAlbumsRow, serverID string, dec 
 		Artists:                 []string{row.ArtistName},
 		ArtistItems:             []nameGuidPair{artistPair},
 		LocationType:            "FileSystem",
-		ImageTags:               map[string]string{"Primary": "a" + strconv.FormatInt(row.ID, 16)},
+		ImageTags:               map[string]string{"Primary": tag32("img-album", row.ID)},
 		BackdropImageTags:       []string{},
 		PrimaryImageAspectRatio: &aspectSquare,
 	}
@@ -293,7 +340,7 @@ func (s *Server) dtoFromTrackRow(row sqlc.JFListTracksRow, serverID string, dec 
 		Name:                    row.Title,
 		ServerID:                serverID,
 		ID:                      EncodeID(KindTrack, row.ID),
-		Etag:                    "t" + strconv.FormatInt(row.ID, 16),
+		Etag:                    tag32("etag-track", row.ID),
 		CanDownload:             true,
 		Taglines:                []string{},
 		Genres:                  orEmpty(row.AlbumGenres),
@@ -305,13 +352,13 @@ func (s *Server) dtoFromTrackRow(row sqlc.JFListTracksRow, serverID string, dec 
 		ParentID:                EncodeID(KindAlbum, row.AlbumID),
 		Album:                   row.AlbumTitle,
 		AlbumID:                 EncodeID(KindAlbum, row.AlbumID),
-		AlbumPrimaryImageTag:    "a" + strconv.FormatInt(row.AlbumID, 16),
+		AlbumPrimaryImageTag:    tag32("img-album", row.AlbumID),
 		AlbumArtist:             row.ArtistName,
 		AlbumArtists:            []nameGuidPair{artistPair},
 		Artists:                 []string{row.ArtistName},
 		ArtistItems:             []nameGuidPair{artistPair},
 		LocationType:            "FileSystem",
-		ImageTags:               map[string]string{"Primary": "a" + strconv.FormatInt(row.AlbumID, 16)},
+		ImageTags:               map[string]string{"Primary": tag32("img-album", row.AlbumID)},
 		BackdropImageTags:       []string{},
 		PrimaryImageAspectRatio: &aspectSquare,
 	}
@@ -327,7 +374,7 @@ func (s *Server) dtoFromLibrary(lib sqlc.Library, serverID string) baseItemDto {
 		Name:              lib.Name,
 		ServerID:          serverID,
 		ID:                EncodeID(KindLibrary, lib.ID),
-		Etag:              "l" + strconv.FormatInt(lib.ID, 16),
+		Etag:              tag32("etag-lib", lib.ID),
 		DateCreated:       tsTime(lib.CreatedAt),
 		Taglines:          []string{},
 		Genres:            []string{},
