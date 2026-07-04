@@ -37,6 +37,20 @@ func newPassiveImageProxy(cfg *config.Config) *httputil.ReverseProxy {
 			pr.SetURL(base)
 			pr.Out.Host = base.Host
 		},
+		ModifyResponse: func(res *http.Response) error {
+			// The upstream sets its own CORS headers, which ReverseProxy would
+			// APPEND to the ones our withCORS middleware already put on the
+			// local response — and browsers hard-fail cross-origin requests
+			// carrying a duplicated Access-Control-Allow-Origin ("Multiple
+			// CORS header ... not allowed", surfaced by Feishin's web client
+			// loading covers). The local middleware owns CORS; drop upstream's.
+			for h := range res.Header {
+				if len(h) >= 15 && h[:15] == "Access-Control-" {
+					res.Header.Del(h)
+				}
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Warn().Err(err).Str("path", r.URL.Path).Msg("image proxy upstream failed")
 			http.Error(w, "image proxy upstream failed", http.StatusBadGateway)

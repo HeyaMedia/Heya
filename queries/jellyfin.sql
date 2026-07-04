@@ -216,3 +216,10 @@ SELECT DISTINCT ON (media_item_id) *
 FROM library_files
 WHERE media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[]) AND deleted_at IS NULL
 ORDER BY media_item_id, (status = 'matched') DESC, path ASC;
+
+-- name: JFTrackFilesByIDs :many
+-- track_file id -> owning library file, batched for list-level MediaSources
+-- decoration of Audio items (fields=MediaSources).
+SELECT tf.id, tf.library_file_id
+FROM track_files tf
+WHERE tf.id = ANY(sqlc.arg(ids)::bigint[]);

@@ -3,10 +3,12 @@ package jellyfin
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
@@ -15,9 +17,11 @@ import (
 // /api/media/{id}/image/{type} — <img> tags carry no auth headers. Every
 // request is dispatched IN-PROCESS to the matching native Heya image
 // endpoint, which owns the full pipeline (media_assets walk, resizer,
-// passive-mode proxy). Bytes come back directly, like real Jellyfin — a 302
-// was tried first and broke Feishin, which doesn't follow image redirects.
-// Only remote still URLs (heya.media assets never downloaded) still redirect.
+// passive-mode proxy), and the bytes come back directly, like real Jellyfin.
+// No response on this surface is ever a redirect: a 302 was tried first and
+// broke Feishin, which doesn't follow image redirects — so redirects a
+// native handler emits (remote cover/still URLs on heya.media that were
+// never downloaded) are intercepted and the remote bytes proxied through.
 
 // jellyfin ImageType → Heya asset type. Unknown types 404 (upstream does the
 // same for types an item lacks).
@@ -101,7 +105,7 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 		case s.hasImage(ctx, ep.SeriesMediaItemID, "still", label):
 			target = fmt.Sprintf("/api/media/%d/image/still?label=%s", ep.SeriesMediaItemID, label)
 		case strings.HasPrefix(ep.StillPath, "http"):
-			http.Redirect(w, r, ep.StillPath, http.StatusFound)
+			s.serveNativeImage(w, r, ep.StillPath) // absolute → proxied remote fetch
 			return
 		case s.hasImage(ctx, ep.SeriesMediaItemID, "backdrop", ""):
 			target = fmt.Sprintf("/api/media/%d/image/backdrop", ep.SeriesMediaItemID)
@@ -141,26 +145,104 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 	s.serveNativeImage(w, r, appendResizeQuery(target, r))
 }
 
-// serveNativeImage re-routes the request to a native image endpoint through
-// the full server mux, in-process — the response bytes stream straight back
-// to the client with no redirect hop. Falls back to a 302 when no native
-// handler is mounted (unit tests, exotic embeddings).
+// serveNativeImage resolves target to actual image bytes: local paths
+// dispatch through the full server mux in-process; absolute URLs (and any
+// redirect a native handler answers with — e.g. a remote heya.media cover
+// that was never downloaded) are fetched server-side and streamed through.
+// The client never sees a redirect. Falls back to a plain 302 when no
+// native handler is mounted (unit tests, exotic embeddings).
 func (s *Server) serveNativeImage(w http.ResponseWriter, r *http.Request, target string) {
 	if s.native == nil {
 		http.Redirect(w, r, target, http.StatusFound)
 		return
 	}
-	u, err := url.Parse(target)
+	for range 3 { // bounded redirect-resolution depth
+		u, err := url.Parse(target)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if u.IsAbs() {
+			s.proxyRemoteImage(w, r, target)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = u.Path
+		r2.URL.RawPath = ""
+		r2.URL.RawQuery = u.RawQuery
+		r2.RequestURI = ""
+		dw := &imageDispatchWriter{ResponseWriter: w}
+		s.native.ServeHTTP(dw, r2)
+		if !dw.intercepted {
+			return // native handler served bytes (or a real error) directly
+		}
+		if dw.redirect == "" {
+			http.NotFound(w, r)
+			return
+		}
+		target = dw.redirect
+	}
+	http.NotFound(w, r) // redirect chain too deep — treat as missing
+}
+
+// imageDispatchWriter forwards a dispatched native response through, except
+// redirects: those are captured (and their tiny HTML bodies swallowed) so
+// serveNativeImage can resolve them to bytes instead.
+type imageDispatchWriter struct {
+	http.ResponseWriter
+	redirect    string
+	intercepted bool
+}
+
+func (dw *imageDispatchWriter) WriteHeader(code int) {
+	if code >= 300 && code < 400 {
+		dw.redirect = dw.Header().Get("Location")
+		dw.Header().Del("Location")
+		dw.intercepted = true
+		return
+	}
+	dw.ResponseWriter.WriteHeader(code)
+}
+
+func (dw *imageDispatchWriter) Write(b []byte) (int, error) {
+	if dw.intercepted {
+		return len(b), nil
+	}
+	return dw.ResponseWriter.Write(b)
+}
+
+// remoteImageClient fetches never-downloaded remote assets (heya.media CDN
+// covers/stills) for proxying. Bounded so a stalled CDN can't pin handlers.
+var remoteImageClient = &http.Client{Timeout: 20 * time.Second}
+
+func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL string) {
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, rawURL, nil)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	r2 := r.Clone(r.Context())
-	r2.URL.Path = u.Path
-	r2.URL.RawPath = ""
-	r2.URL.RawQuery = u.RawQuery
-	r2.RequestURI = ""
-	s.native.ServeHTTP(w, r2)
+	res, err := remoteImageClient.Do(req)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		http.NotFound(w, r) // remote miss = no image
+		return
+	}
+	h := w.Header()
+	if ct := res.Header.Get("Content-Type"); ct != "" {
+		h.Set("Content-Type", ct)
+	}
+	if cl := res.Header.Get("Content-Length"); cl != "" {
+		h.Set("Content-Length", cl)
+	}
+	h.Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = io.Copy(w, res.Body)
+	}
 }
 
 // hasImage reports whether a media item has a resolvable image of the given

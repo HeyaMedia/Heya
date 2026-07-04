@@ -302,15 +302,23 @@ func (s *Server) attachVideoSource(ctx context.Context, dto *baseItemDto, itemID
 }
 
 func (s *Server) trackMediaSource(target playTarget) mediaSourceInfo {
+	return trackSourceInfo(target.trackFileID, target.file.Path, target.file.Size, target.title, target.trackDuration)
+}
+
+// trackSourceInfo is the shared Audio MediaSourceInfo builder — used by
+// PlaybackInfo (via trackMediaSource) and by list-level decoration
+// (attachTrackSources). Audio needs no probe data: clients stream through
+// /Audio/{id}/universal, which negotiates on its own.
+func trackSourceInfo(trackFileID int64, path string, size int64, title string, durationSeconds int32) mediaSourceInfo {
 	return mediaSourceInfo{
 		Protocol:             "File",
-		ID:                   EncodeID(KindTrackFile, target.trackFileID),
-		Path:                 sanitizePath(target.file.Path),
+		ID:                   EncodeID(KindTrackFile, trackFileID),
+		Path:                 sanitizePath(path),
 		Type:                 "Default",
-		Container:            containerOf(target.file.Path),
-		Size:                 target.file.Size,
-		Name:                 target.title,
-		RunTimeTicks:         int64(target.trackDuration) * ticksPerSecond,
+		Container:            containerOf(path),
+		Size:                 size,
+		Name:                 title,
+		RunTimeTicks:         int64(durationSeconds) * ticksPerSecond,
 		SupportsDirectPlay:   true,
 		SupportsDirectStream: true,
 		SupportsTranscoding:  true,

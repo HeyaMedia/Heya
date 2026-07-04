@@ -840,3 +840,36 @@ func (q *Queries) JFListWatchProgressByIDs(ctx context.Context, arg JFListWatchP
 	}
 	return items, nil
 }
+
+const jFTrackFilesByIDs = `-- name: JFTrackFilesByIDs :many
+SELECT tf.id, tf.library_file_id
+FROM track_files tf
+WHERE tf.id = ANY($1::bigint[])
+`
+
+type JFTrackFilesByIDsRow struct {
+	ID            int64 `json:"id"`
+	LibraryFileID int64 `json:"library_file_id"`
+}
+
+// track_file id -> owning library file, batched for list-level MediaSources
+// decoration of Audio items (fields=MediaSources).
+func (q *Queries) JFTrackFilesByIDs(ctx context.Context, ids []int64) ([]JFTrackFilesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, jFTrackFilesByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []JFTrackFilesByIDsRow{}
+	for rows.Next() {
+		var i JFTrackFilesByIDsRow
+		if err := rows.Scan(&i.ID, &i.LibraryFileID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

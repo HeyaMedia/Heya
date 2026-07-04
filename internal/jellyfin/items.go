@@ -132,10 +132,18 @@ func (s *Server) handleItemByID(w http.ResponseWriter, r *http.Request, p Params
 		return
 	}
 	dto := res.Items[0]
-	// Full detail carries MediaSources for playable video, like upstream —
-	// Infuse decides playability from the detail response.
-	if dto.Type == "Movie" || dto.Type == "Episode" {
+	// Full detail carries MediaSources for playable items, like upstream —
+	// Infuse decides video playability from the detail response, and Feishin
+	// won't queue a song without sources.
+	switch dto.Type {
+	case "Movie", "Episode":
 		s.attachVideoSource(r.Context(), &dto, p["itemId"])
+	case "Audio":
+		if target, ok := s.resolvePlayTarget(r.Context(), p["itemId"]); ok {
+			src := s.trackMediaSource(target)
+			dto.MediaSources = []mediaSourceInfo{src}
+			dto.Container = src.Container
+		}
 	}
 	writeJSON(w, http.StatusOK, dto)
 }

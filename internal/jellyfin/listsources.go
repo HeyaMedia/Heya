@@ -91,6 +91,41 @@ func (s *Server) attachMovieSources(ctx context.Context, rows []sqlc.JFListLibra
 	}
 }
 
+// attachTrackSources decorates a page of Audio dtos in place; rows and items
+// are parallel slices. Audio sources are cheap (no probe data — see
+// trackSourceInfo), but Feishin refuses to queue a song whose dto lacks
+// MediaSources, so lists must carry them when fields ask.
+func (s *Server) attachTrackSources(ctx context.Context, rows []sqlc.JFListTracksRow, items []baseItemDto, req itemsRequest) {
+	if len(rows) == 0 || len(rows) != len(items) {
+		return
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if row.BestFileID > 0 {
+			ids = append(ids, row.BestFileID)
+		}
+	}
+	files, err := s.app.JFTrackLibraryFiles(ctx, ids)
+	if err != nil {
+		log.Warn().Err(err).Str("component", "jellyfin").Msg("track file hydration failed; list dtos will lack MediaSources")
+		return
+	}
+	for i, row := range rows {
+		file, ok := files[row.BestFileID]
+		if !ok {
+			continue
+		}
+		src := trackSourceInfo(row.BestFileID, file.Path, file.Size, row.Title, row.Duration)
+		if req.fields["mediasources"] {
+			items[i].MediaSources = []mediaSourceInfo{src}
+		}
+		items[i].Container = src.Container
+		if items[i].DateCreated == nil {
+			items[i].DateCreated = tsTime(file.CreatedAt)
+		}
+	}
+}
+
 // decorateWithSource attaches the file-derived media info to one dto:
 // MediaSources and/or MediaStreams per the requested fields, plus Container,
 // HasSubtitles, and DateCreated (episodes have no created_at of their own —

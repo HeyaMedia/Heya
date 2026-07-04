@@ -144,8 +144,17 @@ const season = computed(() => {
   return allSeasons.value.find((s: any) => s.season_number === currentSeasonNum.value) || null
 })
 
+// Only surface episodes we actually have a file for. A currently-airing
+// season carries the full metadata episode list from the provider (e.g. all
+// 10 from TMDB) even when just episode 1 has aired/downloaded — rendering the
+// unreleased rest as empty cards is misleading. Presence comes from the
+// `episode_files` map already on the detail doc (see `episodeFileId`).
+// Fallback: if nothing resolves as present (e.g. a season pack parsed without
+// per-episode numbers), show the full list rather than an empty season.
 const episodes = computed(() => {
-  return ((season.value as any)?.episodes || []).sort((a: any, b: any) => a.episode_number - b.episode_number)
+  const all = [...((season.value as any)?.episodes || [])].sort((a: any, b: any) => a.episode_number - b.episode_number)
+  const present = all.filter((ep: any) => episodeFileId(ep) != null)
+  return present.length ? present : all
 })
 
 const seasonTitle = computed(() => {

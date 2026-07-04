@@ -237,6 +237,34 @@ func (a *App) JFLibraryFilesByIDs(ctx context.Context, ids []int64) (map[int64]s
 	return out, nil
 }
 
+// JFTrackLibraryFiles resolves track_file ids to their library files, keyed
+// by track_file id — the batch behind Audio list MediaSources decoration.
+func (a *App) JFTrackLibraryFiles(ctx context.Context, trackFileIDs []int64) (map[int64]sqlc.LibraryFile, error) {
+	if len(trackFileIDs) == 0 {
+		return map[int64]sqlc.LibraryFile{}, nil
+	}
+	q := sqlc.New(a.db)
+	rows, err := q.JFTrackFilesByIDs(ctx, trackFileIDs)
+	if err != nil {
+		return nil, err
+	}
+	libIDs := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		libIDs = append(libIDs, r.LibraryFileID)
+	}
+	files, err := a.JFLibraryFilesByIDs(ctx, libIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]sqlc.LibraryFile, len(rows))
+	for _, r := range rows {
+		if f, ok := files[r.LibraryFileID]; ok {
+			out[r.ID] = f
+		}
+	}
+	return out, nil
+}
+
 // JFBestVideoFiles returns the primary playable file per movie media item,
 // batched — the same matched-first pick JFMovieFileID makes for one item.
 func (a *App) JFBestVideoFiles(ctx context.Context, mediaItemIDs []int64) (map[int64]sqlc.LibraryFile, error) {

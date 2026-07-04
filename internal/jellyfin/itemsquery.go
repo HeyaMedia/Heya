@@ -418,6 +418,9 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		for _, row := range rows {
 			items = append(items, s.dtoFromTrackRow(row, serverID, dec))
 		}
+		if req.wantsSources() {
+			s.attachTrackSources(ctx, rows, items, req)
+		}
 		return queryResult[baseItemDto]{Items: items, TotalRecordCount: int(total), StartIndex: req.startIndex}, nil
 	}
 
@@ -509,8 +512,15 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 				return queryResult[baseItemDto]{Items: []baseItemDto{}}, err
 			}
 			trackDec := s.favoriteDecor(ctx, userID, "track")
-			for _, row := range rows {
-				found[EncodeID(KindTrack, row.ID)] = s.dtoFromTrackRow(row, serverID, trackDec)
+			dtos := make([]baseItemDto, len(rows))
+			for i, row := range rows {
+				dtos[i] = s.dtoFromTrackRow(row, serverID, trackDec)
+			}
+			if req.wantsSources() {
+				s.attachTrackSources(ctx, rows, dtos, req)
+			}
+			for i, row := range rows {
+				found[EncodeID(KindTrack, row.ID)] = dtos[i]
 			}
 		case KindLibrary:
 			libs, err := s.app.ListLibraries(ctx)
