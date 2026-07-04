@@ -3,7 +3,7 @@
  * Heya Eye — a Chrome DevTools Protocol driver for visual debugging.
  *
  * Subcommands:
- *   start           Launch headless Chrome with remote debugging.
+ *   start [--window-size WxH]  Launch headless Chrome with remote debugging.
  *   stop            Kill the running Chrome.
  *   login [user pw] Hit /api/auth/login and stash the token in localStorage.
  *   goto <url>      Navigate the current tab (default: http://localhost:8080/).
@@ -17,6 +17,8 @@
  *   type <text>     Type text into the focused element.
  *   wait <selector> [timeout-ms] Poll until selector appears (or vanishes with !sel).
  *   sleep <ms>      Block for ms milliseconds (cheap settle wait).
+ *   viewport <WxH> [--dpr N] [--touch]  Persist a mobile-viewport override
+ *                   applied on every subsequent connect(); `viewport off` clears it.
  *
  * State is persisted in /tmp/heya-eye/state.json (debugger ws URL + chrome PID).
  */
@@ -30,11 +32,22 @@ const STATE_FILE = `${STATE_DIR}/state.json`
 const PROFILE_DIR = `${STATE_DIR}/profile`
 const PORT = 9223
 const DEFAULT_ORIGIN = 'http://localhost:8080'
+const DEFAULT_WINDOW_SIZE = { width: 1600, height: 1000 }
+
+interface ViewportOverride {
+  width: number
+  height: number
+  dpr: number
+  mobile: boolean
+  touch: boolean
+}
 
 interface State {
   pid: number
   wsUrl: string
   origin: string
+  windowSize?: { width: number; height: number }
+  viewport?: ViewportOverride
 }
 
 mkdirSync(STATE_DIR, { recursive: true })
@@ -48,7 +61,7 @@ function clearState() { try { rmSync(STATE_FILE) } catch {} }
 
 async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
-async function startChrome(): Promise<State> {
+async function startChrome(windowSize = '1600,1000'): Promise<State> {
   // Kill any zombie chrome on our port first.
   const existing = loadState()
   if (existing) {
@@ -63,7 +76,7 @@ async function startChrome(): Promise<State> {
     '--no-default-browser-check',
     '--hide-scrollbars',
     `--user-data-dir=${PROFILE_DIR}`,
-    '--window-size=1600,1000',
+    `--window-size=${windowSize}`,
     'about:blank',
   ], { detached: true, stdio: 'ignore' })
   child.unref()
@@ -77,7 +90,13 @@ async function startChrome(): Promise<State> {
   }
   const targets = await (await fetch(`http://localhost:${PORT}/json`)).json() as any[]
   const tab = targets.find(t => t.type === 'page') ?? targets[0]
-  const state: State = { pid: child.pid!, wsUrl: tab.webSocketDebuggerUrl, origin: DEFAULT_ORIGIN }
+  const [w, h] = windowSize.split(',').map(n => parseInt(n, 10))
+  const state: State = {
+    pid: child.pid!,
+    wsUrl: tab.webSocketDebuggerUrl,
+    origin: DEFAULT_ORIGIN,
+    windowSize: { width: w, height: h },
+  }
   saveState(state)
   console.log(`Chrome started (pid ${state.pid})`)
   return state
@@ -126,6 +145,41 @@ class CDP {
   close() { this.ws.close() }
 }
 
+// If a viewport override is saved in state, apply it to a freshly-connected
+// CDP session. Every subcommand re-applies this on connect — there's no
+// persistent browser-side state we can rely on since each subcommand opens
+// its own CDP session.
+//
+// Headless Chrome has no real OS window separate from the emulated render
+// surface: calling Emulation.setDeviceMetricsOverride actually resizes that
+// surface, and it stays resized across separate debugger sessions attaching
+// to the same target. `Emulation.clearDeviceMetricsOverride` does NOT
+// restore the original launch size in this mode (verified empirically) — so
+// the "no override" branch re-asserts the desktop dimensions explicitly
+// instead of merely clearing, otherwise `viewport off` (or any desktop
+// command run after an emulated one) would keep seeing the stale mobile size.
+async function applyViewportOverride(cdp: CDP, s: State) {
+  const v = s.viewport
+  if (v) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: v.width,
+      height: v.height,
+      deviceScaleFactor: v.dpr,
+      mobile: v.mobile,
+    })
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: v.touch })
+  } else {
+    const desktop = s.windowSize ?? DEFAULT_WINDOW_SIZE
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: desktop.width,
+      height: desktop.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    })
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+  }
+}
+
 async function connect(): Promise<CDP> {
   const s = requireState()
   const cdp = new CDP(s.wsUrl)
@@ -133,6 +187,7 @@ async function connect(): Promise<CDP> {
   await cdp.send('Page.enable')
   await cdp.send('DOM.enable')
   await cdp.send('Runtime.enable')
+  await applyViewportOverride(cdp, s)
   return cdp
 }
 
@@ -144,6 +199,7 @@ async function captureConsole(nav: (cdp: CDP) => Promise<void>, durationMs = 400
   await cdp.ready
   await cdp.send('Runtime.enable')
   await cdp.send('Page.enable')
+  await applyViewportOverride(cdp, s)
   const lines: Array<{ kind: string; text: string }> = []
   cdp.on('Runtime.consoleAPICalled', (p: any) => {
     const text = (p.args ?? []).map((a: any) => a.value ?? a.description ?? a.unserializableValue ?? '').join(' ')
@@ -184,8 +240,17 @@ async function evalJs(cdp: CDP, expression: string, awaitPromise = false): Promi
   return r.result?.value
 }
 
-async function cmd_start() {
-  await startChrome()
+async function cmd_start(...args: string[]) {
+  let windowSize = '1600,1000'
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--window-size') {
+      const val = args[++i]
+      const m = val?.match(/^(\d+)x(\d+)$/)
+      if (!m) throw new Error(`start: --window-size expects "<width>x<height>", got "${val}"`)
+      windowSize = `${m[1]},${m[2]}`
+    }
+  }
+  await startChrome(windowSize)
 }
 
 async function cmd_stop() {
@@ -194,6 +259,27 @@ async function cmd_stop() {
   try { process.kill(s.pid, 9) } catch {}
   clearState()
   console.log('Chrome stopped.')
+}
+
+async function cmd_viewport(spec?: string, ...rest: string[]) {
+  const s = requireState()
+  if (!spec || spec === 'off') {
+    delete s.viewport
+    saveState(s)
+    console.log('Viewport override: off (desktop default)')
+    return
+  }
+  const m = spec.match(/^(\d+)x(\d+)$/)
+  if (!m) throw new Error(`viewport: expected "<width>x<height>" or "off", got "${spec}"`)
+  let dpr = 2
+  let touch = false
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '--dpr') dpr = parseFloat(rest[++i])
+    else if (rest[i] === '--touch') touch = true
+  }
+  s.viewport = { width: parseInt(m[1], 10), height: parseInt(m[2], 10), dpr, mobile: true, touch }
+  saveState(s)
+  console.log(`Viewport override: ${s.viewport.width}x${s.viewport.height} @${dpr}x${touch ? ', touch' : ''}`)
 }
 
 async function cmd_login(user = 'admin', pw = 'admin') {
@@ -452,8 +538,9 @@ async function cmd_type(text: string) {
 async function main() {
   const [sub, ...rest] = process.argv.slice(2)
   switch (sub) {
-    case 'start':  await cmd_start(); break
+    case 'start':  await cmd_start(...rest); break
     case 'stop':   await cmd_stop(); break
+    case 'viewport': await cmd_viewport(rest[0], ...rest.slice(1)); break
     case 'login':  await cmd_login(rest[0], rest[1]); break
     case 'goto':   await cmd_goto(rest[0] ?? '/'); break
     case 'shot':   await cmd_shot(rest[0], rest[1], rest[2]); break
@@ -470,7 +557,7 @@ async function main() {
     case 'sleep':   await cmd_sleep(rest[0]); break
     case 'console': await cmd_console(rest[0], rest[1]); break
     default:
-      console.error('usage: eye <start|stop|login|goto|shot|eval|click|dom|style|reload|focus|type|wait|sleep> [args]')
+      console.error('usage: eye <start|stop|login|goto|shot|eval|click|dom|style|reload|focus|type|wait|sleep|viewport> [args]')
       process.exit(1)
   }
 }

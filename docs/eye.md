@@ -29,8 +29,9 @@ against `:8080` directly.
 
 | Cmd | Purpose |
 | --- | --- |
-| `start` | Spawn Chrome with remote debugging on `:9223`, user-data-dir `/tmp/heya-eye/profile/` |
+| `start [--window-size WxH]` | Spawn Chrome with remote debugging on `:9223`, user-data-dir `/tmp/heya-eye/profile/`. Window size defaults to `1600x1000` |
 | `stop` | Kill it and clear state |
+| `viewport <WxH> [--dpr N] [--touch]` | Persist a mobile-viewport override (device metrics emulation) applied on every subsequent command. `viewport off` clears it — prints the active state either way |
 | `login [user pw]` | API-login + stash token. Defaults `admin/admin` |
 | `goto <path-or-url>` | Navigate; waits for `Page.loadEventFired` + 800 ms settle |
 | `reload` | Hard reload (ignores cache) |
@@ -43,6 +44,45 @@ against `:8080` directly.
 | `dom <sel>` | Print outerHTML (truncated to 8 KiB) |
 | `style <sel> [props…]` | computed-style key/value dump. **Use kebab-case** (`backdrop-filter`, `border-radius`) — `getPropertyValue` won't translate camelCase |
 | `shot <out.png> [sel] [pad]` | Screenshot. Pass a selector to clip; default 16 px padding |
+
+## Mobile viewport emulation
+
+`eye viewport` persists a CDP device-metrics override (`{width, height, dpr,
+mobile: true, touch}`) into the same `state.json` that already tracks
+`origin` — every subcommand re-connects fresh and re-applies it before doing
+its own work, so `goto`, `shot`, `click`, `eval`, etc. all see the emulated
+size without any extra flags. It stacks with `--touch` for
+`Emulation.setTouchEmulationEnabled`, which is what makes
+`navigator.maxTouchPoints`/`matchMedia('(pointer: coarse)')` report as a
+touch device — the app's `useViewport()`/`isCoarse` composable keys off that.
+
+Mobile testing recipe:
+
+```bash
+bun tools/eye/eye.ts viewport 390x844 --dpr 3 --touch   # iPhone-ish phone
+bun tools/eye/eye.ts goto /music
+bun tools/eye/eye.ts shot /tmp/heya-eye/phone.png
+```
+
+`eye viewport off` returns to the desktop default — every following command
+goes back to the `start`-time window size (`1600x1000` unless overridden via
+`eye start --window-size`). Other useful sizes: `820x1180` for the tablet
+breakpoint, or drop back to `1600x1000` explicitly for a desktop-unchanged
+spot check.
+
+Headless Chrome has no separate "real OS window" behind the emulated
+surface — `Emulation.setDeviceMetricsOverride` actually resizes the render
+surface itself, and it stays resized across separate debugger sessions
+attached to the same target. Because of that, `eye viewport off` doesn't rely
+on `Emulation.clearDeviceMetricsOverride` (verified empirically to *not*
+restore the original size in headless mode) — it re-asserts the desktop
+dimensions explicitly instead.
+
+`shot` already captures at the emulated size correctly: `captureBeyondViewport:
+true` (used for every `shot`) sizes the PNG in physical pixels as `CSS width ×
+dpr`, and extends past the viewport height to cover the full scrollable page
+— a 390×844 @3x override with 2000px of scrollable content yields an
+1170×6000 PNG, not a viewport-height-clipped one.
 
 ## Patterns that come up
 
