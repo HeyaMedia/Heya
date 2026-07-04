@@ -390,26 +390,44 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		m.linkCollection(ctx, mediaItemID, d.Collection)
 	}
 
+	// Merge the social/link IDs the enrich payload carries beyond the core
+	// provider IDs into media_items.external_ids. (This block used to write
+	// the row back unchanged — the merge below is what it always meant to do.)
 	if d.ExternalIDs["wikidata"] != "" || d.ExternalIDs["facebook"] != "" || d.ExternalIDs["instagram"] != "" || d.ExternalIDs["twitter"] != "" || d.Homepage != "" {
 		item, err := m.q.GetMediaItemByID(ctx, mediaItemID)
 		if err == nil {
-			if _, err := m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
-				ID:               item.ID,
-				Title:            item.Title,
-				SortTitle:        item.SortTitle,
-				Year:             item.Year,
-				Description:      item.Description,
-				PosterPath:       item.PosterPath,
-				BackdropPath:     item.BackdropPath,
-				ExternalIds:      item.ExternalIds,
-				Tagline:          item.Tagline,
-				OriginalTitle:    item.OriginalTitle,
-				OriginalLanguage: item.OriginalLanguage,
-				Status:           item.Status,
-				ProviderKind:     item.ProviderKind,
-				HeyaSlug:         item.HeyaSlug,
-			}); err != nil {
-				re.add(fmt.Errorf("external ids: %w", err))
+			ids := map[string]string{}
+			_ = json.Unmarshal(item.ExternalIds, &ids)
+			changed := false
+			for _, k := range []string{"wikidata", "facebook", "instagram", "twitter"} {
+				if v := d.ExternalIDs[k]; v != "" && ids[k] != v {
+					ids[k] = v
+					changed = true
+				}
+			}
+			if d.Homepage != "" && ids["homepage"] != d.Homepage {
+				ids["homepage"] = d.Homepage
+				changed = true
+			}
+			if changed {
+				if _, err := m.q.UpdateMediaItem(ctx, sqlc.UpdateMediaItemParams{
+					ID:               item.ID,
+					Title:            item.Title,
+					SortTitle:        item.SortTitle,
+					Year:             item.Year,
+					Description:      item.Description,
+					PosterPath:       item.PosterPath,
+					BackdropPath:     item.BackdropPath,
+					ExternalIds:      mustJSON(ids),
+					Tagline:          item.Tagline,
+					OriginalTitle:    item.OriginalTitle,
+					OriginalLanguage: item.OriginalLanguage,
+					Status:           item.Status,
+					ProviderKind:     item.ProviderKind,
+					HeyaSlug:         item.HeyaSlug,
+				}); err != nil {
+					re.add(fmt.Errorf("external ids: %w", err))
+				}
 			}
 		}
 	}
