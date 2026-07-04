@@ -40,56 +40,6 @@ func (q *Queries) ListFavoritedIDs(ctx context.Context, arg ListFavoritedIDsPara
 	return items, nil
 }
 
-const listSeasonWatchCounts = `-- name: ListSeasonWatchCounts :many
-SELECT s.id AS season_id,
-       s.series_id,
-       count(e.id)::int AS total_episodes,
-       count(wp.entity_id)::int AS watched_episodes
-FROM tv_seasons s
-JOIN tv_episodes e ON e.season_id = s.id
-LEFT JOIN user_watch_progress wp ON wp.entity_id = e.id AND wp.entity_type = 'episode' AND wp.completed = true AND wp.user_id = $1
-WHERE s.series_id = $2
-GROUP BY s.id, s.series_id
-`
-
-type ListSeasonWatchCountsParams struct {
-	UserID   int64 `json:"user_id"`
-	SeriesID int64 `json:"series_id"`
-}
-
-type ListSeasonWatchCountsRow struct {
-	SeasonID        int64 `json:"season_id"`
-	SeriesID        int64 `json:"series_id"`
-	TotalEpisodes   int32 `json:"total_episodes"`
-	WatchedEpisodes int32 `json:"watched_episodes"`
-}
-
-// Per-season watched: total vs watched, grouped by season
-func (q *Queries) ListSeasonWatchCounts(ctx context.Context, arg ListSeasonWatchCountsParams) ([]ListSeasonWatchCountsRow, error) {
-	rows, err := q.db.Query(ctx, listSeasonWatchCounts, arg.UserID, arg.SeriesID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListSeasonWatchCountsRow{}
-	for rows.Next() {
-		var i ListSeasonWatchCountsRow
-		if err := rows.Scan(
-			&i.SeasonID,
-			&i.SeriesID,
-			&i.TotalEpisodes,
-			&i.WatchedEpisodes,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listShowWatchCounts = `-- name: ListShowWatchCounts :many
 SELECT ts.media_item_id,
        ts.number_of_episodes::int AS total_episodes,
@@ -137,6 +87,7 @@ func (q *Queries) ListShowWatchCounts(ctx context.Context, userID int64) ([]List
 }
 
 const listWatchedEpisodeIDsForSeries = `-- name: ListWatchedEpisodeIDsForSeries :many
+
 SELECT wp.entity_id AS episode_id
 FROM user_watch_progress wp
 JOIN tv_episodes e ON e.id = wp.entity_id
@@ -149,6 +100,7 @@ type ListWatchedEpisodeIDsForSeriesParams struct {
 	SeriesID int64 `json:"series_id"`
 }
 
+// Per-season watched: total vs watched, grouped by season
 // Per-episode watched IDs for a single series
 func (q *Queries) ListWatchedEpisodeIDsForSeries(ctx context.Context, arg ListWatchedEpisodeIDsForSeriesParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listWatchedEpisodeIDsForSeries, arg.UserID, arg.SeriesID)

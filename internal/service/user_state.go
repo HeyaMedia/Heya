@@ -47,32 +47,33 @@ func (a *App) GetUserState(ctx context.Context, userID int64, scope string, seri
 		showCounts, _ := q.ListShowWatchCounts(ctx, userID)
 		favIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "media_item"})
 
-		// Totals are the provider-catalog count (tv_series.number_of_episodes)
-		// which counts unaired episodes too — but bulk-mark only writes the
-		// episodes we hold, so progress/fully-watched must be measured against
-		// present episodes. Overlaying only shows with watch rows bounds the
-		// cost; a zero-watched show renders no badge either way.
+		// Raw counts compare the user's watch rows to the provider-catalog
+		// total — but bulk-mark only writes the episodes we hold, and stale
+		// marks can sit on episodes we don't. Both sides of the fraction are
+		// re-measured against the present set (presentShowWatchCounts).
+		// Overlaying only shows with watch rows bounds the cost; a
+		// zero-watched show renders no badge either way.
 		var watchedIDs []int64
 		for _, s := range showCounts {
 			if s.WatchedEpisodes > 0 {
 				watchedIDs = append(watchedIDs, s.MediaItemID)
 			}
 		}
-		totals, terr := a.presentEpisodeTotals(ctx, q, watchedIDs)
-		if terr != nil {
-			totals = map[int64]int{}
+		presentCounts, perr := a.presentShowWatchCounts(ctx, q, userID, watchedIDs)
+		if perr != nil {
+			presentCounts = map[int64]presentWatchCounts{}
 		}
 
 		shows := make([]ShowWatchState, len(showCounts))
 		for i, s := range showCounts {
-			total := s.TotalEpisodes
-			if t, ok := totals[s.MediaItemID]; ok && s.WatchedEpisodes > 0 {
-				total = int32(t)
+			total, watched := s.TotalEpisodes, s.WatchedEpisodes
+			if pc, ok := presentCounts[s.MediaItemID]; ok && s.WatchedEpisodes > 0 {
+				total, watched = int32(pc.Total), int32(pc.Watched)
 			}
 			shows[i] = ShowWatchState{
 				MediaItemID:     s.MediaItemID,
 				TotalEpisodes:   total,
-				WatchedEpisodes: min(s.WatchedEpisodes, total),
+				WatchedEpisodes: watched,
 			}
 		}
 		result["shows"] = shows
@@ -87,23 +88,10 @@ func (a *App) GetUserState(ctx context.Context, userID int64, scope string, seri
 			return nil, fmt.Errorf("series not found: %w", err)
 		}
 
-		seasonCounts, _ := q.ListSeasonWatchCounts(ctx, sqlc.ListSeasonWatchCountsParams{
-			UserID:   userID,
-			SeriesID: series.ID,
-		})
-
 		favMediaIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "media_item"})
 		favSeasonIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "season"})
 
-		seasons := make([]SeasonWatchState, len(seasonCounts))
-		for i, s := range seasonCounts {
-			seasons[i] = SeasonWatchState{
-				SeasonID:        s.SeasonID,
-				TotalEpisodes:   s.TotalEpisodes,
-				WatchedEpisodes: s.WatchedEpisodes,
-			}
-		}
-		result["seasons"] = seasons
+		result["seasons"] = a.presentSeasonStates(ctx, q, userID, series)
 		result["favorited_media"] = favMediaIDs
 		result["favorited_seasons"] = favSeasonIDs
 
@@ -116,10 +104,6 @@ func (a *App) GetUserState(ctx context.Context, userID int64, scope string, seri
 			return nil, fmt.Errorf("series not found: %w", err)
 		}
 
-		seasonCounts, _ := q.ListSeasonWatchCounts(ctx, sqlc.ListSeasonWatchCountsParams{
-			UserID:   userID,
-			SeriesID: series.ID,
-		})
 		watchedEpIDs, _ := q.ListWatchedEpisodeIDsForSeries(ctx, sqlc.ListWatchedEpisodeIDsForSeriesParams{
 			UserID:   userID,
 			SeriesID: series.ID,
@@ -128,14 +112,7 @@ func (a *App) GetUserState(ctx context.Context, userID int64, scope string, seri
 		favSeasonIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "season"})
 		favMediaIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "media_item"})
 
-		seasons := make([]SeasonWatchState, len(seasonCounts))
-		for i, s := range seasonCounts {
-			seasons[i] = SeasonWatchState{
-				SeasonID:        s.SeasonID,
-				TotalEpisodes:   s.TotalEpisodes,
-				WatchedEpisodes: s.WatchedEpisodes,
-			}
-		}
+		seasons := a.presentSeasonStates(ctx, q, userID, series)
 
 		epProgress, _ := q.ListEpisodeProgressForSeries(ctx, sqlc.ListEpisodeProgressForSeriesParams{
 			UserID:   userID,
@@ -163,4 +140,41 @@ func (a *App) GetUserState(ctx context.Context, userID int64, scope string, seri
 	}
 
 	return result, nil
+}
+
+// presentSeasonStates builds per-season watched state measured against the
+// episodes we actually hold: totals come from seasonPresentEpisodeSets (the
+// same sets bulk-mark writes) and watched counts only the user's completed
+// episodes inside those sets — a stale mark on a non-held episode neither
+// completes a season nor inflates its progress. Hidden (fileless) seasons
+// have no entry, matching the detail view that never lists them.
+func (a *App) presentSeasonStates(ctx context.Context, q *sqlc.Queries, userID int64, series sqlc.TvSeries) []SeasonWatchState {
+	sets, err := a.seasonPresentEpisodeSets(ctx, q, series)
+	if err != nil {
+		return []SeasonWatchState{}
+	}
+	watchedEpIDs, _ := q.ListWatchedEpisodeIDsForSeries(ctx, sqlc.ListWatchedEpisodeIDsForSeriesParams{
+		UserID:   userID,
+		SeriesID: series.ID,
+	})
+	watchedSet := make(map[int64]bool, len(watchedEpIDs))
+	for _, id := range watchedEpIDs {
+		watchedSet[id] = true
+	}
+
+	seasons := make([]SeasonWatchState, 0, len(sets))
+	for seasonID, set := range sets {
+		watched := 0
+		for _, epID := range set {
+			if watchedSet[epID] {
+				watched++
+			}
+		}
+		seasons = append(seasons, SeasonWatchState{
+			SeasonID:        seasonID,
+			TotalEpisodes:   int32(len(set)),
+			WatchedEpisodes: int32(watched),
+		})
+	}
+	return seasons
 }

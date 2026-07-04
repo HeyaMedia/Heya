@@ -18,16 +18,6 @@ LEFT JOIN (
 ) w ON w.series_id = ts.id;
 
 -- Per-season watched: total vs watched, grouped by season
--- name: ListSeasonWatchCounts :many
-SELECT s.id AS season_id,
-       s.series_id,
-       count(e.id)::int AS total_episodes,
-       count(wp.entity_id)::int AS watched_episodes
-FROM tv_seasons s
-JOIN tv_episodes e ON e.season_id = s.id
-LEFT JOIN user_watch_progress wp ON wp.entity_id = e.id AND wp.entity_type = 'episode' AND wp.completed = true AND wp.user_id = $1
-WHERE s.series_id = $2
-GROUP BY s.id, s.series_id;
 
 -- Per-episode watched IDs for a single series
 -- name: ListWatchedEpisodeIDsForSeries :many

@@ -128,28 +128,29 @@ func (a *App) JFUserVideoSets(ctx context.Context, userID int64) (watchedMovies,
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	// Same present-episode overlay as the native user-state path: played
-	// state is measured against episodes we hold, not the provider catalog
-	// (bulk-mark never writes unaired episodes).
+	// Same present-episode overlay as the native user-state path: both sides
+	// of the played fraction are measured against episodes we hold, not the
+	// provider catalog (bulk-mark never writes unaired episodes, and stale
+	// marks on non-held episodes must not count).
 	var watchedIDs []int64
 	for _, c := range counts {
 		if c.WatchedEpisodes > 0 {
 			watchedIDs = append(watchedIDs, c.MediaItemID)
 		}
 	}
-	totals, terr := a.presentEpisodeTotals(ctx, q, watchedIDs)
-	if terr != nil {
-		totals = map[int64]int{}
+	presentCounts, perr := a.presentShowWatchCounts(ctx, q, userID, watchedIDs)
+	if perr != nil {
+		presentCounts = map[int64]presentWatchCounts{}
 	}
 	watchedSeries = make(map[int64]bool)
 	showCounts = make(map[int64][2]int32, len(counts))
 	for _, c := range counts {
-		total := c.TotalEpisodes
-		if t, ok := totals[c.MediaItemID]; ok && c.WatchedEpisodes > 0 {
-			total = int32(t)
+		total, watched := c.TotalEpisodes, c.WatchedEpisodes
+		if pc, ok := presentCounts[c.MediaItemID]; ok && c.WatchedEpisodes > 0 {
+			total, watched = int32(pc.Total), int32(pc.Watched)
 		}
-		showCounts[c.MediaItemID] = [2]int32{min(c.WatchedEpisodes, total), total}
-		if total > 0 && c.WatchedEpisodes >= total {
+		showCounts[c.MediaItemID] = [2]int32{watched, total}
+		if total > 0 && watched >= total {
 			watchedSeries[c.MediaItemID] = true
 		}
 	}

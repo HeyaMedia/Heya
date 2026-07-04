@@ -11,25 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countWatchedInSeason = `-- name: CountWatchedInSeason :one
-SELECT count(*)::int AS watched
-FROM user_watch_progress wp
-JOIN tv_episodes e ON e.id = wp.entity_id
-WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true AND e.season_id = $2
-`
-
-type CountWatchedInSeasonParams struct {
-	UserID   int64 `json:"user_id"`
-	SeasonID int64 `json:"season_id"`
-}
-
-func (q *Queries) CountWatchedInSeason(ctx context.Context, arg CountWatchedInSeasonParams) (int32, error) {
-	row := q.db.QueryRow(ctx, countWatchedInSeason, arg.UserID, arg.SeasonID)
-	var watched int32
-	err := row.Scan(&watched)
-	return watched, err
-}
-
 const getNextUnwatchedEpisode = `-- name: GetNextUnwatchedEpisode :one
 SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,
        s.id AS season_id, s.season_number,
@@ -348,29 +329,43 @@ func (q *Queries) ListRecentlyWatched(ctx context.Context, userID int64) ([]List
 	return items, nil
 }
 
-const listWatchedEpisodeIDs = `-- name: ListWatchedEpisodeIDs :many
-SELECT entity_id AS episode_id FROM user_watch_progress
-WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = ANY($2::bigint[]) AND completed = true
+const listWatchedEpisodeNumbersForMediaItems = `-- name: ListWatchedEpisodeNumbersForMediaItems :many
+SELECT ts.media_item_id, s.season_number, e.episode_number
+FROM user_watch_progress wp
+JOIN tv_episodes e ON e.id = wp.entity_id
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
+  AND ts.media_item_id = ANY($2::bigint[])
 `
 
-type ListWatchedEpisodeIDsParams struct {
-	UserID  int64   `json:"user_id"`
-	Column2 []int64 `json:"column_2"`
+type ListWatchedEpisodeNumbersForMediaItemsParams struct {
+	UserID       int64   `json:"user_id"`
+	MediaItemIds []int64 `json:"media_item_ids"`
 }
 
-func (q *Queries) ListWatchedEpisodeIDs(ctx context.Context, arg ListWatchedEpisodeIDsParams) ([]int64, error) {
-	rows, err := q.db.Query(ctx, listWatchedEpisodeIDs, arg.UserID, arg.Column2)
+type ListWatchedEpisodeNumbersForMediaItemsRow struct {
+	MediaItemID   int64 `json:"media_item_id"`
+	SeasonNumber  int32 `json:"season_number"`
+	EpisodeNumber int32 `json:"episode_number"`
+}
+
+// Season/episode numbers of a user's completed episodes across many series —
+// the watched numerator of presentShowWatchCounts. Numbers (not ids) so the
+// caller can intersect with the parsed file keys the same way the totals do.
+func (q *Queries) ListWatchedEpisodeNumbersForMediaItems(ctx context.Context, arg ListWatchedEpisodeNumbersForMediaItemsParams) ([]ListWatchedEpisodeNumbersForMediaItemsRow, error) {
+	rows, err := q.db.Query(ctx, listWatchedEpisodeNumbersForMediaItems, arg.UserID, arg.MediaItemIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []int64{}
+	items := []ListWatchedEpisodeNumbersForMediaItemsRow{}
 	for rows.Next() {
-		var episode_id int64
-		if err := rows.Scan(&episode_id); err != nil {
+		var i ListWatchedEpisodeNumbersForMediaItemsRow
+		if err := rows.Scan(&i.MediaItemID, &i.SeasonNumber, &i.EpisodeNumber); err != nil {
 			return nil, err
 		}
-		items = append(items, episode_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

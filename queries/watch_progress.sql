@@ -35,20 +35,10 @@ SELECT EXISTS(
   SELECT 1 FROM user_watch_progress WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = $2 AND completed = true
 ) AS watched;
 
--- name: ListWatchedEpisodeIDs :many
-SELECT entity_id AS episode_id FROM user_watch_progress
-WHERE user_id = $1 AND entity_type = 'episode' AND entity_id = ANY($2::bigint[]) AND completed = true;
-
 -- name: UnmarkSeasonWatched :exec
 DELETE FROM user_watch_progress
 WHERE user_id = $1 AND entity_type = 'episode'
 AND entity_id IN (SELECT id FROM tv_episodes WHERE season_id = $2);
-
--- name: CountWatchedInSeason :one
-SELECT count(*)::int AS watched
-FROM user_watch_progress wp
-JOIN tv_episodes e ON e.id = wp.entity_id
-WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true AND e.season_id = $2;
 
 -- name: UnmarkShowWatched :exec
 DELETE FROM user_watch_progress
@@ -149,3 +139,15 @@ LEFT JOIN user_watch_progress wp ON wp.entity_id = e.id AND wp.entity_type = 'ep
 WHERE ts.media_item_id = $2 AND wp.entity_id IS NULL
 ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC, e.episode_number ASC
 LIMIT 1;
+
+-- name: ListWatchedEpisodeNumbersForMediaItems :many
+-- Season/episode numbers of a user's completed episodes across many series —
+-- the watched numerator of presentShowWatchCounts. Numbers (not ids) so the
+-- caller can intersect with the parsed file keys the same way the totals do.
+SELECT ts.media_item_id, s.season_number, e.episode_number
+FROM user_watch_progress wp
+JOIN tv_episodes e ON e.id = wp.entity_id
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
+  AND ts.media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[]);
