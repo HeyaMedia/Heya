@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
@@ -180,6 +182,36 @@ func (a *App) JFNextUnwatchedEpisode(ctx context.Context, userID, seriesMediaIte
 		return sqlc.GetNextUnwatchedEpisodeRow{}, false, err
 	}
 	return row, true, nil
+}
+
+// JFEpisodeFileID resolves the playable library file for one episode via the
+// series' parse-result file map (episodes have no file FK — see
+// BuildEpisodeFileMap).
+func (a *App) JFEpisodeFileID(ctx context.Context, seriesMediaItemID int64, season, episode int32) (int64, bool, error) {
+	files, err := sqlc.New(a.db).ListEpisodeFiles(ctx, pgtype.Int8{Int64: seriesMediaItemID, Valid: true})
+	if err != nil {
+		return 0, false, err
+	}
+	entry, ok := BuildEpisodeFileMap(files)[fmt.Sprintf("s%de%d", season, episode)]
+	return entry.FileID, ok, nil
+}
+
+// JFMovieFileID returns the primary playable file for a movie media item
+// (first non-deleted match, mirroring what the FE plays).
+func (a *App) JFMovieFileID(ctx context.Context, mediaItemID int64) (sqlc.LibraryFile, bool, error) {
+	files, err := sqlc.New(a.db).ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: mediaItemID, Valid: true})
+	if err != nil {
+		return sqlc.LibraryFile{}, false, err
+	}
+	for _, f := range files {
+		if f.Status == sqlc.FileStatusMatched {
+			return f, true, nil
+		}
+	}
+	if len(files) > 0 {
+		return files[0], true, nil
+	}
+	return sqlc.LibraryFile{}, false, nil
 }
 
 // emptyNotNil keeps pgx happy: a nil []int64 binds as NULL, and

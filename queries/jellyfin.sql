@@ -155,8 +155,8 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration,
        ar.name AS artist_name,
        ar.media_item_id AS artist_media_item_id,
        mi.library_id,
-       (SELECT tf.id FROM track_files tf WHERE tf.track_id = t.id
-        ORDER BY tf.quality_score DESC, tf.id ASC LIMIT 1) AS best_file_id
+       COALESCE((SELECT tf.id FROM track_files tf WHERE tf.track_id = t.id
+        ORDER BY tf.quality_score DESC, tf.id ASC LIMIT 1), 0)::bigint AS best_file_id
 FROM tracks t
 JOIN albums al ON al.id = t.album_id
 JOIN artists ar ON ar.id = al.artist_id

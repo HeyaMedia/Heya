@@ -120,6 +120,27 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Users/{userId}/Items", s.requireAuth(s.handleItems))
 	rt.handle(http.MethodGet, "/Users/{userId}/Items/{itemId}", s.requireAuth(s.handleItemByID))
 
+	// Playback negotiation + delivery. The HEAD registrations exist because
+	// the upstream spec declares them; the router also HEAD→GET falls back.
+	rt.handle(http.MethodGet, "/Items/{itemId}/PlaybackInfo", s.requireAuth(s.handlePlaybackInfo))
+	rt.handle(http.MethodPost, "/Items/{itemId}/PlaybackInfo", s.requireAuth(s.handlePlaybackInfo))
+	rt.handle(http.MethodGet, "/Videos/{itemId}/stream", s.requireAuth(s.handleVideoStream))
+	rt.handle(http.MethodGet, "/Videos/{itemId}/stream.{container}", s.requireAuth(s.handleVideoStream))
+	rt.handle(http.MethodHead, "/Videos/{itemId}/stream", s.requireAuth(s.handleVideoStream))
+	rt.handle(http.MethodHead, "/Videos/{itemId}/stream.{container}", s.requireAuth(s.handleVideoStream))
+	rt.handle(http.MethodGet, "/Audio/{itemId}/stream", s.requireAuth(s.handleAudioStream))
+	rt.handle(http.MethodGet, "/Audio/{itemId}/stream.{container}", s.requireAuth(s.handleAudioStream))
+	rt.handle(http.MethodHead, "/Audio/{itemId}/stream", s.requireAuth(s.handleAudioStream))
+	rt.handle(http.MethodHead, "/Audio/{itemId}/stream.{container}", s.requireAuth(s.handleAudioStream))
+	rt.handle(http.MethodGet, "/Audio/{itemId}/universal", s.requireAuth(s.handleAudioUniversal))
+	rt.handle(http.MethodHead, "/Audio/{itemId}/universal", s.requireAuth(s.handleAudioUniversal))
+
+	// Playstate reporting.
+	rt.handle(http.MethodPost, "/Sessions/Playing", s.requireAuth(s.handlePlaying(playStart)))
+	rt.handle(http.MethodPost, "/Sessions/Playing/Progress", s.requireAuth(s.handlePlaying(playProgress)))
+	rt.handle(http.MethodPost, "/Sessions/Playing/Stopped", s.requireAuth(s.handlePlaying(playStopped)))
+	rt.handle(http.MethodPost, "/Sessions/Playing/Ping", s.requireAuth(s.handlePlayingPing))
+
 	// WebSocket. "/socket" isn't part of the REST spec; the manifest lists
 	// it as an extra.
 	rt.handle(http.MethodGet, "/socket", s.handleSocket)
