@@ -839,6 +839,10 @@ func (a *App) SearchProviderArtwork(ctx context.Context, mediaItemID int64, filt
 		kind = metadata.KindMovie
 	case sqlc.MediaTypeTv:
 		kind = metadata.KindTV
+	case sqlc.MediaTypeMusic:
+		// Music media items are artists; the artist payload's flat image
+		// pool comes back typed as posters.
+		kind = metadata.KindMusic
 	default:
 		return []metadata.ArtworkResult{}, nil
 	}
