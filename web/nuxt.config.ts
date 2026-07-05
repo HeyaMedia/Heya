@@ -28,7 +28,11 @@ export default defineNuxtConfig({
       display: 'standalone',
       background_color: '#0a0a12',
       theme_color: '#0a0a12',
-      orientation: 'portrait',
+      // No `orientation` lock: on foldables the portrait lock stops Chrome
+      // from resizing the standalone window across a fold/unfold — the app
+      // stays at the folded viewport (~70% height) until fully relaunched.
+      // Unlocked, the window resizes live and the responsive breakpoints
+      // (useViewport + CSS media queries) react without a restart.
       icons: [
         { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
         { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
