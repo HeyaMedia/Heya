@@ -76,8 +76,12 @@
         "group": "HONE",
         "resolution": "1080P",
         "source": "WEBDL",
-        "seasons": [1],
-        "episodes": [1]
+        "seasons": [
+          1
+        ],
+        "episodes": [
+          1
+        ]
       }
     }
   },
@@ -90,8 +94,12 @@
       "entryType": "file",
       "release": {
         "exists": true,
-        "seasons": [0],
-        "episodes": [1]
+        "seasons": [
+          0
+        ],
+        "episodes": [
+          1
+        ]
       }
     }
   },
@@ -106,8 +114,12 @@
         "exists": true,
         "title": "Alf",
         "resolution": "1080P",
-        "seasons": [1],
-        "episodes": [19]
+        "seasons": [
+          1
+        ],
+        "episodes": [
+          19
+        ]
       }
     }
   },
@@ -122,7 +134,9 @@
         "exists": true,
         "title": "Mobile Suit Gundam SEED",
         "group": "LoliHouse",
-        "episodes": [1]
+        "episodes": [
+          1
+        ]
       }
     }
   },
@@ -137,8 +151,12 @@
         "exists": true,
         "resolution": "1080P",
         "source": "BLURAY",
-        "seasons": [8],
-        "episodes": [2]
+        "seasons": [
+          8
+        ],
+        "episodes": [
+          2
+        ]
       }
     }
   },
@@ -154,8 +172,12 @@
         "exists": true,
         "group": "EMBER",
         "resolution": "1080P",
-        "seasons": [1],
-        "flagsContain": ["unpack"]
+        "seasons": [
+          1
+        ],
+        "flagsContain": [
+          "unpack"
+        ]
       }
     }
   },
@@ -172,8 +194,12 @@
         "group": "STC",
         "resolution": "1080P",
         "source": "WEBDL",
-        "seasons": [1],
-        "episodes": [1]
+        "seasons": [
+          1
+        ],
+        "episodes": [
+          1
+        ]
       }
     }
   },
@@ -189,8 +215,13 @@
         "group": "URANiME",
         "resolution": "1080P",
         "source": "BLURAY",
-        "episodes": [5],
-        "flagsContain": ["retry", "internal"]
+        "episodes": [
+          5
+        ],
+        "flagsContain": [
+          "retry",
+          "internal"
+        ]
       }
     }
   },
@@ -205,8 +236,12 @@
         "exists": true,
         "title": "The Wire",
         "resolution": "1080P",
-        "seasons": [5],
-        "flagsContain": ["complete"]
+        "seasons": [
+          5
+        ],
+        "flagsContain": [
+          "complete"
+        ]
       }
     }
   },
@@ -222,8 +257,56 @@
         "group": "SiGMA",
         "resolution": "1080P",
         "source": "WEBDL",
-        "seasons": [4],
-        "episodes": [23]
+        "seasons": [
+          4
+        ],
+        "episodes": [
+          23
+        ]
+      }
+    }
+  },
+  {
+    "label": "splits the (YYYY) disambiguation year off a TV series title into the year field",
+    "kind": "storage-path",
+    "input": "The Bear (2022)/Season 1/The Bear (2022) - S01E01.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "media": "video",
+        "title": "The Bear",
+        "year": "2022",
+        "seasons": [
+          1
+        ],
+        "episodes": [
+          1
+        ]
+      }
+    }
+  },
+  {
+    "label": "keeps a numeric TV series title intact while still capturing its disambiguation year",
+    "kind": "storage-path",
+    "input": "1923 (2022)/Season 1/1923 (2022) - S01E01.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "media": "video",
+        "title": "1923",
+        "year": "2022",
+        "seasons": [
+          1
+        ],
+        "episodes": [
+          1
+        ]
       }
     }
   }

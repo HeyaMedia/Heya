@@ -68,6 +68,17 @@ func FilenameParse(name string, isTv bool) interface{} {
 			if seriesTitle == "" {
 				seriesTitle = title
 			}
+			// The season parser leaves a "(YYYY)" disambiguation year glued onto
+			// the series title (Sonarr's convention). Split it into the Year field
+			// so downstream matching searches a clean title. Guarded on a non-empty
+			// resulting title so a show literally named for a year ("1923", "2012")
+			// keeps its name instead of collapsing to an empty title.
+			if year == "" && seriesTitle != "" {
+				if tay := ParseTitleAndYear(seriesTitle); tay.Year != "" && tay.Title != "" {
+					seriesTitle = tay.Title
+					year = tay.Year
+				}
+			}
 			return &ParsedShow{
 				Title:           seriesTitle,
 				Year:            year,

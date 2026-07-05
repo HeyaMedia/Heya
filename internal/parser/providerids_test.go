@@ -40,3 +40,36 @@ func TestParseStoragePathExtractsProviderID(t *testing.T) {
 		t.Errorf("ImdbID = %q; want tt0113198", p.Release.ImdbID)
 	}
 }
+
+// A clean library movie ("Title (Year).mkv" with no scene tokens) must still
+// produce a release — the Plex/Jellyfin/*arr layout scores below the scene
+// threshold but title+year is an unambiguous movie signal. The provider id is
+// parked on the *folder* while the leaf file (which wins the candidate tie)
+// carries none, so it must be recovered from the parent directory.
+func TestParseStoragePathCleanMovieWithFolderID(t *testing.T) {
+	cases := []struct {
+		name              string
+		input             string
+		title, year, tmdb string
+	}{
+		{"tmdb on folder", "Movies/Thunderbolts (2025) {tmdb-986056}/Thunderbolts (2025).mkv", "Thunderbolts", "2025", "986056"},
+		{"clean, no id", "Movies/Dune (2021)/Dune (2021).mkv", "Dune", "2021", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := ParseStoragePath(c.input)
+			if p.Release == nil {
+				t.Fatalf("expected a release parse for %q, got nil", c.input)
+			}
+			if p.Release.Title != c.title {
+				t.Errorf("title = %q; want %q", p.Release.Title, c.title)
+			}
+			if p.Release.Year != c.year {
+				t.Errorf("year = %q; want %q", p.Release.Year, c.year)
+			}
+			if p.Release.TmdbID != c.tmdb {
+				t.Errorf("tmdb = %q; want %q", p.Release.TmdbID, c.tmdb)
+			}
+		})
+	}
+}

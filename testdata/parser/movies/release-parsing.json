@@ -162,5 +162,50 @@
         "source": "WEBDL"
       }
     }
+  },
+  {
+    "label": "parses clean library movie with no scene tokens (Plex/Jellyfin/*arr layout)",
+    "kind": "storage-path",
+    "input": "Movies/Thunderbolts (2025)/Thunderbolts (2025).mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "media": "video",
+        "title": "Thunderbolts",
+        "year": "2025"
+      }
+    }
+  },
+  {
+    "label": "parses clean library movie whose folder carries a tmdb id",
+    "kind": "storage-path",
+    "input": "Movies/Thunderbolts (2025) {tmdb-986056}/Thunderbolts (2025).mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "media": "video",
+        "title": "Thunderbolts",
+        "year": "2025"
+      }
+    }
+  },
+  {
+    "label": "clean movie folder without a year or scene tokens does not become a movie",
+    "kind": "storage-path",
+    "input": "Movies/Documentaries/random.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": false
+      }
+    }
   }
 ]

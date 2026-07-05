@@ -52,14 +52,22 @@ func ParseStoragePath(inputPath string) ParsedStorageEntry {
 	}
 
 	if release != nil {
-		// Embedded provider IDs live in the release's own segment (folder) or the
-		// filename — scan both, not the whole path, to avoid picking up an ID from
-		// an unrelated ancestor directory.
-		idSource := basename
+		// Embedded provider IDs live in the release's own segment, the filename,
+		// or the movie/show's immediate parent folder — the ubiquitous
+		// "Title (Year) {tmdb-123}/Title (Year).mkv" form parks the id on the
+		// folder while the leaf file (which wins the candidate tie) carries none.
+		// Scan those three, not the whole path, so an unrelated ancestor dir's id
+		// can't bleed in.
+		idParts := []string{basename}
 		if releaseSegment != "" && releaseSegment != basename {
-			idSource = releaseSegment + " " + basename
+			idParts = append(idParts, releaseSegment)
 		}
-		release.ImdbID, release.TmdbID, release.TvdbID = ParseProviderIDs(idSource)
+		if entryType == EntryFile && len(segments) >= 2 {
+			if parent := segments[len(segments)-2]; parent != basename && parent != releaseSegment {
+				idParts = append(idParts, parent)
+			}
+		}
+		release.ImdbID, release.TmdbID, release.TvdbID = ParseProviderIDs(strings.Join(idParts, " "))
 	}
 
 	if release != nil && release.Strategy == StrategyMusicCurated {

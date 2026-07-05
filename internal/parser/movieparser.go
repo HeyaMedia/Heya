@@ -63,7 +63,17 @@ func parseMovie(prepared PreparedSegment) *SceneReleaseParse {
 
 	hasStrongSignal := parsed.Resolution != "" || parsed.VideoCodec != "" || len(sources) > 0 || parsed.Year != "" || normalized.AnimeGroup != ""
 
-	if title == "" || score < 4 || !hasStrongSignal {
+	if title == "" || !hasStrongSignal {
+		return nil
+	}
+	// The score threshold is tuned for scene releases, which always carry
+	// resolution/codec/source/group tokens. A clean library layout
+	// ("Title (Year).mkv", the Plex / Jellyfin / *arr convention) has none of
+	// those and only scores 2 (title + year) — but a title paired with a
+	// release year is itself an unambiguous movie signal, so let the year stand
+	// in for the missing scene tokens. Without a year we still demand a
+	// confident scene parse to avoid turning a bare folder name into a "movie".
+	if score < 4 && parsed.Year == "" {
 		return nil
 	}
 
