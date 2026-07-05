@@ -29,8 +29,13 @@ type Client struct {
 // heya.media's artist endpoint can legitimately take 60-120s on cold
 // cache (rate-limited upstream MusicBrainz / Last.fm), so the timeout
 // has to be generous. Search calls return in seconds.
+//
+// The transport is wrapped with loggingTransport so every upstream call
+// gets a DEBUG-level trace (method, path, status, duration) — see
+// transport.go for why that's useful and what it deliberately avoids
+// logging.
 func NewClient(baseURL string) *Client {
-	httpClient := &http.Client{Timeout: 5 * time.Minute}
+	httpClient := &http.Client{Timeout: 5 * time.Minute, Transport: newLoggingTransport(nil)}
 	c, err := gen.NewClientWithResponses(baseURL, gen.WithHTTPClient(httpClient))
 	if err != nil {
 		// NewClientWithResponses only errors when a ClientOption rejects
