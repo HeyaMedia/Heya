@@ -5,6 +5,7 @@ import { SmartCrossfade } from '~/engine/crossfade/smartCrossfade'
 import type { BoundaryHints, TransitionPlan } from '~/engine/crossfade/strategy'
 import { TimeBasedCrossfade } from '~/engine/crossfade/timeBased'
 import { alog } from '~/engine/debug'
+import { prefetchManager } from '~/engine/prefetch'
 
 // Track shape consumed by the player UI. `stream_url` is what the engine
 // actually hits — derived from the track row in the caller (Phase A list
@@ -79,6 +80,28 @@ let lastTickTime = 0
 // analysis fetch so a stale request that resolves late can detect it's been
 // superseded by a newer one and bail instead of clobbering the active deck.
 let playGeneration = 0
+
+// Debounces prefetchManager.sync() calls triggered by a `watch(upcomingTracks)`
+// (registered once in ensureEngine, below) — covers track advance, add/
+// remove, AND drag-reorder with one coalescing timer, since all of them
+// reshape the up-next slice. See docs/music-audio-engine-plan.md for the
+// prefetch backlog item this replaces. 2s is imperceptible against tracks
+// that play for minutes, and far shorter than the ~10-30s a cold
+// transcode-tier fetch can take, which is exactly the latency this hides.
+const PREFETCH_SYNC_DEBOUNCE_MS = 2000
+let prefetchSyncTimer: ReturnType<typeof setTimeout> | null = null
+// `current` is threaded straight to prefetchManager.sync so it can retain the
+// actively-playing track even though it's never part of `upcoming` (the
+// upcoming list excludes the current track by definition).
+function schedulePrefetchSync(upcoming: Track[], current: Track | null) {
+  if (!import.meta.client) return
+  if (prefetchSyncTimer) clearTimeout(prefetchSyncTimer)
+  prefetchSyncTimer = setTimeout(() => {
+    prefetchSyncTimer = null
+    const { settings: deviceSettings } = useDeviceSettings()
+    void prefetchManager.sync(upcoming.slice(0, deviceSettings.value.prefetchCount), current)
+  }, PREFETCH_SYNC_DEBOUNCE_MS)
+}
 
 // Minimal view of the real engine — useAudioEngine() returns a union with an
 // SSR stub that lacks the DSP-block accessors. Everything here is only reached
@@ -217,6 +240,11 @@ export function usePlayer() {
       watch(e.duration, (v) => {
         if (Number.isFinite(v) && v > 0) duration.value = v
       })
+      // Keep the Cache API warmed for the upcoming window. Fires on every
+      // shape change of the up-next slice — track advance, add/remove, drag
+      // reorder — debounced so a rapid string of reorders coalesces into one
+      // sync() instead of refetching on every intermediate drop position.
+      watch(upcomingTracks, (list) => schedulePrefetchSync(list, currentTrack.value))
     }
     // Seed the engine's volume OUTSIDE the wiring guard so it's idempotent: a
     // hot reload of useAudioEngine resets its module singleton (back to a 1.0
@@ -333,33 +361,26 @@ export function usePlayer() {
     return true
   }
 
-  // The <audio> element can't carry an Authorization header, so the session
-  // token has to ride in the query string. The auth middleware already
-  // accepts ?token= as an alternative to Bearer.
-  //
-  // For /stream URLs (smart endpoint that picks best playable + transcodes
-  // if needed) we also append the audio caps so the server can match what
-  // this browser will actually decode. /file/{id} URLs are bit-perfect and
-  // don't need the caps decoration.
+  // The network URL for `t` (token + caps + quality) — see
+  // ~/composables/useStreamUrl.ts for the full contract. Hoisted out of this
+  // file so engine/prefetch.ts can build the exact same URL for its cache
+  // keys; this stays a thin wrapper so every existing call site's
+  // `if (!url) return` guard keeps working unchanged (buildStreamUrl returns
+  // '' rather than undefined on failure — both are falsy).
   function resolveStreamUrl(t: Track): string | undefined {
-    const base = t.stream_url ?? (t.id > 0 ? `/api/music/tracks/${t.id}/stream` : undefined)
-    if (!base) return undefined
+    return buildStreamUrl(t) || undefined
+  }
 
-    const params = new URLSearchParams()
-    const { token } = useAuth()
-    if (token.value) params.set('token', token.value)
-
-    // Smart-pick endpoint? Decorate with audio caps so the server can pick a
-    // file the browser supports (or fall back to AAC-256 transcode).
-    if (import.meta.client && base.endsWith('/stream')) {
-      const caps = useClientCaps()
-      for (const [key, val] of Object.entries(caps)) {
-        if (key.startsWith('supports_') && val) params.set(key, '1')
-      }
-    }
-
-    const sep = base.includes('?') ? '&' : '?'
-    return params.toString() ? `${base}${sep}${params.toString()}` : base
+  // The URL a deck should actually load for `t`: a cached blob: URL when the
+  // prefetch manager has already warmed it, otherwise the plain network URL.
+  // Streams (internet radio) skip the cache entirely — they're unbounded
+  // responses, not a file to warm ahead of time.
+  async function resolveDeckUrl(t: Track): Promise<string | undefined> {
+    const network = resolveStreamUrl(t)
+    if (!network) return undefined
+    if (t.isStream) return network
+    const playable = await prefetchManager.resolvePlayable(t)
+    return playable || network
   }
 
   // --- Transition orchestration --------------------------------------------
@@ -439,10 +460,22 @@ export function usePlayer() {
       const url = resolveStreamUrl(next)
       if (url && prefetchedTrackId !== next.id) {
         prefetchedTrackId = next.id
-        void e.loadNext(url).catch((err) => {
-          alog('xfade', `preload FAILED for "${next.title}" — will cold-play`, err)
-          if (prefetchedTrackId === next.id) prefetchedTrackId = null
-        })
+        const targetId = next.id
+        // armSync stays synchronous (called straight from watchers), so the
+        // cache lookup that might turn `url` into a blob: URL happens off to
+        // the side: resolvePlayable never does network I/O itself (only
+        // sync() does), so this settles almost immediately either way. The
+        // targetId check guards against a late resolve loading a track that's
+        // no longer the armed "next" (queue changed again in the meantime).
+        void prefetchManager.resolvePlayable(next)
+          .then((playable) => {
+            if (prefetchedTrackId !== targetId) return
+            return e.loadNext(playable || url)
+          })
+          .catch((err) => {
+            alog('xfade', `preload FAILED for "${next.title}" — will cold-play`, err)
+            if (prefetchedTrackId === targetId) prefetchedTrackId = null
+          })
       }
     }
   }
@@ -501,10 +534,13 @@ export function usePlayer() {
         // apply during the overlap.
         await e.transition('timed', pendingPlan ?? undefined)
       } else {
-        const url = resolveStreamUrl(next)
-        if (!url) { transitioning = false; return }
+        const playUrl = await resolveDeckUrl(next)
+        if (!playUrl) { transitioning = false; return }
+        // A manual play() (or another transition) superseded us while the
+        // cache lookup was in flight — bail rather than clobber it.
+        if (currentTrack.value !== cur) { transitioning = false; return }
         applyActiveNorm(e, next)
-        await e.play(url)
+        await e.play(playUrl)
       }
       advanceCurrentTo(next)
     } catch (err) {
@@ -547,8 +583,8 @@ export function usePlayer() {
       listenedSeconds = 0
       lastTickTime = 0
       if (track.duration && Number.isFinite(track.duration)) duration.value = track.duration
-      const url = resolveStreamUrl(track)
-      if (!url) return
+      const networkUrl = resolveStreamUrl(track)
+      if (!networkUrl) return
       alog('player', `play "${track.title}" #${track.id}${track.isStream ? ' (stream)' : ''}`)
       // Resume the AudioContext synchronously on the user gesture, BEFORE the
       // awaited fetch below — autoplay policy needs resume() within the gesture's
@@ -563,8 +599,12 @@ export function usePlayer() {
       // stale track onto the active deck.
       if (gen !== playGeneration) return
       applyActiveNorm(e, track)
+      // Cache lookup (resolvePlayable never does network I/O itself, only a
+      // fast Cache.match) — check staleness again after it, same reasoning.
+      const playUrl = track.isStream ? networkUrl : await prefetchManager.resolvePlayable(track)
+      if (gen !== playGeneration) return
       try {
-        await e.play(url)
+        await e.play(playUrl || networkUrl)
       } catch {
         if (gen === playGeneration) playing.value = false
       }
@@ -765,10 +805,12 @@ export function usePlayer() {
       } else {
         // Not preloaded (queue changed, stream, or preload failed) — cold play.
         alog('player', `advance → "${next.title}" (cold load — not preloaded)`)
-        const url = resolveStreamUrl(next)
-        if (!url) { transitioning = false; playing.value = false; return }
+        const playUrl = await resolveDeckUrl(next)
+        if (!playUrl) { transitioning = false; playing.value = false; return }
+        // Superseded by a manual play() while the cache lookup was in flight.
+        if (currentTrack.value !== finished) { transitioning = false; return }
         applyActiveNorm(e, next)
-        await e.play(url)
+        await e.play(playUrl)
       }
       advanceCurrentTo(next)
     } catch (err) {
