@@ -10,11 +10,14 @@
   tap-to-dismiss.
 
   Bottom offset clears the app's own bottom chrome:
-  - Desktop (>720px): fixed ~110px clears the music Playbar (--playbar-h:
-    88px, in-flow at the bottom of /music) with a bit of margin. Playbar
-    only exists on /music, but a constant offset elsewhere is harmless —
-    the host is empty (zero visible height) until a toast fires, so it
-    never shifts other desktop layout per the desktop-unchanged rule.
+  - Desktop (>720px): `calc(var(--playbar-h) + 22px)` clears the music
+    Playbar (--playbar-h: 88px, in-flow at the bottom of /music) with a bit
+    of margin. Deriving from the variable (rather than a hardcoded 110px)
+    means a compact-band height override on --playbar-h propagates here
+    automatically. Playbar only exists on /music, but a constant offset
+    elsewhere is harmless — the host is empty (zero visible height) until a
+    toast fires, so it never shifts other desktop layout per the
+    desktop-unchanged rule.
   - Phone (<=720px): clears BottomNav (--bottomnav-h + --safe-bottom), and
     when MobilePlayerHost's mini-player is docked, adds --miniplayer-h too
     — same `body:has(.global-miniplayer-dock)` pattern heya.css uses for
@@ -51,7 +54,7 @@ const { toasts, dismiss } = useToast()
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 110px;
+  bottom: calc(var(--playbar-h) + 22px);
   z-index: 600;
   display: flex;
   flex-direction: column;

@@ -18,8 +18,10 @@
             <AppTooltip label="Show full image">
               <button class="pb-cover-action" @click.prevent.stop="openCoverLightbox"><Icon name="expand" :size="13" /></button>
             </AppTooltip>
+            <!-- Folds into the compact-band sidebar, which is hidden in that band
+                 (parallel crew) — CSS drops this affordance there too. -->
             <AppTooltip label="Fold out into sidebar">
-              <button class="pb-cover-action" @click.prevent.stop="toggleCoverExpanded"><Icon name="grid" :size="13" /></button>
+              <button class="pb-cover-action pb-cover-action-fold" @click.prevent.stop="toggleCoverExpanded"><Icon name="grid" :size="13" /></button>
             </AppTooltip>
           </div>
         </div>
@@ -72,7 +74,7 @@
         <!-- Rating floats to the LEFT of the transport cluster (absolute, out of
              the flex flow) so the play button stays dead-centered — muscle
              memory. Mirrors the quality readout that floats to the right. -->
-        <div v-if="currentTrack" class="pb-rate-slot" @click.stop>
+        <div v-if="currentTrack && !isCompact" class="pb-rate-slot" @click.stop>
           <StarRating
             :model-value="ratings.get(currentTrack.id) ?? 0"
             size="sm"
@@ -125,7 +127,7 @@
         </AppTooltip>
         <!-- Quality readout floats to the right of the transport so the play
              button stays dead-centered (absolute → out of the flex flow). -->
-        <div v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0" class="pb-quality-slot">
+        <div v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0 && !isCompact" class="pb-quality-slot">
           <PlaybarQuality :key="currentTrack.id" :track-id="currentTrack.id" />
         </div>
       </div>
@@ -140,8 +142,13 @@
       </div>
     </div>
 
-    <!-- Right: queue, vol, etc -->
-    <div class="pb-right">
+    <!-- Right: queue, vol, etc. Compact band (720.02-1200px) can't fit the
+         full cluster (lyrics/eq/viz/sleep/volume squash or clip past ~977px
+         of viewport) — it keeps queue + expand + a ⋯ overflow menu that holds
+         everything else. v-if/v-else (not CSS-hiding) so components that own
+         mounted side effects (SleepTimer's 1Hz interval, PlaybarQuality's
+         popover state) never double-mount. -->
+    <div v-if="!isCompact" class="pb-right">
       <AppTooltip label="Lyrics">
         <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'lyrics' }" @click="toggleLyrics"><Icon name="lyrics" :size="16" /></button>
       </AppTooltip>
@@ -179,6 +186,107 @@
         </button>
       </AppTooltip>
     </div>
+    <div v-else class="pb-right">
+      <AppTooltip label="Queue">
+        <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'queue' }" @click="toggleQueue"><Icon name="queue" :size="16" /></button>
+      </AppTooltip>
+      <AppMenu align="end" :width="260" trigger-class="btn-icon" trigger-title="More">
+        <template #trigger>
+          <Icon name="more" :size="16" />
+        </template>
+
+        <!-- Tech-info pill that otherwise floats off the transport controls
+             on the wide layout. Nested popover-in-menu verified in Eye. -->
+        <template v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0">
+          <div class="surface-section-label pb-more-label">Quality</div>
+          <div class="pb-more-row" @click.stop>
+            <PlaybarQuality :key="currentTrack.id" :track-id="currentTrack.id" />
+          </div>
+          <DropdownMenuSeparator class="surface-divider" />
+        </template>
+
+        <DropdownMenuItem
+          class="surface-item app-context-item pb-more-item"
+          :class="{ 'pb-more-active': queueOpen && sideTab === 'lyrics' }"
+          @select="toggleLyrics"
+        >
+          <Icon name="lyrics" :size="15" class="surface-item-icon" />
+          <span class="pb-more-item-label">Lyrics</span>
+          <Icon v-if="queueOpen && sideTab === 'lyrics'" name="check" :size="13" class="pb-more-check" />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          class="surface-item app-context-item pb-more-item"
+          :class="{ 'pb-more-active': eqOpen }"
+          @select="eqOpen = !eqOpen"
+        >
+          <Icon name="eq" :size="15" class="surface-item-icon" />
+          <span class="pb-more-item-label">Equalizer</span>
+          <Icon v-if="eqOpen" name="check" :size="13" class="pb-more-check" />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          class="surface-item app-context-item pb-more-item"
+          @select="vis.fullscreenOpen.value = true"
+        >
+          <Icon name="pulse" :size="15" class="surface-item-icon" />
+          <span class="pb-more-item-label">Visualizer</span>
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator class="surface-divider" />
+
+        <!-- Flattened, not <SleepTimer/> nested — see the script comment by
+             `chooseSleep` for why nesting its popover doesn't work here. -->
+        <div class="surface-section-label pb-more-label">
+          Sleep timer<span v-if="sleep.active.value"> — {{ sleepCountdownLabel }}</span>
+        </div>
+        <DropdownMenuItem
+          v-for="opt in SLEEP_OPTIONS"
+          :key="opt.label"
+          class="surface-item app-context-item pb-more-item"
+          :class="{ 'pb-more-active': isSleepActive(opt) }"
+          @select="chooseSleep(opt)"
+        >
+          <span class="pb-more-item-label">{{ opt.label }}</span>
+          <Icon v-if="isSleepActive(opt)" name="check" :size="13" class="pb-more-check" />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          v-if="sleep.active.value"
+          class="surface-item app-context-item pb-more-item pb-more-destructive"
+          @select="turnOffSleep"
+        >
+          <span class="pb-more-item-label">Turn off</span>
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator class="surface-divider" />
+
+        <!-- Native range, not <AppSlider/> — verified in Eye that reka's
+             SliderThumb interaction closes the parent dropdown out from under
+             it the same way the nested sleep-timer popover did (drag/focus
+             reads as an outside interaction). A styled native input sidesteps
+             reka entirely. -->
+        <div class="pb-more-row pb-more-volume-row" @click.stop @wheel.prevent="onVolumeWheel">
+          <button class="btn-icon" :class="{ active: muted }" @click="toggleMute">
+            <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="16" />
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            :value="muted ? 0 : volume"
+            :style="{ '--pb-vol': muted ? 0 : volume }"
+            aria-label="Volume"
+            class="pb-more-volume-range"
+            @input="onVolumeChange(Number(($event.target as HTMLInputElement).value))"
+          >
+          <span class="pb-more-volume-value">{{ muted ? 0 : volume }}</span>
+        </div>
+      </AppMenu>
+      <AppTooltip label="Expand">
+        <button class="btn-icon" @click="nowPlayingOpen = !nowPlayingOpen">
+          <Icon name="expand" :size="16" />
+        </button>
+      </AppTooltip>
+    </div>
   </footer>
   <NowPlayingView :open="nowPlayingOpen" @close="nowPlayingOpen = false" />
 </template>
@@ -188,7 +296,7 @@ const {
   playing, currentTrack, position, duration, volume, muted,
   shuffled, repeatMode, queueOpen, sideTab,
   togglePlay, seek, setVolume, toggleMute, toggleShuffle,
-  cycleRepeat, nextTrack, prevTrack, stop,
+  cycleRepeat, nextTrack, prevTrack, stop, pause,
   toggleQueue, toggleLyrics, formatTime,
 } = usePlayer()
 
@@ -218,6 +326,66 @@ function openCoverLightbox() {
 // the big cover) react to it. See MusicBigCover / MusicSidebar.
 const coverExpanded = useState('music_cover_expanded', () => false)
 function toggleCoverExpanded() { coverExpanded.value = !coverExpanded.value }
+
+// Compact band (720.02-1200px): sidebars hide behind the topbar burger
+// (parallel compact-sidebar work), so folding the cover out into a hidden
+// sidebar would strand the track with no artwork at all. Drop the affordance
+// (CSS, below) and unwind any expanded state carried in from a wider window.
+const { isCompact } = useViewport()
+watch(isCompact, (compact) => {
+  if (compact && coverExpanded.value) coverExpanded.value = false
+})
+
+// --- Compact-band ⋯ overflow menu -------------------------------------------
+// Sleep timer flattens into plain rows here instead of nesting <SleepTimer/>'s
+// own popover: verified in Eye that reka's PopoverContent auto-focuses its
+// first focusable row on open, and since that content is teleported outside
+// the ⋯ AppMenu's DOM, the focus jump reads as an outside interaction and
+// closes the dropdown out from under it. (PlaybarQuality's popover has no
+// focusable rows and nests fine — that's the one exception below.) Owns a
+// single 1Hz tick, active only while compact; the wide layout's <SleepTimer/>
+// instance ticks its own — never run both at once.
+const sleep = useSleepTimer()
+interface SleepOpt { label: string, minutes?: number, endOfTrack?: boolean }
+const SLEEP_OPTIONS: SleepOpt[] = [
+  { label: '15 minutes', minutes: 15 },
+  { label: '30 minutes', minutes: 30 },
+  { label: '45 minutes', minutes: 45 },
+  { label: '60 minutes', minutes: 60 },
+  { label: 'End of track', endOfTrack: true },
+]
+function chooseSleep(opt: SleepOpt) {
+  if (opt.endOfTrack) sleep.setEndOfTrack()
+  else if (opt.minutes) sleep.setMinutes(opt.minutes)
+}
+function turnOffSleep() { sleep.cancel() }
+// A timed option can't be told apart from any other once running (see
+// SleepTimer.vue) — only "end of track" has a distinct on/off state.
+function isSleepActive(opt: SleepOpt): boolean {
+  return !!opt.endOfTrack && sleep.atTrackEnd.value
+}
+const sleepCountdownLabel = computed(() => {
+  if (sleep.atTrackEnd.value) return 'EOT'
+  const ms = sleep.remainingMs.value
+  if (ms <= 0) return ''
+  const total = Math.ceil(ms / 1000)
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return m >= 1 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`
+})
+
+let sleepTickId: ReturnType<typeof setInterval> | null = null
+watch(isCompact, (compact) => {
+  if (compact && !sleepTickId) {
+    sleepTickId = setInterval(() => sleep.tick(() => pause()), 1000)
+  } else if (!compact && sleepTickId) {
+    clearInterval(sleepTickId)
+    sleepTickId = null
+  }
+}, { immediate: true })
+onScopeDispose(() => {
+  if (sleepTickId) clearInterval(sleepTickId)
+})
 
 import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 
@@ -532,4 +700,117 @@ onScopeDispose(() => {
 .pb-viz-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: var(--border); }
 .pb-viz-btn.active { border-color: rgba(230, 185, 74, 0.4); background: var(--gold-soft); }
 .pb-viz-meter { width: 34px; height: 20px; }
+
+/* ── Compact band (720.02–1200px) ───────────────────────────────────────
+   Desktop (>1200px) is untouched above this point. In this band: the grid
+   tracks get minmax(0, …) so they can shrink below their content size (the
+   base `1fr`/`1.6fr` tracks can't — nothing here relied on that before
+   because nothing needed to shrink), the rating/quality floats that hang off
+   `.pb-controls` are dropped (quality moves into the ⋯ menu; rating is an
+   acceptable in-band loss, still reachable from the expanded NowPlayingView),
+   and the fold-into-sidebar affordance hides since the sidebar it targets is
+   hidden in this band too (script watcher above unwinds the state if it was
+   set at a wider width). The template handles the `.pb-right` cluster
+   collapse itself (v-if/v-else on isCompact, not CSS) so components that own
+   mounted side effects never double-mount. */
+@media (min-width: 720.02px) and (max-width: 1200px) {
+  .playbar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr);
+  }
+  .pb-cover-action-fold { display: none; }
+  .pb-left-expanded { padding-left: 0; }
+}
+</style>
+
+<!-- Overflow (⋯) menu content is portaled by AppMenu — scoped styles above
+     don't reach it (see docs/ui.md "Scoped CSS doesn't reach portaled /
+     child-rendered elements"), so its rules live here unscoped, same
+     convention as PlaybarQuality's .pbq-pop / SleepTimer's .st-pop. -->
+<style>
+.pb-more-label {
+  padding: 8px 14px 4px;
+}
+.pb-more-row {
+  padding: 8px 14px;
+}
+.pb-more-item {
+  min-height: 44px;
+}
+.pb-more-item-label {
+  flex: 1;
+  min-width: 0;
+}
+.pb-more-active { color: var(--gold-bright, var(--gold)); }
+.pb-more-check { color: var(--gold-bright, var(--gold)); flex-shrink: 0; }
+.pb-more-destructive { color: var(--bad); }
+.pb-more-destructive[data-highlighted],
+.pb-more-destructive:hover { background: rgba(255, 80, 80, 0.06); color: var(--bad); }
+
+.pb-more-volume-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+.pb-more-volume-value {
+  min-width: 26px;
+  text-align: right;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--fg-2);
+}
+
+/* Plain range input styled to match AppSlider's look (gold fill, round
+   thumb) — see the template comment above this row for why it isn't
+   <AppSlider/>. -webkit/-moz prefixed rule groups can't be comma-combined
+   (an invalid prefixed selector invalidates the whole rule), so track/thumb
+   are declared per-engine. */
+.pb-more-volume-range {
+  flex: 1;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.pb-more-volume-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--gold) 0%,
+    var(--gold) calc(1% * var(--pb-vol, 0)),
+    rgba(255, 255, 255, 0.08) calc(1% * var(--pb-vol, 0)),
+    rgba(255, 255, 255, 0.08) 100%
+  );
+}
+.pb-more-volume-range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.pb-more-volume-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--gold);
+}
+.pb-more-volume-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--fg-0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.pb-more-volume-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fg-0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
 </style>
