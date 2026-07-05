@@ -120,7 +120,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/tasks/{id}/run", "run-task", "Trigger a scheduled task immediately", "Tasks")),
 		func(ctx context.Context, in *struct {
-			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,analyze_music_facets" doc:"Task identifier"`
+			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,detect_media_segments,analyze_music_facets" doc:"Task identifier"`
 		}) (*StatusOutput, error) {
 			if err := app.TriggerTask(ctx, in.ID); err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusConflict)
@@ -130,7 +130,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/tasks/{id}/cancel", "cancel-task", "Cancel an in-flight scheduled task", "Tasks")),
 		func(ctx context.Context, in *struct {
-			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,analyze_music_facets" doc:"Task identifier"`
+			ID string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,detect_media_segments,analyze_music_facets" doc:"Task identifier"`
 		}) (*StatusOutput, error) {
 			if err := app.CancelTask(ctx, in.ID); err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusConflict)
@@ -140,7 +140,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, adminSecured(op(http.MethodPut, "/api/tasks/{id}", "update-task", "Update a scheduled task's window/cadence", "Tasks")),
 		func(ctx context.Context, in *struct {
-			ID   string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,analyze_music_facets" doc:"Task identifier"`
+			ID   string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,detect_media_segments,analyze_music_facets" doc:"Task identifier"`
 			Body struct {
 				Enabled           bool   `json:"enabled"`
 				IntervalHours     int32  `json:"interval_hours" minimum:"0" maximum:"720"`
@@ -158,7 +158,7 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/tasks/{id}/items", "task-items", "Items associated with a task run", "Tasks")),
 		func(ctx context.Context, in *struct {
-			ID     string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,analyze_music_facets" doc:"Task identifier"`
+			ID     string `path:"id" enum:"generate_trickplay,generate_thumbnails,scan_libraries,refresh_stale_items,scan_music_loudness,scan_music_fingerprint,scan_media_segments,detect_media_segments,analyze_music_facets" doc:"Task identifier"`
 			Status string `query:"status" maxLength:"32" doc:"Filter by item status (pending/running/done/error)"`
 			Limit  int    `query:"limit" minimum:"1" maximum:"200" default:"50"`
 			Offset int    `query:"offset" minimum:"0" default:"0"`
@@ -182,6 +182,8 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 				resp, err = app.QueryFingerprintItems(ctx, in.Status, in.Limit, in.Offset)
 			case "scan_media_segments":
 				resp, err = app.QuerySegmentsItems(ctx, in.Status, in.Limit, in.Offset)
+			case "detect_media_segments":
+				resp, err = app.QueryDetectionItems(ctx, in.Status, in.Limit, in.Offset)
 			case "analyze_music_facets":
 				resp, err = app.QueryFacetsItems(ctx, in.Status, in.Limit, in.Offset)
 			default:

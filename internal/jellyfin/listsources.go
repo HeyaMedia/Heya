@@ -61,7 +61,7 @@ func (s *Server) attachEpisodeSources(ctx context.Context, rows []sqlc.JFListEpi
 			continue
 		}
 		if file, ok := files[entry.FileID]; ok {
-			s.decorateWithSource(&items[i], file, token, req)
+			s.decorateWithSource(ctx, &items[i], file, token, req)
 		}
 	}
 }
@@ -86,7 +86,7 @@ func (s *Server) attachMovieSources(ctx context.Context, rows []sqlc.JFListLibra
 	}
 	for i, row := range rows {
 		if file, ok := files[row.ID]; ok {
-			s.decorateWithSource(&items[i], file, token, req)
+			s.decorateWithSource(ctx, &items[i], file, token, req)
 		}
 	}
 }
@@ -130,8 +130,8 @@ func (s *Server) attachTrackSources(ctx context.Context, rows []sqlc.JFListTrack
 // MediaSources and/or MediaStreams per the requested fields, plus Container,
 // HasSubtitles, and DateCreated (episodes have no created_at of their own —
 // the file's add time is what upstream reports too).
-func (s *Server) decorateWithSource(dto *baseItemDto, file sqlc.LibraryFile, token string, req itemsRequest) {
-	src, _, _ := s.mediaSourceForFile(file, dto.Name, token, nil)
+func (s *Server) decorateWithSource(ctx context.Context, dto *baseItemDto, file sqlc.LibraryFile, token string, req itemsRequest) {
+	src, _, _ := s.mediaSourceForFile(ctx, file, dto.Name, token, nil)
 	if req.fields["mediasources"] {
 		dto.MediaSources = []mediaSourceInfo{src}
 	}

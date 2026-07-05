@@ -217,7 +217,7 @@ func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token 
 	if err != nil {
 		file = target.file
 	}
-	return s.mediaSourceForFile(file, target.title, token, profile)
+	return s.mediaSourceForFile(ctx, file, target.title, token, profile)
 }
 
 // mediaSourceForFile renders a MediaSourceInfo from a library file's stored
@@ -225,7 +225,7 @@ func (s *Server) videoMediaSource(ctx context.Context, target playTarget, token 
 // (fields=MediaSources over a whole episode page) must not fan out into
 // per-item ffprobe runs. Callers that can afford a probe (PlaybackInfo,
 // detail) go through videoMediaSource, which EnsureFileProbed's first.
-func (s *Server) mediaSourceForFile(file sqlc.LibraryFile, name, token string, profile *deviceProfile) (mediaSourceInfo, transcoder.PlaybackPlan, transcoder.ClientCapabilities) {
+func (s *Server) mediaSourceForFile(ctx context.Context, file sqlc.LibraryFile, name, token string, profile *deviceProfile) (mediaSourceInfo, transcoder.PlaybackPlan, transcoder.ClientCapabilities) {
 	var info mediaprobe.MediaInfo
 	if len(file.MediaInfo) > 0 {
 		_ = json.Unmarshal(file.MediaInfo, &info)
@@ -263,6 +263,14 @@ func (s *Server) mediaSourceForFile(file sqlc.LibraryFile, name, token string, p
 		RequiredHTTPHeaders:        map[string]string{},
 		DefaultAudioStreamIndex:    defAudio,
 		DefaultSubtitleStreamIndex: defSub,
+		// jellyfin-web's MediaSegmentManager gates its whole /MediaSegments
+		// fetch on this at playback start (onPlayerPlaybackStart reads
+		// state.MediaSource?.HasSegments and returns early when falsy) — real
+		// Jellyfin computes the same per-item EXISTS in
+		// MediaSegmentManager.HasSegments. Third-party clients (Streamyfin,
+		// Findroid) call /MediaSegments unconditionally and ignore this flag,
+		// but jellyfin-web needs it set to ever show a skip button.
+		HasSegments: s.app.JFFileHasSegments(ctx, file.ID),
 	}, plan, caps
 }
 

@@ -375,3 +375,47 @@ func (ScanAlbumLoudnessArgs) InsertOpts() river.InsertOpts {
 		UniqueOpts:  uniqueWhileActive(),
 	}
 }
+
+// DetectSeasonSegmentsArgs runs Intro-Skipper-style local detection for one
+// (series, season) pair: chromaprint-fingerprints every pending episode's
+// intro and tail windows, pairs episodes to find their shared regions, and
+// writes any resolved intro/credits rows. Heavier than the community
+// segments fetch (real audio decode, not just an HTTP round-trip) so it
+// gets its own queue at MaxWorkers=1; DetectSeasonSegmentsWorker overrides
+// Timeout() to run unbounded since a 25-episode season is many minutes of
+// decoding and River's default per-job timeout would kill it mid-run.
+type DetectSeasonSegmentsArgs struct {
+	MediaItemID     int64  `json:"media_item_id" river:"unique"`
+	Season          int    `json:"season" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (DetectSeasonSegmentsArgs) Kind() string { return "detect_segments_season" }
+func (DetectSeasonSegmentsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "detect_segments_season",
+		MaxAttempts: 2,
+		Priority:    PriorityAnalysis,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
+// DetectMovieCreditsArgs runs ffmpeg blackdetect over one movie's tail
+// window to find its credits cut when the community databases had nothing.
+// DetectMovieCreditsWorker also overrides Timeout() to run unbounded — an
+// 8-minute tail window read over a slow SMB share can outlast River's
+// default per-job deadline.
+type DetectMovieCreditsArgs struct {
+	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (DetectMovieCreditsArgs) Kind() string { return "detect_segments_movie" }
+func (DetectMovieCreditsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "detect_segments_movie",
+		MaxAttempts: 2,
+		Priority:    PriorityAnalysis,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}

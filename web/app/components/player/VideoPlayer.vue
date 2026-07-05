@@ -54,6 +54,9 @@ function skipSegment() {
   if (!seg) return
   dismissedSegments.value = new Set(dismissedSegments.value).add(seg.start_ms)
   controls.seek(seg.end_ms / 1000)
+  // Flash the control bar so the time jump is visible feedback — a skip
+  // that lands in similar-looking footage otherwise reads as a no-op.
+  showCtrl()
 }
 
 const controlsVisible = ref(true)

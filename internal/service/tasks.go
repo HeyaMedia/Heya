@@ -763,6 +763,97 @@ func (a *App) QuerySegmentsItems(ctx context.Context, status string, limit, offs
 	}, nil
 }
 
+// QueryDetectionItems returns movie/episode files paginated by local
+// skip-segment detection state — the chromaprint/blackdetect fallback pass
+// that only considers files the community fetch already checked
+// (segments_analyzed_at NOT NULL). "complete" rows have
+// segments_detected_at stamped; the detail counts markers this pass itself
+// produced (source chromaprint/blackframe) so a file whose only segments
+// came from the community fetch doesn't read as having local results.
+func (a *App) QueryDetectionItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
+	var total, complete int
+	err := a.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE lf.segments_detected_at IS NOT NULL)
+		FROM library_files lf
+		JOIN libraries l ON l.id = lf.library_id
+		WHERE l.media_type IN ('movie', 'tv')
+		  AND lf.deleted_at IS NULL
+		  AND lf.media_info IS NOT NULL
+		  AND lf.media_item_id IS NOT NULL
+		  AND lf.segments_analyzed_at IS NOT NULL
+	`).Scan(&total, &complete)
+	if err != nil {
+		return nil, err
+	}
+
+	statusFilter := ""
+	switch status {
+	case "complete":
+		statusFilter = "AND lf.segments_detected_at IS NOT NULL"
+	case "pending":
+		statusFilter = "AND lf.segments_detected_at IS NULL"
+	}
+
+	rows, err := a.db.Query(ctx, `
+		SELECT lf.id, lf.path, lf.segments_detected_at IS NOT NULL,
+		       (SELECT count(*) FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.source IN ('chromaprint', 'blackframe'))
+		FROM library_files lf
+		JOIN libraries l ON l.id = lf.library_id
+		WHERE l.media_type IN ('movie', 'tv')
+		  AND lf.deleted_at IS NULL
+		  AND lf.media_info IS NOT NULL
+		  AND lf.media_item_id IS NOT NULL
+		  AND lf.segments_analyzed_at IS NOT NULL
+		  `+statusFilter+`
+		ORDER BY lf.segments_detected_at IS NOT NULL, lf.path ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TaskItem
+	for rows.Next() {
+		var id int64
+		var path string
+		var done bool
+		var markers int
+		if err := rows.Scan(&id, &path, &done, &markers); err != nil {
+			continue
+		}
+		s := "pending"
+		detail := ""
+		if done {
+			s = "complete"
+			if markers > 0 {
+				detail = strconv.Itoa(markers) + " markers"
+			} else {
+				detail = "no local markers found"
+			}
+		}
+		items = append(items, TaskItem{
+			ID:     id,
+			Name:   filepath.Base(path),
+			Path:   path,
+			Status: s,
+			Detail: detail,
+		})
+	}
+
+	if items == nil {
+		items = []TaskItem{}
+	}
+
+	return &TaskItemsResult{
+		Items:    items,
+		Total:    total,
+		Complete: complete,
+		Pending:  total - complete,
+	}, nil
+}
+
 // QueryFacetsItems returns tracks paginated by sonic-analysis state. A track
 // is "complete" when its track_facets row exists. Mirrors the scheduler's
 // NextTrackForAnalysis duration filter so the modal only lists tracks we'd

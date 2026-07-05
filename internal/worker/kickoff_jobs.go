@@ -167,6 +167,25 @@ func (KickoffMediaSegmentsArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// KickoffDetectSegmentsArgs enqueues detect_segments_season /
+// detect_segments_movie for files the community pump already checked
+// (segments_analyzed_at set) but couldn't resolve on its own
+// (segments_detected_at NULL). Two-cursor pump shape like
+// KickoffMusicLoudnessArgs: seasons sweep first via TrackCursor (heavier —
+// cross-episode audio decode), then movie files via AlbumCursor.
+type KickoffDetectSegmentsArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (KickoffDetectSegmentsArgs) Kind() string { return "kickoff_detect_segments" }
+func (KickoffDetectSegmentsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "kickoff_detect_segments",
+		MaxAttempts: 1,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 // KickoffTrickplayArgs replaces scheduler.GenerateTrickplayTask.
 // Finds library_files with has_trickplay=false on a library where
 // enable_trickplay is set, and enqueues one trickplay_file job per

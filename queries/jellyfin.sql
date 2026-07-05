@@ -240,6 +240,17 @@ FROM library_files
 WHERE media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[]) AND deleted_at IS NULL
 ORDER BY media_item_id, (status = 'matched') DESC, path ASC;
 
+-- name: JFFileHasSegments :one
+-- Backs MediaSourceInfo.HasSegments — jellyfin-web's MediaSegmentManager
+-- gates its entire /MediaSegments fetch on this flag at playback start (a
+-- falsy HasSegments means the skip-intro/outro UI never even asks). Real
+-- Jellyfin computes the identical per-item EXISTS in
+-- MediaSegmentManager.HasSegments (Jellyfin.Server.Implementations); the
+-- table here (queries/media_segments.sql) is owned by the segments worker.
+SELECT EXISTS(
+    SELECT 1 FROM media_segments WHERE library_file_id = $1
+) AS exists;
+
 -- name: JFTrackFilesByIDs :many
 -- track_file id -> owning library file, batched for list-level MediaSources
 -- decoration of Audio items (fields=MediaSources).

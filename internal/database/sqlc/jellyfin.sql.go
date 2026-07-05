@@ -12,7 +12,7 @@ import (
 )
 
 const jFBestVideoFilesForItems = `-- name: JFBestVideoFilesForItems :many
-SELECT DISTINCT ON (media_item_id) id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at
+SELECT DISTINCT ON (media_item_id) id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at
 FROM library_files
 WHERE media_item_id = ANY($1::bigint[]) AND deleted_at IS NULL
 ORDER BY media_item_id, (status = 'matched') DESC, path ASC
@@ -48,6 +48,7 @@ func (q *Queries) JFBestVideoFilesForItems(ctx context.Context, mediaItemIds []i
 			&i.UpdatedAt,
 			&i.VideoHeight,
 			&i.SegmentsAnalyzedAt,
+			&i.SegmentsDetectedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -202,8 +203,27 @@ func (q *Queries) JFCountTracks(ctx context.Context, arg JFCountTracksParams) (i
 	return count, err
 }
 
+const jFFileHasSegments = `-- name: JFFileHasSegments :one
+SELECT EXISTS(
+    SELECT 1 FROM media_segments WHERE library_file_id = $1
+) AS exists
+`
+
+// Backs MediaSourceInfo.HasSegments — jellyfin-web's MediaSegmentManager
+// gates its entire /MediaSegments fetch on this flag at playback start (a
+// falsy HasSegments means the skip-intro/outro UI never even asks). Real
+// Jellyfin computes the identical per-item EXISTS in
+// MediaSegmentManager.HasSegments (Jellyfin.Server.Implementations); the
+// table here (queries/media_segments.sql) is owned by the segments worker.
+func (q *Queries) JFFileHasSegments(ctx context.Context, libraryFileID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, jFFileHasSegments, libraryFileID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const jFLibraryFilesByIDs = `-- name: JFLibraryFilesByIDs :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL
 `
 
@@ -237,6 +257,7 @@ func (q *Queries) JFLibraryFilesByIDs(ctx context.Context, ids []int64) ([]Libra
 			&i.UpdatedAt,
 			&i.VideoHeight,
 			&i.SegmentsAnalyzedAt,
+			&i.SegmentsDetectedAt,
 		); err != nil {
 			return nil, err
 		}

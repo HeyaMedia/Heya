@@ -123,6 +123,8 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &ScanAlbumLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanTrackFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanMediaSegmentsFileWorker{DB: cfg.DB, Heya: cfg.Heya, Progress: cfg.Progress})
+	river.AddWorker(workers, &DetectSeasonSegmentsWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &DetectMovieCreditsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &TrickplayFileWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ThumbnailExtraWorker{DB: cfg.DB, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &AnalyzeTrackFacetsWorker{DB: cfg.DB, Holder: cfg.SonicHolder, Progress: cfg.Progress})
@@ -140,6 +142,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &KickoffMusicLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffMusicFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffMediaSegmentsWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &KickoffDetectSegmentsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffTrickplayWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffThumbnailsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffSonicAnalysisWorker{DB: cfg.DB, Enabled: cfg.SonicEnabled, Progress: cfg.Progress})
@@ -194,10 +197,18 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			// decode. Single worker keeps a cold library sweep a
 			// polite trickle against the aggregator.
 			"scan_media_segments_file": {MaxWorkers: 1},
-			"trickplay":                {MaxWorkers: 1}, // ffmpeg sprites
-			"thumbnails":               {MaxWorkers: 1}, // ffmpeg thumbnail extraction
-			"sonic_analysis":           {MaxWorkers: 1}, // full model bundle (Discogs heads + EffNet base + classifier heads + CLAP audio) held by AnalyzerHolder singleton; ~hundreds of MB resident
-			"transcode":                {MaxWorkers: 1},
+
+			// Local skip-segment detection — the fallback pass for files
+			// the community databases had nothing for. Real audio decode
+			// (chromaprint cross-episode matching / ffmpeg blackdetect),
+			// so each stays MaxWorkers=1 like the other CPU-heavy queues.
+			"detect_segments_season": {MaxWorkers: 1}, // cross-episode chromaprint matching — heaviest of the two
+			"detect_segments_movie":  {MaxWorkers: 1}, // ffmpeg blackdetect over the tail window
+
+			"trickplay":      {MaxWorkers: 1}, // ffmpeg sprites
+			"thumbnails":     {MaxWorkers: 1}, // ffmpeg thumbnail extraction
+			"sonic_analysis": {MaxWorkers: 1}, // full model bundle (Discogs heads + EffNet base + classifier heads + CLAP audio) held by AnalyzerHolder singleton; ~hundreds of MB resident
+			"transcode":      {MaxWorkers: 1},
 
 			// Sonic centroid refreshes (cheap; own queue so they don't
 			// block the next track analysis).
@@ -215,6 +226,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"kickoff_music_loudness":    {MaxWorkers: 1},
 			"kickoff_music_fingerprint": {MaxWorkers: 1},
 			"kickoff_media_segments":    {MaxWorkers: 1},
+			"kickoff_detect_segments":   {MaxWorkers: 1},
 			"kickoff_trickplay":         {MaxWorkers: 1},
 			"kickoff_thumbnails":        {MaxWorkers: 1},
 			"kickoff_sonic_analysis":    {MaxWorkers: 1},

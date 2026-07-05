@@ -205,7 +205,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Localization/Cultures":                                {Status: opPlanned, Tag: "Localization"},
 	"GET /Localization/Options":                                 {Status: opPlanned, Tag: "Localization"},
 	"GET /Localization/ParentalRatings":                         {Status: opPlanned, Tag: "Localization"},
-	"GET /MediaSegments/{itemId}":                               {Status: opImplemented, Tag: "MediaSegments"}, // media_segments rows for the item's file, ms → ticks
+	"GET /MediaSegments/{itemId}":                               {Status: opImplemented, Tag: "MediaSegments"}, // media_segments rows for the item's file, ms → ticks; gated by MediaSourceInfo.HasSegments (mediaSourceForFile)
 	"GET /Movies/{itemId}/Similar":                              {Status: opImplemented, Tag: "Library"},
 	"GET /Movies/Recommendations":                               {Status: opStubbed, Tag: "Movies"},
 	"GET /MusicGenres":                                          {Status: opStubbed, Tag: "MusicGenres"},

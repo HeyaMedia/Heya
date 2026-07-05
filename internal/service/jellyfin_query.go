@@ -332,6 +332,19 @@ func (a *App) JFMovieFileID(ctx context.Context, mediaItemID int64) (sqlc.Librar
 	return sqlc.LibraryFile{}, false, nil
 }
 
+// JFFileHasSegments reports whether a library file has any stored skip
+// markers — backs MediaSourceInfo.HasSegments, which jellyfin-web gates its
+// entire /MediaSegments fetch on at playback start. A query error is
+// swallowed to false: a missed skip-intro button beats a broken PlaybackInfo
+// response.
+func (a *App) JFFileHasSegments(ctx context.Context, fileID int64) bool {
+	has, err := sqlc.New(a.db).JFFileHasSegments(ctx, fileID)
+	if err != nil {
+		return false
+	}
+	return has
+}
+
 // JFSimilarLocalItemIDs returns local media_item ids recommended for the
 // given item, best-rated first (media_recommendations rows that matched a
 // library item by external ids).

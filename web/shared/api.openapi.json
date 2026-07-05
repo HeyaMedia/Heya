@@ -4256,6 +4256,9 @@
           "segments_analyzed_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "segments_detected_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
           "size": {
             "format": "int64",
             "type": "integer"
@@ -4289,7 +4292,8 @@
           "created_at",
           "updated_at",
           "video_height",
-          "segments_analyzed_at"
+          "segments_analyzed_at",
+          "segments_detected_at"
         ],
         "type": "object"
       },
@@ -30720,6 +30724,7 @@
                 "scan_music_loudness",
                 "scan_music_fingerprint",
                 "scan_media_segments",
+                "detect_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30795,6 +30800,7 @@
                 "scan_music_loudness",
                 "scan_music_fingerprint",
                 "scan_media_segments",
+                "detect_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30853,6 +30859,7 @@
                 "scan_music_loudness",
                 "scan_music_fingerprint",
                 "scan_media_segments",
+                "detect_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30952,6 +30959,7 @@
                 "scan_music_loudness",
                 "scan_music_fingerprint",
                 "scan_media_segments",
+                "detect_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"

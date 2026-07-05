@@ -20,6 +20,7 @@ var definitions = []Definition{
 	{ID: "scan_music_loudness", KickoffKind: "kickoff_music_loudness", WorkKinds: []string{"scan_track_loudness", "scan_album_loudness"}, Pump: true},
 	{ID: "scan_music_fingerprint", KickoffKind: "kickoff_music_fingerprint", WorkKinds: []string{"scan_track_fingerprint"}, Pump: true},
 	{ID: "scan_media_segments", KickoffKind: "kickoff_media_segments", WorkKinds: []string{"scan_media_segments_file"}, Pump: true},
+	{ID: "detect_media_segments", KickoffKind: "kickoff_detect_segments", WorkKinds: []string{"detect_segments_season", "detect_segments_movie"}, Pump: true},
 	{ID: "generate_trickplay", KickoffKind: "kickoff_trickplay", WorkKinds: []string{"trickplay_file"}},
 	{ID: "generate_thumbnails", KickoffKind: "kickoff_thumbnails", WorkKinds: []string{"thumbnail_extra"}},
 	{ID: "analyze_music_facets", KickoffKind: "kickoff_sonic_analysis", WorkKinds: []string{"analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"}, Pump: true},

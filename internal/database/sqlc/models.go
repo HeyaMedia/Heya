@@ -432,6 +432,7 @@ type LibraryFile struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	VideoHeight        int32              `json:"video_height"`
 	SegmentsAnalyzedAt pgtype.Timestamptz `json:"segments_analyzed_at"`
+	SegmentsDetectedAt pgtype.Timestamptz `json:"segments_detected_at"`
 }
 
 type LibraryNfoDir struct {

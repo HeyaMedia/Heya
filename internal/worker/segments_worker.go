@@ -290,10 +290,56 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := q.WithTx(tx)
-	if err := qtx.DeleteMediaSegmentsForFile(ctx, lf.ID); err != nil {
+
+	// Precedence, final: manual > chromaprint (measured on this exact file)
+	// > community:* > blackframe. Only clear this worker's own
+	// (community:*) rows here — the old DeleteMediaSegmentsForFile-then-
+	// reinsert flow also wiped a manual correction or a local-detection
+	// result on every re-check, even when the community databases had
+	// nothing new to say.
+	if err := qtx.DeleteCommunityMediaSegmentsForFile(ctx, lf.ID); err != nil {
 		return err
 	}
+
+	blockedByType := map[string]bool{}
+	blackframeCleared := map[string]bool{}
 	for _, p := range picked {
+		blocked, checked := blockedByType[p.Type]
+		if !checked {
+			manual, err := qtx.ExistsManualMediaSegment(ctx, sqlc.ExistsManualMediaSegmentParams{
+				LibraryFileID: lf.ID,
+				SegmentType:   p.Type,
+			})
+			if err != nil {
+				return err
+			}
+			chromaprint, err := qtx.ExistsChromaprintMediaSegment(ctx, sqlc.ExistsChromaprintMediaSegmentParams{
+				LibraryFileID: lf.ID,
+				SegmentType:   p.Type,
+			})
+			if err != nil {
+				return err
+			}
+			blocked = manual || chromaprint
+			blockedByType[p.Type] = blocked
+		}
+		if blocked {
+			// A user-authored correction or a direct chromaprint
+			// measurement always wins over crowdsourced community data.
+			continue
+		}
+		if !blackframeCleared[p.Type] {
+			// Community beats a blackframe heuristic guess for the same
+			// type — clear it before writing the community winner in its
+			// place.
+			if err := qtx.DeleteBlackframeMediaSegmentsForFileAndType(ctx, sqlc.DeleteBlackframeMediaSegmentsForFileAndTypeParams{
+				LibraryFileID: lf.ID,
+				SegmentType:   p.Type,
+			}); err != nil {
+				return err
+			}
+			blackframeCleared[p.Type] = true
+		}
 		if err := qtx.InsertMediaSegment(ctx, sqlc.InsertMediaSegmentParams{
 			LibraryFileID: lf.ID,
 			SegmentType:   p.Type,
