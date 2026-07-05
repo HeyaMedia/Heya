@@ -693,11 +693,6 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
     <template v-else>
       <video ref="videoEl" @click="onVideoClick" />
 
-      <!-- Buffering -->
-      <div v-if="state.buffering" class="p-center" style="pointer-events: none">
-        <div class="spinner-lg" />
-      </div>
-
       <!-- In-player resume prompt — shown on mount when saved progress
            exists for this item and no ?t= override is set. -->
       <div v-if="resumeOpen" class="resume-overlay">
@@ -728,11 +723,16 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
           <button class="c-btn" :class="{ active: showInfoPanel }" @click="showInfoPanel = !showInfoPanel"><Icon name="info" :size="18" /></button>
         </div>
 
-        <!-- Center play -->
+        <!-- Center play. The buffering ring is concentric with the button
+             (same flex center) so it wraps the glyph cleanly instead of
+             peeking out from a separately-centered spinner. -->
         <div class="ctrl-center" @click.stop="controls.togglePlay()">
-          <button class="center-btn">
-            <Icon :name="state.paused ? 'play' : 'pause'" :size="40" />
-          </button>
+          <div class="center-play">
+            <div v-if="state.buffering" class="center-ring" />
+            <button class="center-btn" :class="{ 'is-play': state.paused }">
+              <Icon :name="state.paused ? 'play' : 'pause'" :size="40" />
+            </button>
+          </div>
         </div>
 
         <!-- Bottom -->
@@ -775,7 +775,8 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
               :width="240"
               align="end"
               :side-offset="10"
-              trigger-class="c-btn vp-trigger"
+              trigger-class="vp-trigger"
+              content-class="vp-menu-surface"
               trigger-title="Audio track"
             >
               <template #trigger>
@@ -801,7 +802,8 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
               :width="260"
               align="end"
               :side-offset="10"
-              :trigger-class="{ 'c-btn': true, 'vp-trigger': true, active: activeSubIdx >= 0 }"
+              :trigger-class="{ 'vp-trigger': true, active: activeSubIdx >= 0 }"
+              content-class="vp-menu-surface"
               trigger-title="Subtitles"
             >
               <template #trigger>
@@ -836,7 +838,8 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
               :width="240"
               align="end"
               :side-offset="10"
-              trigger-class="c-btn vp-trigger"
+              trigger-class="vp-trigger vp-trigger-quality"
+              content-class="vp-menu-surface"
               trigger-title="Quality"
             >
               <template #trigger>
@@ -898,7 +901,8 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
           class="skip-seg-btn"
           @click.stop="skipSegment"
         >
-          {{ skipSegmentLabels[activeSkipSegment.type] ?? 'Skip' }}
+          <span>{{ skipSegmentLabels[activeSkipSegment.type] ?? 'Skip' }}</span>
+          <Icon name="skipforward" :size="15" />
         </button>
       </Transition>
 
@@ -934,7 +938,6 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
 video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
 .p-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); font-size: 14px; gap: 8px; z-index: 20; }
 .spinner { width: 28px; height: 28px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--gold, #e6b94a); border-radius: 50%; animation: spin 0.7s linear infinite; }
-.spinner-lg { width: 44px; height: 44px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--gold, #e6b94a); border-radius: 50%; animation: spin 0.7s linear infinite; }
 
 /* Resume overlay — full-surface dimmer with a centered card. Mounts only
    while resumeOpen is true; the video element is paused while it's up. */
@@ -1013,8 +1016,14 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .ctrl-title { flex: 1; font-size: 15px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .ctrl-center { flex: 1; display: flex; align-items: center; justify-content: center; }
-.center-btn { width: 72px; height: 72px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); color: #fff; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+.center-play { position: relative; width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; }
+.center-btn { width: 72px; height: 72px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); color: #fff; display: flex; align-items: center; justify-content: center; transition: background 0.2s, transform 0.2s; }
 .center-btn:hover { background: rgba(0,0,0,0.6); transform: scale(1.08); }
+/* Optical centering: the phosphor play triangle sits right-of-centre in its
+   box, so nudge it left a hair. The pause glyph is symmetric — left alone. */
+.center-btn.is-play :deep(svg) { transform: translateX(-2px); }
+/* Buffering ring — concentric with the button, wrapping it. */
+.center-ring { position: absolute; inset: -7px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.12); border-top-color: var(--gold, #e6b94a); animation: spin 0.7s linear infinite; pointer-events: none; }
 
 .ctrl-bottom { padding: 40px 20px 16px; background: linear-gradient(to top, rgba(0,0,0,0.6), transparent); }
 
@@ -1034,7 +1043,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .seekbar-tip-time { font-size: 10px; line-height: 1; }
 
 /* Controls row */
-.ctrl-row { display: flex; align-items: center; gap: 2px; }
+.ctrl-row { display: flex; align-items: center; gap: 4px; }
 .c-btn { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.8); background: transparent; transition: all 0.12s; flex-shrink: 0; }
 .c-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
 .c-btn.active { color: var(--gold, #e6b94a); }
@@ -1048,13 +1057,6 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 /* Time */
 .time { font-size: 12px; font-family: var(--font-mono, monospace); color: rgba(255,255,255,0.7); margin-left: 10px; white-space: nowrap; }
 .time-sep { color: rgba(255,255,255,0.3); margin: 0 2px; }
-
-/* Menus — AppMenu supplies overlay/positioning/animation via .surface.
-   Trigger-button chrome reuses the .c-btn styling already defined above;
-   .vp-trigger is just a marker for any future per-instance tweaks. */
-.quality-badge { font-size: 9px; font-weight: 700; font-family: var(--font-mono, monospace); color: rgba(255,255,255,0.6); margin-left: -2px; }
-.c-btn.active .quality-badge,
-.c-btn[data-state="open"] .quality-badge { color: var(--gold, #e6b94a); }
 
 /* Info panel — no dimming, positioned top-right, doesn't block video */
 .info-panel-wrap { position: absolute; top: 56px; right: 16px; z-index: 50; pointer-events: none; }
@@ -1071,15 +1073,18 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 }
 .skip-seg-btn {
   position: absolute; bottom: 100px; right: 24px; z-index: 60;
+  display: flex; align-items: center; gap: 8px;
   background: rgba(10,10,16,0.92); backdrop-filter: blur(20px) saturate(1.3);
-  border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
-  padding: 12px 22px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 10px;
+  padding: 11px 20px; cursor: pointer;
   font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 0.02em;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
-  transition: background 0.15s, border-color 0.15s;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
+.skip-seg-btn :deep(svg) { color: var(--gold, #e6b94a); }
 .skip-seg-btn:hover {
-  background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.3);
+  background: rgba(230,185,74,0.16); border-color: var(--gold, #e6b94a);
+  transform: translateY(-1px);
 }
 .upnext-card {
   background: rgba(10,10,16,0.92); backdrop-filter: blur(20px) saturate(1.3);
@@ -1116,10 +1121,49 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 
 <!--
   AppMenu portals the audio/subs/quality menus out of this component's
-  scoped DOM, so the per-item styles have to live unscoped to reach the
-  rendered elements.
+  scoped DOM, so the trigger chrome AND the per-item styles have to live
+  unscoped to reach the rendered elements. Scoped `.c-btn` never lands on
+  the AppMenu-rendered <button> (it carries AppMenu's scope id, not ours),
+  which is why these triggers used to collapse to bare 18px icons.
 -->
 <style>
+/* Bottom-bar menu triggers (audio / subtitles / quality). Mirrors the
+   scoped `.c-btn` box so the right-hand cluster matches the plain control
+   buttons on the left. */
+.app-menu-trigger.vp-trigger {
+  min-width: 38px;
+  height: 38px;
+  padding: 0 8px;
+  border-radius: 8px;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.8);
+  transition: color 0.12s, background 0.12s;
+}
+.app-menu-trigger.vp-trigger:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.app-menu-trigger.vp-trigger[data-state="open"] {
+  color: var(--gold, #e6b94a);
+  background: rgba(255, 255, 255, 0.08);
+}
+.app-menu-trigger.vp-trigger.active { color: var(--gold, #e6b94a); }
+
+/* Current-quality badge sitting next to the sliders icon. */
+.vp-trigger .quality-badge {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  color: rgba(255, 255, 255, 0.6);
+}
+.vp-trigger[data-state="open"] .quality-badge { color: var(--gold, #e6b94a); }
+
+/* The player root is a z-index:9999 fixed overlay, so a menu portalled to
+   <body> (reka wraps it at z-index:200) would paint *behind* the video.
+   Lift only the player's own menus back above it — app-wide menus keep
+   their normal stacking. */
+[data-reka-popper-content-wrapper]:has(.vp-menu-surface) { z-index: 10000 !important; }
+
 .vp-menu-title { padding: 8px 14px 6px; }
 
 .vp-item {
