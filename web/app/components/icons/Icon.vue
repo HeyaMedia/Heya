@@ -22,6 +22,8 @@ const nameMap: Record<string, string> = {
   stop: 'stop',
   prev: 'skip-back',
   next: 'skip-forward',
+  skipback: 'skip-back',
+  skipforward: 'skip-forward',
   shuffle: 'shuffle',
   repeat: 'repeat',
   vol: 'speaker-high',
