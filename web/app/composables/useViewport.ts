@@ -20,6 +20,13 @@ export interface ViewportInfo {
   isPhone: Ref<boolean>
   isTablet: Ref<boolean>
   isDesktop: Ref<boolean>
+  /**
+   * The adaptive tablet/narrow band: 720.02–1200px (iPad Mini both
+   * orientations, foldable inner screens). In this band sidebars hide behind
+   * the topbar burger, and the topbar/playbar run their collapsed layouts.
+   * Above 1200px the app renders its full desktop chrome untouched.
+   */
+  isCompact: Ref<boolean>
   isCoarse: Ref<boolean>
 }
 
@@ -34,6 +41,7 @@ export function useViewport(): ViewportInfo {
       isPhone: ref(false),
       isTablet: ref(false),
       isDesktop: ref(true),
+      isCompact: ref(false),
       isCoarse: ref(false),
     }
   }
@@ -49,6 +57,7 @@ export function useViewport(): ViewportInfo {
     isPhone: useMediaQuery('(max-width: 720px)'),
     isTablet: useMediaQuery('(min-width: 720.02px) and (max-width: 960px)'),
     isDesktop: useMediaQuery('(min-width: 960.02px)'),
+    isCompact: useMediaQuery('(min-width: 720.02px) and (max-width: 1200px)'),
     isCoarse: useMediaQuery('(pointer: coarse)'),
   }))!
   return shared
