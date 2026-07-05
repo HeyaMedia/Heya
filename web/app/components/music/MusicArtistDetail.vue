@@ -921,6 +921,31 @@ if (import.meta.client) {
   color: #d96b6b; margin-right: 6px;
 }
 
+/* `.hero-floating-actions` is position:absolute, so it and `.hero-meta`'s
+   text never negotiate width with each other — on a long-enough stats line
+   (or a narrow-enough hero) the text runs right under the button cluster
+   and gets visually clipped by it (bug: gold Play circle sitting on top of
+   "136.4K plays", "Born 1991" partially hidden). `.hero-stats` already
+   flex-wraps; reserving the button cluster's footprint as padding-right
+   makes it wrap *before* reaching that zone instead of running under it.
+   The offset is the actions cluster's rendered width (5 round buttons +
+   4 gaps ≈ 274px) minus the 8px delta between `.hero-content`'s
+   padding-right (40) and the actions' `right` inset (32), plus a small
+   visual gap — same reservation on `.hero-ext` since external-link chips
+   can land in the same bottom-right band when the stats line is short.
+   Scoped above the phone breakpoint: phone already stacks the actions row
+   below the meta text (see the max-width:720px block), so there's nothing
+   to collide with there and no reservation is needed. This isn't a
+   narrow-band patch — it holds unchanged from just-above-phone through
+   wide desktop, where the extra padding is inert because the text never
+   gets close to it. */
+@media (min-width: 721px) {
+  .hero-stats,
+  .hero-ext {
+    padding-right: 290px;
+  }
+}
+
 /* Popular Tracks ================================================== */
 .top-tracks {}
 .section-row-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }

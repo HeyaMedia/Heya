@@ -475,7 +475,7 @@ function playFromIndex(i: number) {
   color: var(--fg-0);
   letter-spacing: -0.02em;
 }
-.hero-sub { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-2); margin-bottom: 18px; font-family: var(--font-mono); }
+.hero-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--fg-2); margin-bottom: 18px; font-family: var(--font-mono); }
 .dot { color: var(--fg-3); }
 .artist-link { color: var(--fg-1); text-decoration: none; font-weight: 500; font-family: var(--font-sans, inherit); }
 .artist-link:hover { color: var(--gold); }
@@ -520,6 +520,27 @@ function playFromIndex(i: number) {
   font-size: 11px; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em;
   color: #d96b6b; margin-right: 6px;
+}
+
+/* `.hero-floating-actions` is position:absolute, so it and `.hero-sub`'s
+   text never negotiate width with each other — on a long-enough artist
+   name / track-count / duration combo (or a narrow-enough hero) the text
+   runs right under the button cluster and gets visually clipped by it
+   (bug: gold Play circle sitting on top of the track-count/duration text).
+   `.hero-sub` gets `flex-wrap: wrap` above so it *can* drop to a second
+   line, and reserving the actions cluster's footprint as padding-right
+   makes it wrap before reaching that zone instead of running under it.
+   The album hero's action cluster is wider than the artist page's (it
+   also carries the inline star-rating widget), hence the bigger offset
+   here. Scoped above the phone breakpoint: phone already stacks the
+   actions row below the meta text (see the max-width:720px block), so
+   there's nothing to collide with there. Not a narrow-band patch — holds
+   unchanged from just-above-phone through wide desktop, where the extra
+   padding is inert because the text never gets close to it. */
+@media (min-width: 721px) {
+  .hero-sub {
+    padding-right: 460px;
+  }
 }
 
 .tracklist { padding-top: 24px; }
