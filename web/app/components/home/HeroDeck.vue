@@ -193,4 +193,31 @@ onMounted(() => {
   .deck-tabs { right: 12px; top: 12px; }
   .deck-tab { padding: 5px 8px; }
 }
+/* Phone (W3a): the desktop 480px band is already ~57vh on a 390x844 phone,
+   but content inside HeroA/etc. was vertically *centered* rather than
+   bottom-anchored, so most of that height read as dead black space above the
+   rails. Re-express the height as a capped vh range (the sub-heroes'
+   bottom-alignment does the rest) and let the mode-chip row scroll
+   horizontally instead of silently overflowing — five labels + the pin
+   button can exceed a 390px screen once "Tonight" joins the set. */
+@media (max-width: 720px) {
+  .hero-deck {
+    height: 64vh;
+    height: 64dvh;
+    min-height: 440px;
+    max-height: 580px;
+  }
+  .deck-tabs {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    justify-content: flex-start;
+  }
+  .deck-tabs::-webkit-scrollbar { display: none; }
+  .deck-tab, .deck-pin { flex-shrink: 0; }
+}
 </style>

@@ -606,4 +606,19 @@ onMounted(() => {
 .empty-home p {
   font-size: 15px;
 }
+
+/* Phone (W3a): match the 16px-side .page-pad override already used by the
+   music pages (see music/artists.vue) — the shared heya.css rule only tapers
+   to 24px at <=1100px. ContentRow / ContinueWatchingRow / UpNextRow are
+   untouched this package (touch-fixed already in W2b), so their shared
+   `.section-title-lg` heading and `.more` "See all" link get a page-scoped
+   :deep() override here instead of editing those component files. */
+@media (max-width: 720px) {
+  .page-pad { padding-left: 16px; padding-right: 16px; }
+  .page-pad :deep(.section-title-lg) { font-size: 18px; }
+  .page-pad :deep(.more) {
+    padding: 10px 6px;
+    margin: -10px -6px;
+  }
+}
 </style>

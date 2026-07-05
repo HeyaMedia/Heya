@@ -1,5 +1,11 @@
 <template>
-  <section class="hero-featured" v-if="items.length" :style="{ '--hero-tint': tint }">
+  <section
+    class="hero-featured"
+    v-if="items.length"
+    :style="{ '--hero-tint': tint }"
+    @touchstart.passive="onTouchStart"
+    @touchend="onTouchEnd"
+  >
     <div class="hero-bg">
       <NuxtImg
         v-if="bgA"
@@ -79,7 +85,7 @@
             @click="$emit('play', current)"
           >
             <Icon name="play" :size="16" />
-            {{ playLabel }}
+            <span class="hero-play-label">{{ playLabel }}</span>
           </button>
           <NuxtLink :to="mediaUrl(current)" class="btn btn-ghost">
             <Icon name="info" :size="16" />
@@ -301,6 +307,37 @@ function jumpHero(idx: number) {
   if (!heroPaused.value) startTimer()
 }
 
+// --- Touch swipe between slides (phone) ------------------------------------
+// The dots are already tappable and auto-rotate keeps running either way, but
+// a horizontal drag is the gesture phone users reach for first. Only commits
+// to a slide change past a clear horizontal threshold so it never fights the
+// page's own vertical scroll or a plain tap on a link/button underneath.
+let touchStartX: number | null = null
+let touchStartY: number | null = null
+
+function onTouchStart(e: TouchEvent) {
+  if (props.items.length <= 1) return
+  const t = e.touches[0]
+  if (!t) return
+  touchStartX = t.clientX
+  touchStartY = t.clientY
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (touchStartX === null || props.items.length <= 1) return
+  const startX = touchStartX
+  const startY = touchStartY ?? 0
+  touchStartX = null
+  touchStartY = null
+  const t = e.changedTouches[0]
+  if (!t) return
+  const dx = t.clientX - startX
+  const dy = t.clientY - startY
+  if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+  const dir = dx < 0 ? 1 : -1
+  jumpHero((currentIdx.value + dir + props.items.length) % props.items.length)
+}
+
 function initBackdrops() {
   showA.value = true
   currentIdx.value = 0
@@ -487,5 +524,45 @@ onUnmounted(() => {
   .hero-poster { display: none; }
   .hero-title { font-size: 36px; }
   .hero-logo { max-width: 300px; max-height: 96px; }
+}
+/* Phone (W3a): bottom-anchor the content island instead of the desktop's
+   vertical centering (that centering was the main source of the "very tall,
+   mostly empty" hero on a narrow screen — see docs/responsive-plan.md W3a).
+   Synopsis drops (title + rating + actions is the mobile-hero convention);
+   Play/Details go side-by-side and both stay fully on screen. */
+@media (max-width: 720px) {
+  .hero-inner { padding: 16px 16px 20px; }
+  .hero-info { justify-content: flex-end; }
+  .hero-bg-gradient {
+    background:
+      linear-gradient(to top, var(--bg-1) 0%, rgba(10, 10, 14, 0.92) 24%, rgba(10, 10, 14, 0.5) 50%, transparent 78%),
+      radial-gradient(ellipse at 50% 100%, rgba(var(--hero-tint), 0.18), transparent 60%);
+  }
+  .hero-synopsis { display: none; }
+  .hero-title { font-size: 26px; line-height: 1.1; }
+  .hero-logo { max-width: 220px; max-height: 64px; margin: 2px 0 8px; }
+  .hero-meta-row { font-size: 12px; }
+  .hero-actions { margin-top: 16px; gap: 8px; }
+  /* Play grows to fill the row, Details keeps its natural width — so a long
+     "Play S03E12 - Episode Title" label truncates instead of shoving Details
+     off the right edge (the bug this package was written to fix). */
+  .hero-actions .btn-primary { flex: 1 1 auto; min-width: 0; }
+  .hero-actions .btn-ghost { flex: 0 0 auto; }
+  .hero-play-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .hero-dots { margin-top: 14px; gap: 10px; }
+  /* Dots stay visually 32x3 but grow their hit area to ~44px tall via an
+     invisible ::before — overflow must switch to visible for it to render
+     (the ::after progress-fill is still clipped to the dot's own box because
+     it's positioned by inset:0, not by this rule). */
+  .hero-dot { overflow: visible; }
+  .hero-dot::before {
+    content: '';
+    position: absolute;
+    inset: -21px -6px;
+  }
 }
 </style>
