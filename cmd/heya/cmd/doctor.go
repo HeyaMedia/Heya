@@ -22,7 +22,18 @@ var doctorCmd = &cobra.Command{
 		"Secrets (DB password, API keys) are redacted — safe to paste publicly.\n" +
 		"Use --json (the global flag) for the full machine-readable bundle.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Force passive mode for the bootstrap: withApp normally runs
+		// AutoMigrate + HEYA_ADMIN_*/HEYA_LIBRARY_* env bootstrap, which
+		// would let a diagnostic tool alter the very install it's supposed
+		// to observe (worst case: a newer binary run just for doctor
+		// migrates the schema out from under an older running server).
+		// Passive mode already gates exactly those two writes — see
+		// service.New. Restored before the report builds so the config
+		// section still shows the box's real infra.passive_mode.
+		origPassive := cfg.PassiveMode.Value
+		cfg.PassiveMode.Value = true
 		return withApp(func(ctx context.Context, app *service.App) error {
+			cfg.PassiveMode.Value = origPassive
 			report := app.BuildDoctorReport(ctx, nil)
 
 			if ui.JSONMode {
