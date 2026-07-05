@@ -5296,6 +5296,12 @@
           "available": {
             "type": "boolean"
           },
+          "bit_depth": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "bitrate_kbps": {
+            "$ref": "#/components/schemas/Int4"
+          },
           "disc_number": {
             "format": "int32",
             "type": "integer"
@@ -5304,9 +5310,15 @@
             "format": "int32",
             "type": "integer"
           },
+          "format": {
+            "$ref": "#/components/schemas/Text"
+          },
           "position": {
             "format": "int32",
             "type": "integer"
+          },
+          "sample_rate_hz": {
+            "$ref": "#/components/schemas/Int4"
           },
           "track_id": {
             "format": "int64",
@@ -5336,7 +5348,11 @@
           "artist_slug",
           "position",
           "added_at",
-          "available"
+          "available",
+          "format",
+          "bitrate_kbps",
+          "sample_rate_hz",
+          "bit_depth"
         ],
         "type": "object"
       },
