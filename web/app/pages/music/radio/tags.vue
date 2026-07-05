@@ -164,4 +164,9 @@ function tagSize(count: number) {
   gap: 18px;
 }
 .mono { font-family: var(--font-mono); }
+
+@media (max-width: 720px) {
+  .rt-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .page-pad { padding-left: 16px; padding-right: 16px; }
+}
 </style>

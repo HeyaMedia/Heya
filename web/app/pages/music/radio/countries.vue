@@ -173,4 +173,10 @@ function flag(code: string) {
   gap: 18px;
 }
 .mono { font-family: var(--font-mono); }
+
+@media (max-width: 720px) {
+  .rc-country-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .rc-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .page-pad { padding-left: 16px; padding-right: 16px; }
+}
 </style>

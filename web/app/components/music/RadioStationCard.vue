@@ -147,6 +147,16 @@ const topTags = computed(() => {
 .rs-art:hover .rs-fav { opacity: 1; }
 .rs-fav:hover { color: var(--gold); background: rgba(0, 0, 0, 0.7); }
 
+/* Touch: hover never fires on coarse pointers and the card has no tap
+   target of its own (no navigation — stations only play), so the hover-
+   revealed play/favorite buttons are the ONLY actions. Keep them always
+   visible there instead of hiding them like MusicCard's overlay — hiding
+   would leave radio grids completely inert on phones. */
+@media (pointer: coarse) {
+  .rs-play { opacity: 1; transform: translateY(0); }
+  .rs-fav { opacity: 1; }
+}
+
 .rs-meta {
   display: flex;
   flex-direction: column;

@@ -333,4 +333,13 @@ const stationCountSub = computed(() => {
   font-family: var(--font-mono);
 }
 .mono { font-family: var(--font-mono); }
+
+@media (max-width: 720px) {
+  /* music.vue's phone header already reads "Internet Radio" directly
+     above this page — the live sub line + search box both stay. */
+  .ri-title { display: none; }
+  .ri-head { margin-bottom: 20px; }
+  .ri-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .page-pad { padding-left: 16px; padding-right: 16px; }
+}
 </style>

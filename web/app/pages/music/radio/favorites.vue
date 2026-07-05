@@ -84,4 +84,9 @@ const subline = computed(() => {
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 18px;
 }
+
+@media (max-width: 720px) {
+  .rf-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .page-pad { padding-left: 16px; padding-right: 16px; }
+}
 </style>

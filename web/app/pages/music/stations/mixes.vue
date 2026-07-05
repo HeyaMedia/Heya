@@ -243,4 +243,17 @@ async function playMix(mix: Mix) {
 .ms-mixes-empty :deep(svg) { color: var(--gold); margin-bottom: 12px; opacity: 0.6; }
 .ms-mixes-empty h3 { font-size: 16px; color: var(--fg-1); margin-bottom: 8px; font-weight: 600; }
 .ms-mixes-empty p { font-size: 13px; max-width: 400px; margin: 0 auto; line-height: 1.5; }
+
+@media (max-width: 720px) {
+  .ms-mixes-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; }
+  /* music.vue's phone header for this route reads "Mixes" — "Mixes for
+     You" is the same page identity plus flavor text, no new information
+     (unlike the per-mix detail page, which names the seed artist), so it's
+     redundant weight here. The description line + "Build your own" CTA
+     both carry real info and stay. */
+  .ms-mixes-title { display: none; }
+  .ms-mixes-builder-cta { align-self: flex-start; }
+
+  .ms-mixes-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 14px; }
+}
 </style>

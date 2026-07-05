@@ -316,4 +316,17 @@ async function playMix(mix: Mix) {
 .ms-loading {
   color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center;
 }
+
+@media (max-width: 720px) {
+  .ms-st-head { flex-direction: column; align-items: stretch; gap: 14px; margin-bottom: 24px; padding-bottom: 20px; }
+  /* music.vue's phone section header already reads "Stations" directly
+     above this page — the sub line and the Mix Builder CTA both stay. */
+  .ms-st-title { display: none; }
+  .ms-st-builder-cta { justify-content: center; }
+
+  .ms-station-grid { gap: 10px; }
+  .ms-station-card { min-height: 100px; padding: 16px; }
+  .ms-browse-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .ms-browse-card { padding: 16px 14px; }
+}
 </style>

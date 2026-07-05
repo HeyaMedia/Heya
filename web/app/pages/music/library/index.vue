@@ -302,4 +302,16 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 .ms-empty h3 { font-size: 16px; color: var(--fg-1); margin-bottom: 8px; font-weight: 600; }
 .ms-empty a { color: var(--gold); text-decoration: none; }
 .ms-empty a:hover { text-decoration: underline; }
+
+@media (max-width: 720px) {
+  .ms-lib-head { flex-direction: column; align-items: stretch; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; }
+  /* music.vue's phone section header already reads "Library" directly
+     above this page — the sub line ("Everything in your music
+     collection.") stays since it's not duplicated anywhere else. */
+  .ms-lib-title { display: none; }
+  .ms-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .ms-stat { min-width: 0; padding: 12px 8px; }
+
+  .ms-nav-row { grid-template-columns: 1fr; margin-bottom: 28px; }
+}
 </style>

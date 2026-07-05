@@ -179,4 +179,24 @@ function genreGradient(i: number) { return GENRE_GRADIENTS[i % GENRE_GRADIENTS.l
   max-width: 520px;
 }
 .bp-empty-link { color: var(--gold); text-decoration: underline; }
+
+@media (max-width: 720px) {
+  /* music.vue's phone header already reads "Browse" directly above this
+     page — the descriptive paragraph stays, it's not duplicated elsewhere.
+     (browse/[kind]/[key].vue's own h2 names the specific mood/genre/tempo
+     bucket, which the header can't show, so that page keeps its heading —
+     it's out of this package's scope regardless.) */
+  .bp-title { display: none; }
+  .bp-sub { margin-bottom: 24px; }
+  .bp-tiles { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+  .page-pad { padding-left: 16px; padding-right: 16px; }
+
+  /* The fixed 16/10 aspect-ratio was sized for >=180px desktop tiles — at
+     ~110px phone width it shrinks to ~70px tall, too short for the
+     tempo/genre tiles' 3 lines of text (label + sub + count), so
+     overflow:hidden was clipping the label's top edge. Let content dictate
+     height instead of forcing a ratio. */
+  .bp-tile { aspect-ratio: auto; min-height: 92px; padding: 10px 12px; }
+  .bp-tile-label { font-size: 15px; }
+}
 </style>

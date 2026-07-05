@@ -413,4 +413,15 @@ async function playLovedTracks(startIdx: number) {
 .ms-empty :deep(svg) { color: var(--fg-3); margin-bottom: 12px; }
 .ms-empty h3 { font-size: 18px; color: var(--fg-1); margin-bottom: 8px; font-weight: 600; }
 .ms-empty p { font-size: 13px; line-height: 1.6; max-width: 400px; margin: 0 auto; }
+
+@media (max-width: 720px) {
+  .ms-my-head { flex-direction: column; align-items: stretch; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; }
+  /* music.vue's phone section header already reads "My Music" directly
+     above this page — the sub line stays, it's not duplicated elsewhere. */
+  .ms-my-title { display: none; }
+  .ms-stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .ms-stat { min-width: 0; padding: 12px 8px; }
+
+  .ms-track-row { padding: 10px 8px; }
+}
 </style>

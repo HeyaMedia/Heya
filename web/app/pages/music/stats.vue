@@ -236,7 +236,18 @@ function tempoLabel(band: string) {
 }
 .mono { font-family: var(--font-mono); }
 
-@media (max-width: 800px) {
+@media (max-width: 720px) {
   .ys-grid { grid-template-columns: 1fr; }
+
+  /* Phone header above the page (music.vue's compact section title) already
+     says "My Sound" — this h1 ("Your Sound") is a wording variant of the
+     exact same label with no extra information, so it's redundant weight at
+     the top of a short screen. The live-data sub line right below it (play
+     count) carries real info and stays. */
+  .ys-title { display: none; }
+
+  .ys-card { padding: 14px 16px 18px; }
+  .ys-bar-row { grid-template-columns: 88px 1fr 40px; gap: 8px; }
+  .ys-tempo-chart { gap: 8px; }
 }
 </style>

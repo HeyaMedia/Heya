@@ -137,7 +137,7 @@
             :items="actions.forTrack({ id: t.id, title: t.title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_media_item_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })"
           >
           <li
-            class="ms-track-row"
+            class="ms-track-row ms-track-row-actionable"
             :class="{ 'kb-active': isActive('track', i), 'ms-track-missing': t.available === false }"
             :data-kb-idx="flatIdx('track', i)"
             @click="t.available !== false && playTrack(i)"
@@ -152,12 +152,23 @@
               <div class="ms-track-sub">{{ t.artist_name }} · {{ t.album_title }}</div>
             </div>
             <div class="ms-track-dur">{{ formatDuration(t.duration) }}</div>
+            <button
+              v-if="isPhone"
+              type="button"
+              class="ms-track-more"
+              aria-label="More actions"
+              @click.stop="openTrackSheet(t)"
+            >
+              <Icon name="more" :size="18" />
+            </button>
           </li>
           </AppContextMenu>
         </ul>
       </section>
 
-      <!-- Vibe Search results — distinct section, gold-tinted -->
+      <!-- Vibe Search results — distinct section, gold-tinted. No context
+           menu wired here today (unlike the Tracks section above), so this
+           only gets the layout/tap-height fixes, not a "..." sheet. -->
       <section v-if="vibeResults.length" class="ms-section ms-vibe-section">
         <div class="ms-section-head">
           <h2 class="section-title-lg">
@@ -192,6 +203,12 @@
         <p>Try a different spelling, or press <button type="button" class="ms-inline-btn" @click="runVibe">Vibe Search</button> to find tracks that match this as a feeling.</p>
       </div>
     </div>
+
+    <ActionSheet
+      v-model:open="trackSheetOpen"
+      :items="trackSheetItems"
+      :title="trackSheetTarget?.title"
+    />
   </div>
 </template>
 
@@ -209,6 +226,35 @@ const { $heya } = useNuxtApp()
 const recent = useRecentSearches('music')
 const recentEntries = recent.entries
 const actions = useMusicActions()
+const { isPhone } = useViewport()
+
+// Phone-only "..." sheet for the Tracks section — same context-menu items
+// AppContextMenu already exposes via right-click/long-press, surfaced as an
+// always-visible tap target (see docs/responsive-plan.md W2c). The Vibe
+// Search results below have no context menu wired today, so they don't get
+// this — only the layout gets touched there.
+const trackSheetOpen = ref(false)
+const trackSheetTarget = ref<TrackRow | null>(null)
+function openTrackSheet(t: TrackRow) {
+  trackSheetTarget.value = t
+  trackSheetOpen.value = true
+}
+const trackSheetItems = computed(() => {
+  const t = trackSheetTarget.value
+  if (!t) return []
+  return actions.forTrack({
+    id: t.id,
+    title: t.title,
+    artist: t.artist_name,
+    album: t.album_title,
+    duration: t.duration,
+    album_id: t.album_id,
+    artist_id: t.artist_media_item_id,
+    artist_slug: t.artist_slug,
+    album_slug: t.album_slug,
+    available: t.available,
+  })
+})
 
 // Source of truth: URL query param. Editing the input updates it after a
 // debounce so reloads / bookmarks / shareable URLs all work consistently.
@@ -637,6 +683,12 @@ async function playVibe(startIdx: number) {
 .ms-grid { display: grid; gap: 16px; }
 .ms-grid-tiles { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
 .ms-grid-artists { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+/* Grid items stretch to row height by default, and MusicCard's `.mc` is
+   height:100% — the stretched card swallows the space the row reserved for
+   .ms-circle-label, pushing the label below the item box where it overlaps
+   the next row (invisible on one-row desktop layouts, glaring on a 3-column
+   phone grid). start-aligning keeps the card at its intrinsic square. */
+.ms-grid-artists .ms-card-link { align-self: start; }
 .ms-circle-label {
   text-align: center;
   margin-top: 8px;
@@ -732,5 +784,32 @@ async function playVibe(startIdx: number) {
   background: rgba(255, 118, 118, 0.06);
   border: 1px solid rgba(255, 118, 118, 0.2);
   margin-top: 12px;
+}
+
+/* "..." button — phone-only, always visible (no hover-only affordance).
+   Mirrors TrackList.vue's .tl-phone-more treatment. */
+.ms-track-more {
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.ms-track-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+
+@media (max-width: 720px) {
+  .ms-search-head { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 20px; }
+  .ms-vibe-btn { justify-content: center; height: 44px; }
+
+  .ms-grid-tiles { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+  .ms-grid-artists { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px; }
+
+  /* Comfortable tap height on every row (Tracks + Vibe share this class);
+     the extra "..." column only applies where the button actually renders. */
+  .ms-track-row { padding: 10px 8px; }
+  .ms-track-row-actionable { grid-template-columns: 44px 1fr auto auto; }
 }
 </style>

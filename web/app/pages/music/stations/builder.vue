@@ -748,4 +748,31 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-empty :deep(svg) { color: var(--fg-3); margin-bottom: 12px; }
 .ms-mb-empty p { font-size: 13px; }
 .ms-mb-empty strong { color: var(--fg-1); }
+
+/* ── Phone (<=720px) ──────────────────────────────────────────────────
+   This page is already a single vertical flow (tabs → seed input → chips
+   → controls → results) — there's no side-by-side two-pane layout to
+   restack, just the usual overflow/tap-target fixes. Functional over
+   pretty per docs/responsive-plan.md W2c. */
+@media (max-width: 720px) {
+  /* music.vue's phone header already reads "Mix Builder" — the
+     description line right below stays, it's not duplicated elsewhere. */
+  .ms-mb-title { display: none; }
+  .ms-mb-head { margin-bottom: 18px; }
+
+  /* 4 pill tabs at `width: fit-content` overflow a 390px viewport — scroll
+     the strip horizontally instead of blowing out the page width. */
+  .ms-mb-tabs { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .ms-mb-tabs::-webkit-scrollbar { display: none; }
+  .ms-mb-tab { flex-shrink: 0; }
+
+  .ms-mb-controls { flex-direction: column; align-items: stretch; gap: 14px; }
+  .ms-mb-control { width: 100%; }
+  .ms-mb-build-btn { justify-content: center; width: 100%; height: 44px; }
+
+  .ms-mb-results-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .ms-mb-results-actions { flex-wrap: wrap; }
+
+  .ms-mb-track-row { padding: 10px 8px; }
+}
 </style>

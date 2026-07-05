@@ -284,4 +284,13 @@ function formatProgress(ep: ContinueEpisode) {
 .pp-progress-bar { flex: 1; height: 3px; background: rgba(255, 255, 255, 0.06); border-radius: 999px; overflow: hidden; }
 .pp-progress-fill { height: 100%; background: var(--gold); }
 .mono { font-family: var(--font-mono); }
+
+@media (max-width: 720px) {
+  /* music.vue's phone header already reads "Podcasts" directly above this
+     page — the live sub line + search box both stay. */
+  .pp-title { display: none; }
+  .pp-head { margin-bottom: 20px; }
+  .pp-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .page-pad { padding-left: 16px; padding-right: 16px; }
+}
 </style>

@@ -195,4 +195,22 @@ function refetch() { stationQuery.refetch() }
   background: var(--gold-soft);
   color: var(--gold);
 }
+
+@media (max-width: 720px) {
+  .ms-st-icon-wrap { width: 52px; height: 52px; }
+  .ms-st-title { font-size: 24px; }
+
+  /* 7 decade pills at `width: fit-content` overflow a 390px viewport and
+     blow out the page's scrollWidth — let the strip scroll horizontally
+     within itself instead of the whole page gaining a scrollbar. */
+  .ms-st-decade-row {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .ms-st-decade-row::-webkit-scrollbar { display: none; }
+  .ms-st-decade-btn { flex-shrink: 0; }
+}
 </style>
