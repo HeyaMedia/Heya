@@ -63,7 +63,11 @@ func (a *App) UpdateWatchProgress(ctx context.Context, userID int64, entityType 
 		entityType = "movie"
 	}
 
-	completed := total > 0 && progress >= total-30
+	// Treat "watched" as 90% through — matches the Plex/Jellyfin convention.
+	// A fixed 30s-from-end tail left anything with a minute of credits still
+	// sitting in Continue Watching. Integer math (progress ≥ 90% of total)
+	// avoids float rounding; total is seconds so total*9 can't overflow int32.
+	completed := total > 0 && progress >= total*9/10
 
 	if a.hub != nil {
 		a.hub.Emit(eventhub.EventMediaWatched, eventhub.WatchPayload{

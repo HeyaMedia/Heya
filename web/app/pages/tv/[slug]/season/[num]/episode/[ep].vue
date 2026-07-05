@@ -213,6 +213,7 @@ function episodeStillUrl(ep: any) {
   return `/api/media/${detail.value.media_item.id}/image/still?label=${label}`
 }
 
+const invalidateContinueWatching = useInvalidateContinueWatching()
 async function toggleWatched() {
   if (!episode.value) return
   const { $heya } = useNuxtApp()
@@ -229,6 +230,7 @@ async function toggleWatched() {
     })
     watchedEpisodes.value.add(episode.value.id)
   }
+  invalidateContinueWatching()
 }
 
 function play() {

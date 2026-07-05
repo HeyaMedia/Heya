@@ -25,6 +25,11 @@ withDefaults(defineProps<{
   progressPct?: number
   /** Renders a trashcan badge top-right and greys + dims the tile. */
   missing?: boolean
+  /** When set, the title becomes a link to this route (the entity detail
+   *  page) even if the surrounding tile navigates elsewhere — e.g. a
+   *  Continue Watching tile opens the player, but its title deep-links to
+   *  the series. Left empty, the title stays plain text. */
+  titleTo?: string
 }>(), {
   src: '',
   idx: 0,
@@ -55,7 +60,8 @@ withDefaults(defineProps<{
       <slot name="badges" />
 
       <div class="mediac-info">
-        <div class="mediac-title">{{ title }}</div>
+        <NuxtLink v-if="titleTo" :to="titleTo" class="mediac-title mediac-title-link" @click.stop>{{ title }}</NuxtLink>
+        <div v-else class="mediac-title">{{ title }}</div>
         <div v-if="subtitle" class="mediac-sub">{{ subtitle }}</div>
       </div>
 
@@ -110,6 +116,14 @@ withDefaults(defineProps<{
   -webkit-box-orient: vertical;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
+/* The overlay is pointer-events:none so the tile's own click still lands;
+   re-enable it just for the title link, and only over the text itself. */
+.mediac-title-link {
+  pointer-events: auto;
+  width: fit-content;
+  transition: color 0.12s;
+}
+.mediac-title-link:hover { color: var(--gold); }
 .mediac-sub {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.7);

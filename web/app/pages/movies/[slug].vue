@@ -418,6 +418,7 @@ async function toggleFavorite() {
   isFavorited.value = res.favorited
 }
 
+const invalidateContinueWatching = useInvalidateContinueWatching()
 async function toggleWatched() {
   if (!detail.value) return
   const { $heya } = useNuxtApp()
@@ -427,6 +428,7 @@ async function toggleWatched() {
     body: { watched: !isWatched.value } as any,
   })
   isWatched.value = !isWatched.value
+  invalidateContinueWatching()
 }
 
 async function loadState() {

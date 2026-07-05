@@ -184,6 +184,8 @@ function isSeasonWatched(s: any) {
   return eps.every((ep: any) => watchedEpisodes.value.has(ep.id))
 }
 
+const invalidateContinueWatching = useInvalidateContinueWatching()
+
 async function toggleEpisodeWatched(ep: any) {
   const watched = isWatched(ep.id)
   const { $heya } = useNuxtApp()
@@ -200,6 +202,7 @@ async function toggleEpisodeWatched(ep: any) {
     })
     watchedEpisodes.value.add(ep.id)
   }
+  invalidateContinueWatching()
 }
 
 async function toggleSeasonWatched() {
@@ -212,6 +215,7 @@ async function toggleSeasonWatched() {
     body: { watched: !allWatched.value } as any,
   })
   await loadWatchState()
+  invalidateContinueWatching()
 }
 
 async function toggleFavorite() {

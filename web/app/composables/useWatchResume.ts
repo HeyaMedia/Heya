@@ -10,7 +10,7 @@
 // button just defaults to "Play" (the dialog inside the player will
 // catch the saved progress via its own API call regardless).
 
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 interface ContinueWatchingRow {
   entity_type: string
@@ -33,6 +33,17 @@ export function useWatchResumeList() {
     queryFn: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingRow[],
     staleTime: 1000 * 30,
   })
+}
+
+// Drop the shared CW cache so the home rail + Play/Resume buttons re-fetch.
+// Call after anything that changes watched state (mark watched/unwatched)
+// — the backend excludes completed items and deletes rows on unwatch, but
+// the FE would otherwise keep showing the stale tile until the 30s staleTime
+// (or a hard reload). Returns the composable so callers can grab it at
+// setup time and invoke on demand.
+export function useInvalidateContinueWatching() {
+  const queryClient = useQueryClient()
+  return () => queryClient.invalidateQueries({ queryKey: CW_QUERY_KEY })
 }
 
 // useWatchResume returns a reactive object describing whether the given

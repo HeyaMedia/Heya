@@ -118,6 +118,7 @@
                     :src="usePosterUrl(item.id)"
                     aspect="2/3"
                     :title="item.title"
+                    :title-to="mediaUrl(item)"
                     :subtitle="item.year + (item.rating ? ` · ${item.rating.toFixed(1)}★` : '')"
                     :missing="item.available === false"
                   >
@@ -330,6 +331,7 @@ const { dragState, onDragStart, onDragEnd, onListDragOver, onListDragLeave, onLi
 // at item-build time so each render reflects the latest watched/favorited
 // state; reka only mounts the menu on right-click so this is cheap.
 const { $heya } = useNuxtApp()
+const invalidateContinueWatching = useInvalidateContinueWatching()
 const cardCtxOpts = computed(() => {
   return {
     watchedSet: watchedSet.value,
@@ -345,6 +347,7 @@ const cardCtxOpts = computed(() => {
         if (watched) watchedSet.value.add(id)
         else watchedSet.value.delete(id)
         watchedSet.value = new Set(watchedSet.value)
+        invalidateContinueWatching()
       } catch { /* ignore */ }
     },
     onToggleFavorite: async (id: number, favorited: boolean) => {

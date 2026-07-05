@@ -109,6 +109,7 @@
                     :src="usePosterUrl(item.id)"
                     aspect="2/3"
                     :title="item.title"
+                    :title-to="mediaUrl(item)"
                     :subtitle="item.year + (item.rating ? ` · ${item.rating.toFixed(1)}★` : '')"
                     :missing="item.available === false"
                   >
@@ -323,6 +324,7 @@ const { buildItems: buildCardCtxItems } = useCardContextItems()
 const { dragState, onDragStart, onDragEnd, onListDragOver, onListDragLeave, onListDrop } = useDragDrop()
 
 const { $heya } = useNuxtApp()
+const invalidateContinueWatching = useInvalidateContinueWatching()
 const cardCtxOpts = computed(() => {
   return {
     watchedSet: watchedSet.value,
@@ -335,6 +337,7 @@ const cardCtxOpts = computed(() => {
           path: { id },
           body: { watched } as any,
         })
+        invalidateContinueWatching()
       } catch { /* ignore */ }
     },
     onToggleFavorite: async (id: number, favorited: boolean) => {

@@ -303,6 +303,7 @@ async function toggleFavorite() {
 
 // Watched (for movies)
 const isWatched = ref(false)
+const invalidateContinueWatching = useInvalidateContinueWatching()
 async function toggleWatched() {
   if (!detail.value) return
   const { $heya } = useNuxtApp()
@@ -312,6 +313,9 @@ async function toggleWatched() {
     body: { watched: !isWatched.value } as any,
   })
   isWatched.value = !isWatched.value
+  // Marking watched removes it from Continue Watching (completed=true);
+  // unmarking deletes the progress row. Either way the home rail is stale.
+  invalidateContinueWatching()
 }
 
 // Lists — AddToListDialog owns loading/creation/toggling.

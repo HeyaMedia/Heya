@@ -502,6 +502,8 @@ function seasonFullyWatched(s: any): boolean {
   return total > 0 && watched >= total
 }
 
+const invalidateContinueWatching = useInvalidateContinueWatching()
+
 async function toggleSeasonWatched(s: any) {
   const watched = seasonFullyWatched(s)
   const { $heya } = useNuxtApp()
@@ -511,6 +513,7 @@ async function toggleSeasonWatched(s: any) {
     body: { watched: !watched } as any,
   })
   await loadState()
+  invalidateContinueWatching()
 }
 
 async function toggleShowWatched() {
@@ -522,6 +525,7 @@ async function toggleShowWatched() {
     body: { watched: !showFullyWatched.value } as any,
   })
   await loadState()
+  invalidateContinueWatching()
 }
 
 // User lists — AddToListDialog owns loading/creation/toggling.

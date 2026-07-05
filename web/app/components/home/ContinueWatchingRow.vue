@@ -21,6 +21,7 @@
           :src="thumbUrl(item)"
           aspect="16/9"
           :title="item.title"
+          :title-to="detailUrl(item)"
           :subtitle="bottomLine(item)"
           :badge-tl="episodeBadge(item)"
           :badge-tr="formatRemaining(item)"
@@ -100,6 +101,13 @@ function episodeBadge(item: ContinueWatchingItem): string {
 function bottomLine(item: ContinueWatchingItem): string {
   if (item.entity_type === 'episode' && item.episode_title) return item.episode_title
   return ''
+}
+
+// The tile itself opens the player; the title deep-links to the entity
+// (series for episodes, the movie otherwise) so you can reach the detail
+// page without playing.
+function detailUrl(item: ContinueWatchingItem): string {
+  return mediaUrl({ id: item.media_item_id, title: item.title, slug: item.slug, media_type: item.media_type })
 }
 </script>
 
