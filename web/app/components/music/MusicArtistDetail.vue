@@ -85,7 +85,7 @@
         >
           <Icon name="radio" :size="18" />
         </button>
-        <button v-if="isAdmin" class="hero-round" title="Edit Metadata" @click="showMetadataEditor = true">
+        <button v-if="isAdmin" class="hero-round hero-edit" title="Edit Metadata" @click="showMetadataEditor = true">
           <Icon name="pencil" :size="17" />
         </button>
       </div>
@@ -1148,7 +1148,22 @@ if (import.meta.client) {
   .hero-stats { justify-content: center; }
   .hero-ext :deep(.ext-links) { justify-content: center; }
   .hero-floating-actions { position: static; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
-  .hero-floating-actions .hero-round { width: 38px; height: 38px; }
-  .hero-floating-actions .hero-round-primary { width: 48px; height: 48px; }
+  .hero-floating-actions .hero-round { width: 44px; height: 44px; }
+  .hero-floating-actions .hero-round-primary { width: 56px; height: 56px; }
+  /* Desktop `.hero` bottom-aligns its row children (align-items: flex-end);
+     after the column flip above that axis becomes horizontal, shoving this
+     shelf-sized row against the right edge (the edit button rendered half
+     off-screen). Center it on its own axis instead. */
+  .hero-floating-actions { align-self: center; gap: 14px; }
+  /* The metadata editor is a desktop-sized surface — no entry point on
+     phones (same call as the album page). */
+  .hero-edit { display: none; }
+
+  /* Popular Tracks: the 5-star widget ate the title column (titles
+     truncated to a few characters at 390px). Ratings are hidden on phone —
+     rate from the track's long-press / ⋯ menus instead — and the freed
+     column plus taller rows give the text room to breathe. */
+  .tt-stars { display: none; }
+  .tt-row { grid-template-columns: 32px 1fr max-content; gap: 10px; padding: 10px 8px; min-height: 44px; }
 }
 </style>

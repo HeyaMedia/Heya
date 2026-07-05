@@ -12,7 +12,9 @@
              with a section title + a Browse button that opens the nav sheet
              below. Desktop/tablet are unchanged (MusicSidebar stays). -->
         <div v-if="isPhone" class="music-phone-header">
-          <div class="mph-title">{{ phoneSectionTitle }}</div>
+          <!-- The title doubles as "back to music home" — same destination
+               as the bottom nav's Music tab, one fewer reach. -->
+          <NuxtLink to="/music" class="mph-title">{{ phoneSectionTitle }}</NuxtLink>
           <button type="button" class="mph-browse-btn" @click="browseOpen = true">
             <Icon name="list" :size="16" />
             <span>Browse</span>

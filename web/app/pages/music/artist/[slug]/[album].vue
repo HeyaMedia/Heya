@@ -327,7 +327,7 @@ function playFromIndex(i: number) {
         >
           <Icon name="radio" :size="18" />
         </button>
-        <button v-if="isAdmin" class="hero-round" title="Edit Metadata" @click="showAlbumEdit = true">
+        <button v-if="isAdmin" class="hero-round hero-edit" title="Edit Metadata" @click="showAlbumEdit = true">
           <Icon name="pencil" :size="17" />
         </button>
       </div>
@@ -615,7 +615,18 @@ function playFromIndex(i: number) {
     justify-content: center;
     flex-wrap: wrap;
     margin-top: 4px;
+    /* Desktop `.hero` bottom-aligns row children; after the column flip
+       that axis turns horizontal and shoves this shelf-sized row toward
+       the right edge — center it on its own axis. */
+    align-self: center;
+    gap: 14px;
   }
+  /* The inline star widget stretched the action row edge-to-edge with the
+     buttons scattered around it — rate from a track's ⋯ menu or desktop
+     instead. The metadata editor is a desktop-sized surface, so its entry
+     point goes too. */
+  .hero-rate { display: none; }
+  .hero-edit { display: none; }
   .similar-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px 12px; }
 }
 </style>
