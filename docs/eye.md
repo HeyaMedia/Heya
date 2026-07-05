@@ -54,13 +54,23 @@ var on EVERY eye invocation, not just `start`.
 ## Mobile viewport emulation
 
 `eye viewport` persists a CDP device-metrics override (`{width, height, dpr,
-mobile: true, touch}`) into the same `state.json` that already tracks
+mobile: false, touch}`) into the same `state.json` that already tracks
 `origin` — every subcommand re-connects fresh and re-applies it before doing
 its own work, so `goto`, `shot`, `click`, `eval`, etc. all see the emulated
 size without any extra flags. It stacks with `--touch` for
 `Emulation.setTouchEmulationEnabled`, which is what makes
 `navigator.maxTouchPoints`/`matchMedia('(pointer: coarse)')` report as a
 touch device — the app's `useViewport()`/`isCoarse` composable keys off that.
+
+`mobile` is deliberately **false**: with `mobile: true`, any page whose
+content min-width exceeds the requested width makes Chrome's mobile
+emulation zoom out to fit — the layout viewport silently becomes the content
+width, media queries evaluate in the wrong band, and the screenshot shows a
+"working" desktop layout at a width that is actually broken (this burned a
+tablet-band survey once: 744/821 shots came back rendered at ~1151px).
+`mobile: false` pins the layout viewport at exactly the requested size and
+lets overflow show as overflow. Sanity-check any new size with
+`eye eval 'window.innerWidth'` — it must echo the width you asked for.
 
 Mobile testing recipe:
 

@@ -168,7 +168,10 @@ async function applyViewportOverride(cdp: CDP, s: State) {
       width: v.width,
       height: v.height,
       deviceScaleFactor: v.dpr,
-      mobile: v.mobile,
+      // Always false — never trust v.mobile from a stale state file. See the
+      // comment in cmd_viewport: mobile:true lets content overflow silently
+      // widen the layout viewport, which falsifies breakage screenshots.
+      mobile: false,
     })
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: v.touch })
   } else {
@@ -280,7 +283,16 @@ async function cmd_viewport(spec?: string, ...rest: string[]) {
     if (rest[i] === '--dpr') dpr = parseFloat(rest[++i])
     else if (rest[i] === '--touch') touch = true
   }
-  s.viewport = { width: parseInt(m[1], 10), height: parseInt(m[2], 10), dpr, mobile: true, touch }
+  // mobile:false is deliberate. With mobile:true, whenever page content
+  // overflows the requested width (e.g. a shell with a larger min-content
+  // width than the emulated viewport), Chrome's mobile emulation zooms out
+  // to fit: the layout viewport silently BECOMES the content width, media
+  // queries evaluate in the wrong band, and screenshots show a "working"
+  // desktop layout at a width that is actually broken. mobile:false pins the
+  // layout viewport at exactly WxH and lets overflow be overflow — which is
+  // the whole point of viewport verification. Touch emulation is orthogonal
+  // and still driven by --touch.
+  s.viewport = { width: parseInt(m[1], 10), height: parseInt(m[2], 10), dpr, mobile: false, touch }
   saveState(s)
   console.log(`Viewport override: ${s.viewport.width}x${s.viewport.height} @${dpr}x${touch ? ', touch' : ''}`)
 }
