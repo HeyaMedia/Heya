@@ -11,6 +11,7 @@ const sys = ref<Sys | null>(null)
 const logLevel = ref<LogLevel | null>(null)
 const loading = ref(true)
 const setting = ref(false)
+const bundling = ref(false)
 const { flash } = useFlash()
 
 // History of last ~60 samples for sparklines. We pull /api/admin/system every
@@ -81,6 +82,31 @@ function fmtNumber(n?: number) {
   return n.toLocaleString()
 }
 
+// Full read-only diagnostic bundle — app/config/db/libraries/tools/queue/
+// storage/logs, secrets redacted server-side (see internal/service/doctor.go)
+// so this is safe to paste into a bug report or Discord message. Same
+// blob-download pattern as the logs page's Export button.
+async function downloadSupportBundle() {
+  bundling.value = true
+  try {
+    const report = await $heya('/api/admin/doctor')
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `heya-doctor-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    flash.value = { kind: 'ok', text: 'Support bundle downloaded.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Failed to build support bundle.' }
+  } finally {
+    bundling.value = false
+  }
+}
+
 // pprof endpoints — admin-only binary profiles. We open them in a new tab
 // rather than fetching ourselves; the browser handles the download.
 const PPROF = [
@@ -113,6 +139,14 @@ onBeforeUnmount(() => {
         level on the fly, or grab a pprof profile.
       </p>
     </header>
+
+    <SettingsSection title="Support bundle" icon="clipboard"
+      description="Everything a maintainer needs in one file — app version, config (with provenance, secrets redacted), database health, library path checks, ffmpeg/ffprobe, queue counts, and storage. Read-only; safe to paste into a bug report.">
+      <button class="sv2-btn primary" :disabled="bundling" @click="downloadSupportBundle">
+        <Icon :name="bundling ? 'spinner' : 'download'" :size="12" />
+        {{ bundling ? 'Building…' : 'Download support bundle' }}
+      </button>
+    </SettingsSection>
 
     <div v-if="loading && !sys" class="loading-state">
       <Icon name="spinner" :size="16" /> Probing runtime…

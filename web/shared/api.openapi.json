@@ -2175,6 +2175,503 @@
         ],
         "type": "object"
       },
+      "DoctorAppSection": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "go_version": {
+            "type": "string"
+          },
+          "goarch": {
+            "type": "string"
+          },
+          "goos": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "modified": {
+            "description": "Built from a working tree with uncommitted changes",
+            "type": "boolean"
+          },
+          "num_cpu": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "revision_time": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "go_version",
+          "goos",
+          "goarch",
+          "num_cpu",
+          "hostname",
+          "pid",
+          "uptime_seconds"
+        ],
+        "type": "object"
+      },
+      "DoctorConfigField": {
+        "additionalProperties": false,
+        "properties": {
+          "env_var": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "source"
+        ],
+        "type": "object"
+      },
+      "DoctorConfigSection": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DoctorConfigField"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "DoctorDatabaseSection": {
+        "additionalProperties": false,
+        "properties": {
+          "database_name": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "migration_version": {
+            "description": "Latest applied goose migration id",
+            "format": "int64",
+            "type": "integer"
+          },
+          "pool": {
+            "$ref": "#/components/schemas/DoctorPoolStats"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "row_counts": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Exact for libraries; estimated from pg_class.reltuples for the rest",
+            "type": "object"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reachable",
+          "pool"
+        ],
+        "type": "object"
+      },
+      "DoctorLibrariesSection": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "libraries": {
+            "items": {
+              "$ref": "#/components/schemas/DoctorLibrary"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "missing_media_total": {
+            "description": "Global count of media with no live file left (dashboard's cached missing_count) — not broken out per library because that anti-join is only cheap in aggregate",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "libraries",
+          "missing_media_total"
+        ],
+        "type": "object"
+      },
+      "DoctorLibrary": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "file_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "file_status_counts": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "library_files grouped by status: pending/matched/unmatched/ignored/error",
+            "type": "object"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/DoctorLibraryPath"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "media_type",
+          "paths",
+          "file_count"
+        ],
+        "type": "object"
+      },
+      "DoctorLibraryPath": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "is_smb": {
+            "type": "boolean"
+          },
+          "path": {
+            "description": "SMB credentials are redacted; see vfs.RedactPath",
+            "type": "string"
+          },
+          "readable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "exists",
+          "readable"
+        ],
+        "type": "object"
+      },
+      "DoctorLogsSection": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "type": "object"
+      },
+      "DoctorPathUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "free_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "total_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "used_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "used_pct": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "exists"
+        ],
+        "type": "object"
+      },
+      "DoctorPoolStats": {
+        "additionalProperties": false,
+        "properties": {
+          "acquired_connections": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "idle_connections": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "max_connections": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "total_connections": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_connections",
+          "acquired_connections",
+          "idle_connections",
+          "max_connections"
+        ],
+        "type": "object"
+      },
+      "DoctorQueueCount": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "count"
+        ],
+        "type": "object"
+      },
+      "DoctorQueueSection": {
+        "additionalProperties": false,
+        "properties": {
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/DoctorQueueCount"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DoctorReport": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DoctorReport.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "app": {
+            "$ref": "#/components/schemas/DoctorAppSection"
+          },
+          "config": {
+            "$ref": "#/components/schemas/DoctorConfigSection"
+          },
+          "database": {
+            "$ref": "#/components/schemas/DoctorDatabaseSection"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "libraries": {
+            "$ref": "#/components/schemas/DoctorLibrariesSection"
+          },
+          "logs": {
+            "$ref": "#/components/schemas/DoctorLogsSection"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/DoctorQueueSection"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/DoctorStorageSection"
+          },
+          "tools": {
+            "$ref": "#/components/schemas/DoctorToolsSection"
+          }
+        },
+        "required": [
+          "generated_at",
+          "app",
+          "config",
+          "database",
+          "libraries",
+          "tools",
+          "queue",
+          "logs",
+          "storage"
+        ],
+        "type": "object"
+      },
+      "DoctorStorageSection": {
+        "additionalProperties": false,
+        "properties": {
+          "data_dir": {
+            "$ref": "#/components/schemas/DoctorPathUsage"
+          },
+          "error": {
+            "type": "string"
+          },
+          "library_disk_usage": {
+            "description": "Cached results from the last scan_library_disk run; empty until a scan completes. Never triggers a fresh walk.",
+            "items": {
+              "$ref": "#/components/schemas/LibraryDiskUsage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "transcode_dir": {
+            "$ref": "#/components/schemas/DoctorPathUsage"
+          },
+          "transcode_items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "transcode_used_mb": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data_dir",
+          "transcode_dir"
+        ],
+        "type": "object"
+      },
+      "DoctorTool": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "found"
+        ],
+        "type": "object"
+      },
+      "DoctorToolsSection": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "ffmpeg": {
+            "$ref": "#/components/schemas/DoctorTool"
+          },
+          "ffprobe": {
+            "$ref": "#/components/schemas/DoctorTool"
+          }
+        },
+        "required": [
+          "ffmpeg",
+          "ffprobe"
+        ],
+        "type": "object"
+      },
       "Download-assetRequest": {
         "additionalProperties": false,
         "properties": {
@@ -14726,6 +15223,49 @@
           }
         ],
         "summary": "Database size, pool stats, version",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/doctor": {
+      "get": {
+        "operationId": "admin-doctor",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoctorReport"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Full diagnostic support bundle (redacted, safe to paste)",
         "tags": [
           "Admin"
         ]

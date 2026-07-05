@@ -73,6 +73,7 @@ var adminRoutes = []struct {
 	{"storage", http.MethodGet, "/api/admin/storage", nil},
 	{"storage/scan", http.MethodPost, "/api/admin/storage/scan", map[string]any{"library_id": 0}},
 	{"db", http.MethodGet, "/api/admin/db", nil},
+	{"doctor", http.MethodGet, "/api/admin/doctor", nil},
 	{"listeners", http.MethodGet, "/api/admin/listeners", nil},
 	{"log-level/get", http.MethodGet, "/api/admin/log-level", nil},
 	{"log-level/put", http.MethodPut, "/api/admin/log-level", map[string]any{"level": "info"}},

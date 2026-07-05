@@ -70,6 +70,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerAuthRoutes(api, app)
 	registerAdminRoutes(api, app, o.logBuf)
 	registerAdminSystemRoutes(api, app, o.hub)
+	registerAdminDoctorRoutes(api, app, o.logBuf)
 	registerTailscaleRoutes(api, app, cfg)
 	registerJellyfinConfigRoutes(api, app)
 	registerLibraryRoutes(api, app)
