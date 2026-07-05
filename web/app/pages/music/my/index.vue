@@ -31,9 +31,12 @@
       title="My Playlists"
       :card-size="170"
     >
-      <NuxtLink
+      <AppContextMenu
         v-for="pl in playlists"
         :key="`pl-${pl.id}`"
+        :items="actions.forPlaylist({ id: pl.id, name: pl.name, track_count: pl.track_count })"
+      >
+      <NuxtLink
         :to="`/music/playlist/${pl.id}`"
         class="ms-card-link"
       >
@@ -46,6 +49,7 @@
           no-play
         />
       </NuxtLink>
+      </AppContextMenu>
     </MusicScrollRow>
 
     <!-- Liked Artists -->
@@ -55,9 +59,12 @@
       title-href="/music/my/artists"
       :card-size="160"
     >
-      <NuxtLink
+      <AppContextMenu
         v-for="ar in lovedArtists"
         :key="`la-${ar.id}`"
+        :items="actions.forArtist({ id: ar.id, name: ar.name, slug: ar.slug, media_item_id: ar.media_item_id })"
+      >
+      <NuxtLink
         :to="`/music/artist/${ar.slug}`"
         class="ms-card-link"
       >
@@ -70,6 +77,7 @@
         />
         <div class="ms-circle-label">{{ ar.name }}</div>
       </NuxtLink>
+      </AppContextMenu>
     </MusicScrollRow>
 
     <!-- Liked Albums -->
@@ -79,9 +87,12 @@
       title-href="/music/my/albums"
       :card-size="170"
     >
-      <NuxtLink
+      <AppContextMenu
         v-for="al in lovedAlbums"
         :key="`lal-${al.id}`"
+        :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name })"
+      >
+      <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="ms-card-link"
       >
@@ -93,6 +104,7 @@
           @play="playLovedAlbum(al)"
         />
       </NuxtLink>
+      </AppContextMenu>
     </MusicScrollRow>
 
     <!-- Loved Songs — rated 1★+, capped at 8 so it doesn't dominate. -->
@@ -141,6 +153,9 @@ definePageMeta({ layout: 'default' })
 
 const { play, queue } = usePlayer()
 const { $heya } = useNuxtApp()
+// Right-click on desktop, long-press on touch — the card shelves' only
+// play/queue path on coarse pointers (hover-play is hidden there).
+const actions = useMusicActions()
 
 interface PlaylistRow {
   id: number

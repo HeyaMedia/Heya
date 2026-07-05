@@ -56,9 +56,12 @@
       title-href="/music/albums"
       :card-size="170"
     >
-      <NuxtLink
+      <AppContextMenu
         v-for="(al, i) in recentAlbums"
         :key="`ra-${al.id}`"
+        :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name })"
+      >
+      <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="ms-card-link"
       >
@@ -71,6 +74,7 @@
           @play="playAlbum(al, i)"
         />
       </NuxtLink>
+      </AppContextMenu>
     </MusicScrollRow>
 
     <!-- Recently Added Artists -->
@@ -80,9 +84,12 @@
       title-href="/music/artists"
       :card-size="170"
     >
-      <NuxtLink
+      <AppContextMenu
         v-for="ar in recentArtists"
         :key="`ar-${ar.id}`"
+        :items="actions.forArtist({ id: ar.id, name: ar.name, slug: ar.slug, media_item_id: ar.media_item_id })"
+      >
+      <NuxtLink
         :to="`/music/artist/${ar.slug}`"
         class="ms-card-link"
       >
@@ -95,6 +102,7 @@
           no-play
         />
       </NuxtLink>
+      </AppContextMenu>
     </MusicScrollRow>
 
     <div v-if="homeLoading && !recentAlbums.length" class="ms-loading">Loading library overview…</div>
@@ -115,6 +123,9 @@ definePageMeta({ layout: 'default' })
 
 const { play, queue } = usePlayer()
 const { $heya } = useNuxtApp()
+// Right-click on desktop, long-press on touch — the card shelves' only
+// play/queue path on coarse pointers (hover-play is hidden there).
+const actions = useMusicActions()
 
 interface RecentAlbumRow {
   id: number
