@@ -55,10 +55,12 @@ type TranscodeSession struct {
 	// Zero-valued (Running=false) until the head starts emitting.
 	progress ProgressStats
 
-	// lastRequestedSeg is the highest segment index any player request has
-	// touched. It anchors the lead-cap throttle: once the encoder runs more
+	// lastRequestedSeg is the segment index of the most recent player
+	// request. It anchors the lead-cap throttle: once the encoder runs more
 	// than LeadCapSeconds ahead of this point, the head is killed to stop
-	// transcoding content the player isn't likely to need.
+	// transcoding content the player isn't likely to need. Most-recent (not
+	// all-time max) so the anchor follows the player back down after a
+	// backward seek.
 	lastRequestedSeg int
 
 	// headStopReason explains why the most recent head exited. "" means the
@@ -199,12 +201,22 @@ func (s *TranscodeSession) IsFMP4() bool {
 	return s.SegExt == ".m4s"
 }
 
+// segmentReadyChan returns the ready latch for a segment under the session
+// mutex. Callers must go through this instead of touching s.segments directly:
+// resetSegment swaps latch pointers at runtime, so unsynchronized slice reads
+// would race.
+func (s *TranscodeSession) segmentReadyChan(index int) <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.segments[index].ch
+}
+
 func (s *TranscodeSession) IsSegmentReady(index int) bool {
 	if index < 0 || index >= s.TotalSegs {
 		return false
 	}
 	select {
-	case <-s.segments[index].ch:
+	case <-s.segmentReadyChan(index):
 		return true
 	default:
 		return false
@@ -216,11 +228,29 @@ func (s *TranscodeSession) WaitForSegment(ctx context.Context, index int) bool {
 		return false
 	}
 	select {
-	case <-s.segments[index].ch:
+	case <-s.segmentReadyChan(index):
 		return true
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func (s *TranscodeSession) segmentFileExists(idx int) bool {
+	_, err := os.Stat(s.SegmentPath(idx))
+	return err == nil
+}
+
+// resetSegment replaces a segment's ready latch with a fresh one. Used when a
+// segment is marked ready but its file has vanished from disk (cache eviction,
+// manual deletion): the closed latch would otherwise make every request serve
+// a 404 forever with no way to trigger a re-encode.
+func (s *TranscodeSession) resetSegment(idx int) {
+	if idx < 0 || idx >= s.TotalSegs {
+		return
+	}
+	s.mu.Lock()
+	s.segments[idx] = newSegReady()
+	s.mu.Unlock()
 }
 
 func (s *TranscodeSession) RequestSegment(ctx context.Context, idx int) bool {
@@ -229,18 +259,25 @@ func (s *TranscodeSession) RequestSegment(ctx context.Context, idx int) bool {
 	}
 
 	s.mu.Lock()
-	if idx > s.lastRequestedSeg {
-		s.lastRequestedSeg = idx
-	}
+	s.lastRequestedSeg = idx
 	s.mu.Unlock()
 
 	if s.IsSegmentReady(idx) {
-		return true
+		if s.segmentFileExists(idx) {
+			return true
+		}
+		s.resetSegment(idx)
 	}
 
 	s.mu.Lock()
-	if s.needsNewHead(idx) {
-		s.killHead()
+	for s.needsNewHead(idx) {
+		if s.head != nil {
+			// killHead drops s.mu while waiting for the head goroutine, so a
+			// concurrent request may install its own head in that window.
+			// Re-evaluate instead of spawning a second head over it.
+			s.killHead()
+			continue
+		}
 		s.spawnHead(idx)
 	}
 	s.mu.Unlock()
@@ -272,6 +309,11 @@ func (s *TranscodeSession) needsNewHead(idx int) bool {
 	case <-s.head.Done:
 		return true
 	default:
+	}
+	// A head only encodes forward from its start segment: a request behind
+	// that start (backward seek) will never be satisfied by the running head.
+	if idx < s.head.StartSeg {
+		return true
 	}
 	dist := idx - s.head.CurrentSeg
 	return dist > seekThresholdSegs
@@ -575,14 +617,16 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 				continue
 			}
 			idx := parseSegIdx(name)
-			if idx < 1 {
+			if idx < 0 {
 				continue
 			}
-			// "next exists → previous is flushed"
-			s.markSegmentReady(idx - 1)
-			s.setHeadCurrent(head, idx-1)
-			if idx-1 > head.StartSeg && s.segmentAlreadyDone(idx+1) {
-				log.Info().Str("key", s.Key).Int("seg", idx-1).Msg("head reached completed territory, stopping")
+			// ffmpeg runs with hls_flags temp_file: segments are written to
+			// seg_N.m4s.tmp and renamed when fully flushed, so a seg_N.m4s
+			// appearing is already complete and servable.
+			s.markSegmentReady(idx)
+			s.setHeadCurrent(head, idx)
+			if idx > head.StartSeg && s.segmentAlreadyDone(idx+1) {
+				log.Info().Str("key", s.Key).Int("seg", idx).Msg("head reached completed territory, stopping")
 				s.setStopReason(StopReasonCompleted)
 				head.Cancel()
 			}
@@ -594,7 +638,7 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 			if exceeded {
 				log.Info().
 					Str("key", s.Key).
-					Int("seg", idx-1).
+					Int("seg", idx).
 					Int("last_requested", lastReq).
 					Float64("lead_cap_seconds", LeadCapSeconds).
 					Msg("head exceeded lead cap, stopping")
@@ -611,63 +655,67 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 	}
 }
 
-// reconcileSegmentsFromFS scans the output directory and marks all complete
-// segments as ready. "Complete" means: file exists AND (next file exists OR
-// ffmpeg has exited). Called periodically (defense-in-depth) and on exit.
+// reconcileSegmentsFromFS scans the output directory and marks every segment
+// whose file exists as ready. ffmpeg runs with hls_flags temp_file, so any
+// seg_N.m4s on disk is fully flushed (in-progress files carry a .tmp suffix
+// and are skipped by the extension check).
+//
+// Only files actually present may be marked: the directory accumulates
+// disjoint ranges from previous heads (earlier seek targets), so filling the
+// whole span from StartSeg to the highest index on disk would mark
+// never-encoded gap segments as ready — requests for those then 404 forever
+// with no head respawn, dead-ending playback after a backward seek.
 func (s *TranscodeSession) reconcileSegmentsFromFS(head *Head) {
 	entries, err := os.ReadDir(s.OutputDir)
 	if err != nil {
 		return
 	}
-	maxIdx := -1
+	present := make(map[int]bool, len(entries))
 	for _, e := range entries {
 		n := e.Name()
 		if !strings.HasSuffix(n, ".m4s") {
 			continue
 		}
-		if strings.HasSuffix(n, ".tmp") {
+		idx := parseSegIdx(n)
+		if idx < 0 {
 			continue
 		}
-		idx := parseSegIdx(n)
-		if idx > maxIdx {
-			maxIdx = idx
+		present[idx] = true
+		s.markSegmentReady(idx)
+	}
+	// Advance the head cursor along its own contiguous run only. The highest
+	// index on disk may belong to an older head far ahead of this one; using
+	// it would fake forward progress, breaking seek detection and tripping
+	// the lead cap on a head that just spawned behind the player.
+	cur := head.StartSeg
+	for present[cur] {
+		cur++
+	}
+	last := cur - 1
+	if last >= head.StartSeg {
+		s.mu.Lock()
+		if last > head.CurrentSeg {
+			head.CurrentSeg = last
 		}
+		s.mu.Unlock()
 	}
-	// Check if ffmpeg is still running; if so, only mark up to maxIdx-1.
-	// On the exit path (head.Done not yet closed but we're inside the cleanup
-	// flow), we mark through maxIdx.
-	cutoff := maxIdx
-	if head.Cmd != nil && head.Cmd.ProcessState == nil {
-		cutoff = maxIdx - 1
-	}
-	for i := head.StartSeg; i <= cutoff && i < s.TotalSegs; i++ {
-		s.markSegmentReady(i)
-	}
-	s.mu.Lock()
-	if maxIdx > head.CurrentSeg {
-		head.CurrentSeg = maxIdx
-	}
-	s.mu.Unlock()
 }
 
-// markSegmentReady is safe to call concurrently and without holding s.mu.
-// sync.Once ensures the channel is closed exactly once even under races.
+// markSegmentReady is safe to call concurrently. The latch pointer is read
+// under s.mu (it can be swapped by resetSegment); sync.Once ensures the
+// channel is closed exactly once even under races.
 func (s *TranscodeSession) markSegmentReady(idx int) {
-	if idx >= 0 && idx < s.TotalSegs {
-		s.segments[idx].markReady()
+	if idx < 0 || idx >= s.TotalSegs {
+		return
 	}
+	s.mu.Lock()
+	sg := s.segments[idx]
+	s.mu.Unlock()
+	sg.markReady()
 }
 
 func (s *TranscodeSession) segmentAlreadyDone(idx int) bool {
-	if idx < 0 || idx >= s.TotalSegs {
-		return false
-	}
-	select {
-	case <-s.segments[idx].ch:
-		return true
-	default:
-		return false
-	}
+	return s.IsSegmentReady(idx)
 }
 
 func (s *TranscodeSession) Kill() {
@@ -853,7 +901,13 @@ func (m *SessionManager) cleanupLoop() {
 		// Run outside m.mu: EvictLRU takes its own lock and does disk IO, and
 		// must not block GetOrCreate/GetExisting behind the manager mutex.
 		if m.cache != nil {
-			if err := m.cache.EvictLRU(); err != nil {
+			m.mu.Lock()
+			live := make(map[string]bool, len(m.sessions))
+			for _, s := range m.sessions {
+				live[s.OutputDir] = true
+			}
+			m.mu.Unlock()
+			if err := m.cache.EvictLRU(live); err != nil {
 				log.Warn().Err(err).Msg("transcode cache eviction failed")
 			}
 		}

@@ -109,7 +109,11 @@ type dirEntry struct {
 	size    int64
 }
 
-func (c *CacheManager) EvictLRU() error {
+// EvictLRU deletes least-recently-modified cache directories until the total
+// size fits under the cap. Directories in skipDirs (live transcode sessions)
+// are never evicted: deleting one from under an active session leaves its
+// in-memory ready-marks pointing at vanished files, 404ing the player.
+func (c *CacheManager) EvictLRU(skipDirs map[string]bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -164,6 +168,9 @@ func (c *CacheManager) EvictLRU() error {
 	for _, d := range dirs {
 		if freed <= c.maxBytes {
 			break
+		}
+		if skipDirs[d.path] {
+			continue
 		}
 		os.RemoveAll(d.path)
 		freed -= d.size
