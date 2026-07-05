@@ -44,6 +44,17 @@ export default defineNuxtConfig({
       // shell, so it's excluded from precache and fetched on demand instead.
       globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
       globIgnores: ['**/akarisub/**'],
+      // The html glob above never actually matches the SPA shell: Nitro
+      // writes index.html AFTER the client build where workbox's glob runs,
+      // so without this explicit entry the built sw.js contained NO html in
+      // its precache manifest while createHandlerBoundToURL('/index.html')
+      // still pointed at it — a runtime `non-precached-url` error on every
+      // SW-handled navigation. The Date.now revision busts the entry each
+      // build; the shell is tiny and references content-hashed assets, so
+      // always-refetch-on-update is the correct behavior anyway.
+      additionalManifestEntries: [
+        { url: '/index.html', revision: Date.now().toString(36) },
+      ],
       navigateFallback: '/index.html',
       navigateFallbackDenylist: [/^\/api/],
     },
