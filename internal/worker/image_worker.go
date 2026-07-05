@@ -29,6 +29,7 @@ type DownloadImageWorker struct {
 
 func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
 	if job.Args.URL == "" {
+		log.Debug().Int64("item_id", job.Args.MediaItemID).Str("asset_type", job.Args.AssetType).Msg("image: empty url, skipping")
 		return nil
 	}
 

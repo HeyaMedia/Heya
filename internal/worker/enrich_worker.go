@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -49,6 +50,8 @@ func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichM
 		return fmt.Errorf("get media item %d: %w", job.Args.ItemID, err)
 	}
 
+	log.Debug().Int64("item_id", item.ID).Str("title", item.Title).Str("media_type", string(item.MediaType)).Str("source", job.Args.Source).Bool("force", job.Args.Force).Msg("enrich: job started")
+
 	// Idempotency gate: if the item is already complete and this isn't a
 	// forced refresh, skip. Lets us tolerate redundant enqueues (e.g. scan
 	// + scheduled tick both queuing the same item) without redoing work.
@@ -72,10 +75,12 @@ func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichM
 // type-specific rows + rich metadata, kick off image + person + ratings +
 // NFO downstream jobs.
 func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, job *river.Job[EnrichMediaItemArgs]) error {
+	start := time.Now()
 	kind := matcher.MediaTypeToKind(item.MediaType)
 
 	var externalIDs map[string]string
 	if err := json.Unmarshal(item.ExternalIds, &externalIDs); err != nil {
+		log.Debug().Err(err).Int64("item_id", item.ID).Msg("enrich: external_ids decode failed, using empty set")
 		externalIDs = map[string]string{}
 	}
 
@@ -86,10 +91,12 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		// rather than marking it failed. (A title-search fast path can upgrade
 		// these later.) A non-local item missing an id is a real failure.
 		if item.ProviderKind == "local" {
+			log.Debug().Int64("item_id", item.ID).Str("provider_kind", item.ProviderKind).Msg("enrich: no lookup ids and provider_kind=local, leaving as local")
 			return nil
 		}
 		return w.markFailed(ctx, q, item.ID, "no provider lookup id in external_ids")
 	}
+	log.Debug().Int64("item_id", item.ID).Str("kind", string(kind)).Int("candidate_ids", len(providerIDs)).Str("preferred_id", providerIDs[0]).Msg("enrich: lookup ids resolved")
 
 	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
 	if err != nil {
@@ -100,12 +107,14 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	var fetchOpts *metadata.FetchOptions
 	if settings.PreferredLanguage != "" || settings.PreferredCountry != "" {
 		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
+		log.Debug().Int64("item_id", item.ID).Str("language", settings.PreferredLanguage).Str("country", settings.PreferredCountry).Msg("enrich: using library language/country preference")
 	}
 
 	detail, usedID, err := w.Heya.GetDetailFallback(ctx, providerIDs, fetchOpts)
 	if err != nil {
 		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("get detail (tried %d ids): %v", len(providerIDs), err))
 	}
+	log.Debug().Int64("item_id", item.ID).Str("used_id", usedID).Str("title", detail.Title).Msg("enrich: detail fetched")
 	if usedID != providerIDs[0] {
 		log.Info().Int64("item_id", item.ID).Str("used", usedID).Str("preferred", providerIDs[0]).Msg("enrich: fell back to non-preferred lookup id")
 	}
@@ -127,6 +136,9 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		if kind == metadata.KindTV {
 			_ = q.MarkEnrichStructureDone(ctx, item.ID)
 		}
+		log.Debug().Int64("item_id", item.ID).Bool("force", job.Args.Force).Msg("enrich: base component stored")
+	} else {
+		log.Debug().Int64("item_id", item.ID).Msg("enrich: base component already enriched, skipping")
 	}
 
 	// Persist heya.media's canonical slug. It's a stable lookup key
@@ -156,6 +168,9 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		}
 		_ = q.MarkEnrichPeopleDone(ctx, item.ID)
 		_ = q.MarkEnrichExtrasDone(ctx, item.ID)
+		log.Debug().Int64("item_id", item.ID).Int("cast", len(detail.Cast)).Int("crew", len(detail.Crew)).Int("keywords", len(detail.Keywords)).Msg("enrich: people/extras component stored")
+	} else {
+		log.Debug().Int64("item_id", item.ID).Msg("enrich: people/extras component already enriched, skipping")
 	}
 
 	// Image pipeline: enqueue DetectLocalAssets (which fans out poster +
@@ -164,6 +179,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	// the actual local files arrive asynchronously, tracked separately.
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	pending := buildPendingImages(detail)
+	log.Debug().Int64("item_id", item.ID).Int("pending_images", len(pending)).Msg("enrich: image urls collected")
 	if _, err := client.Insert(ctx, DetectLocalAssetsArgs{
 		MediaItemID:     item.ID,
 		LibraryFileID:   0, // looked up by DetectLocalAssetsWorker if needed
@@ -177,10 +193,12 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	}
 	_ = q.MarkEnrichImagesDone(ctx, item.ID)
 
+	log.Debug().Int64("item_id", item.ID).Int("cast", len(detail.Cast)).Int("crew", len(detail.Crew)).Msg("enrich: queueing person fetches")
 	enqueuePersonFetches(ctx, client, q, detail, settings.PreferredLanguage)
 
 	if settings.FetchRatings {
 		_, _ = client.Insert(ctx, RatingsFetchArgs{MediaItemID: item.ID, LibraryID: item.LibraryID}, nil)
+		log.Debug().Int64("item_id", item.ID).Msg("enrich: ratings fetch queued")
 	}
 
 	if settings.SaveNFO {
@@ -188,6 +206,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 			MediaItemID: item.ID,
 			MediaType:   string(item.MediaType),
 		}, nil)
+		log.Debug().Int64("item_id", item.ID).Msg("enrich: save nfo queued")
 	}
 
 	_ = q.MarkEnrichComplete(ctx, item.ID)
@@ -201,6 +220,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		})
 	}
 
+	log.Debug().Int64("item_id", item.ID).Dur("duration", time.Since(start)).Msg("enrich: generic pipeline finished")
 	log.Info().
 		Int64("item_id", item.ID).
 		Str("source", job.Args.Source).
@@ -216,15 +236,18 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 // heya.media artist fetch + canonical upsert) and layers the new status
 // stamps on top.
 func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, job *river.Job[EnrichMediaItemArgs]) error {
+	start := time.Now()
 	artist, err := q.GetArtistByMediaItemID(ctx, item.ID)
 	if err != nil {
 		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("get artist for media item: %v", err))
 	}
+	log.Debug().Int64("item_id", item.ID).Int64("artist_id", artist.ID).Str("name", artist.Name).Msg("enrich: music artist resolved")
 
 	res, err := w.Matcher.RefreshMusicArtist(ctx, artist.ID)
 	if err != nil {
 		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("refresh music artist: %v", err))
 	}
+	log.Debug().Int64("artist_id", artist.ID).Str("provider_id", res.HeyaProviderID).Bool("skipped", res.Skipped).Int("albums_matched", res.AlbumsMatched).Int("albums_updated", res.AlbumsUpdated).Int("tracks_updated", res.TracksUpdated).Msg("enrich: music artist refreshed")
 
 	// RefreshMusicArtist already stamps artists.discography_enriched_at
 	// inside the matcher. Mirror that onto media_items' base/structure
@@ -248,12 +271,16 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	//    slots from heya.media's pool. Already-used remote URLs are
 	//    skipped so repeated refreshes don't re-download the same file.
 	local := detectLocalMusicAssets(ctx, q, w.DataDir, item.ID)
+	log.Debug().Int64("item_id", item.ID).Int("local_poster", local.Poster).Int("local_backdrop", local.Backdrop).Int("local_logo", local.Logo).Int("local_banner", local.Banner).Msg("enrich music: local asset scan done")
 	// A skipped refresh (no upstream record, or an identity-conflict guard
 	// fired) carries no trustworthy upstream artwork — only fill gaps from
 	// the remote pool when the refresh actually adopted the record.
 	remote := remoteArtistImages{}
 	if !res.Skipped {
 		remote = rankRemoteArtistImages(res.ArtistImages, res.PosterURL, res.BackdropURL)
+		log.Debug().Int64("item_id", item.ID).Int("remote_backdrops", len(remote.Backdrops)).Bool("remote_poster", remote.Poster != "").Bool("remote_logo", remote.Logo != "").Msg("enrich music: remote artwork ranked")
+	} else {
+		log.Debug().Int64("item_id", item.ID).Msg("enrich music: refresh skipped, no remote artwork gap-fill")
 	}
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	queueArtistArtworkGaps(ctx, client, item, string(item.MediaType), local, remote)
@@ -266,6 +293,8 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 		if settings.SaveNFO {
 			if _, err := client.Insert(ctx, SaveMusicNFOArgs{ArtistID: artist.ID}, nil); err != nil {
 				log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("enqueue SaveMusicNFO failed")
+			} else {
+				log.Debug().Int64("artist_id", artist.ID).Msg("enrich music: save nfo queued")
 			}
 		}
 	}
@@ -292,10 +321,12 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	}
 
 	if res.Skipped {
+		log.Debug().Int64("artist_id", artist.ID).Dur("duration", time.Since(start)).Msg("enrich: music pipeline finished (skipped)")
 		log.Info().Int64("artist_id", artist.ID).Str("name", artist.Name).Msg("enrich music: heya.media has no record yet")
 		return nil
 	}
 
+	log.Debug().Int64("artist_id", artist.ID).Dur("duration", time.Since(start)).Msg("enrich: music pipeline finished")
 	log.Info().
 		Int64("artist_id", artist.ID).
 		Str("name", artist.Name).

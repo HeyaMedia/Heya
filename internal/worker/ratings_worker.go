@@ -26,6 +26,7 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 
 	item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 	if err != nil {
+		log.Debug().Err(err).Int64("media_id", job.Args.MediaItemID).Msg("ratings: media item not found, skipping")
 		return nil
 	}
 
@@ -33,8 +34,11 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 
 	var externalIDs map[string]string
 	if err := json.Unmarshal(item.ExternalIds, &externalIDs); err != nil {
+		log.Debug().Err(err).Int64("media_id", item.ID).Msg("ratings: external_ids decode failed, skipping")
 		return nil
 	}
+
+	log.Debug().Int64("media_id", item.ID).Str("title", item.Title).Str("media_type", string(item.MediaType)).Msg("ratings: fetch starting")
 
 	data, err := w.Heya.FetchRatings(ctx, metadata.MediaKind(item.MediaType), externalIDs)
 	if err != nil {
@@ -42,6 +46,7 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 		return nil
 	}
 	if data == nil {
+		log.Debug().Int64("media_id", job.Args.MediaItemID).Msg("ratings: no data returned, skipping")
 		return nil
 	}
 
@@ -64,6 +69,8 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 
 	if totalStored > 0 {
 		log.Info().Int64("media_id", job.Args.MediaItemID).Int("ratings", totalStored).Msg("ratings stored")
+	} else {
+		log.Debug().Int64("media_id", job.Args.MediaItemID).Int("candidates", len(data.Ratings)).Msg("ratings: no ratings stored")
 	}
 
 	return nil

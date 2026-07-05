@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,17 +27,22 @@ type FetchArtworkWorker struct {
 }
 
 func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtworkArgs]) error {
+	start := time.Now()
 	q := sqlc.New(w.DB)
 
 	item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 	if err != nil {
+		log.Debug().Err(err).Int64("media_item_id", job.Args.MediaItemID).Msg("artwork: media item not found, skipping")
 		return nil
 	}
 
 	w.Progress.SetCurrentByKind(FetchArtworkArgs{}.Kind(), item.Title)
 
+	log.Debug().Int64("media_item_id", item.ID).Str("title", item.Title).Str("media_type", job.Args.MediaType).Msg("artwork: fetch starting")
+
 	var externalIDs map[string]string
 	if err := decodeJSON(item.ExternalIds, &externalIDs); err != nil {
+		log.Debug().Err(err).Int64("media_item_id", item.ID).Msg("artwork: external_ids decode failed, using empty set")
 		externalIDs = make(map[string]string)
 	}
 
@@ -52,6 +58,7 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 	var fetchOpts *metadata.FetchOptions
 	if settings.PreferredLanguage != "" || settings.PreferredCountry != "" {
 		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
+		log.Debug().Int64("media_item_id", item.ID).Str("language", settings.PreferredLanguage).Str("country", settings.PreferredCountry).Msg("artwork: using library language/country preference")
 	}
 
 	client := river.ClientFromContext[pgx.Tx](ctx)
@@ -73,14 +80,17 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 			countPerType[string(a.AssetType)]++
 		}
 	}
+	log.Debug().Int64("media_item_id", item.ID).Int("existing_assets", len(existingAssets)).Msg("artwork: existing asset counts loaded")
 
 	artworks, err := w.Heya.FetchArtwork(ctx, kind, externalIDs, fetchOpts)
 	if err != nil {
 		log.Debug().Err(err).Msg("artwork fetch failed")
 		return nil
 	}
+	log.Debug().Int64("media_item_id", item.ID).Int("returned", len(artworks)).Msg("artwork: heya.media returned candidates")
 
 	sortOrder := 10
+	skippedCap := 0
 	for _, art := range artworks {
 		if art.URL == "" {
 			continue
@@ -90,6 +100,7 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 			limit = 1
 		}
 		if countPerType[art.AssetType] >= limit {
+			skippedCap++
 			continue
 		}
 		countPerType[art.AssetType]++
@@ -104,6 +115,7 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 		sortOrder++
 	}
 
+	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("skipped_cap", skippedCap).Dur("duration", time.Since(start)).Msg("artwork: fan-out summary")
 	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("artworks_queued", sortOrder-10).Msg("enrichment complete")
 	return nil
 }
