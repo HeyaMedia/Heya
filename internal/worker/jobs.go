@@ -337,6 +337,25 @@ func (ScanTrackFingerprintArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// ScanMediaSegmentsFileArgs fetches community skip segments (intro /
+// recap / credits markers) for one movie/episode file from heya.media
+// and stores the duration-gated winners in media_segments. Pure network
+// work — no local decode.
+type ScanMediaSegmentsFileArgs struct {
+	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (ScanMediaSegmentsFileArgs) Kind() string { return "scan_media_segments_file" }
+func (ScanMediaSegmentsFileArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "scan_media_segments_file",
+		MaxAttempts: 2,
+		Priority:    PriorityAnalysis,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 // ScanAlbumLoudnessArgs concatenates every primary track file in an album
 // via ffmpeg's concat demuxer and runs ebur128 over the union — the correct
 // way to measure album loudness (averaging per-track LUFS is mathematically

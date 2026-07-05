@@ -165,4 +165,24 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 			}
 			return cachedJSON(tracks, 60), nil
 		})
+
+	huma.Register(api, secured(op(http.MethodGet, "/api/stream/{file_id}/segments", "stream-segments", "Skip segments (intro/recap/credits markers) for a file", "Streaming")),
+		func(ctx context.Context, in *struct {
+			FileID int64 `path:"file_id" minimum:"1"`
+		}) (*JSONOutput[fileSegmentsResponse], error) {
+			segments, err := app.ListFileSegments(ctx, in.FileID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("segments lookup failed")
+			}
+			// Segments only change when the pump re-fetches (days apart) or
+			// on manual edit — short client cache keeps player mounts cheap
+			// without hiding edits for long.
+			return cachedJSON(fileSegmentsResponse{Segments: segments}, 300), nil
+		})
+}
+
+// fileSegmentsResponse wraps the segment list so the schema has a named
+// object at the top level (matches the other stream JSON responses).
+type fileSegmentsResponse struct {
+	Segments []service.FileSegment `json:"segments"`
 }

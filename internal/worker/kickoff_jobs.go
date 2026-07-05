@@ -151,6 +151,22 @@ func (KickoffMusicFingerprintArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// KickoffMediaSegmentsArgs enqueues scan_media_segments_file for
+// movie/episode files without a segments pass. Same single-phase
+// snooze-loop pump shape as the fingerprint kickoff.
+type KickoffMediaSegmentsArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (KickoffMediaSegmentsArgs) Kind() string { return "kickoff_media_segments" }
+func (KickoffMediaSegmentsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "kickoff_media_segments",
+		MaxAttempts: 1,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 // KickoffTrickplayArgs replaces scheduler.GenerateTrickplayTask.
 // Finds library_files with has_trickplay=false on a library where
 // enable_trickplay is set, and enqueues one trickplay_file job per

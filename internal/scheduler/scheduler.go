@@ -210,6 +210,8 @@ func (t *Trigger) TriggerNow(ctx context.Context, taskID string, manual bool) er
 		args = worker.KickoffMusicLoudnessArgs{ScheduledTaskID: taskID}
 	case "scan_music_fingerprint":
 		args = worker.KickoffMusicFingerprintArgs{ScheduledTaskID: taskID}
+	case "scan_media_segments":
+		args = worker.KickoffMediaSegmentsArgs{ScheduledTaskID: taskID}
 	case "generate_trickplay":
 		args = worker.KickoffTrickplayArgs{ScheduledTaskID: taskID}
 	case "generate_thumbnails":

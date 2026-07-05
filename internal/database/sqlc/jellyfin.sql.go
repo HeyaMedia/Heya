@@ -12,7 +12,7 @@ import (
 )
 
 const jFBestVideoFilesForItems = `-- name: JFBestVideoFilesForItems :many
-SELECT DISTINCT ON (media_item_id) id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height
+SELECT DISTINCT ON (media_item_id) id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at
 FROM library_files
 WHERE media_item_id = ANY($1::bigint[]) AND deleted_at IS NULL
 ORDER BY media_item_id, (status = 'matched') DESC, path ASC
@@ -47,6 +47,7 @@ func (q *Queries) JFBestVideoFilesForItems(ctx context.Context, mediaItemIds []i
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.VideoHeight,
+			&i.SegmentsAnalyzedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -202,7 +203,7 @@ func (q *Queries) JFCountTracks(ctx context.Context, arg JFCountTracksParams) (i
 }
 
 const jFLibraryFilesByIDs = `-- name: JFLibraryFilesByIDs :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height FROM library_files
+SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at FROM library_files
 WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL
 `
 
@@ -235,6 +236,7 @@ func (q *Queries) JFLibraryFilesByIDs(ctx context.Context, ids []int64) ([]Libra
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.VideoHeight,
+			&i.SegmentsAnalyzedAt,
 		); err != nil {
 			return nil, err
 		}

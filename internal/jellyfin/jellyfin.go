@@ -262,9 +262,7 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Items/{itemId}/Ancestors", s.requireAuth(s.requireItem(s.stubEmptyArray)))
 	rt.handle(http.MethodGet, "/Items/{itemId}/CriticReviews", s.requireAuth(s.requireItem(s.stubEmptyQueryResult)))
 	rt.handle(http.MethodGet, "/Items/Suggestions", s.requireAuth(s.stubEmptyQueryResult))
-	// Intro/credits segments — none extracted; clients probe before playback
-	// and expect an empty page, not a 404.
-	rt.handle(http.MethodGet, "/MediaSegments/{itemId}", s.requireAuth(s.requireItem(s.stubEmptyQueryResult)))
+	rt.handle(http.MethodGet, "/MediaSegments/{itemId}", s.requireAuth(s.requireItem(s.handleMediaSegments)))
 	rt.handle(http.MethodGet, "/System/ActivityLog/Entries", s.requireAdmin(s.handleActivityLogEntries))
 	rt.handle(http.MethodGet, "/web/ConfigurationPages", s.requireAuth(s.handleConfigurationPages))
 	rt.handle(http.MethodGet, "/web/ConfigurationPage", s.stubNotFound)

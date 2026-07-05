@@ -162,6 +162,52 @@ func defaultOnnxLib() string {
 	return "libonnxruntime.so"
 }
 
+// providerLibFiles maps each execution provider that ONNX Runtime loads
+// from a *separate* Linux shared object (co-located with libonnxruntime.so)
+// to that object's filename. ORT loads these lazily inside the
+// AppendExecutionProvider* call and, when the file is absent, prints a
+// misleading
+//
+//	[E:onnxruntime:...] provider_bridge_ort.cc ... Failed to load library libonnxruntime_providers_*.so
+//
+// line to stderr before returning the error. The CPU-only base image
+// legitimately ships none of these, so on `auto` (and on the status
+// endpoint's probe) the CUDA/OpenVINO attempts would each emit that scary
+// log even though CPU fallback works fine. We stat the file first and skip
+// the append when it's missing — silencing the log and a doomed dlopen.
+// CoreML (macOS) and DirectML (Windows) are baked into the core library /
+// provided by the OS rather than gated by a sibling .so, so they're
+// intentionally omitted here and never pre-gated.
+var providerLibFiles = map[Accelerator]string{
+	AccelCUDA:     "libonnxruntime_providers_cuda.so",
+	AccelOpenVINO: "libonnxruntime_providers_openvino.so",
+}
+
+// providerLibInstalled reports whether the shared object backing accel is
+// present in the same directory as the ONNX Runtime library (where ORT
+// resolves providers — via $ORIGIN in the vendor images).
+//
+// The check is Linux-only, deliberately. It exists solely to spare the
+// CPU-only base *container* image the scary provider-load log, and only on
+// Linux does defaultOnnxLib() resolve to an absolute path whose directory
+// we can stat. On Windows the providers are DLLs found via the loader
+// search path (defaultOnnxLib() returns a bare "onnxruntime.dll"), and a
+// real CUDA/DirectML setup would be wrongly gated off by a .so stat; macOS
+// has no CUDA/OpenVINO build at all. So on every non-Linux OS — and for EPs
+// not loaded from a sibling .so (CPU, CoreML, DirectML) — this returns true
+// and lets ORT decide, exactly as before.
+func providerLibInstalled(accel Accelerator) bool {
+	if runtime.GOOS != "linux" {
+		return true
+	}
+	file, ok := providerLibFiles[accel]
+	if !ok {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(filepath.Dir(defaultOnnxLib()), file))
+	return err == nil
+}
+
 // initOnnx initializes the ONNX Runtime environment exactly once for
 // the process. Safe to call from multiple commands.
 func initOnnx() error {
@@ -225,6 +271,9 @@ func buildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error)
 		}
 		return opts, "coreml", nil
 	case AccelCUDA:
+		if !providerLibInstalled(AccelCUDA) {
+			return nil, "", fmt.Errorf("cuda EP not available: provider library %s not installed", providerLibFiles[AccelCUDA])
+		}
 		opts, err := ort.NewSessionOptions()
 		if err != nil {
 			return nil, "", err
@@ -241,6 +290,9 @@ func buildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error)
 		}
 		return opts, "cuda", nil
 	case AccelOpenVINO:
+		if !providerLibInstalled(AccelOpenVINO) {
+			return nil, "", fmt.Errorf("openvino EP not available: provider library %s not installed", providerLibFiles[AccelOpenVINO])
+		}
 		opts, err := ort.NewSessionOptions()
 		if err != nil {
 			return nil, "", err

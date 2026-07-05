@@ -45,6 +45,7 @@ const (
 	KindYear       Kind = 0x0f // literal year number
 	KindUser       Kind = 0x10 // users row
 	KindList       Kind = 0x11 // user_lists row
+	KindSegment    Kind = 0x12 // media_segments row (skip markers)
 )
 
 var (

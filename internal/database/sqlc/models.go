@@ -414,23 +414,24 @@ type LibraryDiskUsage struct {
 }
 
 type LibraryFile struct {
-	ID           int64              `json:"id"`
-	LibraryID    int64              `json:"library_id"`
-	Path         string             `json:"path"`
-	Size         int64              `json:"size"`
-	Mtime        pgtype.Timestamptz `json:"mtime"`
-	MediaItemID  pgtype.Int8        `json:"media_item_id"`
-	ParseResult  []byte             `json:"parse_result"`
-	Status       FileStatus         `json:"status"`
-	ErrorMessage string             `json:"error_message"`
-	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
-	MediaInfo    []byte             `json:"media_info"`
-	Keyframes    []byte             `json:"keyframes"`
-	HasTrickplay bool               `json:"has_trickplay"`
-	ContentHash  string             `json:"content_hash"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	VideoHeight  int32              `json:"video_height"`
+	ID                 int64              `json:"id"`
+	LibraryID          int64              `json:"library_id"`
+	Path               string             `json:"path"`
+	Size               int64              `json:"size"`
+	Mtime              pgtype.Timestamptz `json:"mtime"`
+	MediaItemID        pgtype.Int8        `json:"media_item_id"`
+	ParseResult        []byte             `json:"parse_result"`
+	Status             FileStatus         `json:"status"`
+	ErrorMessage       string             `json:"error_message"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+	MediaInfo          []byte             `json:"media_info"`
+	Keyframes          []byte             `json:"keyframes"`
+	HasTrickplay       bool               `json:"has_trickplay"`
+	ContentHash        string             `json:"content_hash"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	VideoHeight        int32              `json:"video_height"`
+	SegmentsAnalyzedAt pgtype.Timestamptz `json:"segments_analyzed_at"`
 }
 
 type LibraryNfoDir struct {
@@ -582,6 +583,16 @@ type MediaRecommendation struct {
 	MediaType   string         `json:"media_type"`
 	VoteAverage pgtype.Numeric `json:"vote_average"`
 	ReleaseDate string         `json:"release_date"`
+}
+
+type MediaSegment struct {
+	ID            int64              `json:"id"`
+	LibraryFileID int64              `json:"library_file_id"`
+	SegmentType   string             `json:"segment_type"`
+	StartMs       int64              `json:"start_ms"`
+	EndMs         int64              `json:"end_ms"`
+	Source        string             `json:"source"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type MediaTitle struct {

@@ -3192,6 +3192,64 @@
         ],
         "type": "object"
       },
+      "FileSegment": {
+        "additionalProperties": false,
+        "properties": {
+          "end_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "start_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "start_ms",
+          "end_ms",
+          "source"
+        ],
+        "type": "object"
+      },
+      "FileSegmentsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/FileSegmentsResponse.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/FileSegment"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "segments"
+        ],
+        "type": "object"
+      },
       "Float4": {
         "additionalProperties": false,
         "properties": {
@@ -4195,6 +4253,9 @@
           "path": {
             "type": "string"
           },
+          "segments_analyzed_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
           "size": {
             "format": "int64",
             "type": "integer"
@@ -4227,7 +4288,8 @@
           "content_hash",
           "created_at",
           "updated_at",
-          "video_height"
+          "video_height",
+          "segments_analyzed_at"
         ],
         "type": "object"
       },
@@ -29752,6 +29814,61 @@
         ]
       }
     },
+    "/api/stream/{file_id}/segments": {
+      "get": {
+        "operationId": "stream-segments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileSegmentsResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Skip segments (intro/recap/credits markers) for a file",
+        "tags": [
+          "Streaming"
+        ]
+      }
+    },
     "/api/stream/{file_id}/subtitles": {
       "get": {
         "operationId": "list-subtitles",
@@ -30602,6 +30719,7 @@
                 "refresh_stale_items",
                 "scan_music_loudness",
                 "scan_music_fingerprint",
+                "scan_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30676,6 +30794,7 @@
                 "refresh_stale_items",
                 "scan_music_loudness",
                 "scan_music_fingerprint",
+                "scan_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30733,6 +30852,7 @@
                 "refresh_stale_items",
                 "scan_music_loudness",
                 "scan_music_fingerprint",
+                "scan_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"
@@ -30831,6 +30951,7 @@
                 "refresh_stale_items",
                 "scan_music_loudness",
                 "scan_music_fingerprint",
+                "scan_media_segments",
                 "analyze_music_facets"
               ],
               "type": "string"

@@ -31,6 +31,30 @@ const entityIdRef = computed(() => props.entityId || props.mediaItemId || 0)
 const { state: streamState, loadStreamInfo, subtitleUrl, emitProgress } = useVideoPlayer(fileIdRef, mediaItemIdRef, entityTypeRef, entityIdRef)
 const { settings, load: loadSettings, playbackForLibrary } = useUserSettings()
 const { loaded: hasTrickplay, load: loadTrickplay, getThumbnail } = useTrickplay(fileIdRef)
+const { load: loadSegments, segmentAt } = useMediaSegments(fileIdRef)
+
+// Skip-segment button (intro/recap/credits markers). Dismissal is
+// per-segment so skipping the intro doesn't suppress the credits button,
+// and clearing on playback start resets it per file.
+const dismissedSegments = ref(new Set<number>())
+const skipSegmentLabels: Record<string, string> = {
+  intro: 'Skip Intro',
+  recap: 'Skip Recap',
+  credits: 'Skip Credits',
+  preview: 'Skip Preview',
+  commercial: 'Skip Ad',
+}
+const activeSkipSegment = computed(() => {
+  const seg = segmentAt(state.currentTime)
+  if (!seg || dismissedSegments.value.has(seg.start_ms)) return null
+  return seg
+})
+function skipSegment() {
+  const seg = activeSkipSegment.value
+  if (!seg) return
+  dismissedSegments.value = new Set(dismissedSegments.value).add(seg.start_ms)
+  controls.seek(seg.end_ms / 1000)
+}
 
 const controlsVisible = ref(true)
 const showInfoPanel = ref(false)
@@ -292,6 +316,8 @@ function startPlayback() {
   if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initASS())
 
   loadTrickplay(token.value!).catch(() => {})
+  dismissedSegments.value = new Set()
+  loadSegments().catch(() => {})
 
   if (props.mediaItemId) {
     // /api/media/{id} accepts slug or numeric ID — spec types id as string.
@@ -860,6 +886,19 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
         </div>
       </Transition>
 
+      <!-- Skip segment button (intro/recap/credits). Up Next owns the
+           corner when its countdown is running — during credits both
+           would otherwise stack. -->
+      <Transition name="upnext">
+        <button
+          v-if="activeSkipSegment && !(upNextCountdown > 0 && upNext)"
+          class="skip-seg-btn"
+          @click.stop="skipSegment"
+        >
+          {{ skipSegmentLabels[activeSkipSegment.type] ?? 'Skip' }}
+        </button>
+      </Transition>
+
       <!-- Up Next overlay -->
       <Transition name="upnext">
         <div v-if="upNextCountdown > 0 && upNext" class="upnext-overlay" @click.stop>
@@ -1027,6 +1066,18 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .upnext-overlay {
   position: absolute; bottom: 100px; right: 24px; z-index: 60;
 }
+.skip-seg-btn {
+  position: absolute; bottom: 100px; right: 24px; z-index: 60;
+  background: rgba(10,10,16,0.92); backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
+  padding: 12px 22px; cursor: pointer;
+  font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 0.02em;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  transition: background 0.15s, border-color 0.15s;
+}
+.skip-seg-btn:hover {
+  background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.3);
+}
 .upnext-card {
   background: rgba(10,10,16,0.92); backdrop-filter: blur(20px) saturate(1.3);
   border: 1px solid rgba(255,255,255,0.08); border-radius: 14px;
@@ -1057,7 +1108,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .upnext-enter-from { opacity: 0; transform: translateY(16px) scale(0.95); }
 .upnext-leave-to { opacity: 0; transform: translateY(8px); }
 
-@media (max-width: 768px) { .vol-group { display: none; } .upnext-overlay { bottom: 80px; right: 12px; } }
+@media (max-width: 768px) { .vol-group { display: none; } .upnext-overlay { bottom: 80px; right: 12px; } .skip-seg-btn { bottom: 80px; right: 12px; } }
 </style>
 
 <!--
