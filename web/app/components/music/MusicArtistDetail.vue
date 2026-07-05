@@ -121,11 +121,14 @@
           <div class="tt-leader">
             <span v-if="isTopTrackPlayable(t)" class="tt-rank">{{ idx + 1 }}</span>
             <Icon v-else name="trash" :size="12" class="tt-missing-icon" :title="`${t.title} — missing on disk`" />
+            <!-- .stop: on touch this button is opacity-0 but still hit-
+                 testable; without it a tap here fires both this handler and
+                 the row-tap handler (playTopTrack twice, racing). -->
             <button
               v-if="isTopTrackPlayable(t)"
               class="tt-hover-play"
               type="button"
-              @click="playTopTrack(t)"
+              @click.stop="playTopTrack(t)"
               :title="`Play ${t.title}`"
             >
               <Icon name="play" :size="12" />
@@ -135,9 +138,12 @@
             <span class="tt-title">{{ t.title }}</span>
             <template v-if="t.local_album_title">
               <span class="tt-album-sep">·</span>
+              <!-- .stop: the row itself plays on phone tap — without it, a
+                   tap on the album link would navigate AND start playback. -->
               <NuxtLink
                 :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
                 class="tt-album"
+                @click.stop
               >{{ t.local_album_title }}</NuxtLink>
             </template>
           </div>
