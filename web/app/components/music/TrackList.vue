@@ -27,6 +27,16 @@
   Row tap (anywhere but the button) emits `row-click`. Long-press still opens
   the AppContextMenu popper — reka's ContextMenuTrigger already wraps the
   whole row regardless of which layout is showing.
+
+  W2c additions: the `cell-${key}` named slot for `kind: 'custom'` columns
+  (arbitrary per-cell content — e.g. the album page's TrackQualityPicker) and
+  the optional `#row-before` slot (content rendered before a given row — the
+  album page's disc-boundary markers) both pre-date W2c's own edits and are
+  additive: neither is used by songs/loved/favorites/browse, so they render
+  as no-ops there. Several W2c pages also keep their own hand-rolled header
+  row and pass `:show-header="false"` rather than fight TrackList's sticky,
+  solid-background header for pixel parity with a pre-existing layout — see
+  music/artist/[slug]/[album].vue and music/mix/[slug].vue.
 -->
 <template>
   <div class="tl">
@@ -47,11 +57,12 @@
     </div>
 
     <div class="tl-body">
-      <AppContextMenu
-        v-for="(t, i) in tracks"
-        :key="t.id"
-        :items="contextItems(t, i)"
-      >
+      <template v-for="(t, i) in tracks" :key="t.id">
+        <!-- Optional escape hatch (W2c) for content between rows — e.g. the
+             album page's disc-boundary markers. Unused by every other
+             consumer; renders nothing when the slot isn't provided. -->
+        <slot name="row-before" :track="t" :index="i" />
+        <AppContextMenu :items="contextItems(t, i)">
         <div
           class="tl-row tl-track"
           :class="{ 'tl-active': isActive(t), 'tl-missing': t.available === false, 'tl-phone-row': isPhone }"
@@ -165,7 +176,8 @@
             </button>
           </template>
         </div>
-      </AppContextMenu>
+        </AppContextMenu>
+      </template>
     </div>
 
     <ActionSheet

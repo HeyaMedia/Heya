@@ -57,7 +57,13 @@
 
     <section class="pd-episodes page-pad">
       <h2 class="section-title-lg">Episodes</h2>
-      <div class="pd-episode-list">
+      <!-- Episode rows are description-bearing cards, not a dense track
+           table — TrackList's fixed (non-slot) phone row can't carry the
+           blurb or the pub-date/duration meta line, so desktop keeps this
+           markup untouched and only phone gets TrackList (see script: the
+           same split-render call as music/playlist/[id].vue, for a
+           different reason — no reorder here, just richer per-row content). -->
+      <div v-if="!isPhone" class="pd-episode-list">
         <article
           v-for="(ep, i) in detail.episodes"
           :key="ep.guid || `${ep.audio_url}-${i}`"
@@ -87,15 +93,29 @@
           </button>
         </article>
       </div>
+      <TrackList
+        v-else
+        :tracks="tlRows"
+        :columns="columns"
+        grid-template-columns="28px 64px 1fr 40px"
+        :show-header="false"
+        :context-items="contextItemsFor"
+        :duration-formatter="formatDuration"
+        @row-click="onPhoneRowClick"
+      />
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { PodcastDetail, PodcastEpisode } from '~/composables/usePodcasts'
+import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
+import type { ContextMenuItem } from '~~/shared/types'
 import { useQuery } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
+
+const { isPhone } = useViewport()
 
 const route = useRoute()
 const feedURL = computed(() => (route.query.feed as string | undefined) ?? '')
@@ -150,6 +170,44 @@ function formatDuration(seconds: number) {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   return `${h}h ${m}m`
+}
+
+// Phone-only TrackList render (see template comment). `id` has no natural
+// numeric source (episodes are keyed by `guid`) — the list index is stable
+// for a single render of one feed, which is all TrackList needs it for.
+// This mounts only at phone width, where TrackList always uses its fixed
+// 2-line row (not this desktop column config) — the `art` kind column
+// only exists so TrackList's `hasArt` check shows episode thumbnails
+// instead of a bare index there.
+const columns: TrackListColumn[] = [
+  { key: 'idx', kind: 'index' },
+  { key: 'art', kind: 'art' },
+  { key: 'title', kind: 'title' },
+  { key: 'duration', kind: 'duration' },
+]
+
+const tlRows = computed<TrackListRow[]>(() => (detail.value?.episodes ?? []).map((ep, i) => ({
+  id: i,
+  title: ep.title,
+  // Reuses the title column's "artist" subtitle slot to show the pub date
+  // (episodes have no artist/album) — the description itself doesn't fit
+  // TrackList's fixed phone row and is dropped there, same tradeoff every
+  // migrated page makes for secondary metadata at phone width.
+  artist: ep.pub_date ? formatPubDate(ep.pub_date) : '',
+  album: '',
+  duration: ep.duration_secs || 0,
+  poster: ep.artwork_url || detail.value?.artwork_url || null,
+})))
+
+function contextItemsFor(_row: TrackListRow, i: number): ContextMenuItem[] {
+  const ep = detail.value?.episodes[i]
+  if (!ep || !detail.value) return []
+  return [{ label: 'Play Episode', icon: 'play', action: () => actions.playEpisode(detail.value!, ep) }]
+}
+
+function onPhoneRowClick(i: number) {
+  const ep = detail.value?.episodes[i]
+  if (ep && detail.value) actions.playEpisode(detail.value, ep)
 }
 </script>
 
@@ -288,4 +346,21 @@ function formatDuration(seconds: number) {
 .pd-ep:hover .pd-ep-play { opacity: 1; }
 .pd-ep-play:hover { transform: scale(1.1); }
 .mono { font-family: var(--font-mono); }
+
+/* Phone (<=720px): stack the hero, center the art, wrap the action row.
+   The episode list itself swaps to TrackList at this width (see template). */
+@media (max-width: 720px) {
+  .pd-hero { min-height: 0; }
+  .pd-hero-content {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 24px 20px 20px;
+    gap: 14px;
+  }
+  .pd-hero-art { width: min(55vw, 240px); height: min(55vw, 240px); }
+  .pd-hero-meta { width: 100%; }
+  .pd-stats { justify-content: center; }
+  .pd-actions { justify-content: center; flex-wrap: wrap; }
+}
 </style>

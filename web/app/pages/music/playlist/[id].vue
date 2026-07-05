@@ -40,7 +40,9 @@
       <p>Open any track's context menu (right-click) or use the "Add to playlist" action to add songs.</p>
     </section>
 
-    <section v-else class="page-pad pl-tracks">
+    <!-- Desktop keeps the virtualized RecycleScroller table untouched — see
+         script comment for why TrackList only takes over at phone width. -->
+    <section v-else-if="!isPhone" class="page-pad pl-tracks">
       <div class="list-rows">
         <div class="list-row list-row-head pl-cols">
           <div>#</div><div>Title</div><div>Album</div><div>Added</div><div></div><div style="text-align: right">Duration</div>
@@ -77,14 +79,41 @@
         </RecycleScroller>
       </div>
     </section>
+
+    <section v-else class="page-pad pl-tracks">
+      <TrackList
+        :tracks="tlRows"
+        :columns="columns"
+        grid-template-columns="40px 2fr 1.2fr 100px 36px 70px"
+        :show-header="false"
+        :context-items="contextItemsFor"
+        :active-track-id="currentTrack?.id ?? null"
+        :duration-formatter="formatTime"
+        @row-click="playFrom"
+      />
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
+import type { ContextMenuItem } from '~~/shared/types'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
+
+// This page's desktop table drives a virtualized RecycleScroller (playlists
+// can run to thousands of tracks) plus a per-row hover "remove" button.
+// TrackList has no virtualization and no matching column kind for that
+// button — forcing it onto desktop would be a real perf regression for long
+// playlists, not just a styling mismatch. So: desktop keeps this page's own
+// table untouched, and TrackList only takes over at phone width, where the
+// list is short enough in practice and "Remove from Playlist" moves into
+// the row's ⋯ menu (see contextItemsFor below). Note: there's no
+// drag-to-reorder anywhere in this codebase today (grepped for
+// draggable/dragstart/moveTrack — none exist), so that wasn't a factor.
+const { isPhone } = useViewport()
 
 interface PlaylistTrackRow {
   track_id: number
@@ -193,6 +222,51 @@ async function removeRow(trackId: number) {
   // Recent Playlists shelf on the home page derives last-played from
   // playlist tracks; invalidate so a possible last-played change shows up.
   queryClient.invalidateQueries({ queryKey: ['music', 'home', 'recent-playlists'] })
+}
+
+// Phone-only TrackList render (see script-top comment).
+const actions = useMusicActions()
+
+const columns: TrackListColumn[] = [
+  { key: 'idx', kind: 'index' },
+  { key: 'art', kind: 'art' },
+  { key: 'title', kind: 'title', subtitle: 'artist-plain' },
+  { key: 'album', kind: 'album' },
+  { key: 'duration', kind: 'duration' },
+]
+
+const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
+  id: t.track_id,
+  title: t.track_title,
+  artist: t.artist_name,
+  artist_slug: t.artist_slug,
+  album: t.album_title,
+  album_slug: t.album_slug,
+  duration: t.duration,
+  available: t.available,
+  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+})))
+
+function contextItemsFor(_row: TrackListRow, i: number): ContextMenuItem[] {
+  const t = tracks.value[i]
+  if (!t) return []
+  const items = actions.forTrack({
+    id: t.track_id,
+    title: t.track_title,
+    artist: t.artist_name,
+    album: t.album_title,
+    duration: t.duration,
+    album_id: t.album_id,
+    artist_id: t.artist_id,
+    artist_slug: t.artist_slug,
+    album_slug: t.album_slug,
+    available: t.available,
+  })
+  return [
+    ...items,
+    { label: '', separator: true },
+    { label: 'Remove from Playlist', icon: 'close', action: () => removeRow(t.track_id) },
+  ]
 }
 
 async function onDelete() {
@@ -339,4 +413,21 @@ function formatDate(iso: string) {
 .m-empty-icon { color: var(--fg-3); margin-bottom: 16px; }
 .m-empty-state h3 { font-size: 18px; font-weight: 600; color: var(--fg-1); margin-bottom: 8px; }
 .m-empty-state p { font-size: 13px; max-width: 50ch; color: var(--fg-2); }
+
+/* Phone (<=720px): stack the hero, center the cover, wrap the action row.
+   The track list itself swaps to TrackList at this width (see template). */
+@media (max-width: 720px) {
+  .pl-hero { min-height: 0; }
+  .pl-hero-content {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 24px 20px 20px;
+    gap: 14px;
+  }
+  .pl-hero-art { width: min(55vw, 240px); height: min(55vw, 240px); }
+  .pl-hero-meta { width: 100%; }
+  .pl-hero-stats { justify-content: center; }
+  .m-actions { justify-content: center; flex-wrap: wrap; }
+}
 </style>

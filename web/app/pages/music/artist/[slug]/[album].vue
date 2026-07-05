@@ -3,9 +3,12 @@ import type { MusicAlbumDetail, TrackFile, TrackView } from '~~/shared/types'
 // playFromFile picks an explicit file for the track (e.g. the FLAC over the
 // MP3 fallback) and routes the player through the bit-perfect endpoint.
 import type { Track } from '~/composables/usePlayer'
+import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
+
+const { isPhone } = useViewport()
 
 const route = useRoute()
 const artistSlug = computed(() => route.params.slug as string)
@@ -219,6 +222,55 @@ function isDiscBoundary(idx: number) {
   const curr = tracks.value[idx]
   return !!prev && !!curr && prev.disc_number !== curr.disc_number
 }
+
+// TrackList migration (W2c). The header row stays hand-rolled below (rather
+// than TrackList's own `show-header`) so its exact — slightly quirky, 4
+// labels over a 5-track grid — pixels don't move: the desktop header was
+// already missing a "Rating" label before this migration (the "Duration"
+// label sits one column left of the actual duration values), and TrackList's
+// generic per-column header would either "fix" that (a visual change) or
+// need its own override dance to reproduce it. Reusing the literal old
+// header markup sidesteps both.
+const columns: TrackListColumn[] = [
+  { key: 'idx', kind: 'index' },
+  { key: 'title', kind: 'custom' },
+  { key: 'rating', kind: 'rating' },
+  { key: 'disc', kind: 'custom' },
+  { key: 'duration', kind: 'duration' },
+]
+
+const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
+  id: t.id,
+  title: t.title,
+  artist: artistName.value,
+  artist_slug: artistSlug.value,
+  album: album.value?.title ?? '',
+  album_slug: albumSlug.value,
+  duration: t.duration,
+  available: isPlayable(t),
+  rating: ratings.value.get(t.id) ?? 0,
+})))
+
+function contextItemsFor(_row: TrackListRow, i: number) {
+  const t = tracks.value[i]!
+  return actions.forTrack({
+    id: t.id,
+    title: t.title,
+    artist: artistName.value,
+    album: album.value?.title ?? '',
+    duration: t.duration,
+    album_id: album.value?.id,
+    artist_id: detail.value?.artist?.id,
+    artist_slug: artistSlug.value,
+    album_slug: albumSlug.value,
+    available: isPlayable(t),
+  })
+}
+
+function playFromIndex(i: number) {
+  const t = tracks.value[i]
+  if (t) playFrom(t)
+}
 </script>
 
 <template>
@@ -297,44 +349,48 @@ function isDiscBoundary(idx: number) {
 
     <section class="tracklist page-pad">
       <div class="list-rows">
-        <div class="list-row list-row-head tl-cols">
+        <div v-if="!isPhone" class="list-row list-row-head tl-cols">
           <div>#</div>
           <div>Title</div>
           <div v-if="!hasMultipleDiscs" />
           <div v-else>Disc</div>
           <div style="text-align: right">Duration</div>
         </div>
-        <template v-for="(t, i) in tracks" :key="t.id">
-          <div class="disc-marker" v-if="hasMultipleDiscs && isDiscBoundary(i)">Disc {{ t.disc_number }}</div>
-          <AppContextMenu :items="actions.forTrack({ id: t.id, title: t.title, artist: detail?.artist?.name ?? '', album: album?.title ?? '', duration: t.duration, album_id: album?.id, artist_id: detail?.artist?.id, artist_slug: artistSlug, album_slug: albumSlug, available: isPlayable(t) })">
-          <div class="list-row tl-cols" :class="{ 'tl-missing': !isPlayable(t) }" @click="isPlayable(t) && playFrom(t)">
-            <div class="tl-num mono">{{ t.track_number || i + 1 }}</div>
+        <TrackList
+          :tracks="tlRows"
+          :columns="columns"
+          grid-template-columns="48px 1fr 120px 80px 80px"
+          :show-header="false"
+          :context-items="contextItemsFor"
+          :active-track-id="currentTrack?.id ?? null"
+          :playing="playing"
+          :duration-formatter="formatTime"
+          :on-rating-change="onRate"
+          @row-click="playFromIndex"
+        >
+          <template #row-before="{ index }">
+            <div v-if="hasMultipleDiscs && isDiscBoundary(index)" class="disc-marker">Disc {{ tracks[index]!.disc_number }}</div>
+          </template>
+          <template #cell-title="{ index, active }">
             <div class="tl-title-cell">
-              <VuMeter v-if="currentTrack?.id === t.id" :playing="playing" />
-              <Icon v-else-if="!isPlayable(t)" name="trash" :size="13" class="tl-missing-icon" />
+              <VuMeter v-if="active" :playing="playing" />
+              <Icon v-else-if="!isPlayable(tracks[index]!)" name="trash" :size="13" class="tl-missing-icon" />
               <div class="tl-text">
-                <div class="tl-title" :style="currentTrack?.id === t.id ? { color: 'var(--gold)' } : {}">{{ t.title }}</div>
-                <div v-if="t.files.length" class="tl-format-row" @click.stop>
+                <div class="tl-title">{{ tracks[index]!.title }}</div>
+                <div v-if="tracks[index]!.files.length" class="tl-format-row" @click.stop>
                   <TrackQualityPicker
-                    :files="t.files"
-                    :selected-id="primaryFile(t)?.id"
-                    @pick="playFromFile(t, $event)"
+                    :files="tracks[index]!.files"
+                    :selected-id="primaryFile(tracks[index]!)?.id"
+                    @pick="playFromFile(tracks[index]!, $event)"
                   />
                 </div>
               </div>
             </div>
-            <div class="tl-rate" @click.stop>
-              <StarRating
-                :model-value="ratings.get(t.id) ?? 0"
-                size="sm"
-                @update:model-value="(v) => onRate(t.id, v)"
-              />
-            </div>
-            <div class="tl-disc mono">{{ hasMultipleDiscs ? t.disc_number : '' }}</div>
-            <div class="tl-dur mono">{{ formatTime(t.duration) }}</div>
-          </div>
-          </AppContextMenu>
-        </template>
+          </template>
+          <template #cell-disc="{ index }">
+            <div class="tl-disc mono">{{ hasMultipleDiscs ? tracks[index]!.disc_number : '' }}</div>
+          </template>
+        </TrackList>
       </div>
     </section>
 
@@ -461,18 +517,35 @@ function isDiscBoundary(idx: number) {
 }
 
 .tracklist { padding-top: 24px; }
+/* Hand-rolled header only (the `tl-cols` grid template, reused verbatim as
+   TrackList's `grid-template-columns` prop below it). */
 .tl-cols { grid-template-columns: 48px 1fr 120px 80px 80px !important; }
-.tl-rate { display: flex; align-items: center; }
-.tl-num { text-align: right; color: var(--fg-3); }
 .tl-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .tl-text { min-width: 0; }
 .tl-title { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tl-missing { opacity: 0.5; cursor: default; }
 .tl-missing-icon { color: #d96b6b; flex-shrink: 0; }
 .tl-format-row { margin-top: 2px; }
 .tl-disc { text-align: center; color: var(--fg-3); }
-.tl-dur { text-align: right; color: var(--fg-3); }
 .mono { font-family: var(--font-mono); }
+
+/* TrackList's baseline row chrome (padding 6/10, 12px row-body gap, `r-sm`
+   radius, no per-row divider — matches music/songs.vue) differs from this
+   page's old `.list-row` convention (padding 9/12, 16px gap, `r-md` radius,
+   an inset-shadow divider line). Layer the deltas on via :deep() rather than
+   reworking TrackList's shared baseline — same pattern as music/loved.vue. */
+:deep(.tl-row) { column-gap: 16px; }
+:deep(.tl-body) { gap: 0; }
+:deep(.tl-track) {
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.035);
+}
+:deep(.tl-track:hover) { background: rgba(255, 255, 255, 0.045); }
+:deep(.tl-c-index) { font-size: 13px; }
+:deep(.tl-c-duration) { font-size: 13px; }
+/* This page never tinted the index column gold on the active row (only the
+   title text did) — cancel TrackList's songs.vue-derived baseline tint. */
+:deep(.tl-track.tl-active .tl-c-index) { color: var(--fg-3); }
 
 .disc-marker {
   font-size: 11px;
@@ -514,5 +587,35 @@ function isDiscBoundary(idx: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Phone (<=720px): stack the hero, center the cover, wrap the action row.
+   TrackList's own isPhone branch handles the tracklist; this only touches
+   the hero + related-albums grid. */
+@media (max-width: 720px) {
+  /* `.hero-floating-actions` is a flex sibling of `.hero-content` (both
+     direct children of `.hero`), not nested inside it — `.hero` itself
+     needs to switch to a column too, or the actions float beside the
+     content instead of wrapping below it. */
+  .hero { min-height: 0; flex-direction: column; }
+  .hero-content {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 24px 20px 20px;
+    gap: 14px;
+  }
+  .hero-cover { width: min(55vw, 240px); height: min(55vw, 240px); }
+  .hero-meta { width: 100%; }
+  .hero-sub { justify-content: center; flex-wrap: wrap; }
+  .hero-sub .artist-link { max-width: 100%; }
+  .hero-meta :deep(.ext-links) { justify-content: center; }
+  .hero-floating-actions {
+    position: static;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .similar-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px 12px; }
 }
 </style>

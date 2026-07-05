@@ -46,37 +46,29 @@
 
     <section class="page-pad mix-tracks">
       <div class="list-rows">
-        <div class="list-row list-row-head mix-cols">
+        <div v-if="!isPhone" class="list-row list-row-head mix-cols">
           <div>#</div>
           <div>Title</div>
           <div>Album</div>
           <div>Artist</div>
           <div style="text-align: right">Duration</div>
         </div>
-        <div
-          v-for="(t, i) in mix.tracks"
-          :key="t.track_id"
-          class="list-row mix-cols"
-          @click="playFrom(i)"
+        <TrackList
+          :tracks="tlRows"
+          :columns="columns"
+          grid-template-columns="32px 1fr 1fr 1fr 80px"
+          :show-header="false"
+          :context-items="contextItemsFor"
+          :active-track-id="currentTrack?.id ?? null"
+          :duration-formatter="formatTime"
+          @row-click="playFrom"
         >
-          <div class="mix-num mono">{{ i + 1 }}</div>
-          <div class="mix-title-cell">
-            <Poster :idx="t.track_id" :src="useAlbumCoverUrl(t.artist_slug, t.album_slug)" aspect="1/1" class="mix-thumb" />
-            <div class="mix-title-text">
-              <div
-                class="mix-title"
-                :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}"
-              >{{ t.track_title }}</div>
+          <template #cell-artist="{ index }">
+            <div class="mix-artist">
+              <NuxtLink :to="`/music/artist/${mix!.tracks[index]!.artist_slug}`" class="mix-link" @click.stop>{{ mix!.tracks[index]!.artist_name }}</NuxtLink>
             </div>
-          </div>
-          <div class="mix-album">
-            <NuxtLink :to="`/music/artist/${t.artist_slug}/${t.album_slug}`" class="mix-link" @click.stop>{{ t.album_title }}</NuxtLink>
-          </div>
-          <div class="mix-artist">
-            <NuxtLink :to="`/music/artist/${t.artist_slug}`" class="mix-link" @click.stop>{{ t.artist_name }}</NuxtLink>
-          </div>
-          <div class="mix-dur mono">{{ formatTime(t.duration) }}</div>
-        </div>
+          </template>
+        </TrackList>
       </div>
     </section>
   </div>
@@ -84,6 +76,7 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 import { useQuery } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
@@ -107,11 +100,14 @@ interface Mix {
   tracks: MixTrack[]
 }
 
+const { isPhone } = useViewport()
+
 const route = useRoute()
 const slug = computed(() => String(route.params.slug ?? ''))
 
 const { $heya } = useNuxtApp()
-const { play, playing, currentTrack, queue } = usePlayer()
+const { play, currentTrack, queue } = usePlayer()
+const actions = useMusicActions()
 
 // Shares the cache key with MusicHome's mixes-for-you query — opening
 // a mix detail page from the home shelf reads from the same cache slot,
@@ -158,6 +154,46 @@ async function playFrom(index: number) {
   await play(tracks[index]!)
 }
 
+// TrackList migration (W2c) — the header row stays hand-rolled above (see
+// template) since this grid was already correctly aligned; TrackList's own
+// sticky, solid-background header would be a visual change, not a parity fix.
+const columns: TrackListColumn[] = [
+  { key: 'idx', kind: 'index' },
+  { key: 'title', kind: 'title', inlineArt: true, inlineArtSize: 40, subtitle: 'none' },
+  { key: 'album', kind: 'album' },
+  { key: 'artist', kind: 'custom' },
+  { key: 'duration', kind: 'duration' },
+]
+
+const tlRows = computed<TrackListRow[]>(() => (mix.value?.tracks ?? []).map((t) => ({
+  id: t.track_id,
+  title: t.track_title,
+  artist: t.artist_name,
+  artist_slug: t.artist_slug,
+  album: t.album_title,
+  album_slug: t.album_slug,
+  duration: t.duration,
+  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+})))
+
+// The old hand-rolled rows had no context menu at all — TrackList requires
+// one, so this is a small net-new affordance (right-click a mix row to
+// play/queue/rate that track) rather than a preserved behavior.
+function contextItemsFor(_row: TrackListRow, i: number) {
+  const t = mix.value!.tracks[i]!
+  return actions.forTrack({
+    id: t.track_id,
+    title: t.track_title,
+    artist: t.artist_name,
+    album: t.album_title,
+    duration: t.duration,
+    album_id: t.album_id,
+    artist_id: t.artist_id,
+    artist_slug: t.artist_slug,
+    album_slug: t.album_slug,
+  })
+}
+
 function onImgError(e: Event) {
   const img = e.target as HTMLImageElement
   img.style.visibility = 'hidden'
@@ -169,7 +205,6 @@ function formatTime(seconds: number): string {
   const s = Math.floor(seconds % 60)
   return `${m}:${String(s).padStart(2, '0')}`
 }
-void playing
 </script>
 
 <style scoped>
@@ -260,6 +295,8 @@ void playing
 
 .mix-tracks { margin-top: 8px; }
 
+/* `.list-row`/`.list-row-head` back the hand-rolled header only now — the
+   body rows moved to TrackList (`.tl-*`), overridden via :deep() below. */
 .list-rows { display: flex; flex-direction: column; }
 .list-row {
   display: grid;
@@ -270,7 +307,6 @@ void playing
   cursor: pointer;
   transition: background 0.1s;
 }
-.list-row:not(.list-row-head):hover { background: rgba(255, 255, 255, 0.04); }
 .list-row-head {
   font-size: 10px;
   text-transform: uppercase;
@@ -281,24 +317,41 @@ void playing
   border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
 }
+/* Cancels heya.css's global `.list-row:hover` background — this scoped
+   block wins on specificity, so without this the (non-interactive) header
+   would still pick up the global hover tint. */
 .list-row-head:hover { background: transparent; }
 
 .mix-cols { grid-template-columns: 32px 1fr 1fr 1fr 80px; }
-.mix-num { color: var(--fg-3); font-size: 12px; text-align: center; }
-.mix-title-cell { display: flex; gap: 10px; align-items: center; min-width: 0; }
-.mix-thumb { width: 40px; height: 40px; border-radius: 4px; flex-shrink: 0; }
-.mix-title-text { min-width: 0; }
-.mix-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--fg-0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mix-album, .mix-artist { font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mix-artist { font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mix-link { color: inherit; text-decoration: none; transition: color 0.15s; }
 .mix-link:hover { color: var(--gold); }
-.mix-dur { font-size: 12px; color: var(--fg-3); text-align: right; }
-.mono { font-family: var(--font-mono); }
+
+/* TrackList body-row deltas vs. this page's old (already fairly close)
+   `.list-row` numbers: only the row padding, the index alignment, the
+   inline-art gap, and the album-link color/size/hover actually differ. */
+:deep(.tl-body) { gap: 0; }
+:deep(.tl-track) { padding: 8px 12px; }
+:deep(.tl-c-index) { text-align: center; }
+:deep(.tl-track.tl-active .tl-c-index) { color: var(--fg-3); }
+:deep(.tl-title-inline-art) { gap: 10px; }
+:deep(.tl-c-album) { font-size: 12px; }
+:deep(.tl-album-link) { font-size: 12px; }
+:deep(.tl-album-link:hover) { color: var(--gold); }
+
+/* Phone (<=720px): stack the hero, center the mosaic, wrap the action row.
+   TrackList's own isPhone branch handles the tracklist. */
+@media (max-width: 720px) {
+  .mix-hero {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 24px 20px 20px;
+    gap: 14px;
+  }
+  .mix-hero-art { width: min(55vw, 240px); height: min(55vw, 240px); }
+  .mix-hero-meta { width: 100%; }
+  .mix-hero-stats { justify-content: center; flex-wrap: wrap; }
+  .m-actions { justify-content: center; flex-wrap: wrap; }
+}
 </style>

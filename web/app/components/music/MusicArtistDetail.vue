@@ -1130,11 +1130,24 @@ if (import.meta.client) {
 }
 .alias-list { color: var(--fg-2); }
 
-/* Responsive: stack hero poster + meta on narrow screens */
-@media (max-width: 700px) {
-  .hero-content { flex-direction: column; align-items: stretch; gap: 14px; padding-bottom: 22px; }
+/* Responsive: stack hero poster + meta on narrow screens. Aligned to the
+   720px phone convention (docs/ui.md "Responsive conventions") — was 700px.
+   Centering + the `.hero` min-height reset are the only additions beyond
+   that rename; desktop and the rest of this component are untouched. */
+@media (max-width: 720px) {
+  /* `.hero-floating-actions` is a flex sibling of `.hero-content` (both
+     direct children of `.hero`), not nested inside it — `.hero` itself
+     needs to switch to a column too, or the actions float beside the
+     content instead of wrapping below it. */
+  .hero { min-height: 0; flex-direction: column; }
+  .hero-content { flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 20px 20px 22px; }
+  .hero-left { align-self: center; }
   .hero-poster { width: 120px; height: 120px; }
-  .hero-floating-actions { bottom: 18px; right: 16px; }
+  .hero-meta { width: 100%; }
+  .tag-row { justify-content: center; }
+  .hero-stats { justify-content: center; }
+  .hero-ext :deep(.ext-links) { justify-content: center; }
+  .hero-floating-actions { position: static; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
   .hero-floating-actions .hero-round { width: 38px; height: 38px; }
   .hero-floating-actions .hero-round-primary { width: 48px; height: 48px; }
 }
