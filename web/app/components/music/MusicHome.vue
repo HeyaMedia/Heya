@@ -532,6 +532,14 @@ const labelShelfQuery = useQuery({
 })
 const labelShelf = computed<LabelShelf | null>(() => labelShelfQuery.data.value ?? null)
 
+// Live refresh: a track/album file match (media.added) or the discography
+// refresh landing new albums (media.updated) both carry the artist's
+// media_type='music' — see useLiveRefresh for why this is coalesced rather
+// than invalidating on every event.
+useLiveRefresh([
+  { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['music', 'home', 'recently-added']] },
+])
+
 const greeting = computed(() => {
   const h = new Date().getHours()
   if (h < 12) return 'Good morning'

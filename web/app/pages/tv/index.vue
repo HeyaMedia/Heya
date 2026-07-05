@@ -480,17 +480,38 @@ async function loadLists() {
   } catch { /* ignore */ }
 }
 
-onMounted(async () => {
-  const { $heya } = useNuxtApp()
-  const [mediaRes, libRes, stateRes, listsRes] = await Promise.allSettled([
+// Pulled out of onMounted so useLiveRefresh (below) can re-run just the
+// media list on a live media.added/media.updated event (new show, or a
+// debounced re-enrich landing new seasons/episodes on an existing show),
+// without refetching libraries/lists/watch-state too. Errors are
+// swallowed — leaving `items` at its last-good value beats blanking the
+// grid on a background refresh hiccup (matches the original
+// Promise.allSettled fire-and-forget-on-reject behavior).
+async function loadItems() {
+  try {
+    const { $heya } = useNuxtApp()
     // /api/media/enriched wraps results in `{ movies, tv, type }` since the
     // API rewrite — unwrap the relevant branch.
-    $heya('/api/media/enriched', { query: { type: 'tv', limit: 5000 } }) as Promise<{ tv: EnrichedMediaItem[] | null }>,
+    const res = await $heya('/api/media/enriched', { query: { type: 'tv', limit: 5000 } }) as { tv: EnrichedMediaItem[] | null }
+    items.value = res.tv ?? []
+  } catch { /* keep the last-good list */ }
+}
+
+// This page has no vue-query cache to invalidate — data lands in a plain
+// ref via loadItems() — so useLiveRefresh's `refetch` escape hatch drives
+// it directly instead of a `keys` invalidation.
+useLiveRefresh([
+  { events: ['media.added', 'media.updated'], filter: byMediaType('tv'), refetch: loadItems },
+])
+
+onMounted(async () => {
+  const { $heya } = useNuxtApp()
+  const [, libRes, stateRes, listsRes] = await Promise.allSettled([
+    loadItems(),
     $heya('/api/libraries') as Promise<Library[]>,
     fetchUserState('series'),
     $heya('/api/me/lists') as Promise<UserList[]>,
   ])
-  if (mediaRes.status === 'fulfilled') items.value = mediaRes.value.tv ?? []
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'tv')
   if (stateRes.status === 'fulfilled') {
     const st = stateRes.value

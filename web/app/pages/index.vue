@@ -546,45 +546,16 @@ function onPlayUpNext(entry: UpNextItem) {
   navigateTo(`/watch/${entry.play_file_id}?${params}`)
 }
 
-// Event-bus driven cache invalidation. media.added / media.updated map to
-// the right query key by media_type. Debounced so a burst of scanner events
-// doesn't trigger 50 refetches.
-const { on } = useEventBus()
-const invalidationTimers: Record<string, ReturnType<typeof setTimeout>> = {}
-const queryKeyByType: Record<string, readonly unknown[]> = {
-  movie: ['media', 'recent', 'movie'],
-  tv: ['media', 'recent', 'tv'],
-  book: ['media', 'recent', 'book'],
-  music: ['home', 'recent-albums'],
-}
-
-function scheduleInvalidate(mt: string, delay: number) {
-  const key = queryKeyByType[mt]
-  if (!key) return
-  const existing = invalidationTimers[mt]
-  if (existing) clearTimeout(existing)
-  invalidationTimers[mt] = setTimeout(() => {
-    queryClient.invalidateQueries({ queryKey: key })
-  }, delay)
-}
-
-onMounted(() => {
-  const unsubs = [
-    on('media.added', (event) => {
-      const mt = (event.payload as { media_type?: string }).media_type
-      if (mt) scheduleInvalidate(mt, 2000)
-    }),
-    on('media.updated', (event) => {
-      const mt = (event.payload as { media_type?: string }).media_type
-      if (mt) scheduleInvalidate(mt, 3000)
-    }),
-  ]
-
-  onUnmounted(() => {
-    unsubs.forEach(fn => fn())
-    Object.values(invalidationTimers).forEach(t => clearTimeout(t))
-  })
-})
+// Live refresh: media.added (file just matched) / media.updated (enrich
+// landed — new seasons/episodes/albums included) map to each rail's query
+// key by media_type. See useLiveRefresh for the coalescing rationale — a
+// scan matching hundreds of files must not trigger hundreds of refetches.
+useLiveRefresh([
+  { events: ['media.added', 'media.updated'], filter: byMediaType('movie'), keys: [['media', 'recent', 'movie']] },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('tv'), keys: [['media', 'recent', 'tv']] },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('book'), keys: [['media', 'recent', 'book']] },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['home', 'recent-albums']] },
+])
 </script>
 
 <style scoped>

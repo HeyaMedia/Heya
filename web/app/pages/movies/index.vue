@@ -501,18 +501,38 @@ function fmtRuntime(min: number) {
   return h ? `${h}h ${min % 60}m` : `${min}m`
 }
 
-onMounted(async () => {
-  const { $heya } = useNuxtApp()
-  const [mediaRes, libRes, stateRes, listsRes, colRes] = await Promise.allSettled([
+// Pulled out of onMounted so useLiveRefresh (below) can re-run just the
+// media list on a live media.added/media.updated event, without refetching
+// libraries/lists/collections/watch-state too. Errors are swallowed —
+// leaving `items` at its last-good value beats blanking the grid on a
+// background refresh hiccup (matches the original Promise.allSettled
+// fire-and-forget-on-reject behavior).
+async function loadItems() {
+  try {
+    const { $heya } = useNuxtApp()
     // /api/media/enriched wraps results in `{ movies, tv, type }` since the
     // API rewrite — unwrap the relevant branch.
-    $heya('/api/media/enriched', { query: { type: 'movie', limit: 5000 } }) as Promise<{ movies: EnrichedMediaItem[] | null }>,
+    const res = await $heya('/api/media/enriched', { query: { type: 'movie', limit: 5000 } }) as { movies: EnrichedMediaItem[] | null }
+    items.value = res.movies ?? []
+  } catch { /* keep the last-good list */ }
+}
+
+// This page has no vue-query cache to invalidate — data lands in a plain
+// ref via loadItems() — so useLiveRefresh's `refetch` escape hatch drives
+// it directly instead of a `keys` invalidation.
+useLiveRefresh([
+  { events: ['media.added', 'media.updated'], filter: byMediaType('movie'), refetch: loadItems },
+])
+
+onMounted(async () => {
+  const { $heya } = useNuxtApp()
+  const [, libRes, stateRes, listsRes, colRes] = await Promise.allSettled([
+    loadItems(),
     $heya('/api/libraries') as Promise<Library[]>,
     fetchUserState('movies'),
     $heya('/api/me/lists') as Promise<UserList[]>,
     $heya('/api/collections/browse') as Promise<CollectionBrowse[]>,
   ])
-  if (mediaRes.status === 'fulfilled') items.value = mediaRes.value.movies ?? []
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'movie')
   if (stateRes.status === 'fulfilled') {
     favoritedSet.value = new Set(stateRes.value.favorited || [])
