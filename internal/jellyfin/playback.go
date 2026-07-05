@@ -384,7 +384,7 @@ func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p 
 		s.serveMediaFile(w, r, target.file.ID, target.file.Path)
 		return
 	}
-	outPath, err := mgr.EnsureAACMP4(r.Context(), target.trackFileID, target.file.Path)
+	outPath, err := mgr.EnsureAAC(r.Context(), target.trackFileID, target.file.Path, transcoder.DefaultAudioBitrateKbps)
 	if err != nil {
 		log.Warn().Err(err).Str("component", "jellyfin").Int64("track_file", target.trackFileID).Msg("universal audio transcode failed")
 		w.WriteHeader(http.StatusInternalServerError)

@@ -27275,6 +27275,17 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "description": "AAC transcode tier — one of aac-320, aac-256, aac-192, aac-128. Omit for the default caps-based direct-or-256k-fallback behavior. Unrecognized values are ignored, not rejected.",
+            "explode": false,
+            "in": "query",
+            "name": "quality",
+            "schema": {
+              "description": "AAC transcode tier — one of aac-320, aac-256, aac-192, aac-128. Omit for the default caps-based direct-or-256k-fallback behavior. Unrecognized values are ignored, not rejected.",
+              "maxLength": 16,
+              "type": "string"
+            }
           }
         ],
         "responses": {

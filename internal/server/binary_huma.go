@@ -196,6 +196,15 @@ type musicTrackStreamInput struct {
 	SupportsOpusAudio  bool  `query:"supports_opus_audio" required:"false"`
 	SupportsOpus       bool  `query:"supports_opus" required:"false"`
 	SupportsWavPCM     bool  `query:"supports_wav_pcm" required:"false"`
+	// Quality requests an explicit AAC transcode tier instead of the default
+	// caps-based direct-or-256k-fallback decision. Deliberately NOT an
+	// `enum:`-constrained field: Huma hard-rejects unrecognized enum values
+	// with 422 before the handler ever runs (see validation_huma_test.go),
+	// but the API contract requires unrecognized/absent values to silently
+	// fall through to today's behavior instead of erroring. The allowed set
+	// is documented in prose and enforced in Go by audioQualityTiers in
+	// music_stream_handlers.go.
+	Quality string `query:"quality" required:"false" maxLength:"16" doc:"AAC transcode tier — one of aac-320, aac-256, aac-192, aac-128. Omit for the default caps-based direct-or-256k-fallback behavior. Unrecognized values are ignored, not rejected."`
 }
 
 type musicTrackFileInput struct {
