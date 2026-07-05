@@ -220,6 +220,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		},
 		Watcher:  lazyWatcher{ptr: &watcherPauser},
 		Progress: progress,
+		Passive:  cfg.PassiveMode.Value,
 	})
 	if err != nil {
 		db.Close()

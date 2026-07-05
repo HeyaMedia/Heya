@@ -66,30 +66,41 @@ type Config struct {
 	// Workers call SetCurrentByKind at the top of Work() so the UI
 	// shows live labels. nil-safe — emissions become no-ops.
 	Progress *TaskProgressBroadcaster
+	// Passive marks this process a read-mostly guest on a shared DB
+	// (dev box on prod, `heya doctor` on any box). Setup then skips its
+	// two writes — River's schema migrations and the one-time
+	// unique_states cleanup — mirroring how service.New skips goose
+	// AutoMigrate: failing queries on a drifted schema are safer than
+	// altering a database this process doesn't own.
+	Passive bool
 }
 
 func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
-	migrator, err := rivermigrate.New(riverpgxv5.New(cfg.DB), nil)
-	if err != nil {
-		return nil, fmt.Errorf("river migrator: %w", err)
-	}
-	if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
-		return nil, fmt.Errorf("river migrate: %w", err)
-	}
-	log.Info().Msg("river migrations applied")
-
-	// One-time, idempotent: free pre-fix jobs from the unique index so the
-	// uniqueWhileActive() change takes effect on this deploy instead of a
-	// day later. Non-fatal and time-boxed — a slow/unreachable DB must not
-	// stall startup, and worst case is the old (slow) re-runnable behaviour
-	// until River's cleaner ages the rows out.
-	func() {
-		cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		if err := clearStaleUniqueJobStates(cleanupCtx, cfg.DB); err != nil {
-			log.Warn().Err(err).Msg("clear stale unique_states: skipped")
+	if cfg.Passive {
+		log.Warn().Msg("passive mode: skipping river migrations + stale unique_states cleanup")
+	} else {
+		migrator, err := rivermigrate.New(riverpgxv5.New(cfg.DB), nil)
+		if err != nil {
+			return nil, fmt.Errorf("river migrator: %w", err)
 		}
-	}()
+		if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
+			return nil, fmt.Errorf("river migrate: %w", err)
+		}
+		log.Info().Msg("river migrations applied")
+
+		// One-time, idempotent: free pre-fix jobs from the unique index so the
+		// uniqueWhileActive() change takes effect on this deploy instead of a
+		// day later. Non-fatal and time-boxed — a slow/unreachable DB must not
+		// stall startup, and worst case is the old (slow) re-runnable behaviour
+		// until River's cleaner ages the rows out.
+		func() {
+			cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := clearStaleUniqueJobStates(cleanupCtx, cfg.DB); err != nil {
+				log.Warn().Err(err).Msg("clear stale unique_states: skipped")
+			}
+		}()
+	}
 
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &ProcessFileWorker{DB: cfg.DB, Progress: cfg.Progress})

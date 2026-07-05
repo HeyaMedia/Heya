@@ -16,7 +16,9 @@ var doctorCmd = &cobra.Command{
 	Short: "Collect a support bundle for diagnosing issues",
 	Long: "Gathers app/config/database/library/tool/queue/storage diagnostics into one\n" +
 		"report — the thing to paste when asking for help. Read-only: never writes\n" +
-		"to the DB, never touches a file, never kicks off a scan. Runs the same\n" +
+		"to the database, never enqueues work, never modifies media or library\n" +
+		"state. (Opening the service layer may create Heya's own data-dir cache\n" +
+		"folders — the same ones the server creates at boot.) Runs the same\n" +
 		"report builder as GET /api/admin/doctor, minus the in-process log tail\n" +
 		"(the CLI is a short-lived process with no log history of its own).\n\n" +
 		"Secrets (DB password, API keys) are redacted — safe to paste publicly.\n" +
