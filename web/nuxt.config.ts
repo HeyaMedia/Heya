@@ -3,7 +3,56 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-05-19',
   devtools: { enabled: true },
 
-  modules: ['@nuxtjs/tailwindcss', 'nuxt-open-fetch', 'nuxt-phosphor-icons', '@vueuse/nuxt', '@nuxt/image'],
+  modules: ['@nuxtjs/tailwindcss', 'nuxt-open-fetch', 'nuxt-phosphor-icons', '@vueuse/nuxt', '@nuxt/image', '@vite-pwa/nuxt'],
+
+  // PWA install support (Wave 4 of docs/responsive-plan.md). Self-hosted app
+  // with frequent tagged releases, so `autoUpdate` — the new service worker
+  // takes over silently on next load instead of nagging the user with an
+  // "update available" prompt. `generateSW` (the module default) precaches
+  // the built app shell only; there is deliberately NO `runtimeCaching`
+  // entry for `/api/*` — absence means the service worker's fetch handler
+  // never intercepts those requests at all, so auth, streaming, and
+  // `/api/media/*/image/*` always hit the network fresh. `navigateFallback`
+  // covers deep-link/SPA navigations the same way `spaHandler` does
+  // server-side (internal/server/frontend.go always serves index.html for
+  // unknown paths); the denylist keeps that fallback from ever answering a
+  // top-level navigation to an API path (e.g. an image URL opened directly).
+  pwa: {
+    registerType: 'autoUpdate',
+    manifest: {
+      id: '/',
+      name: 'Heya',
+      short_name: 'Heya',
+      description: 'Self-hosted media server for movies, TV, music, and books.',
+      start_url: '/',
+      display: 'standalone',
+      background_color: '#0a0a12',
+      theme_color: '#0a0a12',
+      orientation: 'portrait',
+      icons: [
+        { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+        { src: '/pwa-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
+    },
+    workbox: {
+      // Defaults only glob js/css/html; add the icon + font formats that
+      // make up the rest of the "app shell" so the standalone window has
+      // something to paint from cache immediately. `akarisub` (libass WASM
+      // + its font, ~3.5 MB) is the subtitle renderer for ASS tracks — only
+      // needed when a video with ASS subs actually plays, not part of the
+      // shell, so it's excluded from precache and fetched on demand instead.
+      globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+      globIgnores: ['**/akarisub/**'],
+      navigateFallback: '/index.html',
+      navigateFallbackDenylist: [/^\/api/],
+    },
+    devOptions: {
+      // Never register a SW against the Vite dev server — it would fight
+      // HMR and the `heya dev-proxy` front door described in CLAUDE.md.
+      enabled: false,
+    },
+  },
 
   image: {
     providers: {
@@ -76,6 +125,16 @@ export default defineNuxtConfig({
       ],
       link: [
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        // @vite-pwa/nuxt (unlike plain vite-plugin-pwa in a non-Nuxt app)
+        // does NOT inject <link rel="manifest"> itself — Nuxt owns its own
+        // head/document rendering instead of the raw index.html Vite
+        // normally transforms, and this module's setup never touches
+        // `app.head` (verified against its source — no head/link/meta
+        // manipulation at all). Both this and apple-touch-icon are manual.
+        { rel: 'manifest', href: '/manifest.webmanifest' },
+        // iOS/iPadOS "Add to Home Screen" reads apple-touch-icon directly —
+        // Apple never adopted the Web App Manifest icon list.
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
       ],
       // Inline style so the document is dark from byte 0 — before any CSS file
       // loads and before the spa-loading-template renders. Kills the white
