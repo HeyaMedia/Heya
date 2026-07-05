@@ -16,6 +16,22 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for SegmentDTOSource.
+const (
+	Aniskip    SegmentDTOSource = "aniskip"
+	Skipmedb   SegmentDTOSource = "skipmedb"
+	Theintrodb SegmentDTOSource = "theintrodb"
+)
+
+// Defines values for SegmentDTOType.
+const (
+	Commercial SegmentDTOType = "commercial"
+	Credits    SegmentDTOType = "credits"
+	Intro      SegmentDTOType = "intro"
+	Preview    SegmentDTOType = "preview"
+	Recap      SegmentDTOType = "recap"
+)
+
 // Defines values for SimilarCandidateDTOSource.
 const (
 	Lastfm       SimilarCandidateDTOSource = "lastfm"
@@ -115,6 +131,7 @@ type ArtistDetail struct {
 	Listeners       *int64             `json:"listeners,omitempty"`
 	MemberOfQids    *[]string          `json:"member_of_qids"`
 	Members         *[]ArtistMember    `json:"members"`
+	MusicVideos     *[]MusicVideo      `json:"music_videos"`
 	Name            string             `json:"name"`
 	NativeLanguage  *string            `json:"native_language,omitempty"`
 	NativeName      *string            `json:"native_name,omitempty"`
@@ -213,6 +230,21 @@ type BookDocBody struct {
 	Year            *int64                 `json:"year,omitempty"`
 }
 
+// BrowseOutputBody defines model for BrowseOutputBody.
+type BrowseOutputBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema  *string     `json:"$schema,omitempty"`
+	Page    int64       `json:"page"`
+	PerPage int64       `json:"per_page"`
+	Results *[]ListItem `json:"results"`
+
+	// Total Estimated total matching documents
+	Total int64 `json:"total"`
+
+	// TotalPages Always >= 1
+	TotalPages int64 `json:"total_pages"`
+}
+
 // Cast defines model for Cast.
 type Cast struct {
 	Character   *string            `json:"character,omitempty"`
@@ -258,6 +290,20 @@ type ClassicalWork struct {
 	Recordings      *[]ClassicalRecording `json:"recordings"`
 	Subtitle        *string               `json:"subtitle,omitempty"`
 	Title           string                `json:"title"`
+}
+
+// Collection defines model for Collection.
+type Collection struct {
+	Backdrops *[]ArtworkItem `json:"backdrops"`
+	Ids       CollectionIDs  `json:"ids"`
+	Name      string         `json:"name"`
+	Overview  *string        `json:"overview,omitempty"`
+	Posters   *[]ArtworkItem `json:"posters"`
+}
+
+// CollectionIDs defines model for CollectionIDs.
+type CollectionIDs struct {
+	Tmdb int64 `json:"tmdb"`
 }
 
 // ContentRating defines model for ContentRating.
@@ -306,6 +352,7 @@ type Detail struct {
 	Budget           *int64             `json:"budget,omitempty"`
 	Cast             *[]Cast            `json:"cast"`
 	Characters       *[]Character       `json:"characters"`
+	Collection       *Collection        `json:"collection,omitempty"`
 	ContentRatings   *[]ContentRating   `json:"content_ratings"`
 	CreatedBy        *[]NamedRef        `json:"created_by"`
 	Crew             *[]Crew            `json:"crew"`
@@ -385,6 +432,20 @@ type EpisodeAddress struct {
 	Season   int64  `json:"season"`
 }
 
+// EpisodeSegmentsBody defines model for EpisodeSegmentsBody.
+type EpisodeSegmentsBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema        *string        `json:"$schema,omitempty"`
+	Episode       int64          `json:"episode"`
+	FetchedAt     time.Time      `json:"fetched_at"`
+	Found         bool           `json:"found"`
+	Ids           ExternalIDsDTO `json:"ids"`
+	Season        int64          `json:"season"`
+	Segments      *[]SegmentDTO  `json:"segments"`
+	SourcesFailed *[]string      `json:"sources_failed"`
+	SourcesOk     *[]string      `json:"sources_ok"`
+}
+
 // ErrorDetail defines model for ErrorDetail.
 type ErrorDetail struct {
 	// Location Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id'
@@ -437,6 +498,43 @@ type ExternalIDsDTO struct {
 	Tvrage   *int64  `json:"tvrage,omitempty"`
 }
 
+// FacetsOutputBody defines model for FacetsOutputBody.
+type FacetsOutputBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema *string          `json:"$schema,omitempty"`
+	Genres map[string]int64 `json:"genres"`
+
+	// Kinds kind -> document count
+	Kinds    map[string]int64 `json:"kinds"`
+	Networks map[string]int64 `json:"networks"`
+	Studios  map[string]int64 `json:"studios"`
+	Tags     map[string]int64 `json:"tags"`
+}
+
+// FingerprintStats defines model for FingerprintStats.
+type FingerprintStats struct {
+	// ArtistsDone kind=meta rows — artists with at least one completed fingerprint pass
+	ArtistsDone int64 `json:"artists_done"`
+
+	// ArtistsTotal heya_artists document count
+	ArtistsTotal int64 `json:"artists_total"`
+
+	// DoneLast24h meta rows with scanned_at in the last 24h — a drain-rate proxy
+	DoneLast24h int64 `json:"done_last_24h"`
+
+	// Failed kind=track rows with err set (negative-cached permanent failures)
+	Failed int64 `json:"failed"`
+
+	// QueueAvailable jobs collection: kind=fingerprint, state=available
+	QueueAvailable int64 `json:"queue_available"`
+
+	// QueueRunning jobs collection: kind=fingerprint, state=running
+	QueueRunning int64 `json:"queue_running"`
+
+	// Tracks fingerprints collection rows: kind=track with a usable (non-empty) fp
+	Tracks int64 `json:"tracks"`
+}
+
 // HealthCheck defines model for HealthCheck.
 type HealthCheck struct {
 	Message *string `json:"message,omitempty"`
@@ -474,6 +572,21 @@ type Keyword struct {
 	TmdbId *int64 `json:"tmdb_id,omitempty"`
 }
 
+// ListItem defines model for ListItem.
+type ListItem struct {
+	Kind   string  `json:"kind"`
+	Poster *string `json:"poster,omitempty"`
+	Slug   string  `json:"slug"`
+
+	// Status Normalized status (returning, ended, canceled, planned, ...) — drives list-card badges
+	Status *string `json:"status,omitempty"`
+	Title  string  `json:"title"`
+
+	// UpdatedAt When the doc was last enriched (populated on /recent only)
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	Year      *int64     `json:"year,omitempty"`
+}
+
 // LocalizedTitle defines model for LocalizedTitle.
 type LocalizedTitle struct {
 	Country  *string `json:"country,omitempty"`
@@ -501,6 +614,38 @@ type MovieDocBody struct {
 	Slug            string         `json:"slug"`
 	Title           string         `json:"title"`
 	Year            *int64         `json:"year,omitempty"`
+}
+
+// MovieSegmentsBody defines model for MovieSegmentsBody.
+type MovieSegmentsBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema *string `json:"$schema,omitempty"`
+
+	// FetchedAt Most recent source fetch backing this answer.
+	FetchedAt time.Time `json:"fetched_at"`
+
+	// Found False = the community databases have no markers (yet); misses are re-checked more often than hits.
+	Found    bool           `json:"found"`
+	Ids      ExternalIDsDTO `json:"ids"`
+	Segments *[]SegmentDTO  `json:"segments"`
+
+	// SourcesFailed Sources whose last fetch errored — their markers (if any) are the previous good data.
+	SourcesFailed *[]string `json:"sources_failed"`
+
+	// SourcesOk Sources whose last fetch succeeded (a successful fetch may still carry zero markers).
+	SourcesOk *[]string `json:"sources_ok"`
+}
+
+// MusicVideo defines model for MusicVideo.
+type MusicVideo struct {
+	AlbumTitle  *string `json:"album_title,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Director    *string `json:"director,omitempty"`
+	Duration    *int64  `json:"duration,omitempty"`
+	Source      string  `json:"source"`
+	Thumbnail   *string `json:"thumbnail,omitempty"`
+	Track       string  `json:"track"`
+	Url         string  `json:"url"`
 }
 
 // NamedRef defines model for NamedRef.
@@ -558,12 +703,41 @@ type PersonDocBody struct {
 	Year            *int64         `json:"year,omitempty"`
 }
 
+// RandomOutputBody defines model for RandomOutputBody.
+type RandomOutputBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema *string `json:"$schema,omitempty"`
+	Kind   string  `json:"kind"`
+	Slug   string  `json:"slug"`
+}
+
+// RankedTitle defines model for RankedTitle.
+type RankedTitle struct {
+	Kind   string  `json:"kind"`
+	Poster *string `json:"poster,omitempty"`
+	Rating float64 `json:"rating"`
+	Slug   string  `json:"slug"`
+
+	// Source Which metric Rating is (imdb, tmdb, tvmaze, popularity, listeners)
+	Source string `json:"source"`
+	Title  string `json:"title"`
+	Votes  *int64 `json:"votes,omitempty"`
+	Year   *int64 `json:"year,omitempty"`
+}
+
 // Rating defines model for Rating.
 type Rating struct {
 	Raw    *string `json:"raw,omitempty"`
 	Source string  `json:"source"`
 	Value  float64 `json:"value"`
 	Votes  *int64  `json:"votes,omitempty"`
+}
+
+// RecentOutputBody defines model for RecentOutputBody.
+type RecentOutputBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema  *string     `json:"$schema,omitempty"`
+	Results *[]ListItem `json:"results"`
 }
 
 // Recommendation defines model for Recommendation.
@@ -574,6 +748,20 @@ type Recommendation struct {
 	TmdbId      *int64   `json:"tmdb_id,omitempty"`
 	VoteAverage *float64 `json:"vote_average,omitempty"`
 	Year        *int64   `json:"year,omitempty"`
+}
+
+// ResolveBody defines model for ResolveBody.
+type ResolveBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema *string        `json:"$schema,omitempty"`
+	Artist *ArtistDocBody `json:"artist,omitempty"`
+	Book   *BookDocBody   `json:"book,omitempty"`
+
+	// Kind The doc's precise kind (movie, tv, anime, talk_show, miniseries, documentary, reality, person, artist, book)
+	Kind   string         `json:"kind"`
+	Movie  *MovieDocBody  `json:"movie,omitempty"`
+	Person *PersonDocBody `json:"person,omitempty"`
+	Tv     *TVDocBody     `json:"tv,omitempty"`
 }
 
 // SearchHit defines model for SearchHit.
@@ -631,6 +819,45 @@ type Season struct {
 	XemNames      *map[string]*[]string `json:"xem_names,omitempty"`
 }
 
+// SegmentDTO defines model for SegmentDTO.
+type SegmentDTO struct {
+	// DurationMs Runtime the marker was authored against — compare with your file's runtime before trusting the timestamps (a mismatch means a different release cut).
+	DurationMs *int64 `json:"duration_ms,omitempty"`
+
+	// EndMs Omitted = runs to end of media (credits/preview markers may be open-ended).
+	EndMs   *int64           `json:"end_ms,omitempty"`
+	Source  SegmentDTOSource `json:"source"`
+	StartMs int64            `json:"start_ms"`
+
+	// Submissions Community submission/vote count backing this marker (SkipMe.db only).
+	Submissions *int64         `json:"submissions,omitempty"`
+	Type        SegmentDTOType `json:"type"`
+}
+
+// SegmentDTOSource defines model for SegmentDTO.Source.
+type SegmentDTOSource string
+
+// SegmentDTOType defines model for SegmentDTO.Type.
+type SegmentDTOType string
+
+// SeriesEpisodeSegmentsDTO defines model for SeriesEpisodeSegmentsDTO.
+type SeriesEpisodeSegmentsDTO struct {
+	Episode  int64         `json:"episode"`
+	Season   int64         `json:"season"`
+	Segments *[]SegmentDTO `json:"segments"`
+}
+
+// SeriesSegmentsBody defines model for SeriesSegmentsBody.
+type SeriesSegmentsBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema *string `json:"$schema,omitempty"`
+
+	// Episodes Every episode with at least one cached marker, ordered by season then episode. Freshly bulk-filled from SkipMe.db's series endpoint on each call (cached upstream-side); TheIntroDB data layers in via episode-level lookups.
+	Episodes *[]SeriesEpisodeSegmentsDTO `json:"episodes"`
+	Found    bool                        `json:"found"`
+	Ids      ExternalIDsDTO              `json:"ids"`
+}
+
 // SimilarArtist defines model for SimilarArtist.
 type SimilarArtist struct {
 	Match *float64 `json:"match,omitempty"`
@@ -659,6 +886,45 @@ type SimilarOutputBody struct {
 	// Schema A URL to the JSON Schema for this object.
 	Schema  *string                `json:"$schema,omitempty"`
 	Results *[]SimilarCandidateDTO `json:"results"`
+}
+
+// StatsBody defines model for StatsBody.
+type StatsBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema *string `json:"$schema,omitempty"`
+
+	// Actors Distinct cast names across every title's cast[] (not necessarily enriched)
+	Actors  int64 `json:"actors"`
+	Albums  int64 `json:"albums"`
+	Anime   int64 `json:"anime"`
+	Artists int64 `json:"artists"`
+	Books   int64 `json:"books"`
+
+	// Composers Classical composers (OpenOpus-tagged artists)
+	Composers int64 `json:"composers"`
+
+	// Crew Distinct crew names across every title's crew[]
+	Crew         int64             `json:"crew"`
+	Fingerprints *FingerprintStats `json:"fingerprints,omitempty"`
+
+	// GeneratedAt When this snapshot was computed (served from a 5-minute cache)
+	GeneratedAt time.Time `json:"generated_at"`
+	Movies      int64     `json:"movies"`
+
+	// People Enriched person docs
+	People        int64          `json:"people"`
+	TopAnime      *[]RankedTitle `json:"top_anime"`
+	TopArtists    *[]RankedTitle `json:"top_artists"`
+	TopComposers  *[]RankedTitle `json:"top_composers"`
+	TopMovies     *[]RankedTitle `json:"top_movies"`
+	TopPeople     *[]RankedTitle `json:"top_people"`
+	TopTv         *[]RankedTitle `json:"top_tv"`
+	TotalEpisodes int64          `json:"total_episodes"`
+
+	// TotalTitles Enriched docs across every collection (incl. people/artists/books)
+	TotalTitles int64 `json:"total_titles"`
+	Tracks      int64 `json:"tracks"`
+	TvShows     int64 `json:"tv_shows"`
 }
 
 // TVDocBody defines model for TVDocBody.
@@ -726,6 +992,42 @@ type XEMMapping struct {
 	Schemes  *[]string                        `json:"schemes"`
 }
 
+// BrowseParams defines parameters for Browse.
+type BrowseParams struct {
+	// Q Free-text search within the local index
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Kind Filter: exact kind (movie, tv, anime, person, artist, ...)
+	Kind *string `form:"kind,omitempty" json:"kind,omitempty"`
+
+	// Genre Filter: genre
+	Genre *string `form:"genre,omitempty" json:"genre,omitempty"`
+
+	// Tag Filter: tag
+	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// Network Filter: network name
+	Network *string `form:"network,omitempty" json:"network,omitempty"`
+
+	// Studio Filter: studio name
+	Studio *string `form:"studio,omitempty" json:"studio,omitempty"`
+
+	// Page 1-based page number
+	Page *int64 `form:"page,omitempty" json:"page,omitempty"`
+}
+
+// MovieSegmentsParams defines parameters for MovieSegments.
+type MovieSegmentsParams struct {
+	// DurationMs The caller's file runtime in milliseconds. Passed upstream for release-cut matching — always send it when known.
+	DurationMs *int64 `form:"duration_ms,omitempty" json:"duration_ms,omitempty"`
+}
+
+// RecentParams defines parameters for Recent.
+type RecentParams struct {
+	// Limit Max rows returned
+	Limit *int64 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // SearchParams defines parameters for Search.
 type SearchParams struct {
 	// Type One of: artist, album, track, movie, tv, person, book
@@ -772,6 +1074,12 @@ type SimilarTrackParams struct {
 
 	// Limit Max results per source
 	Limit *int64 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// TvEpisodeSegmentsParams defines parameters for TvEpisodeSegments.
+type TvEpisodeSegmentsParams struct {
+	// DurationMs The caller's file runtime in milliseconds. Passed upstream for release-cut matching — always send it when known.
+	DurationMs *int64 `form:"duration_ms,omitempty" json:"duration_ms,omitempty"`
 }
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
@@ -853,6 +1161,12 @@ type ClientInterface interface {
 	// FetchBook request
 	FetchBook(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// Browse request
+	Browse(ctx context.Context, params *BrowseParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// BrowseFacets request
+	BrowseFacets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// HealthLive request
 	HealthLive(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -862,8 +1176,20 @@ type ClientInterface interface {
 	// FetchMovie request
 	FetchMovie(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// MovieSegments request
+	MovieSegments(ctx context.Context, id string, params *MovieSegmentsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// FetchPerson request
 	FetchPerson(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// Random request
+	Random(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// Recent request
+	Recent(ctx context.Context, params *RecentParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResolveSlug request
+	ResolveSlug(ctx context.Context, slug string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// Search request
 	Search(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -874,8 +1200,17 @@ type ClientInterface interface {
 	// SimilarTrack request
 	SimilarTrack(ctx context.Context, params *SimilarTrackParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// Stats request
+	Stats(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// FetchTv request
 	FetchTv(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TvSeriesSegments request
+	TvSeriesSegments(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TvEpisodeSegments request
+	TvEpisodeSegments(ctx context.Context, id string, season int64, episode int64, params *TvEpisodeSegmentsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) FetchArtist(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -892,6 +1227,30 @@ func (c *Client) FetchArtist(ctx context.Context, id string, reqEditors ...Reque
 
 func (c *Client) FetchBook(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewFetchBookRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) Browse(ctx context.Context, params *BrowseParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBrowseRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) BrowseFacets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBrowseFacetsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -938,8 +1297,56 @@ func (c *Client) FetchMovie(ctx context.Context, id string, reqEditors ...Reques
 	return c.Client.Do(req)
 }
 
+func (c *Client) MovieSegments(ctx context.Context, id string, params *MovieSegmentsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMovieSegmentsRequest(c.Server, id, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) FetchPerson(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewFetchPersonRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) Random(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRandomRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) Recent(ctx context.Context, params *RecentParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRecentRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ResolveSlug(ctx context.Context, slug string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResolveSlugRequest(c.Server, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -986,8 +1393,44 @@ func (c *Client) SimilarTrack(ctx context.Context, params *SimilarTrackParams, r
 	return c.Client.Do(req)
 }
 
+func (c *Client) Stats(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStatsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) FetchTv(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewFetchTvRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TvSeriesSegments(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTvSeriesSegmentsRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TvEpisodeSegments(ctx context.Context, id string, season int64, episode int64, params *TvEpisodeSegmentsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTvEpisodeSegmentsRequest(c.Server, id, season, episode, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1049,6 +1492,178 @@ func NewFetchBookRequest(server string, id string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/book/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewBrowseRequest generates requests for Browse
+func NewBrowseRequest(server string, params *BrowseParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/browse")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Q != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "q", runtime.ParamLocationQuery, *params.Q); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Kind != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "kind", runtime.ParamLocationQuery, *params.Kind); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Genre != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "genre", runtime.ParamLocationQuery, *params.Genre); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Tag != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "tag", runtime.ParamLocationQuery, *params.Tag); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Network != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "network", runtime.ParamLocationQuery, *params.Network); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Studio != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "studio", runtime.ParamLocationQuery, *params.Studio); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Page != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "page", runtime.ParamLocationQuery, *params.Page); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewBrowseFacetsRequest generates requests for BrowseFacets
+func NewBrowseFacetsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/browse/facets")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1154,6 +1769,62 @@ func NewFetchMovieRequest(server string, id string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewMovieSegmentsRequest generates requests for MovieSegments
+func NewMovieSegmentsRequest(server string, id string, params *MovieSegmentsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/movie/%s/segments", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.DurationMs != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "duration_ms", runtime.ParamLocationQuery, *params.DurationMs); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewFetchPersonRequest generates requests for FetchPerson
 func NewFetchPersonRequest(server string, id string) (*http.Request, error) {
 	var err error
@@ -1171,6 +1842,116 @@ func NewFetchPersonRequest(server string, id string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/person/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRandomRequest generates requests for Random
+func NewRandomRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/random")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRecentRequest generates requests for Recent
+func NewRecentRequest(server string, params *RecentParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/recent")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewResolveSlugRequest generates requests for ResolveSlug
+func NewResolveSlugRequest(server string, slug string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "slug", runtime.ParamLocationPath, slug)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/resolve/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1471,6 +2252,33 @@ func NewSimilarTrackRequest(server string, params *SimilarTrackParams) (*http.Re
 	return req, nil
 }
 
+// NewStatsRequest generates requests for Stats
+func NewStatsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/stats")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewFetchTvRequest generates requests for FetchTv
 func NewFetchTvRequest(server string, id string) (*http.Request, error) {
 	var err error
@@ -1495,6 +2303,110 @@ func NewFetchTvRequest(server string, id string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewTvSeriesSegmentsRequest generates requests for TvSeriesSegments
+func NewTvSeriesSegmentsRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/tv/%s/segments", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewTvEpisodeSegmentsRequest generates requests for TvEpisodeSegments
+func NewTvEpisodeSegmentsRequest(server string, id string, season int64, episode int64, params *TvEpisodeSegmentsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "season", runtime.ParamLocationPath, season)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "episode", runtime.ParamLocationPath, episode)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/tv/%s/segments/%s/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.DurationMs != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", false, "duration_ms", runtime.ParamLocationQuery, *params.DurationMs); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -1554,6 +2466,12 @@ type ClientWithResponsesInterface interface {
 	// FetchBookWithResponse request
 	FetchBookWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*FetchBookResponse, error)
 
+	// BrowseWithResponse request
+	BrowseWithResponse(ctx context.Context, params *BrowseParams, reqEditors ...RequestEditorFn) (*BrowseResponse, error)
+
+	// BrowseFacetsWithResponse request
+	BrowseFacetsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*BrowseFacetsResponse, error)
+
 	// HealthLiveWithResponse request
 	HealthLiveWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthLiveResponse, error)
 
@@ -1563,8 +2481,20 @@ type ClientWithResponsesInterface interface {
 	// FetchMovieWithResponse request
 	FetchMovieWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*FetchMovieResponse, error)
 
+	// MovieSegmentsWithResponse request
+	MovieSegmentsWithResponse(ctx context.Context, id string, params *MovieSegmentsParams, reqEditors ...RequestEditorFn) (*MovieSegmentsResponse, error)
+
 	// FetchPersonWithResponse request
 	FetchPersonWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*FetchPersonResponse, error)
+
+	// RandomWithResponse request
+	RandomWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*RandomResponse, error)
+
+	// RecentWithResponse request
+	RecentWithResponse(ctx context.Context, params *RecentParams, reqEditors ...RequestEditorFn) (*RecentResponse, error)
+
+	// ResolveSlugWithResponse request
+	ResolveSlugWithResponse(ctx context.Context, slug string, reqEditors ...RequestEditorFn) (*ResolveSlugResponse, error)
 
 	// SearchWithResponse request
 	SearchWithResponse(ctx context.Context, params *SearchParams, reqEditors ...RequestEditorFn) (*SearchResponse, error)
@@ -1575,8 +2505,17 @@ type ClientWithResponsesInterface interface {
 	// SimilarTrackWithResponse request
 	SimilarTrackWithResponse(ctx context.Context, params *SimilarTrackParams, reqEditors ...RequestEditorFn) (*SimilarTrackResponse, error)
 
+	// StatsWithResponse request
+	StatsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*StatsResponse, error)
+
 	// FetchTvWithResponse request
 	FetchTvWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*FetchTvResponse, error)
+
+	// TvSeriesSegmentsWithResponse request
+	TvSeriesSegmentsWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*TvSeriesSegmentsResponse, error)
+
+	// TvEpisodeSegmentsWithResponse request
+	TvEpisodeSegmentsWithResponse(ctx context.Context, id string, season int64, episode int64, params *TvEpisodeSegmentsParams, reqEditors ...RequestEditorFn) (*TvEpisodeSegmentsResponse, error)
 }
 
 type FetchArtistResponse struct {
@@ -1628,6 +2567,55 @@ func (r FetchBookResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r FetchBookResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type BrowseResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *BrowseOutputBody
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r BrowseResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r BrowseResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type BrowseFacetsResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *FacetsOutputBody
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r BrowseFacetsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r BrowseFacetsResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -1708,6 +2696,33 @@ func (r FetchMovieResponse) StatusCode() int {
 	return 0
 }
 
+type MovieSegmentsResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *MovieSegmentsBody
+	ApplicationproblemJSON400 *ErrorModel
+	ApplicationproblemJSON404 *ErrorModel
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r MovieSegmentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MovieSegmentsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type FetchPersonResponse struct {
 	Body                      []byte
 	HTTPResponse              *http.Response
@@ -1729,6 +2744,82 @@ func (r FetchPersonResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r FetchPersonResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RandomResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *RandomOutputBody
+	ApplicationproblemJSON404 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r RandomResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RandomResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RecentResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *RecentOutputBody
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r RecentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RecentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ResolveSlugResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *ResolveBody
+	ApplicationproblemJSON404 *ErrorModel
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r ResolveSlugResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ResolveSlugResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -1813,6 +2904,30 @@ func (r SimilarTrackResponse) StatusCode() int {
 	return 0
 }
 
+type StatsResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *StatsBody
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r StatsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StatsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type FetchTvResponse struct {
 	Body                      []byte
 	HTTPResponse              *http.Response
@@ -1840,6 +2955,60 @@ func (r FetchTvResponse) StatusCode() int {
 	return 0
 }
 
+type TvSeriesSegmentsResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *SeriesSegmentsBody
+	ApplicationproblemJSON400 *ErrorModel
+	ApplicationproblemJSON404 *ErrorModel
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r TvSeriesSegmentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TvSeriesSegmentsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type TvEpisodeSegmentsResponse struct {
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON200                   *EpisodeSegmentsBody
+	ApplicationproblemJSON400 *ErrorModel
+	ApplicationproblemJSON404 *ErrorModel
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r TvEpisodeSegmentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TvEpisodeSegmentsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 // FetchArtistWithResponse request returning *FetchArtistResponse
 func (c *ClientWithResponses) FetchArtistWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*FetchArtistResponse, error) {
 	rsp, err := c.FetchArtist(ctx, id, reqEditors...)
@@ -1856,6 +3025,24 @@ func (c *ClientWithResponses) FetchBookWithResponse(ctx context.Context, id stri
 		return nil, err
 	}
 	return ParseFetchBookResponse(rsp)
+}
+
+// BrowseWithResponse request returning *BrowseResponse
+func (c *ClientWithResponses) BrowseWithResponse(ctx context.Context, params *BrowseParams, reqEditors ...RequestEditorFn) (*BrowseResponse, error) {
+	rsp, err := c.Browse(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBrowseResponse(rsp)
+}
+
+// BrowseFacetsWithResponse request returning *BrowseFacetsResponse
+func (c *ClientWithResponses) BrowseFacetsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*BrowseFacetsResponse, error) {
+	rsp, err := c.BrowseFacets(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBrowseFacetsResponse(rsp)
 }
 
 // HealthLiveWithResponse request returning *HealthLiveResponse
@@ -1885,6 +3072,15 @@ func (c *ClientWithResponses) FetchMovieWithResponse(ctx context.Context, id str
 	return ParseFetchMovieResponse(rsp)
 }
 
+// MovieSegmentsWithResponse request returning *MovieSegmentsResponse
+func (c *ClientWithResponses) MovieSegmentsWithResponse(ctx context.Context, id string, params *MovieSegmentsParams, reqEditors ...RequestEditorFn) (*MovieSegmentsResponse, error) {
+	rsp, err := c.MovieSegments(ctx, id, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMovieSegmentsResponse(rsp)
+}
+
 // FetchPersonWithResponse request returning *FetchPersonResponse
 func (c *ClientWithResponses) FetchPersonWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*FetchPersonResponse, error) {
 	rsp, err := c.FetchPerson(ctx, id, reqEditors...)
@@ -1892,6 +3088,33 @@ func (c *ClientWithResponses) FetchPersonWithResponse(ctx context.Context, id st
 		return nil, err
 	}
 	return ParseFetchPersonResponse(rsp)
+}
+
+// RandomWithResponse request returning *RandomResponse
+func (c *ClientWithResponses) RandomWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*RandomResponse, error) {
+	rsp, err := c.Random(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRandomResponse(rsp)
+}
+
+// RecentWithResponse request returning *RecentResponse
+func (c *ClientWithResponses) RecentWithResponse(ctx context.Context, params *RecentParams, reqEditors ...RequestEditorFn) (*RecentResponse, error) {
+	rsp, err := c.Recent(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRecentResponse(rsp)
+}
+
+// ResolveSlugWithResponse request returning *ResolveSlugResponse
+func (c *ClientWithResponses) ResolveSlugWithResponse(ctx context.Context, slug string, reqEditors ...RequestEditorFn) (*ResolveSlugResponse, error) {
+	rsp, err := c.ResolveSlug(ctx, slug, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResolveSlugResponse(rsp)
 }
 
 // SearchWithResponse request returning *SearchResponse
@@ -1921,6 +3144,15 @@ func (c *ClientWithResponses) SimilarTrackWithResponse(ctx context.Context, para
 	return ParseSimilarTrackResponse(rsp)
 }
 
+// StatsWithResponse request returning *StatsResponse
+func (c *ClientWithResponses) StatsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*StatsResponse, error) {
+	rsp, err := c.Stats(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStatsResponse(rsp)
+}
+
 // FetchTvWithResponse request returning *FetchTvResponse
 func (c *ClientWithResponses) FetchTvWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*FetchTvResponse, error) {
 	rsp, err := c.FetchTv(ctx, id, reqEditors...)
@@ -1928,6 +3160,24 @@ func (c *ClientWithResponses) FetchTvWithResponse(ctx context.Context, id string
 		return nil, err
 	}
 	return ParseFetchTvResponse(rsp)
+}
+
+// TvSeriesSegmentsWithResponse request returning *TvSeriesSegmentsResponse
+func (c *ClientWithResponses) TvSeriesSegmentsWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*TvSeriesSegmentsResponse, error) {
+	rsp, err := c.TvSeriesSegments(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTvSeriesSegmentsResponse(rsp)
+}
+
+// TvEpisodeSegmentsWithResponse request returning *TvEpisodeSegmentsResponse
+func (c *ClientWithResponses) TvEpisodeSegmentsWithResponse(ctx context.Context, id string, season int64, episode int64, params *TvEpisodeSegmentsParams, reqEditors ...RequestEditorFn) (*TvEpisodeSegmentsResponse, error) {
+	rsp, err := c.TvEpisodeSegments(ctx, id, season, episode, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTvEpisodeSegmentsResponse(rsp)
 }
 
 // ParseFetchArtistResponse parses an HTTP response from a FetchArtistWithResponse call
@@ -2046,6 +3296,93 @@ func ParseFetchBookResponse(rsp *http.Response) (*FetchBookResponse, error) {
 			return nil, err
 		}
 		response.ApplicationproblemJSON501 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseBrowseResponse parses an HTTP response from a BrowseWithResponse call
+func ParseBrowseResponse(rsp *http.Response) (*BrowseResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &BrowseResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BrowseOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseBrowseFacetsResponse parses an HTTP response from a BrowseFacetsWithResponse call
+func ParseBrowseFacetsResponse(rsp *http.Response) (*BrowseFacetsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &BrowseFacetsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest FacetsOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest ErrorModel
@@ -2193,6 +3530,67 @@ func ParseFetchMovieResponse(rsp *http.Response) (*FetchMovieResponse, error) {
 	return response, nil
 }
 
+// ParseMovieSegmentsResponse parses an HTTP response from a MovieSegmentsWithResponse call
+func ParseMovieSegmentsResponse(rsp *http.Response) (*MovieSegmentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MovieSegmentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MovieSegmentsBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseFetchPersonResponse parses an HTTP response from a FetchPersonWithResponse call
 func ParseFetchPersonResponse(rsp *http.Response) (*FetchPersonResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2220,6 +3618,154 @@ func ParseFetchPersonResponse(rsp *http.Response) (*FetchPersonResponse, error) 
 			return nil, err
 		}
 		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRandomResponse parses an HTTP response from a RandomWithResponse call
+func ParseRandomResponse(rsp *http.Response) (*RandomResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RandomResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RandomOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRecentResponse parses an HTTP response from a RecentWithResponse call
+func ParseRecentResponse(rsp *http.Response) (*RecentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RecentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RecentOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseResolveSlugResponse parses an HTTP response from a ResolveSlugWithResponse call
+func ParseResolveSlugResponse(rsp *http.Response) (*ResolveSlugResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ResolveSlugResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ResolveBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ErrorModel
@@ -2416,6 +3962,46 @@ func ParseSimilarTrackResponse(rsp *http.Response) (*SimilarTrackResponse, error
 	return response, nil
 }
 
+// ParseStatsResponse parses an HTTP response from a StatsWithResponse call
+func ParseStatsResponse(rsp *http.Response) (*StatsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StatsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StatsBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseFetchTvResponse parses an HTTP response from a FetchTvWithResponse call
 func ParseFetchTvResponse(rsp *http.Response) (*FetchTvResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2432,6 +4018,128 @@ func ParseFetchTvResponse(rsp *http.Response) (*FetchTvResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest TVDocBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTvSeriesSegmentsResponse parses an HTTP response from a TvSeriesSegmentsWithResponse call
+func ParseTvSeriesSegmentsResponse(rsp *http.Response) (*TvSeriesSegmentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TvSeriesSegmentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SeriesSegmentsBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTvEpisodeSegmentsResponse parses an HTTP response from a TvEpisodeSegmentsWithResponse call
+func ParseTvEpisodeSegmentsResponse(rsp *http.Response) (*TvEpisodeSegmentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TvEpisodeSegmentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EpisodeSegmentsBody
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
