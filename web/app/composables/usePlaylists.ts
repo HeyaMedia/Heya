@@ -36,6 +36,30 @@ async function loadAll() {
   await inflight
 }
 
+// Every mutation below also has to invalidate the vue-query caches that
+// mirror playlist state elsewhere in the app — the playlist detail page
+// (`['music', 'playlist', id]`), the music-home recent-playlists rail
+// (`['music', 'home', 'recent-playlists']`), and the /music/my "My
+// Playlists" shelf (`['me', 'playlists']`). Those pages don't read from the
+// `playlists` ref above, so without this a create/add/remove/delete here
+// (this ref updates synchronously) leaves those other views stale until a
+// hard reload — the exact bug this helper exists to close.
+//
+// `useNuxtApp().$queryClient` (not `useQueryClient()`) on purpose: these
+// functions run from event-handler closures (context-menu actions, modal
+// submit handlers) with no active component instance on the call stack, the
+// same reason plugins/cache-invalidation.client.ts reads the client off
+// `nuxtApp` instead of injecting it.
+function invalidatePlaylistCaches(playlistId?: number) {
+  if (import.meta.server) return
+  const { $queryClient } = useNuxtApp()
+  if (playlistId != null) {
+    $queryClient.invalidateQueries({ queryKey: ['music', 'playlist', playlistId] })
+  }
+  $queryClient.invalidateQueries({ queryKey: ['music', 'home', 'recent-playlists'] })
+  $queryClient.invalidateQueries({ queryKey: ['me', 'playlists'] })
+}
+
 async function create(name: string, description = '', coverPath = '') {
   const { $heya } = useNuxtApp()
   const created = await $heya('/api/me/playlists', {
@@ -48,6 +72,7 @@ async function create(name: string, description = '', coverPath = '') {
     { ...created, track_count: 0, auto_cover: '' } as UserPlaylistRow,
     ...playlists.value,
   ]
+  invalidatePlaylistCaches()
   return created
 }
 
@@ -55,6 +80,7 @@ async function remove(id: number) {
   const { $heya } = useNuxtApp()
   await $heya('/api/me/playlists/{id}', { method: 'DELETE', path: { id } })
   playlists.value = playlists.value.filter((p) => p.id !== id)
+  invalidatePlaylistCaches(id)
 }
 
 async function addTrack(playlistId: number, trackId: number) {
@@ -67,6 +93,7 @@ async function addTrack(playlistId: number, trackId: number) {
   playlists.value = playlists.value.map((p) =>
     p.id === playlistId ? { ...p, track_count: p.track_count + 1 } : p,
   )
+  invalidatePlaylistCaches(playlistId)
 }
 
 async function removeTrack(playlistId: number, trackId: number) {
@@ -78,6 +105,7 @@ async function removeTrack(playlistId: number, trackId: number) {
   playlists.value = playlists.value.map((p) =>
     p.id === playlistId ? { ...p, track_count: Math.max(0, p.track_count - 1) } : p,
   )
+  invalidatePlaylistCaches(playlistId)
 }
 
 // Sidebar view: simplified rows with `cover` synthesizing from user-set
