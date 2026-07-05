@@ -345,4 +345,14 @@ onMounted(async () => {
 .col-c { color: var(--fg-2); }
 .mono { font-family: var(--font-mono); font-size: 11.5px; }
 
+/* Phone: the hardware-accel select has a fixed 220px min-width that's fine
+   at 390px on its own, but let it fill the row like every other phone
+   input; the quality ladder's 4 columns already fit without stacking. */
+@media (max-width: 720px) {
+  .sv2-select { min-width: 0; width: 100%; }
+  .ladder-head, .ladder-row { gap: 6px; padding: 9px 10px; }
+
+  /* minmax(180px) only fits 1 column at 390px — force 2. */
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

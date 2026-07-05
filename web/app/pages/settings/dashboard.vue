@@ -454,7 +454,10 @@ onMounted(async () => {
   gap: 14px;
   align-items: start;
 }
-@media (max-width: 900px) {
+/* Was a stray @media 900 — folded onto the ratified phone breakpoint
+   (docs/ui.md "Responsive conventions"). Sidebar is gone by 720px, so the
+   content column has full width and doesn't need to fold earlier. */
+@media (max-width: 720px) {
   .two-col { grid-template-columns: 1fr; }
 }
 
@@ -615,5 +618,20 @@ onMounted(async () => {
   font-size: 11.5px; font-weight: 500;
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+/* Phone: the "200px 1fr auto" style component/task rows are unreadably
+   cramped at 390px — reflow to a wrapped 2-line card (name on its own
+   line, message/meta + badge sharing the second) instead of a strict grid. */
+@media (max-width: 720px) {
+  .comp-row, .task-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+  .comp-name, .task-name { flex: 1 1 100%; }
+  .comp-msg { flex: 1 1 auto; min-width: 0; white-space: normal; }
+  .task-meta { flex: 1 1 auto; justify-content: flex-start; }
 }
 </style>

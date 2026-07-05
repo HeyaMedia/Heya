@@ -290,4 +290,10 @@ onBeforeUnmount(() => {
 
 .mono { font-family: var(--font-mono); }
 
+/* Phone: minmax(180px) only fits 1 column at 390px (358px content width) —
+   force 2 so the tile row actually reflows per the responsive plan instead
+   of stacking to full-width singles. */
+@media (max-width: 720px) {
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

@@ -450,4 +450,7 @@ watch(cfg, (next) => {
 
 .mono { font-family: var(--font-mono); }
 
+@media (max-width: 720px) {
+  .sv2-input { min-width: 0; width: 100%; }
+}
 </style>

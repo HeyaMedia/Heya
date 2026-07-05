@@ -510,4 +510,14 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
 .sv2-btn.warn  { border: 1px solid rgba(230, 185, 74, 0.40); background: var(--gold-soft); color: var(--gold); }
 .sv2-btn.warn:hover:not(:disabled) { background: rgba(230, 185, 74, 0.18); }
 
+/* Phone: the toolbar's fixed-width search input is the one thing here that
+   can overflow 390px on its own (everything else already wraps). The
+   3-column log-row grid (time/level/message) stays — it's narrow enough
+   to fit without stacking. */
+@media (max-width: 720px) {
+  .tb-left, .tb-right { width: 100%; }
+  .lvl-row { flex-wrap: wrap; row-gap: 6px; }
+  .search-input { width: 100%; }
+  .status-bar { flex-wrap: wrap; row-gap: 4px; }
+}
 </style>

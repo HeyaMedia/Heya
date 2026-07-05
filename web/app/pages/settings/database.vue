@@ -189,4 +189,20 @@ onBeforeUnmount(() => {
 .tbl-size { color: var(--fg-2); font-size: 11.5px; text-align: right; }
 
 .mono { font-family: var(--font-mono); }
+
+/* Phone: name + bar + size can't share one row at 390px — put the bar on
+   its own line under the name/size header line. */
+@media (max-width: 720px) {
+  .tbl-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "name size" "bar bar";
+    row-gap: 6px;
+  }
+  .tbl-name { grid-area: name; }
+  .tbl-size { grid-area: size; }
+  .tbl-bar { grid-area: bar; }
+
+  /* minmax(180px) only fits 1 column at 390px — force 2. */
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

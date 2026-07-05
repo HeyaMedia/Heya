@@ -140,26 +140,31 @@ onMounted(load)
             <span class="lib-type mono">{{ l.media_type }}</span>
           </span>
           <span class="col-bool">
+            <span class="col-label">NFO</span>
             <StatusBadge :state="settingsByLib.get(l.id)?.save_nfo ? 'ok' : 'idle'">
               {{ settingsByLib.get(l.id)?.save_nfo ? 'on' : 'off' }}
             </StatusBadge>
           </span>
           <span class="col-bool">
+            <span class="col-label">Images</span>
             <StatusBadge :state="settingsByLib.get(l.id)?.save_images ? 'ok' : 'idle'">
               {{ settingsByLib.get(l.id)?.save_images ? 'on' : 'off' }}
             </StatusBadge>
           </span>
           <span class="col-bool">
+            <span class="col-label">Ratings</span>
             <StatusBadge :state="settingsByLib.get(l.id)?.fetch_ratings ? 'ok' : 'idle'">
               {{ settingsByLib.get(l.id)?.fetch_ratings ? 'on' : 'off' }}
             </StatusBadge>
           </span>
           <span class="col-bool">
+            <span class="col-label">Auto-collections</span>
             <StatusBadge :state="settingsByLib.get(l.id)?.auto_collections ? 'ok' : 'idle'">
               {{ settingsByLib.get(l.id)?.auto_collections ? 'on' : 'off' }}
             </StatusBadge>
           </span>
           <span class="col-bool">
+            <span class="col-label">Watch</span>
             <StatusBadge :state="settingsByLib.get(l.id)?.watch ? 'ok' : 'idle'">
               {{ settingsByLib.get(l.id)?.watch ? 'on' : 'off' }}
             </StatusBadge>
@@ -283,4 +288,39 @@ onMounted(load)
   text-decoration: none;
 }
 .link-arrow:hover { color: var(--gold); }
+
+/* Desktop: the column header row already supplies each badge's meaning, so
+   the inline label stays hidden until the phone regrid below needs it. */
+.col-label { display: none; }
+
+/* Phone: 8 columns can't fit 390px. Pure-CSS regrid — library name gets its
+   own top line, the five on/off badges wrap as a labelled meta row (the
+   header row that normally supplies the column meaning is hidden, so each
+   badge grows a small inline label), refresh/locale trail on their own
+   line. .col-label only exists for this breakpoint. */
+@media (max-width: 720px) {
+  .lib-head { display: none; }
+  .lib-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 12px 14px;
+  }
+  .col-lib { flex: 1 1 100%; }
+  .col-bool {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .col-label {
+    display: inline;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-4);
+  }
+  .col-days, .col-locale { margin-left: 0; }
+}
 </style>

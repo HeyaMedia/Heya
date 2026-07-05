@@ -310,4 +310,23 @@ onMounted(load)
   margin-top: 12px;
   border-top: 1px solid var(--border);
 }
+
+/* Phone: the "200px 1fr auto" component rows and the "130px 1fr" source
+   rows are cramped at 390px — reflow instead of a strict grid. */
+@media (max-width: 720px) {
+  .comp-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+  }
+  .comp-name { flex: 1 1 100%; }
+  .comp-msg { flex: 1 1 auto; min-width: 0; }
+
+  .src-row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .src-name { font-size: 12px; }
+}
 </style>

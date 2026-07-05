@@ -236,4 +236,23 @@ onMounted(load)
 .cfg-env { color: var(--fg-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mono { font-family: var(--font-mono); }
+
+/* Phone: the "2fr 80px 1.5fr" key/source/env grid is unreadably cramped at
+   390px — key gets its own line, source badge + env value share the next. */
+@media (max-width: 720px) {
+  .filter-input { width: 100%; }
+
+  .cfg-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 10px 14px;
+  }
+  .cfg-key { flex: 1 1 100%; white-space: normal; word-break: break-word; }
+  .cfg-env { flex: 1 1 auto; min-width: 0; }
+
+  /* minmax(180px) only fits 1 column at 390px — force 2. */
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

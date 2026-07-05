@@ -63,6 +63,12 @@ defineProps<{
   color: var(--fg-0);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
+  /* Long string values (encoder names, hostnames) get a clean ellipsis
+     instead of a hard clip against the tile's overflow:hidden — matters
+     more now that phone tiles are half the desktop width. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sv2-tile-sub {

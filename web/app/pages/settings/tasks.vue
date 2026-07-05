@@ -583,4 +583,19 @@ onBeforeUnmount(() => {
 }
 .sv2-btn.ghost { border: 1px solid var(--border); background: var(--bg-1); color: var(--fg-2); }
 
+/* Phone: the queue-panel's 3-col grid and the task-card header row (icon +
+   info + two buttons) are both too tight at 390px — stack instead. */
+@media (max-width: 720px) {
+  .queue-panel {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .queue-left { flex-wrap: wrap; }
+  .queue-thru { align-items: flex-start; }
+
+  .t-head { flex-wrap: wrap; row-gap: 10px; }
+  .t-actions { flex: 1 1 100%; justify-content: flex-end; }
+
+  .d-config { gap: 16px; }
+}
 </style>

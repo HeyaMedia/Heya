@@ -442,4 +442,8 @@ onMounted(load)
   font-size: 12px;
 }
 
+/* Phone: minmax(180px) only fits 1 column at 390px — force 2. */
+@media (max-width: 720px) {
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

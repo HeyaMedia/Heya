@@ -561,4 +561,11 @@ onBeforeUnmount(() => {
 }
 .link-arrow:hover { color: var(--gold); }
 
+@media (max-width: 720px) {
+  .sv2-select { min-width: 0; width: 100%; }
+  .enable-card { flex-wrap: wrap; }
+
+  /* minmax(180px) only fits 1 column at 390px — force 2. */
+  .tiles, .cov-row { grid-template-columns: repeat(2, 1fr); }
+}
 </style>

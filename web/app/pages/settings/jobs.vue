@@ -514,4 +514,48 @@ onMounted(async () => {
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 
+/* Phone: the 6-column grid (state/kind/queue/attempt/time/actions) can't
+   fit 390px. Pure-CSS regrid to a 3-row card via grid-template-areas — no
+   markup change, same spans just reassigned areas: primary line is kind +
+   status, secondary line is the queue/attempt/time meta, actions trail on
+   their own row. A plain flex-wrap reflow was tried first, but forcing a
+   line break per row (flex-basis:100%) also forces that item to *fill*
+   the line, bumping later siblings to their own line each — grid areas
+   don't have that problem, and an empty actions area (nothing to
+   retry/cancel) collapses to just the row-gap instead of a dead 44px line.
+   The header row is meaningless once columns aren't aligned, so hide it. */
+@media (max-width: 720px) {
+  .thead { display: none; }
+  .job-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas:
+      "kind    kind    state"
+      "queue   attempt time"
+      "actions actions actions";
+    column-gap: 10px;
+    row-gap: 4px;
+    align-items: center;
+    padding: 12px 14px;
+    min-height: 44px;
+  }
+  .col-kind {
+    grid-area: kind;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .col-state { grid-area: state; justify-self: end; }
+  .col-queue { grid-area: queue; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col-attempt { grid-area: attempt; justify-self: end; }
+  .col-time { grid-area: time; justify-self: end; }
+  .col-actions { grid-area: actions; justify-content: flex-end; }
+  .detail { grid-column: 1 / -1; }
+  .row-btn { width: 44px; height: 44px; }
+  .detail-grid { grid-template-columns: 100px 1fr; }
+}
 </style>

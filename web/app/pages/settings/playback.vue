@@ -494,4 +494,8 @@ onMounted(load)
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
+
+@media (max-width: 720px) {
+  .sv2-select { min-width: 0; width: 100%; }
+}
 </style>

@@ -68,4 +68,22 @@ async function copy(text: string | number) {
 }
 .sv2-kv-row:hover .sv2-kv-copy { opacity: 1; }
 .sv2-kv-copy:hover { background: rgba(255,255,255,0.05); color: var(--fg-1); }
+
+/* Phone: the 200px key column leaves almost nothing for the value (paths,
+   URLs, version strings) at 390px. Stack key above value instead. */
+@media (max-width: 720px) {
+  .sv2-kv-row {
+    grid-template-columns: 1fr;
+    gap: 3px;
+    padding: 10px 14px;
+  }
+  .sv2-kv-k {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-4);
+  }
+  .sv2-kv-copy { opacity: 1; }
+}
 </style>

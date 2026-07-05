@@ -253,4 +253,9 @@ function lastFetchedText(): string {
   display: flex; align-items: center; gap: 8px;
 }
 .sv2-flash.err { background: rgba(217, 107, 107, 0.10); border: 1px solid rgba(217, 107, 107, 0.30); color: var(--bad); }
+
+/* Phone: minmax(200px) only fits 1 column at 390px — force 2. */
+@media (max-width: 720px) {
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+}
 </style>
