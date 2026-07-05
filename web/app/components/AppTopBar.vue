@@ -36,87 +36,103 @@
         <Icon name="database" :size="16" />
       </button>
       <div class="search-wrap open" ref="searchWrapRef">
-        <Icon name="search" :size="16" />
-        <input
-          ref="searchInput"
-          v-model="search.query.value"
-          placeholder="Search titles, artists, people…"
-          @keydown.enter.prevent="onEnter"
-          @keydown.escape.prevent="closeDropdown"
-          @keydown.down.prevent="moveSelection(1)"
-          @keydown.up.prevent="moveSelection(-1)"
-          @focus="searchFocused = true"
-        />
-        <button v-if="search.query.value" class="search-close" @click="search.reset(); searchFocused = false">
-          <Icon name="close" :size="14" />
+        <!-- Phone (<=720px): the dropdown below is cramped at phone widths,
+             so the field becomes a non-editable trigger that opens
+             AppSearchOverlay (fullscreen) instead — it doesn't mount the
+             input/dropdown/Teleport at all. Desktop/tablet keep the
+             original inline behavior untouched. -->
+        <button
+          v-if="isPhone"
+          type="button"
+          class="search-trigger"
+          @click="searchOverlayOpen = true"
+        >
+          <Icon name="search" :size="16" />
+          <span class="search-trigger-label">Search</span>
         </button>
+        <template v-else>
+          <Icon name="search" :size="16" />
+          <input
+            ref="searchInput"
+            v-model="search.query.value"
+            placeholder="Search titles, artists, people…"
+            @keydown.enter.prevent="onEnter"
+            @keydown.escape.prevent="closeDropdown"
+            @keydown.down.prevent="moveSelection(1)"
+            @keydown.up.prevent="moveSelection(-1)"
+            @focus="searchFocused = true"
+          />
+          <button v-if="search.query.value" class="search-close" @click="search.reset(); searchFocused = false">
+            <Icon name="close" :size="14" />
+          </button>
 
-        <Teleport to="body">
-        <Transition name="dropdown">
-          <div
-            v-if="showDropdown"
-            ref="searchDropdownRef"
-            class="search-dropdown surface"
-            :style="{ top: searchDropdownTop + 'px', right: searchDropdownRight + 'px' }"
-            @mousedown.prevent
-          >
-            <div v-if="search.loading.value && !search.data.value" class="search-loading">
-              <span class="search-spinner" /> Searching…
-            </div>
-
-            <div v-else-if="search.data.value && sections.length === 0" class="search-empty">
-              No results for <strong>{{ search.data.value.query }}</strong>
-            </div>
-
-            <div v-else>
-              <div v-for="(section, sIdx) in sections" :key="section.key" class="search-section">
-                <div class="search-section-header">
-                  <span class="search-section-title">{{ section.label }}</span>
-                  <span class="search-section-count">{{ section.bucket.total.toLocaleString() }}</span>
-                </div>
-                <button
-                  v-for="(item, iIdx) in section.bucket.items"
-                  :key="section.key + ':' + item.id"
-                  class="search-result"
-                  :class="{ active: flatIndex(sIdx, iIdx) === selectedIdx }"
-                  @click="goToResult(section.key, item)"
-                  @mouseenter="selectedIdx = flatIndex(sIdx, iIdx)"
-                >
-                  <div class="search-result-thumb" :class="section.thumbShape">
-                    <NuxtImg v-if="thumbUrl(section.key, item)" :src="thumbUrl(section.key, item)!" :width="80" :quality="80" loading="lazy" />
-                    <Icon v-else :name="section.icon" :size="14" />
-                  </div>
-                  <div class="search-result-body">
-                    <div class="search-result-title">{{ resultTitle(section.key, item) }}</div>
-                    <div v-if="resultSub(section.key, item)" class="search-result-sub">
-                      {{ resultSub(section.key, item) }}
-                    </div>
-                  </div>
-                  <span v-if="section.badge" class="search-result-badge">{{ section.badge }}</span>
-                </button>
-                <NuxtLink
-                  v-if="section.bucket.total > section.bucket.items.length"
-                  :to="`/search?q=${encodeURIComponent(search.query.value)}&type=${section.key}`"
-                  class="search-section-more"
-                  @click="closeDropdown"
-                >
-                  View all {{ section.bucket.total }} {{ section.label.toLowerCase() }}
-                  <Icon name="arrow-right" :size="11" />
-                </NuxtLink>
+          <Teleport to="body">
+          <Transition name="dropdown">
+            <div
+              v-if="showDropdown"
+              ref="searchDropdownRef"
+              class="search-dropdown surface"
+              :style="{ top: searchDropdownTop + 'px', right: searchDropdownRight + 'px' }"
+              @mousedown.prevent
+            >
+              <div v-if="search.loading.value && !search.data.value" class="search-loading">
+                <span class="search-spinner" /> Searching…
               </div>
 
-              <NuxtLink
-                :to="`/search?q=${encodeURIComponent(search.query.value)}`"
-                class="search-footer"
-                @click="closeDropdown"
-              >
-                See all results for "{{ search.query.value }}"
-                <Icon name="arrow-right" :size="12" />
-              </NuxtLink>
+              <div v-else-if="search.data.value && sections.length === 0" class="search-empty">
+                No results for <strong>{{ search.data.value.query }}</strong>
+              </div>
+
+              <div v-else>
+                <div v-for="(section, sIdx) in sections" :key="section.key" class="search-section">
+                  <div class="search-section-header">
+                    <span class="search-section-title">{{ section.label }}</span>
+                    <span class="search-section-count">{{ section.bucket.total.toLocaleString() }}</span>
+                  </div>
+                  <button
+                    v-for="(item, iIdx) in section.bucket.items"
+                    :key="section.key + ':' + item.id"
+                    class="search-result"
+                    :class="{ active: flatIndex(sIdx, iIdx) === selectedIdx }"
+                    @click="goToResult(section.key, item)"
+                    @mouseenter="selectedIdx = flatIndex(sIdx, iIdx)"
+                  >
+                    <div class="search-result-thumb" :class="section.thumbShape">
+                      <NuxtImg v-if="thumbUrl(section.key, item)" :src="thumbUrl(section.key, item)!" :width="80" :quality="80" loading="lazy" />
+                      <Icon v-else :name="section.icon" :size="14" />
+                    </div>
+                    <div class="search-result-body">
+                      <div class="search-result-title">{{ resultTitle(section.key, item) }}</div>
+                      <div v-if="resultSub(section.key, item)" class="search-result-sub">
+                        {{ resultSub(section.key, item) }}
+                      </div>
+                    </div>
+                    <span v-if="section.badge" class="search-result-badge">{{ section.badge }}</span>
+                  </button>
+                  <NuxtLink
+                    v-if="section.bucket.total > section.bucket.items.length"
+                    :to="`/search?q=${encodeURIComponent(search.query.value)}&type=${section.key}`"
+                    class="search-section-more"
+                    @click="closeDropdown"
+                  >
+                    View all {{ section.bucket.total }} {{ section.label.toLowerCase() }}
+                    <Icon name="arrow-right" :size="11" />
+                  </NuxtLink>
+                </div>
+
+                <NuxtLink
+                  :to="`/search?q=${encodeURIComponent(search.query.value)}`"
+                  class="search-footer"
+                  @click="closeDropdown"
+                >
+                  See all results for "{{ search.query.value }}"
+                  <Icon name="arrow-right" :size="12" />
+                </NuxtLink>
+              </div>
             </div>
-          </div>
-        </Transition>
-        </Teleport>
+          </Transition>
+          </Teleport>
+        </template>
       </div>
       <AppTooltip label="Cast">
         <button class="btn-icon topbar-cast-btn"><Icon name="cast" :size="18" /></button>
@@ -263,6 +279,12 @@
 
       <UserDropdown />
     </div>
+
+    <!-- Phone-only fullscreen search — mounted unconditionally (cheap, and
+         avoids the overlay vanishing mid-use if the viewport crosses the
+         720px breakpoint while it's open); only the phone trigger button
+         above can ever flip it open. -->
+    <AppSearchOverlay v-model:open="searchOverlayOpen" />
   </header>
 </template>
 
@@ -335,6 +357,9 @@ const searchFocused = ref(false)
 const search = useQuickSearch(180)
 const selectedIdx = ref(-1)
 const activityOpen = ref(false)
+// Phone-only fullscreen search overlay (AppSearchOverlay.vue) — the input
+// pill above becomes a non-editable trigger on phone and just flips this.
+const searchOverlayOpen = ref(false)
 
 // The search dropdown is teleported to <body> because `.topbar` has its own
 // `backdrop-filter` — a child element's backdrop-filter rendered inside that
@@ -691,6 +716,23 @@ watch(() => route.fullPath, () => { closeDropdown() })
 .search-close { color: var(--fg-3); }
 .search-close:hover { color: var(--fg-0); }
 
+/* Phone-only trigger (see the `isPhone` branch above) — fills the same
+   `.search-wrap.open` pill as the desktop input, just non-editable. */
+.search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--fg-3);
+  font-size: 13px;
+  text-align: left;
+}
+.search-trigger-label { flex: 1; }
+
 /* Search dropdown — teleported to <body> (see useElementBounding wiring in
    script) so we sidestep .topbar's backdrop-filter compositing. Position is
    driven inline via :style.top/.right; the rule below only owns layout +
@@ -864,7 +906,8 @@ watch(() => route.fullPath, () => { closeDropdown() })
 .dropdown-leave-to { opacity: 0; transform: translateY(-2px); }
 
 /* Phone (<=720px): BottomNav.vue takes over the tab row, so the topbar
-   collapses to brand + search + activity + avatar. Desktop rule above is
+   collapses to brand + search + avatar (Activity is dropped too — see the
+   `.activity-btn` rule in the unscoped block below). Desktop rule above is
    untouched — everything mobile-specific is gated behind this query. */
 @media (max-width: 720px) {
   .topbar {
@@ -886,8 +929,8 @@ watch(() => route.fullPath, () => { closeDropdown() })
     justify-self: stretch;
   }
   /* Dev-only query-cache toggle and the (currently inert) cast button
-     aren't part of the required phone set (brand/search/activity/avatar)
-     — hide them so the search input gets the width instead. */
+     aren't part of the required phone set (brand/search/avatar) — hide
+     them so the search input gets the width instead. */
   .qcp-nav-btn,
   .topbar-cast-btn { display: none; }
   .search-wrap.open {
@@ -926,6 +969,10 @@ watch(() => route.fullPath, () => { closeDropdown() })
    so this keeps the panel from overflowing a 390px phone viewport. */
 @media (max-width: 720px) {
   .activity-panel { max-width: calc(100vw - 16px); }
+  /* Phone topbar collapses to brand + search + avatar only — Activity's
+     panel content (Tasks section) is also reachable via Settings → Tasks,
+     so the trigger is dropped rather than squeezed into the narrow bar. */
+  .activity-btn { display: none; }
 }
 
 .activity-ring {
