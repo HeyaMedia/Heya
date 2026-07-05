@@ -1,6 +1,7 @@
 <template>
   <div class="mt-layout">
     <LibrarySidebar
+      v-if="!isPhone"
       :libraries="libraries"
       :active-lib="activeLib"
       :active-view="null"
@@ -8,6 +9,17 @@
       :total-count="items.length"
       @select="activeLib = $event"
     />
+    <AppSheet v-if="isPhone" v-model:open="librarySheetOpen" title="Library" size="full">
+      <LibrarySidebar
+        variant="sheet"
+        :libraries="libraries"
+        :active-lib="activeLib"
+        :active-view="null"
+        type-label="Books"
+        :total-count="items.length"
+        @select="activeLib = $event; librarySheetOpen = false"
+      />
+    </AppSheet>
     <div class="library-main scroll">
       <LibraryToolbar
         title="Books"
@@ -16,16 +28,17 @@
         :view="view"
         @sort="sort = $event"
         @view="view = $event"
+        @open-library="librarySheetOpen = true"
       />
 
       <div class="lib-content">
-        <div v-if="loading" class="grid-posters" style="padding: 0 32px">
+        <div v-if="loading" class="grid-posters lib-pad-top">
           <div v-for="i in 12" :key="i" class="grid-tile">
             <div class="poster" style="aspect-ratio: 2/3; background: var(--bg-3)" />
           </div>
         </div>
 
-        <div v-else-if="view === 'grid'" ref="gridWrap" class="grid-virt" style="padding: 0 32px 80px">
+        <div v-else-if="view === 'grid'" ref="gridWrap" class="grid-virt lib-pad">
           <RecycleScroller
             :items="gridRows"
             :item-size="rowHeight"
@@ -52,35 +65,48 @@
           </RecycleScroller>
         </div>
 
-        <div v-else class="list-rows" style="padding: 0 32px 80px">
-          <div class="list-row list-row-head">
+        <div v-else class="list-rows lib-pad">
+          <div v-if="!isPhone" class="list-row list-row-head">
             <div>Title</div>
             <div>Year</div>
             <div>Added</div>
           </div>
           <RecycleScroller
             :items="sorted"
-            :item-size="70"
+            :item-size="isPhone ? 76 : 70"
             key-field="id"
             page-mode
             v-slot="{ item }"
           >
             <div
               class="list-row"
+              :class="{ 'list-row-phone': isPhone }"
               @click="navigateTo(mediaUrl(item))"
             >
-              <div class="list-title-cell">
-                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
-                <div>
+              <template v-if="isPhone">
+                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
+                <div class="list-phone-main">
                   <div class="list-title">
                     {{ item.title }}
                     <Icon v-if="item.available === false" name="trash" :size="11" class="list-missing-icon" />
                   </div>
                   <div class="list-sub">{{ item.year }}</div>
                 </div>
-              </div>
-              <div>{{ item.year }}</div>
-              <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
+              </template>
+              <template v-else>
+                <div class="list-title-cell">
+                  <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
+                  <div>
+                    <div class="list-title">
+                      {{ item.title }}
+                      <Icon v-if="item.available === false" name="trash" :size="11" class="list-missing-icon" />
+                    </div>
+                    <div class="list-sub">{{ item.year }}</div>
+                  </div>
+                </div>
+                <div>{{ item.year }}</div>
+                <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
+              </template>
             </div>
           </RecycleScroller>
         </div>
@@ -104,6 +130,9 @@ const loading = ref(true)
 const activeLib = ref<number | null>(null)
 const sort = ref('added')
 const view = ref('grid')
+
+const { isPhone } = useViewport()
+const librarySheetOpen = ref(false)
 
 const sorted = computed(() => {
   let list = [...items.value]
@@ -135,6 +164,30 @@ onMounted(async () => {
 .lib-content { min-height: 200px; }
 .grid-virt { /* container for usePosterGrid; width is the source of truth */ }
 .grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
+/* Was inline `style="padding: 0 32px 80px"` on grid-virt/list-rows (and
+   `0 32px` on the loading skeleton) — moved to classes so phone can
+   override without fighting inline style specificity. */
+.lib-pad { padding: 0 32px 80px; }
+.lib-pad-top { padding: 0 32px; }
 .empty-lib { padding: 80px 32px; text-align: center; color: var(--fg-2); font-size: 15px; }
 .list-missing-icon { color: #d96b6b; vertical-align: -1px; margin-left: 4px; }
+
+/* ── Phone (<=720px) ─────────────────────────────────────────────────
+   Grid gap/padding here must track usePosterGrid.ts's phone constants
+   (MIN_CARD_PHONE/COL_GAP_PHONE/ROW_GAP_PHONE). Books has no context menu
+   / actions today (desktop tap = navigate is the only interaction), so the
+   phone list row is a plain stacked 2-line card — no "..." sheet to add. */
+@media (max-width: 720px) {
+  .lib-pad { padding: 0 12px 90px; }
+  .lib-pad-top { padding: 0 12px; }
+  .grid-row { column-gap: 10px; padding-bottom: 14px; }
+
+  .list-row-phone {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+  }
+  .list-phone-main { flex: 1; min-width: 0; }
+}
 </style>

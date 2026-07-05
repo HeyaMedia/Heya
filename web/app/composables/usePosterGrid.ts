@@ -4,12 +4,23 @@
 // computed in JS so RecycleScroller knows the item dimensions ahead of time.
 // Callers pass a container ref; we observe its width and derive column count
 // + row height. `rows` chunks the items into virtual rows of `cols` items.
+//
+// Phone (<=720px, via useViewport().isPhone): mirrors the `.grid-posters`
+// phone override in heya.css (minmax(110px,1fr), tighter gaps) — see
+// docs/responsive-plan.md W3b. Callers whose CSS grid-row rule sets a fixed
+// `column-gap`/`padding-bottom` (movies/tv/books index.vue) must add a
+// matching `@media (max-width: 720px)` override using these same phone
+// values, or the JS column math and the actual rendered gap will disagree.
 
 import type { Ref } from 'vue'
 
 const MIN_CARD = 160
 const COL_GAP = 18
 const ROW_GAP = 22
+
+const MIN_CARD_PHONE = 105
+const COL_GAP_PHONE = 10
+const ROW_GAP_PHONE = 14
 
 interface Options {
   // Aspect ratio of the poster body (height / width). 2/3 posters → 1.5,
@@ -29,20 +40,25 @@ export function usePosterGrid<T>(
   const metaHeight = opts.metaHeight ?? 43
 
   const { width } = useElementSize(containerRef)
+  const { isPhone } = useViewport()
+
+  const minCard = computed(() => isPhone.value ? MIN_CARD_PHONE : MIN_CARD)
+  const colGap = computed(() => isPhone.value ? COL_GAP_PHONE : COL_GAP)
+  const rowGap = computed(() => isPhone.value ? ROW_GAP_PHONE : ROW_GAP)
 
   const cols = computed(() => {
     const w = width.value
     if (!w) return 6
-    return Math.max(1, Math.floor((w + COL_GAP) / (MIN_CARD + COL_GAP)))
+    return Math.max(1, Math.floor((w + colGap.value) / (minCard.value + colGap.value)))
   })
 
   const cardWidth = computed(() => {
     const w = width.value
-    if (!w) return MIN_CARD
-    return (w - (cols.value - 1) * COL_GAP) / cols.value
+    if (!w) return minCard.value
+    return (w - (cols.value - 1) * colGap.value) / cols.value
   })
 
-  const rowHeight = computed(() => Math.ceil(cardWidth.value * aspect) + metaHeight + ROW_GAP)
+  const rowHeight = computed(() => Math.ceil(cardWidth.value * aspect) + metaHeight + rowGap.value)
 
   const rows = computed(() => {
     const c = cols.value
@@ -54,5 +70,5 @@ export function usePosterGrid<T>(
     return out
   })
 
-  return { cols, cardWidth, rowHeight, rows, colGap: COL_GAP }
+  return { cols, cardWidth, rowHeight, rows, colGap }
 }

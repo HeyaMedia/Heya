@@ -19,6 +19,15 @@
         <span class="filter-bar-count">{{ count }} titles</span>
       </div>
       <div class="filter-bar-right">
+        <!-- Phone only: LibrarySidebar (library/loved/lists/franchises) moves
+             into a sheet on phone (docs/responsive-plan.md W3b) — the popover
+             "Filters" button just below stays put, it's the separate
+             attribute-filter panel (genre/year/rating/...), so this one is
+             labeled "Library" to avoid the name collision. -->
+        <button v-if="isPhone" class="btn-ghost-sm fb-library-btn" @click="$emit('open-library')">
+          <Icon name="folder" :size="14" />
+          Library
+        </button>
         <button v-if="dirty" class="btn-ghost-sm fb-reset" title="Reset filters and sorting" @click="$emit('reset')">
           <Icon name="undo" :size="14" />
           Reset
@@ -234,7 +243,10 @@ const emits = defineEmits<{
   'update:filters': [filters: FilterState]
   'save-list': []
   reset: []
+  'open-library': []
 }>()
+
+const { isPhone } = useViewport()
 
 const panelOpen = ref(false)
 
@@ -496,6 +508,36 @@ function langName(code: string) {
 .filter-pill:hover { border-color: var(--gold); color: var(--gold); }
 .filter-pill-clear { color: var(--fg-3); border-color: transparent; background: none; }
 .filter-pill-clear:hover { color: var(--bad); }
+
+/* ── Phone (<=720px) ─────────────────────────────────────────────────
+   Title above, controls below (wrapping onto a second line rather than
+   scroll-hunting — there's a "Library" button plus up to 4 more here).
+   Buttons carrying `.btn-ghost-sm`/`.view-toggle-btn` are literal elements
+   in this template (not AppMenu/Popover-rendered), so the scoped selector
+   reaches them fine — see the unscoped block below for the one trigger
+   AppMenu itself renders. */
+@media (max-width: 720px) {
+  .filter-bar { padding: 14px 16px 12px; }
+  .filter-bar-top { flex-direction: column; align-items: stretch; gap: 12px; }
+  .filter-bar-left { justify-content: space-between; }
+  .filter-bar-title { font-size: 21px; }
+  .filter-bar-right { flex-wrap: wrap; gap: 8px; }
+  .btn-ghost-sm { min-height: 44px; }
+  .view-toggle { height: 40px; }
+  .view-toggle-btn { width: 40px; height: 34px; }
+
+  /* Active-filter pills can run long (person/studio names) — scroll the
+     strip internally instead of letting it wrap forever or blow out page
+     width (same fix as the station decade pills / builder seed tabs). */
+  .filter-pills {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .filter-pills::-webkit-scrollbar { display: none; }
+  .filter-pill, .filter-pill-clear { flex-shrink: 0; }
+}
 </style>
 
 <style>
@@ -595,4 +637,17 @@ function langName(code: string) {
 .fb-sort-item { justify-content: space-between; }
 .fb-sort-item.active { color: var(--gold); }
 .fb-sort-check { color: var(--gold); }
+
+@media (max-width: 720px) {
+  /* The Sort button is rendered BY AppMenu (a real <button>, not as-child),
+     so it carries AppMenu's own scope, not FilterBar's — the scoped phone
+     rule above can't reach it (docs/ui.md "Scoped CSS doesn't reach
+     portaled/child-owned elements"). Bump it from here instead. */
+  .app-menu-trigger.btn-ghost-sm { min-height: 44px; }
+
+  /* Two-column sections (Year/Rating, Resolution/Watched, Actor/Studio) get
+     tight at a ~360px popover width — stack to one column. */
+  .fb-sec-cols { grid-template-columns: 1fr; gap: 14px 0; }
+  .fb-input { width: 100px; }
+}
 </style>

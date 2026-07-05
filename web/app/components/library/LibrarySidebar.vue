@@ -1,5 +1,5 @@
 <template>
-  <aside class="lib-sidebar scroll">
+  <aside class="lib-sidebar scroll" :class="{ 'lib-sidebar-sheet': variant === 'sheet' }">
     <div class="lib-section">
       <div class="section-title" style="padding: 0 14px; margin-bottom: 10px">Libraries</div>
       <div
@@ -107,6 +107,10 @@ const props = defineProps<{
   dragOverListId?: number | null
   /** TMDB collections with local movies. Undefined hides the Franchises section. */
   collections?: CollectionBrowse[]
+  /** 'sidebar' (default) = fixed 240px aside. 'sheet' = fills an AppSheet body
+   *  on phone (movies/tv/books index.vue) — same markup/behavior, just sheds
+   *  the standalone-aside chrome. See the `.lib-sidebar-sheet` rule below. */
+  variant?: 'sidebar' | 'sheet'
 }>()
 
 const emit = defineEmits<{
@@ -176,5 +180,35 @@ async function createList() {
   background: rgba(212,175,55,0.1);
   border: 1px dashed var(--gold);
   border-radius: var(--r-sm);
+}
+
+/* ── Sheet variant (docs/responsive-plan.md W3b) ─────────────────────────
+   Same component, same markup/behavior — rendered a second time inside the
+   phone "Library" AppSheet in movies/tv/books index.vue instead of the
+   persistent aside. AppSheet's body already supplies scroll + side padding,
+   so this variant just sheds the standalone-aside chrome (fixed width,
+   built-in scroll, border, own background/padding). Two classes on the same
+   element (`.lib-sidebar.lib-sidebar-sheet`) beat the base rule's own
+   specificity without `!important` or fighting from outside the component —
+   the approach MusicSidebar (W1c) couldn't use because its collapsible
+   groups + now-playing fold-out cover are coupled to being a persistent
+   240px+ aside; this sidebar has neither, so owning the variant here was
+   simpler than re-listing its links flatly the way music.vue's nav sheet
+   does. */
+.lib-sidebar-sheet {
+  width: 100%;
+  height: auto;
+  flex-shrink: initial;
+  background: transparent;
+  border-right: 0;
+  padding: 0;
+}
+.lib-sidebar-sheet .lib-footer { margin-top: 24px; }
+
+/* Sheet instance only ever renders at phone width, but scope the bump to
+   the breakpoint anyway so it can't leak into the desktop aside if variant
+   handling ever changes. */
+@media (max-width: 720px) {
+  .lib-item { min-height: 44px; }
 }
 </style>

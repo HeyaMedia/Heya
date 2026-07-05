@@ -1,6 +1,7 @@
 <template>
   <div class="mt-layout">
     <LibrarySidebar
+      v-if="!isPhone"
       :libraries="libraries"
       :active-lib="activeLib"
       :active-view="activeView"
@@ -15,6 +16,24 @@
       @list-dragover="onListDragOver"
       @list-dragleave="onListDragLeave"
     />
+    <AppSheet v-if="isPhone" v-model:open="librarySheetOpen" title="Library" size="full">
+      <LibrarySidebar
+        variant="sheet"
+        :libraries="libraries"
+        :active-lib="activeLib"
+        :active-view="activeView"
+        type-label="Shows"
+        :total-count="items.length"
+        :loved-count="favoritedSet.size"
+        :user-lists="userLists"
+        :drag-over-list-id="dragState.overListId"
+        @select="activeLib = $event; activeView = null; librarySheetOpen = false"
+        @view="activeView = $event; librarySheetOpen = false"
+        @list-drop="onListDrop"
+        @list-dragover="onListDragOver"
+        @list-dragleave="onListDragLeave"
+      />
+    </AppSheet>
     <div ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
       <FilterBar
         :title="viewTitle"
@@ -31,16 +50,17 @@
         @update:filters="onFiltersChange"
         @save-list="saveSmartList"
         @reset="resetBrowse"
+        @open-library="librarySheetOpen = true"
       />
 
       <div class="lib-content">
-        <div v-if="loading" class="grid-posters" style="padding: 0 32px">
+        <div v-if="loading" class="grid-posters lib-pad-top">
           <div v-for="i in 12" :key="i" class="grid-tile">
             <div class="poster" style="aspect-ratio: 2/3; background: var(--bg-3)" />
           </div>
         </div>
 
-        <div v-else-if="view === 'grid'" ref="gridWrap" class="grid-virt" style="padding: 0 32px 80px">
+        <div v-else-if="view === 'grid'" ref="gridWrap" class="grid-virt lib-pad">
           <RecycleScroller
             :items="gridRows"
             :item-size="rowHeight"
@@ -83,10 +103,10 @@
           </RecycleScroller>
         </div>
 
-        <div v-else-if="view === 'detail'" class="detail-virt" style="padding: 0 32px 80px">
+        <div v-else-if="view === 'detail'" class="detail-virt lib-pad">
           <RecycleScroller
             :items="sorted"
-            :item-size="188"
+            :item-size="isPhone ? 132 : 188"
             key-field="id"
             page-mode
             v-slot="{ item, index }"
@@ -94,39 +114,65 @@
             <AppContextMenu :items="ctxItemsFor(item)">
               <div
                 class="browse-detail-row"
-                :class="{ unavailable: item.available === false }"
+                :class="{ unavailable: item.available === false, 'browse-detail-row-phone': isPhone }"
                 draggable="true"
                 @click="item.available !== false && navigateTo(mediaUrl(item))"
                 @dragstart="onDragStart($event, item)"
                 @dragend="onDragEnd"
               >
-                <Poster :idx="index" :src="usePosterUrl(item.id)" class-name="browse-detail-poster" :width="120" />
-                <div class="browse-detail-body">
-                  <div class="browse-detail-title">
-                    <span>{{ item.title }}</span>
-                    <Icon v-if="isFullyWatched(item.id)" name="check" :size="14" style="color: var(--good); flex-shrink: 0" />
-                    <Icon v-if="isFavorited(item.id)" name="heartfill" :size="14" style="color: var(--bad); flex-shrink: 0" />
-                  </div>
-                  <div class="browse-detail-meta">
-                    <span>{{ item.year }}</span>
-                    <span v-if="item.number_of_seasons">{{ item.number_of_seasons }} {{ item.number_of_seasons === 1 ? 'season' : 'seasons' }}</span>
-                    <span v-if="item.number_of_episodes">{{ item.number_of_episodes }} eps</span>
-                    <span v-if="item.rating" class="star"><Icon name="star" :size="11" weight="fill" />{{ item.rating.toFixed(1) }}</span>
-                    <span v-if="item.resolution" class="browse-detail-res">{{ item.resolution === '4k' ? '4K' : item.resolution }}</span>
-                    <span v-if="unwatchedCount(item.id) > 0" class="browse-detail-unseen">{{ unwatchedCount(item.id) }} unseen</span>
+                <template v-if="isPhone">
+                  <div class="bdr-top">
+                    <Poster :idx="index" :src="usePosterUrl(item.id)" style="width: 52px; height: 78px; border-radius: 4px; flex-shrink: 0" />
+                    <div class="bdr-top-text">
+                      <div class="bdr-title">
+                        {{ item.title }}
+                        <Icon v-if="isFullyWatched(item.id)" name="check" :size="12" style="color: var(--good); flex-shrink: 0" />
+                        <Icon v-if="isFavorited(item.id)" name="heartfill" :size="12" style="color: var(--bad); flex-shrink: 0" />
+                      </div>
+                      <div class="bdr-meta">
+                        <span>{{ item.year }}</span>
+                        <span v-if="item.number_of_seasons">{{ item.number_of_seasons }}s</span>
+                        <span v-if="item.rating" class="star"><Icon name="star" :size="10" weight="fill" />{{ item.rating.toFixed(1) }}</span>
+                        <span v-if="unwatchedCount(item.id) > 0" class="browse-detail-unseen">{{ unwatchedCount(item.id) }} unseen</span>
+                      </div>
+                    </div>
+                    <button type="button" class="bdr-more" aria-label="More actions" @click.stop="openListSheet(item)">
+                      <Icon name="more" :size="18" />
+                    </button>
                   </div>
                   <div v-if="item.genres?.length" class="browse-detail-genres">
-                    <span v-for="g in item.genres.slice(0, 4)" :key="g" class="chip">{{ g }}</span>
+                    <span v-for="g in item.genres.slice(0, 3)" :key="g" class="chip">{{ g }}</span>
                   </div>
-                  <p v-if="item.description" class="browse-detail-overview">{{ item.description }}</p>
-                </div>
+                </template>
+                <template v-else>
+                  <Poster :idx="index" :src="usePosterUrl(item.id)" class-name="browse-detail-poster" :width="120" />
+                  <div class="browse-detail-body">
+                    <div class="browse-detail-title">
+                      <span>{{ item.title }}</span>
+                      <Icon v-if="isFullyWatched(item.id)" name="check" :size="14" style="color: var(--good); flex-shrink: 0" />
+                      <Icon v-if="isFavorited(item.id)" name="heartfill" :size="14" style="color: var(--bad); flex-shrink: 0" />
+                    </div>
+                    <div class="browse-detail-meta">
+                      <span>{{ item.year }}</span>
+                      <span v-if="item.number_of_seasons">{{ item.number_of_seasons }} {{ item.number_of_seasons === 1 ? 'season' : 'seasons' }}</span>
+                      <span v-if="item.number_of_episodes">{{ item.number_of_episodes }} eps</span>
+                      <span v-if="item.rating" class="star"><Icon name="star" :size="11" weight="fill" />{{ item.rating.toFixed(1) }}</span>
+                      <span v-if="item.resolution" class="browse-detail-res">{{ item.resolution === '4k' ? '4K' : item.resolution }}</span>
+                      <span v-if="unwatchedCount(item.id) > 0" class="browse-detail-unseen">{{ unwatchedCount(item.id) }} unseen</span>
+                    </div>
+                    <div v-if="item.genres?.length" class="browse-detail-genres">
+                      <span v-for="g in item.genres.slice(0, 4)" :key="g" class="chip">{{ g }}</span>
+                    </div>
+                    <p v-if="item.description" class="browse-detail-overview">{{ item.description }}</p>
+                  </div>
+                </template>
               </div>
             </AppContextMenu>
           </RecycleScroller>
         </div>
 
-        <div v-else class="list-rows" style="padding: 0 32px 80px">
-          <div class="list-row list-row-head">
+        <div v-else class="list-rows lib-pad">
+          <div v-if="!isPhone" class="list-row list-row-head">
             <div>Title</div>
             <div>Year</div>
             <div>Rating</div>
@@ -135,7 +181,7 @@
           </div>
           <RecycleScroller
             :items="sorted"
-            :item-size="70"
+            :item-size="isPhone ? 76 : 70"
             key-field="id"
             page-mode
             v-slot="{ item }"
@@ -143,23 +189,40 @@
             <AppContextMenu :items="ctxItemsFor(item)">
             <div
               class="list-row"
+              :class="{ 'list-row-phone': isPhone }"
               @click="navigateTo(mediaUrl(item))"
             >
-              <div class="list-title-cell">
-                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
-                <div>
+              <template v-if="isPhone">
+                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" />
+                <div class="list-phone-main">
                   <div class="list-title">
                     {{ item.title }}
                     <Icon v-if="isFullyWatched(item.id)" name="check" :size="12" style="color: var(--good); margin-left: 4px" />
                     <Icon v-if="isFavorited(item.id)" name="heartfill" :size="12" style="color: var(--bad); margin-left: 2px" />
                   </div>
-                  <div class="list-sub">{{ item.year }}</div>
+                  <div class="list-sub">{{ item.year }} · {{ item.status || '–' }}</div>
                 </div>
-              </div>
-              <div>{{ item.year }}</div>
-              <div>{{ item.rating ? item.rating.toFixed(1) : '–' }}</div>
-              <div class="list-status">{{ item.status || '–' }}</div>
-              <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
+                <button type="button" class="list-phone-more" aria-label="More actions" @click.stop="openListSheet(item)">
+                  <Icon name="more" :size="18" />
+                </button>
+              </template>
+              <template v-else>
+                <div class="list-title-cell">
+                  <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
+                  <div>
+                    <div class="list-title">
+                      {{ item.title }}
+                      <Icon v-if="isFullyWatched(item.id)" name="check" :size="12" style="color: var(--good); margin-left: 4px" />
+                      <Icon v-if="isFavorited(item.id)" name="heartfill" :size="12" style="color: var(--bad); margin-left: 2px" />
+                    </div>
+                    <div class="list-sub">{{ item.year }}</div>
+                  </div>
+                </div>
+                <div>{{ item.year }}</div>
+                <div>{{ item.rating ? item.rating.toFixed(1) : '–' }}</div>
+                <div class="list-status">{{ item.status || '–' }}</div>
+                <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
+              </template>
             </div>
             </AppContextMenu>
           </RecycleScroller>
@@ -176,6 +239,12 @@
         </div>
       </div>
     </div>
+
+    <ActionSheet
+      v-model:open="listSheetOpen"
+      :items="listSheetItem ? ctxItemsFor(listSheetItem) : []"
+      :title="listSheetItem?.title"
+    />
   </div>
 </template>
 
@@ -189,6 +258,16 @@ const items = ref<EnrichedMediaItem[]>([])
 const libraries = ref<Library[]>([])
 const userLists = ref<UserList[]>([])
 const loading = ref(true)
+
+const { isPhone } = useViewport()
+const librarySheetOpen = ref(false)
+
+const listSheetOpen = ref(false)
+const listSheetItem = ref<EnrichedMediaItem | null>(null)
+function openListSheet(item: EnrichedMediaItem) {
+  listSheetItem.value = item
+  listSheetOpen.value = true
+}
 
 // View mode, sort, filters, sidebar selection and scroll offset all persist —
 // navigating into a show and back restores the page exactly as it was.
@@ -442,6 +521,11 @@ onMounted(async () => {
 .lib-content { min-height: 200px; padding-top: 16px; }
 .grid-virt { /* container for usePosterGrid; width is the source of truth */ }
 .grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
+/* Was inline `style="padding: 0 32px 80px"` on grid-virt/detail-virt/list-rows
+   (and `0 32px` on the loading skeleton) — moved to classes so phone can
+   override without fighting inline style specificity. */
+.lib-pad { padding: 0 32px 80px; }
+.lib-pad-top { padding: 0 32px; }
 .empty-lib {
   display: flex; flex-direction: column; align-items: center; gap: 14px;
   padding: 90px 32px; text-align: center; color: var(--fg-2); font-size: 15px;
@@ -484,4 +568,58 @@ onMounted(async () => {
 }
 .list-status { font-size: 12px; color: var(--fg-3); }
 .browse-detail-unseen { color: var(--gold); font-size: 11px; }
+
+/* ── Phone (<=720px) ─────────────────────────────────────────────────
+   Grid gap/padding here must track usePosterGrid.ts's phone constants
+   (MIN_CARD_PHONE/COL_GAP_PHONE/ROW_GAP_PHONE) — the JS column math and the
+   actual rendered gap have to agree or RecycleScroller misjudges row
+   height. List/detail rows collapse to the same stacked-card + "..." sheet
+   language as TrackList's phone rows (docs/responsive-plan.md W2a/W3b). */
+@media (max-width: 720px) {
+  .lib-pad { padding: 0 12px 90px; }
+  .lib-pad-top { padding: 0 12px; }
+  .grid-row { column-gap: 10px; padding-bottom: 14px; }
+
+  .list-row-phone {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+  }
+  .list-phone-main { flex: 1; min-width: 0; }
+  .list-phone-more {
+    flex-shrink: 0;
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: 0; border-radius: var(--r-sm);
+    color: var(--fg-2); cursor: pointer;
+  }
+  .list-phone-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+
+  /* Detail view collapses to the same header row as list, plus a genre-chip
+     row underneath — the overview paragraph drops to keep row height sane
+     in a virtualized, fixed-item-size list. */
+  .browse-detail-row-phone { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 8px; }
+  .bdr-top { display: flex; align-items: center; gap: 12px; }
+  .bdr-top-text { flex: 1; min-width: 0; }
+  .bdr-title {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 14px; font-weight: 500; color: var(--fg-0);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .bdr-meta {
+    display: flex; align-items: center; gap: 8px; margin-top: 3px;
+    font-size: 11px; color: var(--fg-3);
+  }
+  .bdr-meta .star { color: var(--gold); display: inline-flex; align-items: center; gap: 3px; }
+  .bdr-more {
+    flex-shrink: 0;
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: 0; border-radius: var(--r-sm);
+    color: var(--fg-2); cursor: pointer;
+  }
+  .bdr-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+  .browse-detail-row-phone .browse-detail-genres { margin-top: 0; max-height: none; }
+}
 </style>
