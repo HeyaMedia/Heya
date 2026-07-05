@@ -88,20 +88,22 @@ func TestReconcileSegments_NoOwnOutputYet(t *testing.T) {
 	assert.False(t, s.IsSegmentReady(5))
 }
 
-// A running head only encodes forward from its start segment; a request
-// behind that start (backward seek) must spawn a new head instead of waiting
-// on the running one forever.
+// A running head only encodes forward from its cursor. needsNewHead is only
+// consulted for segments that are NOT ready, so anything at or behind the
+// cursor — a backward seek, or a passed segment whose file vanished and had
+// its latch reset — will never arrive from this head and needs a new one.
 func TestNeedsNewHead_BackwardSeek(t *testing.T) {
 	s := makeFsSession(t, 200)
 	s.head = &Head{StartSeg: 50, CurrentSeg: 60, Done: make(chan struct{})}
 
 	assert.True(t, s.needsNewHead(40), "behind head start → new head")
-	assert.False(t, s.needsNewHead(55), "inside the head's run → keep head")
+	assert.True(t, s.needsNewHead(55), "unready behind the cursor (vanished file) → new head")
+	assert.True(t, s.needsNewHead(60), "unready at the cursor → new head")
 	assert.False(t, s.needsNewHead(65), "shortly ahead → keep head")
 	assert.True(t, s.needsNewHead(75), "past seek threshold → new head")
 
 	close(s.head.Done)
-	assert.True(t, s.needsNewHead(55), "finished head → new head")
+	assert.True(t, s.needsNewHead(65), "finished head → new head")
 }
 
 // A ready-marked segment whose file vanished (cache eviction, manual delete)

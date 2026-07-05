@@ -310,13 +310,15 @@ func (s *TranscodeSession) needsNewHead(idx int) bool {
 		return true
 	default:
 	}
-	// A head only encodes forward from its start segment: a request behind
-	// that start (backward seek) will never be satisfied by the running head.
-	if idx < s.head.StartSeg {
+	// Only consulted for segments that are NOT ready (RequestSegment checks
+	// readiness first). A head encodes strictly forward from its cursor, so
+	// an unready segment at or behind CurrentSeg will never be produced by
+	// this head — whether it's a backward seek behind the run's start or a
+	// segment whose file vanished after the head passed it (reset latch).
+	if idx <= s.head.CurrentSeg {
 		return true
 	}
-	dist := idx - s.head.CurrentSeg
-	return dist > seekThresholdSegs
+	return idx-s.head.CurrentSeg > seekThresholdSegs
 }
 
 func (s *TranscodeSession) setHeadCurrent(head *Head, seg int) {
