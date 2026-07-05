@@ -17,77 +17,87 @@
 
     <!-- ── Equalizer ─────────────────────────────────────────────── -->
     <div v-show="tab === 'eq'">
-      <div class="eq-master-row">
-        <span class="eq-master-label">Enable equalizer</span>
-        <AppSwitch
-          :model-value="eq.enabled"
-          :aria-label="eq.enabled ? 'Disable EQ' : 'Enable EQ'"
-          size="md"
-          @update:model-value="settings.setEQEnabled"
-        />
+      <!-- iOS runs the direct-element engine (no Web Audio graph — see
+           engine/directEngine.ts) so there's no node to hang an equalizer
+           off of. Show a notice instead of controls that would silently do
+           nothing. -->
+      <div v-if="!eqAvailable" class="eq-unavailable">
+        <p class="eq-unavailable-title">Not available in compatibility playback mode (iOS)</p>
+        <p class="eq-extra-hint">This device plays audio directly through the browser to keep it running in the background, which bypasses the equalizer stage entirely.</p>
       </div>
+      <template v-else>
+        <div class="eq-master-row">
+          <span class="eq-master-label">Enable equalizer</span>
+          <AppSwitch
+            :model-value="eq.enabled"
+            :aria-label="eq.enabled ? 'Disable EQ' : 'Enable EQ'"
+            size="md"
+            @update:model-value="settings.setEQEnabled"
+          />
+        </div>
 
-      <div class="eq-presets">
-        <button
-          v-for="p in settings.presets"
-          :key="p.name"
-          class="eq-preset"
-          :class="{ active: eq.presetName === p.name }"
-          @click="settings.applyPreset(p.name)"
-        >
-          {{ p.name }}
-        </button>
-      </div>
-
-      <div class="eq-bands">
-        <div v-for="(value, i) in eq.bands" :key="i" class="eq-band">
-          <div
-            class="eq-bar-track"
-            @mousedown="startDrag($event, i)"
+        <div class="eq-presets">
+          <button
+            v-for="p in settings.presets"
+            :key="p.name"
+            class="eq-preset"
+            :class="{ active: eq.presetName === p.name }"
+            @click="settings.applyPreset(p.name)"
           >
-            <div class="eq-bar-baseline" />
-            <div
-              class="eq-bar-fill"
-              :class="{ negative: value < 0 }"
-              :style="bandStyle(value)"
-            />
-            <div class="eq-bar-knob" :style="knobStyle(value)" />
-          </div>
-          <span class="eq-val">{{ value > 0 ? `+${value}` : value }}</span>
-          <span class="eq-freq">{{ BAND_LABELS[i] }}</span>
+            {{ p.name }}
+          </button>
         </div>
-      </div>
 
-      <div class="eq-extras">
-        <div class="eq-extra-row">
-          <span class="eq-extra-label">Pre-amp</span>
-          <AppSlider
-            :model-value="eq.preamp"
-            :min="-12"
-            :max="12"
-            :step="0.5"
-            bipolar
-            aria-label="Pre-amp"
-            class="eq-slider-flex"
-            @update:model-value="settings.setPreamp"
-          />
-          <span class="eq-extra-val">{{ eq.preamp > 0 ? `+${eq.preamp}` : eq.preamp }} dB</span>
+        <div class="eq-bands">
+          <div v-for="(value, i) in eq.bands" :key="i" class="eq-band">
+            <div
+              class="eq-bar-track"
+              @mousedown="startDrag($event, i)"
+            >
+              <div class="eq-bar-baseline" />
+              <div
+                class="eq-bar-fill"
+                :class="{ negative: value < 0 }"
+                :style="bandStyle(value)"
+              />
+              <div class="eq-bar-knob" :style="knobStyle(value)" />
+            </div>
+            <span class="eq-val">{{ value > 0 ? `+${value}` : value }}</span>
+            <span class="eq-freq">{{ BAND_LABELS[i] }}</span>
+          </div>
         </div>
-        <div class="eq-extra-row">
-          <span class="eq-extra-label">Post-gain</span>
-          <AppSlider
-            :model-value="eq.postgain"
-            :min="-12"
-            :max="12"
-            :step="0.5"
-            bipolar
-            aria-label="Post-gain"
-            class="eq-slider-flex"
-            @update:model-value="settings.setPostgain"
-          />
-          <span class="eq-extra-val">{{ eq.postgain > 0 ? `+${eq.postgain}` : eq.postgain }} dB</span>
+
+        <div class="eq-extras">
+          <div class="eq-extra-row">
+            <span class="eq-extra-label">Pre-amp</span>
+            <AppSlider
+              :model-value="eq.preamp"
+              :min="-12"
+              :max="12"
+              :step="0.5"
+              bipolar
+              aria-label="Pre-amp"
+              class="eq-slider-flex"
+              @update:model-value="settings.setPreamp"
+            />
+            <span class="eq-extra-val">{{ eq.preamp > 0 ? `+${eq.preamp}` : eq.preamp }} dB</span>
+          </div>
+          <div class="eq-extra-row">
+            <span class="eq-extra-label">Post-gain</span>
+            <AppSlider
+              :model-value="eq.postgain"
+              :min="-12"
+              :max="12"
+              :step="0.5"
+              bipolar
+              aria-label="Post-gain"
+              class="eq-slider-flex"
+              @update:model-value="settings.setPostgain"
+            />
+            <span class="eq-extra-val">{{ eq.postgain > 0 ? `+${eq.postgain}` : eq.postgain }} dB</span>
+          </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <!-- ── Playback ──────────────────────────────────────────────── -->
@@ -240,6 +250,10 @@ const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 
 const settings = useAudioSettings()
+// directMode is a plain boolean present on every useAudioEngine() branch
+// (graph/direct/SSR stub) — see useAudioEngine.ts — so this needs no cast.
+const engine = useAudioEngine()
+const eqAvailable = computed(() => !engine.directMode)
 const eq = settings.eq
 const crossfade = settings.crossfade
 const replayGain = settings.replayGain
@@ -366,6 +380,22 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 /* Standalone tab panes (Playback / Effects) — no top border, the tab bar
    already separates them from the header. */
 .eq-pane { display: flex; flex-direction: column; gap: 12px; }
+
+.eq-unavailable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.eq-unavailable-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
 
 .eq-master-row {
   display: flex;

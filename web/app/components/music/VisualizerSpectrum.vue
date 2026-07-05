@@ -25,7 +25,8 @@ const props = withDefaults(defineProps<{
 })
 
 import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
-// Real engine (client) always carries the analyser; SSR stub omits it.
+// The graph engine (client, off-iOS) always carries the analyser; the SSR
+// stub and the direct-element engine (iOS compatibility mode) both omit it.
 const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
@@ -283,8 +284,11 @@ function frame() {
       const w = canvas.width
       const h = canvas.height
       ctx.clearRect(0, 0, w, h)
-      if (!props.active) {
-        // Idle: draw a flat baseline so the meter reads "present but silent".
+      // The direct-element engine (iOS compatibility mode, see
+      // engine/directEngine.ts) has no AnalyserNode at all — draw the same
+      // flat "present but silent" baseline as the inactive state instead of
+      // leaving the canvas blank while audio is actually playing.
+      if (!props.active || !engine.analyserBridge) {
         ctx.fillStyle = dim
         ctx.fillRect(0, h - Math.max(1, h * 0.02), w, Math.max(1, h * 0.02))
       } else if (props.variant === 'scope') {

@@ -5,6 +5,7 @@ import { getAudioContext, resumeContext } from '~/engine/context'
 import { alog, shortUrl } from '~/engine/debug'
 import type { TransitionPlan } from '~/engine/crossfade/strategy'
 import { DeckManager } from '~/engine/deckManager'
+import { createDirectEngine } from '~/engine/directEngine'
 import { createCrossfeed } from '~/engine/dsp/crossfeed'
 import { createEqualizer } from '~/engine/dsp/equalizer'
 import { createLimiter } from '~/engine/dsp/limiter'
@@ -14,7 +15,7 @@ import { createPreamp } from '~/engine/dsp/preamp'
 import { Scheduler } from '~/engine/scheduler'
 import { SignalChain } from '~/engine/signalChain'
 
-let instance: ReturnType<typeof createEngine> | null = null
+let instance: ReturnType<typeof createEngine> | ReturnType<typeof createDirectEngine> | null = null
 
 function createEngine() {
   const ctx = getAudioContext()
@@ -176,6 +177,10 @@ function createEngine() {
     signalChain, analyserBridge, scheduler,
     setActiveNormalization, setPendingNormalization,
     resetActiveNormalization, resetPendingNormalization,
+    // Full Web Audio graph — the default everywhere except iOS. See
+    // engine/directEngine.ts for the no-graph counterpart and `directMode`'s
+    // purpose (gating EQ/visualizer UI that has nothing to attach to there).
+    directMode: false,
   }
 }
 
@@ -203,6 +208,10 @@ type EngineStub = {
   setPendingNormalization: (integrated: number, truePeak: number) => void
   resetActiveNormalization: () => void
   resetPendingNormalization: () => void
+  // Present on every branch (graph, direct, SSR stub) so UI can read
+  // `useAudioEngine().directMode` without a cast. True only for
+  // engine/directEngine.ts's no-graph engine.
+  directMode: boolean
 }
 
 const serverStub: EngineStub = {
@@ -226,10 +235,24 @@ const serverStub: EngineStub = {
   setPendingNormalization: () => {},
   resetActiveNormalization: () => {},
   resetPendingNormalization: () => {},
+  directMode: false,
 }
 
 export function useAudioEngine() {
   if (import.meta.server) return serverStub
-  if (!instance) instance = createEngine()
+  if (!instance) {
+    // Read once, at first construction. iOS gets the direct-element engine
+    // by default (no Web Audio graph — see engine/directEngine.ts for why);
+    // forceDirectEngine lets a user override in either direction. This is
+    // deliberately NOT reactive — the module singleton is built once and
+    // reused for the app's lifetime, so flipping the setting later needs a
+    // reload to take effect (the device-settings UI says so).
+    const direct = useDeviceSettings().settings.value.forceDirectEngine ?? isIOS()
+    instance = direct ? createDirectEngine() : createEngine()
+    // Cheap, permanent diagnosability hook — inspectable from devtools or a
+    // real device without instrumenting engine internals, and doubles as the
+    // structural probe used in this feature's own smoke test.
+    if (import.meta.client) document.documentElement.dataset.engine = direct ? 'direct' : 'graph'
+  }
   return instance
 }

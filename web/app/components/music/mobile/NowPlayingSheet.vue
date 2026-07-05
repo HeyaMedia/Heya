@@ -30,9 +30,9 @@
       <div class="nps-body nps-pane-np">
         <div class="nps-visual">
           <div v-if="!showLyrics" class="nps-art-wrap" @click="cycleVisual">
-            <Poster v-if="visualMode === 'art'" :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
+            <Poster v-if="effectiveVisualMode === 'art'" :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
             <div v-else class="nps-viz-wrap">
-              <VisualizerMilkdrop v-if="visualMode === 'milkdrop'" />
+              <VisualizerMilkdrop v-if="effectiveVisualMode === 'milkdrop'" />
               <VisualizerSpectrum v-else :variant="spectrumVariant" :active="playing" />
             </div>
             <Transition name="nps-viz-toast-fade">
@@ -230,13 +230,24 @@ const VISUAL_LABELS: Record<VisualMode, string> = {
   vu: 'VU Meter',
 }
 const visualMode = useLocalStorage<VisualMode>('heya_np_visual_v1', 'art')
+// The direct-element engine (iOS compatibility mode, see
+// engine/directEngine.ts) has no AnalyserNode — milkdrop and the canvas
+// spectrum/scope/VU modes all read one. Render 'art' regardless of what a
+// prior desktop session persisted, without clobbering that preference (it
+// applies again once this device is back on the graph engine).
+const engine = useAudioEngine()
+const effectiveVisualMode = computed<VisualMode>(() => engine.directMode ? 'art' : visualMode.value)
 const spectrumVariant = computed<'bars' | 'scope' | 'vu'>(() =>
-  visualMode.value === 'scope' || visualMode.value === 'vu' ? visualMode.value : 'bars')
-const visualModeLabel = computed(() => VISUAL_LABELS[visualMode.value])
+  effectiveVisualMode.value === 'scope' || effectiveVisualMode.value === 'vu' ? effectiveVisualMode.value : 'bars')
+const visualModeLabel = computed(() => VISUAL_LABELS[effectiveVisualMode.value])
 
 const visualToastVisible = ref(false)
 let visualToastTimer: ReturnType<typeof setTimeout> | null = null
 function cycleVisual() {
+  // No AnalyserNode to feed any of the other modes — collapse the cycle to
+  // art-only (tap does nothing). Lyrics is a separate button/toggle and
+  // stays fully functional.
+  if (engine.directMode) return
   const i = VISUAL_MODES.indexOf(visualMode.value)
   visualMode.value = VISUAL_MODES[(i + 1) % VISUAL_MODES.length]!
   visualToastVisible.value = true
