@@ -32,7 +32,7 @@
     <HotkeyHelp v-if="!isPhone" />
 
     <!--
-      Phone nav sheet — the global MiniPlayer/NowPlayingSheet/QueueSheet live
+      Phone nav sheet — the global MiniPlayer/NowPlayingSheet live
       in layouts/default.vue, but the music section nav is specific to this
       page, so it's owned here. Built as a flat list of MusicSidebar's own
       links rather than reusing <MusicSidebar/> verbatim: that component is a
@@ -256,7 +256,7 @@ function onCreated(id: number) {
 
 <!--
   The browse AppSheet's content is portaled to <body> (docs/ui.md gotcha #2
-  — same reason NowPlayingSheet/QueueSheet keep their body styles unscoped),
+  — same reason NowPlayingSheet/QueuePane keep their body styles unscoped),
   so `.mnav-*` below lives in its own unscoped block rather than the scoped
   one above.
 -->

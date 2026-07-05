@@ -1,7 +1,9 @@
 <!--
-  QueueSheet — full-screen queue view for phones, built on AppSheet
-  (size="full", title="Queue"). Reads Played / Now Playing / Up Next
-  straight from the global usePlayer() singleton.
+  QueuePane — queue content for the merged phone now-playing sheet. Used to
+  be a standalone QueueSheet (its own AppSheet); now it's plain content
+  mounted as the second scroll-snap section inside NowPlayingSheet's
+  `.nps-scroll` (see that file). No AppSheet wrapper, no `open` model — the
+  parent owns visibility/scroll position entirely.
 
   Index math mirrors QueuePanel.vue exactly: playedTracks rows are already
   absolute queue indices (0..currentIndex-1), so `jumpTo(i)` needs no offset.
@@ -9,76 +11,76 @@
   jumpTo/moveInQueue/removeFromQueue re-derives the absolute index as
   `currentIndex + 1 + i`.
 
-  Props/model:
-    v-model:open — boolean, sheet visibility
-
-  No props beyond the model; no emits.
+  No props, no emits — reads/mutates the global usePlayer() singleton.
 -->
 <template>
-  <AppSheet v-model:open="open" size="full" title="Queue">
-    <div class="qs-body">
-      <div class="qs-toolbar">
-        <button type="button" class="qs-chip" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
+  <div class="qp-root">
+    <div class="qp-sticky-header">
+      <div class="qp-title">Queue</div>
+      <div class="qp-toolbar">
+        <button type="button" class="qp-chip" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
           <Icon name="shuffle" :size="15" />
           <span>Shuffle</span>
         </button>
-        <button type="button" class="qs-chip" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" @click="cycleRepeat">
+        <button type="button" class="qp-chip" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" @click="cycleRepeat">
           <Icon name="repeat" :size="15" />
           <span>{{ repeatMode === 'one' ? 'Repeat one' : 'Repeat' }}</span>
         </button>
-        <button type="button" class="qs-clear" @click="clearUpcoming">Clear</button>
+        <button type="button" class="qp-clear" @click="clearUpcoming">Clear</button>
       </div>
+    </div>
 
+    <div class="qp-list">
       <template v-if="playedTracks.length">
-        <div class="qs-section-label">Played</div>
+        <div class="qp-section-label">Played</div>
         <button
           v-for="(t, i) in playedTracks"
           :key="`played-${t.id}-${i}`"
           type="button"
-          class="qs-row qs-row-played"
+          class="qp-row qp-row-played"
           @click="jumpTo(i)"
         >
-          <Poster :idx="t.id" :src="t.poster ?? null" aspect="1/1" :width="88" class="qs-thumb" />
-          <div class="qs-row-info">
-            <div class="qs-row-title">{{ t.title }}</div>
-            <div class="qs-row-artist">{{ t.artist }}</div>
+          <Poster :idx="t.id" :src="t.poster ?? null" aspect="1/1" :width="88" class="qp-thumb" />
+          <div class="qp-row-info">
+            <div class="qp-row-title">{{ t.title }}</div>
+            <div class="qp-row-artist">{{ t.artist }}</div>
           </div>
-          <span class="qs-row-dur">{{ formatTime(t.duration) }}</span>
+          <span class="qp-row-dur">{{ formatTime(t.duration) }}</span>
         </button>
       </template>
 
       <template v-if="currentTrack">
-        <div class="qs-section-label">Now Playing</div>
-        <div ref="currentEl" class="qs-row qs-row-current">
-          <Poster :idx="currentTrack.id" :src="currentTrack.poster ?? null" aspect="1/1" :width="88" class="qs-thumb" />
-          <div class="qs-row-info">
-            <div class="qs-row-title">{{ currentTrack.title }}</div>
-            <div class="qs-row-artist">{{ currentTrack.artist }}</div>
+        <div class="qp-section-label">Now Playing</div>
+        <div class="qp-row qp-row-current">
+          <Poster :idx="currentTrack.id" :src="currentTrack.poster ?? null" aspect="1/1" :width="88" class="qp-thumb" />
+          <div class="qp-row-info">
+            <div class="qp-row-title">{{ currentTrack.title }}</div>
+            <div class="qp-row-artist">{{ currentTrack.artist }}</div>
           </div>
-          <span v-if="currentTrack.isStream" class="qs-live-badge"><span class="qs-live-dot" />LIVE</span>
-          <span v-else class="qs-row-dur">{{ formatTime(currentTrack.duration) }}</span>
+          <span v-if="currentTrack.isStream" class="qp-live-badge"><span class="qp-live-dot" />LIVE</span>
+          <span v-else class="qp-row-dur">{{ formatTime(currentTrack.duration) }}</span>
         </div>
       </template>
 
       <template v-if="upcomingTracks.length">
-        <div class="qs-section-label">Up Next · {{ upcomingTracks.length }}</div>
+        <div class="qp-section-label">Up Next · {{ upcomingTracks.length }}</div>
         <div
           v-for="(t, i) in upcomingTracks"
           :key="`upcoming-${t.id}-${i}`"
-          class="qs-row qs-row-upcoming"
+          class="qp-row qp-row-upcoming"
         >
-          <button type="button" class="qs-row-tap" @click="jumpTo(currentIndex + 1 + i)">
-            <Poster :idx="t.id" :src="t.poster ?? null" aspect="1/1" :width="88" class="qs-thumb" />
-            <div class="qs-row-info">
-              <div class="qs-row-title">{{ t.title }}</div>
-              <div class="qs-row-artist">{{ t.artist }}</div>
+          <button type="button" class="qp-row-tap" @click="jumpTo(currentIndex + 1 + i)">
+            <Poster :idx="t.id" :src="t.poster ?? null" aspect="1/1" :width="88" class="qp-thumb" />
+            <div class="qp-row-info">
+              <div class="qp-row-title">{{ t.title }}</div>
+              <div class="qp-row-artist">{{ t.artist }}</div>
             </div>
-            <span class="qs-row-dur">{{ formatTime(t.duration) }}</span>
+            <span class="qp-row-dur">{{ formatTime(t.duration) }}</span>
           </button>
-          <div class="qs-row-actions">
+          <div class="qp-row-actions">
             <button
               type="button"
-              class="qs-icon-btn"
+              class="qp-icon-btn"
               :disabled="i === 0"
               aria-label="Move up"
               @click="moveUp(i)"
@@ -87,7 +89,7 @@
             </button>
             <button
               type="button"
-              class="qs-icon-btn"
+              class="qp-icon-btn"
               :disabled="i === upcomingTracks.length - 1"
               aria-label="Move down"
               @click="moveDown(i)"
@@ -96,7 +98,7 @@
             </button>
             <button
               type="button"
-              class="qs-icon-btn qs-remove"
+              class="qp-icon-btn qp-remove"
               aria-label="Remove from queue"
               @click="removeFromQueue(currentIndex + 1 + i)"
             >
@@ -106,17 +108,15 @@
         </div>
       </template>
 
-      <div v-if="!queue.length && !currentTrack" class="qs-empty">
+      <div v-if="!queue.length && !currentTrack" class="qp-empty">
         <Icon name="music" :size="32" style="opacity: 0.4; margin-bottom: 8px" />
         <p>Queue is empty</p>
       </div>
     </div>
-  </AppSheet>
+  </div>
 </template>
 
 <script setup lang="ts">
-const open = defineModel<boolean>('open', { default: false })
-
 const {
   queue, currentTrack, currentIndex, playedTracks, upcomingTracks,
   shuffled, repeatMode, formatTime,
@@ -133,36 +133,48 @@ function moveDown(i: number) {
   const from = currentIndex.value + 1 + i
   moveInQueue(from, from + 1)
 }
-
-// Auto-scroll so the current track is visible whenever the sheet opens.
-const currentEl = ref<HTMLElement | null>(null)
-watch(open, async (v) => {
-  if (!v) return
-  await nextTick()
-  currentEl.value?.scrollIntoView({ block: 'center' })
-})
 </script>
 
 <!--
-  AppSheet portals its content to <body>, so styling for anything rendered
-  inside it must be unscoped (docs/ui.md gotcha #2).
+  Mounted inside NowPlayingSheet, whose AppSheet content is portaled to
+  <body> — so this must stay unscoped too (docs/ui.md gotcha #2).
 -->
 <style>
-.qs-body {
+.qp-root {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.qs-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Pinned above the Played/Now Playing/Up Next rows as the pane scrolls —
+   solid (not the translucent `.surface` glass) so rows fully disappear
+   underneath it rather than ghosting through. A backdrop-filter here would
+   also just render ~30% opaque anyway: the AppSheet ancestor already has one
+   (docs/ui.md gotcha #4), so a flat opaque color is both simpler and correct. */
+.qp-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-2);
+  padding-top: 4px;
   padding-bottom: 10px;
   margin-bottom: 6px;
   border-bottom: 1px solid var(--border);
 }
-.qs-chip {
+.qp-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-3);
+  padding: 2px 4px 10px;
+}
+.qp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.qp-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -175,8 +187,8 @@ watch(open, async (v) => {
   font-size: 12px;
   cursor: pointer;
 }
-.qs-chip.active { color: var(--gold); border-color: rgba(230, 185, 74, 0.4); background: var(--gold-soft); }
-.qs-clear {
+.qp-chip.active { color: var(--gold); border-color: rgba(230, 185, 74, 0.4); background: var(--gold-soft); }
+.qp-clear {
   margin-left: auto;
   height: 36px;
   padding: 0 10px;
@@ -186,9 +198,9 @@ watch(open, async (v) => {
   font-size: 13px;
   cursor: pointer;
 }
-.qs-clear:active { color: var(--gold); }
+.qp-clear:active { color: var(--gold); }
 
-.qs-section-label {
+.qp-section-label {
   font-size: 10px;
   font-family: var(--font-mono);
   text-transform: uppercase;
@@ -197,7 +209,7 @@ watch(open, async (v) => {
   padding: 14px 4px 6px;
 }
 
-.qs-row {
+.qp-row {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -209,16 +221,16 @@ watch(open, async (v) => {
   text-align: left;
   cursor: pointer;
 }
-.qs-row-played { opacity: 0.5; }
-.qs-row-current {
+.qp-row-played { opacity: 0.5; }
+.qp-row-current {
   background: var(--gold-soft);
   border-left-color: var(--gold);
   border-radius: var(--r-sm);
   cursor: default;
 }
-.qs-row-upcoming { padding: 4px 0; gap: 6px; }
+.qp-row-upcoming { padding: 4px 0; gap: 6px; }
 
-.qs-row-tap {
+.qp-row-tap {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -231,14 +243,14 @@ watch(open, async (v) => {
   cursor: pointer;
 }
 
-.qs-thumb {
+.qp-thumb {
   width: 44px;
   height: 44px;
   border-radius: 6px;
   flex-shrink: 0;
 }
-.qs-row-info { flex: 1; min-width: 0; }
-.qs-row-title {
+.qp-row-info { flex: 1; min-width: 0; }
+.qp-row-title {
   font-size: 14px;
   font-weight: 500;
   color: var(--fg-0);
@@ -246,28 +258,28 @@ watch(open, async (v) => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.qs-row-current .qs-row-title { color: var(--gold); }
-.qs-row-artist {
+.qp-row-current .qp-row-title { color: var(--gold); }
+.qp-row-artist {
   font-size: 12px;
   color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.qs-row-dur {
+.qp-row-dur {
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--fg-3);
   flex-shrink: 0;
 }
 
-.qs-row-actions {
+.qp-row-actions {
   display: flex;
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
 }
-.qs-icon-btn {
+.qp-icon-btn {
   width: 44px;
   height: 44px;
   display: inline-flex;
@@ -278,11 +290,11 @@ watch(open, async (v) => {
   color: var(--fg-2);
   cursor: pointer;
 }
-.qs-icon-btn:disabled { opacity: 0.25; cursor: default; }
-.qs-icon-btn:active:not(:disabled) { color: var(--gold); }
-.qs-remove:active { color: var(--bad); }
+.qp-icon-btn:disabled { opacity: 0.25; cursor: default; }
+.qp-icon-btn:active:not(:disabled) { color: var(--gold); }
+.qp-remove:active { color: var(--bad); }
 
-.qs-live-badge {
+.qp-live-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -296,12 +308,12 @@ watch(open, async (v) => {
   font-family: var(--font-mono);
   flex-shrink: 0;
 }
-.qs-live-dot {
+.qp-live-dot {
   width: 5px;
   height: 5px;
   background: #f87171;
   border-radius: 50%;
 }
 
-.qs-empty { text-align: center; padding: 40px 16px; color: var(--fg-2); font-size: 13px; }
+.qp-empty { text-align: center; padding: 40px 16px; color: var(--fg-2); font-size: 13px; }
 </style>

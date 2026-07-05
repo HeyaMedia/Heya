@@ -4,109 +4,131 @@
   singleton except the lyrics fetch, which mirrors the pattern in
   QueuePanel.vue's lyrics tab ($heya, GET /api/music/tracks/{id}/lyrics).
 
+  The queue used to be a separate stacked AppSheet (QueueSheet); it's now
+  merged in as a second scroll-snap section below the now-playing UI, inside
+  one shared scroll container (`.nps-scroll`). Reka's drawer dismiss-on-
+  swipe-down logic walks up from the touch target to the nearest scrollable
+  ancestor and only treats the drag as a dismiss when THAT element is
+  scrolled to the top — so a single scroller is load-bearing here, not just
+  a style choice. Do not add another `overflow-y: auto` element inside
+  `.nps-scroll` (e.g. nesting a second internal scroll region) — a nested
+  scroller at its own top would hijack a swipe-down into a premature sheet
+  dismiss. The pre-existing `.nps-lyrics` internal scroll is the one
+  exception (it predates this merge and only applies while lyrics replace
+  the artwork, never at the same time as the queue pane).
+
   Props/model:
     v-model:open — boolean, sheet visibility
 
-  Emits:
-    open-queue — the "Queue" button was tapped (parent opens QueueSheet)
-
   Note: content rendered by AppSheet is portaled to <body>, so anything that
-  needs to reach it (there's no such CSS here today, but keep it in mind if
-  this file grows) must live in an unscoped <style> block, not scoped —
-  see docs/ui.md gotcha #2.
+  needs to reach it must live in an unscoped <style> block, not scoped — see
+  docs/ui.md gotcha #2.
 -->
 <template>
   <AppSheet v-model:open="open" size="full" title="Now Playing">
-    <div class="nps-body">
-      <div class="nps-visual">
-        <div v-if="!showLyrics" class="nps-art-wrap">
-          <Poster :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
-        </div>
-        <div v-else ref="lyricsScrollEl" class="nps-lyrics scroll">
-          <div v-if="lyricsLoading" class="nps-lyrics-empty">Loading lyrics…</div>
-          <template v-else-if="lyrics && lyrics.lines.length">
-            <p
-              v-for="(line, i) in lyrics.lines"
-              :key="i"
-              class="nps-lyric-line"
-              :class="{
-                active: lyrics.synced && i === activeLyricIdx,
-                past: lyrics.synced && i < activeLyricIdx,
-                unsynced: !lyrics.synced,
-              }"
-              :ref="(el) => bindLyricRef(el as HTMLElement | null, i)"
-            >
-              {{ line.text || '♪' }}
-            </p>
-          </template>
-          <div v-else class="nps-lyrics-empty">
-            <p>No lyrics for this track.</p>
+    <div class="nps-scroll">
+      <div class="nps-body nps-pane-np">
+        <div class="nps-visual">
+          <div v-if="!showLyrics" class="nps-art-wrap" @click="cycleVisual">
+            <Poster v-if="visualMode === 'art'" :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
+            <div v-else class="nps-viz-wrap">
+              <VisualizerMilkdrop v-if="visualMode === 'milkdrop'" />
+              <VisualizerSpectrum v-else :variant="spectrumVariant" :active="playing" />
+            </div>
+            <Transition name="nps-viz-toast-fade">
+              <div v-if="visualToastVisible" class="nps-viz-toast">{{ visualModeLabel }}</div>
+            </Transition>
+          </div>
+          <div v-else ref="lyricsScrollEl" class="nps-lyrics scroll">
+            <div v-if="lyricsLoading" class="nps-lyrics-empty">Loading lyrics…</div>
+            <template v-else-if="lyrics && lyrics.lines.length">
+              <p
+                v-for="(line, i) in lyrics.lines"
+                :key="i"
+                class="nps-lyric-line"
+                :class="{
+                  active: lyrics.synced && i === activeLyricIdx,
+                  past: lyrics.synced && i < activeLyricIdx,
+                  unsynced: !lyrics.synced,
+                }"
+                :ref="(el) => bindLyricRef(el as HTMLElement | null, i)"
+              >
+                {{ line.text || '♪' }}
+              </p>
+            </template>
+            <div v-else class="nps-lyrics-empty">
+              <p>No lyrics for this track.</p>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="nps-meta">
-        <NuxtLink v-if="albumTo" :to="albumTo" class="nps-title nps-link" @click="open = false">{{ currentTrack?.title }}</NuxtLink>
-        <div v-else class="nps-title">{{ currentTrack?.title ?? '—' }}</div>
-        <NuxtLink v-if="artistTo" :to="artistTo" class="nps-artist nps-link" @click="open = false">{{ currentTrack?.artist }}</NuxtLink>
-        <div v-else class="nps-artist">{{ currentTrack?.artist ?? '' }}</div>
-      </div>
+        <div class="nps-meta">
+          <NuxtLink v-if="albumTo" :to="albumTo" class="nps-title nps-link" @click="open = false">{{ currentTrack?.title }}</NuxtLink>
+          <div v-else class="nps-title">{{ currentTrack?.title ?? '—' }}</div>
+          <NuxtLink v-if="artistTo" :to="artistTo" class="nps-artist nps-link" @click="open = false">{{ currentTrack?.artist }}</NuxtLink>
+          <div v-else class="nps-artist">{{ currentTrack?.artist ?? '' }}</div>
+        </div>
 
-      <div class="nps-seek">
-        <span class="nps-time">{{ formatTime(displayPosition) }}</span>
-        <AppSlider
-          :model-value="seekPct"
-          :min="0"
-          :max="100"
-          :step="0.1"
-          aria-label="Seek"
-          class="nps-seek-slider"
-          @update:model-value="onSeekInput"
-          @value-commit="onSeekCommit"
-        />
-        <span class="nps-time">{{ formatTime(duration) }}</span>
-      </div>
-
-      <div class="nps-transport">
-        <button type="button" class="nps-icon" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
-          <Icon name="shuffle" :size="20" />
-        </button>
-        <button type="button" class="nps-icon" aria-label="Previous" @click="prevTrack">
-          <Icon name="prev" :size="26" />
-        </button>
-        <button type="button" class="nps-play" :aria-label="playing ? 'Pause' : 'Play'" @click="togglePlay">
-          <Icon :name="playing ? 'pause' : 'play'" :size="30" />
-        </button>
-        <button type="button" class="nps-icon" aria-label="Next" @click="nextTrack">
-          <Icon name="next" :size="26" />
-        </button>
-        <button type="button" class="nps-icon" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" @click="cycleRepeat">
-          <Icon name="repeat" :size="20" />
-          <span v-if="repeatMode === 'one'" class="nps-repeat-badge">1</span>
-        </button>
-      </div>
-
-      <div class="nps-secondary">
-        <button type="button" class="nps-sicon" :class="{ active: queueOpenTab }" aria-label="Queue" @click="$emit('open-queue')">
-          <Icon name="queue" :size="18" />
-        </button>
-        <button type="button" class="nps-sicon" :class="{ active: showLyrics }" aria-label="Lyrics" @click="showLyrics = !showLyrics">
-          <Icon name="lyrics" :size="18" />
-        </button>
-        <div class="nps-volume">
-          <button type="button" class="nps-sicon" aria-label="Mute" @click="toggleMute">
-            <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="18" />
-          </button>
+        <div class="nps-seek">
+          <span class="nps-time">{{ formatTime(displayPosition) }}</span>
           <AppSlider
-            :model-value="muted ? 0 : volume"
+            :model-value="seekPct"
             :min="0"
             :max="100"
-            :step="1"
-            aria-label="Volume"
-            class="nps-volume-slider"
-            @update:model-value="onVolumeChange"
+            :step="0.1"
+            aria-label="Seek"
+            class="nps-seek-slider"
+            @update:model-value="onSeekInput"
+            @value-commit="onSeekCommit"
           />
+          <span class="nps-time">{{ formatTime(duration) }}</span>
         </div>
+
+        <div class="nps-transport">
+          <button type="button" class="nps-icon" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
+            <Icon name="shuffle" :size="20" />
+          </button>
+          <button type="button" class="nps-icon" aria-label="Previous" @click="prevTrack">
+            <Icon name="prev" :size="26" />
+          </button>
+          <button
+            type="button"
+            class="nps-play"
+            :aria-label="playing ? 'Pause' : 'Play'"
+            @pointerdown="onPlayPointerDown"
+            @pointerup="clearPlayHold"
+            @pointercancel="clearPlayHold"
+            @pointerleave="clearPlayHold"
+            @click="onPlayClick"
+          >
+            <Icon :name="playing ? 'pause' : 'play'" :size="30" />
+          </button>
+          <button type="button" class="nps-icon" aria-label="Next" @click="nextTrack">
+            <Icon name="next" :size="26" />
+          </button>
+          <button type="button" class="nps-icon" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" @click="cycleRepeat">
+            <Icon name="repeat" :size="20" />
+            <span v-if="repeatMode === 'one'" class="nps-repeat-badge">1</span>
+          </button>
+        </div>
+
+        <div class="nps-secondary">
+          <button type="button" class="nps-sicon" aria-label="Queue" @click="scrollToQueue">
+            <Icon name="queue" :size="18" />
+          </button>
+          <button type="button" class="nps-sicon" :class="{ active: showLyrics }" aria-label="Lyrics" @click="showLyrics = !showLyrics">
+            <Icon name="lyrics" :size="18" />
+          </button>
+        </div>
+
+        <button type="button" class="nps-queue-hint" @click="scrollToQueue">
+          <Icon name="chevdown" :size="14" />
+          <span>Queue</span>
+        </button>
+      </div>
+
+      <div ref="queuePaneEl" class="nps-pane-queue">
+        <QueuePane />
       </div>
     </div>
   </AppSheet>
@@ -118,18 +140,13 @@
 const { $heya } = useNuxtApp()
 
 const open = defineModel<boolean>('open', { default: false })
-defineEmits<{ 'open-queue': [] }>()
 
 const {
-  currentTrack, playing, position, duration, volume, muted,
-  shuffled, repeatMode, queueOpen, sideTab,
-  togglePlay, seek, setVolume, toggleMute,
+  currentTrack, playing, position, duration,
+  shuffled, repeatMode,
+  togglePlay, seek, stop,
   toggleShuffle, cycleRepeat, nextTrack, prevTrack, formatTime,
 } = usePlayer()
-
-// Cosmetic only — highlights the Queue button when the queue sheet/panel
-// happens to already be open on the queue tab.
-const queueOpenTab = computed(() => queueOpen.value && sideTab.value === 'queue')
 
 // --- Links (mirrors Playbar.vue's artistTo/albumTo computeds) --------------
 const artistTo = computed(() =>
@@ -159,10 +176,81 @@ function onSeekCommit(v: number[] | undefined) {
   scrubPct.value = null
 }
 
-// --- Volume --------------------------------------------------------------
-function onVolumeChange(v: number) {
-  if (muted.value && v > 0) toggleMute()
-  setVolume(v)
+// --- Long-press play/pause = stop (the phone equivalent of Playbar's 3s
+// hold-to-stop "panic" gesture, shortened since there's no ring/arm staging
+// here — just a flat 650ms hold). `holdFired` suppresses the trailing click
+// so releasing after the hold fired doesn't also toggle play/pause. ---------
+const HOLD_MS = 650
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+let holdFired = false
+
+function clearPlayHold() {
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
+}
+function onPlayPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return // primary button / touch only
+  // Touch pointers get implicit pointer capture on pointerdown, which
+  // suppresses pointerleave — release it so sliding off the button still
+  // fires pointerleave and cancels the hold (same trick as Playbar.vue).
+  ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
+  holdFired = false
+  clearPlayHold()
+  holdTimer = setTimeout(() => {
+    holdFired = true
+    holdTimer = null
+    navigator.vibrate?.(35)
+    // Close the sheet before tearing the player down. stop() clears
+    // currentTrack, which flips MobilePlayerHost's `v-if="isPhone &&
+    // currentTrack"` and force-unmounts this whole subtree — closing first
+    // (and yielding a tick) lets reka's drawer-close bookkeeping (the
+    // DismissableLayer watcher that restores `body.style.pointerEvents`)
+    // run on a live component instead of racing the unmount.
+    open.value = false
+    nextTick(() => stop())
+  }, HOLD_MS)
+}
+function onPlayClick() {
+  if (holdFired) { holdFired = false; return } // long-press already handled it
+  togglePlay()
+}
+onScopeDispose(() => clearPlayHold())
+
+// --- Visualizer cycling (tap artwork) ---------------------------------
+// Cycles art -> milkdrop -> bars -> scope -> vu -> art. Persisted so the
+// choice survives closing/reopening the sheet and reloading the page.
+// Milkdrop is mounted with v-if (not v-show) so its WebGL context actually
+// tears down the instant it's cycled away, rather than idling offscreen.
+type VisualMode = 'art' | 'milkdrop' | 'bars' | 'scope' | 'vu'
+const VISUAL_MODES: VisualMode[] = ['art', 'milkdrop', 'bars', 'scope', 'vu']
+const VISUAL_LABELS: Record<VisualMode, string> = {
+  art: 'Album Art',
+  milkdrop: 'Milkdrop',
+  bars: 'Spectrum',
+  scope: 'Scope',
+  vu: 'VU Meter',
+}
+const visualMode = useLocalStorage<VisualMode>('heya_np_visual_v1', 'art')
+const spectrumVariant = computed<'bars' | 'scope' | 'vu'>(() =>
+  visualMode.value === 'scope' || visualMode.value === 'vu' ? visualMode.value : 'bars')
+const visualModeLabel = computed(() => VISUAL_LABELS[visualMode.value])
+
+const visualToastVisible = ref(false)
+let visualToastTimer: ReturnType<typeof setTimeout> | null = null
+function cycleVisual() {
+  const i = VISUAL_MODES.indexOf(visualMode.value)
+  visualMode.value = VISUAL_MODES[(i + 1) % VISUAL_MODES.length]!
+  visualToastVisible.value = true
+  if (visualToastTimer) clearTimeout(visualToastTimer)
+  visualToastTimer = setTimeout(() => { visualToastVisible.value = false }, 900)
+}
+onScopeDispose(() => { if (visualToastTimer) clearTimeout(visualToastTimer) })
+
+// --- Queue pane (merged in below the now-playing UI) -----------------------
+// The queue button no longer opens a second stacked sheet — it smooth-scrolls
+// the queue section of the shared `.nps-scroll` container into view.
+const queuePaneEl = ref<HTMLElement | null>(null)
+function scrollToQueue() {
+  queuePaneEl.value?.scrollIntoView({ behavior: 'smooth' })
 }
 
 // --- Lyrics (inline, replaces the artwork area when toggled on) -----------
@@ -233,12 +321,32 @@ watch(activeLyricIdx, (i) => {
   style content rendered inside it must be unscoped (docs/ui.md gotcha #2).
 -->
 <style>
+/* Single scroll container for the whole sheet: the now-playing pane and the
+   queue pane are its two scroll-snap children. `proximity` (not `mandatory`)
+   is deliberate — it gives a slight "settle" resistance at the pane boundary
+   without fighting free scrolling deep inside a long queue, which a
+   `mandatory` snap would yank at on every scroll tick. */
+.nps-scroll {
+  height: 100%;
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+  overscroll-behavior: contain;
+}
+
 .nps-body {
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
   gap: 18px;
+}
+.nps-pane-np {
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+.nps-pane-queue {
+  min-height: 100%;
+  scroll-snap-align: start;
 }
 
 .nps-visual {
@@ -248,13 +356,50 @@ watch(activeLyricIdx, (i) => {
   align-items: center;
   justify-content: center;
 }
-.nps-art-wrap { width: 100%; display: flex; justify-content: center; }
+.nps-art-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 .nps-art {
   width: min(70vw, 360px);
   max-width: 100%;
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-3);
 }
+.nps-viz-wrap {
+  position: relative;
+  width: min(70vw, 360px);
+  aspect-ratio: 1 / 1;
+  max-width: 100%;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-3);
+  background: var(--bg-2);
+}
+.nps-viz-toast {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--fg-0);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.nps-viz-toast-fade-enter-active { transition: opacity 0.15s ease; }
+.nps-viz-toast-fade-leave-active { transition: opacity 0.6s ease; }
+.nps-viz-toast-fade-enter-from,
+.nps-viz-toast-fade-leave-to { opacity: 0; }
 
 .nps-lyrics {
   width: 100%;
@@ -353,6 +498,8 @@ watch(activeLyricIdx, (i) => {
   justify-content: center;
   cursor: pointer;
   box-shadow: 0 10px 24px var(--gold-glow);
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .nps-play:active { background: var(--gold-bright); }
 .nps-repeat-badge {
@@ -386,6 +533,22 @@ watch(activeLyricIdx, (i) => {
 }
 .nps-sicon:active { background: rgba(255, 255, 255, 0.08); }
 .nps-sicon.active { color: var(--gold); }
-.nps-volume { display: flex; align-items: center; gap: 4px; flex: 1; max-width: 160px; }
-.nps-volume-slider { flex: 1; min-width: 0; }
+
+/* Bottom-of-pane hint that the queue lives one swipe below. */
+.nps-queue-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0 auto;
+  padding: 2px 10px 4px;
+  background: transparent;
+  border: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.nps-queue-hint:active { opacity: 1; color: var(--gold); }
 </style>

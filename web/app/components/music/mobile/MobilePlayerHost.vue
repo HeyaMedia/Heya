@@ -1,8 +1,10 @@
 <!--
   MobilePlayerHost — the phone-only player mount: MiniPlayer docked above
-  BottomNav plus the NowPlayingSheet/QueueSheet it opens. Mounted once per
-  layout (default.vue AND settings.vue — both render BottomNav, so both need
-  the bar; /watch and /login use layout:false / auth and get neither).
+  BottomNav plus the NowPlayingSheet it opens (the queue lives inside that
+  sheet now, as a second scroll-snap pane — there's no separate QueueSheet
+  any more). Mounted once per layout (default.vue AND settings.vue — both
+  render BottomNav, so both need the bar; /watch and /login use layout:false
+  / auth and get neither).
 
   Renders nothing on desktop/tablet or when no track is loaded. The
   `.global-miniplayer-dock` element only exists while the bar is visible —
@@ -14,17 +16,26 @@
     <div class="global-miniplayer-dock">
       <MiniPlayer @expand="npOpen = true" />
     </div>
-    <NowPlayingSheet v-model:open="npOpen" @open-queue="queueSheetOpen = true" />
-    <QueueSheet v-model:open="queueSheetOpen" />
+    <NowPlayingSheet v-model:open="npOpen" />
   </template>
 </template>
 
 <script setup lang="ts">
 const { isPhone } = useViewport()
-const { currentTrack } = usePlayer()
+const { currentTrack, muted, volume, toggleMute, setVolume } = usePlayer()
 
 const npOpen = ref(false)
-const queueSheetOpen = ref(false)
+
+// Phones have their own hardware volume buttons / system output level
+// already sitting between the engine and the speaker, so there's no phone
+// volume UI (see NowPlayingSheet). Keep the Web Audio engine's own gain
+// pinned at unity (unmuted, 100) here so nothing upstream can silently
+// leave it attenuated with no on-screen control to fix it.
+watchEffect(() => {
+  if (!isPhone.value) return
+  if (muted.value) toggleMute()
+  if (volume.value !== 100) setVolume(100)
+})
 </script>
 
 <style scoped>
