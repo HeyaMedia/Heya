@@ -183,28 +183,46 @@ var providerLibFiles = map[Accelerator]string{
 	AccelOpenVINO: "libonnxruntime_providers_openvino.so",
 }
 
-// providerLibInstalled reports whether the shared object backing accel is
-// present in the same directory as the ONNX Runtime library (where ORT
-// resolves providers — via $ORIGIN in the vendor images).
+// gatedProviderDir returns the directory a provider shared object must sit
+// in for the pre-append gate to fire, or "" to disable the gate entirely.
 //
-// The check is Linux-only, deliberately. It exists solely to spare the
-// CPU-only base *container* image the scary provider-load log, and only on
-// Linux does defaultOnnxLib() resolve to an absolute path whose directory
-// we can stat. On Windows the providers are DLLs found via the loader
-// search path (defaultOnnxLib() returns a bare "onnxruntime.dll"), and a
-// real CUDA/DirectML setup would be wrongly gated off by a .so stat; macOS
-// has no CUDA/OpenVINO build at all. So on every non-Linux OS — and for EPs
-// not loaded from a sibling .so (CPU, CoreML, DirectML) — this returns true
-// and lets ORT decide, exactly as before.
-func providerLibInstalled(accel Accelerator) bool {
+// The gate exists for one purpose: sparing the default CPU container image
+// ORT's misleading "Failed to load library libonnxruntime_providers_*.so"
+// log when `auto` (or the status probe) tries a GPU EP the image doesn't
+// ship. It must never veto a provider an operator wired up themselves, so it
+// fires only where the layout is guaranteed: on Linux, with no
+// ONNXRUNTIME_LIB override, where the vendor images place the provider next
+// to libonnxruntime.so in the system multiarch dir. A custom ONNXRUNTIME_LIB
+// means the operator manages ORT and may resolve providers via
+// LD_LIBRARY_PATH / ldconfig / rpath from somewhere we can't see — defer to
+// ORT. Same on non-Linux (Windows providers are DLLs on the loader search
+// path; macOS has no CUDA/OpenVINO build). A package var so tests can point
+// it at a scratch dir without abusing the env override.
+var gatedProviderDir = func() string {
 	if runtime.GOOS != "linux" {
-		return true
+		return ""
 	}
+	if os.Getenv("ONNXRUNTIME_LIB") != "" {
+		return ""
+	}
+	return filepath.Dir(defaultOnnxLib())
+}
+
+// providerLibInstalled reports whether accel's provider shared object is
+// present in the gated directory. Accelerators not loaded from a sibling
+// .so (CPU, CoreML, DirectML) and any context where the gate is disabled
+// (see gatedProviderDir) report true, so ORT decides exactly as it did
+// before the gate existed.
+func providerLibInstalled(accel Accelerator) bool {
 	file, ok := providerLibFiles[accel]
 	if !ok {
 		return true
 	}
-	_, err := os.Stat(filepath.Join(filepath.Dir(defaultOnnxLib()), file))
+	dir := gatedProviderDir()
+	if dir == "" {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(dir, file))
 	return err == nil
 }
 

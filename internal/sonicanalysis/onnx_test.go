@@ -3,40 +3,41 @@ package sonicanalysis
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
-// TestProviderLibInstalled verifies the on-disk gate that keeps the CPU-only
-// base image from triggering ONNX Runtime's noisy "Failed to load library
-// libonnxruntime_providers_*.so" log when it probes GPU execution providers
-// whose provider libraries aren't shipped. The gate is Linux-only (Windows
-// providers are DLLs on the loader search path, macOS has no CUDA/OpenVINO),
-// so the assertions below only hold there.
-func TestProviderLibInstalled(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("provider-lib gate only applies on linux")
-	}
-	dir := t.TempDir()
-	t.Setenv("ONNXRUNTIME_LIB", filepath.Join(dir, "libonnxruntime.so"))
+// stubGateDir points the provider-lib gate at a scratch directory for the
+// duration of a test, so the disk logic can be exercised on any OS without
+// touching (or writing to) the real system lib path.
+func stubGateDir(t *testing.T, dir string) {
+	t.Helper()
+	orig := gatedProviderDir
+	gatedProviderDir = func() string { return dir }
+	t.Cleanup(func() { gatedProviderDir = orig })
+}
 
-	// CPU / CoreML / DirectML aren't loaded from a sibling .so, so they're
-	// never gated regardless of what's on disk.
+// TestProviderLibGate verifies the on-disk gate that keeps the CPU-only base
+// image from triggering ONNX Runtime's noisy "Failed to load library
+// libonnxruntime_providers_*.so" log while probing GPU EPs it doesn't ship.
+func TestProviderLibGate(t *testing.T) {
+	dir := t.TempDir()
+	stubGateDir(t, dir)
+
+	// Not loaded from a sibling .so → never gated.
 	for _, a := range []Accelerator{AccelCPU, AccelCoreML, AccelDirectML} {
 		if !providerLibInstalled(a) {
 			t.Errorf("providerLibInstalled(%s) = false, want true (never gated)", a)
 		}
 	}
 
-	// CUDA's provider lib is absent → gated off.
+	// Provider lib absent (the base CPU image) → gated off.
 	if providerLibInstalled(AccelCUDA) {
-		t.Error("providerLibInstalled(cuda) = true with no provider lib on disk, want false")
+		t.Error("providerLibInstalled(cuda) = true with no provider lib, want false")
 	}
 
-	// Drop the provider lib next to libonnxruntime.so → now available.
-	cuda := filepath.Join(dir, providerLibFiles[AccelCUDA])
-	if err := os.WriteFile(cuda, []byte("stub"), 0o644); err != nil {
+	// Provider lib present (a vendor image) → available.
+	if err := os.WriteFile(filepath.Join(dir, providerLibFiles[AccelCUDA]), []byte("stub"), 0o644); err != nil {
 		t.Fatalf("write stub provider lib: %v", err)
 	}
 	if !providerLibInstalled(AccelCUDA) {
@@ -44,17 +45,29 @@ func TestProviderLibInstalled(t *testing.T) {
 	}
 }
 
-// TestBuildSessionOptionsSkipsUninstalledProvider confirms that requesting a
-// GPU EP with no provider library installed fails fast with a clear message
-// and — crucially — before any ORT call, so no scary provider-load line is
-// emitted. This is exactly the base-image path: `auto` and the status probe
-// both route through buildSessionOptions.
-func TestBuildSessionOptionsSkipsUninstalledProvider(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("provider-lib gate only applies on linux")
-	}
+// TestProviderGateDisabledForCustomLib guards the regression Codex flagged:
+// when an operator points ONNXRUNTIME_LIB at their own ORT, the provider may
+// resolve via LD_LIBRARY_PATH/ldconfig/rpath from a directory we can't see,
+// so the gate must defer to ORT rather than falsely disable a working EP.
+// (On non-Linux the gate is off unconditionally, which this also covers.)
+func TestProviderGateDisabledForCustomLib(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ONNXRUNTIME_LIB", filepath.Join(dir, "libonnxruntime.so"))
+	// No provider .so exists beside that path, yet neither GPU EP may be
+	// gated off — the override hands provider resolution back to ORT.
+	for _, a := range []Accelerator{AccelCUDA, AccelOpenVINO} {
+		if !providerLibInstalled(a) {
+			t.Errorf("providerLibInstalled(%s) = false under custom ONNXRUNTIME_LIB; must defer to ORT", a)
+		}
+	}
+}
+
+// TestBuildSessionOptionsSkipsUninstalledProvider confirms a GPU EP whose
+// provider lib is absent fails fast with a clear message and — crucially —
+// before any ORT call, so no provider-load line is emitted. This is the
+// base-image path: `auto` and the status probe both route through here.
+func TestBuildSessionOptionsSkipsUninstalledProvider(t *testing.T) {
+	stubGateDir(t, t.TempDir()) // empty scratch dir: no provider libs present
 
 	for _, a := range []Accelerator{AccelCUDA, AccelOpenVINO} {
 		_, _, err := buildSessionOptions(a)
