@@ -25,6 +25,12 @@ The full dev stack must be running — `make dev` (mprocs) brings it up: the
 backend and the SPA to Nuxt, so the login command and the page both work
 against `:8080` directly.
 
+**Concurrent instances**: `HEYA_EYE_PORT=9224 bun tools/eye/eye.ts …` gives
+this shell its own Chrome, state file, and profile (`/tmp/heya-eye-9224/`) —
+required whenever more than one agent/session drives Eye at the same time;
+two instances on one port silently fight over the same browser. Set the env
+var on EVERY eye invocation, not just `start`.
+
 ## Commands
 
 | Cmd | Purpose |

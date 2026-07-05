@@ -27,10 +27,13 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-const STATE_DIR = '/tmp/heya-eye'
+// HEYA_EYE_PORT isolates concurrent Eye instances (parallel agents each get
+// their own Chrome, state, and profile) — everything below is keyed off the
+// port so two instances can never fight over one browser or state file.
+const PORT = Number(process.env.HEYA_EYE_PORT) || 9223
+const STATE_DIR = PORT === 9223 ? '/tmp/heya-eye' : `/tmp/heya-eye-${PORT}`
 const STATE_FILE = `${STATE_DIR}/state.json`
 const PROFILE_DIR = `${STATE_DIR}/profile`
-const PORT = 9223
 const DEFAULT_ORIGIN = 'http://localhost:8080'
 const DEFAULT_WINDOW_SIZE = { width: 1600, height: 1000 }
 
