@@ -67,8 +67,11 @@
           class="tl-row tl-track"
           :class="{ 'tl-active': isActive(t), 'tl-missing': t.available === false, 'tl-phone-row': isPhone }"
           :style="!isPhone ? { gridTemplateColumns } : undefined"
+          :draggable="!isCoarse"
           @click="onRowClick(i, t)"
           @dblclick="onRowClick(i, t)"
+          @dragstart="onDragStart($event, { kind: 'track', track: { id: t.id, title: t.title } })"
+          @dragend="onDragEnd"
         >
           <template v-if="!isPhone">
             <div
@@ -272,7 +275,8 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ 'row-click': [index: number] }>()
 
-const { isPhone } = useViewport()
+const { isPhone, isCoarse } = useViewport()
+const { onDragStart, onDragEnd } = useMusicDragDrop()
 
 const hasArt = computed(() => props.columns.some((c) => c.kind === 'art' || (c.kind === 'title' && c.inlineArt)))
 
@@ -355,6 +359,13 @@ function openSheet(t: TrackListRow, i: number) {
 .tl-track.tl-active .tl-c-index { color: var(--gold); }
 .tl-track.tl-missing { opacity: 0.5; cursor: default; }
 .tl-track.tl-missing:hover { background: transparent; }
+
+/* Drag affordance — fine-pointer only, doesn't touch the resting cursor on
+   touch devices (which don't drag; long-press opens the context menu). */
+@media (pointer: fine) {
+  .tl-track:not(.tl-missing) { cursor: grab; }
+  .tl-track:not(.tl-missing):active { cursor: grabbing; }
+}
 
 .tl-c-index { text-align: right; color: var(--fg-3); font-family: var(--font-mono); font-size: 12px; }
 .tl-c-year { color: var(--fg-3); font-family: var(--font-mono); font-size: 12px; }

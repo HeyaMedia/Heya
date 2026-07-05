@@ -116,7 +116,10 @@
         <li
           class="tt-row"
           :class="{ 'tt-row-missing': !isTopTrackPlayable(t) }"
+          :draggable="!isCoarse && !!t.local_track_id"
           @click="onTtRowTap(t)"
+          @dragstart="t.local_track_id && onDragStart($event, { kind: 'track', track: { id: t.local_track_id, title: t.title } })"
+          @dragend="onDragEnd"
         >
           <div class="tt-leader">
             <span v-if="isTopTrackPlayable(t)" class="tt-rank">{{ idx + 1 }}</span>
@@ -220,6 +223,9 @@
           :to="`/music/artist/${route.params.slug}/${album.slug}`"
           class="discog-tile card-tile"
           :class="{ 'discog-missing': !albumPlayable(album) }"
+          :draggable="!isCoarse"
+          @dragstart="onDragStart($event, discogDragPayload(album))"
+          @dragend="onDragEnd"
         >
           <div class="discog-art-wrap">
             <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="discog-art" />
@@ -344,6 +350,7 @@
 <script setup lang="ts">
 import type { AlbumView, Artist, ArtistTopTrackRow, MediaDetail, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
+import type { DragAlbumPayload } from '~/composables/useMusicDragDrop'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 // slug keys + addresses the detail query so it shares the vue-query cache
@@ -355,7 +362,8 @@ const props = defineProps<{ mediaId: number; slug: string }>()
 const route = useRoute()
 const { play, queue, formatTime } = usePlayer()
 const radio = useRadio()
-const { isPhone } = useViewport()
+const { isPhone, isCoarse } = useViewport()
+const { onDragStart, onDragEnd } = useMusicDragDrop()
 // Popular Tracks context/⋯ items — the phone rows hide the star widget, so
 // this menu (Rate lives in it) is the rating path there.
 const trackMenuActions = useMusicActions()
@@ -487,6 +495,19 @@ const playableTrackIds = computed(() => {
 })
 function isTopTrackPlayable(t: ArtistTopTrackRow) {
   return !!t.local_track_id && playableTrackIds.value.has(t.local_track_id)
+}
+
+// Discography tile drag payload — album.tracks is already loaded (detail
+// query), so this carries trackIds straight through and the sidebar drop
+// handler skips the album-detail re-fetch.
+function discogDragPayload(album: AlbumView): DragAlbumPayload {
+  return {
+    kind: 'album',
+    title: album.title,
+    artist_slug: route.params.slug as string,
+    album_slug: album.slug,
+    trackIds: album.tracks.filter(isTrackPlayable).map((t) => t.id),
+  }
 }
 
 const artistPosterUrl = computed(() => {

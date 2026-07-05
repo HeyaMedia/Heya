@@ -44,6 +44,9 @@
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="mh-card-link"
+        :draggable="!isCoarse"
+        @dragstart="onDragStart($event, { kind: 'album', title: al.title, artist_slug: al.artist_slug, album_slug: al.slug })"
+        @dragend="onDragEnd"
       >
         <MusicCard
           :src="useAlbumCoverUrl(al.artist_slug, al.slug)"
@@ -102,6 +105,9 @@
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
         class="mh-card-link"
+        :draggable="!isCoarse"
+        @dragstart="onDragStart($event, { kind: 'album', title: al.title, artist_slug: al.artist_slug, album_slug: al.slug })"
+        @dragend="onDragEnd"
       >
         <MusicCard
           :src="useAlbumCoverUrl(al.artist_slug, al.slug)"
@@ -160,6 +166,9 @@
         <NuxtLink
           :to="`/music/artist/${entry.artist_slug}/${al.slug}`"
           class="mh-card-link"
+          :draggable="!isCoarse"
+          @dragstart="onDragStart($event, { kind: 'album', title: al.title, artist_slug: entry.artist_slug, album_slug: al.slug })"
+          @dragend="onDragEnd"
         >
           <MusicCard
             :src="useAlbumCoverUrl(entry.artist_slug, al.slug)"
@@ -208,6 +217,9 @@
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.album_slug}`"
         class="mh-card-link"
+        :draggable="!isCoarse"
+        @dragstart="onDragStart($event, { kind: 'album', title: al.album_title, artist_slug: al.artist_slug, album_slug: al.album_slug })"
+        @dragend="onDragEnd"
       >
         <MusicCard
           :src="useAlbumCoverUrl(al.artist_slug, al.album_slug)"
@@ -239,6 +251,9 @@
         <NuxtLink
           :to="`/music/artist/${a.artist_slug}/${al.slug}`"
           class="mh-card-link"
+          :draggable="!isCoarse"
+          @dragstart="onDragStart($event, { kind: 'album', title: al.title, artist_slug: a.artist_slug, album_slug: al.slug })"
+          @dragend="onDragEnd"
         >
           <MusicCard
             :src="useAlbumCoverUrl(a.artist_slug, al.slug)"
@@ -266,6 +281,9 @@
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.album_slug}`"
         class="mh-card-link"
+        :draggable="!isCoarse"
+        @dragstart="onDragStart($event, { kind: 'album', title: al.album_title, artist_slug: al.artist_slug, album_slug: al.album_slug })"
+        @dragend="onDragEnd"
       >
         <MusicCard
           :src="useAlbumCoverUrl(al.artist_slug, al.album_slug)"
@@ -565,6 +583,8 @@ function formatLapsed(a: LapsedArtist) {
 
 const { play, queue } = usePlayer()
 const actions = useMusicActions()
+const { isCoarse } = useViewport()
+const { onDragStart, onDragEnd } = useMusicDragDrop()
 
 function mixTrackToEntity(t: MixTrack) {
   return {

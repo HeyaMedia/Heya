@@ -54,7 +54,14 @@
           page-mode
           v-slot="{ item: t, index: i }"
         >
-          <div class="list-row pl-cols" :class="{ 'pl-missing': t.available === false }" @click="t.available !== false && playFrom(i)">
+          <div
+            class="list-row pl-cols"
+            :class="{ 'pl-missing': t.available === false }"
+            :draggable="!isCoarse"
+            @click="t.available !== false && playFrom(i)"
+            @dragstart="onDragStart($event, { kind: 'track', track: { id: t.track_id, title: t.track_title } })"
+            @dragend="onDragEnd"
+          >
             <div class="pl-num mono">{{ i + 1 }}</div>
             <div class="pl-title-cell">
               <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
@@ -113,7 +120,8 @@ definePageMeta({ layout: 'default' })
 // the row's ⋯ menu (see contextItemsFor below). Note: there's no
 // drag-to-reorder anywhere in this codebase today (grepped for
 // draggable/dragstart/moveTrack — none exist), so that wasn't a factor.
-const { isPhone } = useViewport()
+const { isPhone, isCoarse } = useViewport()
+const { onDragStart, onDragEnd } = useMusicDragDrop()
 
 interface PlaylistTrackRow {
   track_id: number

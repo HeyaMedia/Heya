@@ -144,7 +144,14 @@
         </NuxtLink>
       </li>
       <li v-for="(pl, i) in playlists" :key="pl.id">
-        <NuxtLink :to="`/music/playlist/${pl.id}`" class="ms-pl-item" :class="{ active: section === 'playlist-' + pl.id }">
+        <NuxtLink
+          :to="`/music/playlist/${pl.id}`"
+          class="ms-pl-item"
+          :class="{ active: section === 'playlist-' + pl.id, 'drop-target': !isCoarse && dragDrop.dragState.overPlaylistId === pl.id }"
+          @dragover="!isCoarse && dragDrop.onPlaylistDragOver($event, pl.id)"
+          @dragleave="!isCoarse && dragDrop.onPlaylistDragLeave()"
+          @drop="!isCoarse && dragDrop.onPlaylistDrop($event, pl.id, pl.name)"
+        >
           <Poster :idx="i" :src="pl.cover_path || null" aspect="1/1" class="ms-pl-cover" :width="80" />
           <div class="ms-pl-meta">
             <div class="ms-pl-name">{{ pl.name }}</div>
@@ -177,6 +184,12 @@ defineEmits<{ 'create-playlist': [] }>()
 const { currentTrack } = usePlayer()
 const coverExpanded = useState('music_cover_expanded', () => false)
 const coverShown = computed(() => coverExpanded.value && !!currentTrack.value)
+
+// Desktop drag-and-drop onto playlist rows — touch keeps the long-press
+// context menu as the only "add to playlist" path (docs/ui.md responsive
+// conventions: gate on pointer coarseness, not viewport width).
+const { isCoarse } = useViewport()
+const dragDrop = useMusicDragDrop()
 
 // Auto-open the group that contains the active section. User can still
 // collapse manually after — these are open by default if the user happens
@@ -434,5 +447,13 @@ watch(() => props.section, (s) => {
   font-size: 12px;
   color: var(--fg-3);
   text-align: center;
+}
+
+/* Drag-and-drop target state — matches LibrarySidebar's gold dashed
+   treatment for movie/TV "add to list" drops. */
+.ms-pl-item.drop-target {
+  background: rgba(212,175,55,0.1);
+  border: 1px dashed var(--gold);
+  border-radius: var(--r-sm);
 }
 </style>

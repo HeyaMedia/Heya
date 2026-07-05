@@ -110,6 +110,9 @@
             class="ms-card-link"
             :class="{ 'kb-active': isActive('album', i) }"
             :data-kb-idx="flatIdx('album', i)"
+            :draggable="!isCoarse"
+            @dragstart="onDragStart($event, { kind: 'album', title: al.title, artist_slug: al.artist_slug, album_slug: al.slug })"
+            @dragend="onDragEnd"
           >
             <MusicCard
               :src="useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined"
@@ -140,7 +143,10 @@
             class="ms-track-row ms-track-row-actionable"
             :class="{ 'kb-active': isActive('track', i), 'ms-track-missing': t.available === false }"
             :data-kb-idx="flatIdx('track', i)"
+            :draggable="!isCoarse"
             @click="t.available !== false && playTrack(i)"
+            @dragstart="onDragStart($event, { kind: 'track', track: { id: t.id, title: t.title } })"
+            @dragend="onDragEnd"
           >
             <div class="ms-track-art">
               <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
@@ -226,7 +232,8 @@ const { $heya } = useNuxtApp()
 const recent = useRecentSearches('music')
 const recentEntries = recent.entries
 const actions = useMusicActions()
-const { isPhone } = useViewport()
+const { isPhone, isCoarse } = useViewport()
+const { onDragStart, onDragEnd } = useMusicDragDrop()
 
 // Phone-only "..." sheet for the Tracks section — same context-menu items
 // AppContextMenu already exposes via right-click/long-press, surfaced as an
