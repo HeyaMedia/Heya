@@ -22,6 +22,7 @@ const ALL_GROUPS: SettingsNavGroup[] = [
     items: [
       { to: '/settings/profile',    label: 'Profile',     icon: 'user' },
       { to: '/settings/playback',   label: 'Playback',    icon: 'eq' },
+      { to: '/settings/device',     label: 'Device',      icon: 'cpu' },
       { to: '/settings/appearance', label: 'Appearance',  icon: 'brightness' },
       { to: '/settings/sessions',   label: 'My sessions', icon: 'eye' },
       { to: '/settings/lists',      label: 'My lists',    icon: 'bookmark' },
