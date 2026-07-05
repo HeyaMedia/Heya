@@ -18,16 +18,16 @@
       </button>
       <div class="msr-grow" />
       <template v-if="!expanded && overflows">
-        <button class="msr-nav" @click="scroll('left')" title="Scroll left">
+        <button class="msr-nav msr-nav-scroll" @click="scroll('left')" title="Scroll left">
           <Icon name="chevleft" :size="16" />
         </button>
-        <button class="msr-nav" @click="scroll('right')" title="Scroll right">
+        <button class="msr-nav msr-nav-scroll" @click="scroll('right')" title="Scroll right">
           <Icon name="chevright" :size="16" />
         </button>
       </template>
       <button
         v-if="expanded || overflows"
-        class="msr-nav"
+        class="msr-nav msr-nav-expand"
         @click="expanded = !expanded"
         :title="expanded ? 'Collapse' : 'Expand all'"
       >
@@ -171,5 +171,20 @@ provide('msr:cardSize', props.cardSize)
 .msr-grid {
   display: grid;
   gap: 16px;
+}
+
+/* Touch: swipe replaces the mouse-only scroll arrows. The expand-to-grid
+   toggle (.msr-nav-expand) stays — it's a tap target, not a mouse affordance. */
+@media (pointer: coarse) {
+  .msr-nav-scroll { display: none; }
+}
+
+/* Phone: rail cards (mixes at 220px, everything else at 170px on desktop)
+   collapse to one sensible size — these are all square covers or circular
+   artist portraits, not text-heavy, so a uniform ~140px reads fine. */
+@media (max-width: 720px) {
+  .msr-scroller { gap: 10px; }
+  .msr-scroller > :deep(*) { width: 140px; }
+  .msr-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)) !important; gap: 14px 12px; }
 }
 </style>

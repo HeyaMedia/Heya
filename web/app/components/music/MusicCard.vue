@@ -185,6 +185,17 @@ function onImgError(e: Event) {
 }
 .mc-play:hover { transform: scale(1.08); }
 
+/* Touch: the hover-only play button never gets a hover state on coarse
+   pointers, so it would otherwise just sit there as dead chrome. Tap keeps
+   its existing meaning (navigate via the outer NuxtLink); playing lives in
+   the long-press context menu the pages already wrap every card with
+   (AppContextMenu — see useMusicActions forAlbum/forArtist/forMix/forPlaylist,
+   each of which has a "Play"/"Play Top Tracks"/"Play Mix" row). Do NOT make
+   bare tap play — that breaks navigation. */
+@media (pointer: coarse) {
+  .mc-play-wrap { display: none; }
+}
+
 .mc-info {
   position: absolute; bottom: 0; left: 0; right: 0; z-index: 2;
   padding: 10px 12px 12px;

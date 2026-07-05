@@ -142,4 +142,17 @@ function bottomLine(item: ContinueWatchingItem): string {
   background: rgba(255,255,255,0.18); backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
+
+/* Touch: swipe replaces the mouse-only scroll arrows. */
+@media (pointer: coarse) {
+  .scroll-btn { display: none; }
+}
+
+/* Phone: the 280px 16/9 backdrop card was rendering at ~85% of a 390px
+   viewport (280 / (390 - page-pad) after the page's horizontal padding) —
+   nearly the full screen for a "rail" tile. Cap wide episode cards at 70vw. */
+@media (max-width: 720px) {
+  .row-scroll { gap: 12px; }
+  .cw-tile { width: min(70vw, 300px); }
+}
 </style>

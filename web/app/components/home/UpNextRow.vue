@@ -132,4 +132,17 @@ function scrollBy(dir: number) {
   display: flex; align-items: center; justify-content: center;
   color: #fff;
 }
+
+/* Touch: swipe replaces the mouse-only scroll arrows. */
+@media (pointer: coarse) {
+  .scroll-btn { display: none; }
+}
+
+/* Phone: 168px poster tiles are too wide for a 390px screen — the
+   width is a literal inline style (`:style="{ width: '168px' }"`) so this
+   needs !important to win. */
+@media (max-width: 720px) {
+  .row-scroll { gap: 12px; }
+  .un-tile { width: 140px !important; }
+}
 </style>

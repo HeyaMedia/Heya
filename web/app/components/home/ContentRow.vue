@@ -102,4 +102,17 @@ function scrollBy(dir: number) {
   color: var(--fg-0);
 }
 .unavailable { opacity: 0.4; cursor: default !important; }
+
+/* Touch: swipe replaces the mouse-only scroll arrows. */
+@media (pointer: coarse) {
+  .scroll-btn { display: none; }
+}
+
+/* Phone: 168px desktop tiles (both 2/3 posters and 1/1 covers) are too wide
+   for a 390px screen — collapse to ~140px. tileWidth is a literal inline
+   style so this needs !important to win. */
+@media (max-width: 720px) {
+  .row-scroll { gap: 12px; }
+  .card-tile { width: 140px !important; }
+}
 </style>
