@@ -103,11 +103,20 @@
         </button>
       </div>
       <ol class="tt-list">
-        <li
+        <!-- AppContextMenu is as-child (no wrapper element), so the <li>s
+             stay direct children of the <ol>. Right-click on desktop,
+             long-press on touch — and on phone the row also gets a visible
+             ⋯ (ActionSheet) since the star widget is hidden there and the
+             menu is the rating/queue path. -->
+        <AppContextMenu
           v-for="(t, idx) in topTracks.slice(0, ttExpanded ? topTracks.length : 8)"
           :key="`tt-${t.local_track_id}-${idx}`"
+          :items="ttMenuItems(t)"
+        >
+        <li
           class="tt-row"
           :class="{ 'tt-row-missing': !isTopTrackPlayable(t) }"
+          @click="onTtRowTap(t)"
         >
           <div class="tt-leader">
             <span v-if="isTopTrackPlayable(t)" class="tt-rank">{{ idx + 1 }}</span>
@@ -141,7 +150,16 @@
           </div>
           <div v-if="t.local_duration" class="tt-duration">{{ formatTime(t.local_duration) }}</div>
           <div v-else class="tt-duration" />
+          <button
+            type="button"
+            class="tt-phone-more"
+            aria-label="More actions"
+            @click.stop="openTtSheet(t)"
+          >
+            <Icon name="more" :size="18" />
+          </button>
         </li>
+        </AppContextMenu>
       </ol>
       <button v-if="topTracks.length > 8" class="tt-more" @click="ttExpanded = !ttExpanded">
         {{ ttExpanded ? 'Show fewer' : `See all ${topTracks.length}` }}
@@ -307,6 +325,13 @@
       :show="showMetadataEditor"
       @close="onEditorClose"
     />
+
+    <!-- Phone ⋯ target for Popular Tracks rows (play/queue/rate/navigate). -->
+    <ActionSheet
+      v-model:open="ttSheetOpen"
+      :items="ttSheetTrack ? ttMenuItems(ttSheetTrack) : []"
+      :title="ttSheetTrack?.title"
+    />
   </div>
 </template>
 
@@ -324,6 +349,10 @@ const props = defineProps<{ mediaId: number; slug: string }>()
 const route = useRoute()
 const { play, queue, formatTime } = usePlayer()
 const radio = useRadio()
+const { isPhone } = useViewport()
+// Popular Tracks context/⋯ items — the phone rows hide the star widget, so
+// this menu (Rate lives in it) is the rating path there.
+const trackMenuActions = useMusicActions()
 
 const artistRatings = useRatings('artist')
 const trackRatings = useRatings('track')
@@ -614,6 +643,36 @@ function topTrackToTrack(t: ArtistTopTrackRow): Track {
     artist_id: artist.value?.id,
     poster: useAlbumCoverUrl(route.params.slug as string, t.local_album_slug ?? '') ?? undefined,
   }
+}
+
+// --- Popular Tracks menu / phone action sheet -------------------------------
+function ttMenuItems(t: ArtistTopTrackRow) {
+  if (!t.local_track_id) return []
+  return trackMenuActions.forTrack({
+    id: t.local_track_id,
+    title: t.title,
+    artist: artist.value?.name ?? '',
+    album: t.local_album_title ?? '',
+    duration: t.local_duration ?? 0,
+    artist_slug: artistSlugForQueries.value || undefined,
+    album_slug: t.local_album_slug,
+    available: isTopTrackPlayable(t),
+  })
+}
+
+const ttSheetOpen = ref(false)
+const ttSheetTrack = ref<ArtistTopTrackRow | null>(null)
+function openTtSheet(t: ArtistTopTrackRow) {
+  ttSheetTrack.value = t
+  ttSheetOpen.value = true
+}
+
+// Phone rows have no hover-play, so the row itself plays. Desktop keeps its
+// existing affordances (hover play button) — a bare row click stays inert
+// there to avoid changing behavior.
+function onTtRowTap(t: ArtistTopTrackRow) {
+  if (!isPhone.value) return
+  if (isTopTrackPlayable(t)) void playTopTrack(t)
 }
 
 async function playTopTrack(t: ArtistTopTrackRow) {
@@ -958,6 +1017,9 @@ if (import.meta.client) {
 .tt-album:hover { color: var(--gold); }
 .tt-album-missing { font-style: italic; color: var(--fg-3); opacity: 0.7; }
 .tt-stars { display: inline-flex; }
+/* Phone-only ⋯ (see the media query below) — desktop keeps stars + hover
+   play and doesn't render an extra affordance. */
+.tt-phone-more { display: none; }
 .tt-duration {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1161,9 +1223,22 @@ if (import.meta.client) {
 
   /* Popular Tracks: the 5-star widget ate the title column (titles
      truncated to a few characters at 390px). Ratings are hidden on phone —
-     rate from the track's long-press / ⋯ menus instead — and the freed
-     column plus taller rows give the text room to breathe. */
+     the ⋯ ActionSheet / long-press menu carries Rate (plus play/queue) —
+     and the freed column plus taller rows give the text room to breathe.
+     Row tap plays (no hover-play on touch). */
   .tt-stars { display: none; }
-  .tt-row { grid-template-columns: 32px 1fr max-content; gap: 10px; padding: 10px 8px; min-height: 44px; }
+  .tt-row { grid-template-columns: 32px 1fr max-content 44px; gap: 8px; padding: 6px 4px; min-height: 44px; }
+  .tt-phone-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    background: transparent;
+    border: 0;
+    color: var(--fg-2);
+    cursor: pointer;
+  }
+  .tt-phone-more:active { color: var(--gold); }
 }
 </style>
