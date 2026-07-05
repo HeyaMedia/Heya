@@ -1233,7 +1233,7 @@ if (import.meta.client) {
      and the freed column plus taller rows give the text room to breathe.
      Row tap plays (no hover-play on touch). */
   .tt-stars { display: none; }
-  .tt-row { grid-template-columns: 32px 1fr max-content 44px; gap: 8px; padding: 6px 4px; min-height: 44px; }
+  .tt-row { grid-template-columns: 32px 1fr max-content 44px; gap: 8px; padding: 8px 4px; min-height: 52px; }
   .tt-phone-more {
     display: inline-flex;
     align-items: center;
@@ -1246,5 +1246,33 @@ if (import.meta.client) {
     cursor: pointer;
   }
   .tt-phone-more:active { color: var(--gold); }
+
+  /* Two-line rows: title on its own line, album underneath (in place of the
+     desktop "Title · Album" single line) — more breathing room and the
+     album no longer competes with the title for the same line width. The
+     markup order (title → sep → album) is unchanged; only the phone-only
+     layout of `.tt-meta` and its children changes here. */
+  .tt-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    white-space: normal;
+  }
+  .tt-title { white-space: nowrap; }
+  .tt-album-sep { display: none; }
+  .tt-album {
+    display: block;
+    width: 100%;
+    font-size: 12px;
+    color: var(--fg-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Discography: one desktop column (170px min) stretched full-width on a
+     390px phone — drop to the same dense-grid convention as `.grid-posters`
+     (docs/ui.md / heya.css) so multiple album tiles fit per row. */
+  .discog-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
 }
 </style>

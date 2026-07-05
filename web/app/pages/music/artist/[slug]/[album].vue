@@ -239,17 +239,23 @@ const columns: TrackListColumn[] = [
   { key: 'duration', kind: 'duration' },
 ]
 
-const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
-  id: t.id,
-  title: t.title,
-  artist: artistName.value,
-  artist_slug: artistSlug.value,
-  album: album.value?.title ?? '',
-  album_slug: albumSlug.value,
-  duration: t.duration,
-  available: isPlayable(t),
-  rating: ratings.value.get(t.id) ?? 0,
-})))
+const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => {
+  const file = primaryFile(t)
+  return {
+    id: t.id,
+    title: t.title,
+    artist: artistName.value,
+    artist_slug: artistSlug.value,
+    album: album.value?.title ?? '',
+    album_slug: albumSlug.value,
+    duration: t.duration,
+    available: isPlayable(t),
+    rating: ratings.value.get(t.id) ?? 0,
+    // Phone-only TrackList row (see TrackList.vue) — same "primary" file the
+    // desktop TrackQualityPicker cell already treats as the default pick.
+    quality: file ? formatTrackQuality(file) : null,
+  }
+}))
 
 function contextItemsFor(_row: TrackListRow, i: number) {
   const t = tracks.value[i]!

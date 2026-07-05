@@ -235,6 +235,12 @@ const columns: TrackListColumn[] = [
   { key: 'duration', kind: 'duration' },
 ]
 
+// No `quality` here: ListPlaylistTracksRow (the API shape backing
+// PlaylistTrackRow above) carries no file fields (format/bitrate_kbps/
+// sample_rate_hz/bit_depth) — only the album page's TrackView.files gives us
+// that. Wiring it would mean inventing data, so the phone row's quality line
+// just doesn't render for playlists (TrackList treats a missing `quality` as
+// "nothing to show").
 const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
   id: t.track_id,
   title: t.track_title,

@@ -165,7 +165,10 @@
               <div class="tl-title tl-phone-title">{{ t.title }}</div>
               <div class="tl-phone-sub">{{ subtitlePhone(t) }}</div>
             </div>
-            <div class="tl-phone-dur">{{ durationFormatter(t.duration) }}</div>
+            <div class="tl-phone-right">
+              <div class="tl-phone-dur">{{ durationFormatter(t.duration) }}</div>
+              <div v-if="t.quality" class="tl-phone-quality">{{ t.quality }}</div>
+            </div>
             <button
               type="button"
               class="tl-phone-more"
@@ -208,6 +211,9 @@ export interface TrackListRow {
   poster?: string | null
   /** 0..10 half-star scale; only rendered when a 'rating' column is present. */
   rating?: number
+  /** Phone-only quality label ("FLAC 24/96", "MP3 320") — see utils/trackQuality.ts.
+   *  Rendered under the duration in the phone row; omitted entirely when absent. */
+  quality?: string | null
 }
 
 export type TrackListColumnKind =
@@ -447,11 +453,23 @@ function openSheet(t: TrackListRow, i: number) {
   margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tl-phone-dur {
+.tl-phone-right {
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.tl-phone-dur {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg-3);
+}
+.tl-phone-quality {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.02em;
 }
 .tl-phone-more {
   flex-shrink: 0;

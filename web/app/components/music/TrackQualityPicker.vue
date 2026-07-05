@@ -48,17 +48,12 @@ defineEmits<{ pick: [TrackFile] }>()
 
 function chipLabel(f?: TrackFile): string {
   if (!f) return ''
-  const parts: string[] = []
-  if (f.format) parts.push(f.format.toUpperCase())
-  if (f.bit_depth > 0 && f.sample_rate_hz > 0) {
-    parts.push(`${f.bit_depth}/${Math.round(f.sample_rate_hz / 1000)}`)
-  } else if (f.bitrate_kbps > 0) {
-    parts.push(`${f.bitrate_kbps}`)
-  }
-  return parts.join(' ')
+  return formatTrackQuality(f) ?? ''
 }
 
 // fmtBytes (binary-adaptive) comes from useFormat.ts (auto-imported).
+// formatTrackQuality comes from utils/trackQuality.ts (auto-imported) —
+// shared with TrackList's phone-row quality label.
 </script>
 
 <style scoped>
