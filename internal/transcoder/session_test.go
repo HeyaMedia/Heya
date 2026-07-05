@@ -3,6 +3,7 @@ package transcoder
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -88,10 +89,11 @@ func TestReconcileSegments_NoOwnOutputYet(t *testing.T) {
 	assert.False(t, s.IsSegmentReady(5))
 }
 
-// A running head only encodes forward from its cursor. needsNewHead is only
-// consulted for segments that are NOT ready, so anything at or behind the
-// cursor — a backward seek, or a passed segment whose file vanished and had
-// its latch reset — will never arrive from this head and needs a new one.
+// A running head only encodes forward from its cursor (last FLUSHED segment).
+// needsNewHead is only consulted for segments that are NOT ready, so anything
+// at or behind the cursor — a backward seek, or a passed segment whose file
+// vanished and had its latch reset — will never arrive from this head and
+// needs a new one.
 func TestNeedsNewHead_BackwardSeek(t *testing.T) {
 	s := makeFsSession(t, 200)
 	s.head = &Head{StartSeg: 50, CurrentSeg: 60, Done: make(chan struct{})}
@@ -104,6 +106,51 @@ func TestNeedsNewHead_BackwardSeek(t *testing.T) {
 
 	close(s.head.Done)
 	assert.True(t, s.needsNewHead(65), "finished head → new head")
+}
+
+// A freshly spawned head sits at CurrentSeg = StartSeg-1 (nothing flushed).
+// Its own start segment must NOT read as "already passed", or the request
+// that spawned it would kill/spawn heads in an infinite loop.
+func TestNeedsNewHead_FreshHeadServesItsStartSegment(t *testing.T) {
+	s := makeFsSession(t, 200)
+	s.head = &Head{StartSeg: 50, CurrentSeg: 49, Done: make(chan struct{})}
+
+	assert.False(t, s.needsNewHead(50), "fresh head's own start segment → keep head")
+	assert.False(t, s.needsNewHead(51), "just ahead of a fresh head → keep head")
+	assert.True(t, s.needsNewHead(49), "behind the fresh head's start → new head")
+}
+
+// fakeBuilder produces a command that runs long but never writes segments,
+// standing in for ffmpeg in livelock/timeout tests.
+type fakeBuilder struct{}
+
+func (fakeBuilder) BuildHLSCommand(ctx context.Context, opts TranscodeOpts) (*exec.Cmd, error) {
+	return exec.CommandContext(ctx, "sleep", "60"), nil
+}
+func (fakeBuilder) IsAvailable() bool                  { return true }
+func (fakeBuilder) FormatCommand(cmd *exec.Cmd) string { return "fake" }
+
+// Livelock canary: the first request of a fresh session spawns a head for
+// exactly that segment. RequestSegment must settle into WaitForSegment and
+// time out cleanly — not kill/spawn the head it just created forever.
+func TestRequestSegment_FreshSpawnDoesNotLivelock(t *testing.T) {
+	s := makeFsSession(t, 200)
+	s.builder = fakeBuilder{}
+
+	done := make(chan bool, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		done <- s.RequestSegment(ctx, 8)
+	}()
+
+	select {
+	case ok := <-done:
+		assert.False(t, ok, "no segments were produced, request must time out")
+	case <-time.After(10 * time.Second):
+		t.Fatal("RequestSegment did not return — kill/spawn livelock")
+	}
+	s.Kill()
 }
 
 // A ready-marked segment whose file vanished (cache eviction, manual delete)

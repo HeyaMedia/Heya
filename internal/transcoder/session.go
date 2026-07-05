@@ -18,7 +18,11 @@ import (
 )
 
 type Head struct {
-	StartSeg   int
+	StartSeg int
+	// CurrentSeg is the last segment this head has FLUSHED to disk. A fresh
+	// head that hasn't produced anything yet sits at StartSeg-1 — that
+	// distinction is load-bearing for needsNewHead, which treats any unready
+	// segment <= CurrentSeg as "passed, will never arrive from this head".
 	CurrentSeg int
 	Cancel     context.CancelFunc
 	Cmd        *exec.Cmd
@@ -132,10 +136,16 @@ func (s *TranscodeSession) HeadSnapshot() HeadInfo {
 		running = false
 	default:
 	}
+	cur := s.head.CurrentSeg
+	if cur < s.head.StartSeg {
+		// Fresh head, nothing flushed yet — report its start position
+		// instead of the internal StartSeg-1 sentinel.
+		cur = s.head.StartSeg
+	}
 	return HeadInfo{
 		Running:    running,
 		StartSeg:   s.head.StartSeg,
-		CurrentSeg: s.head.CurrentSeg,
+		CurrentSeg: cur,
 		StopReason: s.headStopReason,
 	}
 }
@@ -311,10 +321,12 @@ func (s *TranscodeSession) needsNewHead(idx int) bool {
 	default:
 	}
 	// Only consulted for segments that are NOT ready (RequestSegment checks
-	// readiness first). A head encodes strictly forward from its cursor, so
-	// an unready segment at or behind CurrentSeg will never be produced by
-	// this head — whether it's a backward seek behind the run's start or a
-	// segment whose file vanished after the head passed it (reset latch).
+	// readiness first). A head encodes strictly forward and CurrentSeg is its
+	// last FLUSHED segment (StartSeg-1 when fresh), so an unready segment at
+	// or behind CurrentSeg will never be produced by this head — whether it's
+	// a backward seek behind the run's start or a segment whose file vanished
+	// after the head passed it (reset latch). The head's own next segment is
+	// CurrentSeg+1, which correctly falls through to the distance check.
 	if idx <= s.head.CurrentSeg {
 		return true
 	}
@@ -361,8 +373,11 @@ func (s *TranscodeSession) spawnHead(startSeg int) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	head := &Head{
-		StartSeg:   startSeg,
-		CurrentSeg: startSeg,
+		StartSeg: startSeg,
+		// Nothing flushed yet. Starting at startSeg would make needsNewHead
+		// see the head's own first segment as already-passed and kill/spawn
+		// in an infinite loop on the very request that spawned it.
+		CurrentSeg: startSeg - 1,
 		Cancel:     cancel,
 		Done:       make(chan struct{}),
 	}
