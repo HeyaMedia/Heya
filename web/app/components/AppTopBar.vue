@@ -1,15 +1,33 @@
 <template>
   <header class="topbar">
-    <NuxtLink to="/" class="topbar-brand">
-      <div class="brand-mark">
-        <svg width="22" height="22" viewBox="0 0 22 22">
-          <circle cx="11" cy="11" r="10" fill="none" stroke="var(--gold)" stroke-width="1.5" />
-          <circle cx="11" cy="11" r="4" fill="var(--gold)" />
-          <circle cx="11" cy="11" r="1.5" fill="#0a0a0a" />
-        </svg>
-      </div>
-      <span class="brand-name">heya<span class="brand-dot">.</span>media</span>
-    </NuxtLink>
+    <!-- topbar-left wraps the burger + brand as a flex row in the compact
+         band (720.02-1200px) — see useSectionSidebar()/useViewport() below.
+         The burger is a SIBLING of the brand anchor, never nested inside it
+         (the anchor is a link; nesting a button in it would fire both on
+         tap). At >1200px and <=720px the burger never renders (isCompact is
+         false there), so `.topbar-left` holds a single child and lays out
+         identically to the old bare `.topbar-brand` grid item. -->
+    <div class="topbar-left">
+      <button
+        v-if="sidebar.kind.value && isCompact"
+        type="button"
+        class="btn-icon topbar-burger-btn"
+        aria-label="Toggle navigation"
+        @click="sidebar.toggle()"
+      >
+        <Icon name="menu" :size="18" />
+      </button>
+      <NuxtLink to="/" class="topbar-brand">
+        <div class="brand-mark">
+          <svg width="22" height="22" viewBox="0 0 22 22">
+            <circle cx="11" cy="11" r="10" fill="none" stroke="var(--gold)" stroke-width="1.5" />
+            <circle cx="11" cy="11" r="4" fill="var(--gold)" />
+            <circle cx="11" cy="11" r="1.5" fill="#0a0a0a" />
+          </svg>
+        </div>
+        <span class="brand-name">heya<span class="brand-dot">.</span>media</span>
+      </NuxtLink>
+    </div>
 
     <nav class="topbar-tabs">
       <NuxtLink
@@ -18,6 +36,8 @@
         :to="t.to"
         class="tab"
         :class="{ active: isActive(t) }"
+        :title="t.label"
+        :aria-label="t.label"
       >
         <Icon :name="t.icon" :size="16" />
         <span>{{ t.label }}</span>
@@ -36,13 +56,14 @@
         <Icon name="database" :size="16" />
       </button>
       <div class="search-wrap open" ref="searchWrapRef">
-        <!-- Phone (<=720px): the dropdown below is cramped at phone widths,
-             so the field becomes a non-editable trigger that opens
-             AppSearchOverlay (fullscreen) instead — it doesn't mount the
-             input/dropdown/Teleport at all. Desktop/tablet keep the
+        <!-- Phone (<=720px) and the compact band (720.02-1200px, see
+             useViewport().isCompact): the dropdown below is cramped at
+             these widths, so the field becomes a non-editable trigger that
+             opens AppSearchOverlay (fullscreen) instead — it doesn't mount
+             the input/dropdown/Teleport at all. Desktop (>1200px) keeps the
              original inline behavior untouched. -->
         <button
-          v-if="isPhone"
+          v-if="isPhone || isCompact"
           type="button"
           class="search-trigger"
           @click="searchOverlayOpen = true"
@@ -280,10 +301,10 @@
       <UserDropdown />
     </div>
 
-    <!-- Phone-only fullscreen search — mounted unconditionally (cheap, and
-         avoids the overlay vanishing mid-use if the viewport crosses the
-         720px breakpoint while it's open); only the phone trigger button
-         above can ever flip it open. -->
+    <!-- Fullscreen search for phone + the compact band — mounted
+         unconditionally (cheap, and avoids the overlay vanishing mid-use if
+         the viewport crosses a breakpoint while it's open); only the
+         isPhone/isCompact trigger button above can ever flip it open. -->
     <AppSearchOverlay v-model:open="searchOverlayOpen" />
   </header>
 </template>
@@ -294,6 +315,10 @@ import type { TaskProgressPayload } from '~/composables/useEventBus'
 const route = useRoute()
 const { user } = useAuth()
 const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgress, taskProgress } = useEventBus()
+// Compact-band (720.02-1200px) burger trigger — see useSectionSidebar.ts.
+// `kind` gates whether the current route even has a section sidebar to
+// open; the drawer itself is mounted by the section pages, not here.
+const sidebar = useSectionSidebar()
 
 // Dev-only Query Cache toggle (left of search). Shares open-state with
 // components/dev/QueryCachePanel.vue via this useState key.
@@ -370,7 +395,7 @@ const searchOverlayOpen = ref(false)
 // useElementBounding + useWindowSize so resizes stay anchored.
 const { bottom: swBottom, right: swRight } = useElementBounding(searchWrapRef)
 const { width: vw } = useWindowSize()
-const { isPhone } = useViewport()
+const { isPhone, isCompact } = useViewport()
 const searchDropdownTop = computed(() => swBottom.value + 8)
 // On phone the search-wrap flex-grows to fill the topbar (see the phone
 // media query below), so its measured right edge sits close to the
@@ -684,7 +709,15 @@ watch(() => route.fullPath, () => { closeDropdown() })
   z-index: 50;
   position: relative;
 }
-.topbar-brand { display: flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; justify-self: start; }
+/* `.topbar-left` is the actual grid item (column 1) — `.topbar-brand` used
+   to hold `justify-self: start` directly, back when it was the grid item
+   itself. Moved here so the wrapper shrinks to content instead of
+   stretching across the 1fr track; at >1200px and <=720px it holds a single
+   child (the brand link) so this is a no-op layout-wise. `display: flex`
+   only gets added in the compact media query below, where the burger can
+   also be present — see the comment there for why it must stay gated. */
+.topbar-left { justify-self: start; min-width: 0; }
+.topbar-brand { display: flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
 .brand-mark { display: flex; align-items: center; justify-content: center; }
 .brand-name { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--fg-0); }
 .brand-name .brand-dot { color: var(--gold); }
@@ -943,6 +976,58 @@ watch(() => route.fullPath, () => { closeDropdown() })
      unlike AppMenu/reka-portaled content, this scoped rule does reach it. */
   .search-dropdown {
     width: min(460px, calc(100vw - 16px));
+  }
+}
+
+/* Compact band (720.02-1200px, see useViewport().isCompact): the persistent
+   section sidebars (movies/tv/books index + all of /music) move behind the
+   burger in `.topbar-left`, so there's room to keep the tab row visible —
+   just icon-only — instead of handing off to BottomNav like phone does.
+   Entirely separate from the <=720px query above; nothing here touches
+   phone, and nothing outside this query touches >1200px desktop. */
+@media (min-width: 720.02px) and (max-width: 1200px) {
+  .topbar {
+    gap: 12px;
+    padding: 0 16px;
+  }
+  /* `display: flex` is gated here (not in the always-on `.topbar-left` rule
+     above) because it's only needed when the burger sits beside the brand —
+     the two need to sit in a row instead of the default block stacking a
+     `display:flex` anchor would otherwise fall into. Outside this band the
+     burger never renders (see `v-if="sidebar.kind.value && isCompact"`), so
+     `.topbar-left` never needs the row treatment there. */
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  /* Same reclaim-the-width move as the phone query, just for the narrower
+     compact band instead of dropping the tab row entirely. */
+  .brand-name { display: none; }
+  .topbar-tabs { min-width: 0; }
+  /* Icon-only tabs — the label span hides, padding tightens, height (36px)
+     is untouched. `.tab.active`'s text-color-only treatment (inherited by
+     the icon via `currentColor`) reads as too subtle without the label
+     next to it, so add a background tint to keep the active tab obvious. */
+  .topbar-tabs .tab {
+    padding: 0 12px;
+  }
+  .topbar-tabs .tab span { display: none; }
+  .topbar-tabs .tab.active { background: var(--gold-soft); }
+  .topbar-right { gap: 8px; min-width: 0; }
+  /* Dev-only Query Cache toggle — not part of the compact-band set, and
+     crowds the ladder at the narrow end (~744px). Hidden the same way the
+     phone query already drops it. */
+  .qcp-nav-btn { display: none; }
+  /* Fixed 280px on desktop; here the pill flexes to fill the space search
+     and the right-cluster buttons leave available, capped so it doesn't
+     crowd cast/activity/avatar, floored so it never drops below a tappable
+     width even if a future addition to the right cluster squeezes it. */
+  .search-wrap.open {
+    flex: 1;
+    width: auto;
+    max-width: 240px;
+    min-width: 44px;
   }
 }
 </style>

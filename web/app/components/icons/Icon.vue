@@ -43,6 +43,10 @@ const nameMap: Record<string, string> = {
   mic: 'microphone',
   radio: 'radio',
   list: 'list',
+  // Compact-band topbar burger (AppTopBar.vue) — reuses phosphor's 3-line
+  // "list" glyph as the menu/hamburger icon; there's no separate hamburger
+  // glyph in the phosphor set.
+  menu: 'list',
   grid: 'squares-four',
   rows: 'rows',
   filter: 'funnel',
