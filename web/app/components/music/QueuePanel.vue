@@ -324,6 +324,25 @@ function onDrop(_event: DragEvent, toIndex: number) {
   height: 100%;
 }
 
+/* Compact band (720.02-1200px): the docked panel becomes a floating overlay
+   instead of a flex sibling squeezing `.music-main` on an already-tight
+   viewport — same `queueOpen` toggle from the playbar, same content, just
+   repositioned + elevated so it reads as "on top of" rather than "beside".
+   Above 1200px nothing here applies; the desktop dock is untouched. */
+@media (min-width: 720.02px) and (max-width: 1200px) {
+  .queue-panel {
+    position: fixed;
+    top: var(--topbar-h);
+    right: 0;
+    bottom: var(--playbar-h);
+    height: auto;
+    width: min(var(--music-queue-w), 90vw);
+    z-index: 60;
+    border-left: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-3);
+  }
+}
+
 .qp-tabs {
   display: flex;
   gap: 0;

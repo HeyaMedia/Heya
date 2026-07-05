@@ -2,7 +2,7 @@
   <div class="music-shell">
     <div class="music-body">
       <MusicSidebar
-        v-if="!isPhone"
+        v-if="!isPhone && !isCompact"
         :section="currentSection"
         :playlists="sidebarPlaylists"
         @create-playlist="createOpen = true"
@@ -22,6 +22,9 @@
         </div>
         <NuxtPage />
       </main>
+      <!-- QueuePanel handles its own compact-band overlay styling internally
+           (fixed position, no layout squeeze) — mount gate stays `!isPhone`,
+           same as desktop. -->
       <QueuePanel v-if="!isPhone" />
     </div>
     <Playbar v-if="!isPhone" />
@@ -34,72 +37,30 @@
     <!--
       Phone nav sheet — the global MiniPlayer/NowPlayingSheet live
       in layouts/default.vue, but the music section nav is specific to this
-      page, so it's owned here. Built as a flat list of MusicSidebar's own
-      links rather than reusing <MusicSidebar/> verbatim: that component is a
-      fixed 256px `<aside>` with its own collapsible groups and a
-      `coverShown` state tied to the now-playing fold-out cover — overriding
-      all of that from an unscoped stylesheet (required since AppSheet
-      content is portaled) fought the component's own scoped CSS harder than
-      just re-listing its ~20 links flatly here. Tapping any link (or the
-      Create Playlist row) closes the sheet.
+      page, so it's owned here. MusicNavSheet holds the actual flat link
+      list (see its own header comment for why it's not a re-skinned
+      <MusicSidebar/>). Tapping any link (or the Create Playlist row) closes
+      the sheet.
     -->
     <AppSheet v-if="isPhone" v-model:open="browseOpen" title="Browse" size="full">
-      <nav class="mnav">
-        <NuxtLink to="/music" class="mnav-item" :class="{ active: currentSection === 'home' }" @click="browseOpen = false">
-          <Icon name="home" :size="18" /> <span>Home</span>
-        </NuxtLink>
-        <NuxtLink to="/music/search" class="mnav-item" :class="{ active: currentSection === 'search' }" @click="browseOpen = false">
-          <Icon name="search" :size="18" /> <span>Search</span>
-        </NuxtLink>
-
-        <div class="mnav-group-label">Library</div>
-        <NuxtLink to="/music/library" class="mnav-item" :class="{ active: currentSection === 'library' }" @click="browseOpen = false">
-          <Icon name="music" :size="18" /> <span>Overview</span>
-        </NuxtLink>
-        <NuxtLink to="/music/artists" class="mnav-item mnav-sub" :class="{ active: currentSection === 'artists' }" @click="browseOpen = false">Artists</NuxtLink>
-        <NuxtLink to="/music/albums" class="mnav-item mnav-sub" :class="{ active: currentSection === 'albums' }" @click="browseOpen = false">Albums</NuxtLink>
-        <NuxtLink to="/music/songs" class="mnav-item mnav-sub" :class="{ active: currentSection === 'songs' }" @click="browseOpen = false">Songs</NuxtLink>
-
-        <div class="mnav-group-label">My Music</div>
-        <NuxtLink to="/music/my" class="mnav-item" :class="{ active: currentSection === 'my' }" @click="browseOpen = false">
-          <Icon name="user" :size="18" /> <span>Overview</span>
-        </NuxtLink>
-        <NuxtLink to="/music/my/artists" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-artists' }" @click="browseOpen = false">Artists</NuxtLink>
-        <NuxtLink to="/music/my/albums" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-albums' }" @click="browseOpen = false">Albums</NuxtLink>
-        <NuxtLink to="/music/my/favorites" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-favorites' }" @click="browseOpen = false">My Favorites</NuxtLink>
-        <NuxtLink to="/music/stats" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stats' }" @click="browseOpen = false">My Sound</NuxtLink>
-
-        <div class="mnav-group-label">Stations</div>
-        <NuxtLink to="/music/stations" class="mnav-item" :class="{ active: currentSection === 'stations' }" @click="browseOpen = false">
-          <Icon name="compass" :size="18" /> <span>Overview</span>
-        </NuxtLink>
-        <NuxtLink to="/music/stations/mixes" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stations-mixes' }" @click="browseOpen = false">Mixes</NuxtLink>
-        <NuxtLink to="/music/stations/builder" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stations-builder' }" @click="browseOpen = false">Mix Builder</NuxtLink>
-        <NuxtLink to="/music/browse" class="mnav-item mnav-sub" :class="{ active: currentSection?.startsWith('browse') }" @click="browseOpen = false">Moods · Genres · Tempo</NuxtLink>
-
-        <NuxtLink to="/music/podcasts" class="mnav-item" :class="{ active: currentSection === 'podcasts' }" @click="browseOpen = false">
-          <Icon name="mic" :size="18" /> <span>Podcasts</span>
-        </NuxtLink>
-        <NuxtLink to="/music/radio" class="mnav-item" :class="{ active: currentSection === 'radio' }" @click="browseOpen = false">
-          <Icon name="radio" :size="18" /> <span>Internet Radio</span>
-        </NuxtLink>
-
-        <div class="mnav-group-label">Playlists</div>
-        <NuxtLink to="/music/loved" class="mnav-item" :class="{ active: currentSection === 'loved' }" @click="browseOpen = false">
-          <Icon name="star" :size="18" /> <span>Loved Songs</span>
-        </NuxtLink>
-        <NuxtLink
-          v-for="pl in sidebarPlaylists"
-          :key="pl.id"
-          :to="`/music/playlist/${pl.id}`"
-          class="mnav-item mnav-sub"
-          :class="{ active: currentSection === 'playlist-' + pl.id }"
-          @click="browseOpen = false"
-        >{{ pl.name }}</NuxtLink>
-        <button type="button" class="mnav-item mnav-create" @click="browseOpen = false; createOpen = true">
-          <Icon name="plus" :size="18" /> <span>Create Playlist</span>
-        </button>
-      </nav>
+      <MusicNavSheet
+        :current-section="currentSection"
+        :playlists="sidebarPlaylists"
+        @navigate="browseOpen = false"
+        @create-playlist="createOpen = true"
+      />
+    </AppSheet>
+    <!-- Compact band (720.02-1200px): same nav list as the phone sheet
+         above, but as a left-side drawer opened by AppTopBar's burger
+         (useSectionSidebar's shared `open` ref) instead of the phone
+         header's "Browse" button (that button only renders `v-if="isPhone"`). -->
+    <AppSheet v-if="isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Music">
+      <MusicNavSheet
+        :current-section="currentSection"
+        :playlists="sidebarPlaylists"
+        @navigate="sectionSidebar.close()"
+        @create-playlist="createOpen = true"
+      />
     </AppSheet>
   </div>
 </template>
@@ -114,11 +75,14 @@ useGlobalHotkeys()
 const route = useRoute()
 const router = useRouter()
 
-const { isPhone } = useViewport()
+const { isPhone, isCompact } = useViewport()
 
 const eqOpen = useState('music_eq_open', () => false)
 const createOpen = useState('music_create_playlist_open', () => false)
 const browseOpen = ref(false)
+// Compact-band (720.02-1200px) left drawer, opened by AppTopBar's burger —
+// shared singleton state (module-level ref), see useSectionSidebar.ts.
+const sectionSidebar = useSectionSidebar()
 
 // Map the current route to a sidebar highlight key.
 const currentSection = computed(() => {
@@ -252,55 +216,4 @@ function onCreated(id: number) {
   flex-shrink: 0;
 }
 .mph-browse-btn:active { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
-</style>
-
-<!--
-  The browse AppSheet's content is portaled to <body> (docs/ui.md gotcha #2
-  — same reason NowPlayingSheet/QueuePane keep their body styles unscoped),
-  so `.mnav-*` below lives in its own unscoped block rather than the scoped
-  one above.
--->
-<style>
-.mnav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.mnav-group-label {
-  padding: 16px 10px 4px;
-  font-size: 10px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--fg-3);
-}
-.mnav-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 44px;
-  padding: 0 10px;
-  border-radius: var(--r-sm);
-  background: transparent;
-  border: 0;
-  color: var(--fg-1);
-  font-size: 15px;
-  font-weight: 500;
-  text-align: left;
-  text-decoration: none;
-  cursor: pointer;
-}
-.mnav-item:active { background: rgba(255, 255, 255, 0.06); }
-.mnav-item.active { color: var(--gold); background: var(--gold-soft); }
-.mnav-sub {
-  margin-left: 28px;
-  width: calc(100% - 28px);
-  min-height: 40px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--fg-2);
-}
-.mnav-sub.active { color: var(--gold); }
-.mnav-create { margin-top: 10px; color: var(--fg-2); }
 </style>

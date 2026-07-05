@@ -1,7 +1,7 @@
 <template>
   <div class="mt-layout">
     <LibrarySidebar
-      v-if="!isPhone"
+      v-if="!isPhone && !isCompact"
       :libraries="libraries"
       :active-lib="activeLib"
       :active-view="null"
@@ -18,6 +18,21 @@
         type-label="Books"
         :total-count="items.length"
         @select="activeLib = $event; librarySheetOpen = false"
+      />
+    </AppSheet>
+    <!-- Compact band (720.02-1200px): same sidebar content as the phone
+         sheet above, but as a left-side drawer opened by AppTopBar's burger
+         (useSectionSidebar's shared `open` ref) rather than a page-owned
+         toolbar button. -->
+    <AppSheet v-if="isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Library">
+      <LibrarySidebar
+        variant="sheet"
+        :libraries="libraries"
+        :active-lib="activeLib"
+        :active-view="null"
+        type-label="Books"
+        :total-count="items.length"
+        @select="activeLib = $event; sectionSidebar.close()"
       />
     </AppSheet>
     <div class="library-main scroll">
@@ -131,8 +146,11 @@ const activeLib = ref<number | null>(null)
 const sort = ref('added')
 const view = ref('grid')
 
-const { isPhone } = useViewport()
+const { isPhone, isCompact } = useViewport()
 const librarySheetOpen = ref(false)
+// Compact-band (720.02-1200px) left drawer, opened by AppTopBar's burger —
+// shared singleton state (module-level ref), see useSectionSidebar.ts.
+const sectionSidebar = useSectionSidebar()
 
 const sorted = computed(() => {
   let list = [...items.value]

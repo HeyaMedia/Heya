@@ -1,7 +1,7 @@
 <template>
   <div class="mt-layout">
     <LibrarySidebar
-      v-if="!isPhone"
+      v-if="!isPhone && !isCompact"
       :libraries="libraries"
       :active-lib="activeLib"
       :active-view="activeView"
@@ -37,6 +37,29 @@
         :drag-over-list-id="dragState.overListId"
         @select="activeLib = $event; activeView = null; librarySheetOpen = false"
         @view="activeView = $event; librarySheetOpen = false"
+        @list-drop="onListDrop"
+        @list-dragover="onListDragOver"
+        @list-dragleave="onListDragLeave"
+      />
+    </AppSheet>
+    <!-- Compact band (720.02-1200px): same sidebar content as the phone
+         sheet above, but as a left-side drawer opened by AppTopBar's burger
+         (useSectionSidebar's shared `open` ref) rather than FilterBar's
+         "Library" button — that button only renders `v-if="isPhone"`. -->
+    <AppSheet v-if="isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Library">
+      <LibrarySidebar
+        variant="sheet"
+        :libraries="libraries"
+        :active-lib="activeLib"
+        :active-view="activeView"
+        type-label="Movies"
+        :total-count="items.length"
+        :loved-count="favoritedSet.size"
+        :user-lists="userLists"
+        :collections="collections"
+        :drag-over-list-id="dragState.overListId"
+        @select="activeLib = $event; activeView = null; sectionSidebar.close()"
+        @view="activeView = $event; sectionSidebar.close()"
         @list-drop="onListDrop"
         @list-dragover="onListDragOver"
         @list-dragleave="onListDragLeave"
@@ -268,8 +291,11 @@ const userLists = ref<UserList[]>([])
 const collections = ref<CollectionBrowse[]>([])
 const loading = ref(true)
 
-const { isPhone } = useViewport()
+const { isPhone, isCompact } = useViewport()
 const librarySheetOpen = ref(false)
+// Compact-band (720.02-1200px) left drawer, opened by AppTopBar's burger —
+// shared singleton state (module-level ref), see useSectionSidebar.ts.
+const sectionSidebar = useSectionSidebar()
 
 // Phone-only "..." action sheet for list/detail rows — see ActionSheet usage
 // at the bottom of the template. Grid tiles don't need this: AppContextMenu

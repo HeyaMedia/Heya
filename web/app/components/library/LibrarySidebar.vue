@@ -4,6 +4,7 @@
       <div class="section-title" style="padding: 0 14px; margin-bottom: 10px">Libraries</div>
       <div
         class="lib-item"
+        role="button"
         :class="{ active: !activeLib && !activeView }"
         @click="selectLib(null)"
       >
@@ -15,6 +16,7 @@
         v-for="lib in libraries"
         :key="lib.id"
         class="lib-item lib-item-nested"
+        role="button"
         :class="{ active: activeLib === lib.id && !activeView }"
         @click="selectLib(lib.id)"
       >
@@ -27,6 +29,7 @@
       <div class="section-title" style="padding: 0 14px; margin-bottom: 10px">Collections</div>
       <div
         class="lib-item"
+        role="button"
         :class="{ active: activeView === 'loved' }"
         @click="$emit('view', 'loved')"
       >
@@ -35,7 +38,16 @@
         <span v-if="(lovedCount ?? 0) > 0" class="count">{{ lovedCount }}</span>
       </div>
 
-      <div class="lib-item lists-toggle" @click="listsExpanded = !listsExpanded">
+      <!-- `role="button"` on every clickable row below isn't decorative: reka
+           Drawer's swipe-to-dismiss (AppSheet side="left"/bottom) captures
+           the mouse pointer on pointerdown for anything that ISN'T
+           button/a/input/select/textarea/label/[role="button"] and retargets
+           the resulting click to the drawer's root content element instead
+           of this row — silently eating the click. Harmless outside a
+           drawer (desktop aside, and phone where taps are real touch events
+           that skip pointer capture entirely), but required once this
+           component renders inside AppSheet's `variant="sheet"`. -->
+      <div class="lib-item lists-toggle" role="button" @click="listsExpanded = !listsExpanded">
         <Icon name="list" :size="16" />
         <span>My Lists</span>
         <Icon :name="listsExpanded ? 'chevdown' : 'chevright'" :size="10" class="expand-icon" />
@@ -45,6 +57,7 @@
           v-for="l in displayLists"
           :key="l.id"
           class="lib-item lib-item-nested"
+          role="button"
           :class="{ active: activeView === `list-${l.id}`, 'drop-target': dragOverListId === l.id }"
           @click="$emit('view', `list-${l.id}`)"
           @dragover.prevent="$emit('list-dragover', $event, l.id)"
@@ -55,7 +68,7 @@
           <span>{{ l.name }}</span>
           <span v-if="l.item_count > 0" class="count">{{ l.item_count }}</span>
         </div>
-        <div class="lib-item lib-item-nested lib-item-action" @click="createList">
+        <div class="lib-item lib-item-nested lib-item-action" role="button" @click="createList">
           <Icon name="plus" :size="12" />
           <span>New List</span>
         </div>
@@ -64,7 +77,7 @@
       <!-- TMDB Collections — movie-only, so the section renders only when the
            parent page passes the browse result in (tv/books leave it unset). -->
       <template v-if="collections">
-        <div class="lib-item lists-toggle" @click="collectionsExpanded = !collectionsExpanded" style="margin-top: 4px">
+        <div class="lib-item lists-toggle" role="button" @click="collectionsExpanded = !collectionsExpanded" style="margin-top: 4px">
           <Icon name="film" :size="16" />
           <span>Franchises</span>
           <Icon :name="collectionsExpanded ? 'chevdown' : 'chevright'" :size="10" class="expand-icon" />
@@ -74,6 +87,7 @@
             v-for="c in collections"
             :key="c.id"
             class="lib-item lib-item-nested"
+            role="button"
             :class="{ active: activeView === `collection-${c.id}` }"
             @click="$emit('view', `collection-${c.id}`)"
           >

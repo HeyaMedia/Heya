@@ -1,15 +1,23 @@
 <!--
   AppSheet — bottom sheet for phone/tablet, built on reka-ui's Drawer family.
+  Also doubles as a left-side drawer (`side="left"`) for the compact-band
+  (720.02-1200px) section-sidebar drawers — see the `side` prop below.
 
   Reka component names used (reka-ui 2.10.1, verified against
   node_modules/reka-ui/src/Drawer): DrawerRoot, DrawerPortal, DrawerOverlay,
   DrawerContent, DrawerHandle, DrawerTitle. `DrawerRoot`'s default
   `swipeDirection` is 'down' and its swipe-dismiss gesture is wired into
   `DrawerContent` itself (attaches to the content element, scroll-edge aware)
-  — no extra wiring needed here for "swipe down to dismiss".
+  — no extra wiring needed here for "swipe down to dismiss". For `side="left"`
+  we pass `swipe-direction="left"` explicitly so the same gesture wiring
+  swipes the panel off to the left instead.
 
   Usage:
     <AppSheet v-model:open="show" title="Queue" size="full">
+      …rows…
+    </AppSheet>
+
+    <AppSheet v-model:open="show" side="left" title="Library">
       …rows…
     </AppSheet>
 
@@ -19,15 +27,14 @@
                `<DrawerTitle>` if you do — reka warns without one)
 
   Visuals reuse the shared `.surface` glass chrome (background/blur/border)
-  but override radius (top corners only), position (fixed, docked to the
-  viewport bottom), and animation (slide, not the popover scale-in) — see the
-  unscoped <style> block below. Content is portaled to `body`, same as
+  but override radius, position, and animation — see the unscoped <style>
+  block below. Content is portaled to `body`, same as
   AppDialog/AppMenu/AppContextMenu, so ancestor `backdrop-filter` never
   poisons this panel (docs/ui.md gotcha #4) and any styling here must stay
   unscoped (gotcha #2).
 -->
 <template>
-  <DrawerRoot v-model:open="open">
+  <DrawerRoot v-model:open="open" :swipe-direction="side === 'left' ? 'left' : undefined">
     <DrawerPortal>
       <DrawerOverlay class="app-sheet-overlay" />
       <!-- open-auto-focus is prevented unconditionally: sheets are touch-first
@@ -36,10 +43,13 @@
            (and would summon the soft keyboard if it were an input). -->
       <DrawerContent
         class="surface app-sheet-content"
-        :class="`app-sheet-${size}`"
+        :class="side === 'left' ? 'app-sheet-left' : `app-sheet-${size}`"
         @open-auto-focus.prevent
       >
-        <DrawerHandle v-if="handle" class="app-sheet-handle" />
+        <!-- Handle is a horizontal grip — the wrong shape for a side drawer,
+             so it's force-hidden for side="left" regardless of the `handle`
+             prop. -->
+        <DrawerHandle v-if="handle && side !== 'left'" class="app-sheet-handle" />
 
         <slot name="header">
           <header v-if="title" class="app-sheet-header">
@@ -63,12 +73,19 @@ import { DrawerRoot, DrawerPortal, DrawerOverlay, DrawerContent, DrawerHandle, D
 
 withDefaults(defineProps<{
   title?: string
-  /** 'auto' (default) = content height, capped at 92dvh. 'full' = 92dvh. */
+  /** 'auto' (default) = content height, capped at 92dvh. 'full' = 92dvh.
+   *  Height-only semantics — ignored when `side="left"`, which is always
+   *  full-height (100dvh) with a fixed width instead. */
   size?: 'auto' | 'full'
   handle?: boolean
+  /** 'bottom' (default) = classic bottom sheet. 'left' = side drawer docked
+   *  to the left edge, full height, fixed width — used for the compact-band
+   *  section-sidebar drawers (movies/tv/books Library, music nav). */
+  side?: 'bottom' | 'left'
 }>(), {
   size: 'auto',
   handle: true,
+  side: 'bottom',
 })
 
 const open = defineModel<boolean>('open')
@@ -136,6 +153,42 @@ const open = defineModel<boolean>('open')
   from { transform: translateY(var(--drawer-swipe-movement-y, 0px)); }
   to   { transform: translateY(100%); }
 }
+
+/* ── Left-side drawer (side="left") ──────────────────
+   Compact-band (720.02-1200px) section-sidebar drawers. Same `.surface`
+   chrome, own position/size/animation — `size` is ignored here (height
+   semantics don't apply to a full-height side drawer). */
+.app-sheet-left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  width: min(320px, 85vw);
+  height: 100dvh;
+  max-height: 100dvh;
+  max-width: 85vw;
+  border-radius: 0 var(--r-lg) var(--r-lg) 0;
+  padding-bottom: 0;
+  transform: translateX(var(--drawer-swipe-movement-x, 0px));
+}
+.app-sheet-left[data-state="open"] {
+  animation: app-sheet-left-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.app-sheet-left[data-state="closed"] {
+  animation: app-sheet-left-out 0.16s cubic-bezier(0.4, 0, 1, 1) both;
+}
+@keyframes app-sheet-left-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(var(--drawer-swipe-movement-x, 0px)); }
+}
+@keyframes app-sheet-left-out {
+  from { transform: translateX(var(--drawer-swipe-movement-x, 0px)); }
+  to   { transform: translateX(-100%); }
+}
+/* The scroll body carries the safe-area inset for a left drawer (the content
+   box itself has no bottom padding, unlike the bottom sheet's `100%`-wide
+   content which pads under itself either way). */
+.app-sheet-left .app-sheet-body { padding-bottom: calc(20px + var(--safe-bottom)); }
 
 /* ── Drag handle ──────────────────────────────────── */
 .app-sheet-handle {
