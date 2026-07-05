@@ -19,58 +19,39 @@
       <p>Rate a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you give it any rating.</p>
     </div>
 
-    <ul v-else class="ml-list">
-      <AppContextMenu
-        v-for="(t, i) in rows"
-        :key="t.track_id"
-        :items="actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })"
-      >
-      <li
-        class="ml-row"
-        :class="{ playing: currentTrack?.id === t.track_id, 'ml-row-missing': t.available === false }"
-        @click="t.available !== false && playFrom(i)"
-      >
-        <div class="ml-idx">{{ i + 1 }}</div>
-        <div class="ml-art">
-          <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
-          <template v-else>
-            <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
-            <div v-if="t.available !== false" class="ml-play"><Icon name="play" :size="13" /></div>
-            <div v-else class="ml-play ml-play-missing" title="Missing on disk"><Icon name="trash" :size="13" /></div>
-          </template>
-        </div>
-        <div class="ml-title-col">
-          <div class="ml-title-cell">{{ t.track_title }}</div>
-          <NuxtLink
-            :to="`/music/artist/${t.artist_slug}`"
-            class="ml-artist"
-            @click.stop
-          >{{ t.artist_name }}</NuxtLink>
-        </div>
-        <NuxtLink
-          :to="`/music/artist/${t.artist_slug}/${t.album_slug}`"
-          class="ml-album-cell"
-          @click.stop
-        >{{ t.album_title }}</NuxtLink>
-        <div class="ml-rating-cell" @click.stop>
-          <StarRating
-            :model-value="ratings.get(t.track_id) ?? t.rating"
-            size="sm"
-            @update:model-value="(v) => onRatingChange(t.track_id, v)"
-          />
-        </div>
-        <div class="ml-dur">{{ formatTime(t.duration) }}</div>
-      </li>
-      </AppContextMenu>
-    </ul>
+    <TrackList
+      v-else
+      :tracks="tlRows"
+      :columns="columns"
+      grid-template-columns="32px 44px 1fr minmax(160px, 1.2fr) 130px 60px"
+      :show-header="false"
+      :context-items="contextItemsFor"
+      :active-track-id="activeTrackId"
+      :playing="playing"
+      vu-meter-in="art"
+      :art-play-icon-size="13"
+      :duration-formatter="formatTime"
+      :on-rating-change="onRatingChange"
+      @row-click="playFrom"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 import { useQuery } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
+
+const columns: TrackListColumn[] = [
+  { key: 'idx', kind: 'index' },
+  { key: 'art', kind: 'art' },
+  { key: 'title', kind: 'title', subtitle: 'artist-link' },
+  { key: 'album', kind: 'album' },
+  { key: 'rating', kind: 'rating' },
+  { key: 'duration', kind: 'duration' },
+]
 
 interface RatedTrackRow {
   track_id: number
@@ -105,6 +86,27 @@ const lovedQuery = useQuery({
 const pending = computed(() => lovedQuery.isPending.value)
 const rows = computed(() => lovedQuery.data.value?.items ?? [])
 const total = computed(() => lovedQuery.data.value?.total ?? 0)
+
+const tlRows = computed<TrackListRow[]>(() => rows.value.map((t) => ({
+  id: t.track_id,
+  title: t.track_title,
+  artist: t.artist_name,
+  artist_slug: t.artist_slug,
+  album: t.album_title,
+  album_slug: t.album_slug,
+  album_year: t.album_year,
+  duration: t.duration,
+  available: t.available,
+  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+  rating: ratings.value.get(t.track_id) ?? t.rating,
+})))
+
+function contextItemsFor(_track: TrackListRow, i: number) {
+  const t = rows.value[i]!
+  return actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })
+}
+
+const activeTrackId = computed(() => currentTrack.value?.id ?? null)
 
 async function onRatingChange(trackId: number, v: number) {
   try {
@@ -170,63 +172,16 @@ async function playFrom(i: number) {
 .ml-empty a { color: var(--gold); text-decoration: none; }
 .ml-empty a:hover { text-decoration: underline; }
 
-.ml-list { display: flex; flex-direction: column; gap: 2px; }
-.ml-row {
-  display: grid;
-  grid-template-columns: 32px 44px 1fr minmax(160px, 1.2fr) 130px 60px;
-  gap: 12px;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.ml-row:hover { background: rgba(255,255,255,0.04); }
-.ml-row.playing { background: var(--gold-soft); }
-.ml-row.playing .ml-title-cell { color: var(--gold); }
-
-.ml-idx { text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
-.ml-art {
-  position: relative;
-  width: 44px; height: 44px;
-  border-radius: 4px; overflow: hidden;
-  background: var(--bg-3);
-}
-.ml-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ml-play {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55); color: #fff;
-  opacity: 0; transition: opacity 0.15s;
-}
-.ml-row:hover .ml-play { opacity: 1; }
-.ml-play-missing { opacity: 1; color: #d96b6b; }
-.ml-row-missing { opacity: 0.5; cursor: default; }
-.ml-row-missing:hover { background: transparent; }
-
-.ml-title-col { min-width: 0; }
-.ml-title-cell {
-  font-size: 14px; font-weight: 500; color: var(--fg-0);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ml-artist {
-  font-size: 12px; color: var(--fg-3);
-  text-decoration: none;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  display: inline-block; max-width: 100%; margin-top: 1px;
-}
-.ml-artist:hover { color: var(--fg-1); text-decoration: underline; }
-.ml-album-cell {
-  font-size: 13px; color: var(--fg-2);
-  text-decoration: none;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  display: block;
-}
-.ml-album-cell:hover { color: var(--fg-0); text-decoration: underline; }
-.ml-rating-cell { display: flex; align-items: center; }
-.ml-dur {
-  font-family: var(--font-mono); font-size: 11px;
-  color: var(--fg-3); letter-spacing: 0.04em;
-  text-align: right;
-}
+/* TrackList's baseline CSS matches music/songs.vue exactly (48px art, 12px
+   index, 1px list gap, gold-tinted index on the active row, no duration
+   letter-spacing) — this page's numbers differ in a handful of spots, so
+   layer the deltas on via :deep() rather than duplicating the whole table.
+   TrackList isn't portaled, so scoped :deep() reaches its internals fine
+   (docs/ui.md gotcha #2 only applies to portaled content). */
+:deep(.tl-body) { gap: 2px; }
+:deep(.tl-c-art) { width: 44px; height: 44px; }
+:deep(.tl-c-index) { font-size: 11px; }
+:deep(.tl-c-duration) { font-size: 11px; letter-spacing: 0.04em; }
+/* songs.vue tints its index column gold on the active row; loved.vue never did. */
+:deep(.tl-track.tl-active .tl-c-index) { color: var(--fg-3); }
 </style>

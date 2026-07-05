@@ -31,47 +31,33 @@
     </header>
 
     <section class="bd-tracks page-pad">
-      <div class="list-rows">
-        <div class="list-row list-row-head bd-cols">
-          <div>#</div><div>Title</div><div>Album</div><div style="text-align: right">Duration</div>
-        </div>
-        <AppContextMenu
-          v-for="(t, i) in rows"
-          :key="t.track_id"
-          :items="actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug })"
-        >
-        <div
-          class="list-row bd-cols"
-          @click="playFrom(i)"
-        >
-          <div class="bd-num mono">{{ i + 1 }}</div>
-          <div class="bd-title-cell">
-            <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
-            <Poster v-else :idx="t.track_id" :src="useAlbumCoverUrl(t.artist_slug, t.album_slug)" aspect="1/1" class="bd-thumb" />
-            <div class="bd-title-text">
-              <div class="bd-title-row" :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}">
-                {{ t.track_title }}
-              </div>
-              <div class="bd-artist">{{ t.artist_name }}</div>
-            </div>
-          </div>
-          <div class="bd-album">
-            <NuxtLink :to="`/music/artist/${t.artist_slug}/${t.album_slug}`" class="bd-album-link" @click.stop>
-              {{ t.album_title }}
-            </NuxtLink>
-          </div>
-          <div class="bd-dur mono">{{ formatTime(t.duration) }}</div>
-        </div>
-        </AppContextMenu>
-      </div>
+      <TrackList
+        :tracks="tlRows"
+        :columns="columns"
+        grid-template-columns="40px 2.5fr 1.5fr 80px"
+        :context-items="contextItemsFor"
+        :active-track-id="activeTrackId"
+        :playing="playing"
+        vu-meter-in="title"
+        :duration-formatter="formatTime"
+        @row-click="playFrom"
+      />
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 
 definePageMeta({ layout: 'default' })
+
+const columns: TrackListColumn[] = [
+  { key: 'idx', kind: 'index', label: '#' },
+  { key: 'title', kind: 'title', label: 'Title', inlineArt: true, inlineArtSize: 40, subtitle: 'artist-plain' },
+  { key: 'album', kind: 'album', label: 'Album' },
+  { key: 'duration', kind: 'duration', label: 'Duration' },
+]
 
 // The /music/browse/[kind]/[key] route dispatches three flavors via `kind`:
 //   mood   → /api/music/browse/moods/{key}/tracks
@@ -104,6 +90,27 @@ const actions = useMusicActions()
 
 const rows = ref<BrowseTrackRow[]>([])
 const loading = ref(true)
+
+// BrowseTrackRow has no `available` field (the browse endpoints don't
+// report it) — tlRows/contextItemsFor both omit it, which TrackList
+// treats as always-available, matching today's unconditional playFrom/menu.
+const tlRows = computed<TrackListRow[]>(() => rows.value.map((t) => ({
+  id: t.track_id,
+  title: t.track_title,
+  artist: t.artist_name,
+  artist_slug: t.artist_slug,
+  album: t.album_title,
+  album_slug: t.album_slug,
+  duration: t.duration,
+  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+})))
+
+function contextItemsFor(_track: TrackListRow, i: number) {
+  const t = rows.value[i]!
+  return actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug })
+}
+
+const activeTrackId = computed(() => currentTrack.value?.id ?? null)
 
 async function load() {
   loading.value = true
@@ -251,21 +258,27 @@ async function playFrom(idx: number) {
 .bd-actions { display: flex; gap: 10px; margin-top: 20px; }
 
 .bd-tracks { margin-top: 24px; }
-.bd-cols {
-  display: grid;
-  grid-template-columns: 40px 2.5fr 1.5fr 80px;
-  gap: 12px;
-  align-items: center;
+
+/* This page used the global `.list-row`/`.list-row-head` chrome (heya.css)
+   instead of a bespoke row implementation, so its deltas from TrackList's
+   songs.vue-shaped baseline are: bigger padding, r-md radius (not r-sm), a
+   stronger hover tint, an inset row divider, a non-sticky/inline header,
+   13px index (inherited from `.list-row` before), regular-weight title, and
+   a gold (not underline) album-link hover. See loved.vue for the pattern. */
+:deep(.tl-track) {
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.035);
 }
-.bd-num { color: var(--fg-3); text-align: right; }
-.bd-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.bd-thumb { width: 40px; height: 40px; border-radius: 4px; flex-shrink: 0; }
-.bd-title-text { min-width: 0; }
-.bd-title-row { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bd-artist { font-size: 11px; color: var(--fg-3); margin-top: 2px; }
-.bd-album { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bd-album-link { color: var(--fg-2); font-size: 13px; text-decoration: none; }
-.bd-album-link:hover { color: var(--gold); }
-.bd-dur { font-size: 12px; color: var(--fg-3); text-align: right; }
-.mono { font-family: var(--font-mono); }
+:deep(.tl-track:hover) { background: rgba(255, 255, 255, 0.045); }
+:deep(.tl-body) { gap: 0; }
+:deep(.tl-head) {
+  position: static;
+  padding: 9px 12px 6px;
+  margin-bottom: 4px;
+  background: transparent;
+}
+:deep(.tl-c-index) { font-size: 13px; }
+:deep(.tl-title) { font-weight: 400; }
+:deep(.tl-album-link:hover) { color: var(--gold); text-decoration: none; }
 </style>

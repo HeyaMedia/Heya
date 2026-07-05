@@ -46,46 +46,34 @@
       </p>
     </div>
 
-    <ul v-else class="ms-fav-list">
-      <AppContextMenu
-        v-for="(t, i) in tracks"
-        :key="`fav-${t.track_id}`"
-        :items="actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })"
-      >
-      <li
-        class="ms-fav-row"
-        :class="{ 'ms-fav-missing': t.available === false }"
-        @click="t.available !== false && playFrom(i)"
-      >
-        <div class="ms-fav-idx">{{ i + 1 }}</div>
-        <div class="ms-fav-art">
-          <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
-          <div v-if="t.available !== false" class="ms-fav-play"><Icon name="play" :size="13" /></div>
-          <div v-else class="ms-fav-play ms-fav-play-missing" title="Missing on disk"><Icon name="trash" :size="13" /></div>
-        </div>
-        <div class="ms-fav-meta-col">
-          <div class="ms-fav-title-cell">{{ t.track_title }}</div>
-          <div class="ms-fav-sub-cell">{{ t.artist_name }} · {{ t.album_title }}{{ t.album_year ? ' · ' + t.album_year : '' }}</div>
-        </div>
-        <div class="ms-fav-rating-cell" @click.stop>
-          <StarRating
-            :model-value="ratings.get(t.track_id) ?? t.rating"
-            size="sm"
-            @update:model-value="(v) => onRatingChange(t.track_id, v)"
-          />
-        </div>
-        <div class="ms-fav-dur">{{ formatDuration(t.duration) }}</div>
-      </li>
-      </AppContextMenu>
-    </ul>
+    <TrackList
+      v-else
+      :tracks="tlRows"
+      :columns="columns"
+      grid-template-columns="28px 44px 1fr 130px 60px"
+      :show-header="false"
+      :context-items="contextItemsFor"
+      :art-play-icon-size="13"
+      :on-rating-change="onRatingChange"
+      @row-click="playFrom"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 import { useQuery } from '@tanstack/vue-query'
 
 definePageMeta({ layout: 'default' })
+
+const columns: TrackListColumn[] = [
+  { key: 'idx', kind: 'index' },
+  { key: 'art', kind: 'art' },
+  { key: 'title', kind: 'title', subtitle: 'artist-album-year' },
+  { key: 'rating', kind: 'rating' },
+  { key: 'duration', kind: 'duration' },
+]
 
 const { play, queue } = usePlayer()
 const { $heya } = useNuxtApp()
@@ -148,6 +136,27 @@ const ratedQuery = useQuery({
 const tracks = computed<RatedTrackRow[]>(() => ratedQuery.data.value?.items ?? [])
 const totalFavorites = computed(() => ratedQuery.data.value?.total ?? 0)
 const isLoading = computed(() => ratedQuery.isLoading.value)
+
+// This page never tracked "now playing" (no activeTrackId passed to
+// TrackList below), so no gold tint/VU meter here — matches today exactly.
+const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
+  id: t.track_id,
+  title: t.track_title,
+  artist: t.artist_name,
+  artist_slug: t.artist_slug,
+  album: t.album_title,
+  album_slug: t.album_slug,
+  album_year: t.album_year,
+  duration: t.duration,
+  available: t.available,
+  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+  rating: ratings.value.get(t.track_id) ?? t.rating,
+})))
+
+function contextItemsFor(_track: TrackListRow, i: number) {
+  const t = tracks.value[i]!
+  return actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })
+}
 
 async function onRatingChange(trackId: number, v: number) {
   try {
@@ -253,56 +262,11 @@ async function playFrom(i: number) {
 .ms-fav-empty a:hover { text-decoration: underline; }
 .ms-fav-empty strong { color: var(--gold); font-weight: 700; }
 
-.ms-fav-list { display: flex; flex-direction: column; gap: 2px; }
-.ms-fav-row {
-  display: grid;
-  grid-template-columns: 28px 44px 1fr 130px 60px;
-  gap: 12px;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.ms-fav-row:hover { background: rgba(255,255,255,0.04); }
-.ms-fav-idx { text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
-.ms-fav-art {
-  position: relative;
-  width: 44px; height: 44px;
-  border-radius: 4px; overflow: hidden;
-  background: var(--bg-3);
-}
-.ms-fav-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ms-fav-play {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55);
-  color: #fff;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.ms-fav-row:hover .ms-fav-play { opacity: 1; }
-.ms-fav-play-missing { opacity: 1; color: #d96b6b; }
-.ms-fav-missing { opacity: 0.5; cursor: default; }
-.ms-fav-missing:hover { background: transparent; }
-.ms-fav-meta-col { min-width: 0; }
-.ms-fav-title-cell {
-  font-size: 14px; font-weight: 500;
-  color: var(--fg-0);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ms-fav-sub-cell {
-  font-size: 12px;
-  color: var(--fg-3);
-  margin-top: 2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ms-fav-rating-cell { display: flex; align-items: center; }
-.ms-fav-dur {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-3);
-  letter-spacing: 0.04em;
-  text-align: right;
-}
+/* Deltas from TrackList's songs.vue-shaped baseline — see loved.vue for the
+   same pattern. This page never had an active-row treatment (no
+   activeTrackId passed above), so no tint override is needed here. */
+:deep(.tl-body) { gap: 2px; }
+:deep(.tl-c-art) { width: 44px; height: 44px; }
+:deep(.tl-c-index) { font-size: 11px; }
+:deep(.tl-c-duration) { font-size: 11px; letter-spacing: 0.04em; }
 </style>
