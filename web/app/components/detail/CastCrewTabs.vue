@@ -180,4 +180,11 @@ const crewByDepartment = computed(() => {
 /* Expanded grid (pill only) — keep after the width rules so `width: auto` wins. */
 .cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }
 .cast-grid .cast-card { width: auto; }
+
+/* Touch: swipe replaces the mouse-only scroll arrows. The pill variant's
+   fold/expand toggle (`.expand`) stays — it's a real affordance on touch too. */
+@media (pointer: coarse) {
+  .scroll-controls .scroll-ctrl-btn:not(.expand) { display: none; }
+  .scroll-arrow { display: none; }
+}
 </style>

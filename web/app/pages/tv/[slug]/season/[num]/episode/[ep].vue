@@ -341,11 +341,24 @@ watch([numParam, epParam], async () => {
 }
 .ep-nav-link:last-child { margin-left: auto; }
 
-@media (max-width: 900px) {
+/* Tablet (folded from the previous 900px collapse point onto the ratified
+   960px convention — docs/ui.md "Responsive conventions"). */
+@media (max-width: 960px) {
   .hero-content { flex-direction: column; padding: 24px 20px 16px; gap: 16px; }
   .hero-left { width: 100%; }
   .ep-title { font-size: 22px; }
   .ep-nav { padding: 12px 20px 60px; flex-direction: column; }
   .ep-nav-link { max-width: 100%; }
+}
+
+/* Phone: tighter padding, meta row wraps, action row gets 44px touch targets. */
+@media (max-width: 720px) {
+  .hero-content { padding: 20px 16px 14px; gap: 14px; }
+  .ep-title { font-size: 19px; }
+  .hero-meta-row { flex-wrap: wrap; row-gap: 4px; }
+  .hero-actions { flex-wrap: wrap; row-gap: 8px; }
+  .hero-actions .btn-sm { height: 44px; padding: 0 14px; }
+  .hero-actions .btn-icon { width: 44px; height: 44px; }
+  .ep-nav { padding: 12px 16px 60px; }
 }
 </style>

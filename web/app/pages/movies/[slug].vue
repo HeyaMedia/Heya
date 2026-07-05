@@ -579,11 +579,37 @@ watch(detail, async (d) => {
   .hero-ratings { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
-@media (max-width: 900px) {
+/* Tablet (folded from the previous 900px collapse point onto the ratified
+   960px convention — docs/ui.md "Responsive conventions"): single-column
+   hero, small poster, no other structural change. */
+@media (max-width: 960px) {
   .hero-content { grid-template-columns: 1fr; gap: 20px; padding: 32px 20px 24px; }
   .hero-poster { max-width: 200px; }
   .hero-left { flex-direction: column; }
   .hero-ratings { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
   .detail-title { font-size: 32px; }
+}
+
+/* Phone: tighter padding/poster, meta rows wrap instead of clipping, primary
+   CTA takes its own full-width row (labels like "Resume S01E03 - Title" don't
+   fit alongside the secondary buttons), and every actionable button meets the
+   44px touch target minimum. */
+@media (max-width: 720px) {
+  .hero-content { padding: 24px 16px 20px; gap: 16px; }
+  .hero-poster { max-width: 140px; }
+  .detail-title { font-size: 26px; }
+  .hero-meta-row { flex-wrap: wrap; row-gap: 6px; }
+  .detail-actions { flex-wrap: wrap; row-gap: 10px; }
+  .detail-actions .btn { height: 44px; }
+  .detail-actions .btn-primary { flex: 1 1 100%; white-space: normal; text-align: left; line-height: 1.3; height: auto; min-height: 44px; padding: 10px 16px; }
+  .detail-actions .btn-icon { width: 44px; height: 44px; }
+  .extras-group-head { flex-wrap: wrap; row-gap: 8px; }
+}
+
+/* Touch: swipe replaces the mouse-only scroll arrows on the extras/recs
+   section-head controls. The fold/expand toggle (`.expand`) stays — it's a
+   real affordance on touch too, not a mouse-only convenience. */
+@media (pointer: coarse) {
+  .scroll-controls .scroll-ctrl-btn:not(.expand) { display: none; }
 }
 </style>

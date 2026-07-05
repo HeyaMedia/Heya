@@ -856,4 +856,33 @@ onMounted(async () => {
 .credits-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 18px; }
 .credit-card { text-decoration: none; color: inherit; }
 .credit-card:hover .grid-tile-title { color: var(--gold); }
+
+/* Tablet: single-column hero, portrait shrinks and centers, department
+   sidebar (when present) drops below and centers as its own block. */
+@media (max-width: 960px) {
+  .hero-content { grid-template-columns: 1fr; gap: 20px; padding: 32px 24px 20px; }
+  .hero-left { align-self: center; }
+  .hero-portrait { width: 200px; margin: 0 auto; }
+  .hero-info { align-items: center; }
+  .detail-badges, .hero-meta-row, .social-links, .profile-strip { justify-content: center; }
+  .hero-side { grid-column: 1 / -1; }
+  .stat-card { max-width: 420px; margin: 0 auto; }
+  .filmography-body { padding: 0 24px 60px; }
+}
+
+/* Phone: portrait shrinks further, everything in the identity column
+   centers except the prose (bio / AKA), which stays left-aligned for
+   readability — `align-items: center` on `.hero-info` only affects each
+   child's own box, not the text inside it, so a wide `.bio-block` still
+   reads left-to-right normally. Filmography grid density matches the
+   `.grid-posters` phone convention (heya.css) since this is a page-local
+   grid, not that shared class. */
+@media (max-width: 720px) {
+  .hero-content { padding: 24px 16px 20px; gap: 16px; }
+  .hero-portrait { width: 140px; }
+  .detail-title { font-size: 28px; }
+  .filmography-body { padding: 0 16px 60px; }
+  .credits-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .scope-toggle { display: flex; justify-content: center; }
+}
 </style>

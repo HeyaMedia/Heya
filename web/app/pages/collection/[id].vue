@@ -102,9 +102,14 @@ onMounted(async () => {
 .col-overview { font-size: 14px; line-height: 1.65; color: var(--fg-1); max-width: 600px; margin: 8px 0 0; }
 .col-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); margin-top: 4px; }
 
-@media (max-width: 700px) {
+/* Folded from the previous 700px breakpoint onto the ratified 720px phone
+   convention (docs/ui.md "Responsive conventions") — page-pad's own 16px
+   side padding overrides heya.css's global .page-pad here since this page
+   is a grid page per the W3c convention for collection/genre/keyword/lists. */
+@media (max-width: 720px) {
+  .page-pad { padding: 20px 16px 60px; }
   .col-header { flex-direction: column; align-items: flex-start; gap: 16px; }
   .col-poster { width: 120px; }
-  .col-title { font-size: 28px; }
+  .col-title { font-size: 26px; }
 }
 </style>

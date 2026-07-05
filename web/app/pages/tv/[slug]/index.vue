@@ -657,10 +657,48 @@ watch(detail, async (d) => {
   .hero-side > * { flex: 1 1 280px; }
 }
 
-@media (max-width: 900px) {
+/* Tablet (folded from the previous 900px collapse point onto the ratified
+   960px convention — docs/ui.md "Responsive conventions"). */
+@media (max-width: 960px) {
   .hero-content { grid-template-columns: 1fr; gap: 20px; padding: 32px 20px 24px; }
   .hero-poster { max-width: 200px; }
   .detail-title { font-size: 32px; }
   .seasons-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+}
+
+/* Phone: tighter padding/poster, meta rows wrap, primary CTA ("Play/Resume
+   S01E03 - Title" can be long) takes its own full-width row, every button
+   meets the 44px touch target minimum, season tiles compress further. */
+@media (max-width: 720px) {
+  .hero-content { padding: 24px 16px 20px; gap: 16px; }
+  .hero-poster { max-width: 140px; }
+  .detail-title { font-size: 26px; }
+  .hero-meta-row { flex-wrap: wrap; row-gap: 6px; }
+  .detail-actions { flex-wrap: wrap; row-gap: 10px; }
+  .detail-actions .btn { height: 44px; }
+  .detail-actions .btn-primary { flex: 1 1 100%; white-space: normal; text-align: left; line-height: 1.3; height: auto; min-height: 44px; padding: 10px 16px; }
+  .detail-actions .btn-icon { width: 44px; height: 44px; }
+  .seasons-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+  /* Forcing `.season-overlay` permanently visible for touch (below) leaves
+     no room next to the episode-count `.season-badge` at this card width
+     (~110px) — both shrink so the two corners stop overlapping. */
+  .season-badge { min-width: 18px; height: 18px; font-size: 9px; padding: 0 4px; top: 6px; left: 6px; }
+  .season-overlay { top: 6px; right: 6px; gap: 3px; }
+  .season-action { width: 20px; height: 20px; }
+}
+
+/* Touch: swipe replaces the mouse-only scroll arrows on the recs section-head
+   controls; the fold/expand toggle stays. The season-card quick actions
+   (favorite/watched/expand) are hover-revealed on desktop — on a touch
+   device there's no hover, so they'd be permanently unreachable without this. */
+@media (pointer: coarse) {
+  .scroll-controls .scroll-ctrl-btn:not(.expand) { display: none; }
+  /* `transition: none` matters here, not just cosmetics: without it, headless
+     Chrome under CDP touch emulation (no active compositor pump) can freeze
+     the opacity transition at its pre-change value indefinitely — verified
+     empirically via Heya Eye. A real device's continuous render loop would
+     finish the 150ms transition regardless, but forcing it instant removes
+     any doubt for a state that's supposed to be permanently on anyway. */
+  .season-overlay { opacity: 1; transition: none; }
 }
 </style>

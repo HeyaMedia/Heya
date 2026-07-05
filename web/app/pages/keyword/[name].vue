@@ -101,4 +101,13 @@ watch(name, async () => {
 .genre-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); }
 .genre-empty { padding: 60px 0; text-align: center; color: var(--fg-3); font-size: 14px; }
 .load-more-wrap { text-align: center; padding: 24px 0 80px; }
+
+/* Phone: 16px side padding per the established grid-page pattern (this
+   overrides heya.css's global .page-pad, which only tightens at 1100px).
+   The `.grid-posters` grid itself already gets the phone density rule from
+   heya.css — nothing page-local to fix there. */
+@media (max-width: 720px) {
+  .page-pad { padding: 20px 16px 60px; }
+  .genre-title { font-size: 26px; }
+}
 </style>

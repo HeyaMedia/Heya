@@ -607,10 +607,35 @@ onMounted(async () => {
 }
 .scroll-arrow:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
 
-@media (max-width: 900px) {
+/* Tablet (folded from the previous 900px collapse point onto the ratified
+   960px convention — docs/ui.md "Responsive conventions"). No structural
+   rework: same single-column collapse, poster still hidden entirely (this
+   view's own long-standing choice, not something introduced here). */
+@media (max-width: 960px) {
   .hero-content { grid-template-columns: 1fr; gap: 20px; }
   .hero-poster { display: none; }
   .detail-title { font-size: 32px; }
   .detail-body-below { padding: 0 20px 60px; }
+}
+
+/* Phone: tighter padding, meta rows wrap, action row gets 44px touch targets. */
+@media (max-width: 720px) {
+  .hero-content { padding: 24px 16px 20px; gap: 14px; }
+  .detail-title { font-size: 26px; }
+  .hero-meta-row { flex-wrap: wrap; row-gap: 6px; }
+  .ratings-row { row-gap: 6px; }
+  .detail-actions { flex-wrap: wrap; row-gap: 10px; }
+  .detail-actions .btn { height: 44px; }
+  .detail-actions .btn-primary { flex: 1 1 100%; }
+  .detail-actions .btn-icon { width: 44px; height: 44px; }
+  .detail-body-below { padding: 0 16px 60px; }
+  .tab-bar { overflow-x: auto; scrollbar-width: none; }
+  .tab-bar::-webkit-scrollbar { display: none; }
+}
+
+/* Touch: swipe replaces the mouse-only scroll arrows (always-visible on this
+   view's underline variant, unlike the pill variant's overflow-gated ones). */
+@media (pointer: coarse) {
+  .scroll-arrow { display: none; }
 }
 </style>

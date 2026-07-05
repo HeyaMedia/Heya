@@ -155,7 +155,18 @@ const emit = defineEmits<{
   flex: 1; min-height: 0;
 }
 
-@media (max-width: 900px) {
-  .epc-check { opacity: 1; }
+/* Touch: the checkmark and play overlay are hover-revealed on desktop — on a
+   touch device there's no hover, so surface both permanently instead of
+   leaving them unreachable. Keyed on pointer capability (docs/ui.md
+   "Responsive conventions"), not viewport width, since this card also
+   renders at desktop width in narrow layouts. */
+@media (pointer: coarse) {
+  /* `transition: none` isn't just cosmetic: headless Chrome under CDP touch
+     emulation (no active compositor pump) can freeze an opacity transition
+     at its pre-change value indefinitely — verified empirically via Heya
+     Eye. A real device's render loop would finish the 150ms transition
+     regardless, but instant removes any doubt for a permanently-on state. */
+  .epc-check { opacity: 1; transition: none; }
+  .epc-play-wrap { opacity: 1; transition: none; }
 }
 </style>

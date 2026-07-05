@@ -380,11 +380,36 @@ watch(numParam, async () => {
 }
 .ep-card-link { text-decoration: none; color: inherit; display: flex; flex-direction: column; }
 
-@media (max-width: 900px) {
-  .hero-content { padding: 24px 20px 16px; gap: 16px; }
+/* Tablet (folded from the previous 900px collapse point onto the ratified
+   960px convention — docs/ui.md "Responsive conventions"). The pre-existing
+   900px rule never actually stacked this hero — `align-items: flex-end` on
+   a still-row `.hero-content` just bottom-aligned a shrunk poster next to
+   the text column, which reads fine down to ~960px but crowds badly at
+   phone widths. Fixed here (the sibling episode page's 900px rule already
+   did this) since it's directly in the way of "hero stacks" for the phone
+   pass — poster now stacks above the info column like the movie/tv/person
+   heroes. */
+@media (max-width: 960px) {
+  .hero-content { flex-direction: column; align-items: flex-start; padding: 24px 20px 16px; gap: 16px; }
   .hero-poster-link { width: 100px; }
   .season-title { font-size: 22px; }
   .episode-grid { padding: 16px 20px 60px; grid-template-columns: 1fr; }
   .season-nav { padding: 8px 20px 12px; }
+}
+
+/* Phone: tighter padding/poster, meta row wraps, action row gets 44px touch
+   targets. Episode cards already go full-width single-column at the tablet
+   breakpoint above (EpisodeCard.vue's own aspect-ratio layout compresses the
+   still/title/meta/overview naturally — no fixed-width layout to fight). */
+@media (max-width: 720px) {
+  .hero-content { padding: 20px 16px 14px; gap: 14px; }
+  .hero-poster-link { width: 80px; }
+  .season-title { font-size: 19px; }
+  .hero-meta-row { flex-wrap: wrap; row-gap: 4px; }
+  .hero-actions { flex-wrap: wrap; row-gap: 8px; }
+  .hero-actions .btn-sm { height: 44px; padding: 0 14px; }
+  .hero-actions .btn-icon { width: 44px; height: 44px; }
+  .episode-grid { padding: 14px 16px 60px; gap: 16px; }
+  .season-nav { padding: 8px 16px 12px; }
 }
 </style>

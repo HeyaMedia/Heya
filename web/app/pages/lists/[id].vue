@@ -102,4 +102,16 @@ onMounted(async () => {
 .list-meta { font-size: 12px; color: var(--fg-3); font-family: var(--font-mono); margin-top: 8px; }
 .empty-list { padding: 80px 0; text-align: center; color: var(--fg-2); font-size: 15px; }
 .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+/* Phone: 16px side padding per the established grid-page pattern (overrides
+   heya.css's global .page-pad, which only tightens at 1100px); header
+   stacks so the delete button doesn't crowd a long list name, and gets a
+   44px touch target. `.grid-posters` itself already gets the phone density
+   rule from heya.css. */
+@media (max-width: 720px) {
+  .page-pad { padding: 20px 16px 60px; }
+  .list-header { flex-direction: column; align-items: flex-start; gap: 12px; padding: 20px 0 16px; }
+  .list-name { font-size: 22px; }
+  .btn-sm { height: 44px; padding: 0 16px; }
+}
 </style>

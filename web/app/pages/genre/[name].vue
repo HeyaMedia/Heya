@@ -116,4 +116,16 @@ watch(name, async () => {
 .load-more-wrap { text-align: center; padding: 24px 0 80px; }
 .grid-virt { /* container for usePosterGrid */ }
 .grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
+
+/* Phone: 16px side padding per the established grid-page pattern (this
+   overrides heya.css's global .page-pad, which only tightens at 1100px).
+   `.grid-row`'s gap/padding here must track usePosterGrid.ts's phone
+   constants (MIN_CARD_PHONE/COL_GAP_PHONE/ROW_GAP_PHONE, landed via the
+   W3b library-pages package) — same pairing movies/tv/books index.vue use
+   — so the JS column math and the actual rendered gap agree. */
+@media (max-width: 720px) {
+  .page-pad { padding: 20px 16px 60px; }
+  .genre-title { font-size: 26px; }
+  .grid-row { column-gap: 10px; padding-bottom: 14px; }
+}
 </style>
