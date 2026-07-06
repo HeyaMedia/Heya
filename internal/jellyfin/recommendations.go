@@ -75,52 +75,85 @@ func (s *Server) handleMovieRecommendations(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, out)
 }
 
-// GET /Items/Suggestions — a flat suggestion feed. The `type` param
-// (BaseItemKind[]) picks the section: series suggestions when it asks only for
-// Series, movies otherwise. Rails are flattened and deduped, best-first.
+// GET /Items/Suggestions — a flat, best-first suggestion feed. The request's
+// type / mediaType filters pick the section; kinds Heya can't suggest for
+// (audio, books, photos) yield an empty page rather than mis-typed items.
+// Honors startIndex / limit; the full deduped set drives TotalRecordCount.
 func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request, _ Params) {
 	u, _ := UserFrom(r.Context())
 	limit := intQuery(r, "limit", 12, 1, 100)
+	startIndex, _ := strconv.Atoi(queryCI(r, "startIndex"))
+	if startIndex < 0 {
+		startIndex = 0
+	}
 
-	section := "movie"
-	kinds := strings.ToLower(queryCI(r, "type"))
-	if strings.Contains(kinds, "series") && !strings.Contains(kinds, "movie") {
-		section = "tv"
+	section, ok := suggestionSection(r)
+	if !ok {
+		writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: []baseItemDto{}, StartIndex: startIndex})
+		return
 	}
 
 	rec, err := s.app.Recommended(r.Context(), u.ID, section)
 	if err != nil {
-		writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: []baseItemDto{}})
+		writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: []baseItemDto{}, StartIndex: startIndex})
 		return
 	}
 
+	// Flatten every rail into one deduped, best-first id list, then paginate.
 	seen := map[int64]bool{}
-	ids := make([]int64, 0, limit)
+	all := make([]int64, 0, 64)
 	for _, rail := range rec.Rails {
 		for _, it := range rail.Items {
 			if seen[it.ID] {
 				continue
 			}
 			seen[it.ID] = true
-			ids = append(ids, it.ID)
-			if len(ids) >= limit {
-				break
-			}
-		}
-		if len(ids) >= limit {
-			break
+			all = append(all, it.ID)
 		}
 	}
-	if len(ids) == 0 {
-		writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: []baseItemDto{}})
+	total := len(all)
+	if startIndex >= total {
+		writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: []baseItemDto{}, TotalRecordCount: total, StartIndex: startIndex})
 		return
 	}
-	res, err := s.queryByIDs(r.Context(), u.ID, s.serverID(r), itemsRequest{ids: encodeItemIDs(ids)})
+	page := all[startIndex:]
+	if len(page) > limit {
+		page = page[:limit]
+	}
+
+	res, err := s.queryByIDs(r.Context(), u.ID, s.serverID(r), itemsRequest{ids: encodeItemIDs(page)})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	res.TotalRecordCount = total
+	res.StartIndex = startIndex
 	writeJSON(w, http.StatusOK, res)
+}
+
+// suggestionSection maps a /Items/Suggestions request's type / mediaType
+// filters to a Recommended section. ok=false means the client asked for a kind
+// Heya has no suggestions for (audio / books / photos) — the caller returns an
+// empty page rather than movies dressed as something else. An unfiltered
+// request defaults to movies.
+func suggestionSection(r *http.Request) (section string, ok bool) {
+	hint := strings.ToLower(queryCI(r, "type") + "," + queryCI(r, "mediaType"))
+	specified := strings.Trim(hint, ", ") != ""
+
+	seriesWanted := strings.Contains(hint, "series") || strings.Contains(hint, "episode")
+	movieWanted := strings.Contains(hint, "movie")
+	videoWanted := movieWanted || strings.Contains(hint, "video")
+
+	switch {
+	case seriesWanted && !movieWanted:
+		return "tv", true
+	case videoWanted:
+		return "movie", true
+	case !specified:
+		return "movie", true
+	default:
+		return "", false
+	}
 }
 
 // railItemIDs pulls up to limit local media-item ids from a rail, in order.
