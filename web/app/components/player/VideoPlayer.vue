@@ -564,6 +564,30 @@ onMounted(() => {
   nowPlaying.start(() => currentSessionPayload.value)
 })
 
+// --- Remote control (Activity page) ---
+// An admin, or the owner from another device, can stop this playback or push a
+// short message to it. Commands ride the shared WS broadcast, so every client
+// receives the frame; we act only on the one addressed to *this* player's
+// session id. connect() is idempotent — it guarantees a live socket even on a
+// client that only ever plays (never opens a page that subscribes).
+const { toast } = useToast()
+const { on: onWsEvent, connect: connectWs } = useEventBus()
+let offSessionCmd: (() => void) | null = null
+onMounted(() => {
+  connectWs()
+  offSessionCmd = onWsEvent('session.command', (event) => {
+    const p = event.payload as { session_id?: string, action?: string, message?: string, by?: string }
+    if (!p || p.session_id !== nowPlaying.sessionId) return
+    if (p.action === 'stop') {
+      toast.info(p.by ? `Playback stopped by ${p.by}` : 'Playback stopped remotely')
+      handleClose()
+    } else if (p.action === 'message' && p.message) {
+      toast({ message: p.by ? `${p.by}: ${p.message}` : p.message, tone: 'info', icon: 'bell', duration: 7000 })
+    }
+  })
+})
+onUnmounted(() => { offSessionCmd?.() })
+
 // --- In-player Resume prompt ---
 // Before the source loads, check whether the user has saved progress for
 // this item. If so AND no `?t=` query forces a specific seek, show an

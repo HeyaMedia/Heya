@@ -262,3 +262,48 @@ const EventSessionUpdate eventhub.EventType = "session.update"
 
 type SessionUpdatePayload struct {
 }
+
+// EventSessionCommand carries a remote-control instruction (stop / message)
+// aimed at a single session — issued from the Activity page. Unlike
+// EventSessionUpdate it DOES carry a payload (the action and, for messages,
+// text), so it is delivered with PublishToUser — only the target session's
+// OWNER receives it, never the global broadcast. That keeps a message meant
+// for one user off every other connected client's socket. Among the owner's
+// own devices, the client whose local session_id matches acts on a stop; a
+// message toasts on all of them.
+const EventSessionCommand eventhub.EventType = "session.command"
+
+type CommandPayload struct {
+	SessionID string `json:"session_id"`
+	UserID    int64  `json:"user_id"`
+	Action    string `json:"action"`            // "stop" | "message"
+	Message   string `json:"message,omitempty"` // present for action=="message"
+	By        string `json:"by,omitempty"`      // username that issued the command
+}
+
+// Get returns a copy of the session with the given id, or ok=false if it's
+// not currently live. Callers use it to check existence + ownership before
+// issuing a command.
+func (s *Store) Get(sessionID string) (Session, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.data[sessionID]
+	if !ok {
+		return Session{}, false
+	}
+	return *sess, true
+}
+
+// SendCommand pushes a control instruction toward the client that owns a
+// session. Targeted at p.UserID so only that user's own connections receive
+// it (see EventSessionCommand) — never the global broadcast. Best-effort and
+// fire-and-forget: it emits and returns, with no ack. The registry is left
+// untouched — a "stop" that lands makes the client tear its player down and
+// DELETE its own session, and the 30s purge sweep covers a client that never
+// received it.
+func (s *Store) SendCommand(p CommandPayload) {
+	if s.hub == nil || p.UserID == 0 {
+		return
+	}
+	s.hub.EmitToUser(p.UserID, EventSessionCommand, p)
+}

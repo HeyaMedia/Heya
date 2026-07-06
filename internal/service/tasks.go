@@ -134,9 +134,7 @@ func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 			count(*) FILTER (WHERE mi.enrichment_status = 'complete'),
 			count(*) FILTER (WHERE mi.enrichment_status = 'failed')
 		FROM media_items mi
-		JOIN libraries l ON l.id = mi.library_id
-		WHERE (mi.media_type = 'music' OR mi.external_ids != '{}')
-		  AND COALESCE(NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 0) > 0
+		WHERE mi.media_type = 'music' OR mi.external_ids != '{}'
 	`)
 	if row.Scan(&metaTotal, &metaComplete, &metaFailed) == nil {
 		stats["refresh_stale_items"] = TaskStats{
@@ -443,9 +441,7 @@ func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limi
 			count(*) FILTER (WHERE mi.enrichment_status = 'complete'),
 			count(*) FILTER (WHERE mi.enrichment_status = 'failed')
 		FROM media_items mi
-		JOIN libraries l ON l.id = mi.library_id
-		WHERE (mi.media_type = 'music' OR mi.external_ids != '{}')
-		  AND COALESCE(NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 0) > 0
+		WHERE mi.media_type = 'music' OR mi.external_ids != '{}'
 	`).Scan(&total, &complete, &failed)
 	if err != nil {
 		return nil, err
@@ -467,9 +463,7 @@ func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limi
 		SELECT mi.id, mi.title, mi.media_type, mi.enrichment_status,
 		       mi.last_enrich_error, mi.metadata_refreshed_at
 		FROM media_items mi
-		JOIN libraries l ON l.id = mi.library_id
 		WHERE (mi.media_type = 'music' OR mi.external_ids != '{}')
-		  AND COALESCE(NULLIF((l.settings->>'metadata_refresh_days')::int, 0), 0) > 0
 		  `+statusFilter+`
 		ORDER BY
 		  CASE mi.enrichment_status

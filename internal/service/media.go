@@ -71,7 +71,15 @@ func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 		return nil, fmt.Errorf("listing media items: %w", err)
 	}
 
-	unavailableIDs, _ := q.ListUnavailableMediaItemIDs(ctx, mediaType)
+	// Availability is only a display flag on the rows we actually return, so
+	// check just this page's IDs — the unscoped variant scanned the whole media
+	// type (twice per dashboard load) to compute a set we then threw all but 20
+	// entries away from.
+	ids := make([]int64, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
+	unavailableIDs, _ := q.ListUnavailableMediaItemIDsForItems(ctx, ids)
 	unavailable := make(map[int64]bool, len(unavailableIDs))
 	for _, id := range unavailableIDs {
 		unavailable[id] = true

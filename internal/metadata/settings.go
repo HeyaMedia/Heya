@@ -3,16 +3,15 @@ package metadata
 import "encoding/json"
 
 type LibrarySettings struct {
-	Watch               bool   `json:"watch"`
-	PreferredLanguage   string `json:"preferred_language"`
-	PreferredCountry    string `json:"preferred_country"`
-	AutoCollections     bool   `json:"auto_collections"`
-	MetadataRefreshDays int    `json:"metadata_refresh_days"`
-	FetchRatings        bool   `json:"fetch_ratings"`
-	SaveNFO             bool   `json:"save_nfo"`
-	SaveImages          bool   `json:"save_images"`
-	EnableTrickplay     bool   `json:"enable_trickplay"`
-	GenerateThumbnails  bool   `json:"generate_thumbnails"`
+	Watch              bool   `json:"watch"`
+	PreferredLanguage  string `json:"preferred_language"`
+	PreferredCountry   string `json:"preferred_country"`
+	AutoCollections    bool   `json:"auto_collections"`
+	FetchRatings       bool   `json:"fetch_ratings"`
+	SaveNFO            bool   `json:"save_nfo"`
+	SaveImages         bool   `json:"save_images"`
+	EnableTrickplay    bool   `json:"enable_trickplay"`
+	GenerateThumbnails bool   `json:"generate_thumbnails"`
 }
 
 func DefaultSettings(mediaType string) LibrarySettings {
@@ -57,9 +56,6 @@ func (s LibrarySettings) Merge(other LibrarySettings) LibrarySettings {
 	}
 	if other.PreferredCountry != "" {
 		s.PreferredCountry = other.PreferredCountry
-	}
-	if other.MetadataRefreshDays != 0 {
-		s.MetadataRefreshDays = other.MetadataRefreshDays
 	}
 	s.Watch = other.Watch
 	s.AutoCollections = other.AutoCollections

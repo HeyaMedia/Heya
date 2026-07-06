@@ -232,14 +232,14 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/genres/{name}", "get-genre", "Media within a genre", "Discover")),
 		func(ctx context.Context, in *struct {
-			Name string `path:"name" maxLength:"128" example:"science-fiction" doc:"Dash-separated genre/keyword (URL form)"`
+			Name string `path:"name" maxLength:"128" example:"Sci-Fi & Fantasy" doc:"Exact genre/keyword name, URL-encoded; matched verbatim (dashes are literal, not space separators)"`
 			Pagination
 		}) (*JSONOutput[service.GenreResult], error) {
 			limit := in.Limit
 			if limit <= 0 || limit > 200 {
 				limit = 60
 			}
-			result, err := app.GetGenre(ctx, strings.ReplaceAll(in.Name, "-", " "), limit, in.Offset)
+			result, err := app.GetGenre(ctx, in.Name, limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -248,14 +248,14 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/keywords/{name}", "get-keyword", "Media tagged with a keyword", "Discover")),
 		func(ctx context.Context, in *struct {
-			Name string `path:"name" maxLength:"128" example:"science-fiction" doc:"Dash-separated genre/keyword (URL form)"`
+			Name string `path:"name" maxLength:"128" example:"Sci-Fi & Fantasy" doc:"Exact genre/keyword name, URL-encoded; matched verbatim (dashes are literal, not space separators)"`
 			Pagination
 		}) (*JSONOutput[service.KeywordResult], error) {
 			limit := in.Limit
 			if limit <= 0 || limit > 200 {
 				limit = 60
 			}
-			result, err := app.GetKeyword(ctx, strings.ReplaceAll(in.Name, "-", " "), limit, in.Offset)
+			result, err := app.GetKeyword(ctx, in.Name, limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

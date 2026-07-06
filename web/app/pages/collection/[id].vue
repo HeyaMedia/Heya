@@ -19,11 +19,43 @@
           <div class="col-eyebrow">Collection</div>
           <h1 class="col-title">{{ collection.name }}</h1>
           <p v-if="collection.overview" class="col-overview">{{ collection.overview }}</p>
-          <div class="col-meta">{{ movies.length }} movie<span v-if="movies.length !== 1">s</span></div>
+          <div class="col-meta">
+            <template v-if="parts.length">You own {{ ownedCount }} of {{ parts.length }} film<span v-if="parts.length !== 1">s</span></template>
+            <template v-else>{{ movies.length }} movie<span v-if="movies.length !== 1">s</span></template>
+          </div>
         </div>
       </div>
 
-      <div v-if="movies.length" class="grid-posters" style="margin-top: 32px; padding-bottom: 80px">
+      <!-- Full franchise membership from heya.media: owned films link to the
+           local movie, missing ones render dimmed with a badge. Falls back to
+           just the local movies until a member is enriched with collection
+           parts (progressive during the metadata backfill). -->
+      <div v-if="parts.length" class="grid-posters" style="margin-top: 32px; padding-bottom: 80px">
+        <component
+          :is="p.local_media_item_id ? 'NuxtLink' : 'div'"
+          v-for="(p, i) in parts"
+          :key="p.tmdb_id || p.title"
+          :to="p.local_media_item_id ? mediaUrl({ id: p.local_media_item_id, title: p.title, slug: p.local_slug ?? undefined, media_type: 'movie' }) : undefined"
+          class="grid-tile card-tile"
+          :class="{ 'part-missing': !p.local_media_item_id }"
+        >
+          <MediaCard
+            :idx="i"
+            :src="partPoster(p)"
+            aspect="2/3"
+            :title="p.title"
+            :subtitle="p.year ? String(p.year) : ''"
+            :badge-tr="p.vote_average ? `★ ${p.vote_average.toFixed(1)}` : ''"
+            :badge-tr-gold="false"
+          >
+            <template v-if="!p.local_media_item_id" #badges>
+              <div class="part-missing-badge">Not in library</div>
+            </template>
+          </MediaCard>
+        </component>
+      </div>
+
+      <div v-else-if="movies.length" class="grid-posters" style="margin-top: 32px; padding-bottom: 80px">
         <NuxtLink
           v-for="(item, i) in movies"
           :key="item.id"
@@ -59,19 +91,44 @@ interface CollectionDetail {
   backdrop_path: string
 }
 
+// One franchise film, resolved server-side to a local movie (owned) or not
+// (missing). local_media_item_id/local_slug are set only when owned.
+interface CollectionPart {
+  title: string
+  year?: number
+  tmdb_id?: number
+  poster_path?: string
+  vote_average?: number
+  local_media_item_id?: number | null
+  local_slug?: string | null
+}
+
 const route = useRoute()
 const id = computed(() => route.params.id as string)
 
 const collection = ref<CollectionDetail | null>(null)
 const movies = ref<MediaItem[]>([])
+const parts = ref<CollectionPart[]>([])
+const ownedCount = ref(0)
 const loading = ref(true)
+
+// Owned films use our local artwork; missing ones use heya.media's CDN poster
+// (already an absolute URL — the image provider passes it through).
+function partPoster(p: CollectionPart): string {
+  if (p.local_media_item_id) return usePosterUrl(p.local_media_item_id) ?? ''
+  return p.poster_path || ''
+}
 
 onMounted(async () => {
   try {
     const { $heya } = useNuxtApp()
-    const res = await $heya('/api/collections/{id}', { path: { id: Number(id.value) } }) as { collection: CollectionDetail; movies: MediaItem[] }
+    const res = await $heya('/api/collections/{id}', { path: { id: Number(id.value) } }) as {
+      collection: CollectionDetail; movies: MediaItem[]; parts: CollectionPart[]; owned_count: number
+    }
     collection.value = res.collection
     movies.value = res.movies || []
+    parts.value = res.parts || []
+    ownedCount.value = res.owned_count || 0
   } catch { /* empty */ }
   loading.value = false
 })
@@ -101,6 +158,21 @@ onMounted(async () => {
 .col-title { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
 .col-overview { font-size: 14px; line-height: 1.65; color: var(--fg-1); max-width: 600px; margin: 8px 0 0; }
 .col-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); margin-top: 4px; }
+
+/* Films in the franchise the library doesn't have: dimmed, non-interactive,
+   with a badge. The badge lives in MediaCard's slot so it stays in this page's
+   scope (per the shared-slot-scope rule in docs/ui.md). */
+.part-missing { cursor: default; }
+.part-missing:hover { transform: none; }
+.part-missing :deep(img) { filter: grayscale(0.85); opacity: 0.5; }
+.part-missing-badge {
+  position: absolute; top: 8px; left: 8px; z-index: 3;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 7px; border-radius: 4px;
+  background: rgba(0, 0, 0, 0.68); backdrop-filter: blur(6px);
+  color: rgba(255, 255, 255, 0.82);
+}
 
 /* Folded from the previous 700px breakpoint onto the ratified 720px phone
    convention (docs/ui.md "Responsive conventions") — page-pad's own 16px

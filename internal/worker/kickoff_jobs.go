@@ -104,8 +104,8 @@ func (KickoffLibraryScanArgs) InsertOpts() river.InsertOpts {
 }
 
 // KickoffRefreshStaleArgs replaces scheduler.RefreshStaleItemsTask.
-// Finds every media_item past its library's MetadataRefreshDays window
-// and enqueues an enrich_media_item job per item.
+// Finds every media_item past its automatic refresh window (see
+// refreshWindowDays) and enqueues an enrich_media_item job per item.
 type KickoffRefreshStaleArgs struct {
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }

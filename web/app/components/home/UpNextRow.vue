@@ -11,32 +11,35 @@
       </div>
     </div>
     <div class="row-scroll" ref="scrollEl">
+      <!-- Mouse-click plays the next episode; the title deep-links to the
+           series detail page (same interaction model as Continue Watching) so
+           you can reach the show without starting playback. `title-to`
+           re-enables pointer events on just the title inside MediaCard's
+           overlay, and its @click.stop keeps that click from also firing play.
+           The tile is a plain click target (no tabindex/role) on purpose:
+           the only keyboard-focusable thing is the title link, so Enter on it
+           navigates without a competing tile handler double-firing play. -->
       <div
         v-for="(item, i) in items"
         :key="item.id"
         class="un-tile"
         :style="{ width: '168px' }"
+        @click="$emit('play', item)"
       >
-        <!-- Poster: clicking plays the next episode directly. The MediaCard
-             paints the overlay; we wrap the entire tile in a button so the
-             whole card is the play target and the overlay info reflects what
-             will start. -->
-        <button
-          class="un-poster"
-          :aria-label="`Play ${item.title} ${item.episode_label}`"
-          @click="$emit('play', item)"
+        <MediaCard
+          :idx="i"
+          :src="usePosterUrl(item.id)"
+          :title="item.title"
+          :title-to="detailUrl(item)"
+          :subtitle="item.episode_label"
+          aspect="2/3"
         >
-          <MediaCard
-            :idx="i"
-            :src="usePosterUrl(item.id)"
-            :title="item.title"
-            :subtitle="item.episode_label"
-            aspect="2/3"
-          />
-          <div class="un-play-overlay">
-            <div class="un-play-btn"><Icon name="play" :size="18" /></div>
-          </div>
-        </button>
+          <template #badges>
+            <div class="un-play-overlay">
+              <div class="un-play-btn"><Icon name="play" :size="18" /></div>
+            </div>
+          </template>
+        </MediaCard>
       </div>
     </div>
   </section>
@@ -67,6 +70,13 @@ const scrollEl = ref<HTMLElement>()
 function scrollBy(dir: number) {
   if (!scrollEl.value) return
   scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
+}
+
+// Up Next is always the next TV episode, so the title links to the series
+// detail page. The tile itself still plays; this is the escape hatch to the
+// show without starting playback.
+function detailUrl(item: UpNextItem): string {
+  return mediaUrl({ id: item.id, title: item.title, slug: item.slug, media_type: 'tv' })
 }
 </script>
 
@@ -100,19 +110,11 @@ function scrollBy(dir: number) {
 }
 .scroll-btn:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
 
-.un-tile { flex-shrink: 0; }
+.un-tile { flex-shrink: 0; cursor: pointer; }
 
-.un-poster {
-  position: relative;
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: var(--r-md);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-}
+/* Play overlay lives in MediaCard's badges slot — covers the whole art and
+   fades in on tile hover/focus. Above the gradient, below the title text via
+   z-index (MediaCard's .mediac-info is z-index 3 and paints later). */
 .un-play-overlay {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
@@ -120,11 +122,9 @@ function scrollBy(dir: number) {
   opacity: 0;
   transition: opacity 0.15s;
   pointer-events: none;
-  border-radius: var(--r-md);
-  z-index: 4;
+  z-index: 3;
 }
-.un-poster:hover .un-play-overlay,
-.un-poster:focus-visible .un-play-overlay { opacity: 1; }
+.un-tile:hover .un-play-overlay { opacity: 1; }
 .un-play-btn {
   width: 44px; height: 44px; border-radius: 50%;
   background: rgba(255,255,255,0.18);

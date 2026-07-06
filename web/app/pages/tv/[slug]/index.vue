@@ -205,7 +205,7 @@
           </div>
         </div>
         <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
-          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, year: '', media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
             <MediaCard
               :idx="r.id"
               :src="recPosterUrl(r)"
@@ -216,7 +216,7 @@
           </NuxtLink>
         </div>
         <div v-else class="rec-grid">
-          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, year: '', media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
             <MediaCard
               :idx="r.id"
               :src="recPosterUrl(r)"

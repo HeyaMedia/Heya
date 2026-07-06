@@ -88,6 +88,7 @@ func (q *Queries) ListMediaRecommendations(ctx context.Context, mediaItemID int6
 const listMediaRecommendationsWithLibrary = `-- name: ListMediaRecommendationsWithLibrary :many
 SELECT mr.id, mr.media_item_id, mr.external_ids, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
   mi.id as local_media_item_id,
+  mi.slug as local_slug,
   mi.poster_path as local_poster_path
 FROM media_recommendations mr
 LEFT JOIN media_items mi ON mi.external_ids @> mr.external_ids AND mr.external_ids != '{}'
@@ -105,6 +106,7 @@ type ListMediaRecommendationsWithLibraryRow struct {
 	VoteAverage      pgtype.Numeric `json:"vote_average"`
 	ReleaseDate      string         `json:"release_date"`
 	LocalMediaItemID pgtype.Int8    `json:"local_media_item_id"`
+	LocalSlug        pgtype.Text    `json:"local_slug"`
 	LocalPosterPath  pgtype.Text    `json:"local_poster_path"`
 }
 
@@ -127,6 +129,7 @@ func (q *Queries) ListMediaRecommendationsWithLibrary(ctx context.Context, media
 			&i.VoteAverage,
 			&i.ReleaseDate,
 			&i.LocalMediaItemID,
+			&i.LocalSlug,
 			&i.LocalPosterPath,
 		); err != nil {
 			return nil, err

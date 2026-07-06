@@ -3,6 +3,10 @@ import type { StreamInfoResponse, TranscodeReasonTag } from '~~/shared/types'
 
 defineProps<{ stream: StreamInfoResponse }>()
 
+// Subtitles are collapsed by default — a well-tagged release can carry dozens
+// of tracks, which would otherwise dwarf the video/audio rows in this panel.
+const subsExpanded = ref(false)
+
 const REASON_LABELS: Record<TranscodeReasonTag, string> = {
   container: 'Container',
   video_codec: 'Video Codec',
@@ -74,16 +78,31 @@ function playbackLabel(action: string) {
         <span v-if="a.is_default" class="stag default">Default</span>
       </span>
     </div>
-    <div v-for="s in stream.subtitle" :key="'s' + s.index" class="stream-track">
-      <span class="track-badge sub">S{{ s.index }}</span>
-      <span class="track-info">
-        {{ langLabel(s.language) }} &middot; {{ s.codec.toUpperCase() }}
-        <span v-if="s.title"> &middot; {{ s.title }}</span>
-        <span v-if="s.is_forced" class="stag forced">Forced</span>
-        <span v-if="s.is_hearing_impaired" class="stag hi">HI</span>
-        <span v-if="s.is_default" class="stag default">Default</span>
-      </span>
-    </div>
+    <!-- Subtitles collapse behind a single toggle row — see subsExpanded. -->
+    <template v-if="stream.subtitle?.length">
+      <button
+        type="button"
+        class="stream-track subs-toggle"
+        :aria-expanded="subsExpanded"
+        @click="subsExpanded = !subsExpanded"
+      >
+        <span class="track-badge sub">S</span>
+        <span class="track-info subs-toggle-label">
+          {{ stream.subtitle.length }} subtitle track<span v-if="stream.subtitle.length !== 1">s</span>
+          <Icon name="chevdown" :size="12" class="subs-caret" :class="{ open: subsExpanded }" />
+        </span>
+      </button>
+      <div v-for="s in (subsExpanded ? stream.subtitle : [])" :key="'s' + s.index" class="stream-track subs-child">
+        <span class="track-badge sub">S{{ s.index }}</span>
+        <span class="track-info">
+          {{ langLabel(s.language) }} &middot; {{ s.codec.toUpperCase() }}
+          <span v-if="s.title"> &middot; {{ s.title }}</span>
+          <span v-if="s.is_forced" class="stag forced">Forced</span>
+          <span v-if="s.is_hearing_impaired" class="stag hi">HI</span>
+          <span v-if="s.is_default" class="stag default">Default</span>
+        </span>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -130,6 +149,19 @@ function playbackLabel(action: string) {
 .track-badge.aud { background: rgba(168,85,247,0.12); color: rgb(168,85,247); }
 .track-badge.sub { background: rgba(251,191,36,0.12); color: var(--gold); }
 .track-info { font-size: 11px; color: var(--fg-2); line-height: 1.4; }
+
+/* Subtitle group: a full-width toggle row, then the tracks indented under it.
+   Button reset so it lays out identically to the sibling track rows. */
+.subs-toggle {
+  width: 100%; text-align: left; cursor: pointer;
+  background: rgba(255,255,255,0.03); border: 0;
+  transition: background 0.12s ease;
+}
+.subs-toggle:hover { background: rgba(255,255,255,0.06); }
+.subs-toggle-label { display: inline-flex; align-items: center; gap: 6px; }
+.subs-caret { opacity: 0.5; transition: transform 0.15s ease; }
+.subs-caret.open { transform: rotate(180deg); }
+.subs-child { margin-left: 12px; }
 .stag {
   font-size: 8px; font-weight: 700; font-family: var(--font-mono);
   padding: 1px 4px; border-radius: 2px; margin-left: 3px;

@@ -294,16 +294,26 @@ type ClassicalWork struct {
 
 // Collection defines model for Collection.
 type Collection struct {
-	Backdrops *[]ArtworkItem `json:"backdrops"`
-	Ids       CollectionIDs  `json:"ids"`
-	Name      string         `json:"name"`
-	Overview  *string        `json:"overview,omitempty"`
-	Posters   *[]ArtworkItem `json:"posters"`
+	Backdrops *[]ArtworkItem    `json:"backdrops"`
+	Ids       CollectionIDs     `json:"ids"`
+	Name      string            `json:"name"`
+	Overview  *string           `json:"overview,omitempty"`
+	Parts     *[]CollectionPart `json:"parts"`
+	Posters   *[]ArtworkItem    `json:"posters"`
 }
 
 // CollectionIDs defines model for CollectionIDs.
 type CollectionIDs struct {
 	Tmdb int64 `json:"tmdb"`
+}
+
+// CollectionPart defines model for CollectionPart.
+type CollectionPart struct {
+	PosterPath  *string  `json:"poster_path,omitempty"`
+	Title       string   `json:"title"`
+	TmdbId      *int64   `json:"tmdb_id,omitempty"`
+	VoteAverage *float64 `json:"vote_average,omitempty"`
+	Year        *int64   `json:"year,omitempty"`
 }
 
 // ContentRating defines model for ContentRating.

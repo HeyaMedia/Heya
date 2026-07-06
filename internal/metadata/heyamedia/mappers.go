@@ -94,6 +94,7 @@ func mapMovieOrTV(id, kind, title string, year *int64, slug string, poster *stri
 		OriginalTitle: strPtr(pay.OriginalTitle),
 
 		// Movie fields.
+		Collection:          mapCollection(pay.Collection),
 		RuntimeMinutes:      intPtr64AsInt(pay.Runtime),
 		Tagline:             strPtr(pay.Tagline),
 		ReleaseDate:         firstAirDate, // mirrors the legacy mapper — movies use first_air_date as release_date.
@@ -127,6 +128,50 @@ func mapMovieOrTV(id, kind, title string, year *int64, slug string, poster *stri
 	}
 
 	return detail
+}
+
+// mapCollection converts heya.media's collection block (franchise membership,
+// e.g. "Bad Boys Collection") into the matcher-facing CollectionDetail. The
+// matcher find-or-creates a franchise row keyed on Name and points the movie's
+// collection_id at it — see (*Matcher).linkCollection. Returns nil when the
+// payload carries no named collection so the matcher skips linking.
+func mapCollection(c *gen.Collection) *metadata.CollectionDetail {
+	if c == nil || c.Name == "" {
+		return nil
+	}
+	ext := map[string]string{}
+	if c.Ids.Tmdb != 0 {
+		ext["tmdb"] = strconv.FormatInt(c.Ids.Tmdb, 10)
+	}
+	poster := ""
+	if c.Posters != nil && len(*c.Posters) > 0 {
+		poster = (*c.Posters)[0].Url
+	}
+	backdrop := ""
+	if c.Backdrops != nil && len(*c.Backdrops) > 0 {
+		backdrop = (*c.Backdrops)[0].Url
+	}
+	var parts []metadata.CollectionPart
+	if c.Parts != nil {
+		parts = make([]metadata.CollectionPart, 0, len(*c.Parts))
+		for _, p := range *c.Parts {
+			parts = append(parts, metadata.CollectionPart{
+				Title:       p.Title,
+				Year:        intPtr64AsInt(p.Year),
+				TmdbID:      intPtr64(p.TmdbId),
+				PosterPath:  strPtr(p.PosterPath),
+				VoteAverage: floatPtr(p.VoteAverage),
+			})
+		}
+	}
+	return &metadata.CollectionDetail{
+		ExternalIDs:  ext,
+		Name:         c.Name,
+		Overview:     strPtr(c.Overview),
+		PosterPath:   poster,
+		BackdropPath: backdrop,
+		Parts:        parts,
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -1,13 +1,17 @@
 -- name: CreateCollection :one
-INSERT INTO collections (external_ids, name, overview, poster_path, backdrop_path)
-VALUES ($1, $2, $3, $4, $5) RETURNING *;
+INSERT INTO collections (external_ids, name, overview, poster_path, backdrop_path, parts)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING *;
 
 -- name: FindCollectionByName :one
 SELECT * FROM collections WHERE name = $1 LIMIT 1;
 
 -- name: UpdateCollection :exec
+-- parts is refreshed only when the incoming list is non-empty, so a movie that
+-- enriches without the collection block (partial upstream data) can't blank out
+-- a membership list an earlier sibling already populated.
 UPDATE collections
-SET external_ids = $2, overview = $3, poster_path = $4, backdrop_path = $5
+SET external_ids = $2, overview = $3, poster_path = $4, backdrop_path = $5,
+    parts = CASE WHEN jsonb_array_length($6::jsonb) > 0 THEN $6::jsonb ELSE collections.parts END
 WHERE id = $1;
 
 -- name: SetMovieCollection :exec
@@ -15,6 +19,15 @@ UPDATE movies SET collection_id = $2 WHERE media_item_id = $1;
 
 -- name: GetCollectionByID :one
 SELECT * FROM collections WHERE id = $1;
+
+-- name: ListMoviesByTmdbIDs :many
+-- Resolves a collection's franchise-part tmdb ids to local movies (owned vs
+-- missing on the collection page). external_ids->>'tmdb' is the string form the
+-- enrich mapper writes; parsing back to a part happens in the service.
+SELECT id, slug, external_ids
+FROM media_items
+WHERE media_type = 'movie'
+  AND external_ids->>'tmdb' = ANY(@tmdb_ids::text[]);
 
 -- name: ListCollectionMovies :many
 SELECT mi.*

@@ -238,7 +238,7 @@
             v-for="r in detail.recommendations"
             :key="r.id"
             :is="r.local_media_item_id ? 'NuxtLink' : 'div'"
-            :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, media_type: r.media_type } as any) : undefined"
+            :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type } as any) : undefined"
             class="rec-tile"
             :class="{ dimmed: !r.local_media_item_id }"
           >

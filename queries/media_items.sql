@@ -176,6 +176,19 @@ WHERE mi.media_type = $1
     WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
   );
 
+-- name: ListUnavailableMediaItemIDsForItems :many
+-- Page-scoped availability: given only the media_item IDs actually returned to
+-- the caller, report which have no live files on disk. The unscoped
+-- ListUnavailableMediaItemIDs above scans the entire media type on every list /
+-- rail load (twice per dashboard); this bounds the anti-join to the visible page.
+SELECT mi.id
+FROM media_items mi
+WHERE mi.id = ANY(sqlc.arg(ids)::bigint[])
+  AND NOT EXISTS (
+    SELECT 1 FROM library_files lf
+    WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
+  );
+
 -- name: SearchMediaItemsByLibrary :many
 SELECT * FROM media_items
 WHERE library_id = $1

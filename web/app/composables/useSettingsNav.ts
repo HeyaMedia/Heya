@@ -42,10 +42,11 @@ const ALL_GROUPS: SettingsNavGroup[] = [
     label: 'Activity',
     adminOnly: true,
     items: [
-      { to: '/settings/jobs',     label: 'Jobs',     icon: 'list' },
-      { to: '/settings/tasks',    label: 'Tasks',    icon: 'timer' },
-      { to: '/settings/watchers', label: 'Watchers', icon: 'eye' },
-      { to: '/settings/logs',     label: 'Logs',     icon: 'clipboard' },
+      { to: '/settings/activity', label: 'Now Playing', icon: 'cast' },
+      { to: '/settings/jobs',     label: 'Jobs',        icon: 'list' },
+      { to: '/settings/tasks',    label: 'Tasks',       icon: 'timer' },
+      { to: '/settings/watchers', label: 'Watchers',    icon: 'eye' },
+      { to: '/settings/logs',     label: 'Logs',        icon: 'clipboard' },
     ],
   },
   {

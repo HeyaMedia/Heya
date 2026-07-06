@@ -1721,6 +1721,40 @@
         ],
         "type": "object"
       },
+      "CollectionPartView": {
+        "additionalProperties": false,
+        "properties": {
+          "local_media_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "local_slug": {
+            "type": "string"
+          },
+          "poster_path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "vote_average": {
+            "format": "double",
+            "type": "number"
+          },
+          "year": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
       "CollectionResult": {
         "additionalProperties": false,
         "properties": {
@@ -1744,11 +1778,26 @@
               "array",
               "null"
             ]
+          },
+          "owned_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionPartView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
           "collection",
-          "movies"
+          "movies",
+          "parts",
+          "owned_count"
         ],
         "type": "object"
       },
@@ -4345,10 +4394,6 @@
           "generate_thumbnails": {
             "type": "boolean"
           },
-          "metadata_refresh_days": {
-            "format": "int64",
-            "type": "integer"
-          },
           "preferred_country": {
             "type": "string"
           },
@@ -4370,7 +4415,6 @@
           "preferred_language",
           "preferred_country",
           "auto_collections",
-          "metadata_refresh_days",
           "fetch_ratings",
           "save_nfo",
           "save_images",
@@ -11585,6 +11629,36 @@
         ],
         "type": "object"
       },
+      "SessionCommandInput": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SessionCommandInput.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "stop",
+              "message"
+            ],
+            "maxLength": 16,
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 280,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
       "SessionHeartbeatInput": {
         "additionalProperties": false,
         "properties": {
@@ -16804,14 +16878,14 @@
         "operationId": "get-genre",
         "parameters": [
           {
-            "description": "Dash-separated genre/keyword (URL form)",
+            "description": "Exact genre/keyword name, URL-encoded; matched verbatim (dashes are literal, not space separators)",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
-              "description": "Dash-separated genre/keyword (URL form)",
+              "description": "Exact genre/keyword name, URL-encoded; matched verbatim (dashes are literal, not space separators)",
               "examples": [
-                "science-fiction"
+                "Sci-Fi \u0026 Fantasy"
               ],
               "maxLength": 128,
               "type": "string"
@@ -17652,14 +17726,14 @@
         "operationId": "get-keyword",
         "parameters": [
           {
-            "description": "Dash-separated genre/keyword (URL form)",
+            "description": "Exact genre/keyword name, URL-encoded; matched verbatim (dashes are literal, not space separators)",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
-              "description": "Dash-separated genre/keyword (URL form)",
+              "description": "Exact genre/keyword name, URL-encoded; matched verbatim (dashes are literal, not space separators)",
               "examples": [
-                "science-fiction"
+                "Sci-Fi \u0026 Fantasy"
               ],
               "maxLength": 128,
               "type": "string"
@@ -29409,6 +29483,70 @@
           }
         ],
         "summary": "Active playback sessions (own; all for admins)",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/api/sessions/{session_id}/command": {
+      "post": {
+        "operationId": "session-command",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCommandInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Send a control command (stop / message) to a live session",
         "tags": [
           "Sessions"
         ]

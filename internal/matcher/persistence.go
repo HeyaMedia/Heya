@@ -566,6 +566,12 @@ func (m *Matcher) findOrCreateCompany(ctx context.Context, name string, external
 // name, so a blind insert per enrich would pile up duplicate rows — an
 // existing row is refreshed with the latest artwork/overview instead.
 func (m *Matcher) linkCollection(ctx context.Context, mediaItemID int64, c *metadata.CollectionDetail) {
+	// Always a valid JSON array — an empty/nil slice must be "[]", not "null",
+	// or UpdateCollection's jsonb_array_length guard errors on a scalar.
+	partsJSON := []byte("[]")
+	if len(c.Parts) > 0 {
+		partsJSON = mustJSON(c.Parts)
+	}
 	col, err := m.q.FindCollectionByName(ctx, c.Name)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -575,6 +581,7 @@ func (m *Matcher) linkCollection(ctx context.Context, mediaItemID int64, c *meta
 			Overview:     c.Overview,
 			PosterPath:   c.PosterPath,
 			BackdropPath: c.BackdropPath,
+			Parts:        partsJSON,
 		})
 		if err != nil {
 			log.Debug().Err(err).Str("collection", c.Name).Msg("failed to create collection")
@@ -590,6 +597,7 @@ func (m *Matcher) linkCollection(ctx context.Context, mediaItemID int64, c *meta
 			Overview:     c.Overview,
 			PosterPath:   c.PosterPath,
 			BackdropPath: c.BackdropPath,
+			Column6:      partsJSON,
 		}); err != nil {
 			log.Debug().Err(err).Str("collection", c.Name).Msg("failed to refresh collection")
 		}

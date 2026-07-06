@@ -23,8 +23,8 @@ func (q *Queries) CountAllCollections(ctx context.Context) (int64, error) {
 }
 
 const createCollection = `-- name: CreateCollection :one
-INSERT INTO collections (external_ids, name, overview, poster_path, backdrop_path)
-VALUES ($1, $2, $3, $4, $5) RETURNING id, external_ids, name, overview, poster_path, backdrop_path, search_vector
+INSERT INTO collections (external_ids, name, overview, poster_path, backdrop_path, parts)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, external_ids, name, overview, poster_path, backdrop_path, search_vector, parts
 `
 
 type CreateCollectionParams struct {
@@ -33,6 +33,7 @@ type CreateCollectionParams struct {
 	Overview     string `json:"overview"`
 	PosterPath   string `json:"poster_path"`
 	BackdropPath string `json:"backdrop_path"`
+	Parts        []byte `json:"-"`
 }
 
 func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionParams) (Collection, error) {
@@ -42,6 +43,7 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 		arg.Overview,
 		arg.PosterPath,
 		arg.BackdropPath,
+		arg.Parts,
 	)
 	var i Collection
 	err := row.Scan(
@@ -52,12 +54,13 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 		&i.PosterPath,
 		&i.BackdropPath,
 		&i.SearchVector,
+		&i.Parts,
 	)
 	return i, err
 }
 
 const findCollectionByName = `-- name: FindCollectionByName :one
-SELECT id, external_ids, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE name = $1 LIMIT 1
+SELECT id, external_ids, name, overview, poster_path, backdrop_path, search_vector, parts FROM collections WHERE name = $1 LIMIT 1
 `
 
 func (q *Queries) FindCollectionByName(ctx context.Context, name string) (Collection, error) {
@@ -71,12 +74,13 @@ func (q *Queries) FindCollectionByName(ctx context.Context, name string) (Collec
 		&i.PosterPath,
 		&i.BackdropPath,
 		&i.SearchVector,
+		&i.Parts,
 	)
 	return i, err
 }
 
 const getCollectionByID = `-- name: GetCollectionByID :one
-SELECT id, external_ids, name, overview, poster_path, backdrop_path, search_vector FROM collections WHERE id = $1
+SELECT id, external_ids, name, overview, poster_path, backdrop_path, search_vector, parts FROM collections WHERE id = $1
 `
 
 func (q *Queries) GetCollectionByID(ctx context.Context, id int64) (Collection, error) {
@@ -90,12 +94,13 @@ func (q *Queries) GetCollectionByID(ctx context.Context, id int64) (Collection, 
 		&i.PosterPath,
 		&i.BackdropPath,
 		&i.SearchVector,
+		&i.Parts,
 	)
 	return i, err
 }
 
 const listAllCollections = `-- name: ListAllCollections :many
-SELECT c.id, c.external_ids, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector,
+SELECT c.id, c.external_ids, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector, c.parts,
        (SELECT count(*) FROM movies m WHERE m.collection_id = c.id)::int AS movie_count
 FROM collections c
 ORDER BY c.name
@@ -115,6 +120,7 @@ type ListAllCollectionsRow struct {
 	PosterPath   string      `json:"poster_path"`
 	BackdropPath string      `json:"backdrop_path"`
 	SearchVector interface{} `json:"search_vector"`
+	Parts        []byte      `json:"-"`
 	MovieCount   int32       `json:"movie_count"`
 }
 
@@ -135,6 +141,7 @@ func (q *Queries) ListAllCollections(ctx context.Context, arg ListAllCollections
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.SearchVector,
+			&i.Parts,
 			&i.MovieCount,
 		); err != nil {
 			return nil, err
@@ -253,6 +260,42 @@ func (q *Queries) ListCollectionsWithLocalMedia(ctx context.Context) ([]ListColl
 	return items, nil
 }
 
+const listMoviesByTmdbIDs = `-- name: ListMoviesByTmdbIDs :many
+SELECT id, slug, external_ids
+FROM media_items
+WHERE media_type = 'movie'
+  AND external_ids->>'tmdb' = ANY($1::text[])
+`
+
+type ListMoviesByTmdbIDsRow struct {
+	ID          int64  `json:"id"`
+	Slug        string `json:"slug"`
+	ExternalIds []byte `json:"external_ids"`
+}
+
+// Resolves a collection's franchise-part tmdb ids to local movies (owned vs
+// missing on the collection page). external_ids->>'tmdb' is the string form the
+// enrich mapper writes; parsing back to a part happens in the service.
+func (q *Queries) ListMoviesByTmdbIDs(ctx context.Context, tmdbIds []string) ([]ListMoviesByTmdbIDsRow, error) {
+	rows, err := q.db.Query(ctx, listMoviesByTmdbIDs, tmdbIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMoviesByTmdbIDsRow{}
+	for rows.Next() {
+		var i ListMoviesByTmdbIDsRow
+		if err := rows.Scan(&i.ID, &i.Slug, &i.ExternalIds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setMovieCollection = `-- name: SetMovieCollection :exec
 UPDATE movies SET collection_id = $2 WHERE media_item_id = $1
 `
@@ -269,7 +312,8 @@ func (q *Queries) SetMovieCollection(ctx context.Context, arg SetMovieCollection
 
 const updateCollection = `-- name: UpdateCollection :exec
 UPDATE collections
-SET external_ids = $2, overview = $3, poster_path = $4, backdrop_path = $5
+SET external_ids = $2, overview = $3, poster_path = $4, backdrop_path = $5,
+    parts = CASE WHEN jsonb_array_length($6::jsonb) > 0 THEN $6::jsonb ELSE collections.parts END
 WHERE id = $1
 `
 
@@ -279,8 +323,12 @@ type UpdateCollectionParams struct {
 	Overview     string `json:"overview"`
 	PosterPath   string `json:"poster_path"`
 	BackdropPath string `json:"backdrop_path"`
+	Column6      []byte `json:"column_6"`
 }
 
+// parts is refreshed only when the incoming list is non-empty, so a movie that
+// enriches without the collection block (partial upstream data) can't blank out
+// a membership list an earlier sibling already populated.
 func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error {
 	_, err := q.db.Exec(ctx, updateCollection,
 		arg.ID,
@@ -288,6 +336,7 @@ func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionPara
 		arg.Overview,
 		arg.PosterPath,
 		arg.BackdropPath,
+		arg.Column6,
 	)
 	return err
 }

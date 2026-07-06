@@ -15,6 +15,7 @@ DELETE FROM media_recommendations WHERE media_item_id = $1;
 -- name: ListMediaRecommendationsWithLibrary :many
 SELECT mr.*,
   mi.id as local_media_item_id,
+  mi.slug as local_slug,
   mi.poster_path as local_poster_path
 FROM media_recommendations mr
 LEFT JOIN media_items mi ON mi.external_ids @> mr.external_ids AND mr.external_ids != '{}'

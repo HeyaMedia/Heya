@@ -330,9 +330,6 @@ func applySettingsFlags(cmd *cobra.Command, s metadata.LibrarySettings) metadata
 	if cmd.Flags().Changed("auto-collections") {
 		s.AutoCollections, _ = cmd.Flags().GetBool("auto-collections")
 	}
-	if cmd.Flags().Changed("metadata-refresh") {
-		s.MetadataRefreshDays, _ = cmd.Flags().GetInt("metadata-refresh")
-	}
 	if cmd.Flags().Changed("fetch-ratings") {
 		s.FetchRatings, _ = cmd.Flags().GetBool("fetch-ratings")
 	}
@@ -358,11 +355,6 @@ func printLibrarySettings(lib sqlc.Library) {
 	ui.Info("  Watch", strconv.FormatBool(s.Watch))
 	ui.Info("  Auto collections", strconv.FormatBool(s.AutoCollections))
 	ui.Info("  Fetch ratings", strconv.FormatBool(s.FetchRatings))
-	if s.MetadataRefreshDays > 0 {
-		ui.Info("  Metadata refresh", fmt.Sprintf("every %d days", s.MetadataRefreshDays))
-	} else {
-		ui.Info("  Metadata refresh", "never")
-	}
 	ui.Info("  Save NFO", strconv.FormatBool(s.SaveNFO))
 	ui.Info("  Save images", strconv.FormatBool(s.SaveImages))
 }
@@ -409,7 +401,6 @@ func addSettingsFlags(cmd *cobra.Command) {
 	cmd.Flags().String("country", "", "Preferred country/region (e.g. US)")
 	cmd.Flags().Bool("watch", false, "Enable filesystem watching")
 	cmd.Flags().Bool("auto-collections", false, "Automatically add to collections (movies)")
-	cmd.Flags().Int("metadata-refresh", 0, "Auto-refresh metadata every N days (0=never)")
 	cmd.Flags().Bool("fetch-ratings", true, "Fetch external ratings (IMDb, TMDB, etc.) from heya.media")
 	cmd.Flags().Bool("save-nfo", false, "Write NFO files to media directory")
 	cmd.Flags().Bool("save-images", false, "Write images to media directory")

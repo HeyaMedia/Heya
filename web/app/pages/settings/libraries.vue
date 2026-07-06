@@ -34,7 +34,7 @@ const showEdit = computed({
 function defaultSettings(type: string): LibrarySettings {
   const base: LibrarySettings = {
     watch: true, preferred_language: 'en', preferred_country: 'US',
-    auto_collections: false, metadata_refresh_days: 0, fetch_ratings: true,
+    auto_collections: false, fetch_ratings: true,
     save_nfo: false, save_images: false,
     enable_trickplay: false, generate_thumbnails: true,
   }
@@ -45,6 +45,17 @@ function defaultSettings(type: string): LibrarySettings {
 function mediaIcon(type: string): string {
   return type === 'movie' ? 'film' : type === 'tv' ? 'tv' : type === 'music' ? 'music' : 'book'
 }
+
+// Placeholder tracks the selected type so the Name field reads as an obvious
+// example rather than a value that must be kept.
+const namePlaceholder = computed(() => {
+  switch (newLib.value.media_type) {
+    case 'tv': return 'e.g. My TV Shows'
+    case 'music': return 'e.g. My Music'
+    case 'book': return 'e.g. My Books'
+    default: return 'e.g. My Movies'
+  }
+})
 
 function libProgress(id: number): LibraryScanProgress | null {
   return scanProgress.value[id] ?? null
@@ -460,7 +471,7 @@ onMounted(() => {
         <div class="form-row">
           <div class="form-field grow">
             <label class="form-label">Name</label>
-            <input v-model="newLib.name" class="sv2-input" placeholder="My Movies" required />
+            <input v-model="newLib.name" class="sv2-input" :placeholder="namePlaceholder" required />
           </div>
           <div class="form-field">
             <label class="form-label">Type</label>

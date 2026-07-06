@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -96,6 +97,48 @@ func registerSessionRoutes(api huma.API, app *service.App) {
 			}
 			return noStoreJSON(activeSessionsBody{Items: items}), nil
 		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/sessions/{session_id}/command", "session-command", "Send a control command (stop / message) to a live session", "Sessions")),
+		func(ctx context.Context, in *struct {
+			SessionID string `path:"session_id" maxLength:"128"`
+			Body      sessionCommandInput
+		}) (*JSONOutput[okBody], error) {
+			u := userFrom(ctx)
+			sess, ok := app.Sessions().Get(in.SessionID)
+			if !ok {
+				return nil, huma.Error404NotFound("session not found or already ended")
+			}
+			// Owner or admin only: a user can stop/message their own playback;
+			// admins can control anyone's. Without this, the client-chosen id
+			// would let one user command another's session.
+			if sess.UserID != u.ID && !u.IsAdmin {
+				return nil, huma.Error403Forbidden("not your session")
+			}
+
+			action := in.Body.Action
+			if action != "stop" && action != "message" {
+				return nil, huma.Error400BadRequest("action must be 'stop' or 'message'")
+			}
+			msg := strings.TrimSpace(in.Body.Message)
+			if action == "message" && msg == "" {
+				return nil, huma.Error400BadRequest("message is required for the message action")
+			}
+
+			app.Sessions().SendCommand(sessions.CommandPayload{
+				SessionID: sess.SessionID,
+				UserID:    sess.UserID,
+				Action:    action,
+				Message:   msg,
+				By:        u.Username,
+			})
+			return noStoreJSON(okBody{Ok: true}), nil
+		})
+}
+
+// sessionCommandInput is the wire shape for POST /api/sessions/{id}/command.
+type sessionCommandInput struct {
+	Action  string `json:"action" enum:"stop,message" maxLength:"16"`
+	Message string `json:"message,omitempty" maxLength:"280"`
 }
 
 // sessionDisplay is what the activity panel renders. The server fills

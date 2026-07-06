@@ -252,7 +252,7 @@ func (q *Queries) SearchAllMedia(ctx context.Context, arg SearchAllMediaParams) 
 }
 
 const searchCollections = `-- name: SearchCollections :many
-SELECT c.id, c.external_ids, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector
+SELECT c.id, c.external_ids, c.name, c.overview, c.poster_path, c.backdrop_path, c.search_vector, c.parts
 FROM collections c
 WHERE (
     lower(c.name) % lower($1)
@@ -292,6 +292,7 @@ func (q *Queries) SearchCollections(ctx context.Context, arg SearchCollectionsPa
 			&i.PosterPath,
 			&i.BackdropPath,
 			&i.SearchVector,
+			&i.Parts,
 		); err != nil {
 			return nil, err
 		}

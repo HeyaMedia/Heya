@@ -450,17 +450,6 @@ func (a *App) ListSchedules(ctx context.Context) ([]ScheduleEntry, error) {
 			}
 		}
 
-		if settings.MetadataRefreshDays > 0 {
-			interval := time.Duration(settings.MetadataRefreshDays) * 24 * time.Hour
-			entries = append(entries, ScheduleEntry{
-				LibraryID:   lib.ID,
-				LibraryName: lib.Name,
-				MediaType:   string(lib.MediaType),
-				Type:        "metadata_refresh",
-				Interval:    FormatDuration(interval),
-				IntervalSec: int(interval.Seconds()),
-			})
-		}
 	}
 
 	return entries, nil

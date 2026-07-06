@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,7 +12,6 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
-	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -313,9 +313,8 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
 	rows, err := w.DB.Query(ctx, `
-		SELECT mi.id, mi.media_type, mi.title, l.settings, mi.metadata_refreshed_at, mi.enrichment_status
+		SELECT mi.id, mi.media_type, mi.title, mi.status, mi.metadata_refreshed_at, mi.enrichment_status
 		FROM media_items mi
-		JOIN libraries l ON l.id = mi.library_id
 		WHERE mi.media_type = 'music' OR mi.external_ids != '{}'
 		ORDER BY mi.metadata_refreshed_at ASC NULLS FIRST
 	`)
@@ -335,37 +334,35 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 	var items []stale
 	for rows.Next() {
 		var id int64
-		var mt, title, status string
-		var settingsJSON []byte
+		var mt, title, mediaStatus, enrichStatus string
 		var refreshedAt *time.Time
-		if err := rows.Scan(&id, &mt, &title, &settingsJSON, &refreshedAt, &status); err != nil {
+		if err := rows.Scan(&id, &mt, &title, &mediaStatus, &refreshedAt, &enrichStatus); err != nil {
 			continue
 		}
 		// A previously FAILED enrichment is stranded — River doesn't retry it
 		// (markFailed returns nil) and rescans skip the unchanged file. Re-drive
-		// it every sweep regardless of the metadata_refresh_days knob so a
-		// transient provider blip self-heals. Non-forced is enough (the item
-		// isn't 'complete', so the enrich idempotency gate lets it run).
-		if status == "failed" {
+		// it every sweep so a transient provider blip self-heals. Non-forced is
+		// enough (the item isn't 'complete', so the enrich idempotency gate lets
+		// it run).
+		if enrichStatus == "failed" {
 			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title})
 			continue
 		}
 		// Everything else here is the staleness path: only 'complete' items past
-		// their window, and only when the library opted in (refresh_days > 0).
-		// force=true because the enrich worker short-circuits non-forced refreshes
-		// of already-'complete' items — without it the sweep would no-op.
-		if status != enrichStatusComplete {
+		// their refresh window. The window is automatic and keyed off the item's
+		// production status — finished content barely changes, so it refreshes
+		// slowly; still-airing content refreshes often. force=true because the
+		// enrich worker short-circuits non-forced refreshes of 'complete' items —
+		// without it the sweep would no-op.
+		if enrichStatus != enrichStatusComplete {
 			continue
 		}
-		settings := metadata.ParseSettings(settingsJSON)
-		if settings.MetadataRefreshDays <= 0 {
-			continue
-		}
+		window := refreshWindowDays(mediaStatus)
 		if refreshedAt == nil {
 			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title, Force: true})
 			continue
 		}
-		cutoff := now.AddDate(0, 0, -settings.MetadataRefreshDays)
+		cutoff := now.AddDate(0, 0, -window)
 		if refreshedAt.Before(cutoff) {
 			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title, Force: true})
 		}
@@ -392,6 +389,28 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 	}
 	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
 	return nil
+}
+
+// Automatic metadata-refresh windows. Finished content (ended/cancelled TV,
+// released movies) almost never changes upstream, so it refreshes on a long
+// cadence; anything still in motion (airing series, unreleased titles, and
+// music/books which carry no status) refreshes far more often. These replace
+// the old per-library metadata_refresh_days knob.
+const (
+	refreshWindowActiveDays = 14
+	refreshWindowFinalDays  = 180
+)
+
+// refreshWindowDays maps a media_items.status string to its staleness window
+// in days. Status arrives lowercase and unnormalized from heya.media; the same
+// finished-vs-active split the Jellyfin mapper uses.
+func refreshWindowDays(status string) int {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ended", "canceled", "cancelled", "released":
+		return refreshWindowFinalDays
+	default:
+		return refreshWindowActiveDays
+	}
 }
 
 // ---------------------------------------------------------------------------

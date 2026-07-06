@@ -112,7 +112,7 @@ onMounted(load)
     </div>
 
     <SettingsSection title="Per-library metadata policy" icon="folder"
-      description="One row per library. NFO and images are written back to the library path. Refresh days defines when metadata is considered stale enough to re-fetch.">
+      description="One row per library. NFO and images are written back to the library path. Refresh is automatic — active titles re-fetch every 14 days, ended or cancelled ones every 180 days.">
       <template #actions>
         <NuxtLink to="/settings/libraries" class="link-arrow">
           Edit on Libraries <Icon name="chevright" :size="11" />
@@ -169,7 +169,7 @@ onMounted(load)
               {{ settingsByLib.get(l.id)?.watch ? 'on' : 'off' }}
             </StatusBadge>
           </span>
-          <span class="col-days mono">{{ settingsByLib.get(l.id)?.metadata_refresh_days ?? '—' }}d</span>
+          <span class="col-days mono" title="Automatic — active titles refresh every 14 days, ended/cancelled every 180 days">auto</span>
           <span class="col-locale mono">
             {{ settingsByLib.get(l.id)?.preferred_language || '—' }}<span v-if="settingsByLib.get(l.id)?.preferred_country">·{{ settingsByLib.get(l.id)?.preferred_country }}</span>
           </span>

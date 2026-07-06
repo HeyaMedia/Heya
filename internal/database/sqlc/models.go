@@ -348,6 +348,7 @@ type Collection struct {
 	PosterPath   string      `json:"poster_path"`
 	BackdropPath string      `json:"backdrop_path"`
 	SearchVector interface{} `json:"search_vector"`
+	Parts        []byte      `json:"-"`
 }
 
 type Creator struct {

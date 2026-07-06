@@ -20,14 +20,15 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 		token := auth.TokenFromContext(r.Context())
 		if token == "" {
 			token = r.URL.Query().Get("token")
-			if token == "" {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
-			if _, err := auth.ResolveSession(r.Context(), sessionLookup, token); err != nil {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
+		}
+		// Resolve the token to a user regardless of which transport carried it:
+		// the connection subscribes under that user id so PublishToUser events
+		// (e.g. session commands) reach only this user's connections and never
+		// leak over the global broadcast.
+		resolved, err := auth.ResolveSession(r.Context(), sessionLookup, token)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
 		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -37,7 +38,7 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 		}
 		defer conn.Close()
 
-		ch := hub.Subscribe()
+		ch := hub.SubscribeUser(resolved.User.ID)
 		defer hub.Unsubscribe(ch)
 
 		ctx := r.Context()

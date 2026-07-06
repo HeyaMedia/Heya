@@ -26,6 +26,43 @@ const showPw = computed({
   set: (v: boolean) => { if (!v) pwModal.value = null },
 })
 
+// Reveal + copy state for the two password inputs (create + reset).
+const showCreatePw = ref(false)
+const showResetPw = ref(false)
+const copied = ref<'create' | 'reset' | null>(null)
+
+// Strong random password from a curated alphabet (ambiguous glyphs like
+// 0/O/1/l/I dropped so it survives being read aloud or copied by hand).
+function randomPassword(len = 20): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*?'
+  const buf = new Uint32Array(len)
+  crypto.getRandomValues(buf)
+  let out = ''
+  for (let i = 0; i < len; i++) out += alphabet[buf[i]! % alphabet.length]
+  return out
+}
+
+function generateCreatePw() {
+  newUser.value.password = randomPassword()
+  showCreatePw.value = true
+}
+
+function generateResetPw() {
+  pwValue.value = randomPassword()
+  showResetPw.value = true
+}
+
+async function copyPw(text: string, which: 'create' | 'reset') {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = which
+    setTimeout(() => { if (copied.value === which) copied.value = null }, 1400)
+  } catch {
+    flash.value = { kind: 'err', text: 'Clipboard not available.' }
+  }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -247,7 +284,26 @@ onMounted(load)
         </div>
         <div class="form-field">
           <label class="form-label">Initial password (≥ 8 chars)</label>
-          <input v-model="newUser.password" class="sv2-input" type="password" minlength="8" maxlength="256" autocomplete="new-password" />
+          <div class="pw-group">
+            <input
+              v-model="newUser.password"
+              class="sv2-input"
+              :type="showCreatePw ? 'text' : 'password'"
+              minlength="8" maxlength="256" autocomplete="new-password"
+              placeholder="At least 8 characters"
+            />
+            <button type="button" class="pw-btn" :class="{ active: showCreatePw }"
+              :title="showCreatePw ? 'Hide' : 'Show'" @click="showCreatePw = !showCreatePw">
+              <Icon name="eye" :size="14" />
+            </button>
+            <button type="button" class="pw-btn" :disabled="!newUser.password"
+              :title="copied === 'create' ? 'Copied' : 'Copy'" @click="copyPw(newUser.password, 'create')">
+              <Icon :name="copied === 'create' ? 'check' : 'clipboard'" :size="14" />
+            </button>
+            <button type="button" class="pw-gen" @click="generateCreatePw">
+              <Icon name="sparkle" :size="12" /> Generate
+            </button>
+          </div>
         </div>
         <label class="check-row">
           <input v-model="newUser.is_admin" type="checkbox" />
@@ -270,7 +326,26 @@ onMounted(load)
       <div class="dialog-form">
         <div class="form-field">
           <label class="form-label">New password (≥ 8 chars)</label>
-          <input v-model="pwValue" class="sv2-input" type="password" minlength="8" maxlength="256" autocomplete="new-password" />
+          <div class="pw-group">
+            <input
+              v-model="pwValue"
+              class="sv2-input"
+              :type="showResetPw ? 'text' : 'password'"
+              minlength="8" maxlength="256" autocomplete="new-password"
+              placeholder="At least 8 characters"
+            />
+            <button type="button" class="pw-btn" :class="{ active: showResetPw }"
+              :title="showResetPw ? 'Hide' : 'Show'" @click="showResetPw = !showResetPw">
+              <Icon name="eye" :size="14" />
+            </button>
+            <button type="button" class="pw-btn" :disabled="!pwValue"
+              :title="copied === 'reset' ? 'Copied' : 'Copy'" @click="copyPw(pwValue, 'reset')">
+              <Icon :name="copied === 'reset' ? 'check' : 'clipboard'" :size="14" />
+            </button>
+            <button type="button" class="pw-gen" @click="generateResetPw">
+              <Icon name="sparkle" :size="12" /> Generate
+            </button>
+          </div>
         </div>
         <div v-if="pwErr" class="form-error">
           <Icon name="warning" :size="13" /> {{ pwErr }}
@@ -423,6 +498,33 @@ onMounted(load)
   transition: border-color 0.12s;
 }
 .sv2-input:focus { border-color: var(--gold); }
+
+.pw-group { display: flex; gap: 6px; align-items: stretch; }
+.pw-group .sv2-input { flex: 1; min-width: 0; }
+.pw-btn {
+  width: 38px; flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-0);
+  color: var(--fg-3);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.pw-btn:hover:not(:disabled) { color: var(--fg-0); border-color: var(--border-strong); }
+.pw-btn.active { color: var(--gold); border-color: rgba(230, 185, 74, 0.4); }
+.pw-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.pw-gen {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 0 12px;
+  border: 1px solid rgba(230, 185, 74, 0.35);
+  border-radius: var(--r-sm);
+  background: var(--gold-soft);
+  color: var(--gold-bright);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  transition: border-color 0.12s, background 0.12s;
+}
+.pw-gen:hover { border-color: var(--gold); }
 
 .check-row {
   display: flex; align-items: center; gap: 8px;

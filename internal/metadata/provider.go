@@ -312,6 +312,20 @@ type CollectionDetail struct {
 	Overview     string            `json:"overview"`
 	PosterPath   string            `json:"poster_path"`
 	BackdropPath string            `json:"backdrop_path"`
+	// Parts is the full franchise membership from heya.media — every film in
+	// the collection (release order, undated last), including titles not in the
+	// local library. Persisted so the collection page can show owned vs missing.
+	Parts []CollectionPart `json:"parts,omitempty"`
+}
+
+// CollectionPart is one film in a franchise's membership list. TmdbID is the
+// join key back to a local movie (media_items.external_ids->>'tmdb').
+type CollectionPart struct {
+	Title       string  `json:"title"`
+	Year        int     `json:"year,omitempty"`
+	TmdbID      int64   `json:"tmdb_id,omitempty"`
+	PosterPath  string  `json:"poster_path,omitempty"`
+	VoteAverage float64 `json:"vote_average,omitempty"`
 }
 
 type ProductionCompanyDetail struct {

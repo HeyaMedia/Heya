@@ -16,6 +16,11 @@ sql:
           # album/artist detail responses) without forking slim row types.
           - column: "track_files.chromaprint"
             go_struct_tag: 'json:"-"'
+          # Raw franchise-membership JSON blob. Kept off the wire (as []byte it
+          # would base64-encode anyway) — the collection service unmarshals it,
+          # resolves each part to a local movie, and returns a typed view.
+          - column: "collections.parts"
+            go_struct_tag: 'json:"-"'
           - db_type: "pg_catalog.interval"
             go_type:
               import: "github.com/jackc/pgx/v5/pgtype"

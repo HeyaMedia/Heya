@@ -23,7 +23,6 @@ export interface LibrarySettings {
   preferred_language: string
   preferred_country: string
   auto_collections: boolean
-  metadata_refresh_days: number
   fetch_ratings: boolean
   save_nfo: boolean
   save_images: boolean
@@ -420,6 +419,10 @@ export interface MediaRecommendation {
   vote_average: number | string
   release_date: string
   local_media_item_id: number | null
+  // The local item's real slug (year-suffixed, user-editable) — use this for
+  // the detail-page link, not slugify(title), which drops the disambiguating
+  // year (e.g. `mr-robot` vs the actual `mr-robot-2015`).
+  local_slug: string | null
   local_poster_path: string | null
 }
 

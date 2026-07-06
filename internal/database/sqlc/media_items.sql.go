@@ -723,6 +723,40 @@ func (q *Queries) ListUnavailableMediaItemIDs(ctx context.Context, mediaType Med
 	return items, nil
 }
 
+const listUnavailableMediaItemIDsForItems = `-- name: ListUnavailableMediaItemIDsForItems :many
+SELECT mi.id
+FROM media_items mi
+WHERE mi.id = ANY($1::bigint[])
+  AND NOT EXISTS (
+    SELECT 1 FROM library_files lf
+    WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
+  )
+`
+
+// Page-scoped availability: given only the media_item IDs actually returned to
+// the caller, report which have no live files on disk. The unscoped
+// ListUnavailableMediaItemIDs above scans the entire media type on every list /
+// rail load (twice per dashboard); this bounds the anti-join to the visible page.
+func (q *Queries) ListUnavailableMediaItemIDsForItems(ctx context.Context, ids []int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listUnavailableMediaItemIDsForItems, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markEnrichAttempted = `-- name: MarkEnrichAttempted :exec
 UPDATE media_items
    SET last_enrich_attempt_at = now(),
