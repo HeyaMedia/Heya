@@ -240,6 +240,13 @@ function play() {
     media_item_id: String(detail.value.media_item.id),
     title,
   })
+  // Record progress against the episode, not the series — otherwise it lands
+  // as ('movie', series_id) and mark-watched (keyed by episode) can't clear
+  // it from Continue Watching.
+  if (episode.value?.id) {
+    params.set('entity_type', 'episode')
+    params.set('entity_id', String(episode.value.id))
+  }
   navigateTo(`/watch/${fileId.value}?${params}`)
 }
 

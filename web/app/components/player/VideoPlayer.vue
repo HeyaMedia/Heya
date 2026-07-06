@@ -460,6 +460,12 @@ function playNextEpisode() {
     media_item_id: String(upNext.value.media_item_id),
     title: upNext.value.episode_title ? `${label} - ${upNext.value.episode_title}` : label,
   })
+  // Key the next episode's progress on the episode, not the series, so it
+  // tracks + clears from Continue Watching independently.
+  if (upNext.value.episode_id) {
+    params.set('entity_type', 'episode')
+    params.set('entity_id', String(upNext.value.episode_id))
+  }
   navigateTo(`/watch/${upNext.value.file_id}?${params}`)
 }
 

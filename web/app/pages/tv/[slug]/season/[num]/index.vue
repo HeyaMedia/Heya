@@ -286,6 +286,11 @@ function playEpisode(ep: any) {
     media_item_id: String(detail.value.media_item.id),
     title: `${detail.value.media_item.title} - S${String(currentSeasonNum.value).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')} - ${ep.title}`,
   })
+  // Progress must key on the episode, not the series (see episode detail play).
+  if (ep.id) {
+    params.set('entity_type', 'episode')
+    params.set('entity_id', String(ep.id))
+  }
   navigateTo(`/watch/${fileId}?${params}`)
 }
 
