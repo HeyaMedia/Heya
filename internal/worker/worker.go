@@ -174,10 +174,10 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 
 			// Enrich pipeline (external rate-limit safety).
 			"enrich_media_item":      {MaxWorkers: 1}, // priority bands P1=watcher/view, P2=movies+tv, P3=music+books
-			"person_fetch":           {MaxWorkers: 1},
-			"ratings_fetch":          {MaxWorkers: 1},
+			"person_fetch":           {MaxWorkers: 8}, // I/O-bound on heya.media; now lazy (on-view backfill) so backlog is small, but let concurrent person-page visits parallelize. Slug-race in person_worker is guarded (retry-on-conflict merge).
+			"ratings_fetch":          {MaxWorkers: 4}, // per-item heya.media call, clean upserts, no cross-item state — safe to parallelize (semaphore-8 in the client is the real ceiling)
 			"force_refresh_metadata": {MaxWorkers: 1},
-			"fetch_artwork":          {MaxWorkers: 1}, // secondary artwork pass — extra backdrops + alternates beyond the primary set GetDetail returned
+			"fetch_artwork":          {MaxWorkers: 4}, // secondary artwork pass — heya.media call + pending asset rows (ON CONFLICT DO NOTHING), no cross-item state
 
 			// Images.
 			"download_image":       {MaxWorkers: 4}, // hits CDN/heya.media, not source FS
@@ -194,9 +194,11 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"scan_track_fingerprint": {MaxWorkers: 1}, // chromaprint, first 120s only
 
 			// Skip segments — network calls to heya.media, not local
-			// decode. Single worker keeps a cold library sweep a
-			// polite trickle against the aggregator.
-			"scan_media_segments_file": {MaxWorkers: 1},
+			// decode. Parallelized: heya.media does its own rate limiting and
+			// the client caps in-flight requests (semaphore-8), so a cold sweep
+			// no longer needs to trickle. Job key is per-file (unique-while-
+			// active), no cross-item state.
+			"scan_media_segments_file": {MaxWorkers: 8},
 
 			// Local skip-segment detection — the fallback pass for files
 			// the community databases had nothing for. Real audio decode

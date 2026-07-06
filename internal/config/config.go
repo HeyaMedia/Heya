@@ -95,7 +95,7 @@ func Load() *Config {
 
 	return &Config{
 		DatabaseURL:         envString("HEYA_DATABASE_URL", "postgres://heya:heya@localhost:5440/heya?sslmode=disable"),
-		DatabaseMaxConns:    envInt("HEYA_DB_MAX_CONNS", 15),
+		DatabaseMaxConns:    envInt("HEYA_DB_MAX_CONNS", 30),
 		DatabaseMinConns:    envInt("HEYA_DB_MIN_CONNS", 2),
 		PassiveMode:         envBool("HEYA_PASSIVE_MODE", false),
 		AllowRemoteActive:   envBool("HEYA_ALLOW_REMOTE_ACTIVE", false),
