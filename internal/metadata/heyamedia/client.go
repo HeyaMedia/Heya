@@ -30,12 +30,13 @@ type Client struct {
 // cache (rate-limited upstream MusicBrainz / Last.fm), so the timeout
 // has to be generous. Search calls return in seconds.
 //
-// The transport is wrapped with loggingTransport so every upstream call
-// gets a DEBUG-level trace (method, path, status, duration) — see
-// transport.go for why that's useful and what it deliberately avoids
-// logging.
+// The transport stack (outermost first) is: retryTransport (bounded
+// concurrency + Retry-After-honoring backoff) → loggingTransport (per-attempt
+// DEBUG trace) → a tuned base transport (raised per-host connection pool). See
+// transport.go for the rationale and the tunable knobs.
 func NewClient(baseURL string) *Client {
-	httpClient := &http.Client{Timeout: 5 * time.Minute, Transport: newLoggingTransport(nil)}
+	transport := newRetryTransport(newLoggingTransport(newBaseTransport()))
+	httpClient := &http.Client{Timeout: 5 * time.Minute, Transport: transport}
 	c, err := gen.NewClientWithResponses(baseURL, gen.WithHTTPClient(httpClient))
 	if err != nil {
 		// NewClientWithResponses only errors when a ClientOption rejects

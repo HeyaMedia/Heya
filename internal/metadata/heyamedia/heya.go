@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -759,6 +762,38 @@ func IsNotFound(err error) bool {
 		return u.Status == 404
 	}
 	return false
+}
+
+// IsRetryable reports whether err from a heya.media call is worth retrying at
+// the job level (River re-runs the job on a later attempt). The client already
+// retries transient blips in-process; this is the slower, cross-attempt net for
+// sustained overload. Retryable: 429/408/5xx (except 501, a genuine book miss),
+// the client's own timeout, and connection-level blips. Terminal: any other
+// 4xx / "not found" / bad data. Caller cancellation (shutdown) is not retryable
+// here — the worker handles ctx separately so a shutdown doesn't stamp the item
+// as a hard failure.
+func IsRetryable(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var u *UpstreamError
+	if errors.As(err, &u) {
+		switch u.Status {
+		case http.StatusRequestTimeout, http.StatusTooManyRequests,
+			http.StatusInternalServerError, http.StatusBadGateway,
+			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		}
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 func upstreamErr(path string, status int, body []byte) error {
