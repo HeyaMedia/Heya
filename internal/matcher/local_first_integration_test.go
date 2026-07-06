@@ -98,6 +98,14 @@ func TestLocalFirstUpserts(t *testing.T) {
 		require.False(t, info.IsNew, "empty-search path must fold into the enriched series")
 		require.Equal(t, 1, countDragonKeep(), "no duplicate series may be forked on the empty path")
 
+		// Folding onto a COMPLETE series must schedule a forced re-enrich, or a
+		// brand-new episode's tv_episodes row would never be created.
+		var deb int
+		require.NoError(t, tx.QueryRow(ctx,
+			"SELECT count(*) FROM debounced_enriches WHERE media_item_id=$1", seriesID,
+		).Scan(&deb))
+		require.Equal(t, 1, deb, "fold onto a complete series must schedule a debounced re-enrich")
+
 		// Ambiguous / needs-review path (foldIntoMatched=false): a coincidental
 		// same-title+year file must NOT silently attach onto the published series;
 		// it materializes its own local stub for the user to adjudicate.

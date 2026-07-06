@@ -287,6 +287,14 @@ func (m *Matcher) materializeLocal(ctx context.Context, file sqlc.LibraryFile, p
 			log.Info().Int64("file_id", file.ID).Int64("media_id", existing.ID).
 				Str("title", title).Str("existing_status", existing.EnrichmentStatus).
 				Msg("materialize local: linked file to existing matched item instead of forking a duplicate")
+			// Folding a new episode's file onto a complete series won't create
+			// its tv_episodes row — the enrich worker's idempotency gate skips
+			// complete parents. Schedule the same trailing-edge forced re-enrich
+			// autoMatch uses for new episodes so the sweeper pulls the new
+			// season/episode. No-ops unless the parent is already complete.
+			if kind == metadata.KindTV {
+				m.maybeDebounceEnrich(ctx, existing.ID, "matcher.tv.local-fold")
+			}
 		}
 		return m.linkExisting(ctx, file.ID, existing.ID)
 	}
