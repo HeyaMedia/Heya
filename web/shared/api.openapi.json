@@ -6401,6 +6401,55 @@
         ],
         "type": "object"
       },
+      "ListRecentlyWatchedEpisodesRow": {
+        "additionalProperties": false,
+        "properties": {
+          "episode_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "episode_number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "episode_title": {
+            "type": "string"
+          },
+          "library_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "season_number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "series_slug": {
+            "type": "string"
+          },
+          "series_title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          }
+        },
+        "required": [
+          "episode_id",
+          "updated_at",
+          "media_item_id",
+          "library_id",
+          "series_title",
+          "series_slug",
+          "season_number",
+          "episode_number",
+          "episode_title"
+        ],
+        "type": "object"
+      },
       "ListRecentlyWatchedRow": {
         "additionalProperties": false,
         "properties": {
@@ -23284,6 +23333,55 @@
           }
         ],
         "summary": "Recently-watched activity",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
+    "/api/me/watch/recent-episodes": {
+      "get": {
+        "operationId": "recently-watched-episodes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ListRecentlyWatchedEpisodesRow"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Recently-watched TV episodes (one row per episode)",
         "tags": [
           "Me"
         ]

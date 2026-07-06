@@ -11,7 +11,7 @@
       :artists="recentArtists"
       :pinned-mode="pinnedHeroMode"
       @play="onHeroPlay"
-      @play-up-next="onPlayUpNext"
+      @play-up-next="playUpNext"
       @pin="onPinHeroMode"
     />
 
@@ -19,13 +19,13 @@
       <ContinueWatchingRow
         v-if="continueWatching.length"
         :items="continueWatching"
-        @play="onPlayContinue"
+        @play="playContinue"
       />
 
       <UpNextRow
         v-if="upNextItems.length"
         :items="upNextItems"
-        @play="onPlayUpNext"
+        @play="playUpNext"
       />
 
       <ContentRow
@@ -106,7 +106,6 @@
 import type { MediaItem, MediaDetail, Movie } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
-import type { UpNextItem } from '~/components/home/UpNextRow.vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 const { $heya } = useNuxtApp()
@@ -242,7 +241,11 @@ const continueWatching = computed<ContinueWatchingItem[]>(() => continueWatching
 const movieDetails = ref<Record<number, Movie>>({})
 const heroPlayInfo = ref<Record<number, HeroPlayInfo>>({})
 const heroTrailers = ref<Record<number, number>>({})
-const upNextItems = ref<UpNextItem[]>([])
+
+// Up Next + player navigation are shared with the Movies/TV Recommended
+// landings — see useUpNext / usePlaybackNav.
+const { upNextItems } = useUpNext(() => recentWatchedQuery.data.value)
+const { playContinue, playUpNext } = usePlaybackNav()
 
 // Pinned hero mode — server-persisted in user settings so it follows the
 // user across devices. The deck itself mirrors to localStorage for instant
@@ -404,71 +407,6 @@ function artistToRowItem(ar: RecentArtistEntry): MediaItem {
   } as unknown as MediaItem
 }
 
-function onPlayContinue(item: ContinueWatchingItem) {
-  // No file_id resolved → fall back to opening the detail page (rare,
-  // happens when the underlying library file was deleted or never matched).
-  if (!item.file_id) {
-    navigateTo(mediaUrl({ id: item.media_item_id, title: item.title, slug: item.slug, media_type: item.media_type } as MediaItem))
-    return
-  }
-  // Navigate straight into the player; VideoPlayer discovers the saved
-  // resume position itself and asks the user via its own in-player modal.
-  // Keeping the modal in the player avoids the cross-page transition
-  // positioning glitch and means a single source of truth for "ask resume?".
-  const params = new URLSearchParams({
-    media_item_id: String(item.media_item_id),
-    title: item.title,
-  })
-  if (item.entity_type) params.set('entity_type', item.entity_type)
-  if (item.entity_id) params.set('entity_id', String(item.entity_id))
-  navigateTo(`/watch/${item.file_id}?${params}`)
-}
-
-// Up Next: for each unique TV series in recently-watched, resolve the next
-// unwatched episode. Imperative because it depends on the recentWatched
-// query landing first AND iterates over the result set. Recomputed via
-// `watch` whenever the underlying data refreshes.
-async function rebuildUpNext() {
-  const recent = recentWatchedQuery.data.value
-  if (!recent?.length) { upNextItems.value = []; return }
-  type RecentlyWatchedRow = { media_item_id: number; title: string; slug: string; media_type: string }
-  const tvSeries = new Map<number, RecentlyWatchedRow>()
-  for (const row of recent) {
-    if (row.media_type !== 'tv') continue
-    if (!tvSeries.has(row.media_item_id)) tvSeries.set(row.media_item_id, row as RecentlyWatchedRow)
-  }
-  const resolved = await Promise.allSettled(
-    Array.from(tvSeries.values()).map(async row => {
-      const up = await $heya('/api/media/{id}/up-next', { path: { id: row.media_item_id as never } }) as {
-        has_next: boolean; file_id?: number; episode_id?: number
-        season_number?: number; episode_number?: number; episode_title?: string
-        runtime?: number
-      }
-      return { row, up }
-    })
-  )
-  const entries: UpNextItem[] = []
-  for (const r of resolved) {
-    if (r.status !== 'fulfilled') continue
-    const { row, up } = r.value
-    if (!up?.has_next || !up.file_id) continue
-    const sNum = up.season_number ?? 0
-    const eNum = up.episode_number ?? 0
-    const s = String(sNum).padStart(2, '0')
-    const e = String(eNum).padStart(2, '0')
-    const label = up.episode_title ? `S${s}E${e} · ${up.episode_title}` : `S${s}E${e}`
-    entries.push({
-      id: row.media_item_id, title: row.title, slug: row.slug,
-      season_number: sNum, episode_number: eNum, episode_label: label,
-      play_file_id: up.file_id,
-      episode_id: up.episode_id,
-      runtime_minutes: up.runtime,
-    })
-  }
-  upNextItems.value = entries.slice(0, 20)
-}
-watch(() => recentWatchedQuery.data.value, rebuildUpNext, { immediate: true })
-
 // Hero details — resolves movie/tv detail for each hero tile so the
 // HeroA component can render genres/rating/play button. Recomputed when
 // the underlying movie/tv lists refresh.
@@ -530,20 +468,6 @@ function onHeroPlay(item: MediaItem) {
     params.set('entity_id', String(item.id))
   }
   navigateTo(`/watch/${info.fileId}?${params}`)
-}
-
-function onPlayUpNext(entry: UpNextItem) {
-  const s = String(entry.season_number).padStart(2, '0')
-  const e = String(entry.episode_number).padStart(2, '0')
-  const params = new URLSearchParams({
-    media_item_id: String(entry.id),
-    title: `${entry.title} - S${s}E${e}`,
-  })
-  if (entry.episode_id) {
-    params.set('entity_type', 'episode')
-    params.set('entity_id', String(entry.episode_id))
-  }
-  navigateTo(`/watch/${entry.play_file_id}?${params}`)
 }
 
 // Live refresh: media.added (file just matched) / media.updated (enrich

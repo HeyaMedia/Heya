@@ -19,7 +19,7 @@ WITH agg AS (
   WHERE mr.media_type = $4::text AND mr.external_ids <> '{}'
   GROUP BY mr.external_ids
 )
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
 FROM agg
 JOIN media_items mi ON mi.external_ids @> agg.external_ids
 WHERE mi.media_type = $1::media_type
@@ -41,6 +41,7 @@ type ListLocalRecommendationsParams struct {
 
 type ListLocalRecommendationsRow struct {
 	ID          int64  `json:"id"`
+	LibraryID   int64  `json:"library_id"`
 	Title       string `json:"title"`
 	Slug        string `json:"slug"`
 	Year        string `json:"year"`
@@ -69,6 +70,7 @@ func (q *Queries) ListLocalRecommendations(ctx context.Context, arg ListLocalRec
 		var i ListLocalRecommendationsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,
@@ -86,7 +88,7 @@ func (q *Queries) ListLocalRecommendations(ctx context.Context, arg ListLocalRec
 }
 
 const listPersonUnseenMovies = `-- name: ListPersonUnseenMovies :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_cast mc
 JOIN media_items mi ON mi.id = mc.media_item_id
 JOIN movies m ON m.media_item_id = mi.id
@@ -109,6 +111,7 @@ type ListPersonUnseenMoviesParams struct {
 
 type ListPersonUnseenMoviesRow struct {
 	ID        int64          `json:"id"`
+	LibraryID int64          `json:"library_id"`
 	Title     string         `json:"title"`
 	Slug      string         `json:"slug"`
 	Year      string         `json:"year"`
@@ -128,6 +131,7 @@ func (q *Queries) ListPersonUnseenMovies(ctx context.Context, arg ListPersonUnse
 		var i ListPersonUnseenMoviesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,
@@ -147,7 +151,7 @@ func (q *Queries) ListPersonUnseenMovies(ctx context.Context, arg ListPersonUnse
 const listRecentlyReleasedMovies = `-- name: ListRecentlyReleasedMovies :many
 
 
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_items mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
@@ -160,6 +164,7 @@ LIMIT $1
 
 type ListRecentlyReleasedMoviesRow struct {
 	ID        int64          `json:"id"`
+	LibraryID int64          `json:"library_id"`
 	Title     string         `json:"title"`
 	Slug      string         `json:"slug"`
 	Year      string         `json:"year"`
@@ -187,6 +192,7 @@ func (q *Queries) ListRecentlyReleasedMovies(ctx context.Context, limit int32) (
 		var i ListRecentlyReleasedMoviesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,
@@ -213,7 +219,7 @@ WITH watched AS (
   WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
   GROUP BY ts.id, ts.media_item_id
 )
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
 FROM watched w
 JOIN media_items mi ON mi.id = w.media_item_id
 WHERE w.last_watched < now() - interval '30 days'
@@ -243,6 +249,7 @@ type ListRediscoverTVParams struct {
 
 type ListRediscoverTVRow struct {
 	ID        int64  `json:"id"`
+	LibraryID int64  `json:"library_id"`
 	Title     string `json:"title"`
 	Slug      string `json:"slug"`
 	Year      string `json:"year"`
@@ -262,6 +269,7 @@ func (q *Queries) ListRediscoverTV(ctx context.Context, arg ListRediscoverTVPara
 		var i ListRediscoverTVRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,
@@ -278,7 +286,7 @@ func (q *Queries) ListRediscoverTV(ctx context.Context, arg ListRediscoverTVPara
 }
 
 const listTopMoviesInGenreUnseen = `-- name: ListTopMoviesInGenreUnseen :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_items mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
@@ -300,6 +308,7 @@ type ListTopMoviesInGenreUnseenParams struct {
 
 type ListTopMoviesInGenreUnseenRow struct {
 	ID        int64          `json:"id"`
+	LibraryID int64          `json:"library_id"`
 	Title     string         `json:"title"`
 	Slug      string         `json:"slug"`
 	Year      string         `json:"year"`
@@ -319,6 +328,7 @@ func (q *Queries) ListTopMoviesInGenreUnseen(ctx context.Context, arg ListTopMov
 		var i ListTopMoviesInGenreUnseenRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,
@@ -337,7 +347,7 @@ func (q *Queries) ListTopMoviesInGenreUnseen(ctx context.Context, arg ListTopMov
 
 const listTopRatedTV = `-- name: ListTopRatedTV :many
 
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_items mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
@@ -349,6 +359,7 @@ LIMIT $1
 
 type ListTopRatedTVRow struct {
 	ID        int64          `json:"id"`
+	LibraryID int64          `json:"library_id"`
 	Title     string         `json:"title"`
 	Slug      string         `json:"slug"`
 	Year      string         `json:"year"`
@@ -369,6 +380,7 @@ func (q *Queries) ListTopRatedTV(ctx context.Context, limit int32) ([]ListTopRat
 		var i ListTopRatedTVRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,
@@ -386,7 +398,7 @@ func (q *Queries) ListTopRatedTV(ctx context.Context, limit int32) ([]ListTopRat
 }
 
 const listTopTVInGenre = `-- name: ListTopTVInGenre :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_items mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
@@ -403,6 +415,7 @@ type ListTopTVInGenreParams struct {
 
 type ListTopTVInGenreRow struct {
 	ID        int64          `json:"id"`
+	LibraryID int64          `json:"library_id"`
 	Title     string         `json:"title"`
 	Slug      string         `json:"slug"`
 	Year      string         `json:"year"`
@@ -422,6 +435,7 @@ func (q *Queries) ListTopTVInGenre(ctx context.Context, arg ListTopTVInGenrePara
 		var i ListTopTVInGenreRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,
@@ -439,7 +453,7 @@ func (q *Queries) ListTopTVInGenre(ctx context.Context, arg ListTopTVInGenrePara
 }
 
 const listTopUnwatchedMovies = `-- name: ListTopUnwatchedMovies :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_items mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
@@ -460,6 +474,7 @@ type ListTopUnwatchedMoviesParams struct {
 
 type ListTopUnwatchedMoviesRow struct {
 	ID        int64          `json:"id"`
+	LibraryID int64          `json:"library_id"`
 	Title     string         `json:"title"`
 	Slug      string         `json:"slug"`
 	Year      string         `json:"year"`
@@ -479,6 +494,7 @@ func (q *Queries) ListTopUnwatchedMovies(ctx context.Context, arg ListTopUnwatch
 		var i ListTopUnwatchedMoviesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
 			&i.Year,

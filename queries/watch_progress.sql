@@ -119,6 +119,28 @@ WHERE wp.user_id = $1 AND wp.completed = true
 ORDER BY COALESCE(mi.id, ep_mi.id), wp.updated_at DESC
 LIMIT 20;
 
+-- Recently watched EPISODES (not deduped to the show) — the TV "Recently
+-- Watched" rail shows one tile per episode, each painted with the show's poster
+-- (media_item_id) and an "S02E03 · Title" subtitle. Distinct from
+-- ListRecentlyWatched, which collapses to one row per media item.
+-- name: ListRecentlyWatchedEpisodes :many
+SELECT wp.entity_id AS episode_id, wp.updated_at,
+       ts.media_item_id,
+       ep_mi.library_id,
+       ep_mi.title AS series_title,
+       ep_mi.slug AS series_slug,
+       s.season_number,
+       ep.episode_number,
+       ep.title AS episode_title
+FROM user_watch_progress wp
+JOIN tv_episodes ep ON ep.id = wp.entity_id
+JOIN tv_seasons s ON s.id = ep.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+JOIN media_items ep_mi ON ep_mi.id = ts.media_item_id
+WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
+ORDER BY wp.updated_at DESC
+LIMIT 24;
+
 -- Episode progress for a specific series (for showing progress bars on episode cards)
 -- name: ListEpisodeProgressForSeries :many
 SELECT wp.entity_id AS episode_id, wp.progress_seconds, wp.total_seconds, wp.completed

@@ -6,13 +6,13 @@
       <ContinueWatchingRow
         v-if="continueItems.length"
         :items="continueItems"
-        @play="onPlayContinue"
+        @play="playContinue"
       />
 
       <UpNextRow
         v-if="section === 'tv' && upNextItems.length"
         :items="upNextItems"
-        @play="onPlayUpNext"
+        @play="playUpNext"
       />
 
       <ContentRow
@@ -51,7 +51,6 @@
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
-import type { UpNextItem } from '~/components/home/UpNextRow.vue'
 import { useQuery } from '@tanstack/vue-query'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
@@ -126,18 +125,58 @@ const continueItems = computed<ContinueWatchingItem[]>(() =>
   (continueQuery.data.value ?? []).filter(i => i.media_type === props.section),
 )
 
-const recentWatchedQuery = useQuery({
+// Movies: one tile per watched movie (/watch/recent, deduped to the item).
+const recentMoviesWatchedQuery = useQuery({
   queryKey: ['me', 'watch', 'recent'],
   queryFn: async () => (await $heya('/api/me/watch/recent')) as Array<{
-    media_item_id: number; title: string; poster_path: string; slug: string; media_type: string
+    media_item_id: number; title: string; slug: string; media_type: string
   }>,
   staleTime: 1000 * 30,
+  enabled: props.section === 'movie',
 })
-const recentWatched = computed<MediaItem[]>(() =>
-  (recentWatchedQuery.data.value ?? [])
-    .filter(r => r.media_type === props.section)
-    .map(r => ({ id: r.media_item_id, title: r.title, slug: r.slug, media_type: r.media_type, available: true } as unknown as MediaItem)),
-)
+
+// TV: one tile per watched EPISODE (not deduped to the show), each painted with
+// the show's poster and an "S02E03 · Title" subtitle.
+interface RecentEpisode {
+  episode_id: number
+  media_item_id: number
+  series_title: string
+  series_slug: string
+  season_number: number
+  episode_number: number
+  episode_title: string
+}
+const recentEpisodesQuery = useQuery({
+  queryKey: ['me', 'watch', 'recent-episodes'],
+  queryFn: async () => (await $heya('/api/me/watch/recent-episodes')) as RecentEpisode[],
+  staleTime: 1000 * 30,
+  enabled: props.section === 'tv',
+})
+
+const recentWatched = computed<MediaItem[]>(() => {
+  if (props.section === 'movie') {
+    return (recentMoviesWatchedQuery.data.value ?? [])
+      .filter(r => r.media_type === 'movie')
+      .map(r => ({ id: r.media_item_id, title: r.title, slug: r.slug, media_type: r.media_type, available: true } as unknown as MediaItem))
+  }
+  return (recentEpisodesQuery.data.value ?? []).map(episodeToRowItem)
+})
+
+// Watched episode → rail card: show poster (media_item_id) + episode subtitle;
+// `key` is the episode id so the same show can appear once per watched episode.
+function episodeToRowItem(e: RecentEpisode): MediaItem {
+  const code = `S${String(e.season_number).padStart(2, '0')}E${String(e.episode_number).padStart(2, '0')}`
+  return {
+    id: e.media_item_id,
+    key: `ep-${e.episode_id}`,
+    title: e.series_title,
+    year: '',
+    sub: e.episode_title ? `${code} · ${e.episode_title}` : code,
+    media_type: 'tv',
+    slug: e.series_slug,
+    available: true,
+  } as unknown as MediaItem
+}
 
 const loading = computed(() =>
   railsQuery.isPending.value
@@ -148,51 +187,17 @@ const isEmpty = computed(() =>
   && !recentWatched.value.length && !rails.value.length,
 )
 
-// ── Up Next (TV) ──────────────────────────────────────────────────────────
-// For each unique recently-watched series, resolve its next unwatched episode.
-// Imperative because it depends on the recent-watched query landing first and
-// fans out one /up-next call per series. Mirrors the home page's rebuildUpNext.
-const upNextItems = ref<UpNextItem[]>([])
-async function rebuildUpNext() {
-  if (props.section !== 'tv') { upNextItems.value = []; return }
-  const recent = recentWatchedQuery.data.value
-  if (!recent?.length) { upNextItems.value = []; return }
-  type Row = { media_item_id: number; title: string; slug: string; media_type: string }
-  const series = new Map<number, Row>()
-  for (const row of recent) {
-    if (row.media_type !== 'tv') continue
-    if (!series.has(row.media_item_id)) series.set(row.media_item_id, row as Row)
-  }
-  const resolved = await Promise.allSettled(
-    Array.from(series.values()).map(async row => {
-      const up = await $heya('/api/media/{id}/up-next', { path: { id: row.media_item_id as never } }) as {
-        has_next: boolean; file_id?: number; episode_id?: number
-        season_number?: number; episode_number?: number; episode_title?: string; runtime?: number
-      }
-      return { row, up }
-    }),
-  )
-  const entries: UpNextItem[] = []
-  for (const r of resolved) {
-    if (r.status !== 'fulfilled') continue
-    const { row, up } = r.value
-    if (!up?.has_next || !up.file_id) continue
-    const sNum = up.season_number ?? 0
-    const eNum = up.episode_number ?? 0
-    const s = String(sNum).padStart(2, '0')
-    const e = String(eNum).padStart(2, '0')
-    const label = up.episode_title ? `S${s}E${e} · ${up.episode_title}` : `S${s}E${e}`
-    entries.push({
-      id: row.media_item_id, title: row.title, slug: row.slug,
-      season_number: sNum, episode_number: eNum, episode_label: label,
-      play_file_id: up.file_id, episode_id: up.episode_id, runtime_minutes: up.runtime,
-    })
-  }
-  upNextItems.value = entries.slice(0, 24)
-}
-watch(() => recentWatchedQuery.data.value, rebuildUpNext, { immediate: true })
+// ── Up Next (TV) + player navigation ──────────────────────────────────────
+// Shared with the Home page. Up Next is fed from the episode-level watch feed;
+// useUpNext dedupes to unique series internally, so several watched episodes of
+// one show still yield a single Up Next tile.
+const { upNextItems } = useUpNext(() => props.section === 'tv'
+  ? (recentEpisodesQuery.data.value ?? []).map(e => ({
+    media_item_id: e.media_item_id, title: e.series_title, slug: e.series_slug, media_type: 'tv',
+  }))
+  : [])
+const { playContinue, playUpNext } = usePlaybackNav()
 
-// ── Navigation / playback ─────────────────────────────────────────────────
 // ContentRow types its tiles as MediaItem-ish; RailItem carries just the subset
 // it reads (id for the poster, title/year/sub for labels, slug+media_type for
 // the click-through), so widen it for the prop.
@@ -202,28 +207,6 @@ function toRow(items: RailItem[]): MediaItem[] {
 
 function go(item: MediaItem | RailItem) {
   navigateTo(mediaUrl(item as MediaItem))
-}
-
-function onPlayContinue(item: ContinueWatchingItem) {
-  if (!item.file_id) {
-    navigateTo(mediaUrl({ id: item.media_item_id, title: item.title, slug: item.slug, media_type: item.media_type } as MediaItem))
-    return
-  }
-  const params = new URLSearchParams({ media_item_id: String(item.media_item_id), title: item.title })
-  if (item.entity_type) params.set('entity_type', item.entity_type)
-  if (item.entity_id) params.set('entity_id', String(item.entity_id))
-  navigateTo(`/watch/${item.file_id}?${params}`)
-}
-
-function onPlayUpNext(entry: UpNextItem) {
-  const s = String(entry.season_number).padStart(2, '0')
-  const e = String(entry.episode_number).padStart(2, '0')
-  const params = new URLSearchParams({ media_item_id: String(entry.id), title: `${entry.title} - S${s}E${e}` })
-  if (entry.episode_id) {
-    params.set('entity_type', 'episode')
-    params.set('entity_id', String(entry.episode_id))
-  }
-  navigateTo(`/watch/${entry.play_file_id}?${params}`)
 }
 
 // Grouped TV event → rail card. Poster is the show's; the subtitle carries the
@@ -269,7 +252,7 @@ useLiveRefresh([
       ['media', 'recent', props.section],
     ],
   },
-  { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['recommended', props.section]] },
+  { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['me', 'watch', 'recent-episodes'], ['recommended', props.section]] },
 ])
 </script>
 

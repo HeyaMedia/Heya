@@ -147,6 +147,24 @@ func (a *App) ListRecentlyWatched(ctx context.Context, userID int64) ([]sqlc.Lis
 	return rows, nil
 }
 
+// ListRecentlyWatchedEpisodes is the episode-level counterpart of
+// ListRecentlyWatched for the TV "Recently Watched" rail: one row per watched
+// episode (not deduped to the show), each carrying its series' media item so the
+// FE paints the show poster with an "S02E03 · Title" subtitle. Series titles are
+// localized like the deduped variant.
+func (a *App) ListRecentlyWatchedEpisodes(ctx context.Context, userID int64) ([]sqlc.ListRecentlyWatchedEpisodesRow, error) {
+	q := sqlc.New(a.db)
+	rows, err := q.ListRecentlyWatchedEpisodes(ctx, userID)
+	if err != nil {
+		return rows, err
+	}
+	resolveTitle := a.preferredTitleResolver(ctx, q)
+	for i := range rows {
+		rows[i].SeriesTitle = resolveTitle(rows[i].MediaItemID, rows[i].LibraryID, rows[i].SeriesTitle)
+	}
+	return rows, nil
+}
+
 // ToggleFavorite flips the favorite flag for (entityType, entityID) and returns
 // the resulting state. entityType is honored (episode/season/track/artist/album
 // share this table keyed by their own id space — the old hardcoded "media_item"

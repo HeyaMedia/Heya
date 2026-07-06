@@ -52,6 +52,15 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(items), nil
 		})
 
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/watch/recent-episodes", "recently-watched-episodes", "Recently-watched TV episodes (one row per episode)", "Me")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListRecentlyWatchedEpisodesRow], error) {
+			items, err := app.ListRecentlyWatchedEpisodes(ctx, userFrom(ctx).ID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(items), nil
+		})
+
 	// Personalized discovery rails for a section's Recommended landing page.
 	// The server owns the ordering and which rails exist (watch-history genre /
 	// actor affinity, top-unwatched, rediscover, local TMDB recs); the FE

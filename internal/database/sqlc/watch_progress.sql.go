@@ -329,6 +329,71 @@ func (q *Queries) ListRecentlyWatched(ctx context.Context, userID int64) ([]List
 	return items, nil
 }
 
+const listRecentlyWatchedEpisodes = `-- name: ListRecentlyWatchedEpisodes :many
+SELECT wp.entity_id AS episode_id, wp.updated_at,
+       ts.media_item_id,
+       ep_mi.library_id,
+       ep_mi.title AS series_title,
+       ep_mi.slug AS series_slug,
+       s.season_number,
+       ep.episode_number,
+       ep.title AS episode_title
+FROM user_watch_progress wp
+JOIN tv_episodes ep ON ep.id = wp.entity_id
+JOIN tv_seasons s ON s.id = ep.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+JOIN media_items ep_mi ON ep_mi.id = ts.media_item_id
+WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
+ORDER BY wp.updated_at DESC
+LIMIT 24
+`
+
+type ListRecentlyWatchedEpisodesRow struct {
+	EpisodeID     int64              `json:"episode_id"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	MediaItemID   int64              `json:"media_item_id"`
+	LibraryID     int64              `json:"library_id"`
+	SeriesTitle   string             `json:"series_title"`
+	SeriesSlug    string             `json:"series_slug"`
+	SeasonNumber  int32              `json:"season_number"`
+	EpisodeNumber int32              `json:"episode_number"`
+	EpisodeTitle  string             `json:"episode_title"`
+}
+
+// Recently watched EPISODES (not deduped to the show) — the TV "Recently
+// Watched" rail shows one tile per episode, each painted with the show's poster
+// (media_item_id) and an "S02E03 · Title" subtitle. Distinct from
+// ListRecentlyWatched, which collapses to one row per media item.
+func (q *Queries) ListRecentlyWatchedEpisodes(ctx context.Context, userID int64) ([]ListRecentlyWatchedEpisodesRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyWatchedEpisodes, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentlyWatchedEpisodesRow{}
+	for rows.Next() {
+		var i ListRecentlyWatchedEpisodesRow
+		if err := rows.Scan(
+			&i.EpisodeID,
+			&i.UpdatedAt,
+			&i.MediaItemID,
+			&i.LibraryID,
+			&i.SeriesTitle,
+			&i.SeriesSlug,
+			&i.SeasonNumber,
+			&i.EpisodeNumber,
+			&i.EpisodeTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWatchedEpisodeNumbersForMediaItems = `-- name: ListWatchedEpisodeNumbersForMediaItems :many
 SELECT ts.media_item_id, s.season_number, e.episode_number
 FROM user_watch_progress wp

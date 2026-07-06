@@ -102,24 +102,42 @@ func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 	return views, nil
 }
 
+// titleTarget is the minimal (media item, its library) pair the batched title
+// overlay needs — so callers holding slim rows (recommendation rails) can reuse
+// it without a full sqlc.MediaItem.
+type titleTarget struct {
+	ID        int64
+	LibraryID int64
+}
+
 // preferredTitleOverlay is the batched form of preferredTitleResolver for
 // list pages: two queries per distinct preferred language (wanted language +
 // an 'en' fallback for the misses) instead of one per item — the home rails
 // paid ~60 sequential round trips per load through the per-item resolver.
 // Returns mediaItemID → overlay title; absent keys mean "keep the raw title".
 func (a *App) preferredTitleOverlay(ctx context.Context, q *sqlc.Queries, items []sqlc.MediaItem) map[int64]string {
+	targets := make([]titleTarget, len(items))
+	for i, it := range items {
+		targets[i] = titleTarget{ID: it.ID, LibraryID: it.LibraryID}
+	}
+	return a.preferredTitleOverlayFor(ctx, q, targets)
+}
+
+// preferredTitleOverlayFor is preferredTitleOverlay over bare (id, library)
+// pairs. See that function for the batching rationale.
+func (a *App) preferredTitleOverlayFor(ctx context.Context, q *sqlc.Queries, targets []titleTarget) map[int64]string {
 	libLang := map[int64]string{}
 	idsByLang := map[string][]int64{}
-	for _, it := range items {
-		lang, cached := libLang[it.LibraryID]
+	for _, t := range targets {
+		lang, cached := libLang[t.LibraryID]
 		if !cached {
-			if lib, err := q.GetLibraryByID(ctx, it.LibraryID); err == nil {
+			if lib, err := q.GetLibraryByID(ctx, t.LibraryID); err == nil {
 				lang = metadata.ParseSettings(lib.Settings).PreferredLanguage
 			}
-			libLang[it.LibraryID] = lang
+			libLang[t.LibraryID] = lang
 		}
 		if lang != "" {
-			idsByLang[lang] = append(idsByLang[lang], it.ID)
+			idsByLang[lang] = append(idsByLang[lang], t.ID)
 		}
 	}
 

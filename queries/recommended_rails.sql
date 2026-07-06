@@ -10,7 +10,7 @@
 -- Recently released films we own — ordered by the film's own release date, not
 -- when the file landed (that's "Recently Added"). Only dated, already-released.
 -- name: ListRecentlyReleasedMovies :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_items mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
@@ -22,7 +22,7 @@ LIMIT $1;
 
 -- Highly-rated films the user hasn't finished yet.
 -- name: ListTopUnwatchedMovies :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_items mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
@@ -49,7 +49,7 @@ LIMIT 5;
 
 -- Top-rated unseen films in a genre (the payload for "More <Genre>").
 -- name: ListTopMoviesInGenreUnseen :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_items mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
@@ -76,7 +76,7 @@ LIMIT $2;
 
 -- A given actor's owned, unseen films (payload for "Starring <Actor>").
 -- name: ListPersonUnseenMovies :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_cast mc
 JOIN media_items mi ON mi.id = mc.media_item_id
 JOIN movies m ON m.media_item_id = mi.id
@@ -94,7 +94,7 @@ LIMIT sqlc.arg(lim);
 
 -- Highest-rated shows we own.
 -- name: ListTopRatedTV :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_items mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
@@ -119,7 +119,7 @@ LIMIT 5;
 
 -- Top-rated shows in a genre (payload for TV "More <Genre>").
 -- name: ListTopTVInGenre :many
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_items mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
@@ -140,7 +140,7 @@ WITH watched AS (
   WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
   GROUP BY ts.id, ts.media_item_id
 )
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
 FROM watched w
 JOIN media_items mi ON mi.id = w.media_item_id
 WHERE w.last_watched < now() - interval '30 days'
@@ -175,7 +175,7 @@ WITH agg AS (
   WHERE mr.media_type = sqlc.arg(rec_type)::text AND mr.external_ids <> '{}'
   GROUP BY mr.external_ids
 )
-SELECT mi.id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
+SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
 FROM agg
 JOIN media_items mi ON mi.external_ids @> agg.external_ids
 WHERE mi.media_type = sqlc.arg(item_type)::media_type

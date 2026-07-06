@@ -19,6 +19,10 @@ type RecRailItem struct {
 	MediaType string  `json:"media_type"`
 	Rating    float64 `json:"rating,omitempty"`
 	Available bool    `json:"available"`
+
+	// libraryID is carried so the whole rail stack can be title-localized in one
+	// batch (see localizeRails). Unexported → never serialized, off the schema.
+	libraryID int64
 }
 
 // RecRail is a titled row of RecRailItems. Key is a stable id the FE uses for the
@@ -63,14 +67,14 @@ func (a *App) movieRecommendations(ctx context.Context, userID int64) (Recommend
 
 	if rows, err := q.ListRecentlyReleasedMovies(ctx, recRailLimit); err == nil {
 		items := mapRecRows(rows, func(r sqlc.ListRecentlyReleasedMoviesRow) RecRailItem {
-			return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
+			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 		})
 		rails = appendRail(rails, "recently-released", "Recently Released", "New in theaters & digital", items, 3)
 	}
 
 	if rows, err := q.ListTopUnwatchedMovies(ctx, sqlc.ListTopUnwatchedMoviesParams{UserID: userID, Limit: recRailLimit}); err == nil {
 		items := mapRecRows(rows, func(r sqlc.ListTopUnwatchedMoviesRow) RecRailItem {
-			return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
+			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 		})
 		rails = appendRail(rails, "top-unwatched", "Top Unwatched Movies", "Highly rated, not seen yet", items, 3)
 	}
@@ -84,7 +88,7 @@ func (a *App) movieRecommendations(ctx context.Context, userID int64) (Recommend
 				continue
 			}
 			items := mapRecRows(rows, func(r sqlc.ListPersonUnseenMoviesRow) RecRailItem {
-				return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
+				return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 			})
 			rails = appendRail(rails, "by-actor", "Starring "+ac.Name, "Because you've watched their films", items, 4)
 			break
@@ -100,7 +104,7 @@ func (a *App) movieRecommendations(ctx context.Context, userID int64) (Recommend
 				continue
 			}
 			items := mapRecRows(rows, func(r sqlc.ListTopMoviesInGenreUnseenRow) RecRailItem {
-				return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
+				return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 			})
 			rails = appendRail(rails, "more-genre", "More "+g.Genre, "Because you watch a lot of "+g.Genre, items, 4)
 			break
@@ -108,6 +112,7 @@ func (a *App) movieRecommendations(ctx context.Context, userID int64) (Recommend
 	}
 
 	rails = a.appendLocalRecRail(ctx, q, rails, userID, "movie", "Recommended Movies")
+	a.localizeRails(ctx, q, rails)
 	return RecommendedResult{Rails: rails}, nil
 }
 
@@ -117,7 +122,7 @@ func (a *App) tvRecommendations(ctx context.Context, userID int64) (RecommendedR
 
 	if rows, err := q.ListTopRatedTV(ctx, recRailLimit); err == nil {
 		items := mapRecRows(rows, func(r sqlc.ListTopRatedTVRow) RecRailItem {
-			return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
+			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 		})
 		rails = appendRail(rails, "top-rated", "Top Rated TV", "The best-reviewed shows you own", items, 3)
 	}
@@ -129,7 +134,7 @@ func (a *App) tvRecommendations(ctx context.Context, userID int64) (RecommendedR
 				continue
 			}
 			items := mapRecRows(rows, func(r sqlc.ListTopTVInGenreRow) RecRailItem {
-				return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
+				return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 			})
 			rails = appendRail(rails, "more-genre", "More "+g.Genre, "Because you watch a lot of "+g.Genre, items, 4)
 			break
@@ -139,12 +144,13 @@ func (a *App) tvRecommendations(ctx context.Context, userID int64) (RecommendedR
 	// "Rediscover": shows watched a while ago that have aired new episodes since.
 	if rows, err := q.ListRediscoverTV(ctx, sqlc.ListRediscoverTVParams{UserID: userID, Limit: recRailLimit}); err == nil {
 		items := mapRecRows(rows, func(r sqlc.ListRediscoverTVRow) RecRailItem {
-			return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, 0)
+			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, 0)
 		})
 		rails = appendRail(rails, "rediscover", "Rediscover", "New episodes since you last watched", items, 1)
 	}
 
 	rails = a.appendLocalRecRail(ctx, q, rails, userID, "tv", "Recommended Shows")
+	a.localizeRails(ctx, q, rails)
 	return RecommendedResult{Rails: rails}, nil
 }
 
@@ -161,15 +167,39 @@ func (a *App) appendLocalRecRail(ctx context.Context, q *sqlc.Queries, rails []R
 		return rails
 	}
 	items := mapRecRows(rows, func(r sqlc.ListLocalRecommendationsRow) RecRailItem {
-		return newRecRailItem(r.ID, r.Title, r.Slug, r.Year, r.MediaType, 0)
+		return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, 0)
 	})
 	return appendRail(rails, "recommended", title, "Frequently recommended alongside what you own", items, 3)
 }
 
 // newRecRailItem stamps Available=true — every rail query already gates on a live,
 // non-deleted library file, so anything returned is playable.
-func newRecRailItem(id int64, title, slug, year, mediaType string, rating float64) RecRailItem {
-	return RecRailItem{ID: id, Title: title, Slug: slug, Year: year, MediaType: mediaType, Rating: rating, Available: true}
+func newRecRailItem(id, libraryID int64, title, slug, year, mediaType string, rating float64) RecRailItem {
+	return RecRailItem{ID: id, Title: title, Slug: slug, Year: year, MediaType: mediaType, Rating: rating, Available: true, libraryID: libraryID}
+}
+
+// localizeRails overlays each item's title with its library's PreferredLanguage
+// variant (falling back to English, then the raw title) in a single batched
+// pass across the whole rail stack — the same overlay the enriched list pages
+// use, so a Japanese-preferred library shows the same localized titles here.
+func (a *App) localizeRails(ctx context.Context, q *sqlc.Queries, rails []RecRail) {
+	var targets []titleTarget
+	for _, r := range rails {
+		for _, it := range r.Items {
+			targets = append(targets, titleTarget{ID: it.ID, LibraryID: it.libraryID})
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	overlay := a.preferredTitleOverlayFor(ctx, q, targets)
+	for ri := range rails {
+		for ii := range rails[ri].Items {
+			if t, ok := overlay[rails[ri].Items[ii].ID]; ok && t != "" {
+				rails[ri].Items[ii].Title = t
+			}
+		}
+	}
 }
 
 // mapRecRows maps a typed sqlc row slice into RecRailItems.
