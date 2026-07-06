@@ -1,5 +1,19 @@
 <template>
   <aside class="lib-sidebar scroll" :class="{ 'lib-sidebar-sheet': variant === 'sheet' }">
+    <!-- Recommended landing (movies / tv only). Bare `/movies` route; the flat
+         grid moves under "All {{ typeLabel }}" below. -->
+    <div v-if="showRecommended" class="lib-section" style="margin-bottom: 20px">
+      <div
+        class="lib-item"
+        role="button"
+        :class="{ active: activeView === 'recommended' }"
+        @click="$emit('view', 'recommended')"
+      >
+        <Icon name="star" :size="16" style="color: var(--gold)" />
+        <span>Recommended</span>
+      </div>
+    </div>
+
     <div class="lib-section">
       <div class="section-title" style="padding: 0 14px; margin-bottom: 10px">Libraries</div>
       <div
@@ -10,7 +24,7 @@
       >
         <Icon name="folder" :size="16" />
         <span>All {{ typeLabel }}</span>
-        <span class="count">{{ totalCount }}</span>
+        <span v-if="totalCount > 0" class="count">{{ totalCount }}</span>
       </div>
       <div
         v-for="lib in libraries"
@@ -91,7 +105,7 @@
       </div>
     </div>
 
-    <div class="lib-footer">
+    <div v-if="totalCount > 0" class="lib-footer">
       <div class="lib-footer-text">{{ totalCount }} titles</div>
     </div>
   </aside>
@@ -111,6 +125,8 @@ const props = defineProps<{
   dragOverListId?: number | null
   /** TMDB collections with local movies. Undefined hides the Franchises section. */
   collections?: CollectionBrowse[]
+  /** Show the "Recommended" landing row at the top (movies / tv only). */
+  showRecommended?: boolean
   /** 'sidebar' (default) = fixed 240px aside. 'sheet' = fills an AppSheet body
    *  on phone (movies/tv/books index.vue) — same markup/behavior, just sheds
    *  the standalone-aside chrome. See the `.lib-sidebar-sheet` rule below. */

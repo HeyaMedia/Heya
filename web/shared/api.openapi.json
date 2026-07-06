@@ -10981,6 +10981,74 @@
         ],
         "type": "object"
       },
+      "RecRail": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RecRailItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "items"
+        ],
+        "type": "object"
+      },
+      "RecRailItem": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "rating": {
+            "format": "double",
+            "type": "number"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sub": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "slug",
+          "media_type",
+          "available"
+        ],
+        "type": "object"
+      },
       "RecentAlbumsBody": {
         "additionalProperties": false,
         "properties": {
@@ -11207,6 +11275,33 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "RecommendedResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RecommendedResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "rails": {
+            "items": {
+              "$ref": "#/components/schemas/RecRail"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "rails"
         ],
         "type": "object"
       },
@@ -22777,6 +22872,65 @@
           }
         ],
         "summary": "User's recently-played tracks (deduped)",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
+    "/api/me/recommended/{section}": {
+      "get": {
+        "operationId": "recommended-rails",
+        "parameters": [
+          {
+            "description": "Section to build rails for",
+            "in": "path",
+            "name": "section",
+            "required": true,
+            "schema": {
+              "description": "Section to build rails for",
+              "enum": [
+                "movie",
+                "tv"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendedResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Personalized discovery rails for a section",
         "tags": [
           "Me"
         ]

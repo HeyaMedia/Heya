@@ -6,6 +6,7 @@
       :active-lib="activeLib"
       :active-view="activeView"
       type-label="Movies"
+      :show-recommended="true"
       :total-count="items.length"
       :loved-count="favoritedSet.size"
       :user-lists="userLists"
@@ -30,6 +31,7 @@
         :active-lib="activeLib"
         :active-view="activeView"
         type-label="Movies"
+      :show-recommended="true"
         :total-count="items.length"
         :loved-count="favoritedSet.size"
         :user-lists="userLists"
@@ -53,6 +55,7 @@
         :active-lib="activeLib"
         :active-view="activeView"
         type-label="Movies"
+      :show-recommended="true"
         :total-count="items.length"
         :loved-count="favoritedSet.size"
         :user-lists="userLists"
@@ -65,7 +68,10 @@
         @list-dragleave="onListDragLeave"
       />
     </AppSheet>
-    <div ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
+    <!-- Recommended landing (bare /movies). Its own scroll container; the flat
+         grid + franchises live in the sibling main below. -->
+    <RecommendedView v-if="activeView === 'recommended'" section="movie" class="library-main" />
+    <div v-else ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
       <!-- Franchises overview — a page of its own (/movies/franchises). Reuses
            the FilterBar (sort + grid/detail/list toggle, no movie filters) and
            the same view chrome as the library; cards/rows deep-link into the
@@ -406,9 +412,22 @@ function openListSheet(item: EnrichedMediaItem) {
 
 // View mode, sort, filters, sidebar selection and scroll offset all persist —
 // navigating into a movie and back restores the page exactly as it was.
-const browse = useBrowseState('movies')
+const browse = useBrowseState('movies', { recommendedDefault: true })
 const { view, sort, filters, activeLib, activeView, scrollTop } = browse
 const { isDirty, restoreScroll } = browse
+
+// The Recommended landing (bare /movies) renders rails from their own queries
+// and never needs the full item list, so defer the up-to-5000-item /enriched
+// fetch until a grid/franchises view is actually entered.
+const itemsLoaded = ref(false)
+async function ensureItems() {
+  if (itemsLoaded.value) return
+  loading.value = true
+  await loadItems()
+  itemsLoaded.value = true
+  loading.value = false
+}
+watch(activeView, (v) => { if (v !== 'recommended') ensureItems() })
 
 const favoritedSet = ref<Set<number>>(new Set())
 const watchedSet = ref<Set<number>>(new Set())
@@ -685,13 +704,14 @@ async function loadItems() {
 // ref via loadItems() — so useLiveRefresh's `refetch` escape hatch drives
 // it directly instead of a `keys` invalidation.
 useLiveRefresh([
-  { events: ['media.added', 'media.updated'], filter: byMediaType('movie'), refetch: loadItems },
+  // Only refetch the grid once it's actually been loaded — on the Recommended
+  // landing the item list is deferred and RecommendedView refreshes its own rails.
+  { events: ['media.added', 'media.updated'], filter: byMediaType('movie'), refetch: () => { if (itemsLoaded.value) loadItems() } },
 ])
 
 onMounted(async () => {
   const { $heya } = useNuxtApp()
-  const [, libRes, stateRes, listsRes, colRes] = await Promise.allSettled([
-    loadItems(),
+  const [libRes, stateRes, listsRes, colRes] = await Promise.allSettled([
     $heya('/api/libraries') as Promise<Library[]>,
     fetchUserState('movies'),
     $heya('/api/me/lists') as Promise<UserList[]>,
@@ -704,6 +724,9 @@ onMounted(async () => {
   }
   if (listsRes.status === 'fulfilled') userLists.value = listsRes.value
   if (colRes.status === 'fulfilled') collections.value = colRes.value ?? []
+
+  // Grid/franchises need the full item list; the Recommended landing doesn't.
+  if (activeView.value !== 'recommended') await ensureItems()
   loading.value = false
 
   // Re-validate the persisted sidebar selection against fresh data — a

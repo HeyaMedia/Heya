@@ -52,6 +52,21 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(items), nil
 		})
 
+	// Personalized discovery rails for a section's Recommended landing page.
+	// The server owns the ordering and which rails exist (watch-history genre /
+	// actor affinity, top-unwatched, rediscover, local TMDB recs); the FE
+	// composes the activity rows (continue / up-next / recently added) itself.
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/recommended/{section}", "recommended-rails", "Personalized discovery rails for a section", "Me")),
+		func(ctx context.Context, in *struct {
+			Section string `path:"section" enum:"movie,tv" doc:"Section to build rails for"`
+		}) (*JSONOutput[service.RecommendedResult], error) {
+			result, err := app.Recommended(ctx, userFrom(ctx).ID, in.Section)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(result), nil
+		})
+
 	// --- Favorites ---
 	huma.Register(api, secured(op(http.MethodPost, "/api/me/favorites", "toggle-favorite", "Toggle a favorite flag", "Me")),
 		func(ctx context.Context, in *struct {

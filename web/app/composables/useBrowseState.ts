@@ -76,7 +76,12 @@ function normalizeSelection(activeLib: number | null, activeView: string | null)
   return activeView ? { activeLib: null, activeView } : { activeLib, activeView: null }
 }
 
-export function useBrowseState(page: string) {
+export function useBrowseState(page: string, opts: { recommendedDefault?: boolean } = {}) {
+  // When recommendedDefault is set (movies / tv), the bare `/movies` path is
+  // the Recommended landing (activeView='recommended') and the flat grid moves
+  // to `/movies/all`. Books opts out, so its bare `/books` stays the grid.
+  const recommended = opts.recommendedDefault ?? false
+
   let store = stores.get(page)
   if (!store) {
     store = reactive(initialStore(page))
@@ -93,7 +98,8 @@ export function useBrowseState(page: string) {
   // mid-navigation) so the sync watchers below leave the store untouched
   // rather than reading it as "All" and hijacking the navigation.
   function selectionFromRoute(): Selection | null {
-    if (route.path === base) return { activeLib: null, activeView: null }
+    if (route.path === base) return { activeLib: null, activeView: recommended ? 'recommended' : null }
+    if (recommended && route.path === `${base}/all`) return { activeLib: null, activeView: null }
     if (route.path === `${base}/loved`) return { activeLib: null, activeView: 'loved' }
     if (route.path === `${base}/franchises`) return { activeLib: null, activeView: 'franchises' }
     const rest = route.path.startsWith(`${base}/`) ? route.path.slice(base.length + 1) : ''
@@ -108,11 +114,14 @@ export function useBrowseState(page: string) {
   }
 
   function pathForSelection(sel: Selection): string {
+    if (sel.activeView === 'recommended') return base
     if (sel.activeView === 'loved') return `${base}/loved`
     if (sel.activeView === 'franchises') return `${base}/franchises`
     if (sel.activeView?.startsWith('list-')) return `${base}/list/${sel.activeView.slice(5)}`
     if (sel.activeLib != null) return `${base}/library/${sel.activeLib}`
-    return base
+    // {null, null} is the flat "All" grid — its own path when Recommended owns
+    // the bare route, otherwise the bare route itself (books).
+    return recommended ? `${base}/all` : base
   }
 
   // Reconcile the store from the URL up front — synchronous and before the
