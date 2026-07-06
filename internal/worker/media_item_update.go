@@ -7,45 +7,24 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// updateMediaItemParamsFrom spells every UpdateMediaItem field from the
-// current row. Callers override the one or two fields they're changing —
-// UpdateMediaItem is a full-row write, so any field not copied here would be
-// silently blanked.
-func updateMediaItemParamsFrom(item sqlc.MediaItem) sqlc.UpdateMediaItemParams {
-	return sqlc.UpdateMediaItemParams{
-		ID:               item.ID,
-		Title:            item.Title,
-		SortTitle:        item.SortTitle,
-		Year:             item.Year,
-		Description:      item.Description,
-		PosterPath:       item.PosterPath,
-		BackdropPath:     item.BackdropPath,
-		ExternalIds:      item.ExternalIds,
-		Tagline:          item.Tagline,
-		OriginalTitle:    item.OriginalTitle,
-		OriginalLanguage: item.OriginalLanguage,
-		Status:           item.Status,
-		ProviderKind:     item.ProviderKind,
-		HeyaSlug:         item.HeyaSlug,
-	}
-}
-
 // updateArtworkPathColumns mirrors freshly-detected art onto
 // media_items.poster_path / backdrop_path so the legacy column-based lookup
 // in /api/media/{id}/image/* (and the list endpoints) immediately returns
 // the file without falling back to media_assets. No-op when nothing changed.
 //
-// Callers doing multiple updates against one item snapshot must advance the
-// snapshot after each call (item.PosterPath = ...) — the write is full-row,
-// so a stale snapshot would revert the previous update.
+// Each column is written on its own targeted UPDATE (poster_path or
+// backdrop_path alone), not a full-row rewrite — so a concurrent
+// poster-download and backdrop-download for the same item can't stomp each
+// other's column from a stale in-memory snapshot.
 func updateArtworkPathColumns(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, posterPath, backdropPath string) {
-	if item.PosterPath == posterPath && item.BackdropPath == backdropPath {
-		return
+	if item.PosterPath != posterPath {
+		if err := q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: item.ID, PosterPath: posterPath}); err != nil {
+			log.Debug().Err(err).Int64("item_id", item.ID).Msg("update poster_path failed")
+		}
 	}
-	p := updateMediaItemParamsFrom(item)
-	p.PosterPath = posterPath
-	p.BackdropPath = backdropPath
-	if _, err := q.UpdateMediaItem(ctx, p); err != nil {
-		log.Debug().Err(err).Int64("item_id", item.ID).Msg("update artwork path columns failed")
+	if item.BackdropPath != backdropPath {
+		if err := q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: item.ID, BackdropPath: backdropPath}); err != nil {
+			log.Debug().Err(err).Int64("item_id", item.ID).Msg("update backdrop_path failed")
+		}
 	}
 }
