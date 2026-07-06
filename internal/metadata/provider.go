@@ -73,6 +73,11 @@ type MediaDetail struct {
 	Rating       float64           `json:"rating"`
 	ProviderKind string            `json:"provider_kind,omitempty"`
 	HeyaSlug     string            `json:"heya_slug,omitempty"`
+	// Artwork is the full classified artwork catalogue (alternate posters +
+	// extra backdrops + logos/banners/clearart/thumbs/disc) carried by the same
+	// detail response. Used to write secondary media_assets rows at enrich time
+	// without a second heya.media call.
+	Artwork []ArtworkResult `json:"artwork,omitempty"`
 
 	// Movie
 	RuntimeMinutes      int                       `json:"runtime_minutes,omitempty"`

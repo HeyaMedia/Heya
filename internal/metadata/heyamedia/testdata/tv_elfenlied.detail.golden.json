@@ -401,6 +401,1171 @@
   "rating": 8.304,
   "provider_kind": "anime",
   "heya_slug": "elfen-lied-2004",
+  "artwork": [
+    {
+      "url": "https://media.heya.media/images/tmdb/6c/92/6c92c113b6143b334843a25662b2203d881c818da0fd1ec4f189d3e1c56acc51.webp",
+      "asset_type": "poster",
+      "language": "ja",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 660,
+      "height": 990,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/a4/4f/a44fb4021591e638398037ea7a3b8ff778e510a39c749f46db0db3629baf3933.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 2000,
+      "height": 3000,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/2b/74/2b749e71a72e648981fd23644665fcb559f7df580897b1c8678030e5064aab6f.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 2000,
+      "height": 3000,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/89/71/89715caf7cd4329cd20e6787a62cd525a68d607947285990f817fd14a03f9d67.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 2000,
+      "height": 3000,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/c6/1b/c61b95203d36cfad0f72a00a7f1ecb5d81c6ae6dcf2a848dbe19b1c32748cbde.webp",
+      "asset_type": "poster",
+      "language": "uk",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 853,
+      "height": 1280,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/5d/0a/5d0af79addaed6a403023112c2eea697e487f58ee8338f75c56ecd39712aec32.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 1000,
+      "height": 1500,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/a0/84/a084586bbdfeb1f9139f1a9b64deb03962cbd6ce2cba4d8fdbd25b5302f5c873.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 1200,
+      "height": 1800,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/8b/fe/8bfee06544c95a20afb2595c6834463d42600a0cb527d7261f64159b1541f87a.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 2.542,
+      "width": 666,
+      "height": 999,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/1a/62/1a6282ee70067a2c0daf0c7676844a77c129f84ae4f96727bc26fd70a176dd65.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 2.278,
+      "width": 500,
+      "height": 750,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/7c/a2/7ca28fc85dc7f9f6058808a2fc2d3c8439426e4f6a269dd2c68f10138f57d589.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 500,
+      "height": 750,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/42/b8/42b82c6987f8c882d9818c3917cc1be4c655a4d419c9f21fcc48eca8a272a5d5.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 500,
+      "height": 750,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/70/b6/70b67ee46a42150401049b4ff641285cfda5ef2e2cf576b1d60672039fb36ab2.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 500,
+      "height": 750,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/e8/16/e81614077329a6857ed45ac16061807f0ca15f8df70e20dfb9d5aca869149fa1.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 500,
+      "height": 750,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/e8/2e/e82ee519d8fd81b6883e9989282b57ea0e6755ca0eb0d8ca55c54c3e37b49e47.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 500,
+      "height": 750,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/e4/b1/e4b1b06b536664bb9563baf27bc49de32759d5c5407a968d77451b2afccb39f3.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 500,
+      "height": 750,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/3c/d6/3cd617182ec8d5f5c1630a0a2cb79d8ff46f776349f60309eff82e2b1a8cba7c.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 1100,
+      "height": 1650,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/56/8b/568b2d51f93644f64e6f11e48b4662c0867ba3357b6e0e246107cf1863a5f117.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "score": 1.31,
+      "width": 1200,
+      "height": 1800,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/6a/69/6a69c43453833d7ea97c3d0ddd87765598a374d0de2525e43229970551c7a1a4.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "score": 0.166,
+      "width": 1000,
+      "height": 1500,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/27/83/278312fb8686714c33825fc068e5139560549e9cc5912ce4d286b33e7fdda4c9.webp",
+      "asset_type": "poster",
+      "language": "ja",
+      "source": "tmdb",
+      "width": 680,
+      "height": 1000,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/2b/95/2b95d124b7338d639b9eaa853333e21cb077551d3a0f045d8e6943dbeea4f805.webp",
+      "asset_type": "poster",
+      "language": "ka",
+      "source": "tmdb",
+      "width": 1080,
+      "height": 1599,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/f2/62/f2629a5936a92a6ba9c392f2efc3ca29b254ad7a8e762064f2f7f3e7bdc6a224.webp",
+      "asset_type": "poster",
+      "language": "ru",
+      "source": "tmdb",
+      "width": 800,
+      "height": 1200,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/45/b0/45b0d6e628cdca80bc54d9f47e60f3d87d57e085d3f9a7f3bd3e42965fcb3e09.webp",
+      "asset_type": "poster",
+      "language": "ru",
+      "source": "tmdb",
+      "width": 1200,
+      "height": 1800,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/ef/b0/efb0c5e44d21a9ea35f7d54b0b39dc36903db4d7337d39639588845e683fbe66.webp",
+      "asset_type": "poster",
+      "language": "ru",
+      "source": "tmdb",
+      "width": 1200,
+      "height": 1800,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/5e/f2/5ef24a8b7c3233a5dc1c92bdf19d8f58a09929fa281cde14b9641b88cd15fceb.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "width": 1000,
+      "height": 1500,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/ef/a7/efa71106f6fa7dbbf386412a3817af9367fcdae2d5ea05a9de31a2b7faa2d073.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "width": 1140,
+      "height": 1710,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/52/9a/529a19095eb5f6d0355755a62ffdcfbe6eec6fa6780b947ad213c707dc5d6623.webp",
+      "asset_type": "poster",
+      "language": "ja",
+      "source": "tmdb",
+      "width": 2000,
+      "height": 3000,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/24/cf/24cf5ec56bb2b2acfdd87e7f0847f137ecd652b9b61ccf7b680ecc5d42ea46fd.webp",
+      "asset_type": "poster",
+      "language": "uk",
+      "source": "tmdb",
+      "width": 853,
+      "height": 1280,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/4a/84/4a84f2839d8f30d1d4e336ddbe6165edd7d058f13555b0911772981d0b799829.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "width": 1000,
+      "height": 1500,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/f3/95/f395828b9b7a422f303899a2c11486fd37c60ba88ac18176695cee5228a9764a.webp",
+      "asset_type": "poster",
+      "source": "tmdb",
+      "width": 680,
+      "height": 1000,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/0b/f3/0bf3e6c66b9472355c1d68caffbba0c0cabff7a04ffb09097d1ef7f852b152a0.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "tmdb",
+      "width": 1000,
+      "height": 1500,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/76/63/76636ca440c0cdce7b40103251cbf5dc3476e82b8abb9ee27472ac472af81e1b.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 9,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/46/c5/46c5cfb778151181d94be13277898beb5bbc38db1402ae3219a8fb7d2f93ccbf.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 7,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/72/a4/72a49284442bcd5678892825588866c540b3daec509abda97bb92458db3dd8d5.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 4,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/4f/93/4f9397e01247f3c6983d3ef4e3795c21094223da4a849dc9abdeb0916330bd80.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 3,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/fd/56/fd56e9ef514f8ce13feaf75ec9aec5a83bcedb59f2d9ff722996e799c3993985.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 3,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/58/dd/58dd73383a9bae383413928db963f574e87c603df51058ffa7d441db26d80bc0.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 1,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/ea/79/ea792eb573077114b952da82fe451ee5d586682f5b207c22aecb4876b871c6ce.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 1,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/1d/d4/1dd451b22f0cdb1a743e2359dc885ba0c080e09e9dcd044e89e90dea9ad986e2.webp",
+      "asset_type": "poster",
+      "language": "deu",
+      "source": "tvdb",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/d2/97/d297fd8364a089a009dc657e6a08b4ed9f0f05ad49917b8f416216167a23e21c.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/f5/61/f5610b90a735dda5ae00a8314d00cbd8f1dbc1d667bab2710a9539a07c55065f.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/b1/16/b11642f5e73386ea7c243e9057f46a3b8aac88592088c64098decb020632823b.webp",
+      "asset_type": "poster",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/7c/92/7c9244ffe2f451a2c3e4efb761a6866ef5624fe7797338541b8ffd6b6e269ed6.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "likes": 2,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/ef/9a/ef9a8801c4d703d9c3a4faaeeef3e6925aa0240a9d0d98cdd62ec79167c3fb80.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "likes": 2,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/aa/e6/aae6b4ad58f456a727e3e88887cabe7fec48cf7c27c2335efa981a3e5c08940d.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/bb/a5/bba519b5b4c128f1165fe94c3307642a44bafd418dce0d9d1ee7c0239d48b636.webp",
+      "asset_type": "poster",
+      "language": "00",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/ba/b8/bab87aa3731a38bec563f4c11ae8f2fce0d019ea549fcfcdeef3c316564ca1b5.webp",
+      "asset_type": "poster",
+      "language": "00",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/88/4b/884bc2d7c9a12e1c2d96e6eca65193f8db06359f3ab9a7ae553b1489066722f1.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/f9/75/f975faa73aa26dcc8acd3b382ed094438afb3c36e0eabe3abf2786b263c1f42a.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/be/83/be839d98cea62130cda28ac9f65bd20b9981dae0114a125e52c91af409a74099.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/d8/1a/d81ac1d4b28bc85a5053ba6232c3641acec2f7861a3dc0873aa495079aa36b66.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/6b/1b/6b1b25ff06d8fddb13bd7661603e4080dd71ea2ba79ab7f8f44ddabfff66453e.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/dd/31/dd31a691a6d4814cf8e77de545b1b1622cc7873b458763915f68b56aba9d95fb.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/6e/b8/6eb869e2b548c3b4687c5e5be1cb5cf92d235be1f1f5e9ec2e01f68e46a53d16.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/47/a5/47a5dbe15017bb4312fa47873cf7cb7bbf03aa3db678fd8e95e325c928ad6341.webp",
+      "asset_type": "poster",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/6f/9b/6f9b096b85c42a54412164ef20eebcbd066e8fbeab65f233d2d28d0bfd211ed3.webp",
+      "asset_type": "poster",
+      "language": "00",
+      "source": "fanart",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvmaze/e1/0e/e10e0fdf5f733b5d10b7efc12a209f2b1330a64191d404438f55703c182e7f98.webp",
+      "asset_type": "poster",
+      "source": "tvmaze",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvmaze/cd/f9/cdf9faaf9c396f77b6f9bda2893c0fa27364e8edd6a689e7ff689d665a35b003.webp",
+      "asset_type": "poster",
+      "source": "tvmaze",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvmaze/e3/ca/e3ca840defc9954b1bf30c11d1d5322f3b7bc7324781c06b049ca3f29fe481eb.webp",
+      "asset_type": "poster",
+      "source": "tvmaze",
+      "width": 680,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvmaze/96/9a/969a0667c6cfe11def41a8315e5ef82d8838170c94d7c824b9311f1ccd08aee8.webp",
+      "asset_type": "poster",
+      "source": "tvmaze",
+      "width": 210,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvmaze/e1/0e/e10e0fdf5f733b5d10b7efc12a209f2b1330a64191d404438f55703c182e7f98.webp",
+      "asset_type": "poster",
+      "source": "tvmaze",
+      "width": 2000,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tvmaze/cd/f9/cdf9faaf9c396f77b6f9bda2893c0fa27364e8edd6a689e7ff689d665a35b003.webp",
+      "asset_type": "poster",
+      "source": "tvmaze",
+      "width": 210,
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/anidb/2c/f0/2cf0c1ce3bea0341dbc89f502964f0bb29f6368be3fb0b9a33cefcdce0859c50.webp",
+      "asset_type": "poster",
+      "source": "anidb",
+      "aspect": "poster"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/f9/3c/f93c1ad58e892ec0cf49dfe2a7cc1f8014135ad81f6099a8927c299cb1f2695c.webp",
+      "asset_type": "backdrop",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 3360,
+      "height": 1890,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/fc/50/fc5031ebf90a844328fa65a48ee1437b0901cf6f644d1438bcc4dfdd0222f499.webp",
+      "asset_type": "backdrop",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 1920,
+      "height": 1080,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/f9/fe/f9fe591e4ac81e6d56bf8919ea11e7148cf27d861e90a893f0151eb532a15c6f.webp",
+      "asset_type": "backdrop",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 1920,
+      "height": 1080,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/79/2d/792d3fe503e586792460bb112d80fdd8367b724a0805c026cbfc01d2c3013c4c.webp",
+      "asset_type": "backdrop",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 1920,
+      "height": 1080,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/b4/53/b453200d18cd8204107bd2f73bf196f8cc9bec6710b8b0115aaa09009af2f0cc.webp",
+      "asset_type": "backdrop",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 1920,
+      "height": 1080,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/b3/7a/b37ae30a14b69ae25d843f12a344f9b19f4a32106ea07ebe137757d9930341cd.webp",
+      "asset_type": "backdrop",
+      "source": "tmdb",
+      "score": 1.75,
+      "width": 1920,
+      "height": 1080,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/2b/75/2b75f596e3594fc695a339169bbcef27358a8cabfb6fab81a94b3a59f8303003.webp",
+      "asset_type": "backdrop",
+      "language": "en",
+      "source": "tmdb",
+      "score": 0.166,
+      "width": 1920,
+      "height": 1080,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/d7/ff/d7ff30ec04e42db99d9ffb09dda724e5bca0242638cfa87aa6a322abd457b0f8.webp",
+      "asset_type": "backdrop",
+      "language": "en",
+      "source": "tmdb",
+      "score": 0.166,
+      "width": 1280,
+      "height": 720,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/23/df/23df71d640893834d40a1df7881ff255dbcdc433df1c2b6375191780355ff0e8.webp",
+      "asset_type": "backdrop",
+      "source": "tmdb",
+      "score": 0.166,
+      "width": 1280,
+      "height": 720,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/14/f4/14f46cd7bb07878f8b2ba0a6dadbcb0e0768c1f2e4296f4f41612e8a31e07ebf.webp",
+      "asset_type": "backdrop",
+      "language": "en",
+      "source": "tmdb",
+      "width": 1920,
+      "height": 1080,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/69/b8/69b89cadfb95f7dbf4e37ccea7e1d94b6c1594565c100914eee236a1eaffa623.webp",
+      "asset_type": "backdrop",
+      "source": "tvdb",
+      "score": 100007,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/89/c7/89c7600fdc15e1a986bd06ea742b5051e993bd48c3d32348b19f8851223c16e5.webp",
+      "asset_type": "backdrop",
+      "source": "tvdb",
+      "score": 100004,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/9e/1a/9e1a2e076e0514fb0a31a8653a59303be6b03dc869a0379e1c64f548dc41a7b1.webp",
+      "asset_type": "backdrop",
+      "source": "tvdb",
+      "score": 100000,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/a7/fa/a7faed558564df3d7b67207a5b5c1d6eae3bb8c9696574ce52c6e20f87b05376.webp",
+      "asset_type": "backdrop",
+      "language": "deu",
+      "source": "tvdb",
+      "score": 5,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/aa/18/aa1822ab023ac7057891a1be69962fe56ebf4c86cce5acc5a16e20d771dbac30.webp",
+      "asset_type": "backdrop",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 2,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/5b/e8/5be829b701417c644fc4ff5a89838af2507f08f69ad4f9925357b31b44a8482d.webp",
+      "asset_type": "backdrop",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 1,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/d5/54/d554bdcd4c7af84e3370c4a011c00adf322be81ae727e45acb116485b7bf2538.webp",
+      "asset_type": "backdrop",
+      "language": "fra",
+      "source": "tvdb",
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/70/80/7080bcfab2b1de3fd1422344e9bf5849d37e3143981dc45e5b2bc129a49d3404.webp",
+      "asset_type": "backdrop",
+      "language": "fra",
+      "source": "tvdb",
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/24/8f/248fc49f044b1eac832026d700adcf9fdd59d2b9b2702b879dff226bfdf49b6d.webp",
+      "asset_type": "backdrop",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/0a/cd/0acd28c70733dde18b4d3bf0f16041fbc75aadd7fbb9601876fbed4a5cc03feb.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "likes": 3,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/e0/bd/e0bd84a15f8f494387199a7e0b02fee71409748a793873813b21b29e79ce667e.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "likes": 3,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/1b/cf/1bcf10e6a90854646723702e5b99303e68f5bdac9d2d88da84fa21fb07f2d11a.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "likes": 2,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/01/19/011983a1171d0014ddb3f8796fbaef712dff01a0f91dfe9f8ea05b841ee250ce.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/15/ae/15aea3110567679c9c4026ee160aeab8e57763fe487a702a2a4543e74b3c2fe6.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/d3/45/d3457e98d14939860ea0f716b462f78365ee8d3ccc7cd5e082af74905907269c.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/9a/b5/9ab58970a99f5821bd1f4982499d82d22cffaab428ec5289d610165984252517.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/52/1e/521ebd8c8ffcc39e108c1186466d05da1b5f1ec916612f7465f03b58baf6cf7e.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/1b/36/1b365a67b8064c864b8d8774782bb458672e051973ab21998df37af01609cc7c.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/1b/d8/1bd815dc10b30fa3920f071ad4e66338887a615cb422cd0a484bb3332311ffa0.webp",
+      "asset_type": "backdrop",
+      "source": "fanart",
+      "aspect": "backdrop"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/46/d0/46d0232d048ec61b47c749860bee43a0a66dc5f55ffc4c80643b57602a48d44a.webp",
+      "asset_type": "logo",
+      "language": "en",
+      "source": "tmdb",
+      "score": 3.334,
+      "width": 901,
+      "height": 525,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/a7/92/a7926524465c0cf9c8e0f519bc575192524e5de93428b76bc3a5fc2c9c9fff2d.webp",
+      "asset_type": "logo",
+      "language": "ja",
+      "source": "tmdb",
+      "width": 576,
+      "height": 301,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/92/ac/92acbd25c73ccb6d188e135f33c22047cc929c0e96d1ecf5797c3bc365454efd.webp",
+      "asset_type": "logo",
+      "language": "ru",
+      "source": "tmdb",
+      "width": 794,
+      "height": 285,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/cf/c3/cfc36b0bc47b8a439ed4379a08ac2b8d103baf21f89921f1e2e70ca48f8cd0c1.webp",
+      "asset_type": "logo",
+      "language": "en",
+      "source": "tmdb",
+      "width": 334,
+      "height": 310,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/tmdb/5a/24/5a2458d8ce9f0ad45904256c037ba412f551e7469d5478b1b1b034a6bc0f2fe4.webp",
+      "asset_type": "logo",
+      "language": "en",
+      "source": "tmdb",
+      "width": 561,
+      "height": 169,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/78/ea/78ea782edb3ef86a96588b64cff405a31bd48da0a38a307d801eb3ea90593677.webp",
+      "asset_type": "logo",
+      "language": "en",
+      "source": "fanart",
+      "likes": 3,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/c2/65/c2657ea59a536e8e6779d57e4f9f89d73f54656f13e72bf4d07cf59a1fa0e5b0.webp",
+      "asset_type": "logo",
+      "language": "en",
+      "source": "fanart",
+      "likes": 2,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/fa/7e/fa7ef54542e5552801f5b1ee72ce559a0a18ce9f2ca88d2914b0b5a84b637cd4.webp",
+      "asset_type": "logo",
+      "language": "fr",
+      "source": "fanart",
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/ae/11/ae1124c33877f8232e86924ec9e76b0de4e0077ad0a82c6bd355360a82ac2df8.webp",
+      "asset_type": "logo",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/da/45/da45d355680eef27adcbaf87454eb7e7c9fd911b259cf288c6d8c91eab4e63e2.webp",
+      "asset_type": "logo",
+      "language": "de",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/e2/89/e2896eef5cb2e50e740a1a6e18b52d8b3e35a2d6e799fa78fff2847f777a077a.webp",
+      "asset_type": "logo",
+      "language": "ja",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "logo"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/15/46/15465ef04895d08f3759ea8b2afb18d4be181b818e68e8e2eafed8edf527a439.webp",
+      "asset_type": "banner",
+      "language": "spa",
+      "source": "tvdb",
+      "score": 4,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/9d/fa/9dfa89f600ed3815988c9504e9e09d7dde337716170bf91ac66f724a9c78c066.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 3,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/99/87/9987a96b08de3c14c14029288a97b98151956b12ff91d1e0e407a5512b469233.webp",
+      "asset_type": "banner",
+      "language": "fra",
+      "source": "tvdb",
+      "score": 3,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/e7/3e/e73ec738cdea7c4eada21865acf008ac72416356e549280b89716a3fa296d4cc.webp",
+      "asset_type": "banner",
+      "language": "spa",
+      "source": "tvdb",
+      "score": 2,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/d0/c9/d0c9395e856841935b5611a30b9662c8e2bea4bd5db74c3a6a197337fa54f01c.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 1,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/7b/6b/7b6b50efd6518d28f4769d9a396207ca989fca21780b8893c09939628a679a73.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "score": 1,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/bd/04/bd04168afc2fb4ffc20cfcd69a50295f0ded14a0863782ad79cfaa002bff0e49.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/b9/bb/b9bb0205ea15bb2b7a2237b06269a806314d519a637fe2e1ad54f01e7588527b.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/18/8c/188c693d37275b341265c4c9ef102c80467b5929e578732a3e0b3b0d4e2bed2b.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/be/1d/be1decab4229ac1fd004e9e364a6af6f242c4c76022cbd1ea3b48a4da031058e.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/a1/09/a109353a46ff7cdd3aef1a70362bec9de281b1cda8671a24b0ce777641582660.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/75/f1/75f1304b3cc6520e11060f629cb89a2713146cd9e222e24287e95acef4bd5465.webp",
+      "asset_type": "banner",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/51/ca/51ca971f932265528ce9d5bf270e968a4bb718d5ee75298aefc57f6def90f0d0.webp",
+      "asset_type": "banner",
+      "language": "en",
+      "source": "fanart",
+      "likes": 4,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/6b/f7/6bf7f65c7b8dbb664b9c91d0e4264f2d73b541fd7c9104b0e0d876863dc2b7ec.webp",
+      "asset_type": "banner",
+      "language": "en",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/1c/f8/1cf87b7125d1919a11e729b5643fd7a3307400b404f0428648d3e8b1003565ee.webp",
+      "asset_type": "banner",
+      "language": "en",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/2c/b2/2cb296a7dfa109ac863f4c1fb3503d7be77400bf567d3e9c734fca0609cdb162.webp",
+      "asset_type": "banner",
+      "language": "en",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/4e/e2/4ee2b6f40489c18b2e25c5afa2df73912b1a80b2b7bd5870373f36fc0ec028f6.webp",
+      "asset_type": "banner",
+      "language": "en",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/10/58/10581f90ccfdd85fbe38c1724460aed2b39762266082134ec499de453ead0014.webp",
+      "asset_type": "banner",
+      "language": "fr",
+      "source": "fanart",
+      "aspect": "banner"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/20/98/2098aeafd91895270f90c21638ad0ca94a2bfc6f9ccb01ad4035d0374680f8d4.webp",
+      "asset_type": "clearart",
+      "language": "en",
+      "source": "fanart",
+      "likes": 3,
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/50/35/503584e17a84a49e62d6eebddf731cb13052474476d5aad4b78403e3ad9219f9.webp",
+      "asset_type": "clearart",
+      "language": "fr",
+      "source": "fanart",
+      "likes": 2,
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/0d/c1/0dc1cb7d2b09d91b09dfd3242c52916c080dc5f6b404fdb961219a60ead853dc.webp",
+      "asset_type": "clearart",
+      "language": "en",
+      "source": "fanart",
+      "likes": 2,
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/16/b8/16b8c77f0e21e2a14410bb82c0d8ac9e2ee1930952ae306dc5b4c3f77ee0cde3.webp",
+      "asset_type": "clearart",
+      "language": "fr",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/b8/7c/b87c92802877eb8f706ecb015b9da609298427586900a716874a32048fe37a5c.webp",
+      "asset_type": "clearart",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/32/e8/32e85ca02c1528ea99ea733631e74ead2f413fab5eef9d92f9aba413b604751e.webp",
+      "asset_type": "clearart",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/51/d0/51d06e2bf7eb5c6d8321d1f59b7e623f73a507dbd7eb5d9c9b175c96662e9f85.webp",
+      "asset_type": "clearart",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/ff/d9/ffd97d81609679ba6fc8a8ef5bf789937b63f2d4d3d7bb7a99cf61e6a577ec81.webp",
+      "asset_type": "clearart",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/96/7e/967ef250722725d930833d154f0239d4436f0ae9f206617bee622cceb673130c.webp",
+      "asset_type": "clearart",
+      "language": "ja",
+      "source": "fanart",
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/82/5c/825cf9a57db01fee087fe16ae4b5a7a443e0c980b123a69de48424568ddd1328.webp",
+      "asset_type": "clearart",
+      "language": "en",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/74/f9/74f9ba981fa46c30cd26af686003f3194e4e2d48e222c1679e7ea19de61e561a.webp",
+      "asset_type": "clearart",
+      "language": "00",
+      "source": "fanart",
+      "aspect": "clearart"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/ca/fd/cafd83b0e6d051cf17f719ae66d7d506030c0b78c0f30aca210210b0e1e6e0e1.webp",
+      "asset_type": "thumb",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/0d/6a/0d6a9213d910d47af28dc5e3c16668651cbc94f1e51a5283c821a4efae0359b6.webp",
+      "asset_type": "thumb",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/ed/83/ed838ec6befb09c23f9b210cacee9e0441d95bc87f06d2427596937c4083d0d4.webp",
+      "asset_type": "thumb",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/fd/32/fd3218c695b785b2ad1d32bea4e788eebcdc3434a4ceeb79b345cb319d9b4c5e.webp",
+      "asset_type": "thumb",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/60/f0/60f0c05b4c06cec7d52db7fd2e3038f3ddea1dc299c0aa7dbb19c20dd7d96531.webp",
+      "asset_type": "thumb",
+      "language": "fra",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/e1/b5/e1b54f5d309e6a22636a69f95a6423319beae7afe15110b9a9b91e01bb731cf0.webp",
+      "asset_type": "thumb",
+      "language": "fra",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/89/cb/89cb5fdf541a39cb92eb0d688374e8b495d243d50e4e6aed31a824b4fba43905.webp",
+      "asset_type": "thumb",
+      "language": "fra",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/cb/1f/cb1f69a67fbc0ff8d579aba0c094ade9ed51c2f7c490e8dfa73059ef42fd6a23.webp",
+      "asset_type": "thumb",
+      "language": "fra",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/tvdb/ed/83/ed838ec6befb09c23f9b210cacee9e0441d95bc87f06d2427596937c4083d0d4.webp",
+      "asset_type": "thumb",
+      "language": "eng",
+      "source": "tvdb",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/70/0e/700e39aa3ba1beb4c88645e4e9d12258cb19198df79ff211459adeb6cd0319fc.webp",
+      "asset_type": "thumb",
+      "language": "en",
+      "source": "fanart",
+      "likes": 2,
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/2c/f6/2cf6f6e2ef4940a4dd33d4b100ae425a4cd10142fe354a1814bf3e898f24bb92.webp",
+      "asset_type": "thumb",
+      "language": "ja",
+      "source": "fanart",
+      "likes": 1,
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/8a/e4/8ae4e577826920633a950e60d83d62f9471bbff1b8d8da2b5a32a358023edf1a.webp",
+      "asset_type": "thumb",
+      "language": "nl",
+      "source": "fanart",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/eb/72/eb72cf0906aae468943818f3aae561bd91dcefe6d2fb4dcc14d0c3f27cd169bb.webp",
+      "asset_type": "thumb",
+      "language": "de",
+      "source": "fanart",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/6e/c5/6ec5c89efc51737459b6e96f206f92420cf1d93be1abc87c9918dbf35b745d5e.webp",
+      "asset_type": "thumb",
+      "language": "en",
+      "source": "fanart",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/f1/19/f1195351c28cbe61e584fcf2302a45f90244f8d14d4254112a9c703bd75c52ea.webp",
+      "asset_type": "thumb",
+      "language": "fr",
+      "source": "fanart",
+      "aspect": "thumb"
+    },
+    {
+      "url": "https://media.heya.media/images/fanart/d5/72/d572fb075723e0e5e11c9eaa7e8944287bd61b2614044cb575ab3fad05102e8e.webp",
+      "asset_type": "thumb",
+      "language": "fr",
+      "source": "fanart",
+      "aspect": "thumb"
+    }
+  ],
   "runtime_minutes": 25,
   "tagline": "If only they didn't share the same body!",
   "release_date": "2004-07-25",

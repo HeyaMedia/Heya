@@ -263,14 +263,9 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		}
 	}
 
-	if job.Args.QueueEnrich {
-		if _, err := client.Insert(ctx, FetchArtworkArgs{
-			MediaItemID: mediaItemID,
-			MediaType:   mediaType,
-		}, &river.InsertOpts{Priority: 3}); err != nil {
-			return fmt.Errorf("enqueue fetch artwork: %w", err)
-		}
-	}
+	// Secondary artwork (extra backdrops, logos, ...) is written directly at
+	// enrich time from the detail response we already have (writeSecondaryArtwork)
+	// — no separate FetchArtwork pass, which used to re-fetch the same doc.
 
 	return nil
 }

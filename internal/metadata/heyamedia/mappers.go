@@ -86,6 +86,7 @@ func mapMovieOrTV(id, kind, title string, year *int64, slug string, poster *stri
 		Overviews:     mapStr(pay.Overviews),
 		PosterURL:     posterURL,
 		BackdropURL:   backdropURL,
+		Artwork:       mapArtwork(pay.Artwork),
 		ExternalIDs:   extIDs,
 		Genres:        strs(pay.Genres),
 		Rating:        rating,

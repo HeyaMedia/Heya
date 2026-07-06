@@ -180,10 +180,10 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		log.Debug().Int64("item_id", item.ID).Msg("enrich: people/extras component already enriched, skipping")
 	}
 
-	// Image pipeline: enqueue DetectLocalAssets (which fans out poster +
-	// backdrop downloads + secondary artwork enrichment). We stamp
-	// images_enriched_at here meaning "URLs known, downloads queued" —
-	// the actual local files arrive asynchronously, tracked separately.
+	// Image pipeline: enqueue DetectLocalAssets (local sidecar detection +
+	// pending rows for the primary poster/backdrop + per-season/episode art).
+	// We stamp images_enriched_at here meaning "URLs known"; the bytes are
+	// fetched on-demand when first viewed.
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	pending := buildPendingImages(detail)
 	log.Debug().Int64("item_id", item.ID).Int("pending_images", len(pending)).Msg("enrich: image urls collected")
@@ -199,6 +199,11 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		log.Warn().Err(err).Int64("item_id", item.ID).Msg("enqueue DetectLocalAssets failed")
 	}
 	_ = q.MarkEnrichImagesDone(ctx, item.ID)
+
+	// Secondary artwork (extra backdrops for the carousel, logos, banners, ...)
+	// comes from the SAME detail response we already fetched — record it as
+	// pending rows here instead of firing a second heya.media call for it.
+	writeSecondaryArtwork(ctx, q, item.ID, detail)
 
 	// Person deep-fetch is LAZY. The cast/crew LIST (name, role, tmdb id,
 	// profile URL) is already persisted in-process by StoreRichMetadata above —
@@ -393,4 +398,66 @@ func buildPendingImages(detail *metadata.MediaDetail) []PendingImage {
 		}
 	}
 	return pending
+}
+
+// writeSecondaryArtwork records the alternate/secondary artwork carried by the
+// enrich detail response (extra backdrops for the carousel, logos, banners,
+// clearart, thumbs, disc art) as pending media_assets rows — using the artwork
+// the initial GetDetail already returned, so there's no second heya.media call.
+// The serve path pulls the bytes on first view.
+//
+// The primary poster/backdrop are skipped by URL (they're emitted at sort 0 by
+// buildPendingImages and held in media_items columns). Secondary rows always
+// carry a non-empty label, so a bare/primary image request (which matches the
+// empty-label rows) never resolves to one of them.
+func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, itemID int64, detail *metadata.MediaDetail) {
+	if len(detail.Artwork) == 0 {
+		return
+	}
+	maxPerType := map[string]int{"backdrop": 5, "poster": 1, "logo": 1, "banner": 1, "clearart": 1, "thumb": 1, "disc": 1}
+	count := map[string]int{}
+	existing, _ := q.ListMediaAssets(ctx, itemID)
+	for _, a := range existing {
+		if a.Label == "" {
+			count[string(a.AssetType)]++
+		}
+	}
+	// The primary poster/backdrop may not have an asset row yet (they live in
+	// media_items columns until first served), so seed their count so we don't
+	// emit e.g. a 6th backdrop.
+	if detail.PosterURL != "" && count["poster"] == 0 {
+		count["poster"] = 1
+	}
+	if detail.BackdropURL != "" && count["backdrop"] == 0 {
+		count["backdrop"] = 1
+	}
+	sortOrder := 10
+	for _, art := range detail.Artwork {
+		if art.URL == "" || art.URL == detail.PosterURL || art.URL == detail.BackdropURL {
+			continue
+		}
+		limit := maxPerType[art.AssetType]
+		if limit == 0 {
+			limit = 1
+		}
+		if count[art.AssetType] >= limit {
+			continue
+		}
+		count[art.AssetType]++
+		label := art.Language
+		if label == "" {
+			label = "extra"
+		}
+		if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			MediaItemID: itemID,
+			AssetType:   sqlc.AssetType(art.AssetType),
+			Source:      "remote",
+			RemoteUrl:   art.URL,
+			Label:       label,
+			SortOrder:   int32(sortOrder),
+		}); err != nil {
+			log.Debug().Err(err).Int64("item_id", itemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
+		}
+		sortOrder++
+	}
 }
