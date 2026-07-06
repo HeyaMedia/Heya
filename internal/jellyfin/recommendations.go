@@ -133,35 +133,49 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request, _ Par
 
 // suggestionSection maps a /Items/Suggestions request's type / mediaType
 // filters to a Recommended section. ok=false means the client asked for a kind
-// Heya has no suggestions for (audio / music video / books / photos) — the
-// caller returns an empty page rather than movies dressed as something else. An
-// unfiltered request defaults to movies.
+// Heya has no suggestions for (audio / music video / trailers / books /
+// photos) — the caller returns an empty page rather than movies dressed as
+// something else. An unfiltered request defaults to movies.
 //
-// Both params are comma-separated BaseItemKind / MediaType tokens, matched
-// EXACTLY — substring matching would wrongly treat "MusicVideo" as video.
+// The BaseItemKind `type` filter is AUTHORITATIVE when present: a specific
+// non-movie/series kind yields empty even alongside mediaType=Video (music
+// videos and trailers are video-mediaType too, so that coarse qualifier must
+// not override the precise kind). Only when no `type` is given does the coarse
+// mediaType decide. Tokens are matched exactly, not by substring.
 func suggestionSection(r *http.Request) (section string, ok bool) {
-	tokens := map[string]bool{}
-	for _, raw := range strings.Split(queryCI(r, "type")+","+queryCI(r, "mediaType"), ",") {
-		if t := strings.ToLower(strings.TrimSpace(raw)); t != "" {
-			tokens[t] = true
+	types := tokenSet(queryCI(r, "type"))
+	if len(types) > 0 {
+		switch {
+		case types["movie"]:
+			return "movie", true // movie wins a mixed movie+series request
+		case types["series"] || types["episode"]:
+			return "tv", true
+		default:
+			return "", false
 		}
 	}
-	specified := len(tokens) > 0
 
-	seriesWanted := tokens["series"] || tokens["episode"]
-	movieWanted := tokens["movie"]
-	videoWanted := movieWanted || tokens["video"] // mediaType=Video (any video)
-
+	// No item-kind filter → fall back to the coarse mediaType, else default.
+	mediaTypes := tokenSet(queryCI(r, "mediaType"))
 	switch {
-	case seriesWanted && !movieWanted:
-		return "tv", true
-	case videoWanted:
-		return "movie", true
-	case !specified:
+	case len(mediaTypes) == 0:
+		return "movie", true // fully unfiltered default
+	case mediaTypes["video"]:
 		return "movie", true
 	default:
-		return "", false
+		return "", false // audio / book / photo / unknown
 	}
+}
+
+// tokenSet splits a comma-separated param into a lowercased set of tokens.
+func tokenSet(csv string) map[string]bool {
+	out := map[string]bool{}
+	for _, raw := range strings.Split(csv, ",") {
+		if t := strings.ToLower(strings.TrimSpace(raw)); t != "" {
+			out[t] = true
+		}
+	}
+	return out
 }
 
 // railItemIDs pulls up to limit local media-item ids from a rail, in order.
