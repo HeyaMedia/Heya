@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -112,6 +111,14 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 
 	detail, usedID, err := w.Heya.GetDetailFallback(ctx, providerIDs, fetchOpts)
 	if err != nil {
+		// Transient upstream failure (429/5xx, timeout, connection blip) — let
+		// River retry the whole job rather than stamping the item failed on
+		// something heya.media will likely serve on a later attempt. Only a
+		// terminal error (every id 404'd, bad data) marks it failed for the
+		// stale-refresh sweep to re-drive.
+		if ctx.Err() != nil || heyamedia.IsRetryable(err) {
+			return fmt.Errorf("enrich %d: get detail (tried %d ids): %w", item.ID, len(providerIDs), err)
+		}
 		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("get detail (tried %d ids): %v", len(providerIDs), err))
 	}
 	log.Debug().Int64("item_id", item.ID).Str("used_id", usedID).Str("title", detail.Title).Msg("enrich: detail fetched")
@@ -193,8 +200,14 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	}
 	_ = q.MarkEnrichImagesDone(ctx, item.ID)
 
-	log.Debug().Int64("item_id", item.ID).Int("cast", len(detail.Cast)).Int("crew", len(detail.Crew)).Msg("enrich: queueing person fetches")
-	enqueuePersonFetches(ctx, client, q, detail, settings.PreferredLanguage)
+	// Person deep-fetch is LAZY. The cast/crew LIST (name, role, tmdb id,
+	// profile URL) is already persisted in-process by StoreRichMetadata above —
+	// that's everything media detail pages render. The expensive per-person
+	// deep-fetch (biography, full filmography, birth/death) is consumed only on
+	// the person page, so we defer it to GetPerson's on-view backfill kicker
+	// rather than fanning out ~200 person_fetch jobs per title here. heya.media
+	// also pre-warms top-billed cast/crew on its own side, so the common people
+	// are usually warm by the time anyone opens their page.
 
 	if settings.FetchRatings {
 		_, _ = client.Insert(ctx, RatingsFetchArgs{MediaItemID: item.ID, LibraryID: item.LibraryID}, nil)
@@ -380,44 +393,4 @@ func buildPendingImages(detail *metadata.MediaDetail) []PendingImage {
 		}
 	}
 	return pending
-}
-
-// enqueuePersonFetches fans out PersonFetch jobs for every TMDB-identified
-// cast / crew member. Lifted from the old MetadataFetchWorker.
-func enqueuePersonFetches(ctx context.Context, client *river.Client[pgx.Tx], q *sqlc.Queries, detail *metadata.MediaDetail, lang string) {
-	seen := map[int32]bool{}
-
-	enqueue := func(ids map[string]string) {
-		tmdbStr := ids["tmdb"]
-		if tmdbStr == "" {
-			return
-		}
-		n, err := strconv.ParseInt(tmdbStr, 10, 32)
-		if err != nil || n == 0 {
-			return
-		}
-		tmdbID := int32(n)
-		if seen[tmdbID] {
-			return
-		}
-		seen[tmdbID] = true
-
-		extJSON, _ := json.Marshal(map[string]string{"tmdb": strconv.FormatInt(int64(tmdbID), 10)})
-		person, err := q.FindPersonByExternalID(ctx, extJSON)
-		if err != nil {
-			return
-		}
-		_, _ = client.Insert(ctx, PersonFetchArgs{
-			PersonID: person.ID,
-			TmdbID:   tmdbID,
-			Language: lang,
-		}, &river.InsertOpts{Priority: 4})
-	}
-
-	for _, c := range detail.Cast {
-		enqueue(c.ExternalIDs)
-	}
-	for _, c := range detail.Crew {
-		enqueue(c.ExternalIDs)
-	}
 }

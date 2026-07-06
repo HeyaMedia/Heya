@@ -562,7 +562,7 @@ function goToResult(kind: Section['key'], item: any) {
       path = `/books/${item.slug || slugify(item.title)}`
       break
     case 'people':
-      path = `/person/${item.slug || slugify(item.name)}`
+      path = `/person/${item.slug || item.id}`
       break
     case 'albums':
       // Land on the album detail page. `slug` is the album slug; falls back

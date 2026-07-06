@@ -109,7 +109,7 @@ function go(item: any) {
     case 'books':
       return navigateTo(`/books/${item.slug || slugify(item.title)}`)
     case 'people':
-      return navigateTo(`/person/${item.slug || slugify(item.name)}`)
+      return navigateTo(`/person/${item.slug || item.id}`)
     case 'albums':
       // The album row carries the album slug as `slug` (sqlc maps `al.slug`
       // straight through). Fall back to the artist page if the album slug

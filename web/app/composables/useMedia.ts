@@ -68,7 +68,12 @@ export function mediaUrl(item: { id: number; title: string; year?: string; media
 }
 
 export function personUrl(person: { id: number; name: string; slug?: string }): string {
-  const s = person.slug || slugify(person.name)
+  // A person's stable `slug` is only minted by the deep-fetch worker, which is
+  // now lazy (runs on first person-page view). Before that lands the slug is
+  // empty, and a name-guessed slug won't resolve — so fall back to the numeric
+  // id, which GetPerson resolves directly (ParseInt path). Clicking a cast card
+  // for an un-deep-fetched person then loads the page AND triggers its backfill.
+  const s = person.slug || String(person.id)
   return `/person/${s}`
 }
 

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -58,7 +59,13 @@ func (w *MetadataMatchWorker) Work(ctx context.Context, job *river.Job[MetadataM
 	mediaType := sqlc.MediaType(job.Args.MediaType)
 	matchResult, err := w.Matcher.MatchSingleFile(ctx, file, mediaType, job.Args.LibraryID)
 	if err != nil {
-		log.Warn().Err(err).Int64("file_id", file.ID).Msg("match error")
+		// A transient heya.media failure during search should retry at the job
+		// level (River backoff); a terminal match failure stays a no-op so the
+		// file is left pending for a later manual/scheduled pass.
+		if ctx.Err() != nil || heyamedia.IsRetryable(err) {
+			return fmt.Errorf("match file %d: %w", file.ID, err)
+		}
+		log.Warn().Err(err).Int64("file_id", file.ID).Msg("match error (terminal)")
 		return nil
 	}
 	log.Debug().Int64("file_id", file.ID).Str("provider", matchResult.ProviderName).Str("provider_id", matchResult.ProviderID).Bool("new", matchResult.IsNew).Msg("match: matcher returned")

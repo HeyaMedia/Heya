@@ -74,7 +74,12 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 	// 4. Call HeyaMedia person lookup.
 	resp, err := heyamedia.GetPersonFromHeya(ctx, w.HeyaMedia, tmdbID)
 	if err != nil {
-		log.Debug().Err(err).Int("tmdb_id", tmdbID).Msg("person fetch from heya failed")
+		// Retry transient upstream failures at the job level; a terminal 404
+		// (person genuinely absent upstream) is a no-op, not a retry.
+		if ctx.Err() != nil || heyamedia.IsRetryable(err) {
+			return fmt.Errorf("person fetch tmdb:%d: %w", tmdbID, err)
+		}
+		log.Debug().Err(err).Int("tmdb_id", tmdbID).Msg("person fetch from heya failed (terminal)")
 		return nil
 	}
 
@@ -152,6 +157,25 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		HeyaSlug:           resp.Slug,
 	})
 	if err != nil {
+		// A concurrent person_fetch for the same upstream actor may have claimed
+		// idx_people_heya_slug (a global UNIQUE) between our earlier owner check
+		// and this write, throwing a 23505. Re-resolve the now-committed owner
+		// and fold into it rather than dropping this person's enrichment —
+		// mirrors the "race resolved" re-query in matcher/persistence.go. The
+		// failed UpdatePersonFull is a single autocommit statement, so nothing
+		// partial was written before we merge.
+		if resp.Slug != "" {
+			if owner, reErr := q.GetPersonByHeyaSlug(ctx, resp.Slug); reErr == nil && owner.ID != job.Args.PersonID {
+				if mergeErr := mergePersonInto(ctx, w.DB, q, owner.ID, job.Args.PersonID); mergeErr == nil {
+					log.Debug().
+						Int64("merged_person_id", job.Args.PersonID).
+						Int64("canonical_id", owner.ID).
+						Str("heya_slug", resp.Slug).
+						Msg("merged duplicate person into canonical row (slug race)")
+					return nil
+				}
+			}
+		}
 		log.Warn().Err(err).Int64("person_id", job.Args.PersonID).Msg("failed to update person")
 		return nil
 	}
