@@ -9,7 +9,7 @@
       :total-count="items.length"
       :loved-count="favoritedSet.size"
       :user-lists="userLists"
-      :collections="collections"
+      :collections="displayCollections"
       :drag-over-list-id="dragState.overListId"
       @select="activeLib = $event; activeView = null"
       @view="activeView = $event"
@@ -33,7 +33,7 @@
         :total-count="items.length"
         :loved-count="favoritedSet.size"
         :user-lists="userLists"
-        :collections="collections"
+        :collections="displayCollections"
         :drag-over-list-id="dragState.overListId"
         @select="activeLib = $event; activeView = null; librarySheetOpen = false"
         @view="activeView = $event; librarySheetOpen = false"
@@ -56,7 +56,7 @@
         :total-count="items.length"
         :loved-count="favoritedSet.size"
         :user-lists="userLists"
-        :collections="collections"
+        :collections="displayCollections"
         :drag-over-list-id="dragState.overListId"
         @select="activeLib = $event; activeView = null; sectionSidebar.close()"
         @view="activeView = $event; sectionSidebar.close()"
@@ -66,6 +66,96 @@
       />
     </AppSheet>
     <div ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
+      <!-- Franchises overview — a page of its own (/movies/franchises). Reuses
+           the FilterBar (sort + grid/detail/list toggle, no movie filters) and
+           the same view chrome as the library; cards/rows deep-link into the
+           per-franchise browse view (/movies/collection/N). -->
+      <template v-if="activeView === 'franchises'">
+        <FilterBar
+          title="Franchises"
+          count-label="franchises"
+          :count="sortedFranchises.length"
+          :sort="franchiseSort"
+          :view="view"
+          :filters="filters"
+          :available-genres="[]"
+          :available-languages="[]"
+          :sort-options="FRANCHISE_SORTS"
+          hide-filters
+          @sort="franchiseSort = $event"
+          @view="view = $event"
+          @open-library="librarySheetOpen = true"
+        />
+
+        <div class="lib-content">
+          <div v-if="!sortedFranchises.length" class="empty-lib">
+            <Icon name="film" :size="30" class="empty-icon" />
+            <p>No franchises with more than one film yet.</p>
+          </div>
+
+          <div v-else-if="view === 'grid'" class="grid-posters fr-grid">
+            <NuxtLink
+              v-for="(c, i) in sortedFranchises"
+              :key="c.id"
+              :to="`/collection/${c.id}`"
+              class="grid-tile card-tile"
+            >
+              <MediaCard
+                :idx="i"
+                :src="c.poster_path"
+                aspect="2/3"
+                :title="franchiseLabel(c.name)"
+                :subtitle="`${c.movie_count} films`"
+              />
+            </NuxtLink>
+          </div>
+
+          <div v-else-if="view === 'detail'" class="fr-detail lib-pad">
+            <NuxtLink
+              v-for="(c, i) in sortedFranchises"
+              :key="c.id"
+              :to="`/collection/${c.id}`"
+              class="browse-detail-row"
+            >
+              <Poster :idx="i" :src="c.poster_path" class-name="browse-detail-poster" :width="104" />
+              <div class="browse-detail-body">
+                <div class="browse-detail-title"><span>{{ franchiseLabel(c.name) }}</span></div>
+                <div class="browse-detail-meta">
+                  <span>{{ c.movie_count }} films</span>
+                  <span v-if="c.added">Added {{ formatDateShort(c.added) }}</span>
+                </div>
+              </div>
+            </NuxtLink>
+          </div>
+
+          <div v-else class="list-rows lib-pad">
+            <div v-if="!isPhone" class="list-row list-row-head fr-list-row">
+              <div>Franchise</div>
+              <div>Films</div>
+              <div>Added</div>
+            </div>
+            <NuxtLink
+              v-for="c in sortedFranchises"
+              :key="c.id"
+              :to="`/collection/${c.id}`"
+              class="list-row fr-list-row"
+              :class="{ 'list-row-phone': isPhone }"
+            >
+              <div class="list-title-cell">
+                <Poster :idx="0" :src="c.poster_path" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
+                <div>
+                  <div class="list-title">{{ franchiseLabel(c.name) }}</div>
+                  <div class="list-sub">{{ c.movie_count }} films<span v-if="isPhone && c.added"> · {{ formatDateShort(c.added) }}</span></div>
+                </div>
+              </div>
+              <div v-if="!isPhone">{{ c.movie_count }}</div>
+              <div v-if="!isPhone" class="list-added">{{ c.added ? formatDateShort(c.added) : '–' }}</div>
+            </NuxtLink>
+          </div>
+        </div>
+      </template>
+
+      <template v-else>
       <FilterBar
         :title="viewTitle"
         :count="sorted.length"
@@ -266,6 +356,7 @@
           <button v-if="isDirty" class="btn btn-secondary" @click="resetBrowse">Reset filters</button>
         </div>
       </div>
+      </template>
     </div>
 
     <!-- Phone: list/detail rows get an always-visible "..." button (grid
@@ -283,6 +374,11 @@
 <script setup lang="ts">
 import type { EnrichedMediaItem, Library, UserList, FilterState, CollectionBrowse } from '~~/shared/types'
 import { useCardContextItems } from '~/composables/useContextMenu'
+
+// Stable page key shared with the browse sub-routes registered in
+// app/router.options.ts (/movies/library/:id, /movies/loved, …) so switching
+// the sidebar selection reuses this component instead of remounting + refetching.
+definePageMeta({ key: 'browse-movies' })
 
 const mainEl = ref<HTMLElement | null>(null)
 const gridWrap = ref<HTMLElement | null>(null)
@@ -377,15 +473,57 @@ function ctxItemsFor(item: EnrichedMediaItem) {
   return buildCardCtxItems(item, cardCtxOpts.value)
 }
 
+// Franchises surfaced in the sidebar row + /movies/franchises grid: only
+// collections we own ≥2 films from (a lone film isn't a "franchise"). The full
+// `collections` list stays the source of truth for title lookup + selection
+// revalidation, so deep links to a 1-film collection still resolve.
+const displayCollections = computed(() => collections.value.filter(c => c.movie_count >= 2))
+
+// Franchises browse: the /movies/franchises view reuses the FilterBar + the
+// grid/detail/list view modes, so it needs its own sort. "Recently Added" is
+// derived client-side from the already-loaded movies — a franchise's date is
+// the newest created_at among the films we own from it — so no extra fetch.
+const FRANCHISE_SORTS = [
+  { label: 'Name A→Z', value: 'name' },
+  { label: 'Recently Added', value: 'added' },
+  { label: 'Most Films', value: 'films-desc' },
+  { label: 'Fewest Films', value: 'films-asc' },
+]
+const franchiseSort = ref('name')
+
+const franchiseRows = computed(() => {
+  const addedStr = new Map<number, string>()
+  const addedTs = new Map<number, number>()
+  for (const it of items.value) {
+    const cid = it.collection_id
+    if (cid == null || !it.created_at) continue
+    const t = new Date(it.created_at).getTime()
+    if (t > (addedTs.get(cid) ?? -1)) { addedTs.set(cid, t); addedStr.set(cid, it.created_at) }
+  }
+  return displayCollections.value.map(c => ({
+    ...c,
+    added: addedStr.get(c.id) ?? '',
+    addedTs: addedTs.get(c.id) ?? 0,
+  }))
+})
+
+const sortedFranchises = computed(() => {
+  const rows = [...franchiseRows.value]
+  switch (franchiseSort.value) {
+    case 'films-desc': rows.sort((a, b) => b.movie_count - a.movie_count); break
+    case 'films-asc': rows.sort((a, b) => a.movie_count - b.movie_count); break
+    case 'added': rows.sort((a, b) => b.addedTs - a.addedTs); break
+    default: rows.sort((a, b) => franchiseLabel(a.name).localeCompare(franchiseLabel(b.name)))
+  }
+  return rows
+})
+
 const viewTitle = computed(() => {
   if (activeView.value === 'loved') return 'Loved Movies'
+  if (activeView.value === 'franchises') return 'Franchises'
   if (activeView.value?.startsWith('list-')) {
     const list = userLists.value.find(l => `list-${l.id}` === activeView.value)
     return list?.name || 'List'
-  }
-  if (activeView.value?.startsWith('collection-')) {
-    const col = collections.value.find(c => `collection-${c.id}` === activeView.value)
-    return col?.name || 'Franchise'
   }
   return 'Movies'
 })
@@ -435,9 +573,6 @@ const filtered = computed(() => {
     } else {
       list = list.filter(i => listItems.value.has(i.id))
     }
-  } else if (activeView.value?.startsWith('collection-')) {
-    const colId = Number(activeView.value.replace('collection-', ''))
-    list = list.filter(i => i.collection_id === colId)
   } else if (activeLib.value) {
     list = list.filter(i => i.library_id === activeLib.value)
   }
@@ -575,7 +710,6 @@ onMounted(async () => {
   // deleted library/list/franchise would otherwise filter everything away.
   if (activeLib.value !== null && !libraries.value.some(l => l.id === activeLib.value)) activeLib.value = null
   if (activeView.value?.startsWith('list-') && !userLists.value.some(l => `list-${l.id}` === activeView.value)) activeView.value = null
-  if (activeView.value?.startsWith('collection-') && !collections.value.some(c => `collection-${c.id}` === activeView.value)) activeView.value = null
 
   // Restored person/studio filters need their media-id sets refetched, and a
   // restored list view needs its items loaded, before scroll can be restored.
@@ -589,6 +723,20 @@ onMounted(async () => {
 
 <style scoped>
 .lib-content { min-height: 200px; padding-top: 16px; }
+
+/* Franchises overview (activeView === 'franchises') — reuses the global
+   .grid-posters / .browse-detail-row / .list-row chrome so it matches the
+   library views; only the franchise-specific column shape + link resets live
+   here. */
+.fr-grid { padding: 0 32px 80px; }
+.fr-detail { display: flex; flex-direction: column; gap: 4px; }
+/* Franchise list columns: name | films | added (the global .list-row is a
+   5-column movie layout). Scoped, so it outranks the global rule. */
+.fr-list-row { grid-template-columns: minmax(0, 3fr) 0.6fr 1fr; }
+/* Detail/list rows are NuxtLinks here (movie rows are click-divs) — drop the
+   anchor underline. */
+.fr-detail .browse-detail-row,
+.list-rows .fr-list-row { text-decoration: none; }
 .grid-virt { /* container for usePosterGrid; width is the source of truth */ }
 .grid-row { display: grid; column-gap: 18px; padding-bottom: 22px; }
 /* Was inline `style="padding: 0 32px 80px"` on grid-virt/detail-virt/list-rows
@@ -645,6 +793,8 @@ onMounted(async () => {
 @media (max-width: 720px) {
   .lib-pad { padding: 0 12px 90px; }
   .lib-pad-top { padding: 0 12px; }
+  .fr-head { padding: 14px 12px 10px; }
+  .fr-grid { padding: 0 12px 90px; }
   .grid-row { column-gap: 10px; padding-bottom: 14px; }
 
   .list-row-phone {

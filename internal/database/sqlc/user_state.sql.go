@@ -40,6 +40,41 @@ func (q *Queries) ListFavoritedIDs(ctx context.Context, arg ListFavoritedIDsPara
 	return items, nil
 }
 
+const listFavoritedMediaIDsByType = `-- name: ListFavoritedMediaIDsByType :many
+SELECT f.entity_id
+FROM user_favorites f
+JOIN media_items mi ON mi.id = f.entity_id
+WHERE f.user_id = $1 AND f.entity_type = 'media_item' AND mi.media_type = $2
+`
+
+type ListFavoritedMediaIDsByTypeParams struct {
+	UserID    int64     `json:"user_id"`
+	MediaType MediaType `json:"media_type"`
+}
+
+// Favorited media_item IDs scoped to a media type. Movies and TV shows are both
+// favorited as entity_type='media_item', so the per-section Loved count/list
+// must filter by the item's media_type — a loved show must not count on Movies.
+func (q *Queries) ListFavoritedMediaIDsByType(ctx context.Context, arg ListFavoritedMediaIDsByTypeParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listFavoritedMediaIDsByType, arg.UserID, arg.MediaType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var entity_id int64
+		if err := rows.Scan(&entity_id); err != nil {
+			return nil, err
+		}
+		items = append(items, entity_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listShowWatchCounts = `-- name: ListShowWatchCounts :many
 SELECT ts.media_item_id,
        ts.number_of_episodes::int AS total_episodes,

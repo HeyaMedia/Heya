@@ -16,7 +16,7 @@
     <div class="filter-bar-top">
       <div class="filter-bar-left">
         <h1 class="filter-bar-title">{{ title }}</h1>
-        <span class="filter-bar-count">{{ count }} titles</span>
+        <span class="filter-bar-count">{{ count }} {{ countLabel ?? 'titles' }}</span>
       </div>
       <div class="filter-bar-right">
         <!-- Phone only: LibrarySidebar (library/loved/lists/franchises) moves
@@ -28,12 +28,12 @@
           <Icon name="folder" :size="14" />
           Library
         </button>
-        <button v-if="dirty" class="btn-ghost-sm fb-reset" title="Reset filters and sorting" @click="$emit('reset')">
+        <button v-if="dirty && !hideFilters" class="btn-ghost-sm fb-reset" title="Reset filters and sorting" @click="$emit('reset')">
           <Icon name="undo" :size="14" />
           Reset
         </button>
 
-        <PopoverRoot v-model:open="panelOpen">
+        <PopoverRoot v-if="!hideFilters" v-model:open="panelOpen">
           <PopoverTrigger as-child>
             <button class="btn-ghost-sm" :class="{ active: activeCount > 0 || panelOpen }">
               <Icon name="filter" :size="14" />
@@ -178,7 +178,7 @@
             <Icon name="chevdown" :size="10" class="fb-caret" />
           </template>
           <DropdownMenuItem
-            v-for="opt in sortOptions"
+            v-for="opt in sortMenu"
             :key="opt.value"
             class="surface-item fb-sort-item"
             :class="{ active: sort === opt.value }"
@@ -205,7 +205,7 @@
     </div>
 
     <!-- Active filter pills -->
-    <div v-if="activeCount > 0" class="filter-pills">
+    <div v-if="activeCount > 0 && !hideFilters" class="filter-pills">
       <button
         v-for="pill in activePills"
         :key="pill.key"
@@ -235,6 +235,13 @@ const props = defineProps<{
   genreCounts?: Record<string, number>
   /** True when sort or filters differ from defaults — shows the Reset button. */
   dirty?: boolean
+  /** Override the sort menu (default = the movie sort set below). */
+  sortOptions?: { label: string; value: string }[]
+  /** Hide the attribute-filter controls (Filters popover, Reset, active pills).
+   *  The Franchises view sorts + toggles view but has no movie-level filters. */
+  hideFilters?: boolean
+  /** Noun shown after the count (default 'titles'). */
+  countLabel?: string
 }>()
 
 const emits = defineEmits<{
@@ -260,13 +267,14 @@ function emitFilters() {
   emits('update:filters', { ...local })
 }
 
-const sortOptions = [
+const DEFAULT_SORT_OPTIONS = [
   { label: 'Title A→Z', value: 'title' },
   { label: 'Recently Added', value: 'added' },
   { label: 'Year (Newest)', value: 'year-desc' },
   { label: 'Year (Oldest)', value: 'year-asc' },
   { label: 'Rating', value: 'rating' },
 ]
+const sortMenu = computed(() => props.sortOptions ?? DEFAULT_SORT_OPTIONS)
 
 const viewOptions = [
   { value: 'grid', label: 'Grid view', icon: 'grid' },
@@ -274,7 +282,7 @@ const viewOptions = [
   { value: 'list', label: 'List view', icon: 'list' },
 ]
 
-const sortLabel = computed(() => sortOptions.find(o => o.value === props.sort)?.label || 'Sort')
+const sortLabel = computed(() => sortMenu.value.find(o => o.value === props.sort)?.label || 'Sort')
 
 const activeCount = computed(() => {
   let c = 0

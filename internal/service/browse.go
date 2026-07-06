@@ -33,6 +33,13 @@ type CollectionResult struct {
 	// its local movie when owned. Empty until a member movie is enriched.
 	Parts      []CollectionPartView `json:"parts"`
 	OwnedCount int                  `json:"owned_count"`
+	// Genres aggregated across the collection's owned movies, most-common
+	// first. TMDB collections have no genres of their own, so we surface the
+	// members' — see ListCollectionGenres.
+	Genres []string `json:"genres"`
+	// Keywords is the finer folksonomy aggregated across the owned movies
+	// (capped, most-common first) — see ListCollectionKeywords.
+	Keywords []string `json:"keywords"`
 }
 
 // CollectionPartView is one franchise film plus its local resolution: when
@@ -133,11 +140,25 @@ func (a *App) GetCollection(ctx context.Context, id int64) (CollectionResult, er
 
 	parts, owned := a.resolveCollectionParts(ctx, q, col.Parts)
 
+	genreRows, _ := q.ListCollectionGenres(ctx, pgtype.Int8{Int64: col.ID, Valid: true})
+	genres := make([]string, 0, len(genreRows))
+	for _, g := range genreRows {
+		genres = append(genres, g.Genre)
+	}
+
+	keywordRows, _ := q.ListCollectionKeywords(ctx, pgtype.Int8{Int64: col.ID, Valid: true})
+	keywords := make([]string, 0, len(keywordRows))
+	for _, k := range keywordRows {
+		keywords = append(keywords, k.Name)
+	}
+
 	return CollectionResult{
 		Collection: col,
 		Movies:     movies,
 		Parts:      parts,
 		OwnedCount: owned,
+		Genres:     genres,
+		Keywords:   keywords,
 	}, nil
 }
 

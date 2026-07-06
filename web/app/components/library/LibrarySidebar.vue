@@ -74,31 +74,21 @@
         </div>
       </template>
 
-      <!-- TMDB Collections — movie-only, so the section renders only when the
-           parent page passes the browse result in (tv/books leave it unset). -->
-      <template v-if="collections">
-        <div class="lib-item lists-toggle" role="button" @click="collectionsExpanded = !collectionsExpanded" style="margin-top: 4px">
-          <Icon name="film" :size="16" />
-          <span>Franchises</span>
-          <Icon :name="collectionsExpanded ? 'chevdown' : 'chevright'" :size="10" class="expand-icon" />
-        </div>
-        <template v-if="collectionsExpanded">
-          <div
-            v-for="c in collections"
-            :key="c.id"
-            class="lib-item lib-item-nested"
-            role="button"
-            :class="{ active: activeView === `collection-${c.id}` }"
-            @click="$emit('view', `collection-${c.id}`)"
-          >
-            <span>{{ c.name }}</span>
-            <span class="count">{{ c.movie_count }}</span>
-          </div>
-          <div v-if="!collections.length" class="lib-item lib-item-nested lib-item-empty">
-            No franchises
-          </div>
-        </template>
-      </template>
+      <!-- TMDB Collections → a page of their own (/movies/franchises). Movie-only,
+           so this row renders only when the parent passes the (≥2-film) browse
+           list in; tv/books leave it unset. A specific franchise
+           (/movies/collection/N) keeps this row highlighted too. -->
+      <div
+        v-if="collections?.length"
+        class="lib-item"
+        role="button"
+        :class="{ active: activeView === 'franchises' }"
+        @click="$emit('view', 'franchises')"
+      >
+        <Icon name="film" :size="16" />
+        <span>Franchises</span>
+        <span class="count">{{ collections.length }}</span>
+      </div>
     </div>
 
     <div class="lib-footer">
@@ -136,7 +126,14 @@ const emit = defineEmits<{
 }>()
 
 const listsExpanded = ref(false)
-const collectionsExpanded = ref(false)
+
+// Reveal the active list's section. Now that the selection lives in the URL
+// (a deep link / reload / back can land straight on a list), the accordion it
+// lives in must open so the active row is actually visible. Expand-only —
+// never auto-collapse, so it can't fight a manual toggle.
+watch(() => props.activeView, (v) => {
+  if (v?.startsWith('list-')) listsExpanded.value = true
+}, { immediate: true })
 
 const displayLists = computed(() => props.userLists || [])
 

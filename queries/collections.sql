@@ -36,6 +36,32 @@ JOIN movies m ON m.media_item_id = mi.id
 WHERE m.collection_id = $1
 ORDER BY m.release_date NULLS LAST;
 
+-- name: ListCollectionGenres :many
+-- Aggregated genres across the collection's owned movies (TMDB collections
+-- carry no genres of their own), most-common first for chip display.
+SELECT genre, count(*)::int AS count
+FROM (
+  SELECT unnest(m.genres)::text AS genre
+  FROM movies m
+  WHERE m.collection_id = $1
+) g
+WHERE genre <> ''
+GROUP BY genre
+ORDER BY count DESC, genre;
+
+-- name: ListCollectionKeywords :many
+-- Aggregated keyword tags across the collection's owned movies, most-common
+-- first (capped for display). The finer folksonomy beyond genres — e.g.
+-- "22nd century", "alien planet".
+SELECT k.name, count(*)::int AS count
+FROM keywords k
+JOIN media_keywords mk ON mk.keyword_id = k.id
+JOIN movies m ON m.media_item_id = mk.media_item_id
+WHERE m.collection_id = $1
+GROUP BY k.name
+ORDER BY count DESC, k.name
+LIMIT 30;
+
 -- name: ListAllCollections :many
 SELECT c.*,
        (SELECT count(*) FROM movies m WHERE m.collection_id = c.id)::int AS movie_count

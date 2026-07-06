@@ -275,6 +275,11 @@
 import type { EnrichedMediaItem, Library, UserList, FilterState } from '~~/shared/types'
 import { useCardContextItems } from '~/composables/useContextMenu'
 
+// Stable page key shared with the browse sub-routes registered in
+// app/router.options.ts (/tv/library/:id, /tv/loved, …) so switching the
+// sidebar selection reuses this component instead of remounting + refetching.
+definePageMeta({ key: 'browse-tv' })
+
 const mainEl = ref<HTMLElement | null>(null)
 const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<EnrichedMediaItem[]>([])

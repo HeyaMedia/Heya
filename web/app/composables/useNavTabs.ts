@@ -25,9 +25,10 @@ export function useNavTabs() {
   function isActive(t: NavTab) {
     if (t.to === '/' && route.path === '/') return true
     if (t.to !== '/' && route.path.startsWith(t.to)) return true
-    // Movie detail pages live under /media/{id} (a shared numeric-ID route
-    // used before slugs existed for this entity type) rather than /movies/*.
-    if (t.to === '/movies' && route.path.startsWith('/media/')) return true
+    // Movie-section pages that live outside /movies/*: the legacy numeric-ID
+    // /media/{id} detail route, and /collection/{id} franchise pages (which
+    // collections only exist for movies).
+    if (t.to === '/movies' && (route.path.startsWith('/media/') || route.path.startsWith('/collection/'))) return true
     return false
   }
 

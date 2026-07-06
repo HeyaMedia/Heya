@@ -154,6 +154,84 @@ func (q *Queries) ListAllCollections(ctx context.Context, arg ListAllCollections
 	return items, nil
 }
 
+const listCollectionGenres = `-- name: ListCollectionGenres :many
+SELECT genre, count(*)::int AS count
+FROM (
+  SELECT unnest(m.genres)::text AS genre
+  FROM movies m
+  WHERE m.collection_id = $1
+) g
+WHERE genre <> ''
+GROUP BY genre
+ORDER BY count DESC, genre
+`
+
+type ListCollectionGenresRow struct {
+	Genre string `json:"genre"`
+	Count int32  `json:"count"`
+}
+
+// Aggregated genres across the collection's owned movies (TMDB collections
+// carry no genres of their own), most-common first for chip display.
+func (q *Queries) ListCollectionGenres(ctx context.Context, collectionID pgtype.Int8) ([]ListCollectionGenresRow, error) {
+	rows, err := q.db.Query(ctx, listCollectionGenres, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionGenresRow{}
+	for rows.Next() {
+		var i ListCollectionGenresRow
+		if err := rows.Scan(&i.Genre, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCollectionKeywords = `-- name: ListCollectionKeywords :many
+SELECT k.name, count(*)::int AS count
+FROM keywords k
+JOIN media_keywords mk ON mk.keyword_id = k.id
+JOIN movies m ON m.media_item_id = mk.media_item_id
+WHERE m.collection_id = $1
+GROUP BY k.name
+ORDER BY count DESC, k.name
+LIMIT 30
+`
+
+type ListCollectionKeywordsRow struct {
+	Name  string `json:"name"`
+	Count int32  `json:"count"`
+}
+
+// Aggregated keyword tags across the collection's owned movies, most-common
+// first (capped for display). The finer folksonomy beyond genres — e.g.
+// "22nd century", "alien planet".
+func (q *Queries) ListCollectionKeywords(ctx context.Context, collectionID pgtype.Int8) ([]ListCollectionKeywordsRow, error) {
+	rows, err := q.db.Query(ctx, listCollectionKeywords, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionKeywordsRow{}
+	for rows.Next() {
+		var i ListCollectionKeywordsRow
+		if err := rows.Scan(&i.Name, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCollectionMovies = `-- name: ListCollectionMovies :many
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked
 FROM media_items mi

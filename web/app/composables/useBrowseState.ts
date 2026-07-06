@@ -3,10 +3,22 @@
 //
 // State lives in a module-scope store so it survives client-side navigation —
 // open a movie, go back, and the page picks up exactly where it was. The
-// preference half (view/sort/filters/activeLib/activeView) is also mirrored
-// to localStorage so it survives reloads. Scroll position is intentionally
-// memory-only: after a reload the library may have changed and a stale
-// offset is worse than starting at the top.
+// display preferences (view/sort/filters) are mirrored to localStorage so
+// they survive reloads. Scroll position is intentionally memory-only: after
+// a reload the library may have changed and a stale offset is worse than
+// starting at the top.
+//
+// The sidebar SELECTION (activeLib / activeView) is instead driven by the URL
+// PATH — `/movies/library/<id>`, `/movies/loved`, `/movies/list/<id>`,
+// `/movies/collection/<id>` (and the `/tv/...` equivalents). Every pick
+// becomes a real history entry, so back/forward walks the selection chain
+// instead of leaving the page. A bare `/movies` always means "All"; the last
+// selection is deliberately NOT restored from localStorage (that would fight
+// the address bar). A view supersedes a library (single-selection semantics).
+//
+// Those sub-paths all render the SAME index component as `/movies` — they're
+// registered in `app/router.options.ts` with a shared `meta.key` so switching
+// selection doesn't remount (and refetch) the page.
 
 import type { FilterState } from '~~/shared/types'
 
@@ -45,11 +57,23 @@ function initialStore(page: string): BrowseStore {
       if (BROWSE_VIEWS.has(p.view)) base.view = p.view
       if (BROWSE_SORTS.has(p.sort)) base.sort = p.sort
       if (p.filters && typeof p.filters === 'object') base.filters = { ...defaultFilters(), ...p.filters }
-      if (typeof p.activeLib === 'number') base.activeLib = p.activeLib
-      if (typeof p.activeView === 'string') base.activeView = p.activeView
+      // activeLib / activeView are intentionally NOT restored — they come
+      // from the URL query (see useBrowseState below).
     }
   } catch { /* corrupt snapshot → defaults */ }
   return base
+}
+
+// ── Sidebar selection ⇄ URL path helpers ───────────────────────────────
+// A view supersedes a library (single-selection semantics that match the
+// sidebar's active-highlight), so a live view always drops any library.
+interface Selection {
+  activeLib: number | null
+  activeView: string | null
+}
+
+function normalizeSelection(activeLib: number | null, activeView: string | null): Selection {
+  return activeView ? { activeLib: null, activeView } : { activeLib, activeView: null }
 }
 
 export function useBrowseState(page: string) {
@@ -60,8 +84,78 @@ export function useBrowseState(page: string) {
   }
   const s = store
 
+  const route = useRoute()
+  const router = useRouter()
+  const base = `/${page}`
+
+  // Parse the sidebar selection out of the current path. Returns null when the
+  // route isn't one of THIS page's browse views (e.g. a media detail page
+  // mid-navigation) so the sync watchers below leave the store untouched
+  // rather than reading it as "All" and hijacking the navigation.
+  function selectionFromRoute(): Selection | null {
+    if (route.path === base) return { activeLib: null, activeView: null }
+    if (route.path === `${base}/loved`) return { activeLib: null, activeView: 'loved' }
+    if (route.path === `${base}/franchises`) return { activeLib: null, activeView: 'franchises' }
+    const rest = route.path.startsWith(`${base}/`) ? route.path.slice(base.length + 1) : ''
+    const m = /^(library|list)\/(\d+)$/.exec(rest)
+    if (!m) return null
+    const [, kind, id] = m
+    // 'library' → activeLib; 'list' → the list-<id> activeView key. (A specific
+    // franchise is its own /collection/:id page, not a browse selection.)
+    return kind === 'library'
+      ? { activeLib: Number(id), activeView: null }
+      : { activeLib: null, activeView: `${kind}-${id}` }
+  }
+
+  function pathForSelection(sel: Selection): string {
+    if (sel.activeView === 'loved') return `${base}/loved`
+    if (sel.activeView === 'franchises') return `${base}/franchises`
+    if (sel.activeView?.startsWith('list-')) return `${base}/list/${sel.activeView.slice(5)}`
+    if (sel.activeLib != null) return `${base}/library/${sel.activeLib}`
+    return base
+  }
+
+  // Reconcile the store from the URL up front — synchronous and before the
+  // watchers below register, so the first render already matches the address
+  // bar (no stale-selection flash) without minting a history entry.
+  {
+    const sel = selectionFromRoute()
+    if (sel) {
+      s.activeLib = sel.activeLib
+      s.activeView = sel.activeView
+    }
+  }
+
+  // store → URL: a sidebar pick pushes a new history entry. Skip when the path
+  // already reflects the selection so the URL→store writes below don't echo a
+  // redundant push (which is what breaks the two-way sync into a loop), and
+  // skip entirely when we've left the browse views so we can't hijack a
+  // detail-page navigation.
   watch(
-    () => ({ view: s.view, sort: s.sort, filters: s.filters, activeLib: s.activeLib, activeView: s.activeView }),
+    () => [s.activeLib, s.activeView] as const,
+    () => {
+      if (!selectionFromRoute()) return
+      const target = pathForSelection(normalizeSelection(s.activeLib, s.activeView))
+      if (route.path === target) return
+      router.push(target).catch(() => { /* redundant/aborted nav */ })
+    },
+  )
+
+  // URL → store: back/forward (or a deep link / shared URL) re-applies it.
+  watch(
+    () => route.path,
+    () => {
+      const sel = selectionFromRoute()
+      if (!sel) return
+      if (sel.activeLib === s.activeLib && sel.activeView === s.activeView) return
+      s.activeLib = sel.activeLib
+      s.activeView = sel.activeView
+    },
+  )
+
+  // Display preferences only — the selection is URL-driven (above).
+  watch(
+    () => ({ view: s.view, sort: s.sort, filters: s.filters }),
     (snap) => {
       try { localStorage.setItem(storageKey(page), JSON.stringify(snap)) } catch { /* private mode / quota — prefs just won't stick */ }
     },

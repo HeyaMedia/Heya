@@ -38,14 +38,14 @@ func (a *App) GetUserState(ctx context.Context, userID int64, scope string, seri
 
 	switch scope {
 	case "movies":
-		favIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "media_item"})
+		favIDs, _ := q.ListFavoritedMediaIDsByType(ctx, sqlc.ListFavoritedMediaIDsByTypeParams{UserID: userID, MediaType: sqlc.MediaTypeMovie})
 		watchedIDs, _ := q.ListWatchedMovieIDs(ctx, userID)
 		result["favorited"] = favIDs
 		result["watched"] = watchedIDs
 
 	case "series":
 		showCounts, _ := q.ListShowWatchCounts(ctx, userID)
-		favIDs, _ := q.ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: "media_item"})
+		favIDs, _ := q.ListFavoritedMediaIDsByType(ctx, sqlc.ListFavoritedMediaIDsByTypeParams{UserID: userID, MediaType: sqlc.MediaTypeTv})
 
 		// Raw counts compare the user's watch rows to the provider-catalog
 		// total — but bulk-mark only writes the episodes we hold, and stale

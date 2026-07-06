@@ -12,15 +12,18 @@
 // registration would race page transitions (new page's setup can run before
 // the old page's unmount, so the old unregister clobbers the new register).
 // Route paths are deterministic, so derive instead:
-//   /movies, /tv, /books (index pages only)  -> 'library'
+//   /movies, /tv (incl. the library/loved/list/franchise browse sub-routes,
+//     which share the 'browse-*' page key — see app/router.options.ts), /books
+//                                            -> 'library'
 //   /music and everything under it           -> 'music'
-// Detail pages (/movies/{slug}, ...) have no persistent sidebar on desktop,
-// so they get no burger either.
+// Detail pages (/movies/{slug}, ...) carry no 'browse-*' key and aren't index
+// paths, so they still get no burger.
 import { computed, ref } from 'vue'
 
 export type SectionSidebarKind = 'library' | 'music'
 
 const LIBRARY_INDEX_PATHS = new Set(['/movies', '/tv', '/books'])
+const LIBRARY_BROWSE_KEYS = new Set(['browse-movies', 'browse-tv'])
 
 const open = ref(false)
 
@@ -30,6 +33,9 @@ export function useSectionSidebar() {
   const kind = computed<SectionSidebarKind | null>(() => {
     const path = route.path.replace(/\/+$/, '') || '/'
     if (path === '/music' || path.startsWith('/music/')) return 'music'
+    // Movies/TV browse pages incl. their selection sub-routes, keyed by the
+    // shared page key; /books still matches by path (no browse key).
+    if (typeof route.meta.key === 'string' && LIBRARY_BROWSE_KEYS.has(route.meta.key)) return 'library'
     if (LIBRARY_INDEX_PATHS.has(path)) return 'library'
     return null
   })

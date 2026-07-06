@@ -32,6 +32,15 @@ WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true AND
 SELECT entity_id FROM user_favorites
 WHERE user_id = $1 AND entity_type = $2;
 
+-- Favorited media_item IDs scoped to a media type. Movies and TV shows are both
+-- favorited as entity_type='media_item', so the per-section Loved count/list
+-- must filter by the item's media_type — a loved show must not count on Movies.
+-- name: ListFavoritedMediaIDsByType :many
+SELECT f.entity_id
+FROM user_favorites f
+JOIN media_items mi ON mi.id = f.entity_id
+WHERE f.user_id = $1 AND f.entity_type = 'media_item' AND mi.media_type = $2;
+
 -- Watched movie IDs
 -- name: ListWatchedMovieIDs :many
 SELECT entity_id AS media_item_id FROM user_watch_progress

@@ -1770,6 +1770,24 @@
           "collection": {
             "$ref": "#/components/schemas/Collection"
           },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "movies": {
             "items": {
               "$ref": "#/components/schemas/MediaItem"
@@ -1797,7 +1815,9 @@
           "collection",
           "movies",
           "parts",
-          "owned_count"
+          "owned_count",
+          "genres",
+          "keywords"
         ],
         "type": "object"
       },
