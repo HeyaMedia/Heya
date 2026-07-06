@@ -39,6 +39,17 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 	mediaType := kindToMediaType(kind)
 	sortTitle := strings.ToLower(detail.Title)
 
+	// A pure-local materialize is stamped enrichment_status='local' AT INSERT so
+	// the partial unique index (WHERE enrichment_status='local') catches the
+	// concurrent-materialize race at create time; everything else starts
+	// 'pending' (the prior column default). Enrich later moves it to 'complete',
+	// dropping it out of the index — so re-identified/enriched items are never
+	// constrained by it.
+	enrichStatus := "pending"
+	if detail.ProviderKind == "local" {
+		enrichStatus = "local"
+	}
+
 	item, err := m.q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
 		LibraryID:        libraryID,
 		MediaType:        mediaType,
@@ -55,6 +66,7 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 		Status:           detail.Status,
 		ProviderKind:     detail.ProviderKind,
 		HeyaSlug:         detail.HeyaSlug,
+		EnrichmentStatus: enrichStatus,
 	})
 	if err != nil {
 		if hasExternalIDs {
@@ -64,6 +76,21 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 			})
 			if retryErr == nil {
 				log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing media item (race resolved)")
+				return existing.ID, false, nil
+			}
+		} else if detail.ProviderKind == "local" {
+			// Lost the natural-identity race for a pure-local materialize (23505
+			// on idx_media_items_local_identity from a concurrent metadata_match
+			// worker). The winner is committed; link this file to it rather than
+			// forking a duplicate show. Mirrors the external-ID race path above.
+			existing, retryErr := m.q.FindLocalMediaItemByIdentity(ctx, sqlc.FindLocalMediaItemByIdentityParams{
+				LibraryID: libraryID,
+				MediaType: mediaType,
+				Year:      detail.Year,
+				Title:     detail.Title,
+			})
+			if retryErr == nil {
+				log.Debug().Int64("id", existing.ID).Str("title", existing.Title).Msg("linked to existing local media item (identity race resolved)")
 				return existing.ID, false, nil
 			}
 		}
