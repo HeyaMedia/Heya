@@ -247,6 +247,7 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Items/{itemId}/Download", s.requireAuth(s.handleItemDownload))
 	rt.handle(http.MethodGet, "/Items/{itemId}/File", s.requireAuth(s.handleItemDownload))
 	rt.handle(http.MethodGet, "/Genres", s.requireAuth(s.handleGenres))
+	rt.handle(http.MethodGet, "/Genres/{genreName}", s.requireAuth(s.handleGenreDetail))
 	rt.handle(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}", s.handleSubtitleStream)
 	rt.handle(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/Stream.{routeFormat}", s.handleSubtitleStream)
 

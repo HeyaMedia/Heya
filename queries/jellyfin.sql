@@ -49,6 +49,11 @@ WHERE mi.media_type = sqlc.arg(media_type)
   AND (NOT sqlc.arg(filter_played)::bool OR mi.id = ANY(sqlc.arg(played_ids)::bigint[]))
   AND (NOT sqlc.arg(filter_unplayed)::bool OR NOT (mi.id = ANY(sqlc.arg(played_ids)::bigint[])))
   AND (NOT sqlc.arg(filter_favorite)::bool OR mi.id = ANY(sqlc.arg(favorite_ids)::bigint[]))
+  -- Genre filter (case-insensitive name overlap). Empty arg = no filter. Movies
+  -- carry m.genres, series ts.genres; COALESCE picks whichever this item has.
+  AND (cardinality(sqlc.arg(genres)::text[]) = 0 OR EXISTS (
+        SELECT 1 FROM unnest(COALESCE(m.genres, ts.genres)) AS g
+        WHERE lower(g) = ANY(sqlc.arg(genres)::text[])))
   -- Hide episode-less TV series: enrichment that produced no seasons leaves a
   -- phantom series (no /Seasons, no /Episodes) that strict clients (Infuse)
   -- error on. Real Jellyfin never has one — a series exists only from real
@@ -72,6 +77,8 @@ LIMIT NULLIF(sqlc.arg(lim)::int, 0) OFFSET sqlc.arg(off)::int;
 -- name: JFCountLibraryItems :one
 SELECT count(*)
 FROM media_items mi
+LEFT JOIN movies m ON m.media_item_id = mi.id
+LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = sqlc.arg(media_type)
   AND (sqlc.arg(library_id)::bigint = 0 OR mi.library_id = sqlc.arg(library_id))
   AND (cardinality(sqlc.arg(only_ids)::bigint[]) = 0 OR mi.id = ANY(sqlc.arg(only_ids)::bigint[]))
@@ -79,6 +86,10 @@ WHERE mi.media_type = sqlc.arg(media_type)
   AND (NOT sqlc.arg(filter_played)::bool OR mi.id = ANY(sqlc.arg(played_ids)::bigint[]))
   AND (NOT sqlc.arg(filter_unplayed)::bool OR NOT (mi.id = ANY(sqlc.arg(played_ids)::bigint[])))
   AND (NOT sqlc.arg(filter_favorite)::bool OR mi.id = ANY(sqlc.arg(favorite_ids)::bigint[]))
+  -- Genre filter (case-insensitive name overlap). Empty arg = no filter.
+  AND (cardinality(sqlc.arg(genres)::text[]) = 0 OR EXISTS (
+        SELECT 1 FROM unnest(COALESCE(m.genres, ts.genres)) AS g
+        WHERE lower(g) = ANY(sqlc.arg(genres)::text[])))
   -- Mirror JFListLibraryItems: exclude episode-less TV series.
   AND (mi.media_type <> 'tv' OR EXISTS (
         SELECT 1 FROM tv_series ts2 JOIN tv_seasons s2 ON s2.series_id = ts2.id

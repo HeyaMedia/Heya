@@ -20,6 +20,7 @@ func (a *App) JFListLibraryItems(ctx context.Context, p sqlc.JFListLibraryItemsP
 	p.OnlyIds = emptyNotNil(p.OnlyIds)
 	p.PlayedIds = emptyNotNil(p.PlayedIds)
 	p.FavoriteIds = emptyNotNil(p.FavoriteIds)
+	p.Genres = emptyNotNil(p.Genres)
 	q := sqlc.New(a.db)
 	rows, err := q.JFListLibraryItems(ctx, p)
 	if err != nil {
@@ -35,6 +36,7 @@ func (a *App) JFListLibraryItems(ctx context.Context, p sqlc.JFListLibraryItemsP
 		FilterUnplayed: p.FilterUnplayed,
 		FilterFavorite: p.FilterFavorite,
 		FavoriteIds:    p.FavoriteIds,
+		Genres:         p.Genres,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -369,9 +371,13 @@ func (a *App) JFSimilarLocalItemIDs(ctx context.Context, mediaItemID int64, limi
 // emptyNotNil keeps pgx happy: a nil []int64 binds as NULL, and
 // cardinality(NULL) is NULL, which would disable the "0 = filter off"
 // convention. Always bind at least an empty array.
-func emptyNotNil(ids []int64) []int64 {
-	if ids == nil {
-		return []int64{}
+// emptyNotNil normalizes a nil slice to an empty (non-nil) one so pgx encodes
+// it as an empty SQL array `{}` rather than NULL — the JF list/count queries
+// gate on cardinality(arg)=0, and cardinality(NULL) is NULL (not 0), which
+// would flip an "empty = no filter" clause into "matches nothing".
+func emptyNotNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
 	}
-	return ids
+	return s
 }

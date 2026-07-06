@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -174,22 +175,43 @@ func (s *Server) handleGenres(w http.ResponseWriter, r *http.Request, _ Params) 
 	serverID := s.serverID(r)
 	items := make([]baseItemDto, 0, len(names))
 	for _, n := range names {
-		dto := baseItemDto{
-			Name:              n,
-			ID:                EncodeID(KindGenre, hashName(n)),
-			ServerID:          serverID,
-			Type:              "Genre",
-			MediaType:         "Unknown",
-			IsFolder:          true,
-			Taglines:          []string{},
-			Genres:            []string{},
-			LocationType:      "FileSystem",
-			ImageTags:         map[string]string{},
-			BackdropImageTags: []string{},
-		}
-		items = append(items, dto.done())
+		items = append(items, s.genreDto(n, serverID))
 	}
 	writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: items, TotalRecordCount: len(items)})
+}
+
+// GET /Genres/{genreName} — one genre as a browsable item (the header a client
+// loads before listing the genre's titles via /Items?GenreIds=). 404 for an
+// unknown name, matching upstream; the match is case-insensitive and returns
+// the catalog's canonical casing.
+func (s *Server) handleGenreDetail(w http.ResponseWriter, r *http.Request, p Params) {
+	name := p["genreName"]
+	serverID := s.serverID(r)
+	for _, known := range s.genreNames(r) {
+		if strings.EqualFold(known, name) {
+			writeJSON(w, http.StatusOK, s.genreDto(known, serverID))
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+// genreDto builds the genre pseudo-item shared by /Genres and /Genres/{name}.
+func (s *Server) genreDto(name, serverID string) baseItemDto {
+	dto := baseItemDto{
+		Name:              name,
+		ID:                EncodeID(KindGenre, hashName(name)),
+		ServerID:          serverID,
+		Type:              "Genre",
+		MediaType:         "Unknown",
+		IsFolder:          true,
+		Taglines:          []string{},
+		Genres:            []string{},
+		LocationType:      "FileSystem",
+		ImageTags:         map[string]string{},
+		BackdropImageTags: []string{},
+	}
+	return dto.done()
 }
 
 // GET /Search/Hints — cross-type quick search.

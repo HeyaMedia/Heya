@@ -127,6 +127,8 @@ func (q *Queries) JFCountEpisodes(ctx context.Context, arg JFCountEpisodesParams
 const jFCountLibraryItems = `-- name: JFCountLibraryItems :one
 SELECT count(*)
 FROM media_items mi
+LEFT JOIN movies m ON m.media_item_id = mi.id
+LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = $1
   AND ($2::bigint = 0 OR mi.library_id = $2)
   AND (cardinality($3::bigint[]) = 0 OR mi.id = ANY($3::bigint[]))
@@ -134,6 +136,10 @@ WHERE mi.media_type = $1
   AND (NOT $5::bool OR mi.id = ANY($6::bigint[]))
   AND (NOT $7::bool OR NOT (mi.id = ANY($6::bigint[])))
   AND (NOT $8::bool OR mi.id = ANY($9::bigint[]))
+  -- Genre filter (case-insensitive name overlap). Empty arg = no filter.
+  AND (cardinality($10::text[]) = 0 OR EXISTS (
+        SELECT 1 FROM unnest(COALESCE(m.genres, ts.genres)) AS g
+        WHERE lower(g) = ANY($10::text[])))
   -- Mirror JFListLibraryItems: exclude episode-less TV series.
   AND (mi.media_type <> 'tv' OR EXISTS (
         SELECT 1 FROM tv_series ts2 JOIN tv_seasons s2 ON s2.series_id = ts2.id
@@ -150,6 +156,7 @@ type JFCountLibraryItemsParams struct {
 	FilterUnplayed bool      `json:"filter_unplayed"`
 	FilterFavorite bool      `json:"filter_favorite"`
 	FavoriteIds    []int64   `json:"favorite_ids"`
+	Genres         []string  `json:"genres"`
 }
 
 func (q *Queries) JFCountLibraryItems(ctx context.Context, arg JFCountLibraryItemsParams) (int64, error) {
@@ -163,6 +170,7 @@ func (q *Queries) JFCountLibraryItems(ctx context.Context, arg JFCountLibraryIte
 		arg.FilterUnplayed,
 		arg.FilterFavorite,
 		arg.FavoriteIds,
+		arg.Genres,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -520,25 +528,30 @@ WHERE mi.media_type = $1
   AND (NOT $5::bool OR mi.id = ANY($6::bigint[]))
   AND (NOT $7::bool OR NOT (mi.id = ANY($6::bigint[])))
   AND (NOT $8::bool OR mi.id = ANY($9::bigint[]))
+  -- Genre filter (case-insensitive name overlap). Empty arg = no filter. Movies
+  -- carry m.genres, series ts.genres; COALESCE picks whichever this item has.
+  AND (cardinality($10::text[]) = 0 OR EXISTS (
+        SELECT 1 FROM unnest(COALESCE(m.genres, ts.genres)) AS g
+        WHERE lower(g) = ANY($10::text[])))
   -- Hide episode-less TV series: enrichment that produced no seasons leaves a
   -- phantom series (no /Seasons, no /Episodes) that strict clients (Infuse)
   -- error on. Real Jellyfin never has one — a series exists only from real
   -- episode files. Series WITH seasons but empty tv_episodes still pass.
   AND (mi.media_type <> 'tv' OR EXISTS (SELECT 1 FROM tv_seasons s2 WHERE s2.series_id = ts.id))
 ORDER BY
-  CASE WHEN $10::text = 'random' THEN md5(mi.id::text || $11::text) END ASC,
-  CASE WHEN $10 = 'added'    AND $12::bool     THEN mi.created_at END DESC NULLS LAST,
-  CASE WHEN $10 = 'added'    AND NOT $12::bool THEN mi.created_at END ASC NULLS LAST,
-  CASE WHEN $10 = 'premiere' AND $12::bool     THEN COALESCE(m.release_date, ts.first_air_date) END DESC NULLS LAST,
-  CASE WHEN $10 = 'premiere' AND NOT $12::bool THEN COALESCE(m.release_date, ts.first_air_date) END ASC NULLS LAST,
-  CASE WHEN $10 = 'year'     AND $12::bool     THEN NULLIF(mi.year, '') END DESC NULLS LAST,
-  CASE WHEN $10 = 'year'     AND NOT $12::bool THEN NULLIF(mi.year, '') END ASC NULLS LAST,
-  CASE WHEN $10 = 'rating'   AND $12::bool     THEN COALESCE(m.rating, ts.rating) END DESC NULLS LAST,
-  CASE WHEN $10 = 'rating'   AND NOT $12::bool THEN COALESCE(m.rating, ts.rating) END ASC NULLS LAST,
-  CASE WHEN $12::bool THEN lower(COALESCE(NULLIF(mi.sort_title, ''), mi.title)) END DESC,
-  CASE WHEN NOT $12::bool THEN lower(COALESCE(NULLIF(mi.sort_title, ''), mi.title)) END ASC,
+  CASE WHEN $11::text = 'random' THEN md5(mi.id::text || $12::text) END ASC,
+  CASE WHEN $11 = 'added'    AND $13::bool     THEN mi.created_at END DESC NULLS LAST,
+  CASE WHEN $11 = 'added'    AND NOT $13::bool THEN mi.created_at END ASC NULLS LAST,
+  CASE WHEN $11 = 'premiere' AND $13::bool     THEN COALESCE(m.release_date, ts.first_air_date) END DESC NULLS LAST,
+  CASE WHEN $11 = 'premiere' AND NOT $13::bool THEN COALESCE(m.release_date, ts.first_air_date) END ASC NULLS LAST,
+  CASE WHEN $11 = 'year'     AND $13::bool     THEN NULLIF(mi.year, '') END DESC NULLS LAST,
+  CASE WHEN $11 = 'year'     AND NOT $13::bool THEN NULLIF(mi.year, '') END ASC NULLS LAST,
+  CASE WHEN $11 = 'rating'   AND $13::bool     THEN COALESCE(m.rating, ts.rating) END DESC NULLS LAST,
+  CASE WHEN $11 = 'rating'   AND NOT $13::bool THEN COALESCE(m.rating, ts.rating) END ASC NULLS LAST,
+  CASE WHEN $13::bool THEN lower(COALESCE(NULLIF(mi.sort_title, ''), mi.title)) END DESC,
+  CASE WHEN NOT $13::bool THEN lower(COALESCE(NULLIF(mi.sort_title, ''), mi.title)) END ASC,
   mi.id ASC
-LIMIT NULLIF($14::int, 0) OFFSET $13::int
+LIMIT NULLIF($15::int, 0) OFFSET $14::int
 `
 
 type JFListLibraryItemsParams struct {
@@ -551,6 +564,7 @@ type JFListLibraryItemsParams struct {
 	FilterUnplayed bool      `json:"filter_unplayed"`
 	FilterFavorite bool      `json:"filter_favorite"`
 	FavoriteIds    []int64   `json:"favorite_ids"`
+	Genres         []string  `json:"genres"`
 	SortBy         string    `json:"sort_by"`
 	RandSeed       string    `json:"rand_seed"`
 	SortDesc       bool      `json:"sort_desc"`
@@ -609,6 +623,7 @@ func (q *Queries) JFListLibraryItems(ctx context.Context, arg JFListLibraryItems
 		arg.FilterUnplayed,
 		arg.FilterFavorite,
 		arg.FavoriteIds,
+		arg.Genres,
 		arg.SortBy,
 		arg.RandSeed,
 		arg.SortDesc,

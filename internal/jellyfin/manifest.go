@@ -136,7 +136,7 @@ var manifest = map[string]manifestEntry{
 	"GET /FallbackFont/Fonts":                                       {Status: opPlanned, Tag: "Subtitle"},
 	"GET /FallbackFont/Fonts/{name}":                                {Status: opPlanned, Tag: "Subtitle"},
 	"GET /Genres":                                                   {Status: opImplemented, Tag: "Genres"},
-	"GET /Genres/{genreName}":                                       {Status: opPlanned, Tag: "Genres"},
+	"GET /Genres/{genreName}":                                       {Status: opImplemented, Tag: "Genres"},
 	"GET /Genres/{name}/Images/{imageType}":                         {Status: opPlanned, Tag: "Image"},
 	"GET /Genres/{name}/Images/{imageType}/{imageIndex}":            {Status: opPlanned, Tag: "Image"},
 	"GET /GetUtcTime":                                               {Status: opImplemented, Tag: "TimeSync"},

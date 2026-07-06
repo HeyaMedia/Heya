@@ -53,6 +53,15 @@ type itemsRequest struct {
 	filterPlayed   bool
 	filterUnplayed bool
 	filterFavorite bool
+
+	// Genre scoping (Genres= names / GenreIds= hashed ids). genres holds the
+	// lowercased names the SQL matches; genreIDs are unresolved KindGenre hashes
+	// turned into names by resolveGenreFilter (needs the genre catalog).
+	// genreFiltered records that a filter was requested, so an unresolvable id
+	// yields an empty result rather than the whole library.
+	genres        []string
+	genreIDs      []int64
+	genreFiltered bool
 }
 
 func parseItemsRequest(r *http.Request) itemsRequest {
@@ -131,7 +140,49 @@ func parseItemsRequest(r *http.Request) itemsRequest {
 	if strings.EqualFold(queryCI(r, "isFavorite"), "true") {
 		req.filterFavorite = true
 	}
+
+	// Genre filter: Genres= carries exact names, GenreIds= carries the hashed
+	// KindGenre ids from /Genres. Either marks the request genre-filtered.
+	for _, name := range strings.Split(queryCI(r, "genres"), ",") {
+		if n := strings.TrimSpace(name); n != "" {
+			req.genres = append(req.genres, strings.ToLower(n))
+			req.genreFiltered = true
+		}
+	}
+	for _, raw := range strings.Split(queryCI(r, "genreIds"), ",") {
+		if id, err := DecodeIDKind(strings.TrimSpace(raw), KindGenre); err == nil {
+			req.genreIDs = append(req.genreIDs, id)
+			req.genreFiltered = true
+		} else if strings.TrimSpace(raw) != "" {
+			req.genreFiltered = true // a foreign genre id → match nothing
+		}
+	}
 	return req
+}
+
+// resolveGenreFilter turns GenreIds= (hashed KindGenre ids) into the lowercased
+// genre names the SQL matches, by hashing the genre catalog and looking each id
+// up. Runs once, before the multi-type fan-out, so every sub-query inherits the
+// resolved names. Unresolvable ids simply add no name — with genreFiltered set,
+// the caller returns empty rather than the whole library.
+func (s *Server) resolveGenreFilter(ctx context.Context, req *itemsRequest) {
+	if len(req.genreIDs) == 0 {
+		return
+	}
+	want := make(map[int64]bool, len(req.genreIDs))
+	for _, id := range req.genreIDs {
+		want[id] = true
+	}
+	req.genreIDs = nil
+	rows, err := s.app.ListGenres(ctx)
+	if err != nil {
+		return
+	}
+	for _, row := range rows {
+		if name, ok := row.Genre.(string); ok && name != "" && want[hashName(name)] {
+			req.genres = append(req.genres, strings.ToLower(name))
+		}
+	}
 }
 
 // parseFields reads the Fields= comma list into a lowercased set.
@@ -406,6 +457,10 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		return s.queryByIDs(ctx, userID, serverID, req)
 	}
 
+	// Resolve GenreIds → names once, before any fan-out (sub-requests inherit
+	// the resolved names via the struct copy).
+	s.resolveGenreFilter(ctx, &req)
+
 	// Multi-type / typeless search fans out per type and merges.
 	if types := req.searchTypes(); len(types) > 1 {
 		return s.queryMultiType(ctx, userID, serverID, req, types)
@@ -419,12 +474,18 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 		if mediaType == "" {
 			return empty, nil
 		}
+		// A genre filter that resolved to no known name (a foreign GenreId)
+		// matches nothing — return empty, never the whole library.
+		if req.genreFiltered && len(req.genres) == 0 {
+			return empty, nil
+		}
 		params := sqlc.JFListLibraryItemsParams{
 			MediaType: mediaType,
 			Search:    req.searchTerm,
 			SortBy:    req.sortBy,
 			SortDesc:  req.sortDesc,
 			RandSeed:  randSeed(userID),
+			Genres:    req.genres,
 			Lim:       lim,
 			Off:       off,
 		}
