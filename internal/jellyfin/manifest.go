@@ -169,7 +169,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Items/Filters2":                                       {Status: opImplemented, Tag: "Filter"},
 	"GET /Items/Latest":                                         {Status: opImplemented, Tag: "UserLibrary"},
 	"GET /Items/Root":                                           {Status: opImplemented, Tag: "UserLibrary"},
-	"GET /Items/Suggestions":                                    {Status: opStubbed, Tag: "Suggestions"},
+	"GET /Items/Suggestions":                                    {Status: opImplemented, Tag: "Suggestions"},
 	"GET /Libraries/AvailableOptions":                           {Status: opPlanned, Tag: "Library"},
 	"GET /Library/MediaFolders":                                 {Status: opPlanned, Tag: "Library"},
 	"GET /Library/PhysicalPaths":                                {Status: opPlanned, Tag: "Library"},
@@ -207,7 +207,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Localization/ParentalRatings":                         {Status: opPlanned, Tag: "Localization"},
 	"GET /MediaSegments/{itemId}":                               {Status: opImplemented, Tag: "MediaSegments"}, // media_segments rows for the item's file, ms → ticks; gated by MediaSourceInfo.HasSegments (mediaSourceForFile)
 	"GET /Movies/{itemId}/Similar":                              {Status: opImplemented, Tag: "Library"},
-	"GET /Movies/Recommendations":                               {Status: opStubbed, Tag: "Movies"},
+	"GET /Movies/Recommendations":                               {Status: opImplemented, Tag: "Movies"},
 	"GET /MusicGenres":                                          {Status: opStubbed, Tag: "MusicGenres"},
 	"GET /MusicGenres/{genreName}":                              {Status: opPlanned, Tag: "MusicGenres"},
 	"GET /MusicGenres/{name}/Images/{imageType}":                {Status: opPlanned, Tag: "Image"},

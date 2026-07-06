@@ -32,6 +32,12 @@ type RecRail struct {
 	Title    string        `json:"title"`
 	Subtitle string        `json:"subtitle,omitempty"`
 	Items    []RecRailItem `json:"items"`
+
+	// Baseline is the entity this rail is "about" — the actor for a "Starring
+	// X" rail, the genre for a "More X" rail, empty otherwise. Off the native
+	// wire (the FE derives labels from Title); the Jellyfin compat layer maps it
+	// to RecommendationDto.BaselineItemName for /Movies/Recommendations.
+	Baseline string `json:"-"`
 }
 
 // RecommendedResult is the whole ordered rail stack for one section. The server
@@ -69,14 +75,14 @@ func (a *App) movieRecommendations(ctx context.Context, userID int64) (Recommend
 		items := mapRecRows(rows, func(r sqlc.ListRecentlyReleasedMoviesRow) RecRailItem {
 			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 		})
-		rails = appendRail(rails, "recently-released", "Recently Released", "New in theaters & digital", items, 3)
+		rails = appendRail(rails, "recently-released", "Recently Released", "New in theaters & digital", "", items, 3)
 	}
 
 	if rows, err := q.ListTopUnwatchedMovies(ctx, sqlc.ListTopUnwatchedMoviesParams{UserID: userID, Limit: recRailLimit}); err == nil {
 		items := mapRecRows(rows, func(r sqlc.ListTopUnwatchedMoviesRow) RecRailItem {
 			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 		})
-		rails = appendRail(rails, "top-unwatched", "Top Unwatched Movies", "Highly rated, not seen yet", items, 3)
+		rails = appendRail(rails, "top-unwatched", "Top Unwatched Movies", "Highly rated, not seen yet", "", items, 3)
 	}
 
 	// "Starring <actor>": the most-watched top-billed actor across finished
@@ -90,7 +96,7 @@ func (a *App) movieRecommendations(ctx context.Context, userID int64) (Recommend
 			items := mapRecRows(rows, func(r sqlc.ListPersonUnseenMoviesRow) RecRailItem {
 				return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 			})
-			rails = appendRail(rails, "by-actor", "Starring "+ac.Name, "Because you've watched their films", items, 4)
+			rails = appendRail(rails, "by-actor", "Starring "+ac.Name, "Because you've watched their films", ac.Name, items, 4)
 			break
 		}
 	}
@@ -106,7 +112,7 @@ func (a *App) movieRecommendations(ctx context.Context, userID int64) (Recommend
 			items := mapRecRows(rows, func(r sqlc.ListTopMoviesInGenreUnseenRow) RecRailItem {
 				return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 			})
-			rails = appendRail(rails, "more-genre", "More "+g.Genre, "Because you watch a lot of "+g.Genre, items, 4)
+			rails = appendRail(rails, "more-genre", "More "+g.Genre, "Because you watch a lot of "+g.Genre, g.Genre, items, 4)
 			break
 		}
 	}
@@ -124,7 +130,7 @@ func (a *App) tvRecommendations(ctx context.Context, userID int64) (RecommendedR
 		items := mapRecRows(rows, func(r sqlc.ListTopRatedTVRow) RecRailItem {
 			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 		})
-		rails = appendRail(rails, "top-rated", "Top Rated TV", "The best-reviewed shows you own", items, 3)
+		rails = appendRail(rails, "top-rated", "Top Rated TV", "The best-reviewed shows you own", "", items, 3)
 	}
 
 	if genres, err := q.ListTopWatchedTVGenres(ctx, userID); err == nil {
@@ -136,7 +142,7 @@ func (a *App) tvRecommendations(ctx context.Context, userID int64) (RecommendedR
 			items := mapRecRows(rows, func(r sqlc.ListTopTVInGenreRow) RecRailItem {
 				return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, ratingFloat(r.Rating))
 			})
-			rails = appendRail(rails, "more-genre", "More "+g.Genre, "Because you watch a lot of "+g.Genre, items, 4)
+			rails = appendRail(rails, "more-genre", "More "+g.Genre, "Because you watch a lot of "+g.Genre, g.Genre, items, 4)
 			break
 		}
 	}
@@ -146,7 +152,7 @@ func (a *App) tvRecommendations(ctx context.Context, userID int64) (RecommendedR
 		items := mapRecRows(rows, func(r sqlc.ListRediscoverTVRow) RecRailItem {
 			return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, 0)
 		})
-		rails = appendRail(rails, "rediscover", "Rediscover", "New episodes since you last watched", items, 1)
+		rails = appendRail(rails, "rediscover", "Rediscover", "New episodes since you last watched", "", items, 1)
 	}
 
 	rails = a.appendLocalRecRail(ctx, q, rails, userID, "tv", "Recommended Shows")
@@ -169,7 +175,7 @@ func (a *App) appendLocalRecRail(ctx context.Context, q *sqlc.Queries, rails []R
 	items := mapRecRows(rows, func(r sqlc.ListLocalRecommendationsRow) RecRailItem {
 		return newRecRailItem(r.ID, r.LibraryID, r.Title, r.Slug, r.Year, r.MediaType, 0)
 	})
-	return appendRail(rails, "recommended", title, "Frequently recommended alongside what you own", items, 3)
+	return appendRail(rails, "recommended", title, "Frequently recommended alongside what you own", "", items, 3)
 }
 
 // newRecRailItem stamps Available=true — every rail query already gates on a live,
@@ -213,9 +219,9 @@ func mapRecRows[T any](rows []T, f func(T) RecRailItem) []RecRailItem {
 
 // appendRail appends a rail only when it clears the minimum item count — a
 // one-tile rail reads as broken, so sparse rails are dropped instead.
-func appendRail(rails []RecRail, key, title, subtitle string, items []RecRailItem, minItems int) []RecRail {
+func appendRail(rails []RecRail, key, title, subtitle, baseline string, items []RecRailItem, minItems int) []RecRail {
 	if len(items) < minItems {
 		return rails
 	}
-	return append(rails, RecRail{Key: key, Title: title, Subtitle: subtitle, Items: items})
+	return append(rails, RecRail{Key: key, Title: title, Subtitle: subtitle, Baseline: baseline, Items: items})
 }

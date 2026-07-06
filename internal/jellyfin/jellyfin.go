@@ -261,7 +261,7 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Items/{itemId}/ThemeVideos", s.requireAuth(s.requireItem(s.handleThemeSongsOrVideos)))
 	rt.handle(http.MethodGet, "/Items/{itemId}/Ancestors", s.requireAuth(s.requireItem(s.stubEmptyArray)))
 	rt.handle(http.MethodGet, "/Items/{itemId}/CriticReviews", s.requireAuth(s.requireItem(s.stubEmptyQueryResult)))
-	rt.handle(http.MethodGet, "/Items/Suggestions", s.requireAuth(s.stubEmptyQueryResult))
+	rt.handle(http.MethodGet, "/Items/Suggestions", s.requireAuth(s.handleSuggestions))
 	rt.handle(http.MethodGet, "/MediaSegments/{itemId}", s.requireAuth(s.requireItem(s.handleMediaSegments)))
 	rt.handle(http.MethodGet, "/System/ActivityLog/Entries", s.requireAdmin(s.handleActivityLogEntries))
 	rt.handle(http.MethodGet, "/web/ConfigurationPages", s.requireAuth(s.handleConfigurationPages))
@@ -293,7 +293,7 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Years", s.requireAuth(s.stubEmptyQueryResult))
 	rt.handle(http.MethodGet, "/MusicGenres", s.requireAuth(s.stubEmptyQueryResult))
 	rt.handle(http.MethodGet, "/Shows/Upcoming", s.requireAuth(s.stubEmptyQueryResult))
-	rt.handle(http.MethodGet, "/Movies/Recommendations", s.requireAuth(s.stubEmptyArray))
+	rt.handle(http.MethodGet, "/Movies/Recommendations", s.requireAuth(s.handleMovieRecommendations))
 	rt.handle(http.MethodGet, "/UserViews/GroupingOptions", s.requireAuth(s.handleGroupingOptions))
 
 	// Remote-control command acks: we have no command channel to other
