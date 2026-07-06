@@ -80,15 +80,19 @@ func EnqueueEnrichForce(ctx context.Context, rc *river.Client[pgx.Tx], itemID in
 	return enqueueEnrich(ctx, rc, itemID, mediaType, source, true, "", 0, 0, 0)
 }
 
-// EnqueueEnrichTx variant for callers inside a river worker that already
-// have a pgx.Tx context — pulls the River client out of ctx rather than
-// requiring it as an arg.
-func EnqueueEnrichTx(ctx context.Context, itemID int64, mediaType sqlc.MediaType, source EnrichSource) error {
+// EnqueueEnrichForceTx is the Tx-context force variant, for callers inside a
+// river worker that already have a pgx.Tx context — pulls the River client out
+// of ctx rather than requiring it as an arg. Sets Force=true (like
+// EnqueueEnrichForce) so the fan-out actually re-fetches: the only caller is
+// the library-wide "Refresh Metadata" / "Refresh Images" worker, and without
+// Force the enrich worker skips every already-complete item, making the whole
+// refresh a silent no-op.
+func EnqueueEnrichForceTx(ctx context.Context, itemID int64, mediaType sqlc.MediaType, source EnrichSource) error {
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 	if rc == nil {
-		return fmt.Errorf("EnqueueEnrichTx: no river client in context")
+		return fmt.Errorf("EnqueueEnrichForceTx: no river client in context")
 	}
-	return enqueueEnrich(ctx, rc, itemID, mediaType, source, false, "", 0, 0, 0)
+	return enqueueEnrich(ctx, rc, itemID, mediaType, source, true, "", 0, 0, 0)
 }
 
 func enqueueEnrich(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource, force bool, scheduledTaskID string, batchLibraryID int64, batchTotal, batchPosition int) error {

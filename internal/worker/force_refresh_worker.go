@@ -141,7 +141,7 @@ func enqueueForceForLibrary(ctx context.Context, db *pgxpool.Pool, libraryID int
 			continue
 		}
 
-		if err := EnqueueEnrichTx(ctx, itemID, sqlc.MediaType(mediaType), EnrichSourceForced); err != nil {
+		if err := EnqueueEnrichForceTx(ctx, itemID, sqlc.MediaType(mediaType), EnrichSourceForced); err != nil {
 			log.Warn().Err(err).Int64("item_id", itemID).Msg("enqueue forced enrich failed")
 			continue
 		}
