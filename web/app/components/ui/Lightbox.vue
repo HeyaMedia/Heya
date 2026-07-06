@@ -15,7 +15,11 @@
             <DialogTitle>Image viewer</DialogTitle>
           </VisuallyHidden>
 
-          <NuxtImg :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop />
+          <NuxtImg v-if="!imgError" :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop @error="imgError = true" />
+          <div v-else class="lb-fallback" @click.stop>
+            <Icon name="warning" :size="40" />
+            <span>Image unavailable</span>
+          </div>
 
           <DialogClose class="lb-close" aria-label="Close"><Icon name="close" :size="20" /></DialogClose>
 
@@ -33,6 +37,13 @@
 import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogClose, VisuallyHidden } from 'reka-ui'
 
 const { isOpen, currentSrc, index, total, hasNext, hasPrev, close, next, prev } = useLightbox()
+
+// Per-frame load-failure fallback: a dead URL (e.g. a stale remote profile, or
+// a person-image endpoint that couldn't resolve) shows an "unavailable" card
+// instead of a broken-image icon. Reset whenever the shown image changes so a
+// working next/prev frame renders normally.
+const imgError = ref(false)
+watch([currentSrc, isOpen], () => { imgError.value = false })
 
 // reka's DialogContent handles Escape natively. Arrow keys aren't part of
 // the dialog primitive, so we still wire those manually.
@@ -66,6 +77,16 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   max-height: 92vh;
   object-fit: contain;
   border-radius: 4px;
+  cursor: default;
+  user-select: none;
+}
+.lb-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 13px;
   cursor: default;
   user-select: none;
 }

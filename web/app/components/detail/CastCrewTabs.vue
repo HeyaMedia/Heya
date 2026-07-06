@@ -30,7 +30,7 @@
         <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="cast-card">
           <MediaCard
             :idx="c.id"
-            :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+            :src="c.profile_path ? `/api/person/${c.id}/image` : ''"
             aspect="2/3"
             :title="c.name"
             :subtitle="c.character"
@@ -42,7 +42,7 @@
         <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="cast-card">
           <MediaCard
             :idx="c.id"
-            :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+            :src="c.profile_path ? `/api/person/${c.id}/image` : ''"
             aspect="2/3"
             :title="c.name"
             :subtitle="c.character"
@@ -58,7 +58,7 @@
           <NuxtLink v-for="c in dept.members" :key="`${c.id}-${c.job}`" :to="personUrl(c)" class="crew-card">
             <MediaCard
               :idx="c.id"
-              :src="c.profile_path && !c.profile_path.startsWith('http') ? `/api/person/${c.id}/image` : ''"
+              :src="c.profile_path ? `/api/person/${c.id}/image` : ''"
               aspect="2/3"
               :title="c.name"
               :subtitle="c.job"

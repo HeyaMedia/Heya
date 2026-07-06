@@ -19,12 +19,12 @@
         <div class="hero-left">
           <div class="hero-portrait">
             <NuxtImg
-              v-if="data.person.profile_path && !data.person.profile_path.startsWith('http')"
+              v-if="data.person.profile_path && !heroImgError"
               :src="`/api/person/${data.person.id}/image`"
               :width="600"
               :quality="80"
               class="hero-portrait-img"
-              @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
+              @error="heroImgError = true"
             />
             <div v-else class="hero-portrait-placeholder">
               {{ data.person.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}
@@ -290,6 +290,10 @@ const slug = computed(() => route.params.slug as string)
 const lightbox = useLightbox()
 
 const data = ref<PersonResponse | null>(null)
+// Hero portrait falls back to the initials placeholder if /api/person/{id}/image
+// genuinely can't be resolved (dead upstream URL). Reset per person.
+const heroImgError = ref(false)
+watch(() => data.value?.person?.id, () => { heroImgError.value = false })
 const loading = ref(true)
 const activeFilter = ref('all')
 const bioExpanded = ref(false)
@@ -303,13 +307,18 @@ const selectedBioLang = ref('en')
 const galleryUrls = computed<string[]>(() => {
   if (!data.value) return []
   const urls: string[] = []
-  if (data.value.person.profile_path && !data.value.person.profile_path.startsWith('http')) {
+  // Match the hero: the endpoint serves the primary headshot for both local and
+  // remote profile_path (it downloads remote on demand), so prepend it whenever
+  // there's a profile at all — keeps the hero and the lightbox it opens in sync.
+  // Drop it if the hero image actually failed (dead upstream), so the lightbox
+  // doesn't carry a broken first frame — the remote profiles below still stand.
+  if (data.value.person.profile_path && !heroImgError.value) {
     urls.push(`/api/person/${data.value.person.id}/image`)
   }
   if (data.value.profiles) urls.push(...data.value.profiles.map(p => p.url))
   return urls
 })
-const galleryHeroOffset = computed(() => (data.value?.person.profile_path && !data.value.person.profile_path.startsWith('http')) ? 1 : 0)
+const galleryHeroOffset = computed(() => (data.value?.person.profile_path && !heroImgError.value) ? 1 : 0)
 const galleryThumbs = computed(() => (data.value?.profiles || []).slice(0, 8).map(p => p.url))
 const extraProfileCount = computed(() => Math.max(0, (data.value?.profiles?.length || 0) - 8))
 
