@@ -3,7 +3,10 @@ package transcoder
 import (
 	"bufio"
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +80,126 @@ func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) 
 	}
 
 	return &Keyframes{IFrames: iframes, Duration: duration}, nil
+}
+
+// RealSegmentBoundaries asks ffmpeg's own hls muxer to decide where a
+// stream-copy video track would actually be cut for a target duration, and
+// returns the cumulative end time of each segment it would produce.
+//
+// Why this exists: for a copy-video HLS session (AV1/VP9 fMP4, or H.264
+// MPEG-TS remux), the client-facing playlist must declare every segment's
+// duration UP FRONT, before the real transcode has even started — the
+// TranscodeSession model produces segments lazily on demand but serves a
+// complete VOD-style playlist immediately. Since the video is copied (not
+// re-encoded), splits can only happen at existing keyframes — ffmpeg decides
+// which ones internally, and that decision is an undocumented heuristic that
+// does NOT match "first keyframe at least `target` seconds after the last
+// cut" (verified empirically: real ffmpeg output for a Blu-ray remux landed
+// on cuts as short as 1.5s and as long as 14s against a 6s target, in a
+// pattern a simple min-gap predictor can't reproduce). A Go-side prediction
+// that disagrees with ffmpeg's real cuts causes the *declared* playlist
+// timeline to drift from the *physical* segment content — which is exactly
+// what hls.js uses to place each appended fragment on the playback clock
+// (video.currentTime), since it aligns fragments to the playlist's declared
+// cumulative duration rather than trusting each fragment's own embedded
+// timestamp. That drift is what showed up as skip-intro markers (and,
+// nearly identically, trickplay scrubbing and the seek bar) firing ~25s
+// late on a real Breaking Bad remux.
+//
+// Rather than reverse-engineer that heuristic, we ask a second, throwaway
+// ffmpeg process to make the real decision — the SAME "hls" muxer the real
+// session uses, so fidelity is exact by construction. The trick that makes
+// this nearly free on disk: every media segment is routed to os.DevNull via
+// `-strftime 1` (the hls muxer rejects a bare /dev/null as a %d filename
+// template, but the strftime expansion path passes a template containing no
+// % sequences through verbatim, so every segment "file" opens the null
+// device), while only the playlist — a few KB — is written to a scratch
+// temp dir and parsed for its EXTINF durations, whose cumulative sums are
+// the exact cut sequence. The playlist must be a real seekable file (the
+// muxer rewrites it on finalization), hence the temp dir. The dry run is
+// stream-copy with audio/subtitles dropped (no re-encode, no decode).
+//
+// Verified empirically against a 58-minute 1080p Blu-ray remux (BB S01E01):
+// identical segment count (571) to a full write-everything segment-muxer dry
+// run, boundaries within 1ms (except the trailing file-end boundary, 29ms of
+// end-of-stream rounding), ~16KB written vs 1.4GB, ~4s runtime either way —
+// and the probe's EXTINF values matched the real playback session's playlist
+// exactly. Cost is proportional to demuxing the file once and is paid once
+// per new TranscodeSession, not per segment or per request.
+func RealSegmentBoundaries(ctx context.Context, filePath string, target float64) ([]float64, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("RealSegmentBoundaries: filePath is required")
+	}
+	if target <= 0 {
+		target = SegmentDuration
+	}
+
+	tmpDir, err := os.MkdirTemp("", "heya-segprobe-*")
+	if err != nil {
+		return nil, fmt.Errorf("segment boundary probe: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	playlistPath := filepath.Join(tmpDir, "probe.m3u8")
+
+	// Long-movie remuxes can take longer than a typical episode to demux;
+	// 90s is comfortable headroom for even a multi-hour 4K remux while still
+	// failing fast (falling back to the heuristic predictor) if ffmpeg hangs.
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", //nolint:gosec // filePath comes from library_files we control; ffmpeg binary is fixed
+		"-nostats", "-loglevel", "error",
+		"-i", filePath,
+		// -sn matters, not just -an: without it the hls muxer auto-selects
+		// any text subtitle stream into a webvtt sub-muxer, whose own output
+		// path fails the entire probe on subtitle-carrying inputs.
+		"-an", "-sn", "-c:v", "copy",
+		// Match the real session's timeline flags so split decisions are
+		// made against the identical packet timeline.
+		"-copyts", "-avoid_negative_ts", "disabled",
+		"-f", "hls",
+		"-hls_time", fmt.Sprintf("%.3f", target),
+		// mpegts segment type: the split DECISION (which keyframe to cut at)
+		// is segment-type-independent — verified: this probe's EXTINF list is
+		// identical to a real fMP4 session's playlist for the same input —
+		// and mpegts avoids needing an init-segment file. The segment bytes
+		// all go to DevNull anyway; only the playlist's timing is real.
+		"-hls_segment_type", "mpegts",
+		"-strftime", "1",
+		"-hls_segment_filename", os.DevNull,
+		"-hls_playlist_type", "vod",
+		"-hls_list_size", "0",
+		playlistPath,
+	)
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("segment boundary probe: %w", err)
+	}
+
+	data, err := os.ReadFile(playlistPath) //nolint:gosec // path is inside our own MkdirTemp scratch dir
+	if err != nil {
+		return nil, fmt.Errorf("segment boundary probe: read playlist: %w", err)
+	}
+
+	var ends []float64
+	cum := 0.0
+	for _, line := range strings.Split(string(data), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "#EXTINF:")
+		if !ok {
+			continue
+		}
+		durStr, _, _ := strings.Cut(rest, ",")
+		dur, err := strconv.ParseFloat(strings.TrimSpace(durStr), 64)
+		if err != nil || dur <= 0 {
+			continue
+		}
+		cum += dur
+		ends = append(ends, cum)
+	}
+	if len(ends) == 0 {
+		return nil, fmt.Errorf("segment boundary probe: no segments reported")
+	}
+	return ends, nil
 }
 
 func KeyframesToSegmentTimes(kf *Keyframes, minDuration float64) []float64 {

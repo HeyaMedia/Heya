@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+// PlannedSegmentTimes is a FALLBACK predictor used only when the accurate
+// RealSegmentBoundaries probe (session.go's computeCopyVideoSegmentEnds)
+// isn't available — e.g. an SMB source, or the probe process failing/timing
+// out. It approximates where ffmpeg would cut a copy-video stream from a
+// cached keyframe list, but its min-gap heuristic does NOT reproduce
+// ffmpeg's real internal split decision (see RealSegmentBoundaries' doc for
+// the drift this caused when it was the only predictor). Prefer the real
+// probe; this exists so a session can still start, roughly, when the probe
+// can't run.
 func PlannedSegmentTimes(kf *Keyframes, duration float64, target float64) []float64 {
 	if target <= 0 {
 		target = SegmentDuration

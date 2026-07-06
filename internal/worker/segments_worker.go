@@ -291,30 +291,69 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := q.WithTx(tx)
 
-	// Precedence, final: manual > chromaprint (measured on this exact file)
-	// > community:* > blackframe. Only clear this worker's own
-	// (community:*) rows here — the old DeleteMediaSegmentsForFile-then-
-	// reinsert flow also wiped a manual correction or a local-detection
-	// result on every re-check, even when the community databases had
-	// nothing new to say.
-	if err := qtx.DeleteCommunityMediaSegmentsForFile(ctx, lf.ID); err != nil {
+	if err := writeCommunitySegments(ctx, qtx, lf.ID, picked); err != nil {
+		return err
+	}
+	if err := qtx.MarkFileSegmentsAnalyzed(ctx, lf.ID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// writeCommunitySegments applies the precedence-guarded insert for one
+// file's picked community winners: it clears this worker's own prior
+// community rows, then inserts each picked winner unless a manual row or
+// an existing chromaprint measurement already covers that type.
+//
+// Precedence, final: manual beats everything; community and chromaprint
+// are peers by arrival order — whichever wrote first for a given type
+// wins, so this checks ExistsChromaprintMediaSegment before touching a
+// type local detection already filled (mirrored by
+// insertChromaprintSegmentIfAbsent's own
+// ExistsCommunityMediaSegmentForFileAndType check on the other side).
+// blackframe loses to both — the rank-aware upsert overwrites a
+// blackframe row in place when writing the community winner. Only this
+// worker's own (community:*) rows are cleared up front — the old
+// DeleteMediaSegmentsForFile-then-reinsert flow also wiped a manual
+// correction or a local-detection result on every re-check, even when
+// the community databases had nothing new to say.
+//
+// ORDERING CONTRACT: the community:% delete MUST run before the inserts,
+// in the same transaction. The upsert no-ops on equal rank, and a
+// community row meeting its own prior community row is equal rank — the
+// weekly re-check would silently fail to update values without the
+// delete-first step. That holds here: DeleteCommunityMediaSegmentsForFile
+// is the first statement, the inserts follow, one tx (the caller's).
+//
+// The EXISTS checks are read-committed short-circuits only — a
+// concurrent chromaprint write (different queue, different job) can slip
+// in between check and insert. UpsertMediaSegmentByRank is the source of
+// truth: equal-rank conflict (the chromaprint peer got there first)
+// no-ops, keeping the first-arriver. Commercial rows bypass the upsert
+// via the plain insert (the unique index excludes them; multiple breaks
+// per file are legitimate).
+//
+// Factored out of ScanMediaSegmentsFileWorker.Work so the precedence
+// matrix (manual/chromaprint block, blackframe replace) is testable
+// without a live heya.media fetch.
+func writeCommunitySegments(ctx context.Context, qtx *sqlc.Queries, fileID int64, picked []pickedSegment) error {
+	if err := qtx.DeleteCommunityMediaSegmentsForFile(ctx, fileID); err != nil {
 		return err
 	}
 
 	blockedByType := map[string]bool{}
-	blackframeCleared := map[string]bool{}
 	for _, p := range picked {
 		blocked, checked := blockedByType[p.Type]
 		if !checked {
 			manual, err := qtx.ExistsManualMediaSegment(ctx, sqlc.ExistsManualMediaSegmentParams{
-				LibraryFileID: lf.ID,
+				LibraryFileID: fileID,
 				SegmentType:   p.Type,
 			})
 			if err != nil {
 				return err
 			}
 			chromaprint, err := qtx.ExistsChromaprintMediaSegment(ctx, sqlc.ExistsChromaprintMediaSegmentParams{
-				LibraryFileID: lf.ID,
+				LibraryFileID: fileID,
 				SegmentType:   p.Type,
 			})
 			if err != nil {
@@ -324,24 +363,28 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 			blockedByType[p.Type] = blocked
 		}
 		if blocked {
-			// A user-authored correction or a direct chromaprint
-			// measurement always wins over crowdsourced community data.
+			// A user-authored correction always wins. A chromaprint row
+			// that landed first is a peer, not a subordinate — this
+			// worker must not clobber it either (see the precedence note
+			// above).
 			continue
 		}
-		if !blackframeCleared[p.Type] {
-			// Community beats a blackframe heuristic guess for the same
-			// type — clear it before writing the community winner in its
-			// place.
-			if err := qtx.DeleteBlackframeMediaSegmentsForFileAndType(ctx, sqlc.DeleteBlackframeMediaSegmentsForFileAndTypeParams{
-				LibraryFileID: lf.ID,
+		if p.Type == "commercial" {
+			// Multiple commercial breaks per file are legitimate; the
+			// unique index excludes them, so the plain insert applies.
+			if err := qtx.InsertMediaSegment(ctx, sqlc.InsertMediaSegmentParams{
+				LibraryFileID: fileID,
 				SegmentType:   p.Type,
+				StartMs:       p.StartMs,
+				EndMs:         p.EndMs,
+				Source:        p.Source,
 			}); err != nil {
 				return err
 			}
-			blackframeCleared[p.Type] = true
+			continue
 		}
-		if err := qtx.InsertMediaSegment(ctx, sqlc.InsertMediaSegmentParams{
-			LibraryFileID: lf.ID,
+		if err := qtx.UpsertMediaSegmentByRank(ctx, sqlc.UpsertMediaSegmentByRankParams{
+			LibraryFileID: fileID,
 			SegmentType:   p.Type,
 			StartMs:       p.StartMs,
 			EndMs:         p.EndMs,
@@ -350,10 +393,7 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 			return err
 		}
 	}
-	if err := qtx.MarkFileSegmentsAnalyzed(ctx, lf.ID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

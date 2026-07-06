@@ -11,25 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteBlackframeMediaSegmentsForFileAndType = `-- name: DeleteBlackframeMediaSegmentsForFileAndType :exec
-DELETE FROM media_segments
-WHERE library_file_id = $1 AND segment_type = $2 AND source = 'blackframe'
-`
-
-type DeleteBlackframeMediaSegmentsForFileAndTypeParams struct {
-	LibraryFileID int64  `json:"library_file_id"`
-	SegmentType   string `json:"segment_type"`
-}
-
-// Called by the community worker right before it inserts a picked winner
-// of this type: a blackframe heuristic guess ranks below community data,
-// so community may replace it (chromaprint measurements are never touched
-// here — see ExistsChromaprintMediaSegment).
-func (q *Queries) DeleteBlackframeMediaSegmentsForFileAndType(ctx context.Context, arg DeleteBlackframeMediaSegmentsForFileAndTypeParams) error {
-	_, err := q.db.Exec(ctx, deleteBlackframeMediaSegmentsForFileAndType, arg.LibraryFileID, arg.SegmentType)
-	return err
-}
-
 const deleteCommunityMediaSegmentsForFile = `-- name: DeleteCommunityMediaSegmentsForFile :exec
 DELETE FROM media_segments WHERE library_file_id = $1 AND source LIKE 'community:%'
 `
@@ -54,37 +35,6 @@ func (q *Queries) DeleteMediaSegmentsForFile(ctx context.Context, libraryFileID 
 	return err
 }
 
-const deleteReplaceableMediaSegmentsForFileAndType = `-- name: DeleteReplaceableMediaSegmentsForFileAndType :exec
-
-DELETE FROM media_segments
-WHERE library_file_id = $1
-  AND segment_type = $2
-  AND (source IN ('chromaprint', 'blackframe') OR source LIKE 'community:%')
-`
-
-type DeleteReplaceableMediaSegmentsForFileAndTypeParams struct {
-	LibraryFileID int64  `json:"library_file_id"`
-	SegmentType   string `json:"segment_type"`
-}
-
-// Precedence, final: manual > chromaprint (measured on this exact file) >
-// community:* (crowdsourced, duration-gated but not release-verified) >
-// blackframe (heuristic fallback). A real-world false positive is why
-// chromaprint outranks community: TheIntroDB carries no authored runtime
-// (so the duration gate can't verify the release cut), and a bad match can
-// still pass the gate — but chromaprint measures the actual file, so it's
-// always right when it finds a region at all.
-// Called by the season worker right before it inserts a freshly-measured
-// chromaprint winner of this type: clears any community or blackframe row
-// (both rank below a direct measurement) plus any stale chromaprint row of
-// its own from a prior partial run (retry-safety — this worker's jobs are
-// MaxAttempts 2). A manual row is never touched; ExistsManualMediaSegment
-// gates the whole call.
-func (q *Queries) DeleteReplaceableMediaSegmentsForFileAndType(ctx context.Context, arg DeleteReplaceableMediaSegmentsForFileAndTypeParams) error {
-	_, err := q.db.Exec(ctx, deleteReplaceableMediaSegmentsForFileAndType, arg.LibraryFileID, arg.SegmentType)
-	return err
-}
-
 const existsChromaprintMediaSegment = `-- name: ExistsChromaprintMediaSegment :one
 SELECT EXISTS(
     SELECT 1 FROM media_segments
@@ -97,10 +47,12 @@ type ExistsChromaprintMediaSegmentParams struct {
 	SegmentType   string `json:"segment_type"`
 }
 
-// Precedence: chromaprint (measured on this exact file) beats community
-// (crowdsourced, duration-gated but not release-verified). The community
-// worker checks this before inserting a picked winner of the same type —
-// a fresh community fetch never overwrites an existing measurement.
+// Precedence: community and chromaprint are peers by arrival order for a
+// given (file, type) — whichever gets there first wins. The community
+// worker checks this before inserting a picked winner of the same type so
+// a fresh community fetch never overwrites an existing chromaprint
+// measurement (see the top-of-file precedence note for why chromaprint no
+// longer unconditionally outranks community).
 func (q *Queries) ExistsChromaprintMediaSegment(ctx context.Context, arg ExistsChromaprintMediaSegmentParams) (bool, error) {
 	row := q.db.QueryRow(ctx, existsChromaprintMediaSegment, arg.LibraryFileID, arg.SegmentType)
 	var exists bool
@@ -108,7 +60,32 @@ func (q *Queries) ExistsChromaprintMediaSegment(ctx context.Context, arg ExistsC
 	return exists, err
 }
 
+const existsCommunityMediaSegmentForFileAndType = `-- name: ExistsCommunityMediaSegmentForFileAndType :one
+SELECT EXISTS(
+    SELECT 1 FROM media_segments
+    WHERE library_file_id = $1 AND segment_type = $2 AND source LIKE 'community:%'
+) AS exists
+`
+
+type ExistsCommunityMediaSegmentForFileAndTypeParams struct {
+	LibraryFileID int64  `json:"library_file_id"`
+	SegmentType   string `json:"segment_type"`
+}
+
+// Mirror image of ExistsChromaprintMediaSegment: the local chromaprint
+// detector checks this before inserting a measured winner so it never
+// overwrites a community row that got there first — community and
+// chromaprint are peers by arrival order, not a strict ranking (see the
+// top-of-file precedence note).
+func (q *Queries) ExistsCommunityMediaSegmentForFileAndType(ctx context.Context, arg ExistsCommunityMediaSegmentForFileAndTypeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsCommunityMediaSegmentForFileAndType, arg.LibraryFileID, arg.SegmentType)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const existsManualMediaSegment = `-- name: ExistsManualMediaSegment :one
+
 SELECT EXISTS(
     SELECT 1 FROM media_segments
     WHERE library_file_id = $1 AND segment_type = $2 AND source = 'manual'
@@ -120,6 +97,21 @@ type ExistsManualMediaSegmentParams struct {
 	SegmentType   string `json:"segment_type"`
 }
 
+// Precedence, final: manual beats everything. Community and chromaprint are
+// peers by arrival order — whichever writes first for a given (file,
+// segment_type) wins, and neither is allowed to clobber the other.
+// blackframe (heuristic fallback) loses to both and to manual.
+//
+// This replaced an earlier policy where chromaprint (a direct per-file
+// measurement) unconditionally outranked and replaced community data,
+// because TheIntroDB carries no authored runtime and a bad match could
+// still slip past the duration gate. In practice, a real incident that
+// looked exactly like that — chromaprint disagreeing with a community
+// marker — turned out to be a constant offset in the web player's own
+// clock, not bad community data; the community marker was right all
+// along. Local detection is now a gap-filler: it only computes what the
+// community pass couldn't answer, and never second-guesses a community
+// row (or vice versa) once one exists.
 // Precedence: manual beats everything. Checked before inserting a picked
 // winner of the same type — a user-authored correction is never
 // overwritten by community data or a chromaprint measurement.
@@ -181,7 +173,16 @@ SELECT
     lf.id,
     lf.path,
     lf.media_info,
-    (lf.parse_result->'parsed'->'release'->'episodes'->>0)::int AS episode_number
+    (lf.parse_result->'parsed'->'release'->'episodes'->>0)::int AS episode_number,
+    EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'intro') AS has_intro,
+    EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'credits') AS has_credits,
+    (
+        lf.segments_detected_at IS NULL
+        AND (
+            NOT EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'intro')
+            OR NOT EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'credits')
+        )
+    ) AS pending
 FROM library_files lf
 JOIN libraries l ON l.id = lf.library_id
 WHERE l.media_type = 'tv'
@@ -190,7 +191,6 @@ WHERE l.media_type = 'tv'
   AND lf.media_item_id = $1::bigint
   AND (lf.parse_result->'parsed'->'release'->'seasons'->>0)::int = $2::int
   AND lf.segments_analyzed_at IS NOT NULL
-  AND lf.segments_detected_at IS NULL
   AND (lf.parse_result->'parsed'->'release'->'episodes'->>0) IS NOT NULL
 ORDER BY episode_number
 `
@@ -201,15 +201,33 @@ type ListEpisodeFilesForSeasonDetectionParams struct {
 }
 
 type ListEpisodeFilesForSeasonDetectionRow struct {
-	ID            int64  `json:"id"`
-	Path          string `json:"path"`
-	MediaInfo     []byte `json:"media_info"`
-	EpisodeNumber int32  `json:"episode_number"`
+	ID            int64       `json:"id"`
+	Path          string      `json:"path"`
+	MediaInfo     []byte      `json:"media_info"`
+	EpisodeNumber int32       `json:"episode_number"`
+	HasIntro      bool        `json:"has_intro"`
+	HasCredits    bool        `json:"has_credits"`
+	Pending       pgtype.Bool `json:"pending"`
 }
 
-// Pending-detection episode files for one (media_item_id, season) pair,
-// ordered by episode number so the season worker's nearest-neighbor
-// pairing tries adjacent episodes first.
+// ALL eligible episode files for one (media_item_id, season) pair — the
+// pending gap-fill targets AND the already-covered partners. Cross-episode
+// matching needs a partner to compare against, but the partner does NOT
+// need to be pending: a community-covered episode's audio is perfectly
+// good comparison material (the lone-gap season — community covered 12 of
+// 13 episodes — must still be able to resolve its one hole).
+//
+// pending marks the actual targets (same condition as
+// ListSeasonsPendingDetection's CTE): only pending files get segments
+// written and segments_detected_at stamped. Partners are never written or
+// stamped, and are only fingerprinted when a nearby target actually needs
+// the comparison (see resolveRegionsForTargets). has_intro/has_credits
+// report whether ANY row (any source) already covers that type — the
+// worker derives each pending file's missing types from them, so a window
+// nobody needs is never decoded. The per-file, per-type write guard is
+// enforced separately at write time by insertChromaprintSegmentIfAbsent.
+// Ordered by episode number so nearest-neighbor pairing tries adjacent
+// episodes first.
 func (q *Queries) ListEpisodeFilesForSeasonDetection(ctx context.Context, arg ListEpisodeFilesForSeasonDetectionParams) ([]ListEpisodeFilesForSeasonDetectionRow, error) {
 	rows, err := q.db.Query(ctx, listEpisodeFilesForSeasonDetection, arg.MediaItemID, arg.Season)
 	if err != nil {
@@ -224,6 +242,9 @@ func (q *Queries) ListEpisodeFilesForSeasonDetection(ctx context.Context, arg Li
 			&i.Path,
 			&i.MediaInfo,
 			&i.EpisodeNumber,
+			&i.HasIntro,
+			&i.HasCredits,
+			&i.Pending,
 		); err != nil {
 			return nil, err
 		}
@@ -392,10 +413,17 @@ func (q *Queries) ListMovieFilesPendingDetection(ctx context.Context, arg ListMo
 }
 
 const listSeasonsPendingDetection = `-- name: ListSeasonsPendingDetection :many
-WITH pending AS (
+WITH eligible AS (
     SELECT
         lf.media_item_id AS media_item_id,
-        (lf.parse_result->'parsed'->'release'->'seasons'->>0)::int AS season
+        (lf.parse_result->'parsed'->'release'->'seasons'->>0)::int AS season,
+        (
+            lf.segments_detected_at IS NULL
+            AND (
+                NOT EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'intro')
+                OR NOT EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'credits')
+            )
+        ) AS pending
     FROM library_files lf
     JOIN libraries l ON l.id = lf.library_id
     WHERE l.media_type = 'tv'
@@ -403,17 +431,17 @@ WITH pending AS (
       AND lf.media_info IS NOT NULL
       AND lf.media_item_id IS NOT NULL
       AND lf.segments_analyzed_at IS NOT NULL
-      AND lf.segments_detected_at IS NULL
       AND (lf.parse_result->'parsed'->'release'->'seasons'->>0) IS NOT NULL
 )
 SELECT
     media_item_id,
     season,
-    count(*)::int AS pending_files,
+    (count(*) FILTER (WHERE pending))::int AS pending_files,
     (media_item_id * 100000 + season)::bigint AS cursor_key
-FROM pending
+FROM eligible
 GROUP BY media_item_id, season
-HAVING count(*) >= 2
+HAVING count(*) FILTER (WHERE pending) >= 1
+   AND count(*) >= 2
    AND (media_item_id * 100000 + season) > $1::bigint
 ORDER BY (media_item_id * 100000 + season)
 LIMIT $2::int
@@ -431,17 +459,23 @@ type ListSeasonsPendingDetectionRow struct {
 	CursorKey    int64       `json:"cursor_key"`
 }
 
-// Distinct (series, season) pairs with at least two TV episode files
-// pending local detection — cross-episode matching needs a pair to
-// compare against, hence HAVING count(*) >= 2. A file is pending purely on
-// segments_analyzed_at NOT NULL AND segments_detected_at IS NULL —
-// deliberately NOT gated on the absence of existing intro/credits rows.
-// Chromaprint (a direct measurement of this file) outranks community data
-// (crowdsourced, duration-gated but not release-verified), so it runs as a
-// background pass over every analyzed episode regardless of whether the
-// community fetch already left a row; the per-file write
-// (replaceWithChromaprintSegment) is the precedence enforcement, replacing
-// community/blackframe rows of the same type (but never a manual one).
+// Distinct (series, season) pairs with at least one PENDING episode file
+// and at least two eligible files overall. A file is pending when the
+// community pass already ran (segments_analyzed_at NOT NULL), local
+// detection hasn't stamped it (segments_detected_at IS NULL), and it's
+// still missing an intro or credits row (any source) — the gap local
+// detection exists to fill. A file the community pass fully covered is
+// never pending (gap-filler policy, not a re-measurement pass).
+//
+// The >= 2 floor counts ALL eligible files, not just pending ones:
+// cross-episode matching needs a partner to compare against, but the
+// partner does NOT need to be pending — a community-covered episode's
+// audio is perfectly good comparison material. An earlier version had
+// HAVING count(pending) >= 2, which stranded exactly the lone-gap shape
+// (community covered 12 of 13 episodes; the one hole could never run).
+// A single-file season with a gap still never qualifies — there is
+// nothing to pair against — and staying unlisted keeps the pump from
+// looping on it.
 //
 // Cursor: season numbers are always well under 100000 (no real season
 // count comes close), so `media_item_id * 100000 + season` packs both
@@ -492,5 +526,74 @@ UPDATE library_files SET segments_detected_at = now() WHERE id = ANY($1::bigint[
 // doesn't get re-fingerprinted on every pump sweep.
 func (q *Queries) MarkFileSegmentsDetected(ctx context.Context, ids []int64) error {
 	_, err := q.db.Exec(ctx, markFileSegmentsDetected, ids)
+	return err
+}
+
+const upsertMediaSegmentByRank = `-- name: UpsertMediaSegmentByRank :exec
+INSERT INTO media_segments (library_file_id, segment_type, start_ms, end_ms, source)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (library_file_id, segment_type) WHERE segment_type <> 'commercial'
+DO UPDATE SET
+    start_ms = EXCLUDED.start_ms,
+    end_ms = EXCLUDED.end_ms,
+    source = EXCLUDED.source,
+    created_at = now()
+WHERE (CASE WHEN media_segments.source = 'manual' THEN 2
+            WHEN media_segments.source = 'chromaprint' THEN 1
+            WHEN media_segments.source LIKE 'community:%' THEN 1
+            ELSE 0 END)
+    < (CASE WHEN EXCLUDED.source = 'manual' THEN 2
+            WHEN EXCLUDED.source = 'chromaprint' THEN 1
+            WHEN EXCLUDED.source LIKE 'community:%' THEN 1
+            ELSE 0 END)
+`
+
+type UpsertMediaSegmentByRankParams struct {
+	LibraryFileID int64  `json:"library_file_id"`
+	SegmentType   string `json:"segment_type"`
+	StartMs       int64  `json:"start_ms"`
+	EndMs         int64  `json:"end_ms"`
+	Source        string `json:"source"`
+}
+
+// Precedence-aware upsert — the single-statement source of truth for
+// every non-commercial segment write. The community worker and the local
+// detection workers run concurrently on different queues behind
+// read-committed EXISTS guards, so any two writers can both pass their
+// checks and race the insert (a plain ON CONFLICT DO NOTHING would keep
+// whichever row COMMITTED first, letting a blackframe guess permanently
+// beat a chromaprint measurement that lost the commit race). The partial
+// unique index idx_media_segments_file_type makes the second write
+// conflict, and the rank comparison resolves every ordering in place:
+//
+//	manual (2)  >  chromaprint == community:% (1)  >  blackframe (0)
+//
+// A strictly weaker existing row is overwritten (chromaprint or
+// community landing after a blackframe guess replaces it in place). An
+// equal or stronger existing row makes the write a no-op: community and
+// chromaprint are peers by arrival order, so whichever committed first
+// wins and the loser vanishes silently — the intended policy, not an
+// error. (Deliberate deviation from ranking chromaprint above community
+// here: doing so would let a racing measurement overwrite a committed
+// community row, which is exactly the replace-on-sight behavior the
+// gap-filler revert removed.)
+//
+// Equal-rank corollary: a community re-fetch can NOT update its own rows
+// through this upsert (community-over-community no-ops). The weekly
+// refresh relies on writeCommunitySegments deleting the file's
+// community:% rows in the same transaction BEFORE re-inserting, so its
+// inserts never meet their own old rows.
+//
+// The conflict target is the partial index, so commercial rows never
+// conflict here — the workers write commercials through the plain
+// InsertMediaSegment (multiple breaks per file are legitimate).
+func (q *Queries) UpsertMediaSegmentByRank(ctx context.Context, arg UpsertMediaSegmentByRankParams) error {
+	_, err := q.db.Exec(ctx, upsertMediaSegmentByRank,
+		arg.LibraryFileID,
+		arg.SegmentType,
+		arg.StartMs,
+		arg.EndMs,
+		arg.Source,
+	)
 	return err
 }

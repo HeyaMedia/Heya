@@ -342,7 +342,27 @@ func TestPickCreditsStartNoneQualify(t *testing.T) {
 	}
 }
 
-func TestPairRegionsPrefersNearestOrdinal(t *testing.T) {
+// decodeFromSlice adapts a precomputed points slice into the decode
+// callback resolveRegionsForTargets expects, recording which indices were
+// actually decoded (the lazy-decode behavior under test).
+func decodeFromSlice(points [][]uint32, calls map[int]int) func(int) []uint32 {
+	return func(i int) []uint32 {
+		if calls != nil {
+			calls[i]++
+		}
+		return points[i]
+	}
+}
+
+func allIndices(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}
+
+func TestResolveRegionsForTargetsPrefersNearestOrdinal(t *testing.T) {
 	const runLen = 150 // ~18.6s — inside the 15-120s intro accept bounds
 	run := make([]uint32, runLen)
 	for i := range run {
@@ -366,7 +386,7 @@ func TestPairRegionsPrefersNearestOrdinal(t *testing.T) {
 	}
 	ordinals := []int{1, 2, 3, 4}
 
-	resolved := pairRegions(points, ordinals, acceptIntroRegion)
+	resolved := resolveRegionsForTargets(len(points), allIndices(len(points)), ordinals, decodeFromSlice(points, nil), acceptIntroRegion)
 	for i, r := range resolved {
 		if r == nil {
 			t.Fatalf("episode %d should have resolved a region", i+1)
@@ -382,7 +402,7 @@ func TestPairRegionsPrefersNearestOrdinal(t *testing.T) {
 	}
 }
 
-func TestPairRegionsLeavesUnfingerprintedEpisodeUnresolved(t *testing.T) {
+func TestResolveRegionsForTargetsLeavesUnfingerprintedEpisodeUnresolved(t *testing.T) {
 	const runLen = 150 // ~18.6s — inside the 15-120s intro accept bounds
 	run := make([]uint32, runLen)
 	for i := range run {
@@ -393,11 +413,94 @@ func TestPairRegionsLeavesUnfingerprintedEpisodeUnresolved(t *testing.T) {
 		nil, // fingerprint extraction failed for this episode
 		concatPoints(noisePoints(20_000_000, 5), run),
 	}
-	resolved := pairRegions(points, []int{1, 2, 3}, acceptIntroRegion)
+	resolved := resolveRegionsForTargets(len(points), allIndices(len(points)), []int{1, 2, 3}, decodeFromSlice(points, nil), acceptIntroRegion)
 	if resolved[1] != nil {
 		t.Error("an episode with no fingerprint must stay unresolved")
 	}
 	if resolved[0] == nil || resolved[2] == nil {
 		t.Error("episodes 1 and 3 should still pair with each other")
+	}
+}
+
+// TestResolveRegionsForTargetsLoneGapUsesCoveredPartner is the shape the
+// revert originally stranded: community data covered every episode but
+// one, so the lone pending episode has no PENDING partner — but a covered
+// episode's audio is perfectly good comparison material. The lone target
+// must resolve against its nearest covered neighbor, only that neighbor
+// gets decoded (not the whole season), and no non-target ever gets a
+// region resolved on its own behalf.
+func TestResolveRegionsForTargetsLoneGapUsesCoveredPartner(t *testing.T) {
+	const runLen = 150 // ~18.6s — inside the 15-120s intro accept bounds
+	run := make([]uint32, runLen)
+	for i := range run {
+		run[i] = hashPoint(i)
+	}
+	// Three episodes all sharing the same intro run; only episode 3 is a
+	// target (episodes 1 and 2 are community-covered partners).
+	points := [][]uint32{
+		concatPoints(noisePoints(10_000_000, 10), run),
+		concatPoints(noisePoints(20_000_000, 10), run),
+		concatPoints(noisePoints(30_000_000, 10), run),
+	}
+	calls := map[int]int{}
+	resolved := resolveRegionsForTargets(len(points), []int{2}, []int{1, 2, 3}, decodeFromSlice(points, calls), acceptIntroRegion)
+
+	if resolved[2] == nil {
+		t.Fatal("the lone pending episode must resolve against a covered partner")
+	}
+	if resolved[0] != nil || resolved[1] != nil {
+		t.Error("covered partners must never get a region resolved on their own behalf")
+	}
+	if calls[2] != 1 {
+		t.Errorf("target should be decoded exactly once, got %d", calls[2])
+	}
+	if calls[1] != 1 {
+		t.Errorf("nearest partner (episode 2) should be decoded exactly once, got %d", calls[1])
+	}
+	if calls[0] != 0 {
+		t.Errorf("episode 1 should never be decoded — the nearest partner already matched, got %d decodes", calls[0])
+	}
+}
+
+// TestResolveRegionsForTargetsPartnerDecodeBudget: when no partner
+// matches (a special with a unique cold open), the per-target decode
+// budget stops the resolver from decoding every covered episode in the
+// season chasing a match that isn't there.
+func TestResolveRegionsForTargetsPartnerDecodeBudget(t *testing.T) {
+	// Target plus five partners, all mutually-unrelated noise — nothing
+	// can produce an acceptable (>= 15s) shared region.
+	points := [][]uint32{
+		noisePoints(10_000_000, 300),
+		noisePoints(20_000_000, 300),
+		noisePoints(30_000_000, 300),
+		noisePoints(40_000_000, 300),
+		noisePoints(50_000_000, 300),
+		noisePoints(60_000_000, 300),
+	}
+	calls := map[int]int{}
+	resolved := resolveRegionsForTargets(len(points), []int{0}, []int{1, 2, 3, 4, 5, 6}, decodeFromSlice(points, calls), acceptIntroRegion)
+
+	if resolved[0] != nil {
+		t.Fatal("pure noise must not resolve a region")
+	}
+	// Target + at most maxPartnerDecodesPerTarget partner decodes.
+	if got := len(calls); got != 1+maxPartnerDecodesPerTarget {
+		t.Errorf("decode count = %d, want %d (target + %d-partner budget)", got, 1+maxPartnerDecodesPerTarget, maxPartnerDecodesPerTarget)
+	}
+	// Nearest-first means the two FARTHEST partners are the ones skipped.
+	if calls[4] != 0 || calls[5] != 0 {
+		t.Errorf("partners beyond the budget must never be decoded, got calls=%v", calls)
+	}
+}
+
+// TestResolveRegionsForTargetsSingleEntry: a season job racing down to a
+// single eligible file has nothing to pair against — the target stays
+// unresolved without panicking (the pump's >= 2 total-files floor keeps
+// such seasons from being listed at all).
+func TestResolveRegionsForTargetsSingleEntry(t *testing.T) {
+	points := [][]uint32{noisePoints(10_000_000, 300)}
+	resolved := resolveRegionsForTargets(1, []int{0}, []int{1}, decodeFromSlice(points, nil), acceptIntroRegion)
+	if resolved[0] != nil {
+		t.Error("a lone episode has no partner and must stay unresolved")
 	}
 }

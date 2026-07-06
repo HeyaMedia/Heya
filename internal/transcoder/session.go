@@ -813,27 +813,44 @@ func (m *SessionManager) GetExisting(fileID int64) *TranscodeSession {
 	return nil
 }
 
-func (m *SessionManager) GetOrCreate(fileID int64, filePath string, opts TranscodeOpts, sessionID string, duration float64, kf *Keyframes) *TranscodeSession {
+// computeCopyVideoSegmentEnds determines HLS segment boundaries for a
+// copy-video session (video is stream-copied, so cuts can only land on
+// existing keyframes — the same constraint applies whether delivery is fMP4
+// or MPEG-TS). It prefers RealSegmentBoundaries, which asks ffmpeg itself to
+// make the real split decision so the declared playlist can never drift from
+// the physical segments (see that function's doc for why a Go-side
+// prediction isn't safe here). Falls back to the keyframe-heuristic
+// predictor — worse, but still better than refusing to start — when the
+// probe can't run: SMB sources aren't a local path ffmpeg can open directly,
+// and any probe failure (corrupt file, ffmpeg hiccup, timeout) shouldn't
+// block playback outright.
+func computeCopyVideoSegmentEnds(ctx context.Context, filePath string, duration float64, kf *Keyframes) []float64 {
+	if filePath != "" && !vfs.IsSMBPath(filePath) {
+		if ends, err := RealSegmentBoundaries(ctx, filePath, SegmentDuration); err == nil && len(ends) > 0 {
+			return ends
+		} else if err != nil {
+			log.Warn().Err(err).Str("file", vfs.RedactPath(filePath)).
+				Msg("real segment boundary probe failed, falling back to keyframe heuristic")
+		}
+	}
+	return PlannedSegmentTimes(kf, duration, SegmentDuration)
+}
+
+func (m *SessionManager) GetOrCreate(ctx context.Context, fileID int64, filePath string, opts TranscodeOpts, sessionID string, duration float64, kf *Keyframes) *TranscodeSession {
 	key := FormatKey(fileID, opts.AudioTrack, sessionID)
 
-	m.mu.Lock()
-	if s, ok := m.sessions[key]; ok {
-		s.Touch()
-		m.mu.Unlock()
+	if s := m.existingSession(key); s != nil {
 		return s
 	}
 
-	prefix := fmt.Sprintf("%d:", fileID)
-	for k, s := range m.sessions {
-		if strings.HasPrefix(k, prefix) {
-			s.Kill()
-			delete(m.sessions, k)
-		}
-	}
-
+	// Compute segment boundaries OUTSIDE the manager lock. For a copy-video
+	// session this may shell out to a throwaway ffmpeg process for several
+	// seconds (see computeCopyVideoSegmentEnds/RealSegmentBoundaries) — the
+	// manager lock must stay free so unrelated work (GetExisting, the idle
+	// cleanup loop, another file's GetOrCreate) isn't stalled behind it.
 	var ends []float64
-	if opts.UseFMP4 && opts.Profile.VideoCodec == "copy" {
-		ends = PlannedSegmentTimes(kf, duration, SegmentDuration)
+	if opts.Profile.VideoCodec == "copy" {
+		ends = computeCopyVideoSegmentEnds(ctx, filePath, duration, kf)
 	} else {
 		ends = fixedIntervalBoundaries(duration, SegmentDuration)
 	}
@@ -873,6 +890,22 @@ func (m *SessionManager) GetOrCreate(fileID int64, filePath string, opts Transco
 		LastAccess:  time.Now(),
 	}
 
+	m.mu.Lock()
+	// Re-check: a concurrent caller may have raced us to create this exact
+	// session (or a same-file/different-key one needing eviction) while we
+	// were computing boundaries without the lock held.
+	if s, ok := m.sessions[key]; ok {
+		s.Touch()
+		m.mu.Unlock()
+		return s
+	}
+	prefix := fmt.Sprintf("%d:", fileID)
+	for k, s := range m.sessions {
+		if strings.HasPrefix(k, prefix) {
+			s.Kill()
+			delete(m.sessions, k)
+		}
+	}
 	m.sessions[key] = session
 	m.mu.Unlock()
 
@@ -886,6 +919,20 @@ func (m *SessionManager) GetOrCreate(fileID int64, filePath string, opts Transco
 		Msg("session created")
 
 	return session
+}
+
+// existingSession returns the already-live session for key, if any, touching
+// its LastAccess. Split out of GetOrCreate so the fast, common "already
+// playing" path takes the manager lock only briefly, before the (potentially
+// slow) boundary computation for a genuinely new session.
+func (m *SessionManager) existingSession(key string) *TranscodeSession {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.sessions[key]; ok {
+		s.Touch()
+		return s
+	}
+	return nil
 }
 
 func (m *SessionManager) cleanupLoop() {

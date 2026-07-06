@@ -46,7 +46,7 @@ func TestSession_SeekBackwardWithRealFFmpeg(t *testing.T) {
 		HWAccel: BuildHwAccelConfig(HwAccelNone),
 		UseFMP4: true,
 	}
-	sess := sm.GetOrCreate(1, input, opts, "test", 90, nil)
+	sess := sm.GetOrCreate(context.Background(), 1, input, opts, "test", 90, nil)
 	require.NotNil(t, sess)
 	require.Equal(t, 15, sess.TotalSegs, "90s at 6s segments")
 

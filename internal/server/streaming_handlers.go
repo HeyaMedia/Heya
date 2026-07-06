@@ -336,7 +336,7 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duratio
 	}
 
 	sessionID := r.URL.Query().Get("sid")
-	return app.TranscoderSessions().GetOrCreate(fileID, file.Path, opts, sessionID, duration, kf)
+	return app.TranscoderSessions().GetOrCreate(r.Context(), fileID, file.Path, opts, sessionID, duration, kf)
 }
 
 func parseSegmentIndex(name string) int {

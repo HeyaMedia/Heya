@@ -23,11 +23,13 @@ import (
 // answer. Two independent techniques, both pure local signal:
 //
 //   - TV: chromaprint-fingerprint an intro-length window and a tail window
-//     of every episode in a season, then look for a shared audio region
-//     between episodes (the title sequence repeats near-verbatim; so does
-//     a "next time on" / recap tail in some shows). A season needs at
-//     least two pending episodes to compare — one file alone has nothing
-//     to pair against.
+//     of episodes in a season, then look for a shared audio region between
+//     episodes (the title sequence repeats near-verbatim; so does a "next
+//     time on" / recap tail in some shows). A season needs at least one
+//     PENDING episode (a gap to fill) and at least two eligible episodes
+//     overall — the comparison partner does not need to be pending itself;
+//     a community-covered episode's audio pairs just as well, which is what
+//     lets a lone gap in an otherwise-covered season still resolve.
 //   - Movies: ffmpeg's blackdetect filter over the tail of the file finds
 //     the black frame that typically separates the story from the credits
 //     roll.
@@ -229,26 +231,72 @@ type resolvedRegion struct {
 	EndSecs   float64
 }
 
-// pairRegions resolves each entry's region by comparing its fingerprint
-// against every other entry's, nearest ordinal number first (episode
-// numbers, in practice), accepting the first match both sides agree
-// satisfies accept. Entries with no fingerprint (nil points) or already
-// resolved by an earlier pair are left alone. A resolved pair is removed
-// from further consideration on neither side — each entry only needs one
-// partner — but any leftover unresolved entry can still pair with another
-// leftover in a later iteration.
-func pairRegions(points [][]uint32, ordinals []int, accept func(start, end float64) (float64, float64, bool)) []*resolvedRegion {
-	n := len(points)
+// maxPartnerDecodesPerTarget bounds how many NON-target episodes get a
+// fresh fingerprint decode while hunting a match for one target. Decoding
+// is the expensive part (a real ffmpeg audio decode per window); nearest-
+// neighbor ordering means the first partner almost always matches, so the
+// budget only bites on pathological targets (a special with no shared
+// intro), where it stops the season worker from decoding every covered
+// episode in a 13-episode season to chase a match that isn't there.
+// Comparisons against already-decoded episodes are pure CPU and stay free.
+// Failed decode attempts consume budget too — a file that won't decode
+// once won't decode on the next probe either.
+const maxPartnerDecodesPerTarget = 3
+
+// resolveRegionsForTargets resolves a shared region for each TARGET entry
+// (the pending files that still miss this segment type), comparing against
+// every other entry — target or not — nearest ordinal number first
+// (episode numbers, in practice), accepting the first match both sides
+// agree satisfies accept. Non-target entries are comparison material only:
+// they never get a region resolved on their own behalf (the caller never
+// writes or stamps them), but a target compared against one CAN resolve,
+// which is what fills a lone gap in an otherwise community-covered season.
+// When the partner is itself an unresolved target, the mutual match
+// resolves both sides at once, exactly like the old all-pending pairing.
+//
+// decode(i) is invoked at most once per entry (memoized here) and returns
+// nil when the fingerprint is unavailable (decode failure, too-short file,
+// cancelled ctx). Targets are always worth decoding — they must be
+// attempted regardless — but fresh decodes of non-target partners are
+// capped per target by maxPartnerDecodesPerTarget; once the budget is
+// spent, only already-decoded entries are still probed.
+func resolveRegionsForTargets(n int, targets []int, ordinals []int, decode func(int) []uint32, accept func(start, end float64) (float64, float64, bool)) []*resolvedRegion {
 	out := make([]*resolvedRegion, n)
-	for i := 0; i < n; i++ {
-		if out[i] != nil || points[i] == nil {
+	if len(targets) == 0 {
+		return out
+	}
+	isTarget := make([]bool, n)
+	for _, t := range targets {
+		isTarget[t] = true
+	}
+	pts := make([][]uint32, n)
+	decoded := make([]bool, n)
+	get := func(i int) []uint32 {
+		if !decoded[i] {
+			decoded[i] = true
+			pts[i] = decode(i)
+		}
+		return pts[i]
+	}
+	for _, t := range targets {
+		if out[t] != nil {
 			continue
 		}
-		for _, j := range nearestByOrdinal(i, ordinals) {
-			if out[j] != nil || points[j] == nil {
+		if get(t) == nil {
+			continue
+		}
+		budget := maxPartnerDecodesPerTarget
+		for _, j := range nearestByOrdinal(t, ordinals) {
+			if !decoded[j] && !isTarget[j] {
+				if budget == 0 {
+					continue
+				}
+				budget--
+			}
+			if get(j) == nil {
 				continue
 			}
-			aStart, aEnd, ok := findSharedRegion(points[i], points[j])
+			aStart, aEnd, ok := findSharedRegion(pts[t], pts[j])
 			if !ok {
 				continue
 			}
@@ -256,7 +304,7 @@ func pairRegions(points [][]uint32, ordinals []int, accept func(start, end float
 			if !ok {
 				continue
 			}
-			bStart, bEnd, ok := findSharedRegion(points[j], points[i])
+			bStart, bEnd, ok := findSharedRegion(pts[j], pts[t])
 			if !ok {
 				continue
 			}
@@ -264,8 +312,10 @@ func pairRegions(points [][]uint32, ordinals []int, accept func(start, end float
 			if !ok {
 				continue
 			}
-			out[i] = &resolvedRegion{StartSecs: aAccStart, EndSecs: aAccEnd}
-			out[j] = &resolvedRegion{StartSecs: bAccStart, EndSecs: bAccEnd}
+			out[t] = &resolvedRegion{StartSecs: aAccStart, EndSecs: aAccEnd}
+			if isTarget[j] && out[j] == nil {
+				out[j] = &resolvedRegion{StartSecs: bAccStart, EndSecs: bAccEnd}
+			}
 			break
 		}
 	}
