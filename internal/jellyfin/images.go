@@ -9,10 +9,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/safedial"
 )
 
 // Image delivery. Anonymous, like Jellyfin's own image endpoints and Heya's
@@ -231,33 +231,9 @@ var remoteImageClient = &http.Client{
 		// need proxy support; the guard's integrity does.
 		DialContext: (&net.Dialer{
 			Timeout: 10 * time.Second,
-			Control: func(_, address string, _ syscall.RawConn) error {
-				return rejectNonPublicDial(address)
-			},
+			Control: safedial.Control,
 		}).DialContext,
 	},
-}
-
-// rejectNonPublicDial refuses connections to addresses an anonymous caller
-// must never be able to make this server fetch from.
-func rejectNonPublicDial(address string) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return fmt.Errorf("remote image dial to unresolved host %q", host)
-	}
-	// 100.64.0.0/10 (CGNAT) is what tailnets squat on — private in practice.
-	inCGNAT := false
-	if v4 := ip.To4(); v4 != nil {
-		inCGNAT = v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127
-	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || inCGNAT {
-		return fmt.Errorf("remote image dial to non-public address %s refused", ip)
-	}
-	return nil
 }
 
 const remoteImageMaxBytes = 32 << 20 // no legitimate cover/still is larger

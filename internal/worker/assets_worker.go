@@ -16,6 +16,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -210,6 +211,15 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		hasAsset[key] = true
 	}
 
+	// Libraries that export Kodi-style sidecar art still need the primary
+	// poster/backdrop bytes on disk to copy next to the media file, so keep the
+	// eager download for those. Everyone else records a pending remote asset row
+	// and the serve path pulls the bytes on first view (images on-demand).
+	saveImages := false
+	if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
+		saveImages = metadata.ParseSettings(lib.Settings).SaveImages
+	}
+
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	for _, img := range job.Args.PendingImages {
 		key := img.AssetType
@@ -225,16 +235,31 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		if hasAsset[key] {
 			continue
 		}
-		if _, err := client.Insert(ctx, DownloadImageArgs{
+
+		if saveImages && img.SortOrder == 0 && (img.AssetType == "poster" || img.AssetType == "backdrop") {
+			if _, err := client.Insert(ctx, DownloadImageArgs{
+				MediaItemID: mediaItemID,
+				EntityType:  "media",
+				URL:         img.URL,
+				AssetType:   img.AssetType,
+				MediaType:   mediaType,
+				Label:       img.Label,
+				SortOrder:   img.SortOrder,
+			}, &river.InsertOpts{Priority: img.Priority}); err != nil {
+				return fmt.Errorf("enqueue download image: %w", err)
+			}
+			continue
+		}
+
+		if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 			MediaItemID: mediaItemID,
-			EntityType:  "media",
-			URL:         img.URL,
-			AssetType:   img.AssetType,
-			MediaType:   mediaType,
+			AssetType:   sqlc.AssetType(img.AssetType),
+			Source:      "remote",
+			RemoteUrl:   img.URL,
 			Label:       img.Label,
-			SortOrder:   img.SortOrder,
-		}, &river.InsertOpts{Priority: img.Priority}); err != nil {
-			return fmt.Errorf("enqueue download image: %w", err)
+			SortOrder:   int32(img.SortOrder),
+		}); err != nil {
+			log.Debug().Err(err).Int64("media_item_id", mediaItemID).Str("asset_type", img.AssetType).Msg("pending image row insert skipped")
 		}
 	}
 

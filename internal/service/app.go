@@ -30,6 +30,7 @@ import (
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/singleflight"
 )
 
 type App struct {
@@ -51,6 +52,7 @@ type App struct {
 	analyzer       *sonicanalysis.Analyzer
 	sonicHolder    *sonicanalysis.Holder
 	imageResizer   *imageserve.Resizer
+	imageFetch     singleflight.Group // coalesces concurrent on-demand image fetches by cache key
 	envLibraries   map[int64]EnvManagedLibrary
 	radioBrowser   *radiobrowser.Client
 	podcastIndex   *podcastindex.Client

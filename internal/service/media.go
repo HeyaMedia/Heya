@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -676,62 +678,150 @@ func buildUnavailableMap(ctx context.Context, q *sqlc.Queries, mt sqlc.MediaType
 	return unavailMap
 }
 
-// GetMediaImagePath resolves the local file path for a media item's image.
-// Returns the path and true if found, or empty string and false otherwise.
+// GetMediaImagePath resolves a servable LOCAL file path for a media item's
+// image. A locally-cached file (downloaded sidecar art or a previously-served
+// remote image) wins; otherwise it falls back to the stored upstream URL
+// (media_assets.remote_url, or the media_items poster/backdrop column) and
+// pulls the bytes ON DEMAND — the lazy replacement for pre-downloading all
+// artwork at enrich time. Returns the path and true if found.
 func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageType string, sortOrder int, label string) (string, bool) {
 	q := sqlc.New(a.db)
 
-	assets, err := q.ListMediaAssets(ctx, mediaItemID)
-	if err == nil && len(assets) > 0 {
-		if label != "" {
-			for _, asset := range assets {
-				if asset.Label == label && asset.LocalPath != "" {
-					return asset.LocalPath, true
-				}
+	// 1. media_assets: a matching row's local file wins; else remember its
+	//    remote URL (+ cache identity) for the on-demand fetch below.
+	remoteURL, assetType, remoteSort := "", imageType, 0
+	if assets, err := q.ListMediaAssets(ctx, mediaItemID); err == nil {
+		if row := pickMediaAsset(assets, imageType, sortOrder, label); row != nil {
+			if row.LocalPath != "" {
+				return row.LocalPath, true
 			}
-		}
-		if sortOrder >= 0 {
-			for _, asset := range assets {
-				if string(asset.AssetType) == imageType && int(asset.SortOrder) == sortOrder && asset.LocalPath != "" {
-					return asset.LocalPath, true
-				}
-			}
-		}
-		for _, asset := range assets {
-			if string(asset.AssetType) == imageType && asset.LocalPath != "" {
-				return asset.LocalPath, true
-			}
+			remoteURL, assetType, remoteSort = row.RemoteUrl, string(row.AssetType), int(row.SortOrder)
 		}
 	}
 
-	if imageType == "poster" || imageType == "backdrop" {
-		item, err := q.GetMediaItemByID(ctx, mediaItemID)
-		if err != nil {
-			return "", false
-		}
-		var imgPath string
-		if imageType == "poster" {
-			imgPath = item.PosterPath
-		} else {
-			imgPath = item.BackdropPath
-		}
-		if imgPath == "" || strings.HasPrefix(imgPath, "http") {
-			return "", false
-		}
-		return imgPath, true
+	item, err := q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return "", false
 	}
 
-	return "", false
+	// 2. media_items poster/backdrop column fallback (primary art). A bare local
+	//    path is served as-is; an http URL feeds the on-demand fetch.
+	if remoteURL == "" && (imageType == "poster" || imageType == "backdrop") {
+		col := item.PosterPath
+		if imageType == "backdrop" {
+			col = item.BackdropPath
+		}
+		switch {
+		case col == "":
+			return "", false
+		case !strings.HasPrefix(col, "http"):
+			return col, true
+		default:
+			remoteURL, assetType, remoteSort = col, imageType, 0
+		}
+	}
+
+	if remoteURL == "" {
+		return "", false
+	}
+
+	dirName := strconv.FormatInt(mediaItemID, 10)
+	if item.Slug != "" {
+		dirName = item.Slug
+	}
+	return a.onDemandImage(ctx, remoteURL, string(item.MediaType), dirName, imageCacheFilename(assetType, remoteSort, remoteURL))
 }
 
-// GetPersonImagePath resolves the local file path for a person's profile image.
+// pickMediaAsset selects the best asset row for a request, matching the legacy
+// priority: exact label, then asset-type + sort, then asset-type. It returns
+// the row regardless of whether it's local or remote so the caller can serve a
+// cached file or fetch the remote URL on demand.
+func pickMediaAsset(assets []sqlc.MediaAsset, imageType string, sortOrder int, label string) *sqlc.MediaAsset {
+	if label != "" {
+		for i := range assets {
+			if assets[i].Label == label {
+				return &assets[i]
+			}
+		}
+	}
+	if sortOrder >= 0 {
+		for i := range assets {
+			if string(assets[i].AssetType) == imageType && int(assets[i].SortOrder) == sortOrder {
+				return &assets[i]
+			}
+		}
+	}
+	// Catch-all for a bare (unlabeled) request: never return a labeled row
+	// (e.g. a season poster) for a plain poster/backdrop lookup. Rows are
+	// ordered by sort_order, so the primary (sort 0) is picked first.
+	for i := range assets {
+		if string(assets[i].AssetType) == imageType && assets[i].Label == "" {
+			return &assets[i]
+		}
+	}
+	return nil
+}
+
+// GetPersonImagePath resolves a servable local path for a person's headshot,
+// fetching it on demand from the stored upstream URL when we don't yet hold a
+// local copy. This is what keeps cast/crew photos working now that the person
+// deep-fetch (which used to download them) is lazy.
 func (a *App) GetPersonImagePath(ctx context.Context, personID int64) (string, bool) {
 	q := sqlc.New(a.db)
 	person, err := q.GetPersonByID(ctx, personID)
-	if err != nil || person.ProfilePath == "" || strings.HasPrefix(person.ProfilePath, "http") {
+	if err != nil || person.ProfilePath == "" {
 		return "", false
 	}
-	return person.ProfilePath, true
+	if !strings.HasPrefix(person.ProfilePath, "http") {
+		return person.ProfilePath, true
+	}
+	dirName := strconv.FormatInt(personID, 10)
+	if person.Slug != "" {
+		dirName = person.Slug
+	}
+	return a.onDemandImage(ctx, person.ProfilePath, "person", dirName, "profile.jpg")
+}
+
+// onDemandImage fetches + caches a remote image URL and returns the resulting
+// local path. Concurrent requests for the same cache file coalesce via
+// singleflight; the download detaches from the caller's cancellation (so one
+// client navigating away doesn't abort a fetch others are waiting on) and is
+// time-bounded so a slow CDN can't hang a page-load. The Downloader is itself a
+// content cache — a hit is a cheap stat — so repeat views serve locally.
+func (a *App) onDemandImage(ctx context.Context, url, mediaType, dirName, filename string) (string, bool) {
+	if url == "" || !strings.HasPrefix(url, "http") {
+		return "", false
+	}
+	key := mediaType + "|" + dirName + "|" + filename
+	ch := a.imageFetch.DoChan(key, func() (any, error) {
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		return a.downloader.Download(dctx, url, mediaType, dirName, filename)
+	})
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return "", false
+		}
+		p, _ := res.Val.(string)
+		return p, p != ""
+	case <-ctx.Done():
+		return "", false
+	}
+}
+
+// imageCacheFilename mirrors DownloadImageWorker's on-disk naming so eager and
+// on-demand fetches share cache files: "<assetType>[<sortOrder>].<ext>", with
+// the extension taken from the URL (defaulting to .jpg).
+func imageCacheFilename(assetType string, sortOrder int, url string) string {
+	ext := filepath.Ext(url)
+	if ext == "" {
+		ext = ".jpg"
+	}
+	if sortOrder > 0 {
+		return fmt.Sprintf("%s%d%s", assetType, sortOrder, ext)
+	}
+	return assetType + ext
 }
 
 // GetAlbumCover returns the album's cover, distinguishing local files from

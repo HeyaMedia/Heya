@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -61,8 +60,6 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 		log.Debug().Int64("media_item_id", item.ID).Str("language", settings.PreferredLanguage).Str("country", settings.PreferredCountry).Msg("artwork: using library language/country preference")
 	}
 
-	client := river.ClientFromContext[pgx.Tx](ctx)
-
 	maxPerType := map[string]int{
 		"backdrop": 5,
 		"poster":   1,
@@ -104,14 +101,19 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 			continue
 		}
 		countPerType[art.AssetType]++
-		client.Insert(ctx, DownloadImageArgs{
+		// On-demand images: record the secondary artwork as a pending remote
+		// asset row (keeps the carousel + alternate-art picker populated) instead
+		// of downloading it now. The serve path fetches bytes on first view.
+		if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 			MediaItemID: job.Args.MediaItemID,
-			URL:         art.URL,
-			AssetType:   art.AssetType,
-			MediaType:   job.Args.MediaType,
+			AssetType:   sqlc.AssetType(art.AssetType),
+			Source:      "remote",
+			RemoteUrl:   art.URL,
 			Label:       art.Language,
-			SortOrder:   sortOrder,
-		}, nil)
+			SortOrder:   int32(sortOrder),
+		}); err != nil {
+			log.Debug().Err(err).Int64("media_item_id", job.Args.MediaItemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
+		}
 		sortOrder++
 	}
 

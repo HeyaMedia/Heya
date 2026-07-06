@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/safedial"
 	"github.com/rs/zerolog/log"
 )
 
@@ -42,9 +44,22 @@ type Downloader struct {
 }
 
 func NewDownloader(dataDir string) *Downloader {
+	// Raise the per-host connection pool (stock is 2): on-demand image serving
+	// fetches artwork on first view, so a fresh library grid can burst dozens of
+	// concurrent downloads from the same CDN host — reuse warm connections
+	// instead of paying a TLS handshake each time.
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 100
+	t.MaxIdleConnsPerHost = 16
+	// SSRF guard: the Downloader now fetches DB-stored (semi-trusted, possibly
+	// NFO-sourced) URLs synchronously from the anonymous /api/media/*/image and
+	// /api/person/*/image endpoints. Reject non-public dial targets post-DNS and
+	// disable Proxy so an HTTP_PROXY can't tunnel past the guard.
+	t.Proxy = nil
+	t.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: safedial.Control}).DialContext
 	return &Downloader{
 		dataDir: dataDir,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client:  &http.Client{Timeout: 30 * time.Second, Transport: t},
 	}
 }
 
