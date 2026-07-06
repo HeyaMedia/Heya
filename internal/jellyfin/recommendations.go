@@ -133,16 +133,24 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request, _ Par
 
 // suggestionSection maps a /Items/Suggestions request's type / mediaType
 // filters to a Recommended section. ok=false means the client asked for a kind
-// Heya has no suggestions for (audio / books / photos) — the caller returns an
-// empty page rather than movies dressed as something else. An unfiltered
-// request defaults to movies.
+// Heya has no suggestions for (audio / music video / books / photos) — the
+// caller returns an empty page rather than movies dressed as something else. An
+// unfiltered request defaults to movies.
+//
+// Both params are comma-separated BaseItemKind / MediaType tokens, matched
+// EXACTLY — substring matching would wrongly treat "MusicVideo" as video.
 func suggestionSection(r *http.Request) (section string, ok bool) {
-	hint := strings.ToLower(queryCI(r, "type") + "," + queryCI(r, "mediaType"))
-	specified := strings.Trim(hint, ", ") != ""
+	tokens := map[string]bool{}
+	for _, raw := range strings.Split(queryCI(r, "type")+","+queryCI(r, "mediaType"), ",") {
+		if t := strings.ToLower(strings.TrimSpace(raw)); t != "" {
+			tokens[t] = true
+		}
+	}
+	specified := len(tokens) > 0
 
-	seriesWanted := strings.Contains(hint, "series") || strings.Contains(hint, "episode")
-	movieWanted := strings.Contains(hint, "movie")
-	videoWanted := movieWanted || strings.Contains(hint, "video")
+	seriesWanted := tokens["series"] || tokens["episode"]
+	movieWanted := tokens["movie"]
+	videoWanted := movieWanted || tokens["video"] // mediaType=Video (any video)
 
 	switch {
 	case seriesWanted && !movieWanted:
