@@ -6,7 +6,7 @@
     </div>
     <div v-else class="mea-list">
       <div v-for="al in albums" :key="al.id" class="mea-row">
-        <img v-if="coverUrl(al)" :src="coverUrl(al)!" class="mea-cover" loading="lazy" />
+        <NuxtImg v-if="coverUrl(al)" :src="coverUrl(al)!" class="mea-cover" :width="240" :quality="80" densities="1x 2x" loading="lazy" />
         <div v-else class="mea-cover mea-cover-empty">
           <Icon name="music" :size="16" />
         </div>

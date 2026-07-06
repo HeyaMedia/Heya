@@ -130,7 +130,7 @@ function formatTotalDuration(rows: StationTrack[]): string {
         >
           <div class="sr-track-idx">{{ i + 1 }}</div>
           <div class="sr-track-art">
-            <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
+            <NuxtImg :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" :width="112" :quality="80" densities="1x 2x" loading="lazy" />
             <div class="sr-track-play"><Icon name="play" :size="13" /></div>
           </div>
           <div class="sr-track-meta">

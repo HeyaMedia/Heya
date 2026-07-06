@@ -14,7 +14,7 @@
 
         <div class="ch-hero-body page-pad">
           <div v-if="collection.poster_path" class="ch-poster">
-            <img :src="collection.poster_path" alt="" @error="onImgError">
+            <NuxtImg :src="collection.poster_path" alt="" @error="onImgError" />
           </div>
 
           <div class="ch-info">
@@ -77,7 +77,7 @@
           >
             <div class="ch-row-idx">{{ i + 1 }}</div>
             <div class="ch-row-poster">
-              <img v-if="partPoster(p)" :src="partPoster(p)" alt="" @error="onImgError">
+              <NuxtImg v-if="partPoster(p)" :src="partPoster(p)" alt="" @error="onImgError" />
             </div>
             <div class="ch-row-main">
               <div class="ch-row-title">
@@ -152,7 +152,9 @@ const ownedCount = ref(0)
 const loading = ref(true)
 const watchedIds = ref<Set<number>>(new Set())
 
-function onImgError(e: Event) {
+// NuxtImg types its `error` payload as `string | Event`; narrow before use.
+function onImgError(e: Event | string) {
+  if (typeof e === 'string') return
   const el = e.target as HTMLImageElement
   el.style.visibility = 'hidden'
 }

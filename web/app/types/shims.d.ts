@@ -39,3 +39,10 @@ declare module 'butterchurn-presets' {
   const presets: Record<string, object> & { getPresets?: () => Record<string, object> }
   export default presets
 }
+
+declare module 'butterchurn-presets/lib/*' {
+  // The extra preset packs (MD1, Extra, Extra2, …) live under lib/ and share
+  // the base pack's shape. Deep-imported to expand the preset library.
+  const presets: Record<string, object> & { getPresets?: () => Record<string, object> }
+  export default presets
+}

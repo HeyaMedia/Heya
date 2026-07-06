@@ -12,7 +12,7 @@
       <div class="mei-grid">
         <div v-for="asset in group.assets" :key="asset.id" class="mei-card" :class="{ 'mei-card-wide': wideTypes.has(asset.asset_type) }">
           <div class="mei-img-wrap" :style="{ aspectRatio: wideTypes.has(asset.asset_type) ? '16/9' : '2/3' }">
-            <img :src="imageUrl(asset)" class="mei-img" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+            <NuxtImg :src="imageUrl(asset)" class="mei-img" :width="240" :quality="80" densities="1x 2x" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
             <div v-if="asset.sort_order === 0" class="mei-primary-badge">Primary</div>
             <div class="mei-overlay">
               <button v-if="asset.sort_order !== 0" class="mei-btn" title="Set as primary" @click="setPrimary(asset)">
@@ -80,7 +80,7 @@
             @click="downloadArt(art)"
           >
             <div class="mei-find-img-wrap" :style="{ aspectRatio: wideTypes.has(findModalType!) ? '16/9' : '2/3' }">
-              <img :src="art.url" class="mei-find-img" />
+              <NuxtImg :src="art.url" class="mei-find-img" />
               <div v-if="art.source" class="mei-find-source">{{ art.source }}</div>
               <div class="mei-find-dl"><Icon name="plus" :size="16" /></div>
             </div>

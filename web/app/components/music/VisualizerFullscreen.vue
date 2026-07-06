@@ -23,6 +23,7 @@
       >
         <!-- Active mode fills the surface -->
         <VisualizerMilkdrop v-if="mode === 'milkdrop'" ref="mkRef" />
+        <VisualizerStarfield v-else-if="mode === 'starfield'" />
         <VisualizerSpectrum v-else :variant="specVariant" :active="playing" />
 
         <!-- Floating close (top-right) -->
@@ -104,6 +105,82 @@
             ><Icon name="list" :size="14" /></button>
           </div>
 
+          <!-- Milkdrop preset controls, collapsed — shown only on the compact
+               band (≤1200px). Same controls as the inline cluster above, behind
+               a gear popover so the bar stays a single row on a fold. CSS toggles
+               which of the two shows at each width. -->
+          <div v-if="mode === 'milkdrop'" class="viz-presetctl-compact">
+            <span class="viz-sep" />
+            <PopoverRoot v-model:open="presetSettingsOpen">
+              <PopoverTrigger as-child>
+                <button class="viz-ic sm" :class="{ active: presetSettingsOpen }" title="Presets">
+                  <Icon name="settings" :size="15" />
+                </button>
+              </PopoverTrigger>
+              <PopoverPortal>
+                <PopoverContent class="surface viz-presetpop" side="top" :side-offset="12" align="start" :collision-padding="12">
+                  <div class="viz-presetpop-head">Presets</div>
+                  <button class="viz-presetpop-name" :title="vis.currentPresetName.value" @click="openBrowserFromPopover">{{ prettyPreset }}</button>
+                  <div class="viz-presetpop-nav">
+                    <button title="Previous ([)" @click="mkRef?.prevPreset()"><Icon name="chevleft" :size="16" /></button>
+                    <button title="Random (r)" @click="mkRef?.randomPreset()"><Icon name="shuffle" :size="15" /></button>
+                    <button title="Next (])" @click="mkRef?.nextPreset()"><Icon name="chevright" :size="16" /></button>
+                  </div>
+                  <button class="viz-presetpop-item" :class="{ liked: isFav }" @click="toggleFav">
+                    <Icon :name="isFav ? 'heartfill' : 'heart'" :size="14" />
+                    <span>{{ isFav ? 'Favorited' : 'Favorite preset' }}</span>
+                  </button>
+                  <div class="viz-presetpop-switch">
+                    <AppSwitch :model-value="vis.likedOnly.value" size="sm" label="Liked only" @update:model-value="vis.setLikedOnly" />
+                  </div>
+                  <div class="viz-presetpop-switch">
+                    <AppSwitch :model-value="vis.autoCycleEnabled.value" size="sm" label="Auto-cycle" @update:model-value="vis.setAutoCycleEnabled" />
+                  </div>
+                  <button class="viz-presetpop-browse" @click="openBrowserFromPopover">
+                    <Icon name="list" :size="14" /><span>Browse all presets</span>
+                  </button>
+                </PopoverContent>
+              </PopoverPortal>
+            </PopoverRoot>
+          </div>
+
+          <!-- Starfield settings -->
+          <div v-if="mode === 'starfield'" class="viz-starctl">
+            <span class="viz-sep" />
+            <PopoverRoot v-model:open="starSettingsOpen">
+              <PopoverTrigger as-child>
+                <button class="viz-ic sm" :class="{ active: starSettingsOpen }" title="Starfield settings">
+                  <Icon name="settings" :size="15" />
+                </button>
+              </PopoverTrigger>
+              <PopoverPortal>
+                <PopoverContent class="surface viz-starpop" side="top" :side-offset="12" align="start" :collision-padding="12">
+                  <div class="viz-starpop-head">Starfield</div>
+                  <div class="viz-starpop-row">
+                    <label>Speed</label>
+                    <AppSlider
+                      :model-value="vis.starfieldSpeed.value"
+                      :min="1" :max="10" :step="1"
+                      aria-label="Star speed"
+                      @update:model-value="vis.setStarfieldSpeed"
+                    />
+                    <span class="viz-starpop-val">{{ vis.starfieldSpeed.value }}</span>
+                  </div>
+                  <div class="viz-starpop-row">
+                    <label>Reactivity</label>
+                    <AppSlider
+                      :model-value="vis.starfieldReactivity.value"
+                      :min="0" :max="100" :step="5"
+                      aria-label="Star reactivity"
+                      @update:model-value="vis.setStarfieldReactivity"
+                    />
+                    <span class="viz-starpop-val">{{ vis.starfieldReactivity.value }}</span>
+                  </div>
+                </PopoverContent>
+              </PopoverPortal>
+            </PopoverRoot>
+          </div>
+
           <!-- Mode pills -->
           <span class="viz-sep" />
           <div class="viz-modes">
@@ -147,6 +224,7 @@
 </template>
 
 <script setup lang="ts">
+import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import type { VisMode } from '~/composables/useVisualizer'
 
 interface MilkdropApi {
@@ -165,17 +243,24 @@ const mkRef = ref<MilkdropApi | null>(null)
 const rootRef = ref<HTMLElement | null>(null)
 const presetKeys = ref<string[]>([])
 const isNativeFullscreen = ref(false)
+const starSettingsOpen = ref(false)
+// Milkdrop preset controls collapse into this popover on the compact band.
+const presetSettingsOpen = ref(false)
+const { isCompact } = useViewport()
 
 const MODES: { id: VisMode; label: string }[] = [
   { id: 'milkdrop', label: 'Milkdrop' },
   { id: 'bars', label: 'Spectrum' },
   { id: 'scope', label: 'Scope' },
   { id: 'vu', label: 'VU' },
+  { id: 'starfield', label: 'Starfield' },
 ]
 
-// Narrow VisMode (excludes 'milkdrop' in the v-else branch) for the spectrum's
-// prop, which doesn't accept 'milkdrop'.
-const specVariant = computed<'bars' | 'scope' | 'vu'>(() => (mode.value === 'milkdrop' ? 'bars' : mode.value))
+// Narrow VisMode (the spectrum's prop doesn't accept 'milkdrop'/'starfield',
+// which render their own components) for the v-else branch.
+const specVariant = computed<'bars' | 'scope' | 'vu'>(() =>
+  (mode.value === 'milkdrop' || mode.value === 'starfield' ? 'bars' : mode.value),
+)
 
 const progressPct = computed(() => (duration.value > 0 ? (position.value / duration.value) * 100 : 0))
 
@@ -190,6 +275,9 @@ const prettyPreset = computed(() => {
 
 function onSelectPreset(name: string) { mkRef.value?.loadPreset(name) }
 function toggleBrowser() { vis.presetBrowserOpen.value = !vis.presetBrowserOpen.value }
+// From the compact popover: close it, then open the full browser panel (which
+// would otherwise render behind the higher-z popover).
+function openBrowserFromPopover() { presetSettingsOpen.value = false; vis.presetBrowserOpen.value = true }
 function close() {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
   vis.presetBrowserOpen.value = false
@@ -221,8 +309,14 @@ watch([mkRef, mode], ([ref, m]) => {
   }, 200)
 }, { immediate: true })
 
-// Leaving Milkdrop closes the (Milkdrop-only) browser.
-watch(mode, (m) => { if (m !== 'milkdrop') vis.presetBrowserOpen.value = false })
+// Leaving a mode closes its mode-specific chrome.
+watch(mode, (m) => {
+  if (m !== 'milkdrop') { vis.presetBrowserOpen.value = false; presetSettingsOpen.value = false }
+  if (m !== 'starfield') starSettingsOpen.value = false
+})
+// The compact preset popover is compact-band only — dropping to desktop hides
+// its trigger, so close it rather than leave a portaled panel with no anchor.
+watch(isCompact, (c) => { if (!c) presetSettingsOpen.value = false })
 
 // --- Auto-hide chrome ------------------------------------------------------
 const controlsVisible = ref(true)
@@ -230,8 +324,8 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null
 function poke() {
   controlsVisible.value = true
   if (hideTimer) clearTimeout(hideTimer)
-  // Don't hide while the user is in the preset browser.
-  if (vis.presetBrowserOpen.value) return
+  // Don't hide while any pinned chrome is open (preset browser / the mode popovers).
+  if (vis.presetBrowserOpen.value || starSettingsOpen.value || presetSettingsOpen.value) return
   hideTimer = setTimeout(() => { controlsVisible.value = false }, 3000)
 }
 watch(vis.fullscreenOpen, (open) => {
@@ -240,6 +334,10 @@ watch(vis.fullscreenOpen, (open) => {
 })
 // Opening the browser pins the chrome; closing re-arms the idle timer.
 watch(vis.presetBrowserOpen, (o) => { if (o) { controlsVisible.value = true; if (hideTimer) clearTimeout(hideTimer) } else poke() })
+// Same pin/re-arm for the mode popovers (portaled outside the viz-root, so
+// mousemove-poke never reaches them — pin explicitly while open).
+watch(starSettingsOpen, (o) => { if (o) { controlsVisible.value = true; if (hideTimer) clearTimeout(hideTimer) } else poke() })
+watch(presetSettingsOpen, (o) => { if (o) { controlsVisible.value = true; if (hideTimer) clearTimeout(hideTimer) } else poke() })
 
 // --- Hotkeys ---------------------------------------------------------------
 function isTyping(e: KeyboardEvent) {
@@ -251,7 +349,9 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   poke()
 
   if (e.key === 'Escape') {
-    if (vis.presetBrowserOpen.value) vis.presetBrowserOpen.value = false
+    if (starSettingsOpen.value) starSettingsOpen.value = false
+    else if (presetSettingsOpen.value) presetSettingsOpen.value = false
+    else if (vis.presetBrowserOpen.value) vis.presetBrowserOpen.value = false
     else if (isNativeFullscreen.value) document.exitFullscreen().catch(() => {})
     else close()
     return
@@ -261,7 +361,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 
   const k = e.key.toLowerCase()
   if (k === 'f') { toggleNativeFullscreen(); return }
-  if (k >= '1' && k <= '4') { vis.setMode(MODES[Number(k) - 1]!.id); return }
+  if (k >= '1' && k <= '5') { vis.setMode(MODES[Number(k) - 1]!.id); return }
 
   if (mode.value !== 'milkdrop') return
   if (e.key === 'ArrowRight' || e.key === ']') mkRef.value?.nextPreset()
@@ -346,6 +446,10 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
 .viz-rail:hover .viz-rail-knob { opacity: 1; }
 
 .viz-presetctl { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+/* Inline preset controls are desktop-only; the compact gear popover takes over
+   ≤1200px (see the media query below). */
+.viz-presetctl-compact { display: none; flex-shrink: 0; }
+.viz-starctl { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
 .viz-preset-name {
   max-width: 150px;
   padding: 5px 10px;
@@ -413,4 +517,133 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
 
 .viz-fade-enter-active, .viz-fade-leave-active { transition: opacity 0.25s ease; }
 .viz-fade-enter-from, .viz-fade-leave-to { opacity: 0; }
+
+/* Tablet / foldable (compact band, ≤1200px): the command bar packs a lot —
+   track, transport, seek, 8 Milkdrop controls, 5 mode pills, fullscreen — which
+   overflows the narrower width and reads as an oversized, too-wide bar. Slim
+   every section (tighter gaps/paddings, smaller controls, narrower seek + track
+   meta) so it fits comfortably instead of crowding or horizontal-scrolling. */
+@media (max-width: 1200px) {
+  /* The mode-specific controls collapse into gear popovers below, so the bar is
+     track + transport + seek + gear + 5 mode pills + fullscreen — a single row
+     on a typical fold (~884px). `flex-wrap` is the safety net for the narrowest
+     widths: the mode pills flow to a second row rather than clip behind the
+     hidden-scrollbar overflow. */
+  .viz-bar { gap: 10px; row-gap: 12px; padding: 12px 14px 16px; flex-wrap: wrap; }
+  .viz-track { gap: 9px; }
+  .viz-track-meta { max-width: 120px; }
+  .viz-transport { gap: 8px; }
+  .viz-play { width: 38px; height: 38px; }
+  .viz-seek { flex-basis: 150px; min-width: 110px; gap: 8px; }
+  /* Collapse the 8-button Milkdrop cluster into the gear popover so the bar
+     holds a single row — same move the starfield settings use. */
+  .viz-presetctl { display: none; }
+  .viz-presetctl-compact { display: flex; align-items: center; gap: 5px; }
+  .viz-modes { gap: 4px; }
+  .viz-pill { padding: 5px 10px; font-size: 11px; }
+  .viz-ic { width: 32px; height: 32px; }
+  .viz-ic.sm { width: 27px; height: 27px; }
+  .viz-sep { height: 20px; }
+}
+</style>
+
+<!-- Unscoped: the starfield settings popover is portaled to <body>, out of this
+     component's scope, so its chrome + z-index live in a global block. -->
+<style>
+.viz-starpop {
+  z-index: 500; /* above the fullscreen viz-root (z-index 400) */
+  min-width: 240px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.viz-starpop-head {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-3);
+}
+.viz-starpop-row {
+  display: grid;
+  grid-template-columns: 62px 1fr 26px;
+  align-items: center;
+  gap: 10px;
+}
+.viz-starpop-row label { font-size: 12px; color: var(--fg-1); }
+.viz-starpop-val {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--fg-2);
+  text-align: right;
+}
+
+/* Compact Milkdrop preset popover (fold/tablet). */
+.viz-presetpop {
+  z-index: 500; /* above the fullscreen viz-root (z-index 400) */
+  min-width: 232px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.viz-presetpop-head {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--fg-3);
+  padding: 2px 4px 4px;
+}
+.viz-presetpop-name {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  padding: 7px 9px;
+  border-radius: var(--r-xs);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+.viz-presetpop-name:hover { background: rgba(255, 255, 255, 0.12); }
+.viz-presetpop-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.viz-presetpop-nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  border-radius: var(--r-xs);
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.viz-presetpop-nav button:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.viz-presetpop-item,
+.viz-presetpop-browse {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--r-xs);
+  font-size: 12px;
+  color: var(--fg-1);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.viz-presetpop-item:hover,
+.viz-presetpop-browse:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.viz-presetpop-item.liked { color: #ff5b7a; }
+.viz-presetpop-switch { padding: 4px 8px; }
 </style>

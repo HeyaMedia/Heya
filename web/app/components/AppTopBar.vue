@@ -987,6 +987,13 @@ watch(() => route.fullPath, () => { closeDropdown() })
    phone, and nothing outside this query touches >1200px desktop. */
 @media (min-width: 720.02px) and (max-width: 1200px) {
   .topbar {
+    /* Left-align the whole nav: brand, then the tab row hugging it, with the
+       right cluster taking the remainder. `auto auto 1fr` shrinks brand + tabs
+       to content and hands the rest to the search cluster — the desktop
+       `1fr auto 1fr` centered the tabs, which stranded the left area and boxed
+       the search into a narrow strip. This gives the search a big contiguous
+       area on the right instead. */
+    grid-template-columns: auto auto 1fr;
     gap: 12px;
     padding: 0 16px;
   }
@@ -1004,30 +1011,30 @@ watch(() => route.fullPath, () => { closeDropdown() })
   /* Same reclaim-the-width move as the phone query, just for the narrower
      compact band instead of dropping the tab row entirely. */
   .brand-name { display: none; }
-  .topbar-tabs { min-width: 0; }
-  /* Icon-only tabs — the label span hides, padding tightens, height (36px)
-     is untouched. `.tab.active`'s text-color-only treatment (inherited by
-     the icon via `currentColor`) reads as too subtle without the label
-     next to it, so add a background tint to keep the active tab obvious. */
-  .topbar-tabs .tab {
-    padding: 0 12px;
-  }
-  .topbar-tabs .tab span { display: none; }
-  .topbar-tabs .tab.active { background: var(--gold-soft); }
-  .topbar-right { gap: 8px; min-width: 0; }
+  /* Tabs sit immediately after the brand (left-aligned), not centered. Labels
+     stay visible — with the layout left-aligned they no longer compete with a
+     centered block for the search's room, so Home/Movies/TV/Music/Books read
+     as named buttons just like desktop, only with tighter padding/gap so all
+     five labels + brand + search still fit at the narrow end of the band
+     (~720px, where a burger also occupies the left). */
+  .topbar-tabs { justify-self: start; min-width: 0; }
+  .topbar-tabs .tab { padding: 0 10px; gap: 6px; }
+  /* Stretch the right cluster across the flexible column so the flex-grow
+     search-wrap below actually has room to expand into (mirrors the phone
+     query — `justify-self: end` would shrink-wrap it and strand the space). */
+  .topbar-right { justify-self: stretch; gap: 8px; min-width: 0; }
   /* Dev-only Query Cache toggle — not part of the compact-band set, and
      crowds the ladder at the narrow end (~744px). Hidden the same way the
      phone query already drops it. */
   .qcp-nav-btn { display: none; }
-  /* Fixed 280px on desktop; here the pill flexes to fill the space search
-     and the right-cluster buttons leave available, capped so it doesn't
-     crowd cast/activity/avatar, floored so it never drops below a tappable
-     width even if a future addition to the right cluster squeezes it. */
+  /* Fixed 280px on desktop; here the pill flexes to fill the freed space,
+     capped generously so it doesn't sprawl on the wide end of the band, and
+     floored low so it never forces the row to overflow at the narrow end. */
   .search-wrap.open {
     flex: 1;
     width: auto;
-    max-width: 240px;
-    min-width: 44px;
+    max-width: 560px;
+    min-width: 80px;
   }
 }
 </style>

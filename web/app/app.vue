@@ -4,6 +4,9 @@
   </NuxtLayout>
   <Lightbox />
   <AppToastHost />
+  <!-- Global touch affordances (left-edge swipe → sidebar, pull-to-refresh).
+       Client-only; renders only a transient pull indicator on touch devices. -->
+  <TouchGestures />
   <!-- Dev-only in-app query-cache overview (bottom-left toggle, ⌘⇧Q). Reads
        the live $queryClient: every query's key, status, staleness, observers,
        age + per-query invalidate/refetch/remove. Async-imported behind

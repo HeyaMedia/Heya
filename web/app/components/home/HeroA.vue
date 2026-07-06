@@ -54,12 +54,13 @@
         </div>
 
         <NuxtLink :to="mediaUrl(current)" class="hero-title-link">
-          <img
+          <NuxtImg
             v-if="logoOk[current.id]"
             class="hero-logo"
             :src="logoUrl(current.id)"
             :alt="current.title"
-          >
+            :width="500"
+          />
           <h1 v-else class="hero-title">{{ current.title }}</h1>
         </NuxtLink>
 

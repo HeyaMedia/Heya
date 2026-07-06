@@ -10,7 +10,7 @@
       <div class="pd-hero-tint" />
       <div class="pd-hero-content">
         <div class="pd-hero-art" :class="{ 'pd-hero-art-fallback': !detail.artwork_url }">
-          <img v-if="detail.artwork_url" :src="detail.artwork_url" :alt="detail.title" />
+          <NuxtImg v-if="detail.artwork_url" :src="detail.artwork_url" :alt="detail.title" />
           <Icon v-else name="mic" :size="56" />
         </div>
         <div class="pd-hero-meta">
@@ -72,7 +72,7 @@
         >
           <div class="pd-ep-num mono">{{ ep.episode_number ?? (detail.episodes.length - i) }}</div>
           <div class="pd-ep-art">
-            <img
+            <NuxtImg
               v-if="ep.artwork_url || detail.artwork_url"
               :src="ep.artwork_url || detail.artwork_url"
               :alt="ep.title"

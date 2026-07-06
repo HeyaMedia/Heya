@@ -124,7 +124,7 @@
           @click="playLovedTracks(i)"
         >
           <div class="ms-track-art">
-            <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
+            <NuxtImg :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" :width="160" :quality="80" densities="1x 2x" loading="lazy" />
             <div class="ms-track-play"><Icon name="play" :size="14" /></div>
           </div>
           <div class="ms-track-meta">

@@ -5,13 +5,15 @@
            blurred into ambience. -->
       <VisualizerSpectrum v-if="playing" variant="bars" :active="true" class="music-viz" />
       <template v-else>
-        <img
+        <NuxtImg
           v-if="idleArt"
           :src="idleArt"
+          :width="1280"
+          :quality="85"
           class="music-bg-art"
           alt=""
-          @error="(e) => ((e.target as HTMLImageElement).style.display = 'none')"
-        >
+          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
+        />
       </template>
       <div class="music-bg-gradient" :class="{ playing }" />
     </div>
@@ -30,7 +32,7 @@
         </div>
       </div>
       <div class="music-now-art" v-if="currentTrack.poster">
-        <img :src="currentTrack.poster" alt="">
+        <NuxtImg :src="currentTrack.poster" alt="" />
       </div>
     </div>
 

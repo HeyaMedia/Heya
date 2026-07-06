@@ -67,7 +67,7 @@
             class="ms-mb-ac-row"
             @click="addAutocompleteSeed(r)"
           >
-            <img v-if="r.cover" :src="r.cover" :alt="r.title" loading="lazy" :class="addKind === 'artist' ? 'ac-art ac-art-round' : 'ac-art'" />
+            <NuxtImg v-if="r.cover" :src="r.cover" :alt="r.title" loading="lazy" :class="addKind === 'artist' ? 'ac-art ac-art-round' : 'ac-art'" />
             <div v-else :class="addKind === 'artist' ? 'ac-art ac-art-round ac-art-empty' : 'ac-art ac-art-empty'"><Icon :name="activeTab.icon" :size="16" /></div>
             <div class="ms-mb-ac-meta">
               <div class="ms-mb-ac-title">{{ r.title }}</div>
@@ -157,7 +157,7 @@
         >
           <div class="ms-mb-track-idx">{{ i + 1 }}</div>
           <div class="ms-mb-track-art">
-            <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
+            <NuxtImg :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" :width="160" :quality="80" densities="1x 2x" loading="lazy" />
             <div class="ms-mb-track-play"><Icon name="play" :size="13" /></div>
           </div>
           <div class="ms-mb-track-meta">

@@ -15,7 +15,7 @@
             <DialogTitle>Image viewer</DialogTitle>
           </VisuallyHidden>
 
-          <img :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop />
+          <NuxtImg :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop />
 
           <DialogClose class="lb-close" aria-label="Close"><Icon name="close" :size="20" /></DialogClose>
 

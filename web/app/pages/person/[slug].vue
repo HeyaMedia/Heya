@@ -112,7 +112,7 @@
               :aria-label="`Open photo ${idx + 1}`"
               @click="openGallery(galleryHeroOffset + idx)"
             >
-              <img :src="url" :alt="`Profile ${idx + 1}`" class="profile-thumb" />
+              <NuxtImg :src="url" :alt="`Profile ${idx + 1}`" class="profile-thumb" />
             </button>
             <button v-if="extraProfileCount > 0" type="button" class="profile-thumb-wrap profile-more" @click="openGallery(galleryHeroOffset)">
               +{{ extraProfileCount }}

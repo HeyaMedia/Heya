@@ -30,10 +30,13 @@
         class="ms-mix-card"
       >
         <div class="ms-mix-art">
-          <img
+          <NuxtImg
             v-if="mix.seed_artist_media_item_id"
             :src="usePosterUrl(mix.seed_artist_media_item_id) ?? ''"
             :alt="mix.name"
+            :width="280"
+            :quality="80"
+            densities="1x 2x"
             loading="lazy"
           />
           <div v-else class="ms-mix-art-fallback"><Icon name="sparkle" :size="36" /></div>

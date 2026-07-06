@@ -9,12 +9,15 @@
       <!-- 4-up mosaic of the first four tracks' covers, mirroring the home
            tile so the page identity carries over. -->
       <div class="mix-hero-art">
-        <img
+        <NuxtImg
           v-for="(t, i) in mix.tracks.slice(0, 4)"
           :key="t.track_id"
           :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) || ''"
           :alt="t.album_title"
           :class="['mix-hero-cell', `s${i}`]"
+          :width="160"
+          :quality="80"
+          densities="1x 2x"
           loading="lazy"
           @error="onImgError"
         />
@@ -194,7 +197,9 @@ function contextItemsFor(_row: TrackListRow, i: number) {
   })
 }
 
-function onImgError(e: Event) {
+// NuxtImg types its `error` payload as `string | Event`; narrow before use.
+function onImgError(e: Event | string) {
+  if (typeof e === 'string') return
   const img = e.target as HTMLImageElement
   img.style.visibility = 'hidden'
 }

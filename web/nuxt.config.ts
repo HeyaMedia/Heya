@@ -9,14 +9,14 @@ export default defineNuxtConfig({
   // with frequent tagged releases, so `autoUpdate` — the new service worker
   // takes over silently on next load instead of nagging the user with an
   // "update available" prompt. `generateSW` (the module default) precaches
-  // the built app shell only; there is deliberately NO `runtimeCaching`
-  // entry for `/api/*` — absence means the service worker's fetch handler
-  // never intercepts those requests at all, so auth, streaming, and
-  // `/api/media/*/image/*` always hit the network fresh. `navigateFallback`
-  // covers deep-link/SPA navigations the same way `spaHandler` does
-  // server-side (internal/server/frontend.go always serves index.html for
-  // unknown paths); the denylist keeps that fallback from ever answering a
-  // top-level navigation to an API path (e.g. an image URL opened directly).
+  // the built app shell. The ONLY `/api/*` requests the SW intercepts are
+  // media images (see the `runtimeCaching` rule below, StaleWhileRevalidate) — auth,
+  // streaming, and every other API route match no rule, so the SW leaves them
+  // alone and they always hit the network fresh. `navigateFallback` covers
+  // deep-link/SPA navigations the same way `spaHandler` does server-side
+  // (internal/server/frontend.go always serves index.html for unknown paths);
+  // the denylist keeps that fallback from ever answering a top-level
+  // navigation to an API path (e.g. an image URL opened directly).
   pwa: {
     registerType: 'autoUpdate',
     manifest: {
@@ -61,6 +61,35 @@ export default defineNuxtConfig({
       ],
       navigateFallback: '/index.html',
       navigateFallbackDenylist: [/^\/api/],
+      // The ONLY `/api/*` requests the SW may intercept: media images. Their
+      // URLs are stable but the CONTENT is mutable — album covers especially
+      // (re-identify/edit swaps the bytes behind the same
+      // `/artists/{slug}/albums/{slug}/cover` URL). So StaleWhileRevalidate,
+      // NOT CacheFirst: paint instantly from the SW cache (kills the
+      // repeated-reload flicker on the media grids) while a background fetch
+      // refreshes the entry, so edited art lands on the next view rather than
+      // being pinned. `maxAgeSeconds` is capped at the server's own 7-day
+      // `immutable` window so the SW never holds art staler than the browser's
+      // HTTP cache already would. Auth, streaming, and every other `/api/*`
+      // route match no rule here, so the SW leaves them alone — always
+      // network-fresh. Covers `/image` variants (media/person/studio, incl.
+      // `?w=…&q=…` resize params, keyed per size) and album `/cover`. 500-entry
+      // LRU, quota-purge.
+      runtimeCaching: [
+        {
+          urlPattern: /\/api\/(?:media|person|studio)\/[^/]+\/image|\/api\/music\/artists\/[^/]+\/albums\/[^/]+\/cover/,
+          handler: 'StaleWhileRevalidate',
+          options: {
+            cacheName: 'heya-images',
+            expiration: {
+              maxEntries: 500,
+              maxAgeSeconds: 60 * 60 * 24 * 7,
+              purgeOnQuotaError: true,
+            },
+            cacheableResponse: { statuses: [0, 200] },
+          },
+        },
+      ],
     },
     devOptions: {
       // Never register a SW against the Vite dev server — it would fight

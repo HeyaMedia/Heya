@@ -85,7 +85,14 @@
             @transitionend="onReelLanded"
           >
             <div v-for="(m, i) in reel" :key="`${i}-${m.id}`" class="wheel-cell">
-              <img :src="usePosterUrl(m.id) ?? ''" alt="" @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')">
+              <NuxtImg
+                :src="usePosterUrl(m.id) ?? ''"
+                :width="240"
+                :quality="80"
+                densities="1x 2x"
+                alt=""
+                @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.visibility = 'hidden' }"
+              />
             </div>
           </div>
           <div v-else class="wheel-empty">?</div>

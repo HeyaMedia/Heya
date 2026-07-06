@@ -149,7 +149,7 @@
             @dragend="onDragEnd"
           >
             <div class="ms-track-art">
-              <img :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" loading="lazy" />
+              <NuxtImg :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? ''" :alt="t.album_title" :width="160" :quality="80" densities="1x 2x" loading="lazy" />
               <div v-if="t.available !== false" class="ms-track-play"><Icon name="play" :size="14" /></div>
               <div v-else class="ms-track-play ms-track-play-missing" title="Missing on disk"><Icon name="trash" :size="14" /></div>
             </div>
@@ -186,7 +186,7 @@
         <ul class="ms-track-list">
           <li v-for="(r, i) in vibeResults" :key="`vibe-${r.track_id}`" class="ms-track-row" @click="playVibe(i)">
             <div class="ms-track-art">
-              <img :src="useAlbumCoverUrl(r.artist_slug, r.album_slug) ?? ''" :alt="r.album_title" loading="lazy" />
+              <NuxtImg :src="useAlbumCoverUrl(r.artist_slug, r.album_slug) ?? ''" :alt="r.album_title" :width="160" :quality="80" densities="1x 2x" loading="lazy" />
               <div class="ms-track-play"><Icon name="play" :size="14" /></div>
             </div>
             <div class="ms-track-meta">

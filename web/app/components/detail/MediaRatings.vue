@@ -116,7 +116,7 @@ const displayRatings = computed<ExternalRating[]>(() => {
       :title="sourceLabel(r.source)"
     >
       <div class="rating-head">
-        <img
+        <NuxtImg
           v-if="logo(r.source)"
           :src="logo(r.source)!"
           :alt="sourceLabel(r.source)"

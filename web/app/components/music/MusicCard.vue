@@ -27,6 +27,9 @@ const props = withDefaults(defineProps<{
   progressPct?: number
   /** Renders a trashcan badge and greys + dims the art (missing on disk). */
   missing?: boolean
+  /** Base width hint for the resize provider; `densities="1x 2x"` doubles it on
+   *  HiDPI. Default 200 fits the ~160-180px scroll-row tiles. */
+  width?: number
 }>(), {
   src: '',
   alt: '',
@@ -41,22 +44,25 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ play: [] }>()
 
-function onImgError(e: Event) {
-  const img = e.target as HTMLImageElement
-  img.style.visibility = 'hidden'
-}
+// Mirrors Poster.vue: on load error fall back to the icon tile rather than a
+// broken image, and reset when the src changes.
+const imgError = ref(false)
+watch(() => props.src, () => { imgError.value = false })
 </script>
 
 <template>
   <div class="mc" :class="[`mc-${variant}`, { 'mc-missing': missing }]">
     <MediaMissingBadge v-if="missing" />
     <div class="mc-art">
-      <img
-        v-if="src"
+      <NuxtImg
+        v-if="src && !imgError"
         :src="src"
         :alt="alt || title"
+        :width="width ?? 200"
+        :quality="80"
+        densities="1x 2x"
         loading="lazy"
-        @error="onImgError"
+        @error="imgError = true"
       />
       <div v-else class="mc-fallback">
         <Icon name="music" :size="38" />

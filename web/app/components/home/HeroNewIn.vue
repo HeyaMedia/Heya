@@ -34,7 +34,14 @@
           class="newin-card"
         >
           <div class="newin-card-art">
-            <img :src="ev.art" alt="" @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')">
+            <NuxtImg
+              :src="ev.art"
+              :width="240"
+              :quality="80"
+              densities="1x 2x"
+              alt=""
+              @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.visibility = 'hidden' }"
+            />
             <span class="newin-card-kind">{{ ev.kind }}</span>
           </div>
           <div class="newin-card-title">{{ ev.title }}</div>

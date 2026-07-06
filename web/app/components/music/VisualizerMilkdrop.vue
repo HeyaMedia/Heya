@@ -126,16 +126,29 @@ onMounted(async () => {
   if (!audioCtx || !analyser) { error.value = 'No audio context available'; return }
 
   try {
-    const [bcMod, presetsMod] = await Promise.all([
+    // The bare `butterchurn-presets` specifier resolves to the package `main`,
+    // which is only the 100-preset base pack. Merge in the MD1 + Extra + Extra2
+    // packs (all shipped in the same package) for the full ~395-preset library.
+    // Each pack is a separate lazy chunk, only pulled when the visualizer opens.
+    const [bcMod, baseMod, md1Mod, extraMod, extra2Mod] = await Promise.all([
       import('butterchurn'),
       import('butterchurn-presets'),
+      import('butterchurn-presets/lib/butterchurnPresetsMD1.min.js'),
+      import('butterchurn-presets/lib/butterchurnPresetsExtra.min.js'),
+      import('butterchurn-presets/lib/butterchurnPresetsExtra2.min.js'),
     ])
     if (cancelled) return
 
     const butterchurn = bcMod.default ?? bcMod
-    const rawPresets = presetsMod.default ?? presetsMod
-    presets = typeof rawPresets.getPresets === 'function' ? rawPresets.getPresets() : rawPresets
-    presetKeys = Object.keys(presets)
+    // Each pack ships as either a flat name→preset Record or an object exposing
+    // getPresets(); normalize both, then spread-merge (later packs win on any
+    // duplicate name — harmless, same preset).
+    const packToMap = (mod: { default?: unknown }): Record<string, object> => {
+      const raw = (mod.default ?? mod) as Record<string, object> & { getPresets?: () => Record<string, object> }
+      return typeof raw.getPresets === 'function' ? raw.getPresets() : raw
+    }
+    presets = { ...packToMap(baseMod), ...packToMap(md1Mod), ...packToMap(extraMod), ...packToMap(extra2Mod) }
+    presetKeys = Object.keys(presets).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     if (!presetKeys.length) { error.value = 'No visualizer presets available'; return }
 
     const dpr = Math.max(1, (window.devicePixelRatio || 1) * vis.renderScale.value)

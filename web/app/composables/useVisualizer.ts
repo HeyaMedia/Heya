@@ -4,7 +4,7 @@
 // trip). Follows the same module-level-ref + localStorage shape as
 // useAudioSettings / useAudioDevices so the whole audio surface stays uniform.
 
-export type VisMode = 'milkdrop' | 'bars' | 'scope' | 'vu'
+export type VisMode = 'milkdrop' | 'bars' | 'scope' | 'vu' | 'starfield'
 export type AutoCycleMode = 'random' | 'sequential'
 
 interface VisualizerState {
@@ -19,6 +19,8 @@ interface VisualizerState {
   favoritePresets: string[]
   presetHistory: string[]
   renderScale: number // 0.25..1.0 — GPU cost dial for the Milkdrop canvas
+  starfieldSpeed: number // 1..10 — idle drift speed of the Starfield warp
+  starfieldReactivity: number // 0..100 — how hard audio loudness pushes the warp
 }
 
 const STORAGE_KEY = 'heya_visualizer_v1'
@@ -33,6 +35,8 @@ const DEFAULTS: VisualizerState = {
   favoritePresets: [],
   presetHistory: [],
   renderScale: 1.0,
+  starfieldSpeed: 3,
+  starfieldReactivity: 55,
 }
 
 function loadInitial(): VisualizerState {
@@ -47,6 +51,8 @@ function loadInitial(): VisualizerState {
       favoritePresets: parsed.favoritePresets ?? [],
       presetHistory: parsed.presetHistory ?? [],
       renderScale: clamp(parsed.renderScale ?? DEFAULTS.renderScale, 0.25, 1),
+      starfieldSpeed: clamp(parsed.starfieldSpeed ?? DEFAULTS.starfieldSpeed, 1, 10),
+      starfieldReactivity: clamp(parsed.starfieldReactivity ?? DEFAULTS.starfieldReactivity, 0, 100),
     }
   } catch {
     return { ...DEFAULTS, favoritePresets: [], presetHistory: [] }
@@ -74,6 +80,8 @@ export function useVisualizer() {
   const favoritePresets = computed(() => state.value.favoritePresets)
   const presetHistory = computed(() => state.value.presetHistory)
   const renderScale = computed(() => state.value.renderScale)
+  const starfieldSpeed = computed(() => state.value.starfieldSpeed)
+  const starfieldReactivity = computed(() => state.value.starfieldReactivity)
 
   function setMode(m: VisMode) {
     state.value = { ...state.value, mode: m }
@@ -106,6 +114,14 @@ export function useVisualizer() {
     state.value = { ...state.value, renderScale: clamp(v, 0.25, 1) }
     persist()
   }
+  function setStarfieldSpeed(v: number) {
+    state.value = { ...state.value, starfieldSpeed: clamp(Math.round(v), 1, 10) }
+    persist()
+  }
+  function setStarfieldReactivity(v: number) {
+    state.value = { ...state.value, starfieldReactivity: clamp(Math.round(v), 0, 100) }
+    persist()
+  }
 
   function isFavorite(name: string) {
     return state.value.favoritePresets.includes(name)
@@ -128,9 +144,11 @@ export function useVisualizer() {
     mode, currentPresetName,
     autoCycleEnabled, autoCycleIntervalSec, autoCycleMode, likedOnly,
     favoritePresets, presetHistory, renderScale,
+    starfieldSpeed, starfieldReactivity,
     fullscreenOpen, presetBrowserOpen,
     setMode, setCurrentPreset,
     setAutoCycleEnabled, setAutoCycleIntervalSec, setAutoCycleMode, setLikedOnly, setRenderScale,
+    setStarfieldSpeed, setStarfieldReactivity,
     isFavorite, toggleFavorite,
   }
 }

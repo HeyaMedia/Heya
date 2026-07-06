@@ -19,7 +19,7 @@
         :key="r.provider_id"
         class="mid-result"
       >
-        <img v-if="r.poster_url" :src="r.poster_url" class="mid-cover" />
+        <NuxtImg v-if="r.poster_url" :src="r.poster_url" class="mid-cover" />
         <div v-else class="mid-cover mid-cover-empty">
           <Icon name="music" :size="18" />
         </div>

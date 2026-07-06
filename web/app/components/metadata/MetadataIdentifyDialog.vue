@@ -20,7 +20,7 @@
         :key="r.provider_id"
         class="mid-result"
       >
-        <img v-if="r.poster_url" :src="r.poster_url" class="mid-poster" />
+        <NuxtImg v-if="r.poster_url" :src="r.poster_url" class="mid-poster" />
         <div v-else class="mid-poster mid-poster-empty" />
         <div class="mid-info">
           <div class="mid-result-head">

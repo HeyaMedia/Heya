@@ -11,11 +11,11 @@
     <!-- Cinematic header with backdrop -->
     <div class="me-header">
       <div class="me-backdrop-wrap">
-        <img v-if="headerBackdrop" :src="headerBackdrop" class="me-backdrop" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+        <NuxtImg v-if="headerBackdrop" :src="headerBackdrop" class="me-backdrop" :width="1280" :quality="85" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="me-backdrop-fade" />
       </div>
       <div class="me-header-content">
-        <img v-if="headerPoster" :src="headerPoster" class="me-poster" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+        <NuxtImg v-if="headerPoster" :src="headerPoster" class="me-poster" :width="360" :quality="80" densities="1x 2x" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="me-title-block">
           <div class="me-badges">
             <span class="me-type-badge">{{ headerBadge }}</span>
