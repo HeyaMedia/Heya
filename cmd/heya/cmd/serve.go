@@ -181,6 +181,17 @@ var serveCmd = &cobra.Command{
 			}
 			log.Info().Msg("river workers started")
 
+			// One-time, self-limiting backfill: resolve absolute-numbered anime
+			// files whose parse_result predates the resolve-and-store logic (a
+			// series enriched on an older build has no re-enrich trigger). Async
+			// so a large library's sweep never delays job processing; idempotent,
+			// so a steady-state boot does no work.
+			go func() {
+				if _, err := app.BackfillAbsoluteEpisodes(appCtx); err != nil {
+					log.Warn().Err(err).Msg("startup absolute-episode backfill failed")
+				}
+			}()
+
 			// Recursive watch setup can take minutes on a large SMB-mounted
 			// library; it runs here, after the listener is live, so it never
 			// gates startup health.

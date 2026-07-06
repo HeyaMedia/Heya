@@ -755,6 +755,45 @@ func (q *Queries) ListRetryableUnmatchedFiles(ctx context.Context, arg ListRetry
 	return items, nil
 }
 
+const listSeriesWithUnresolvedAbsoluteFiles = `-- name: ListSeriesWithUnresolvedAbsoluteFiles :many
+SELECT DISTINCT media_item_id
+FROM library_files
+WHERE status = 'matched'
+  AND deleted_at IS NULL
+  AND media_item_id IS NOT NULL
+  AND jsonb_array_length(COALESCE(NULLIF(parse_result->'parsed'->'release'->'absoluteEpisodes', 'null'::jsonb), '[]'::jsonb)) > 0
+  AND jsonb_array_length(COALESCE(NULLIF(parse_result->'parsed'->'release'->'seasons', 'null'::jsonb), '[]'::jsonb)) = 0
+`
+
+// media_item_ids of series still holding a matched absolute-numbered anime file
+// that hasn't been resolved to a real season/episode yet (absoluteEpisodes
+// present, seasons still empty). Drives the one-time startup backfill for series
+// enriched before resolve-and-store existed. Self-limiting: once reconciled a
+// file gains a seasons array and drops out, so a steady-state boot returns
+// nothing. See matcher.ReconcileAbsoluteEpisodes.
+// NULLIF(...,'null') guards the JSON-null case: an absolute file marshals
+// seasons/episodes as `null` (nil slice), and jsonb_array_length('null')
+// errors — COALESCE only catches SQL NULL (absent key), not jsonb null.
+func (q *Queries) ListSeriesWithUnresolvedAbsoluteFiles(ctx context.Context) ([]pgtype.Int8, error) {
+	rows, err := q.db.Query(ctx, listSeriesWithUnresolvedAbsoluteFiles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.Int8{}
+	for rows.Next() {
+		var media_item_id pgtype.Int8
+		if err := rows.Scan(&media_item_id); err != nil {
+			return nil, err
+		}
+		items = append(items, media_item_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnprobedProbeableFiles = `-- name: ListUnprobedProbeableFiles :many
 SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1

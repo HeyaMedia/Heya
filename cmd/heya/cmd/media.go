@@ -353,6 +353,25 @@ var mediaRefreshCmd = &cobra.Command{
 	},
 }
 
+var mediaReconcileAbsoluteCmd = &cobra.Command{
+	Use:   "reconcile-absolute",
+	Short: "Resolve absolute-numbered anime files onto real season/episode",
+	Long: "Scans matched anime files whose absolute episode number hasn't yet " +
+		"been resolved to a real season/episode (via the enriched catalog) and " +
+		"writes the resolution into their parse_result. Idempotent and " +
+		"self-limiting; also runs automatically at server startup.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withApp(func(ctx context.Context, app *service.App) error {
+			n, err := app.BackfillAbsoluteEpisodes(ctx)
+			if err != nil {
+				return err
+			}
+			ui.Success("Reconciled %d absolute-numbered file(s)", n)
+			return nil
+		})
+	},
+}
+
 var mediaMissingCmd = &cobra.Command{
 	Use:   "missing",
 	Short: "List media items whose files are missing on disk",
@@ -450,6 +469,7 @@ func init() {
 	mediaCmd.AddCommand(mediaSearchCmd)
 	mediaCmd.AddCommand(mediaMatchCmd)
 	mediaCmd.AddCommand(mediaRefreshCmd)
+	mediaCmd.AddCommand(mediaReconcileAbsoluteCmd)
 	mediaCmd.AddCommand(mediaMissingCmd)
 	mediaCmd.AddCommand(mediaCleanupMissingCmd)
 }

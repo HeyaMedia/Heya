@@ -13,6 +13,24 @@ SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     deleted_at = NULL, updated_at = now()
 RETURNING *;
 
+-- name: ListSeriesWithUnresolvedAbsoluteFiles :many
+-- media_item_ids of series still holding a matched absolute-numbered anime file
+-- that hasn't been resolved to a real season/episode yet (absoluteEpisodes
+-- present, seasons still empty). Drives the one-time startup backfill for series
+-- enriched before resolve-and-store existed. Self-limiting: once reconciled a
+-- file gains a seasons array and drops out, so a steady-state boot returns
+-- nothing. See matcher.ReconcileAbsoluteEpisodes.
+-- NULLIF(...,'null') guards the JSON-null case: an absolute file marshals
+-- seasons/episodes as `null` (nil slice), and jsonb_array_length('null')
+-- errors — COALESCE only catches SQL NULL (absent key), not jsonb null.
+SELECT DISTINCT media_item_id
+FROM library_files
+WHERE status = 'matched'
+  AND deleted_at IS NULL
+  AND media_item_id IS NOT NULL
+  AND jsonb_array_length(COALESCE(NULLIF(parse_result->'parsed'->'release'->'absoluteEpisodes', 'null'::jsonb), '[]'::jsonb)) > 0
+  AND jsonb_array_length(COALESCE(NULLIF(parse_result->'parsed'->'release'->'seasons', 'null'::jsonb), '[]'::jsonb)) = 0;
+
 -- name: SetLibraryFileResolvedEpisodes :exec
 -- Writes catalog-resolved season/episode arrays into an absolute-numbered anime
 -- file's parse_result, in place, without disturbing status/media_item_id/
