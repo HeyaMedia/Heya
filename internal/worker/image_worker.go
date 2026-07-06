@@ -128,12 +128,6 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 				Str("media_type", job.Args.MediaType).
 				Str("local_path", localPath).
 				Msg("poster_path updated")
-			if w.Hub != nil {
-				w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
-					MediaItemID: job.Args.MediaItemID,
-					MediaType:   job.Args.MediaType,
-				})
-			}
 		}
 	}
 
@@ -141,13 +135,18 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 		if err == nil {
 			updateArtworkPathColumns(ctx, q, item, item.PosterPath, localPath)
-			if w.Hub != nil {
-				w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
-					MediaItemID: job.Args.MediaItemID,
-					MediaType:   job.Args.MediaType,
-				})
-			}
 		}
+	}
+
+	// Store-time completion signal for ANY artwork that actually landed —
+	// primary poster/backdrop AND secondary/alternate art (extra posters,
+	// backdrops, banners, logos, stills). Fires once per successful store; the
+	// FE coalesces bursts (useLiveRefresh's 4s window) during a scan fan-out.
+	if assetErr == nil && w.Hub != nil {
+		w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+			MediaItemID: job.Args.MediaItemID,
+			MediaType:   job.Args.MediaType,
+		})
 	}
 
 	w.maybeSaveToMediaDir(ctx, job, localPath)
