@@ -148,6 +148,19 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		log.Debug().Int64("item_id", item.ID).Msg("enrich: base component already enriched, skipping")
 	}
 
+	// The episode catalog (with absolute_number) now exists. Resolve any
+	// absolute-numbered anime files ("Series - 24 - Title", parsed with no
+	// season) onto their real season/episode and write it into parse_result so
+	// every downstream file<->episode join sees them. Idempotent; runs even on a
+	// skipped re-enrich to pick up newly-added files.
+	if kind == metadata.KindTV {
+		if n, rErr := matcher.ReconcileAbsoluteEpisodes(ctx, q, item.ID); rErr != nil {
+			log.Warn().Err(rErr).Int64("item_id", item.ID).Msg("enrich: reconcile absolute episodes failed")
+		} else if n > 0 {
+			log.Info().Int64("item_id", item.ID).Int("resolved", n).Msg("enrich: reconciled absolute anime files")
+		}
+	}
+
 	// Persist heya.media's canonical slug. It's a stable lookup key
 	// (heya.media accepts slug:<slug> alongside mbid:<id>) and lets
 	// future refreshes / cross-service joins skip the search step.

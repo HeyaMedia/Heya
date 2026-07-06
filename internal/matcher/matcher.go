@@ -480,6 +480,12 @@ func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result m
 	// seasons/episodes. See [internal/worker/debounce_sweep_worker.go].
 	if !isNew && kind == metadata.KindTV {
 		m.maybeDebounceEnrich(ctx, mediaItemID, "matcher.tv")
+		// Resolve this file's absolute number immediately if the series is
+		// already enriched, so it doesn't wait on the debounced re-enrich.
+		// Cheap no-op for non-absolute files and not-yet-enriched series.
+		if err := reconcileAbsoluteFile(ctx, m.q, mediaItemID, file.ID, file.ParseResult); err != nil {
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("reconcile absolute episode failed")
+		}
 	}
 
 	return info, nil
@@ -599,6 +605,14 @@ func (m *Matcher) ResolveMatch(ctx context.Context, libraryFileID int64, candida
 		Status:      sqlc.FileStatusMatched,
 		MediaItemID: pgInt8(mediaItemID),
 	})
+
+	// The episode catalog was just built inline — reconcile the whole series'
+	// absolute-numbered files onto their real season/episode.
+	if kind == metadata.KindTV {
+		if _, err := ReconcileAbsoluteEpisodes(ctx, m.q, mediaItemID); err != nil {
+			log.Warn().Err(err).Int64("item_id", mediaItemID).Msg("reconcile absolute episodes failed")
+		}
+	}
 
 	return nil
 }
@@ -796,6 +810,12 @@ func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFil
 			Status:      sqlc.FileStatusMatched,
 			MediaItemID: pgInt8(existing.ID),
 		})
+
+		// Anime linked by anidb to an existing (usually enriched) series:
+		// resolve its absolute episode now instead of waiting on a re-enrich.
+		if err := reconcileAbsoluteFile(ctx, m.q, existing.ID, file.ID, file.ParseResult); err != nil {
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("reconcile absolute episode failed")
+		}
 
 		log.Debug().Int64("file_id", file.ID).Int64("media_id", existing.ID).Str("title", existing.Title).Msg("linked to existing item via NFO IDs")
 		return MatchInfo{IsNew: false}, true

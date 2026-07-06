@@ -13,6 +13,20 @@ SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     deleted_at = NULL, updated_at = now()
 RETURNING *;
 
+-- name: SetLibraryFileResolvedEpisodes :exec
+-- Writes catalog-resolved season/episode arrays into an absolute-numbered anime
+-- file's parse_result, in place, without disturbing status/media_item_id/
+-- media_info. This is what makes an absolute file ("Series - 24 - Title", parsed
+-- with only absoluteEpisodes) look like a normal SxxExx file to every downstream
+-- file<->episode join. Idempotent: the reconcile step recomputes from the
+-- unchanged absoluteEpisodes each run. See matcher.ReconcileAbsoluteEpisodes.
+UPDATE library_files
+SET parse_result = jsonb_set(
+        jsonb_set(parse_result, '{parsed,release,seasons}', sqlc.arg(seasons)::jsonb, true),
+        '{parsed,release,episodes}', sqlc.arg(episodes)::jsonb, true),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::bigint;
+
 -- name: ReapplyLibraryFileParse :exec
 -- Local-metadata re-apply for a file whose bytes did NOT change (its NFO
 -- did). Refreshes parse_result and re-drives the match pipeline, but keeps

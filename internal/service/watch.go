@@ -118,8 +118,7 @@ func (a *App) ListContinueWatching(ctx context.Context, userID int64) ([]Continu
 			efMap, ok := episodeFileMaps[r.MediaItemID]
 			if !ok {
 				if files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: r.MediaItemID, Valid: true}); err == nil {
-					absRows, _ := q.ListEpisodeAbsoluteMap(ctx, r.MediaItemID)
-					efMap = BuildEpisodeFileMap(files, AbsoluteEpisodeMap(absRows))
+					efMap = BuildEpisodeFileMap(files)
 				}
 				episodeFileMaps[r.MediaItemID] = efMap
 			}

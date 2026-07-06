@@ -255,8 +255,6 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 	// the switch below + the episode_files map at the end) — fetch once, the
 	// rows carry ~2MB of parse_result jsonb on a long-running series.
 	var tvEpisodeFiles []sqlc.ListEpisodeFilesRow
-	// Absolute-number resolver for anime files, likewise reused by both.
-	var tvAbsMap map[int]SeasonEpisode
 
 	// Type-specific data
 	switch item.MediaType {
@@ -277,17 +275,10 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 			result["tv_series"] = series
 			seasons, _ := q.ListTVSeasonsBySeries(ctx, series.ID)
 
-			// Absolute-number -> (season, episode) resolver for anime files
-			// parsed with an absolute episode and no season. Fetched once and
-			// reused for the season set and the episode file map below.
-			if absRows, err := q.ListEpisodeAbsoluteMap(ctx, item.ID); err == nil {
-				tvAbsMap = AbsoluteEpisodeMap(absRows)
-			}
-
 			availableSeasons := map[int]bool{}
 			if epFiles, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); err == nil {
 				tvEpisodeFiles = epFiles
-				availableSeasons = BuildAvailableSeasonSet(epFiles, tvAbsMap)
+				availableSeasons = BuildAvailableSeasonSet(epFiles)
 			}
 
 			type episodeView struct {
@@ -441,7 +432,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 
 	// Episode file map (TV only) — reuses the fetch from the TV branch above.
 	if item.MediaType == sqlc.MediaTypeTv && len(tvEpisodeFiles) > 0 {
-		episodeFileMap := BuildEpisodeFileMap(tvEpisodeFiles, tvAbsMap)
+		episodeFileMap := BuildEpisodeFileMap(tvEpisodeFiles)
 		if len(episodeFileMap) > 0 {
 			result["episode_files"] = episodeFileMap
 		}
@@ -1056,43 +1047,16 @@ func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []Alb
 	return views
 }
 
-// SeasonEpisode is a resolved (season, episode) coordinate.
-type SeasonEpisode struct {
-	Season  int
-	Episode int
-}
-
-// AbsoluteEpisodeMap turns the catalog's absolute-number rows into a lookup
-// from absolute number to its real (season, episode). Nil/empty when the
-// series carries no absolute numbering — callers pass the result to
-// BuildEpisodeFileMap / BuildAvailableSeasonSet to remap absolute-numbered
-// anime files ("Series - 24 - Title", parsed with no season) onto real
-// episodes. See ListEpisodeAbsoluteMap.
-func AbsoluteEpisodeMap(rows []sqlc.ListEpisodeAbsoluteMapRow) map[int]SeasonEpisode {
-	if len(rows) == 0 {
-		return nil
-	}
-	m := make(map[int]SeasonEpisode, len(rows))
-	for _, r := range rows {
-		// Never resolve an absolute number onto a special (season 0) — the query
-		// already excludes them, but guard here too so an absolute-numbered
-		// main-show file can't land on a special regardless of the row source.
-		if r.SeasonNumber <= 0 {
-			continue
-		}
-		m[int(r.AbsoluteNumber)] = SeasonEpisode{Season: int(r.SeasonNumber), Episode: int(r.EpisodeNumber)}
-	}
-	return m
-}
-
 // releaseFileParse is the slice of a library file's parse_result the episode
-// mappers care about.
+// mappers care about. Absolute-numbered anime files are resolved to real
+// season/episode at enrichment time (matcher.ReconcileAbsoluteEpisodes writes
+// them back into parse_result), so by read time these arrays are already
+// populated and no absolute handling is needed here.
 type releaseFileParse struct {
 	Parsed struct {
 		Release struct {
-			Seasons          []int `json:"seasons"`
-			Episodes         []int `json:"episodes"`
-			AbsoluteEpisodes []int `json:"absoluteEpisodes"`
+			Seasons  []int `json:"seasons"`
+			Episodes []int `json:"episodes"`
 		} `json:"release"`
 	} `json:"parsed"`
 }
@@ -1104,11 +1068,7 @@ type releaseFileParse struct {
 // catalog episodes never get marked. Coarser than BuildEpisodeFileMap on
 // purpose — a season pack parsed without per-episode numbers still claims
 // its season here.
-//
-// absMap (may be nil) resolves absolute-numbered anime files onto their real
-// season so those seasons aren't hidden; an unresolved absolute file (catalog
-// not yet enriched) contributes no season, same as before.
-func BuildAvailableSeasonSet(files []sqlc.ListEpisodeFilesRow, absMap map[int]SeasonEpisode) map[int]bool {
+func BuildAvailableSeasonSet(files []sqlc.ListEpisodeFilesRow) map[int]bool {
 	set := map[int]bool{}
 	for _, f := range files {
 		if len(f.ParseResult) == 0 {
@@ -1121,24 +1081,13 @@ func BuildAvailableSeasonSet(files []sqlc.ListEpisodeFilesRow, absMap map[int]Se
 		for _, s := range pr.Parsed.Release.Seasons {
 			set[s] = true
 		}
-		for _, abs := range pr.Parsed.Release.AbsoluteEpisodes {
-			if se, ok := absMap[abs]; ok {
-				set[se.Season] = true
-			}
-		}
 	}
 	return set
 }
 
 // BuildEpisodeFileMap parses library file parse results to build a map
 // from "s{season}e{episode}" keys to file entries.
-//
-// absMap (may be nil) resolves absolute-numbered anime files: a file parsed
-// with an absolute episode and no season is remapped onto its real
-// s{season}e{episode} key so episode presence lines up with the catalog. An
-// unresolved absolute file (series not yet enriched with absolute numbers)
-// simply produces no key until enrichment fills it in.
-func BuildEpisodeFileMap(files []sqlc.ListEpisodeFilesRow, absMap map[int]SeasonEpisode) map[string]EpisodeFileEntry {
+func BuildEpisodeFileMap(files []sqlc.ListEpisodeFilesRow) map[string]EpisodeFileEntry {
 	result := make(map[string]EpisodeFileEntry)
 	for _, f := range files {
 		if len(f.ParseResult) == 0 {
@@ -1153,14 +1102,6 @@ func BuildEpisodeFileMap(files []sqlc.ListEpisodeFilesRow, absMap map[int]Season
 				key := fmt.Sprintf("s%de%d", s, e)
 				result[key] = EpisodeFileEntry{FileID: f.ID, Size: f.Size}
 			}
-		}
-		for _, abs := range pr.Parsed.Release.AbsoluteEpisodes {
-			se, ok := absMap[abs]
-			if !ok {
-				continue
-			}
-			key := fmt.Sprintf("s%de%d", se.Season, se.Episode)
-			result[key] = EpisodeFileEntry{FileID: f.ID, Size: f.Size}
 		}
 	}
 	return result
