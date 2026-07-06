@@ -20,6 +20,9 @@ const emit = defineEmits<{ close: [] }>()
 const { token } = useAuth()
 const videoEl = ref<HTMLVideoElement>()
 const { state, controls, loadSource, destroyHLS } = useHeyaPlayer(videoEl)
+// Touch devices: rotate to landscape → immersive fullscreen, back to portrait
+// → exit. No-op on desktop / where the browser blocks it (see composable).
+useOrientationFullscreen()
 const fileIdRef = computed(() => props.fileId)
 const mediaItemIdRef = computed(() => props.mediaItemId)
 // entityType / entityId for the watch-progress payload — passing these
