@@ -21,7 +21,7 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 	// Only link by external IDs when we actually HAVE some. `external_ids @> '{}'`
 	// matches every row, so an empty-ID stub (NFO-less / filename-only local)
 	// would otherwise link onto an arbitrary existing media_item. Empty-ID
-	// dedup is handled by local_identity_key (Phase 1), not containment.
+	// dedup is handled by natural identity (FindMediaItemByIdentity), not containment.
 	hasExternalIDs := len(detail.ExternalIDs) > 0 && len(extJSON) > 0 &&
 		string(extJSON) != "{}" && string(extJSON) != "null"
 

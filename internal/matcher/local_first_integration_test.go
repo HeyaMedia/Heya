@@ -46,12 +46,13 @@ func TestLocalFirstUpserts(t *testing.T) {
 		file := sqlc.LibraryFile{ID: 0, Path: "/x/Unknown Film (2020)/Unknown Film (2020).mkv"}
 		parsed := parser.ParsedStorageEntry{Release: &parser.SceneReleaseParse{Title: "Unknown Film", Year: "2020"}}
 
-		info, ok := m.materializeLocal(ctx, file, parsed, nil, metadata.KindMovie, sqlc.MediaTypeMovie, lib)
+		info, ok := m.materializeLocal(ctx, file, parsed, nil, metadata.KindMovie, sqlc.MediaTypeMovie, lib, true)
 		require.True(t, ok)
 		require.True(t, info.IsNew)
 
-		key := localIdentityKey("Unknown Film", "2020", sqlc.MediaTypeMovie)
-		mi, err := qtx.GetMediaItemByLocalIdentityKey(ctx, sqlc.GetMediaItemByLocalIdentityKeyParams{LibraryID: lib, LocalIdentityKey: key})
+		mi, err := qtx.FindMediaItemByIdentity(ctx, sqlc.FindMediaItemByIdentityParams{
+			LibraryID: lib, MediaType: sqlc.MediaTypeMovie, Year: "2020", Title: "Unknown Film", IncludeMatched: true,
+		})
 		require.NoError(t, err)
 		require.Equal(t, "local", mi.EnrichmentStatus)
 		require.Equal(t, "local", mi.ProviderKind)
@@ -61,10 +62,50 @@ func TestLocalFirstUpserts(t *testing.T) {
 		_, err = qtx.GetMovieByMediaItemID(ctx, mi.ID)
 		require.NoError(t, err, "type-specific row must exist so the local item is visible")
 
-		// Re-scan of the same local entity dedups instead of creating a duplicate.
-		info2, ok2 := m.materializeLocal(ctx, file, parsed, nil, metadata.KindMovie, sqlc.MediaTypeMovie, lib)
+		// Re-scan dedups to the existing local stub even on the restricted
+		// (foldIntoMatched=false) path — local stubs are always eligible.
+		info2, ok2 := m.materializeLocal(ctx, file, parsed, nil, metadata.KindMovie, sqlc.MediaTypeMovie, lib, false)
 		require.True(t, ok2)
 		require.False(t, info2.IsNew, "re-scan must link to the existing local entity")
+	})
+
+	t.Run("empty-search fold reaches an enriched sibling; ambiguous path does not", func(t *testing.T) {
+		lib := newLib("EnrichedTV", sqlc.MediaTypeTv)
+
+		// An already-matched, enriched series (its local_identity_key would have
+		// been empty under the old scheme, hiding it from re-scan dedup entirely).
+		seriesID, _, err := m.createOrLinkMediaItem(ctx, &metadata.MediaDetail{
+			Title: "Dragon Keep", Year: "2022", ExternalIDs: map[string]string{"tmdb": "777"},
+		}, metadata.KindTV, lib, "")
+		require.NoError(t, err)
+		_, err = tx.Exec(ctx, "UPDATE media_items SET enrichment_status='complete' WHERE id=$1", seriesID)
+		require.NoError(t, err)
+
+		parsed := parser.ParsedStorageEntry{Release: &parser.SceneReleaseParse{Title: "Dragon Keep", Year: "2022"}}
+		countDragonKeep := func() int {
+			var n int
+			require.NoError(t, tx.QueryRow(ctx,
+				"SELECT count(*) FROM media_items WHERE library_id=$1 AND lower(btrim(title))='dragon keep'", lib,
+			).Scan(&n))
+			return n
+		}
+
+		// Empty-search path (foldIntoMatched=true): a new episode whose remote
+		// search returned nothing must fold INTO the enriched series, not fork.
+		epFile := sqlc.LibraryFile{ID: 0, Path: "/x/Dragon Keep (2022)/Season 03/Dragon Keep (2022) - S03E03.mkv"}
+		info, ok := m.materializeLocal(ctx, epFile, parsed, nil, metadata.KindTV, sqlc.MediaTypeTv, lib, true)
+		require.True(t, ok)
+		require.False(t, info.IsNew, "empty-search path must fold into the enriched series")
+		require.Equal(t, 1, countDragonKeep(), "no duplicate series may be forked on the empty path")
+
+		// Ambiguous / needs-review path (foldIntoMatched=false): a coincidental
+		// same-title+year file must NOT silently attach onto the published series;
+		// it materializes its own local stub for the user to adjudicate.
+		collisionFile := sqlc.LibraryFile{ID: 0, Path: "/x/Dragon Keep (2022)/Dragon Keep (2022).mkv"}
+		info2, ok2 := m.materializeLocal(ctx, collisionFile, parsed, nil, metadata.KindTV, sqlc.MediaTypeTv, lib, false)
+		require.True(t, ok2)
+		require.True(t, info2.IsNew, "ambiguous path must not fold onto the enriched series")
+		require.Equal(t, 2, countDragonKeep(), "a distinct local stub is created, kept separate from the enriched series")
 	})
 
 	t.Run("NFO-less stubs do not mislink", func(t *testing.T) {

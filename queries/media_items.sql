@@ -68,22 +68,35 @@ UPDATE media_items SET metadata_refreshed_at = now() WHERE id = $1;
 -- name: MarkMediaItemLocal :exec
 -- Flags a media_item as born from local signal (NFO/tags/filename) with no
 -- confident remote match yet. enrichment_status='local' keeps it out of the
--- "matched, awaiting enrich" (pending) bucket while still being visible; the
--- local_identity_key anchors re-scan dedup for NFO-less items.
+-- "matched, awaiting enrich" (pending) bucket while still being visible. Re-scan
+-- dedup is handled by natural identity (FindMediaItemByIdentity), not a stored
+-- key, so nothing is written here to anchor it.
 UPDATE media_items
-SET enrichment_status  = 'local',
-    local_identity_key = $2,
-    match_confidence   = $3
+SET enrichment_status = 'local',
+    match_confidence  = $2
 WHERE id = $1;
 
--- name: GetMediaItemByLocalIdentityKey :one
--- Dedup lookup for NFO-less locally-materialized entities. Keyed on the
--- normalized lower(title)|year|media_type so a re-scan links to the same row
--- instead of relying on external_ids containment (which mis-joins on '{}').
+-- name: FindMediaItemByIdentity :one
+-- Dedup by natural identity: normalized lower(btrim(title)) | year | media_type,
+-- scoped to the library. Prefers the enriched, then oldest, row as canonical.
+-- Backed by idx_media_items_identity (library_id, media_type, year,
+-- lower(btrim(title))); the probe normalizes with the same SQL so it matches.
+--
+-- include_matched gates how far the fold reaches:
+--   true  — any row (enriched/complete included). Used ONLY when remote search
+--           returned nothing, so a genuine heya.media outage on a new file folds
+--           it into the existing show rather than forking a duplicate.
+--   false — local stubs only (enrichment_status='local'). Used on the ambiguous
+--           "needs review" path: re-scan dedup still works, but a coincidental
+--           title+year collision can NEVER silently attach onto a published,
+--           remotely-matched item.
 SELECT * FROM media_items
-WHERE library_id = $1 AND local_identity_key = sqlc.arg(local_identity_key)
-  AND local_identity_key != ''
-ORDER BY id
+WHERE library_id = $1
+  AND media_type = sqlc.arg(media_type)
+  AND year       = sqlc.arg(year)
+  AND lower(btrim(title)) = lower(btrim(sqlc.arg(title)))
+  AND (sqlc.arg(include_matched)::boolean OR enrichment_status = 'local')
+ORDER BY (enrichment_status = 'local') ASC, id ASC
 LIMIT 1;
 
 -- name: SetMediaItemFieldProvenance :exec

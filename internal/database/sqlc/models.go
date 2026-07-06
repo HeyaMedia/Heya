@@ -554,7 +554,6 @@ type MediaItem struct {
 	LastEnrichError     string             `json:"last_enrich_error"`
 	FieldProvenance     []byte             `json:"field_provenance"`
 	MatchConfidence     float32            `json:"match_confidence"`
-	LocalIdentityKey    string             `json:"local_identity_key"`
 	SlugLocked          bool               `json:"slug_locked"`
 }
 

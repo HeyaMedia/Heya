@@ -8085,9 +8085,6 @@
             "format": "int64",
             "type": "integer"
           },
-          "local_identity_key": {
-            "type": "string"
-          },
           "match_confidence": {
             "format": "float",
             "type": "number"
@@ -8180,7 +8177,6 @@
           "last_enrich_error",
           "field_provenance",
           "match_confidence",
-          "local_identity_key",
           "slug_locked"
         ],
         "type": "object"
@@ -8242,9 +8238,6 @@
           "library_id": {
             "format": "int64",
             "type": "integer"
-          },
-          "local_identity_key": {
-            "type": "string"
           },
           "match_confidence": {
             "format": "float",
@@ -8339,7 +8332,6 @@
           "last_enrich_error",
           "field_provenance",
           "match_confidence",
-          "local_identity_key",
           "slug_locked"
         ],
         "type": "object"

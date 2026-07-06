@@ -61,8 +61,8 @@ fine — see `feedback_no_backwards_compat`):
 | `enrichment_status` | **reuse + 1 new value** | Lifecycle. Add `'local'` for "born from local signal, never confidently matched." Keep `pending` (matched stub awaiting enrich) / `partial` / `complete` / `failed`. |
 | `provider_kind` | **reuse** | Origin axis. Set `'local'` / `'nfo'` for locally-created entities. This — not a lifecycle column — is what distinguishes a pure-local entity from a matched stub. |
 | `field_provenance jsonb` | **new** | Per-field source map `{field: local\|remote\|user}`. Enrich writers overwrite only `local`/empty fields, never `user`. |
-| `match_confidence real` | **new** | Search-stub fast-path score; `0` for pure-local. Also anchors local dedup (below). |
-| `local_identity_key text` | **new** | Normalized dedup key for NFO-less locals: `lower(title)\|year\|media_type` (movies/TV) or canonical folder path. Queried *instead of* `external_ids` containment when there are no provider IDs. |
+| `match_confidence real` | **new** | Search-stub fast-path score; `0` for pure-local. |
+| ~~`local_identity_key text`~~ | **superseded (mig 00044)** | Originally a stored dedup key for NFO-less locals. Removed: dedup now keys on **natural identity** — `lower(btrim(title))\|year\|media_type` computed at query time (`FindMediaItemByIdentity`, backed by `idx_media_items_identity`), which covers enriched rows too and needs no column to maintain. |
 | `slug_locked bool` | **new** | Set true at first publish; re-enrich never changes slug. |
 
 Lifecycle mapping (so consumers stay authoritative):
@@ -140,7 +140,8 @@ None are optional.
    - If marshaled `external_ids` is `"{}"`/`"null"`/`len==0`, **skip**
      `GetMediaItemByExternalID` entirely (and the retry lookup) and go straight
      to `CreateMediaItem`.
-   - Dedup NFO-less locals on `local_identity_key` instead of containment.
+   - Dedup NFO-less locals on natural identity (`FindMediaItemByIdentity`,
+     normalized `title|year|media_type`) instead of containment.
    - Harden the SQL itself: `AND $2::jsonb <> '{}'::jsonb` + explicit `ORDER BY`
      so a future caller can't reintroduce the mislink.
 
@@ -163,8 +164,9 @@ None are optional.
 ## Pipeline phases
 
 - **Phase 0 — Foundations.** The migration above (`field_provenance`,
-  `match_confidence`, `local_identity_key`, `slug_locked`, `enrichment_status
-  += 'local'`) + a `field_provenance` read/write helper + the **upsert
+  `match_confidence`, `slug_locked`, `enrichment_status
+  += 'local'`; the once-planned `local_identity_key` was later dropped for
+  natural-identity dedup, mig 00044) + a `field_provenance` read/write helper + the **upsert
   prerequisites #1 and #2** (movie/TV/series/season/episode get-or-upsert SQL).
   No ingest-order change yet; this is the substrate Phase 2 needs.
 - **Phase 1 — Local extraction.** A "local identity resolver": per file/dir,
@@ -179,8 +181,9 @@ None are optional.
     NFO-derived IDs. Until this lands, filename IDs are **not** available signal —
     only NFO-sidecar IDs are wired.
   - Materialize per type, marked `enrichment_status='local'`, `provider_kind ∈
-    {local,nfo}`, with empty-identity dedup short-circuit (#3) and
-    `local_identity_key` set; attach local assets to `media_assets`.
+    {local,nfo}`, with empty-identity dedup short-circuit (#3); re-scan/collision
+    dedup is by natural identity (`FindMediaItemByIdentity`). Attach local assets
+    to `media_assets`.
     - **Movies:** the full `media_items` + `movies` row (the NFO-with-IDs stub
       path `stubDetailFromNFO` generalizes to NFO-without-IDs and filename-only).
     - **TV:** materialize the **series `media_items` row only** — do **not**

@@ -166,7 +166,9 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		// unmatched row — materializing would permanently mark the file matched
 		// and mask a fetchable remote match behind a low-quality local stub.
 		if searchErr == nil {
-			if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID); ok {
+			// No remote signal at all — fold into an existing matched item of the
+			// same identity if one exists (heya.media-outage recovery).
+			if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID, true); ok {
 				return info, nil
 			}
 		}
@@ -189,17 +191,7 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 	}
 
 	top := allResults[0]
-	clearGap := len(allResults) == 1
-	if !clearGap {
-		secondDiff := -1
-		for i := 1; i < len(allResults); i++ {
-			if NormalizeTitle(allResults[i].Title) != NormalizeTitle(top.Title) {
-				secondDiff = i
-				break
-			}
-		}
-		clearGap = secondDiff == -1 || (top.Confidence-allResults[secondDiff].Confidence) > 0.10
-	}
+	clearGap := hasClearGap(allResults, query.Title)
 
 	threshold := autoMatchThresholdFor(top, m.opts.AutoMatchThreshold)
 	if top.Confidence >= threshold && clearGap {
@@ -226,7 +218,10 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		Msg("match rejected — needs manual review")
 
 	m.storeCandidates(ctx, file.ID, allResults)
-	if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID); ok {
+	// Ambiguous match: candidates are stored for manual review. Materialize a
+	// stub so the file is visible, but restrict the fold to local stubs — never
+	// silently attach onto a published item a coincidental title+year matches.
+	if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID, false); ok {
 		return info, nil
 	}
 	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
@@ -237,14 +232,15 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 	return MatchInfo{}, nil
 }
 
-// localIdentityKey is the dedup key for a locally-materialized entity:
-// normalized title + year + media type. The library scoping is in the query.
-func localIdentityKey(title, year string, mt sqlc.MediaType) string {
-	t := strings.ToLower(strings.TrimSpace(title))
-	if t == "" {
-		return ""
-	}
-	return t + "|" + year + "|" + string(mt)
+// linkExisting points a library file at an already-present media item and
+// marks it matched — the shared tail of every materializeLocal dedup hit.
+func (m *Matcher) linkExisting(ctx context.Context, fileID, mediaItemID int64) (MatchInfo, bool) {
+	_ = m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+		ID:          fileID,
+		Status:      sqlc.FileStatusMatched,
+		MediaItemID: pgInt8(mediaItemID),
+	})
+	return MatchInfo{IsNew: false}, true
 }
 
 // materializeLocal creates a visible entity from local signal (filename / NFO)
@@ -253,7 +249,15 @@ func localIdentityKey(title, year string, mt sqlc.MediaType) string {
 // upgrades it in place if it carries a provider id. Returns ok=false (writing
 // nothing) when there isn't even a local title to show. Music is not handled
 // here (it goes through matchMusicSingleFile).
-func (m *Matcher) materializeLocal(ctx context.Context, file sqlc.LibraryFile, parsed parser.ParsedStorageEntry, nfoIDs *metadata.NFOIDs, kind metadata.MediaKind, mediaType sqlc.MediaType, libraryID int64) (MatchInfo, bool) {
+//
+// foldIntoMatched controls the dedup reach. When true (remote search returned
+// nothing at all), the file may fold into an existing enriched/matched item of
+// the same identity — the recovery that keeps a heya.media outage on a new
+// episode from forking the series. When false (search returned candidates but
+// none was a confident, unambiguous winner), the fold is restricted to local
+// stubs, so a coincidental title+year collision can't silently attach a file
+// onto a published item that manual review should have adjudicated.
+func (m *Matcher) materializeLocal(ctx context.Context, file sqlc.LibraryFile, parsed parser.ParsedStorageEntry, nfoIDs *metadata.NFOIDs, kind metadata.MediaKind, mediaType sqlc.MediaType, libraryID int64, foldIntoMatched bool) (MatchInfo, bool) {
 	title, year := "", ""
 	if parsed.Release != nil {
 		title = parsed.Release.Title
@@ -269,22 +273,22 @@ func (m *Matcher) materializeLocal(ctx context.Context, file sqlc.LibraryFile, p
 		return MatchInfo{}, false
 	}
 
-	key := localIdentityKey(title, year, mediaType)
-
-	// Dedup: a re-scan of the same local entity links to the existing row
-	// instead of creating a duplicate.
-	if key != "" {
-		if existing, err := m.q.GetMediaItemByLocalIdentityKey(ctx, sqlc.GetMediaItemByLocalIdentityKeyParams{
-			LibraryID:        libraryID,
-			LocalIdentityKey: key,
-		}); err == nil {
-			_ = m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
-				ID:          file.ID,
-				Status:      sqlc.FileStatusMatched,
-				MediaItemID: pgInt8(existing.ID),
-			})
-			return MatchInfo{IsNew: false}, true
+	// Dedup: link this file to the existing entity of the same natural identity
+	// (normalized title|year|media_type) instead of spawning a duplicate. How far
+	// the fold reaches is gated by foldIntoMatched (see the doc comment).
+	if existing, err := m.q.FindMediaItemByIdentity(ctx, sqlc.FindMediaItemByIdentityParams{
+		LibraryID:      libraryID,
+		MediaType:      mediaType,
+		Year:           year,
+		Title:          title,
+		IncludeMatched: foldIntoMatched,
+	}); err == nil {
+		if existing.EnrichmentStatus != "local" {
+			log.Info().Int64("file_id", file.ID).Int64("media_id", existing.ID).
+				Str("title", title).Str("existing_status", existing.EnrichmentStatus).
+				Msg("materialize local: linked file to existing matched item instead of forking a duplicate")
 		}
+		return m.linkExisting(ctx, file.ID, existing.ID)
 	}
 
 	extIDs := map[string]string{}
@@ -318,12 +322,12 @@ func (m *Matcher) materializeLocal(ctx context.Context, file sqlc.LibraryFile, p
 		return MatchInfo{}, false
 	}
 
-	// Flag local + stamp the dedup key; record title/year as locally-sourced
-	// (enrich may refresh them — they're not user-locked).
+	// Flag local; record title/year as locally-sourced (enrich may refresh them
+	// — they're not user-locked). Re-scan dedup keys on natural identity, so
+	// there's no stored key to stamp here.
 	if err := m.q.MarkMediaItemLocal(ctx, sqlc.MarkMediaItemLocalParams{
-		ID:               mediaItemID,
-		LocalIdentityKey: key,
-		MatchConfidence:  0,
+		ID:              mediaItemID,
+		MatchConfidence: 0,
 	}); err != nil {
 		log.Warn().Err(err).Int64("id", mediaItemID).Msg("materialize local: mark local failed")
 	}
@@ -346,6 +350,44 @@ func (m *Matcher) materializeLocal(ctx context.Context, file sqlc.LibraryFile, p
 	log.Info().Int64("file_id", file.ID).Int64("media_id", mediaItemID).
 		Str("title", title).Str("provider_kind", providerKind).Msg("materialized local entity")
 	return MatchInfo{IsNew: isNew}, true
+}
+
+// hasClearGap reports whether the top-ranked candidate is an unambiguous enough
+// winner to auto-apply without manual review. results must be non-empty and
+// already sorted by descending confidence; queryTitle is the search title.
+//
+// A candidate wins the gap when it is alone, or clearly ahead (>0.10) of the
+// next candidate with a DIFFERENT normalized title, OR when it is the sole exact
+// normalized-title match to the query. The last clause is load-bearing: a
+// companion that merely shares a title prefix — "Enter the House of the Dragon",
+// "…Podcast: House of the Dragon" — scores close on fuzzy similarity and would
+// otherwise veto the real series via the 0.10 gap, forking a fresh local entity
+// for every new episode. Two genuine same-title hits still read as ambiguous.
+func hasClearGap(results []metadata.SearchResult, queryTitle string) bool {
+	if len(results) == 1 {
+		return true
+	}
+	top := results[0]
+	secondDiff := -1
+	for i := 1; i < len(results); i++ {
+		if NormalizeTitle(results[i].Title) != NormalizeTitle(top.Title) {
+			secondDiff = i
+			break
+		}
+	}
+	if secondDiff == -1 || (top.Confidence-results[secondDiff].Confidence) > 0.10 {
+		return true
+	}
+	if NormalizeTitle(top.Title) == NormalizeTitle(queryTitle) {
+		exact := 0
+		for _, r := range results {
+			if NormalizeTitle(r.Title) == NormalizeTitle(queryTitle) {
+				exact++
+			}
+		}
+		return exact == 1
+	}
+	return false
 }
 
 // scoreBestTitle scores the query against the result's primary Title plus

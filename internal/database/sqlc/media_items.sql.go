@@ -36,7 +36,7 @@ func (q *Queries) CountMediaItemsByType(ctx context.Context, mediaType MediaType
 const createMediaItem = `-- name: CreateMediaItem :one
 INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked
+RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked
 `
 
 type CreateMediaItemParams struct {
@@ -111,7 +111,6 @@ func (q *Queries) CreateMediaItem(ctx context.Context, arg CreateMediaItemParams
 		&i.LastEnrichError,
 		&i.FieldProvenance,
 		&i.MatchConfidence,
-		&i.LocalIdentityKey,
 		&i.SlugLocked,
 	)
 	return i, err
@@ -126,8 +125,90 @@ func (q *Queries) DeleteMediaItem(ctx context.Context, id int64) error {
 	return err
 }
 
+const findMediaItemByIdentity = `-- name: FindMediaItemByIdentity :one
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
+WHERE library_id = $1
+  AND media_type = $2
+  AND year       = $3
+  AND lower(btrim(title)) = lower(btrim($4))
+  AND ($5::boolean OR enrichment_status = 'local')
+ORDER BY (enrichment_status = 'local') ASC, id ASC
+LIMIT 1
+`
+
+type FindMediaItemByIdentityParams struct {
+	LibraryID      int64     `json:"library_id"`
+	MediaType      MediaType `json:"media_type"`
+	Year           string    `json:"year"`
+	Title          string    `json:"title"`
+	IncludeMatched bool      `json:"include_matched"`
+}
+
+// Dedup by natural identity: normalized lower(btrim(title)) | year | media_type,
+// scoped to the library. Prefers the enriched, then oldest, row as canonical.
+// Backed by idx_media_items_identity (library_id, media_type, year,
+// lower(btrim(title))); the probe normalizes with the same SQL so it matches.
+//
+// include_matched gates how far the fold reaches:
+//
+//	true  — any row (enriched/complete included). Used ONLY when remote search
+//	        returned nothing, so a genuine heya.media outage on a new file folds
+//	        it into the existing show rather than forking a duplicate.
+//	false — local stubs only (enrichment_status='local'). Used on the ambiguous
+//	        "needs review" path: re-scan dedup still works, but a coincidental
+//	        title+year collision can NEVER silently attach onto a published,
+//	        remotely-matched item.
+func (q *Queries) FindMediaItemByIdentity(ctx context.Context, arg FindMediaItemByIdentityParams) (MediaItem, error) {
+	row := q.db.QueryRow(ctx, findMediaItemByIdentity,
+		arg.LibraryID,
+		arg.MediaType,
+		arg.Year,
+		arg.Title,
+		arg.IncludeMatched,
+	)
+	var i MediaItem
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.Title,
+		&i.SortTitle,
+		&i.Year,
+		&i.Description,
+		&i.PosterPath,
+		&i.BackdropPath,
+		&i.ExternalIds,
+		&i.Slug,
+		&i.Homepage,
+		&i.Tagline,
+		&i.OriginalTitle,
+		&i.OriginalLanguage,
+		&i.Status,
+		&i.ProviderKind,
+		&i.HeyaSlug,
+		&i.HeyaEnrichedAt,
+		&i.MetadataRefreshedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SearchVector,
+		&i.MatchedAt,
+		&i.EnrichmentStatus,
+		&i.BaseEnrichedAt,
+		&i.PeopleEnrichedAt,
+		&i.ExtrasEnrichedAt,
+		&i.ImagesEnrichedAt,
+		&i.StructureEnrichedAt,
+		&i.LastEnrichAttemptAt,
+		&i.LastEnrichError,
+		&i.FieldProvenance,
+		&i.MatchConfidence,
+		&i.SlugLocked,
+	)
+	return i, err
+}
+
 const getMediaItemByID = `-- name: GetMediaItemByID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items WHERE id = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items WHERE id = $1
 `
 
 func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, error) {
@@ -168,74 +249,13 @@ func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, er
 		&i.LastEnrichError,
 		&i.FieldProvenance,
 		&i.MatchConfidence,
-		&i.LocalIdentityKey,
-		&i.SlugLocked,
-	)
-	return i, err
-}
-
-const getMediaItemByLocalIdentityKey = `-- name: GetMediaItemByLocalIdentityKey :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items
-WHERE library_id = $1 AND local_identity_key = $2
-  AND local_identity_key != ''
-ORDER BY id
-LIMIT 1
-`
-
-type GetMediaItemByLocalIdentityKeyParams struct {
-	LibraryID        int64  `json:"library_id"`
-	LocalIdentityKey string `json:"local_identity_key"`
-}
-
-// Dedup lookup for NFO-less locally-materialized entities. Keyed on the
-// normalized lower(title)|year|media_type so a re-scan links to the same row
-// instead of relying on external_ids containment (which mis-joins on '{}').
-func (q *Queries) GetMediaItemByLocalIdentityKey(ctx context.Context, arg GetMediaItemByLocalIdentityKeyParams) (MediaItem, error) {
-	row := q.db.QueryRow(ctx, getMediaItemByLocalIdentityKey, arg.LibraryID, arg.LocalIdentityKey)
-	var i MediaItem
-	err := row.Scan(
-		&i.ID,
-		&i.LibraryID,
-		&i.MediaType,
-		&i.Title,
-		&i.SortTitle,
-		&i.Year,
-		&i.Description,
-		&i.PosterPath,
-		&i.BackdropPath,
-		&i.ExternalIds,
-		&i.Slug,
-		&i.Homepage,
-		&i.Tagline,
-		&i.OriginalTitle,
-		&i.OriginalLanguage,
-		&i.Status,
-		&i.ProviderKind,
-		&i.HeyaSlug,
-		&i.HeyaEnrichedAt,
-		&i.MetadataRefreshedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.SearchVector,
-		&i.MatchedAt,
-		&i.EnrichmentStatus,
-		&i.BaseEnrichedAt,
-		&i.PeopleEnrichedAt,
-		&i.ExtrasEnrichedAt,
-		&i.ImagesEnrichedAt,
-		&i.StructureEnrichedAt,
-		&i.LastEnrichAttemptAt,
-		&i.LastEnrichError,
-		&i.FieldProvenance,
-		&i.MatchConfidence,
-		&i.LocalIdentityKey,
 		&i.SlugLocked,
 	)
 	return i, err
 }
 
 const getMediaItemBySlug = `-- name: GetMediaItemBySlug :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items WHERE slug = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items WHERE slug = $1
 `
 
 func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaItem, error) {
@@ -276,7 +296,6 @@ func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaIte
 		&i.LastEnrichError,
 		&i.FieldProvenance,
 		&i.MatchConfidence,
-		&i.LocalIdentityKey,
 		&i.SlugLocked,
 	)
 	return i, err
@@ -466,7 +485,7 @@ func (q *Queries) ListEnrichedTVSeries(ctx context.Context, arg ListEnrichedTVSe
 }
 
 const listMediaItemsByLibrary = `-- name: ListMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
 WHERE library_id = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -522,7 +541,6 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 			&i.LastEnrichError,
 			&i.FieldProvenance,
 			&i.MatchConfidence,
-			&i.LocalIdentityKey,
 			&i.SlugLocked,
 		); err != nil {
 			return nil, err
@@ -536,7 +554,7 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 }
 
 const listMediaItemsByType = `-- name: ListMediaItemsByType :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
 WHERE media_type = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -592,7 +610,6 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 			&i.LastEnrichError,
 			&i.FieldProvenance,
 			&i.MatchConfidence,
-			&i.LocalIdentityKey,
 			&i.SlugLocked,
 		); err != nil {
 			return nil, err
@@ -606,7 +623,7 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 }
 
 const listMediaItemsByTypeRecent = `-- name: ListMediaItemsByTypeRecent :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
 WHERE media_type = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3
@@ -664,7 +681,6 @@ func (q *Queries) ListMediaItemsByTypeRecent(ctx context.Context, arg ListMediaI
 			&i.LastEnrichError,
 			&i.FieldProvenance,
 			&i.MatchConfidence,
-			&i.LocalIdentityKey,
 			&i.SlugLocked,
 		); err != nil {
 			return nil, err
@@ -835,24 +851,23 @@ func (q *Queries) MarkMatched(ctx context.Context, id int64) error {
 
 const markMediaItemLocal = `-- name: MarkMediaItemLocal :exec
 UPDATE media_items
-SET enrichment_status  = 'local',
-    local_identity_key = $2,
-    match_confidence   = $3
+SET enrichment_status = 'local',
+    match_confidence  = $2
 WHERE id = $1
 `
 
 type MarkMediaItemLocalParams struct {
-	ID               int64   `json:"id"`
-	LocalIdentityKey string  `json:"local_identity_key"`
-	MatchConfidence  float32 `json:"match_confidence"`
+	ID              int64   `json:"id"`
+	MatchConfidence float32 `json:"match_confidence"`
 }
 
 // Flags a media_item as born from local signal (NFO/tags/filename) with no
 // confident remote match yet. enrichment_status='local' keeps it out of the
-// "matched, awaiting enrich" (pending) bucket while still being visible; the
-// local_identity_key anchors re-scan dedup for NFO-less items.
+// "matched, awaiting enrich" (pending) bucket while still being visible. Re-scan
+// dedup is handled by natural identity (FindMediaItemByIdentity), not a stored
+// key, so nothing is written here to anchor it.
 func (q *Queries) MarkMediaItemLocal(ctx context.Context, arg MarkMediaItemLocalParams) error {
-	_, err := q.db.Exec(ctx, markMediaItemLocal, arg.ID, arg.LocalIdentityKey, arg.MatchConfidence)
+	_, err := q.db.Exec(ctx, markMediaItemLocal, arg.ID, arg.MatchConfidence)
 	return err
 }
 
@@ -882,7 +897,7 @@ func (q *Queries) MediaItemSlugExists(ctx context.Context, arg MediaItemSlugExis
 }
 
 const searchMediaItemsByLibrary = `-- name: SearchMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
 WHERE library_id = $1
   AND ($4::text = '' OR title ILIKE '%' || $4 || '%')
 ORDER BY sort_title ASC, title ASC
@@ -945,7 +960,6 @@ func (q *Queries) SearchMediaItemsByLibrary(ctx context.Context, arg SearchMedia
 			&i.LastEnrichError,
 			&i.FieldProvenance,
 			&i.MatchConfidence,
-			&i.LocalIdentityKey,
 			&i.SlugLocked,
 		); err != nil {
 			return nil, err
@@ -983,7 +997,7 @@ SET title = $2, sort_title = $3, year = $4, description = $5,
     tagline = $9, original_title = $10, original_language = $11,
     status = $12, provider_kind = $13, heya_slug = $14, updated_at = now()
 WHERE id = $1
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, local_identity_key, slug_locked
+RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked
 `
 
 type UpdateMediaItemParams struct {
@@ -1056,7 +1070,6 @@ func (q *Queries) UpdateMediaItem(ctx context.Context, arg UpdateMediaItemParams
 		&i.LastEnrichError,
 		&i.FieldProvenance,
 		&i.MatchConfidence,
-		&i.LocalIdentityKey,
 		&i.SlugLocked,
 	)
 	return i, err
