@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
@@ -72,6 +73,21 @@ func updateMediaItemParamsFrom(item sqlc.MediaItem) sqlc.UpdateMediaItemParams {
 	}
 }
 
+// emitMediaUpdated broadcasts a media.updated event over the hub, nil-guarded
+// like every other emit site (see watch.go's UpdateWatchProgress). Centralized
+// here so the several silent-mutation call sites in this file share one
+// payload construction instead of repeating it.
+func (a *App) emitMediaUpdated(mediaItemID, libraryID int64, title, mediaType string) {
+	if a.hub != nil {
+		a.hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+			MediaItemID: mediaItemID,
+			LibraryID:   libraryID,
+			Title:       title,
+			MediaType:   mediaType,
+		})
+	}
+}
+
 // ListLibraryMedia returns media items belonging to a library with optional search.
 func (a *App) ListLibraryMedia(ctx context.Context, libraryID int64, limit, offset int32, query string) ([]sqlc.MediaItem, error) {
 	q := sqlc.New(a.db)
@@ -85,7 +101,10 @@ func (a *App) ListLibraryMedia(ctx context.Context, libraryID int64, limit, offs
 
 // UpdateMediaMetadata patches a media item and its type-specific record.
 func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req UpdateMediaMetadataReq) error {
-	return a.withTx(ctx, func(q *sqlc.Queries) error {
+	var libraryID int64
+	var title, mediaType string
+
+	err := a.withTx(ctx, func(q *sqlc.Queries) error {
 
 		item, err := q.GetMediaItemByID(ctx, mediaItemID)
 		if err != nil {
@@ -121,6 +140,10 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 		if req.Status != nil {
 			p.Status = *req.Status
 		}
+
+		libraryID = item.LibraryID
+		title = p.Title
+		mediaType = string(item.MediaType)
 
 		if _, err := q.UpdateMediaItem(ctx, p); err != nil {
 			return fmt.Errorf("updating media item: %w", err)
@@ -315,6 +338,12 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	a.emitMediaUpdated(mediaItemID, libraryID, title, mediaType)
+	return nil
 }
 
 // stampUserProvenance merges the given field names into the existing
@@ -364,7 +393,7 @@ func (a *App) UpdateEpisode(ctx context.Context, episodeID int64, req UpdateEpis
 		airDate = pgDateFromStr(*req.AirDate)
 	}
 
-	return q.UpdateTVEpisode(ctx, sqlc.UpdateTVEpisodeParams{
+	updated, err := q.UpdateTVEpisode(ctx, sqlc.UpdateTVEpisodeParams{
 		ID:             episodeID,
 		Title:          title,
 		Overview:       overview,
@@ -378,6 +407,21 @@ func (a *App) UpdateEpisode(ctx context.Context, episodeID int64, req UpdateEpis
 		ExternalIds:    ep.ExternalIds,
 		Source:         ep.Source,
 	})
+	if err != nil {
+		return sqlc.TvEpisode{}, err
+	}
+
+	// MediaPayload has no episode field, so the update is reported against
+	// the parent series (season -> series -> media item) instead.
+	if season, sErr := q.GetTVSeasonByID(ctx, ep.SeasonID); sErr == nil {
+		if series, serErr := q.GetTVSeriesByID(ctx, season.SeriesID); serErr == nil {
+			if item, iErr := q.GetMediaItemByID(ctx, series.MediaItemID); iErr == nil {
+				a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
+			}
+		}
+	}
+
+	return updated, nil
 }
 
 // IdentifySearchResult wraps the search results from all providers.
@@ -690,6 +734,9 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit re-identify: %w", err)
 	}
+
+	a.emitMediaUpdated(mediaItemID, item.LibraryID, detail.Title, string(item.MediaType))
+
 	return nil
 }
 
@@ -782,6 +829,10 @@ func (a *App) DeleteMediaAsset(ctx context.Context, mediaItemID, assetID int64) 
 		}
 	}
 
+	if item, iErr := q.GetMediaItemByID(ctx, mediaItemID); iErr == nil {
+		a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
+	}
+
 	return nil
 }
 
@@ -808,6 +859,10 @@ func (a *App) SetPrimaryAsset(ctx context.Context, mediaItemID, assetID int64) e
 		q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: asset.LocalPath})
 	} else if assetType == "backdrop" {
 		q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: mediaItemID, BackdropPath: asset.LocalPath})
+	}
+
+	if item, iErr := q.GetMediaItemByID(ctx, mediaItemID); iErr == nil {
+		a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
 	}
 
 	return nil
@@ -906,6 +961,8 @@ func (a *App) DownloadAsset(ctx context.Context, mediaItemID int64, url, assetTy
 	}, nil)
 	_ = tx.Commit(ctx)
 
+	a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
+
 	return nil
 }
 
@@ -965,6 +1022,8 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 		// Asset creation failed but the file was saved.
 		return UploadMediaAssetResult{Path: localPath}, nil
 	}
+
+	a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
 
 	return UploadMediaAssetResult{Asset: &asset}, nil
 }

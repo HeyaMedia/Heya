@@ -185,6 +185,7 @@
 
 <script setup lang="ts">
 import { TabsRoot, TabsList, TabsTrigger } from 'reka-ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import type { MediaDetail, UpdateMediaMetadataRequest } from '~~/shared/types'
 
 const props = defineProps<{
@@ -194,6 +195,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ close: [] }>()
+
+const queryClient = useQueryClient()
 
 const detail = ref<any>(null)
 const library = ref<any>(null)
@@ -543,6 +546,12 @@ async function refreshMetadata() {
 function onIdentified() {
   showIdentify.value = false
   fetchDetail()
+  // Prefix match: catches the slug-keyed ['media','detail',slug] query that
+  // the originating page (movie/tv/artist detail) reads from, regardless of
+  // whether it's cached under the slug or the numeric id — so that page
+  // reflects the new identity immediately instead of waiting out its
+  // staleTime or needing a manual reload.
+  queryClient.invalidateQueries({ queryKey: ['media', 'detail'] })
 }
 
 watch(() => props.mediaId, () => {

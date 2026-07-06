@@ -280,6 +280,21 @@ watch(detailQuery.error, (err) => { if (err) navigateTo('/movies') })
 const movieEntityId = computed(() => detail.value?.media_item.id ?? 0)
 const { inProgress: resumeInProgress } = useWatchResume('movie', movieEntityId)
 
+// Live refresh — a debounced re-enrich (or a metadata edit) lands new data
+// server-side while this page is open; without this the user has to
+// manually reload to see it. Filtered on this movie's media_item_id so
+// another item's update doesn't retrigger a refetch here.
+useLiveRefresh([
+  {
+    events: ['media.updated'],
+    filter: (e) => {
+      const payload = e.payload as { media_item_id?: number } | undefined
+      return payload?.media_item_id === movieEntityId.value
+    },
+    keys: [['media', 'detail', slug]],
+  },
+])
+
 const streamInfo = ref<StreamInfoResponse | null>(null)
 const videoModal = ref<{ key: string; title: string } | null>(null)
 const showMetadataEditor = ref(false)

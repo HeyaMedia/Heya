@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/riverqueue/river"
@@ -23,6 +24,7 @@ type FetchArtworkWorker struct {
 	river.WorkerDefaults[FetchArtworkArgs]
 	DB       *pgxpool.Pool
 	Heya     *heyamedia.HeyaProvider
+	Hub      EventPublisher
 	Progress *TaskProgressBroadcaster
 }
 
@@ -117,6 +119,16 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 
 	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("skipped_cap", skippedCap).Dur("duration", time.Since(start)).Msg("artwork: fan-out summary")
 	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("artworks_queued", sortOrder-10).Msg("enrichment complete")
+
+	if sortOrder > 10 && w.Hub != nil {
+		w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+			MediaItemID: item.ID,
+			LibraryID:   item.LibraryID,
+			Title:       item.Title,
+			MediaType:   job.Args.MediaType,
+		})
+	}
+
 	return nil
 }
 

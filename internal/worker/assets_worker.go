@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
@@ -72,6 +73,7 @@ type DetectLocalAssetsWorker struct {
 	river.WorkerDefaults[DetectLocalAssetsArgs]
 	DB       *pgxpool.Pool
 	DataDir  string
+	Hub      EventPublisher
 	Progress *TaskProgressBroadcaster
 }
 
@@ -129,22 +131,24 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		log.Debug().Int64("media_item_id", mediaItemID).Msg("skipping local asset detection: no library file path")
 	}
 
+	assetsCreated := 0
+
 	if source != nil {
 		defer source.Close()
-		w.detectShowLevelImages(ctx, q, mediaItemID, source.FS, cacheDir)
+		assetsCreated += w.detectShowLevelImages(ctx, q, mediaItemID, source.FS, cacheDir)
 		w.detectExtras(ctx, q, mediaItemID, source.FS, showDir)
 	}
 
 	if filePath != "" && !vfs.IsSMBPath(dir) {
 		// Local path: os.DirFS + vfs.Join ≡ os.ReadDir + filepath.Join here,
 		// so the FS-based walker covers both the local and SMB shapes.
-		w.detectSiblingAssetsFS(ctx, q, mediaItemID, os.DirFS(dir), dir, base)
+		assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, os.DirFS(dir), dir, base)
 	} else if source != nil {
 		relDir := vfs.Base(dir)
 		if relDir != vfs.Base(showDir) {
 			subFS, err := fs.Sub(source.FS, relDir)
 			if err == nil {
-				w.detectSiblingAssetsFS(ctx, q, mediaItemID, subFS, dir, base)
+				assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, subFS, dir, base)
 			}
 		}
 	}
@@ -181,9 +185,19 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		newBackdrop = backdropPath
 	}
 
-	if newPoster != item.PosterPath || newBackdrop != item.BackdropPath {
+	pathsChanged := newPoster != item.PosterPath || newBackdrop != item.BackdropPath
+	if pathsChanged {
 		updateArtworkPathColumns(ctx, q, item, newPoster, newBackdrop)
 		log.Info().Str("poster", newPoster).Str("backdrop", newBackdrop).Int64("media_id", mediaItemID).Msg("local images copied to cache")
+	}
+
+	if pathsChanged || assetsCreated > 0 {
+		emit(w.Hub, eventhub.EventMediaUpdated, eventhub.MediaPayload{
+			MediaItemID: mediaItemID,
+			LibraryID:   item.LibraryID,
+			Title:       item.Title,
+			MediaType:   mediaType,
+		})
 	}
 
 	existingAssets, _ := q.ListMediaAssets(ctx, mediaItemID)
@@ -236,10 +250,12 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	return nil
 }
 
-func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, cacheDir string) {
+// detectShowLevelImages returns the number of media_assets rows it created,
+// so the caller can decide whether to emit media.updated.
+func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, cacheDir string) int {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
-		return
+		return 0
 	}
 
 	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
@@ -249,6 +265,8 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			seen[string(a.AssetType)] = true
 		}
 	}
+
+	created := 0
 
 	for _, e := range entries {
 		if e.IsDir() {
@@ -277,13 +295,15 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			if info != nil {
 				size = info.Size()
 			}
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   at,
 				Source:      "local",
 				LocalPath:   destPath,
 				FileSize:    size,
-			})
+			}); err == nil {
+				created++
+			}
 			continue
 		}
 
@@ -297,13 +317,15 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			destPath := filepath.Join(cacheDir, name)
 			copyFromFS(fsys, name, destPath, false)
 
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeBackdrop,
 				Source:      "local",
 				LocalPath:   destPath,
 				SortOrder:   int32(order),
-			})
+			}); err == nil {
+				created++
+			}
 			continue
 		}
 
@@ -326,15 +348,19 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			destPath := filepath.Join(cacheDir, name)
 			copyFromFS(fsys, name, destPath, false)
 
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypePoster,
 				Source:      "local",
 				LocalPath:   destPath,
 				Label:       seasonLabel,
-			})
+			}); err == nil {
+				created++
+			}
 		}
 	}
+
+	return created
 }
 
 func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, showDir string) {
@@ -409,10 +435,12 @@ func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Quer
 	}
 }
 
-func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, dir, baseName string) {
+// detectSiblingAssetsFS returns the number of media_assets rows it created,
+// so the caller can decide whether to emit media.updated.
+func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, dir, baseName string) int {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
-		return
+		return 0
 	}
 
 	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
@@ -422,6 +450,8 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 			hasThumb = true
 		}
 	}
+
+	created := 0
 
 	for _, e := range entries {
 		if e.IsDir() {
@@ -439,23 +469,27 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 			if info != nil {
 				size = info.Size()
 			}
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeSubtitle,
 				Source:      "local",
 				LocalPath:   fullPath,
 				Language:    lang,
 				FileSize:    size,
-			})
+			}); err == nil {
+				created++
+			}
 		}
 
 		if mediafile.IsLyricsExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeLyrics,
 				Source:      "local",
 				LocalPath:   fullPath,
-			})
+			}); err == nil {
+				created++
+			}
 		}
 
 		if mediafile.IsImageExt(ext) && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
@@ -463,14 +497,18 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 				continue
 			}
 			hasThumb = true
-			q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeThumb,
 				Source:      "local",
 				LocalPath:   fullPath,
-			})
+			}); err == nil {
+				created++
+			}
 		}
 	}
+
+	return created
 }
 
 func extractLanguageCode(nameNoExt, baseName string) string {

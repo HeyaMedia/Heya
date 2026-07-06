@@ -263,6 +263,24 @@ watch(detailQuery.error, (err) => { if (err) navigateTo('/tv') })
 const showMetadataEditor = ref(false)
 const videoModal = ref<{ key: string; title: string } | null>(null)
 
+// Live refresh — a debounced re-enrich folding in new seasons/episodes (or a
+// metadata edit) lands server-side while this page is open; without this the
+// user has to manually reload to see it. Filtered on this series' media_item_id
+// so another item's update doesn't retrigger a refetch here. The season and
+// episode pages share this same ['media','detail', slug] query key, so they
+// pick up the invalidation automatically without their own subscription.
+const seriesEntityId = computed(() => detail.value?.media_item.id ?? 0)
+useLiveRefresh([
+  {
+    events: ['media.updated'],
+    filter: (e) => {
+      const payload = e.payload as { media_item_id?: number } | undefined
+      return payload?.media_item_id === seriesEntityId.value
+    },
+    keys: [['media', 'detail', slug]],
+  },
+])
+
 const recsExpanded = ref(false)
 const recsScrollEl = ref<HTMLElement | null>(null)
 const recsOverflows = ref(false)

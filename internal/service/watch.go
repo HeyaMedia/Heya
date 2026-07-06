@@ -165,12 +165,18 @@ func (a *App) ToggleFavorite(ctx context.Context, userID int64, entityType strin
 		if err := q.RemoveFavorite(ctx, sqlc.RemoveFavoriteParams{UserID: userID, EntityType: entityType, EntityID: entityID}); err != nil {
 			return false, err
 		}
+		if a.hub != nil {
+			a.hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{MediaItemID: entityID})
+		}
 		return false, nil
 	}
 	// ErrNoRows = INSERT hit ON CONFLICT DO NOTHING (already favorited via a
 	// race) — benign; the end state is still favorited.
 	if _, err := q.ToggleFavorite(ctx, sqlc.ToggleFavoriteParams{UserID: userID, EntityType: entityType, EntityID: entityID}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, err
+	}
+	if a.hub != nil {
+		a.hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{MediaItemID: entityID})
 	}
 	return true, nil
 }

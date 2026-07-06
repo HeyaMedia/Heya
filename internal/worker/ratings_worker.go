@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/riverqueue/river"
@@ -18,6 +19,7 @@ type RatingsFetchWorker struct {
 	river.WorkerDefaults[RatingsFetchArgs]
 	DB       *pgxpool.Pool
 	Heya     *heyamedia.HeyaProvider
+	Hub      EventPublisher
 	Progress *TaskProgressBroadcaster
 }
 
@@ -69,6 +71,14 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 
 	if totalStored > 0 {
 		log.Info().Int64("media_id", job.Args.MediaItemID).Int("ratings", totalStored).Msg("ratings stored")
+		if w.Hub != nil {
+			w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+				MediaItemID: item.ID,
+				LibraryID:   item.LibraryID,
+				Title:       item.Title,
+				MediaType:   string(item.MediaType),
+			})
+		}
 	} else {
 		log.Debug().Int64("media_id", job.Args.MediaItemID).Int("candidates", len(data.Ratings)).Msg("ratings: no ratings stored")
 	}

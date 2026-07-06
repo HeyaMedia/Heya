@@ -6,25 +6,49 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/metadata"
 )
+
+// emitWatched broadcasts a media.watched event for a watch-state change made
+// through one of the mark/unmark entry points below. Mirrors the hub access +
+// nil-guard in UpdateWatchProgress (watch.go) — Progress/Total are left zero
+// since these entry points are toggles, not the playback-progress path.
+func (a *App) emitWatched(userID, mediaItemID int64, completed bool) {
+	if a.hub == nil {
+		return
+	}
+	a.hub.Emit(eventhub.EventMediaWatched, eventhub.WatchPayload{
+		UserID:      userID,
+		MediaItemID: mediaItemID,
+		Completed:   completed,
+	})
+}
 
 // MarkEpisodeWatched marks a single episode as watched for a user.
 func (a *App) MarkEpisodeWatched(ctx context.Context, userID, episodeID int64) error {
 	q := sqlc.New(a.db)
-	return q.MarkEpisodeWatched(ctx, sqlc.MarkEpisodeWatchedParams{
+	if err := q.MarkEpisodeWatched(ctx, sqlc.MarkEpisodeWatchedParams{
 		UserID:   userID,
 		EntityID: episodeID,
-	})
+	}); err != nil {
+		return err
+	}
+	a.emitWatched(userID, episodeID, true)
+	return nil
 }
 
 // UnmarkEpisodeWatched removes the watched mark from a single episode.
 func (a *App) UnmarkEpisodeWatched(ctx context.Context, userID, episodeID int64) error {
 	q := sqlc.New(a.db)
-	return q.UnmarkEpisodeWatched(ctx, sqlc.UnmarkEpisodeWatchedParams{
+	if err := q.UnmarkEpisodeWatched(ctx, sqlc.UnmarkEpisodeWatchedParams{
 		UserID:   userID,
 		EntityID: episodeID,
-	})
+	}); err != nil {
+		return err
+	}
+	a.emitWatched(userID, episodeID, false)
+	return nil
 }
 
 // MarkSeasonWatched marks the episodes we actually hold in a season as watched
@@ -48,7 +72,11 @@ func (a *App) MarkSeasonWatched(ctx context.Context, userID, seasonID int64) err
 	if len(ids) == 0 {
 		return nil
 	}
-	return q.MarkEpisodesWatched(ctx, sqlc.MarkEpisodesWatchedParams{UserID: userID, Column2: ids})
+	if err := q.MarkEpisodesWatched(ctx, sqlc.MarkEpisodesWatchedParams{UserID: userID, Column2: ids}); err != nil {
+		return err
+	}
+	a.emitWatched(userID, series.MediaItemID, true)
+	return nil
 }
 
 // presentEpisodeIDs returns the IDs of episodes a bulk watch action should
@@ -147,10 +175,18 @@ func (a *App) seasonPresentEpisodeSets(ctx context.Context, q *sqlc.Queries, ser
 // UnmarkSeasonWatched removes watched marks from all episodes in a season.
 func (a *App) UnmarkSeasonWatched(ctx context.Context, userID, seasonID int64) error {
 	q := sqlc.New(a.db)
-	return q.UnmarkSeasonWatched(ctx, sqlc.UnmarkSeasonWatchedParams{
+	if err := q.UnmarkSeasonWatched(ctx, sqlc.UnmarkSeasonWatchedParams{
 		UserID:   userID,
 		SeasonID: seasonID,
-	})
+	}); err != nil {
+		return err
+	}
+	if season, err := q.GetTVSeasonByID(ctx, seasonID); err == nil {
+		if series, err := q.GetTVSeriesByID(ctx, season.SeriesID); err == nil {
+			a.emitWatched(userID, series.MediaItemID, false)
+		}
+	}
+	return nil
 }
 
 // MarkShowWatched marks the episodes we actually hold across a show as watched.
@@ -168,16 +204,24 @@ func (a *App) MarkShowWatched(ctx context.Context, userID, mediaItemID int64) er
 	if len(ids) == 0 {
 		return nil
 	}
-	return q.MarkEpisodesWatched(ctx, sqlc.MarkEpisodesWatchedParams{UserID: userID, Column2: ids})
+	if err := q.MarkEpisodesWatched(ctx, sqlc.MarkEpisodesWatchedParams{UserID: userID, Column2: ids}); err != nil {
+		return err
+	}
+	a.emitWatched(userID, mediaItemID, true)
+	return nil
 }
 
 // UnmarkShowWatched removes watched marks from all episodes in a show.
 func (a *App) UnmarkShowWatched(ctx context.Context, userID, mediaItemID int64) error {
 	q := sqlc.New(a.db)
-	return q.UnmarkShowWatched(ctx, sqlc.UnmarkShowWatchedParams{
+	if err := q.UnmarkShowWatched(ctx, sqlc.UnmarkShowWatchedParams{
 		UserID:      userID,
 		MediaItemID: mediaItemID,
-	})
+	}); err != nil {
+		return err
+	}
+	a.emitWatched(userID, mediaItemID, false)
+	return nil
 }
 
 // MarkMediaWatched routes to the per-type marker by inspecting the media
@@ -207,19 +251,27 @@ func (a *App) MarkMediaWatched(ctx context.Context, userID, mediaItemID int64, w
 // MarkMovieWatched marks a movie as watched.
 func (a *App) MarkMovieWatched(ctx context.Context, userID, mediaItemID int64) error {
 	q := sqlc.New(a.db)
-	return q.MarkMovieWatched(ctx, sqlc.MarkMovieWatchedParams{
+	if err := q.MarkMovieWatched(ctx, sqlc.MarkMovieWatchedParams{
 		UserID:   userID,
 		EntityID: mediaItemID,
-	})
+	}); err != nil {
+		return err
+	}
+	a.emitWatched(userID, mediaItemID, true)
+	return nil
 }
 
 // UnmarkMovieWatched removes the watched mark from a movie.
 func (a *App) UnmarkMovieWatched(ctx context.Context, userID, mediaItemID int64) error {
 	q := sqlc.New(a.db)
-	return q.UnmarkMovieWatched(ctx, sqlc.UnmarkMovieWatchedParams{
+	if err := q.UnmarkMovieWatched(ctx, sqlc.UnmarkMovieWatchedParams{
 		UserID:   userID,
 		EntityID: mediaItemID,
-	})
+	}); err != nil {
+		return err
+	}
+	a.emitWatched(userID, mediaItemID, false)
+	return nil
 }
 
 // presentWatchCounts is a show's watched state measured against the episodes

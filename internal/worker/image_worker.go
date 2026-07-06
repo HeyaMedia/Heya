@@ -141,6 +141,12 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 		if err == nil {
 			updateArtworkPathColumns(ctx, q, item, item.PosterPath, localPath)
+			if w.Hub != nil {
+				w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+					MediaItemID: job.Args.MediaItemID,
+					MediaType:   job.Args.MediaType,
+				})
+			}
 		}
 	}
 
