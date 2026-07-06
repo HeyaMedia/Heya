@@ -469,14 +469,18 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 	level, mediaType := s.resolveLevel(ctx, &req)
 	lim, off := int32(req.limit), int32(req.startIndex)
 
+	// Genre filtering only exists at the media-item level — movies/series carry
+	// genres; seasons/episodes/albums/tracks don't. A genre-filtered request on
+	// any other level (or a GenreId that resolved to no known name) matches
+	// nothing; returning that level's unfiltered set would silently bypass the
+	// filter. Applies to multi-type fan-out too — each sub-query lands here.
+	if req.genreFiltered && (level != levelItems || len(req.genres) == 0) {
+		return empty, nil
+	}
+
 	switch level {
 	case levelItems:
 		if mediaType == "" {
-			return empty, nil
-		}
-		// A genre filter that resolved to no known name (a foreign GenreId)
-		// matches nothing — return empty, never the whole library.
-		if req.genreFiltered && len(req.genres) == 0 {
 			return empty, nil
 		}
 		params := sqlc.JFListLibraryItemsParams{
