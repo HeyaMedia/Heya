@@ -961,7 +961,10 @@ func (a *App) DownloadAsset(ctx context.Context, mediaItemID int64, url, assetTy
 	}, nil)
 	_ = tx.Commit(ctx)
 
-	a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
+	// No emit here: this only enqueues a DownloadImageArgs job. The asset isn't
+	// stored yet, so a media.updated now would trigger a stale refetch. The
+	// DownloadImageWorker emits at store-time when the primary poster/backdrop
+	// actually lands.
 
 	return nil
 }

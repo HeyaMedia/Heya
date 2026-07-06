@@ -110,7 +110,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, HeyaMedia: cfg.HeyaMedia, Progress: cfg.Progress})
-	river.AddWorker(workers, &FetchArtworkWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
+	river.AddWorker(workers, &FetchArtworkWorker{DB: cfg.DB, Heya: cfg.Heya, Progress: cfg.Progress})
 	river.AddWorker(workers, &RatingsFetchWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &SaveNFOWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &SaveImagesWorker{DB: cfg.DB, Progress: cfg.Progress})

@@ -128,6 +128,22 @@ const detailQuery = useQuery({
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
 watch(detailQuery.error, (err) => { if (err) navigateTo('/tv') })
+
+// Live refresh — a re-enrich or metadata edit lands new data server-side while
+// this page is open. It reads the shared ['media','detail', slug] doc, but the
+// parent series page isn't mounted on a direct/deep visit here, so it needs its
+// own subscription: a shared cache key does not imply a shared listener.
+const seriesEntityId = computed(() => detail.value?.media_item.id ?? 0)
+useLiveRefresh([
+  {
+    events: ['media.updated'],
+    filter: (e) => {
+      const payload = e.payload as { media_item_id?: number } | undefined
+      return payload?.media_item_id === seriesEntityId.value
+    },
+    keys: [['media', 'detail', slug]],
+  },
+])
 const watchedEpisodes = ref<Set<number>>(new Set())
 const episodeProgress = ref<Map<number, { progress: number; total: number }>>(new Map())
 const seasonFavorited = ref(false)
