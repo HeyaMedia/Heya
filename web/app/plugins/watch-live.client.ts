@@ -19,6 +19,10 @@ export default defineNuxtPlugin(() => {
     // module doesn't export the constant.
     nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'watch', 'continue'] })
     nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'watch', 'recent'] })
+    // Episode-level feed behind the TV Recommended "Recently Watched" rail —
+    // must invalidate here too (not only in RecommendedView) so watching an
+    // episode from the player / detail page keeps the rail fresh cross-page.
+    nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'watch', 'recent-episodes'] })
     nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
   })
 })
