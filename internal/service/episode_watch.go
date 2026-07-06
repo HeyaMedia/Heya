@@ -123,8 +123,10 @@ func (a *App) seasonPresentEpisodeSets(ctx context.Context, q *sqlc.Queries, ser
 	if err != nil {
 		return nil, err
 	}
-	efMap := BuildEpisodeFileMap(files)
-	availableSeasons := BuildAvailableSeasonSet(files)
+	absRows, _ := q.ListEpisodeAbsoluteMap(ctx, series.MediaItemID)
+	absMap := AbsoluteEpisodeMap(absRows)
+	efMap := BuildEpisodeFileMap(files, absMap)
+	availableSeasons := BuildAvailableSeasonSet(files, absMap)
 
 	seasons, err := q.ListTVSeasonsBySeries(ctx, series.ID)
 	if err != nil {
@@ -543,7 +545,8 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 	var fileID int64
 	epKey := fmt.Sprintf("s%de%d", ep.SeasonNumber, ep.EpisodeNumber)
 	if files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: mediaItemID, Valid: true}); err == nil {
-		efMap := BuildEpisodeFileMap(files)
+		absRows, _ := q.ListEpisodeAbsoluteMap(ctx, mediaItemID)
+		efMap := BuildEpisodeFileMap(files, AbsoluteEpisodeMap(absRows))
 		if entry, ok := efMap[epKey]; ok {
 			fileID = entry.FileID
 		}

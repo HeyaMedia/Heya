@@ -128,7 +128,7 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 
 	kind := MediaTypeToKind(mediaType)
 
-	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.MBID != "") {
+	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.MBID != "" || nfoIDs.AniDBID != "" || nfoIDs.MALID != "") {
 		if info, matched := m.tryNFOLookup(ctx, file, kind, libraryID, nfoIDs); matched {
 			return info, nil
 		}
@@ -542,6 +542,12 @@ func stubDetailFromNFO(ids metadata.NFOIDs) *metadata.MediaDetail {
 	if ids.MBID != "" {
 		extIDs["mbid"] = ids.MBID
 	}
+	if ids.AniDBID != "" {
+		extIDs["anidb"] = ids.AniDBID
+	}
+	if ids.MALID != "" {
+		extIDs["mal"] = ids.MALID
+	}
 	return &metadata.MediaDetail{
 		Title:       ids.Title,
 		SortTitle:   strings.ToLower(ids.Title),
@@ -638,7 +644,7 @@ func parseFileResult(data []byte) (parser.ParsedStorageEntry, *metadata.NFOIDs) 
 // filename only fills providers the NFO didn't supply. Returns ids unchanged
 // when the release carries no embedded IDs.
 func mergeFilenameIDs(ids *metadata.NFOIDs, rel *parser.SceneReleaseParse) *metadata.NFOIDs {
-	if rel == nil || (rel.ImdbID == "" && rel.TmdbID == "" && rel.TvdbID == "") {
+	if rel == nil || (rel.ImdbID == "" && rel.TmdbID == "" && rel.TvdbID == "" && rel.AnidbID == "" && rel.MalID == "") {
 		return ids
 	}
 	if ids == nil {
@@ -652,6 +658,12 @@ func mergeFilenameIDs(ids *metadata.NFOIDs, rel *parser.SceneReleaseParse) *meta
 	}
 	if ids.TVDBID == "" {
 		ids.TVDBID = rel.TvdbID
+	}
+	if ids.AniDBID == "" {
+		ids.AniDBID = rel.AnidbID
+	}
+	if ids.MALID == "" {
+		ids.MALID = rel.MalID
 	}
 	// Carry the filename's title/year too: the new-item strong-ID path
 	// (tryNFOLookup → stubDetailFromNFO) needs a title to write the stub —
@@ -729,6 +741,12 @@ func pickProviderIDFromNFO(kind metadata.MediaKind, ids *metadata.NFOIDs) string
 		if ids.IMDBID != "" {
 			return "imdb:" + ids.IMDBID
 		}
+		if ids.AniDBID != "" {
+			return "anidb:" + ids.AniDBID
+		}
+		if ids.MALID != "" {
+			return "mal:" + ids.MALID
+		}
 	case metadata.KindMovie:
 		if ids.TMDBID != "" {
 			return "tmdb:" + ids.TMDBID
@@ -755,6 +773,12 @@ func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFil
 	}
 	if ids.TVDBID != "" {
 		candidates = append(candidates, map[string]string{"tvdb": ids.TVDBID})
+	}
+	if ids.AniDBID != "" {
+		candidates = append(candidates, map[string]string{"anidb": ids.AniDBID})
+	}
+	if ids.MALID != "" {
+		candidates = append(candidates, map[string]string{"mal": ids.MALID})
 	}
 
 	for _, extIDs := range candidates {

@@ -401,6 +401,15 @@ func parseMatchCollection(match *regexp2.Match, simpleTitle string) *matchResult
 			} else {
 				first := int(firstF)
 				last := int(lastF)
+				if first > last {
+					// Not an ascending batch range: "… Code 044 - 11 …" captures
+					// 44 then 11, which is two discrete numbers (title digit +
+					// episode), not an "044..011" span. Bail so a simpler pattern
+					// or the caller's absolute-episode fallback resolves it —
+					// mirrors the episode-range guard above and avoids building a
+					// negative-length slice (panic).
+					return nil
+				}
 				count := last - first + 1
 				eps := make([]int, count)
 				for i := range eps {

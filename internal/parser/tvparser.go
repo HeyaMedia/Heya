@@ -10,6 +10,12 @@ func canParseTv(prepared PreparedSegment, mediaHint SceneMediaKind) bool {
 	if mediaHint != MediaUnknown && mediaHint != MediaVideo {
 		return false
 	}
+	// Under an anime-tagged path, let bracket-less "Series - 24 - Title" files
+	// through — parseTv still requires an actual episode/strong signal to emit a
+	// release, so a bare folder segment falls out on its own.
+	if prepared.AnimeContext {
+		return true
+	}
 	return LooksLikeTvRelease(prepared.CleanedName)
 }
 
@@ -30,7 +36,20 @@ func parseTv(prepared PreparedSegment) *SceneReleaseParse {
 	episodes := make([]int, len(parsed.EpisodeNumbers))
 	copy(episodes, parsed.EpisodeNumbers)
 
-	if len(episodes) == 0 && normalized.AnimeEpisode >= 0 {
+	var absoluteEpisodes []int
+
+	switch {
+	case prepared.AnimeContext && normalized.AnimeEpisode >= 0:
+		// Absolute-numbered anime ("Series - 24 - Title"): record the absolute
+		// number and clear season/episode. season.go can misread a trailing
+		// title digit as a season ("Yamato 2 - 24" -> 2x24); we ignore that and
+		// let the read path resolve absolute -> real season/episode via
+		// tv_episodes.absolute_number. Kept out of Seasons so it never collides
+		// with genuine season-0 specials.
+		absoluteEpisodes = []int{normalized.AnimeEpisode}
+		seasons = nil
+		episodes = nil
+	case len(episodes) == 0 && normalized.AnimeEpisode >= 0:
 		episodes = []int{normalized.AnimeEpisode}
 	}
 
@@ -70,11 +89,19 @@ func parseTv(prepared PreparedSegment) *SceneReleaseParse {
 		title, parsed.Year, group,
 		string(parsed.Resolution),
 		len(sources), string(parsed.VideoCodec),
-		len(seasons), len(episodes),
+		len(seasons), len(episodes)+len(absoluteEpisodes),
 		normalized.ReleaseHash,
 	)
 
-	hasStrongSignal := parsed.Resolution != "" || parsed.VideoCodec != "" || len(sources) > 0 || len(episodes) > 0 || normalized.AnimeGroup != ""
+	// A clean anime library file ("Series - 24 - Title.mkv") carries no
+	// scene tokens and scores only title+episode (=3), below the cutoff. The
+	// {anidb-…} tag on its folder is itself an unambiguous identity signal, so
+	// let it stand in for the missing tokens.
+	if prepared.AnimeContext && (len(episodes) > 0 || len(absoluteEpisodes) > 0) {
+		score += 2
+	}
+
+	hasStrongSignal := parsed.Resolution != "" || parsed.VideoCodec != "" || len(sources) > 0 || len(episodes) > 0 || len(absoluteEpisodes) > 0 || normalized.AnimeGroup != ""
 
 	if title == "" || score < 4 || !hasStrongSignal {
 		return nil
@@ -92,24 +119,25 @@ func parseTv(prepared PreparedSegment) *SceneReleaseParse {
 	}
 
 	return &SceneReleaseParse{
-		Strategy:       StrategyVideoFilenameParser,
-		RawName:        prepared.RawName,
-		NormalizedName: normalized.Candidate,
-		Media:          MediaVideo,
-		Title:          title,
-		Year:           parsed.Year,
-		Group:          group,
-		ReleaseHash:    normalized.ReleaseHash,
-		Source:         source,
-		Sources:        sources,
-		Codec:          codec,
-		Codecs:         codecs,
-		Resolution:     string(parsed.Resolution),
-		Flags:          dedupeFlags(flags),
-		Seasons:        seasons,
-		Episodes:       episodes,
-		IsTv:           true,
-		Score:          score,
+		Strategy:         StrategyVideoFilenameParser,
+		RawName:          prepared.RawName,
+		NormalizedName:   normalized.Candidate,
+		Media:            MediaVideo,
+		Title:            title,
+		Year:             parsed.Year,
+		Group:            group,
+		ReleaseHash:      normalized.ReleaseHash,
+		Source:           source,
+		Sources:          sources,
+		Codec:            codec,
+		Codecs:           codecs,
+		Resolution:       string(parsed.Resolution),
+		Flags:            dedupeFlags(flags),
+		Seasons:          seasons,
+		Episodes:         episodes,
+		AbsoluteEpisodes: absoluteEpisodes,
+		IsTv:             true,
+		Score:            score,
 	}
 }
 

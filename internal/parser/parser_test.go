@@ -8,20 +8,22 @@ import (
 )
 
 type releaseExpected struct {
-	Exists       bool     `json:"exists"`
-	Strategy     string   `json:"strategy"`
-	Media        string   `json:"media"`
-	Title        string   `json:"title"`
-	Year         string   `json:"year"`
-	Group        string   `json:"group"`
-	Resolution   string   `json:"resolution"`
-	Source       string   `json:"source"`
-	Codec        string   `json:"codec"`
-	Catalog      string   `json:"catalog"`
-	ReleaseHash  string   `json:"releaseHash"`
-	Seasons      []int    `json:"seasons"`
-	Episodes     []int    `json:"episodes"`
-	FlagsContain []string `json:"flagsContain"`
+	Exists           bool     `json:"exists"`
+	Strategy         string   `json:"strategy"`
+	Media            string   `json:"media"`
+	Title            string   `json:"title"`
+	Year             string   `json:"year"`
+	Group            string   `json:"group"`
+	Resolution       string   `json:"resolution"`
+	Source           string   `json:"source"`
+	Codec            string   `json:"codec"`
+	Catalog          string   `json:"catalog"`
+	ReleaseHash      string   `json:"releaseHash"`
+	AnidbID          string   `json:"anidbId"`
+	Seasons          []int    `json:"seasons"`
+	Episodes         []int    `json:"episodes"`
+	AbsoluteEpisodes []int    `json:"absoluteEpisodes"`
+	FlagsContain     []string `json:"flagsContain"`
 
 	Artist               *string `json:"artist"`
 	ArtistDisambiguation *string `json:"artistDisambiguation"`
@@ -153,6 +155,9 @@ func checkRelease(t *testing.T, release *SceneReleaseParse, expected releaseExpe
 	if expected.ReleaseHash != "" && release.ReleaseHash != expected.ReleaseHash {
 		t.Errorf("releaseHash: got %q, want %q", release.ReleaseHash, expected.ReleaseHash)
 	}
+	if expected.AnidbID != "" && release.AnidbID != expected.AnidbID {
+		t.Errorf("anidbId: got %q, want %q", release.AnidbID, expected.AnidbID)
+	}
 
 	if expected.Seasons != nil {
 		if !intSliceEqual(release.Seasons, expected.Seasons) {
@@ -162,6 +167,11 @@ func checkRelease(t *testing.T, release *SceneReleaseParse, expected releaseExpe
 	if expected.Episodes != nil {
 		if !intSliceEqual(release.Episodes, expected.Episodes) {
 			t.Errorf("episodes: got %v, want %v", release.Episodes, expected.Episodes)
+		}
+	}
+	if expected.AbsoluteEpisodes != nil {
+		if !intSliceEqual(release.AbsoluteEpisodes, expected.AbsoluteEpisodes) {
+			t.Errorf("absoluteEpisodes: got %v, want %v", release.AbsoluteEpisodes, expected.AbsoluteEpisodes)
 		}
 	}
 
@@ -215,6 +225,10 @@ func intSliceEqual(a, b []int) bool {
 
 func TestTVReleaseParsing(t *testing.T) {
 	runReleaseParsing(t, "../../testdata/parser/tv/release-parsing.json")
+}
+
+func TestTVAnimeAbsolute(t *testing.T) {
+	runReleaseParsing(t, "../../testdata/parser/tv/anime-absolute.json")
 }
 
 func TestMovieReleaseParsing(t *testing.T) {

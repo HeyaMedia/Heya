@@ -223,11 +223,13 @@ func (a *App) JFNextUnwatchedEpisode(ctx context.Context, userID, seriesMediaIte
 // series' parse-result file map (episodes have no file FK — see
 // BuildEpisodeFileMap).
 func (a *App) JFEpisodeFileID(ctx context.Context, seriesMediaItemID int64, season, episode int32) (int64, bool, error) {
-	files, err := sqlc.New(a.db).ListEpisodeFiles(ctx, pgtype.Int8{Int64: seriesMediaItemID, Valid: true})
+	q := sqlc.New(a.db)
+	files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: seriesMediaItemID, Valid: true})
 	if err != nil {
 		return 0, false, err
 	}
-	entry, ok := BuildEpisodeFileMap(files)[fmt.Sprintf("s%de%d", season, episode)]
+	absRows, _ := q.ListEpisodeAbsoluteMap(ctx, seriesMediaItemID)
+	entry, ok := BuildEpisodeFileMap(files, AbsoluteEpisodeMap(absRows))[fmt.Sprintf("s%de%d", season, episode)]
 	return entry.FileID, ok, nil
 }
 
@@ -246,11 +248,13 @@ func (a *App) PassiveMediaUpstream() string {
 // series — the batch form of JFEpisodeFileID, for decorating a whole episode
 // list (fields=MediaSources) with one query instead of one per episode.
 func (a *App) JFEpisodeFileEntries(ctx context.Context, seriesMediaItemID int64) (map[string]EpisodeFileEntry, error) {
-	files, err := sqlc.New(a.db).ListEpisodeFiles(ctx, pgtype.Int8{Int64: seriesMediaItemID, Valid: true})
+	q := sqlc.New(a.db)
+	files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: seriesMediaItemID, Valid: true})
 	if err != nil {
 		return nil, err
 	}
-	return BuildEpisodeFileMap(files), nil
+	absRows, _ := q.ListEpisodeAbsoluteMap(ctx, seriesMediaItemID)
+	return BuildEpisodeFileMap(files, AbsoluteEpisodeMap(absRows)), nil
 }
 
 // JFLibraryFilesByIDs batch-hydrates library files, keyed by id.

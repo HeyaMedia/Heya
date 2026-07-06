@@ -10,6 +10,12 @@ func canParseMovie(prepared PreparedSegment, mediaHint SceneMediaKind) bool {
 	if mediaHint != MediaUnknown && mediaHint != MediaVideo {
 		return false
 	}
+	// An anime-tagged path is TV/anime, never a movie — this keeps a series
+	// folder with a year ("A.D. Police (1999) {anidb-452}") from parsing as a
+	// movie (and leaking "452" as a release group).
+	if prepared.AnimeContext {
+		return false
+	}
 	if LooksLikeTvRelease(prepared.CleanedName) {
 		return false
 	}

@@ -427,6 +427,11 @@ type NFOIDs struct {
 	IMDBID string
 	TVDBID string
 	MBID   string
+	// AniDBID / MALID identify anime series. AniDB is the authoritative id on
+	// the absolute-numbering anime layout ("Series {anidb-2662}"); heya.media
+	// accepts both as TV external-id providers.
+	AniDBID string
+	MALID   string
 	// Title and Year are optional — populated when the NFO sidecar carries
 	// them. The match step uses these to seed the media_items stub before
 	// the enrich worker fetches the full payload.

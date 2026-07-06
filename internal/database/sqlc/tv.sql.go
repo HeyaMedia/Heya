@@ -347,6 +347,52 @@ func (q *Queries) GetTVSeriesByMediaItemID(ctx context.Context, mediaItemID int6
 	return i, err
 }
 
+const listEpisodeAbsoluteMap = `-- name: ListEpisodeAbsoluteMap :many
+SELECT s.season_number, e.episode_number, e.absolute_number
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE ts.media_item_id = $1
+  AND e.absolute_number > 0
+  AND s.season_number > 0
+  AND NOT e.is_special
+`
+
+type ListEpisodeAbsoluteMapRow struct {
+	SeasonNumber   int32 `json:"season_number"`
+	EpisodeNumber  int32 `json:"episode_number"`
+	AbsoluteNumber int32 `json:"absolute_number"`
+}
+
+// Absolute-number -> (season, episode) resolution for one series. Powers the
+// read-time remap of absolute-numbered anime files: their parse_result carries
+// an absolute episode with no season ("Series - 24 - Title"), and this maps that
+// 24 back onto its real season/episode via the enriched catalog.
+//
+// Specials are excluded (season 0 / is_special): the absolute run of a series
+// covers only its main seasons, and providers sometimes stamp a non-zero
+// absolute_number on a special — without this guard an absolute file could
+// remap onto that special.
+func (q *Queries) ListEpisodeAbsoluteMap(ctx context.Context, mediaItemID int64) ([]ListEpisodeAbsoluteMapRow, error) {
+	rows, err := q.db.Query(ctx, listEpisodeAbsoluteMap, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEpisodeAbsoluteMapRow{}
+	for rows.Next() {
+		var i ListEpisodeAbsoluteMapRow
+		if err := rows.Scan(&i.SeasonNumber, &i.EpisodeNumber, &i.AbsoluteNumber); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEpisodeNumbersForMediaItems = `-- name: ListEpisodeNumbersForMediaItems :many
 SELECT ts.media_item_id, s.season_number, e.episode_number
 FROM tv_episodes e

@@ -52,8 +52,14 @@ type SceneReleaseParse struct {
 	Flags          []string            `json:"flags"`
 	Seasons        []int               `json:"seasons"`
 	Episodes       []int               `json:"episodes"`
-	IsTv           bool                `json:"isTv"`
-	Score          int                 `json:"score"`
+	// AbsoluteEpisodes holds anime absolute episode numbers ("Series - 24 -
+	// Title") that carry no season. It's kept separate from Seasons/Episodes so
+	// the read path can remap the absolute number to a real season/episode via
+	// tv_episodes.absolute_number — without colliding with genuine season-0
+	// specials. Empty for normal SxxExx releases.
+	AbsoluteEpisodes []int `json:"absoluteEpisodes,omitempty"`
+	IsTv             bool  `json:"isTv"`
+	Score            int   `json:"score"`
 
 	// Provider IDs embedded in the release name / path (e.g. "{imdb-tt0113198}"
 	// or "[tmdbid=603]"). Empty when absent. A strong-match signal threaded into
@@ -61,6 +67,13 @@ type SceneReleaseParse struct {
 	ImdbID string `json:"imdbId,omitempty"`
 	TmdbID string `json:"tmdbId,omitempty"`
 	TvdbID string `json:"tvdbId,omitempty"`
+
+	// Anime provider ids, parked on the series folder in the anime layout
+	// ("Series Title {anidb-2662}"). AnidbID is the authoritative signal for
+	// absolute-numbered anime; the matcher searches on it directly.
+	AnidbID   string `json:"anidbId,omitempty"`
+	AnilistID string `json:"anilistId,omitempty"`
+	MalID     string `json:"malId,omitempty"`
 
 	Artist               string `json:"artist,omitempty"`
 	ArtistDisambiguation string `json:"artistDisambiguation,omitempty"`
@@ -91,6 +104,12 @@ type PreparedSegment struct {
 	CleanedName string
 	Extension   string
 	Flags       []string
+
+	// AnimeContext is set when the segment lives under a path carrying an anime
+	// id tag ({anidb-…} etc.). It relaxes TV parsing to accept bracket-less
+	// absolute-numbered episodes ("Series - 24 - Title") and suppresses the
+	// movie parser (an anime path is never a movie). See PathLooksLikeAnime.
+	AnimeContext bool
 }
 
 type NormalizedVideoCandidate struct {

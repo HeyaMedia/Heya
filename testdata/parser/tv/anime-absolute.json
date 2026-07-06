@@ -1,0 +1,143 @@
+[
+  {
+    "label": "bracket-less absolute anime: title ending in a number (Yamato 2, ep 24 absolute)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Uchuu Senkan Yamato 2 {anidb-2662}/Uchuu Senkan Yamato 2 - 24 - Life and death struggle! Two brave men.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "media": "video",
+        "title": "Uchuu Senkan Yamato 2",
+        "anidbId": "2662",
+        "seasons": [],
+        "episodes": [],
+        "absoluteEpisodes": [24]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: title with internal hyphen AND number (Ultraviolet - Code 044, ep 11)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Ultraviolet - Code 044 {anidb-5921}/Ultraviolet - Code 044 - 11 - Toward Hometown.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Ultraviolet - Code 044",
+        "anidbId": "5921",
+        "absoluteEpisodes": [11]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: internal-hyphen title, no episode name (Valkyrie Drive - Mermaid, ep 5)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Valkyrie Drive - Mermaid {anidb-11148}/Valkyrie Drive - Mermaid - 05.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Valkyrie Drive - Mermaid",
+        "anidbId": "11148",
+        "absoluteEpisodes": [5]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: year in the title parses as TV not movie (A.D. Police 1999, ep 1)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/A.D. Police (1999) {anidb-452}/A.D. Police (1999) - 01 - Partner.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "strategy": "video-filename-parser",
+        "year": "1999",
+        "anidbId": "452",
+        "absoluteEpisodes": [1]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: episode name itself contains ' - ' (Seikai no Monshou, ep 10)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Seikai no Monshou {anidb-1}/Seikai no Monshou - 10 - Escape - Just the Two of Us.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Seikai no Monshou",
+        "anidbId": "1",
+        "absoluteEpisodes": [10]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: long punctuated episode name (Bullbuster, ep 9)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Bullbuster {anidb-17725}/Bullbuster - 09 - The Merger Draws Near! Shiota's Plot, and the Origin of the Giant Beasts, Are Both Revealed! What Will Namidome Do.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Bullbuster",
+        "anidbId": "17725",
+        "absoluteEpisodes": [9]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: apostrophe + comma in episode name (Bang Bravern, ep 1)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Yuuki Bakuhatsu Bang Bravern {anidb-18048}/Yuuki Bakuhatsu Bang Bravern - 01 - Wait's Over, Isami.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Yuuki Bakuhatsu Bang Bravern",
+        "anidbId": "18048",
+        "absoluteEpisodes": [1]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: two-digit absolute at series end (Eureka Seven AO, ep 24)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Eureka Seven AO {anidb-8854}/Eureka Seven AO - 24 - The Door into Summer.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Eureka Seven AO",
+        "anidbId": "8854",
+        "absoluteEpisodes": [24]
+      }
+    }
+  },
+  {
+    "label": "bracket-less absolute anime: title ending in punctuation (Top o Nerae!, ep 1)",
+    "kind": "storage-path",
+    "input": "/data/int/one/media/Anime/Top o Nerae! {anidb-185}/Top o Nerae! - 01 - Unbelievable! Amano and I Are Pilots.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "release": {
+        "exists": true,
+        "title": "Top o Nerae!",
+        "anidbId": "185",
+        "absoluteEpisodes": [1]
+      }
+    }
+  }
+]

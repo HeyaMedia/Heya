@@ -259,11 +259,19 @@ func LooksLikeAnimeRelease(name string) bool {
 	return animeRE.MatchString(name)
 }
 
+// providerTagRE matches embedded provider-id tags ({imdb-…}, {tmdb-…},
+// {anidb-…}, [tvdbid=…], …). They're stripped before parsing so the bare id
+// number can't leak into the title or be mistaken for a release group (e.g.
+// "{anidb-452}" surfacing as group "452").
+var providerTagRE = regexp.MustCompile(`(?i)[\[{](?:imdb|tmdb|tvdb|anidb|anilist|mal|myanimelist)(?:id)?[-=][^\]}]+[\]}]`)
+
 func NormalizeVideoCandidate(name string) NormalizedVideoCandidate {
 	candidate := strings.TrimSpace(name)
 	var animeGroup string
 	var releaseHash string
 	var versionFlags []string
+
+	candidate = strings.TrimSpace(providerTagRE.ReplaceAllString(candidate, " "))
 
 	leadingGroupRE := regexp.MustCompile(`^\[([^\]]{1,32})\][\s._\-]*`)
 	if m := leadingGroupRE.FindStringSubmatch(candidate); m != nil {

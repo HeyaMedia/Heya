@@ -67,7 +67,9 @@ func ParseStoragePath(inputPath string) ParsedStorageEntry {
 				idParts = append(idParts, parent)
 			}
 		}
-		release.ImdbID, release.TmdbID, release.TvdbID = ParseProviderIDs(strings.Join(idParts, " "))
+		idBlob := strings.Join(idParts, " ")
+		release.ImdbID, release.TmdbID, release.TvdbID = ParseProviderIDs(idBlob)
+		release.AnidbID, release.AnilistID, release.MalID = ParseAnimeIDs(idBlob)
 	}
 
 	if release != nil && release.Strategy == StrategyMusicCurated {
@@ -123,6 +125,8 @@ type releaseCandidate struct {
 func findBestReleaseCandidate(segments []string, forcedHint SceneMediaKind) *releaseCandidate {
 	var best *releaseCandidate
 
+	animeContext := PathLooksLikeAnime(segments)
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		seg := segments[i]
 		if seg == "" || ShouldSkipSegment(seg) {
@@ -133,6 +137,7 @@ func findBestReleaseCandidate(segments []string, forcedHint SceneMediaKind) *rel
 		if prepared.CleanedName == "" {
 			continue
 		}
+		prepared.AnimeContext = animeContext
 
 		hint := forcedHint
 		if hint == MediaUnknown {
