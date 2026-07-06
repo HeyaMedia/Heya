@@ -1,11 +1,6 @@
 -- name: CreateMediaItem :one
--- enrichment_status is set explicitly (not left to the column default) so the
--- local-materialize path can stamp 'local' AT INSERT — that's what makes the
--- partial unique index idx_media_items_local_identity (WHERE
--- enrichment_status='local') catch the concurrent-materialize race at create
--- time. Non-local callers pass 'pending' (the prior default).
-INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug, enrichment_status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, sqlc.arg(enrichment_status))
+INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING *;
 
 -- name: GetMediaItemByID :one
@@ -102,24 +97,6 @@ WHERE library_id = $1
   AND lower(btrim(title)) = lower(btrim(sqlc.arg(title)))
   AND (sqlc.arg(include_matched)::boolean OR enrichment_status = 'local')
 ORDER BY (enrichment_status = 'local') ASC, id ASC
-LIMIT 1;
-
--- name: FindLocalMediaItemByIdentity :one
--- The enrichment_status='local' counterpart of FindMediaItemByIdentity, for the
--- matcher's create-time retry: when a concurrent metadata_match worker wins the
--- natural-identity race (23505 on idx_media_items_local_identity), re-resolve
--- the winner by the exact predicate the partial unique index enforces so the
--- loser's file links to it. Scoped to un-enriched local stubs ('local'), which
--- the local path now stamps at INSERT, so it resolves the winner the instant its
--- row commits — the moment the conflict fires. Enriched items ('complete') have
--- left the index and are never matched here.
-SELECT * FROM media_items
-WHERE library_id = $1
-  AND media_type = sqlc.arg(media_type)
-  AND year       = sqlc.arg(year)
-  AND lower(btrim(title)) = lower(btrim(sqlc.arg(title)))
-  AND enrichment_status = 'local'
-ORDER BY id ASC
 LIMIT 1;
 
 -- name: SetMediaItemFieldProvenance :exec

@@ -170,7 +170,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"process_file":         {MaxWorkers: 1}, // priority bands: P1=watcher, P2=scan
 			"ffprobe":              {MaxWorkers: 1},
 			"detect_local_assets":  {MaxWorkers: 1},
-			"metadata_match":       {MaxWorkers: 4}, // heya.media search per file; parallelizes cold scans. The natural-identity create race is guarded by idx_media_items_local_identity (partial unique, provider_kind='local') + retry-on-conflict in createOrLinkMediaItem.
+			"metadata_match":       {MaxWorkers: 1},
 
 			// Enrich pipeline (external rate-limit safety).
 			"enrich_media_item":      {MaxWorkers: 1}, // priority bands P1=watcher/view, P2=movies+tv, P3=music+books

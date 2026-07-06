@@ -34,8 +34,8 @@ func (q *Queries) CountMediaItemsByType(ctx context.Context, mediaType MediaType
 }
 
 const createMediaItem = `-- name: CreateMediaItem :one
-INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug, enrichment_status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked
 `
 
@@ -55,14 +55,8 @@ type CreateMediaItemParams struct {
 	Status           string    `json:"status"`
 	ProviderKind     string    `json:"provider_kind"`
 	HeyaSlug         string    `json:"heya_slug"`
-	EnrichmentStatus string    `json:"enrichment_status"`
 }
 
-// enrichment_status is set explicitly (not left to the column default) so the
-// local-materialize path can stamp 'local' AT INSERT — that's what makes the
-// partial unique index idx_media_items_local_identity (WHERE
-// enrichment_status='local') catch the concurrent-materialize race at create
-// time. Non-local callers pass 'pending' (the prior default).
 func (q *Queries) CreateMediaItem(ctx context.Context, arg CreateMediaItemParams) (MediaItem, error) {
 	row := q.db.QueryRow(ctx, createMediaItem,
 		arg.LibraryID,
@@ -80,7 +74,6 @@ func (q *Queries) CreateMediaItem(ctx context.Context, arg CreateMediaItemParams
 		arg.Status,
 		arg.ProviderKind,
 		arg.HeyaSlug,
-		arg.EnrichmentStatus,
 	)
 	var i MediaItem
 	err := row.Scan(
@@ -130,80 +123,6 @@ DELETE FROM media_items WHERE id = $1
 func (q *Queries) DeleteMediaItem(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, deleteMediaItem, id)
 	return err
-}
-
-const findLocalMediaItemByIdentity = `-- name: FindLocalMediaItemByIdentity :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
-WHERE library_id = $1
-  AND media_type = $2
-  AND year       = $3
-  AND lower(btrim(title)) = lower(btrim($4))
-  AND enrichment_status = 'local'
-ORDER BY id ASC
-LIMIT 1
-`
-
-type FindLocalMediaItemByIdentityParams struct {
-	LibraryID int64     `json:"library_id"`
-	MediaType MediaType `json:"media_type"`
-	Year      string    `json:"year"`
-	Title     string    `json:"title"`
-}
-
-// The enrichment_status='local' counterpart of FindMediaItemByIdentity, for the
-// matcher's create-time retry: when a concurrent metadata_match worker wins the
-// natural-identity race (23505 on idx_media_items_local_identity), re-resolve
-// the winner by the exact predicate the partial unique index enforces so the
-// loser's file links to it. Scoped to un-enriched local stubs ('local'), which
-// the local path now stamps at INSERT, so it resolves the winner the instant its
-// row commits — the moment the conflict fires. Enriched items ('complete') have
-// left the index and are never matched here.
-func (q *Queries) FindLocalMediaItemByIdentity(ctx context.Context, arg FindLocalMediaItemByIdentityParams) (MediaItem, error) {
-	row := q.db.QueryRow(ctx, findLocalMediaItemByIdentity,
-		arg.LibraryID,
-		arg.MediaType,
-		arg.Year,
-		arg.Title,
-	)
-	var i MediaItem
-	err := row.Scan(
-		&i.ID,
-		&i.LibraryID,
-		&i.MediaType,
-		&i.Title,
-		&i.SortTitle,
-		&i.Year,
-		&i.Description,
-		&i.PosterPath,
-		&i.BackdropPath,
-		&i.ExternalIds,
-		&i.Slug,
-		&i.Homepage,
-		&i.Tagline,
-		&i.OriginalTitle,
-		&i.OriginalLanguage,
-		&i.Status,
-		&i.ProviderKind,
-		&i.HeyaSlug,
-		&i.HeyaEnrichedAt,
-		&i.MetadataRefreshedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.SearchVector,
-		&i.MatchedAt,
-		&i.EnrichmentStatus,
-		&i.BaseEnrichedAt,
-		&i.PeopleEnrichedAt,
-		&i.ExtrasEnrichedAt,
-		&i.ImagesEnrichedAt,
-		&i.StructureEnrichedAt,
-		&i.LastEnrichAttemptAt,
-		&i.LastEnrichError,
-		&i.FieldProvenance,
-		&i.MatchConfidence,
-		&i.SlugLocked,
-	)
-	return i, err
 }
 
 const findMediaItemByIdentity = `-- name: FindMediaItemByIdentity :one

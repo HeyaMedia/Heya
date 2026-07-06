@@ -739,12 +739,11 @@ func (m *Matcher) upsertMusicArtist(ctx context.Context, libraryID int64, name, 
 	extJSON, _ := json.Marshal(extIDs)
 
 	item, err := m.q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
-		LibraryID:        libraryID,
-		MediaType:        sqlc.MediaTypeMusic,
-		Title:            name,
-		SortTitle:        strings.ToLower(name),
-		ExternalIds:      extJSON,
-		EnrichmentStatus: "pending",
+		LibraryID:   libraryID,
+		MediaType:   sqlc.MediaTypeMusic,
+		Title:       name,
+		SortTitle:   strings.ToLower(name),
+		ExternalIds: extJSON,
 	})
 	if err != nil {
 		// Race recovery: a concurrent worker may have created the same artist
