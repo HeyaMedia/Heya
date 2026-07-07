@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Battlestar Galactica</title>
+  <year>1978</year>
+  <premiered>1978-09-17</premiered>
+  <plot>The original series, intentionally colliding by title with the 2004 show.</plot>
+  <genre>Adventure</genre>
+  <genre>Science Fiction</genre>
+  <studio>ABC</studio>
+  <imdb_id>tt0076984</imdb_id>
+  <uniqueid type="imdb" default="true">tt0076984</uniqueid>
+</tvshow>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Everything Everywhere All at Once</title>
+  <originaltitle>Everything Everywhere All at Once</originaltitle>
+  <plot>The file is named feature.mkv, so folder and NFO evidence should carry identity.</plot>
+  <year>2022</year>
+  <premiered>2022-03-25</premiered>
+  <runtime>140</runtime>
+  <uniqueid type="tmdb" default="true">545611</uniqueid>
+  <uniqueid type="imdb">tt6710474</uniqueid>
+</movie>

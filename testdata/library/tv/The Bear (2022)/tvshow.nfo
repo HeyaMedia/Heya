@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>The Bear</title>
+  <originaltitle>The Bear</originaltitle>
+  <year>2022</year>
+  <premiered>2022-06-23</premiered>
+  <plot>A young chef returns home to run his family's sandwich shop.</plot>
+  <genre>Drama</genre>
+  <genre>Comedy</genre>
+  <studio>FX</studio>
+  <imdb_id>tt14452776</imdb_id>
+  <tmdbid>136315</tmdbid>
+  <tvdbid>397187</tvdbid>
+  <uniqueid type="tmdb" default="true">136315</uniqueid>
+  <uniqueid type="imdb">tt14452776</uniqueid>
+  <uniqueid type="tvdb">397187</uniqueid>
+</tvshow>

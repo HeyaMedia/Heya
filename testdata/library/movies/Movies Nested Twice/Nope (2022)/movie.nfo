@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Nope</title>
+  <originaltitle>Nope</originaltitle>
+  <plot>Nested movie folder under an extra non-movie grouping directory.</plot>
+  <year>2022</year>
+  <premiered>2022-07-22</premiered>
+  <uniqueid type="tmdb" default="true">762504</uniqueid>
+  <uniqueid type="imdb">tt10954984</uniqueid>
+</movie>

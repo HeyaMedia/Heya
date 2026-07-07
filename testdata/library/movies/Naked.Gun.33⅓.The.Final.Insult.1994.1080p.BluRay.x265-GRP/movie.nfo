@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Naked Gun 33 1/3: The Final Insult</title>
+  <originaltitle>Naked Gun 33 1/3: The Final Insult</originaltitle>
+  <plot>Unicode fraction in the filename, normalized title in NFO.</plot>
+  <year>1994</year>
+  <premiered>1994-03-18</premiered>
+  <runtime>83</runtime>
+  <uniqueid type="imdb" default="true">tt0110622</uniqueid>
+</movie>

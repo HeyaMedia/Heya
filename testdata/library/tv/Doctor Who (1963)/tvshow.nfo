@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Doctor Who</title>
+  <year>1963</year>
+  <premiered>1963-11-23</premiered>
+  <plot>The original run of the time-travelling science-fiction series.</plot>
+  <genre>Adventure</genre>
+  <genre>Science Fiction</genre>
+  <studio>BBC One</studio>
+  <imdb_id>tt0056751</imdb_id>
+  <tmdbid>121</tmdbid>
+  <tvdbid>76107</tvdbid>
+  <uniqueid type="tmdb" default="true">121</uniqueid>
+  <uniqueid type="imdb">tt0056751</uniqueid>
+  <uniqueid type="tvdb">76107</uniqueid>
+</tvshow>

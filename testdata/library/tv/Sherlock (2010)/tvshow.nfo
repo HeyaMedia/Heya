@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Sherlock</title>
+  <year>2010</year>
+  <premiered>2010-07-25</premiered>
+  <plot>Modern Holmes, added here as a compact short-season multi-episode stress case.</plot>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <imdb_id>tt1475582</imdb_id>
+  <tmdbid>19885</tmdbid>
+  <tvdbid>176941</tvdbid>
+  <uniqueid type="tmdb" default="true">19885</uniqueid>
+  <uniqueid type="imdb">tt1475582</uniqueid>
+  <uniqueid type="tvdb">176941</uniqueid>
+</tvshow>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Mad Max: Fury Road</title>
+  <originaltitle>Mad Max: Fury Road</originaltitle>
+  <plot>Main movie plus sample, extras directories, subtitles, and multiple image names.</plot>
+  <year>2015</year>
+  <premiered>2015-05-15</premiered>
+  <runtime>121</runtime>
+  <genre>Action</genre>
+  <uniqueid type="tmdb" default="true">76341</uniqueid>
+  <uniqueid type="imdb">tt1392190</uniqueid>
+</movie>

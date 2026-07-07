@@ -15,7 +15,10 @@ bin/
 .env.local
 
 # Data
-data/
+data/*
+!data/postgres/
+data/postgres/*
+!data/postgres/.gitkeep
 tmp/
 
 # IDE
@@ -37,7 +40,6 @@ web/.output/
 web/.nuxt/
 web/dist/*
 !web/dist/.gitkeep
-data/postgres/
 
 # Compiled binary at repo root
 /heya

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<episodedetails>
+  <title>The Bear</title>
+  <season>2</season>
+  <episode>10</episode>
+  <aired>2023-06-22</aired>
+  <plot>A correctly named episode living directly in the show folder.</plot>
+  <uniqueid type="tmdb" default="true">4451899</uniqueid>
+</episodedetails>

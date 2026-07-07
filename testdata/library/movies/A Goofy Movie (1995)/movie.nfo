@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>A Goofy Movie</title>
+  <originaltitle>A Goofy Movie</originaltitle>
+  <plot>Tagged file with a simple local NFO.</plot>
+  <year>1995</year>
+  <premiered>1995-04-07</premiered>
+  <runtime>78</runtime>
+  <genre>Animation</genre>
+  <uniqueid type="imdb" default="true">tt0113198</uniqueid>
+</movie>

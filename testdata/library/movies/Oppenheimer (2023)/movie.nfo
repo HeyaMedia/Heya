@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Oppenheimer</title>
+  <originaltitle>Oppenheimer</originaltitle>
+  <plot>Very clean provider-tagged main movie with ignored behind-the-scenes material.</plot>
+  <year>2023</year>
+  <premiered>2023-07-21</premiered>
+  <runtime>181</runtime>
+  <uniqueid type="tmdb" default="true">872585</uniqueid>
+  <uniqueid type="imdb">tt15398776</uniqueid>
+</movie>

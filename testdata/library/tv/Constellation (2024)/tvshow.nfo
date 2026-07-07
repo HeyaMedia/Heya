@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Constellation</title>
+  <year>2024</year>
+  <premiered>2024-02-21</premiered>
+  <plot>A sparse sidecar case where .plexmatch carries the stronger identity.</plot>
+  <genre>Science Fiction</genre>
+  <genre>Thriller</genre>
+  <studio>Apple TV+</studio>
+  <imdb_id>tt19395018</imdb_id>
+  <uniqueid type="imdb" default="true">tt19395018</uniqueid>
+</tvshow>

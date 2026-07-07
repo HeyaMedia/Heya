@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>The Lord of the Rings: The Fellowship of the Ring</title>
+  <originaltitle>The Lord of the Rings: The Fellowship of the Ring</originaltitle>
+  <sorttitle>lord of the rings 1</sorttitle>
+  <plot>Clean library folder, verbose edition tags in filename, and both IMDb/TMDb ids.</plot>
+  <year>2001</year>
+  <premiered>2001-12-19</premiered>
+  <runtime>178</runtime>
+  <genre>Fantasy</genre>
+  <uniqueid type="tmdb" default="true">120</uniqueid>
+  <uniqueid type="imdb">tt0120737</uniqueid>
+  <set tmdbcolid="119">
+    <name>The Lord of the Rings Collection</name>
+  </set>
+</movie>

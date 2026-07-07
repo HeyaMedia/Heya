@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Actually Corrected By NFO</title>
+  <originaltitle>Actually Corrected By NFO</originaltitle>
+  <plot>The filename lies. This checks that local metadata can override it.</plot>
+  <year>2021</year>
+  <premiered>2021-01-01</premiered>
+  <runtime>90</runtime>
+  <uniqueid type="imdb" default="true">tt0000001</uniqueid>
+  <uniqueid type="tmdb">999001</uniqueid>
+</movie>

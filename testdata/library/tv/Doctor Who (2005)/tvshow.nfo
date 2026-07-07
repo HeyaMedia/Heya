@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Doctor Who</title>
+  <year>2005</year>
+  <premiered>2005-03-26</premiered>
+  <plot>The revived run of the time-travelling science-fiction series.</plot>
+  <genre>Adventure</genre>
+  <genre>Science Fiction</genre>
+  <studio>BBC One</studio>
+  <imdb_id>tt0436992</imdb_id>
+  <tmdbid>57243</tmdbid>
+  <tvdbid>78804</tvdbid>
+  <uniqueid type="tmdb" default="true">57243</uniqueid>
+  <uniqueid type="imdb">tt0436992</uniqueid>
+  <uniqueid type="tvdb">78804</uniqueid>
+</tvshow>

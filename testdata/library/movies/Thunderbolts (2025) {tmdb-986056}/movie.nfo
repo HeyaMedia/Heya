@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Thunderbolts</title>
+  <originaltitle>Thunderbolts*</originaltitle>
+  <plot>Clean library movie with the provider id on the folder.</plot>
+  <year>2025</year>
+  <premiered>2025-05-02</premiered>
+  <runtime>127</runtime>
+  <genre>Action</genre>
+  <uniqueid type="tmdb" default="true">986056</uniqueid>
+  <uniqueid type="imdb">tt20969586</uniqueid>
+</movie>

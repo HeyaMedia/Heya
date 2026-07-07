@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Slow Horses</title>
+  <year>2022</year>
+  <premiered>2022-04-01</premiered>
+  <plot>Disgraced MI5 agents work out of Slough House.</plot>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <studio>Apple TV+</studio>
+  <imdb_id>tt5875444</imdb_id>
+  <tmdbid>95480</tmdbid>
+  <uniqueid type="tmdb" default="true">95480</uniqueid>
+  <uniqueid type="imdb">tt5875444</uniqueid>
+</tvshow>

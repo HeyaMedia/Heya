@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Battlestar Galactica</title>
+  <year>2004</year>
+  <premiered>2004-10-18</premiered>
+  <plot>The reimagined series, intentionally colliding by title with the 1978 show.</plot>
+  <genre>Drama</genre>
+  <genre>Science Fiction</genre>
+  <studio>Syfy</studio>
+  <imdb_id>tt0407362</imdb_id>
+  <tmdbid>1972</tmdbid>
+  <tvdbid>73545</tvdbid>
+  <uniqueid type="tmdb" default="true">1972</uniqueid>
+  <uniqueid type="imdb">tt0407362</uniqueid>
+  <uniqueid type="tvdb">73545</uniqueid>
+</tvshow>
