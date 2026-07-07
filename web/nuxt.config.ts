@@ -6,19 +6,33 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss', 'nuxt-open-fetch', 'nuxt-phosphor-icons', '@vueuse/nuxt', '@nuxt/image', '@vite-pwa/nuxt'],
 
   // PWA install support (Wave 4 of docs/responsive-plan.md). Self-hosted app
-  // with frequent tagged releases, so `autoUpdate` — the new service worker
-  // takes over silently on next load instead of nagging the user with an
-  // "update available" prompt. `generateSW` (the module default) precaches
-  // the built app shell. The ONLY `/api/*` requests the SW intercepts are
-  // media images (see the `runtimeCaching` rule below, StaleWhileRevalidate) — auth,
-  // streaming, and every other API route match no rule, so the SW leaves them
-  // alone and they always hit the network fresh. `navigateFallback` covers
-  // deep-link/SPA navigations the same way `spaHandler` does server-side
+  // with frequent tagged releases. `generateSW` (the module default) precaches
+  // the built app shell, so a freshly deployed version stays invisible until
+  // the service worker is refreshed — and on an installed standalone PWA that
+  // refresh almost never happens on its own (the app resumes an SPA session;
+  // client-side routing never re-checks the SW), so updates would silently
+  // stall on phones/tablets. `registerType: 'prompt'` (NOT 'autoUpdate') hands
+  // the "new version waiting" signal to app/plugins/pwa-update.client.ts, which
+  // polls for updates (client.periodicSyncForUpdates below, plus on foreground
+  // + boot) and applies them SILENTLY — but only while nothing is playing, so a
+  // song/video is never cut off mid-playback (autoUpdate would reload the
+  // instant an update landed, interrupting playback).
+  //
+  // The ONLY `/api/*` requests the SW intercepts are media images (see the
+  // `runtimeCaching` rule below, StaleWhileRevalidate) — auth, streaming, and
+  // every other API route match no rule, so the SW leaves them alone and they
+  // always hit the network fresh. `navigateFallback` covers deep-link/SPA
+  // navigations the same way `spaHandler` does server-side
   // (internal/server/frontend.go always serves index.html for unknown paths);
   // the denylist keeps that fallback from ever answering a top-level
   // navigation to an API path (e.g. an image URL opened directly).
   pwa: {
-    registerType: 'autoUpdate',
+    registerType: 'prompt',
+    // Poll for a new service worker hourly while the app is open; the plugin
+    // layers on foreground + boot checks and applies the update when idle.
+    client: {
+      periodicSyncForUpdates: 3600,
+    },
     manifest: {
       id: '/',
       name: 'Heya',
