@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Dune</title>
+  <originaltitle>Dune</originaltitle>
+  <sorttitle>dune</sorttitle>
+  <ratings>
+    <rating name="imdb" max="10" default="true">
+      <value>8</value>
+      <votes>1066679</votes>
+    </rating>
+    <rating name="themoviedb" max="10">
+      <value>7.78</value>
+      <votes>15025</votes>
+    </rating>
+    <rating name="tomatometerallcritics" max="100">
+      <value>83</value>
+    </rating>
+  </ratings>
+  <rating>7.78</rating>
+  <criticrating>83</criticrating>
+  <userrating />
+  <top250 />
+  <outline />
+  <plot>Paul Atreides, a brilliant and gifted young man born into a great destiny beyond his understanding, must travel to the most dangerous planet in the universe to ensure the future of his family and his people. As malevolent forces explode into conflict over the planet's exclusive supply of the most precious resource in existence-a commodity capable of unlocking humanity's greatest potential-only those who can conquer their fear will survive.</plot>
+  <tagline />
+  <runtime>155</runtime>
+  <thumb aspect="poster" preview="https://image.tmdb.org/t/p/original/gDzOcq0pfeCeqMBwKIJlSmQpjkZ.jpg">https://image.tmdb.org/t/p/original/gDzOcq0pfeCeqMBwKIJlSmQpjkZ.jpg</thumb>
+  <fanart>
+    <thumb preview="https://image.tmdb.org/t/p/original/zRKQW58MBEY078AxkHxEJzUskCl.jpg">https://image.tmdb.org/t/p/original/zRKQW58MBEY078AxkHxEJzUskCl.jpg</thumb>
+  </fanart>
+  <mpaa>PG-13</mpaa>
+  <playcount />
+  <lastplayed />
+  <id>438631</id>
+  <uniqueid type="tmdb" default="true">438631</uniqueid>
+  <uniqueid type="imdb">tt1160419</uniqueid>
+  <genre>Science Fiction</genre>
+  <genre>Adventure</genre>
+  <country />
+  <set tmdbcolid="726871">
+    <name>Dune Collection</name>
+    <overview />
+  </set>
+  <tag>1-lilllamah</tag>
+  <status>Released</status>
+  <credits>Denis Villeneuve</credits>
+  <credits>Eric Roth</credits>
+  <credits>Jon Spaihts</credits>
+  <director>Denis Villeneuve</director>
+  <premiered>2021-09-15</premiered>
+  <year>2021</year>
+  <studio>Legendary Pictures</studio>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=w0HgHet0sxg</trailer>
+  <watched>false</watched>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <aspect>1.7777778</aspect>
+        <bitrate>297584</bitrate>
+        <codec>AV1</codec>
+        <framerate>23.976023976023976023976023976</framerate>
+        <height>1080</height>
+        <scantype>Progressive</scantype>
+        <width>1920</width>
+        <duration>155.41653333333332</duration>
+        <durationinseconds>9325</durationinseconds>
+        <hdrtype>hdr10</hdrtype>
+      </video>
+      <audio>
+        <bitrate>768000</bitrate>
+        <channels>6</channels>
+        <codec>EAC3 Atmos</codec>
+        <language>eng</language>
+      </audio>
+      <subtitle>
+        <language>eng</language>
+      </subtitle>
+      <subtitle>
+        <language>eng</language>
+      </subtitle>
+      <subtitle>
+        <language>spa</language>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <actor>
+    <name>Timothée Chalamet</name>
+    <role>Paul Atreides</role>
+    <order>0</order>
+    <thumb>https://image.tmdb.org/t/p/original/dFxpwRpmzpVfP1zjluH68DeQhyj.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Rebecca Ferguson</name>
+    <role>Lady Jessica Atreides</role>
+    <order>1</order>
+    <thumb>https://image.tmdb.org/t/p/original/lJloTOheuQSirSLXNA3JHsrMNfH.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Oscar Isaac</name>
+    <role>Duke Leto Atreides</role>
+    <order>2</order>
+    <thumb>https://image.tmdb.org/t/p/original/dW5U5yrIIPmMjRThR9KT2xH6nTz.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Jason Momoa</name>
+    <role>Duncan Idaho</role>
+    <order>3</order>
+    <thumb>https://image.tmdb.org/t/p/original/3troAR6QbSb6nUFMDu61YCCWLKa.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Stellan Skarsgård</name>
+    <role>Baron Vladimir Harkonnen</role>
+    <order>4</order>
+    <thumb>https://image.tmdb.org/t/p/original/mW7xmtGV4y79kQGn0zkKVGDMAmw.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Stephen McKinley Henderson</name>
+    <role>Thufir Hawat</role>
+    <order>5</order>
+    <thumb>https://image.tmdb.org/t/p/original/z2weSPo4sdMNj47tP5o0me41r2z.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Josh Brolin</name>
+    <role>Gurney Halleck</role>
+    <order>6</order>
+    <thumb>https://image.tmdb.org/t/p/original/sX2etBbIkxRaCsATyw5ZpOVMPTD.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Javier Bardem</name>
+    <role>Stilgar</role>
+    <order>7</order>
+    <thumb>https://image.tmdb.org/t/p/original/p5xjCovj1uzvA2SXrWLH78Nh1Jf.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Sharon Duncan-Brewster</name>
+    <role>Dr. Liet Kynes</role>
+    <order>8</order>
+    <thumb>https://image.tmdb.org/t/p/original/gp5h6rOrqBrIGgID4AMd58O6Ow6.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Chang Chen</name>
+    <role>Dr. Wellington Yueh</role>
+    <order>9</order>
+    <thumb>https://image.tmdb.org/t/p/original/4BOQ5pJXdsArkMHvyVhrV8Ditnr.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Dave Bautista</name>
+    <role>Beast Rabban Harkonnen</role>
+    <order>10</order>
+    <thumb>https://image.tmdb.org/t/p/original/snk6JiXOOoRjPtHU5VMoy6qbd32.jpg</thumb>
+  </actor>
+  <actor>
+    <name>David Dastmalchian</name>
+    <role>Piter de Vries</role>
+    <order>11</order>
+    <thumb>https://image.tmdb.org/t/p/original/nER1Vzhk51pGHb60KBF1Ja5tEXA.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Zendaya</name>
+    <role>Chani</role>
+    <order>12</order>
+    <thumb>https://image.tmdb.org/t/p/original/3WdOloHpjtjL96uVOhFRRCcYSwq.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Charlotte Rampling</name>
+    <role>Reverend Mother Mohiam</role>
+    <order>13</order>
+    <thumb>https://image.tmdb.org/t/p/original/Htvl9mN6mlf2a18RAFzNXF3RiG.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Babs Olusanmokun</name>
+    <role>Jamis</role>
+    <order>14</order>
+    <thumb>https://image.tmdb.org/t/p/original/bqycmpUrpISeLzQniiYwAZ5X1RN.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Benjamin Clementine</name>
+    <role>Herald of the Change</role>
+    <order>15</order>
+    <thumb>https://image.tmdb.org/t/p/original/johpHbzqrue6XDG63vapfugGbnn.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Souad Faress</name>
+    <role>Bene Gesserit Sister</role>
+    <order>16</order>
+    <thumb>https://image.tmdb.org/t/p/original/aEGdIch9eRzJcsAGbF7mAZPUiXt.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Golda Rosheuvel</name>
+    <role>Shadout Mapes</role>
+    <order>17</order>
+    <thumb>https://image.tmdb.org/t/p/original/nlSIvTWzMEzZGljKYgpZxGcsJtv.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Roger Yuan</name>
+    <role>Lieutenant Lanville</role>
+    <order>18</order>
+    <thumb>https://image.tmdb.org/t/p/original/jHdxbT6n3ToYKw0DVFIUkva86SO.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Seun Shote</name>
+    <role>Arrakeen Residency Gardener</role>
+    <order>19</order>
+    <thumb>https://image.tmdb.org/t/p/original/33szNjKtUsTxlwV039Gec2PKQS2.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Neil Bell</name>
+    <role>Sardaukar Bashar</role>
+    <order>20</order>
+    <thumb>https://image.tmdb.org/t/p/original/3K3dDytqtTSaGrDZ3qOHYpJUGea.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Oliver Ryan</name>
+    <role>Hawat Specialist</role>
+    <order>21</order>
+    <thumb>https://image.tmdb.org/t/p/original/S0YPiYOSikfqjR6HMuxoFDzh0f.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Stephen Collins</name>
+    <role>Harkonnen Trooper</role>
+    <order>22</order>
+    <thumb>https://image.tmdb.org/t/p/original/86LlKrbvYVmR4Ca9fARwUoY5TgJ.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Charlie Rawes</name>
+    <role>Harkonnen Trooper</role>
+    <order>23</order>
+    <thumb>https://image.tmdb.org/t/p/original/zsARROMEHNANOAI8wntYcn3BpOM.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Richard Carter</name>
+    <role>Harkonnen Trooper</role>
+    <order>24</order>
+    <thumb>https://image.tmdb.org/t/p/original/vwMG8213y9UiCDXBPIUwzhVxUcX.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Benjamin Dilloway</name>
+    <role>Sardaukar Assassin</role>
+    <order>25</order>
+    <thumb>https://image.tmdb.org/t/p/original/reXJcitDu5hsCO7Hlra2ZFzr6Nn.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Elmi Rashid Elmi</name>
+    <role>Shamir</role>
+    <order>26</order>
+    <thumb>https://image.tmdb.org/t/p/original/kMH7mX7rzVrrPuWL0qVeYExXVcx.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Tachia Newall</name>
+    <role>Tanat</role>
+    <order>27</order>
+    <thumb>https://image.tmdb.org/t/p/original/ywvojfXK3uzw0IgVEVg3j00GPuy.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Gloria Obianyo</name>
+    <role>Female Fremen</role>
+    <order>28</order>
+    <thumb>https://image.tmdb.org/t/p/original/8vRsNhtxFzYsHQItIKwcMW9flts.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Fehinti Balogun</name>
+    <role>Male Fremen</role>
+    <order>29</order>
+    <thumb>https://image.tmdb.org/t/p/original/lNpDOJn9wMkMg8XLqTvdwxDcztL.jpg</thumb>
+  </actor>
+</movie>

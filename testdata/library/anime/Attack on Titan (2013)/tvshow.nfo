@@ -1,0 +1,172 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<tvshow>
+  <plot>100 years ago, the last remnants of humanity were forced to retreat behind the towering walls of a fortified city to escape the massive, man-eating Titans that roamed the land outside their fortress. Only the members of the Scouting Legion dared to stray beyond the safety of the walls – but even those brave warriors seldom returned alive. Those within the city clung to the illusion of a peaceful existence until the day that dream was shattered, and their slim chance at survival was reduced to one horrifying choice: kill – or be devoured!</plot>
+  <outline>100 years ago, the last remnants of humanity were forced to retreat behind the towering walls of a fortified city to escape the massive, man-eating Titans that roamed the land outside their fortress. Only the members of the Scouting Legion dared to stray beyond the safety of the walls – but even those brave warriors seldom returned alive. Those within the city clung to the illusion of a peaceful existence until the day that dream was shattered, and their slim chance at survival was reduced to one horrifying choice: kill – or be devoured!</outline>
+  <lockdata>false</lockdata>
+  <dateadded>2026-05-10 20:39:40</dateadded>
+  <title>Attack on Titan</title>
+  <originaltitle>進撃の巨人</originaltitle>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=HJaUvV9Hwgs</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=luYOt2-c2TI</trailer>
+  <rating>8.677</rating>
+  <year>2013</year>
+  <mpaa>TV-MA</mpaa>
+  <collectionnumber>1429</collectionnumber>
+  <imdb_id>tt2560140</imdb_id>
+  <tmdbid>1429</tmdbid>
+  <premiered>2013-04-07</premiered>
+  <releasedate>2013-04-07</releasedate>
+  <enddate>2022-04-04</enddate>
+  <runtime>0</runtime>
+  <genre>Action &amp; Adventure</genre>
+  <genre>Animation</genre>
+  <genre>Sci-Fi &amp; Fantasy</genre>
+  <studio>MBS</studio>
+  <studio>NHK G</studio>
+  <studio>Tokyo MX</studio>
+  <studio>Wit Studio</studio>
+  <tag>anime</tag>
+  <tag>baffled</tag>
+  <tag>based on manga</tag>
+  <tag>complex</tag>
+  <tag>dark fantasy</tag>
+  <tag>dystopia</tag>
+  <tag>family tragedy</tag>
+  <tag>fascism</tag>
+  <tag>foreboding</tag>
+  <tag>furious</tag>
+  <tag>giant monster</tag>
+  <tag>gore</tag>
+  <tag>military</tag>
+  <tag>mystery</tag>
+  <tag>political intrigue</tag>
+  <tag>politics</tag>
+  <tag>reflective</tag>
+  <tag>revenge</tag>
+  <tag>serious</tag>
+  <tag>shounen</tag>
+  <tag>super power</tag>
+  <tag>survival</tag>
+  <tag>suspense</tag>
+  <tag>tragedy</tag>
+  <tag>tragic</tag>
+  <tag>war</tag>
+  <anidbid>10944</anidbid>
+  <tvdbid>267440</tvdbid>
+  <tvmazeid>919</tvmazeid>
+  <art>
+  </art>
+  <actor>
+    <name>Hitoshi Ito</name>
+    <role>Producer</role>
+    <type>Producer</type>
+  </actor>
+  <actor>
+    <name>Kensuke Tateishi</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/K/Kensuke Tateishi/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Makoto Kimura</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/M/Makoto Kimura/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Tetsuya Endo</name>
+    <role>Producer</role>
+    <type>Producer</type>
+  </actor>
+  <actor>
+    <name>Tetsuya Kinoshita</name>
+    <role>Producer</role>
+    <type>Producer</type>
+  </actor>
+  <actor>
+    <name>Toshihiro Maeda</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/T/Toshihiro Maeda/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yasuyuki Nishiya</name>
+    <role>Producer</role>
+    <type>Producer</type>
+  </actor>
+  <actor>
+    <name>Yuki Kaji</name>
+    <role>Eren Yeager (voice)</role>
+    <type>Actor</type>
+    <sortorder>0</sortorder>
+    <thumb>/config/data/metadata/People/Y/Yuki Kaji/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yui Ishikawa</name>
+    <role>Mikasa Ackerman (voice)</role>
+    <type>Actor</type>
+    <sortorder>1</sortorder>
+    <thumb>/config/data/metadata/People/Y/Yui Ishikawa/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Marina Inoue</name>
+    <role>Armin Arlert (voice)</role>
+    <type>Actor</type>
+    <sortorder>2</sortorder>
+    <thumb>/config/data/metadata/People/M/Marina Inoue/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Kisho Taniyama</name>
+    <role>Jean Kirstein (voice)</role>
+    <type>Actor</type>
+    <sortorder>4</sortorder>
+    <thumb>/config/data/metadata/People/K/Kisho Taniyama/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Hiro Shimono</name>
+    <role>Connie Springer (voice)</role>
+    <type>Actor</type>
+    <sortorder>5</sortorder>
+    <thumb>/config/data/metadata/People/H/Hiro Shimono/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yoshimasa Hosoya</name>
+    <role>Reiner Braun (voice)</role>
+    <type>Actor</type>
+    <sortorder>6</sortorder>
+    <thumb>/config/data/metadata/People/Y/Yoshimasa Hosoya/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Takehito Koyasu</name>
+    <role>Zeke (voice)</role>
+    <type>Actor</type>
+    <sortorder>10</sortorder>
+    <thumb>/config/data/metadata/People/T/Takehito Koyasu/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Ayane Sakura</name>
+    <role>Gabi Braun (voice)</role>
+    <type>Actor</type>
+    <sortorder>18</sortorder>
+    <thumb>/config/data/metadata/People/A/Ayane Sakura/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Natsuki Hanae</name>
+    <role>Falco Grice (voice)</role>
+    <type>Actor</type>
+    <sortorder>19</sortorder>
+    <thumb>/config/data/metadata/People/N/Natsuki Hanae/folder.jpg</thumb>
+  </actor>
+  <id>267440</id>
+  <episodeguide>
+    <url cache="267440.xml">http://www.thetvdb.com/api/1D62F2F90030C444/series/267440/all/en.zip</url>
+  </episodeguide>
+  <season>-1</season>
+  <episode>-1</episode>
+  <status>Ended</status>
+  <tvdbslugid>attack-on-titan</tvdbslugid>
+  <uniqueid type="tvdb" default="true">267440</uniqueid>
+  <uniqueid type="imdb">tt2560140</uniqueid>
+  <uniqueid type="tmdb">1429</uniqueid>
+  <uniqueid type="tvmaze">919</uniqueid>
+</tvshow>

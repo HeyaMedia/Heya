@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<tvshow>
+  <title>True Detective</title>
+  <originaltitle>True Detective</originaltitle>
+  <plot>A test show standing in for True Detective.</plot>
+  <year>2014</year>
+  <premiered>2014-01-01</premiered>
+  <status>Ended</status>
+  <genre>Test</genre>
+  <tvdbid>270633</tvdbid>
+</tvshow>

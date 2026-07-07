@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<tvshow>
+  <title>Frieren: Beyond Journey's End</title>
+  <rating>8.9</rating>
+  <plot>Decades after her party defeated the Demon King, an old friend's funeral launches the elf wizard Frieren on a journey of self-discovery.</plot>
+  <mpaa>TV-14</mpaa>
+  <id>424536</id>
+  <uniqueid type="tvdb" default="true">424536</uniqueid>
+  <uniqueid type="imdb">tt22248376</uniqueid>
+  <uniqueid type="tmdb">209867</uniqueid>
+  <uniqueid type="tvmaze">69956</uniqueid>
+  <genre>Adventure</genre>
+  <genre>Animation</genre>
+  <genre>Anime</genre>
+  <genre>Drama</genre>
+  <genre>Fantasy</genre>
+  <tag>5-pernille67</tag>
+  <status>Continuing</status>
+  <premiered>2023-09-29</premiered>
+  <studio>Nippon TV</studio>
+  <actor>
+    <name>Atsumi Tanezaki</name>
+    <role>Frieren</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7866747/61c865002721e.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Nobuhiko Okamoto</name>
+    <role>Himmel</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/303207/5f6e1a73d949d.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yoji Ueda</name>
+    <role>Eisen</role>
+    <thumb>https://artworks.thetvdb.com/banners/v4/actor/8085473/photo/62e235c6b46e3.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Hiroki Touchi</name>
+    <role>Heiter</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/463716/61eb88fb49f52.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Chiaki Kobayashi</name>
+    <role>Stark</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7891643/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Kana Ichinose</name>
+    <role>Fern</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7868437/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Atsuko Tanaka</name>
+    <role> Flamme</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/314895/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Hiroki Yasumoto</name>
+    <role>Qual</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/301118/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Junichi Suwabe</name>
+    <role>Lugner</role>
+    <thumb>https://artworks.thetvdb.com/banners/v4/actor/309354/photo/62e22d918a92f.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Takehito Koyasu</name>
+    <role>Kraft</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/277098/61a63f303ea4d.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Shunsuke Sakuya</name>
+    <role>Granat</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/293448/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Manaka Iwami</name>
+    <role>Linie</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/465329/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Ayana Taketatsu</name>
+    <role>Aura</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/302377/61e1ac092d2ca.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Takuya Eguchi</name>
+    <role>Stoltz</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/292647/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Kouki Ohsuzu</name>
+    <role>Draht</role>
+    <thumb>https://artworks.thetvdb.com/banners/v4/actor/9088969/photo/674b4fb066fc2.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Konomi Kohara</name>
+    <role>Chief of the Village of the Sword</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7891685/6223200d3d1eb.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Daisuke Hirakawa</name>
+    <role>Sein's Older Brother</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/301120/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yuichi Nakamura</name>
+    <role>Sein</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7864375/61a4e29c56d7d.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Hiromichi Tezuka</name>
+    <role>Warrior Gorilla</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7896334/61fd08a8c31ed.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Azumi Waki</name>
+    <role>Kanne</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7881478/641eaaf522c55.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Sayumi Suzushiro</name>
+    <role>Lawine</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7937849/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Kisho Taniyama</name>
+    <role>Wirbel</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/302328/61f9045b57401.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Ikumi Hasegawa</name>
+    <role>Übel</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/485406/61fe2aa3d2a05.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Jirou Saitou</name>
+    <role>Denken</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7891597/5e9c7fd884c60.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Shohei Komatsu</name>
+    <role>Land</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7912268/642e74345f45d.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Eiji Hanawa</name>
+    <role>Richter</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/491377/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Shizuka Ishigami</name>
+    <role>Laufen</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/292640/61e18e969c7ac.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Kanae Itou</name>
+    <role>Ehre</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/464298/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Haruka Terui</name>
+    <role>Sense</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/7915489/61e42b3625916.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Tarusuke Shingaki</name>
+    <role>Genau</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/460216/61a4e667d4193.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yuji Murai</name>
+    <role>Scharf </role>
+    <thumb>https://artworks.thetvdb.com/banners/v4/actor/9128619/photo/667d4b2810007.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Tomoyo Kurosawa</name>
+    <role>Edel</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/469674/61c86de9b382d.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Mariya Ise</name>
+    <role>Serie</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/447326/61a676ffcb24c.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Reina Ueda</name>
+    <role>Methode</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/295192/primary.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Atsushi Miyauchi</name>
+    <role>Lernen</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/450869/62011488c5fd0.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Yasuyuki Kase</name>
+    <role>Stark's Father</role>
+    <thumb>https://artworks.thetvdb.com/banners/person/447321/65086cab8d7f0.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Rie Kawamura</name>
+    <role>Mazoku </role>
+    <thumb>https://artworks.thetvdb.com/banners/v4/actor/8172512/photo/674b55f198574.jpg</thumb>
+  </actor>
+  <episodeguide>{"tvdb":"424536","tvmaze":"69956","tmdb":"209867","imdb":"tt22248376"}</episodeguide>
+</tvshow>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Your Name.</title>
+  <originaltitle>Your Name.</originaltitle>
+  <plot>A test movie standing in for Your Name..</plot>
+  <year>2016</year>
+  <premiered>2016-01-01</premiered>
+  <runtime>2</runtime>
+  <genre>Test</genre>
+  <mpaa>NR</mpaa>
+  <imdb_id>tt5311514</imdb_id>
+</movie>

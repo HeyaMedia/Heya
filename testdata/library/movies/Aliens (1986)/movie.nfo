@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Aliens</title>
+  <originaltitle>Aliens</originaltitle>
+  <plot>A test movie standing in for Aliens.</plot>
+  <year>1986</year>
+  <premiered>1986-01-01</premiered>
+  <runtime>2</runtime>
+  <genre>Test</genre>
+  <mpaa>NR</mpaa>
+  <imdb_id>tt0090605</imdb_id>
+</movie>

@@ -176,15 +176,16 @@ func TestFindAndParseEmptyDir(t *testing.T) {
 }
 
 func TestFindAndParseRealFixture(t *testing.T) {
-	if _, err := os.Stat("../../testdata/scanner/tv/Chainsaw Man (2022)"); err != nil {
+	dir := "../../testdata/library/anime/Attack on Titan (2013)"
+	if _, err := os.Stat(dir); err != nil {
 		t.Skip("fixture not present")
 	}
-	parsed := FindAndParseInDir("../../testdata/scanner/tv/Chainsaw Man (2022)")
+	parsed := FindAndParseInDir(dir)
 	require.NotNil(t, parsed)
-	assert.Equal(t, "Chainsaw Man", parsed.Title)
-	assert.Equal(t, "114410", parsed.TMDBID)
-	assert.Equal(t, "tt13616990", parsed.IMDBID)
-	assert.Equal(t, "2022", parsed.Year)
+	assert.Equal(t, "Attack on Titan", parsed.Title)
+	assert.Equal(t, "1429", parsed.TMDBID)
+	assert.Equal(t, "tt2560140", parsed.IMDBID)
+	assert.Equal(t, "2013", parsed.Year)
 	assert.Equal(t, "tvshow", parsed.Kind)
 }
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Blade Runner 2049</title>
+  <originaltitle>Blade Runner 2049</originaltitle>
+  <plot>A test movie standing in for Blade Runner 2049.</plot>
+  <year>2017</year>
+  <premiered>2017-01-01</premiered>
+  <runtime>2</runtime>
+  <genre>Test</genre>
+  <mpaa>NR</mpaa>
+  <imdb_id>tt1856101</imdb_id>
+</movie>

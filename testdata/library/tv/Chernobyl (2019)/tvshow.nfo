@@ -1,0 +1,158 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<tvshow>
+  <plot>The true story of one of the worst man-made catastrophes in history: the catastrophic nuclear accident at Chernobyl. A tale of the brave men and women who sacrificed to save Europe from unimaginable disaster.</plot>
+  <outline>The true story of one of the worst man-made catastrophes in history: the catastrophic nuclear accident at Chernobyl. A tale of the brave men and women who sacrificed to save Europe from unimaginable disaster.</outline>
+  <lockdata>false</lockdata>
+  <dateadded>2025-07-08 01:21:37</dateadded>
+  <title>Chernobyl</title>
+  <originaltitle>Chernobyl</originaltitle>
+  <writer>Craig Mazin</writer>
+  <credits>Craig Mazin</credits>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=PMlwjCID3Io</trailer>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=s9APLXM9Ei8</trailer>
+  <rating>8.705</rating>
+  <year>2019</year>
+  <mpaa>DK-15</mpaa>
+  <imdb_id>tt7366338</imdb_id>
+  <tmdbid>87108</tmdbid>
+  <premiered>2019-05-06</premiered>
+  <releasedate>2019-05-06</releasedate>
+  <enddate>2019-06-03</enddate>
+  <runtime>0</runtime>
+  <genre>Drama</genre>
+  <studio />
+  <studio>HBO</studio>
+  <tag>1980s</tag>
+  <tag>based on true story</tag>
+  <tag>chernobyl, ukraine</tag>
+  <tag>disaster</tag>
+  <tag>miniseries</tag>
+  <tag>nuclear catastrophe</tag>
+  <tvdbid>360893</tvdbid>
+  <tvmazeid>30770</tvmazeid>
+  <art>
+  </art>
+  <actor>
+    <name>Jared Harris</name>
+    <role>Valery Legasov</role>
+    <type>Actor</type>
+    <sortorder>0</sortorder>
+    <thumb>/config/data/metadata/People/J/Jared Harris/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Sanne Wohlenberg</name>
+    <role>Producer</role>
+    <type>Producer</type>
+    <thumb>/config/data/metadata/People/S/Sanne Wohlenberg/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Stellan Skarsgård</name>
+    <role>Boris Shcherbina</role>
+    <type>Actor</type>
+    <sortorder>1</sortorder>
+    <thumb>/config/data/metadata/People/S/Stellan Skarsgård/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Emily Watson</name>
+    <role>Ulana Khomyuk</role>
+    <type>Actor</type>
+    <sortorder>2</sortorder>
+    <thumb>/config/data/metadata/People/E/Emily Watson/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Paul Ritter</name>
+    <role>Anatoly Dyatlov</role>
+    <type>Actor</type>
+    <sortorder>3</sortorder>
+    <thumb>/config/data/metadata/People/P/Paul Ritter/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Jessie Buckley</name>
+    <role>Lyudmilla Ignatenko</role>
+    <type>Actor</type>
+    <sortorder>4</sortorder>
+    <thumb>/config/data/metadata/People/J/Jessie Buckley/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Adam Nagaitis</name>
+    <role>Vasily Ignatenko</role>
+    <type>Actor</type>
+    <sortorder>5</sortorder>
+    <thumb>/config/data/metadata/People/A/Adam Nagaitis/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Sam Troughton</name>
+    <role>Alexandr Akimov</role>
+    <type>Actor</type>
+    <sortorder>6</sortorder>
+    <thumb>/config/data/metadata/People/S/Sam Troughton/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Robert Emms</name>
+    <role>Leonid Toptunov</role>
+    <type>Actor</type>
+    <sortorder>7</sortorder>
+    <thumb>/config/data/metadata/People/R/Robert Emms/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Con O'Neill</name>
+    <role>Viktor Bryukhanov</role>
+    <type>Actor</type>
+    <sortorder>8</sortorder>
+    <thumb>/config/data/metadata/People/C/Con O'Neill/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Adrian Rawlins</name>
+    <role>Nikolai Fomin</role>
+    <type>Actor</type>
+    <sortorder>9</sortorder>
+    <thumb>/config/data/metadata/People/A/Adrian Rawlins/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Alan Williams</name>
+    <role>KGB Chairman Charkov</role>
+    <type>Actor</type>
+    <sortorder>10</sortorder>
+    <thumb>/config/data/metadata/People/A/Alan Williams/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>David Dencik</name>
+    <role>Mikhail Gorbachev</role>
+    <type>Actor</type>
+    <sortorder>11</sortorder>
+    <thumb>/config/data/metadata/People/D/David Dencik/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Mark Lewis Jones</name>
+    <role>General Pikalov</role>
+    <type>Actor</type>
+    <sortorder>12</sortorder>
+    <thumb>/config/data/metadata/People/M/Mark Lewis Jones/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Ralph Ineson</name>
+    <role>General Tarakanov</role>
+    <type>Actor</type>
+    <sortorder>13</sortorder>
+    <thumb>/config/data/metadata/People/R/Ralph Ineson/folder.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Barry Keoghan</name>
+    <role>Pavel</role>
+    <type>Actor</type>
+    <sortorder>14</sortorder>
+    <thumb>/config/data/metadata/People/B/Barry Keoghan/folder.jpg</thumb>
+  </actor>
+  <id>360893</id>
+  <episodeguide>
+    <url cache="360893.xml">http://www.thetvdb.com/api/1D62F2F90030C444/series/360893/all/en.zip</url>
+  </episodeguide>
+  <season>-1</season>
+  <episode>-1</episode>
+  <status>Ended</status>
+  <tvdbslugid>chernobyl</tvdbslugid>
+  <uniqueid type="tvdb" default="true">360893</uniqueid>
+  <uniqueid type="imdb">tt7366338</uniqueid>
+  <uniqueid type="tmdb">87108</uniqueid>
+  <uniqueid type="tvmaze">30770</uniqueid>
+</tvshow>

@@ -1,0 +1,310 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <title>Blade Runner</title>
+  <originaltitle>Blade Runner</originaltitle>
+  <sorttitle>blade runner</sorttitle>
+  <ratings>
+    <rating name="imdb" max="10" default="true">
+      <value>8.1</value>
+      <votes>883678</votes>
+    </rating>
+    <rating name="themoviedb" max="10">
+      <value>7.9</value>
+      <votes>15079</votes>
+    </rating>
+    <rating name="tomatometerallcritics" max="100">
+      <value>89</value>
+    </rating>
+  </ratings>
+  <rating>7.9</rating>
+  <criticrating>89</criticrating>
+  <userrating />
+  <top250 />
+  <outline />
+  <plot>In the smog-choked dystopian Los Angeles of 2019, blade runner Rick Deckard is called out of retirement to terminate a quartet of replicants who have escaped to Earth seeking their creator for a way to extend their short life spans.</plot>
+  <tagline />
+  <runtime>118</runtime>
+  <thumb aspect="poster" preview="https://image.tmdb.org/t/p/original/63N9uy8nd9j7Eog2axPQ8lbr3Wj.jpg">https://image.tmdb.org/t/p/original/63N9uy8nd9j7Eog2axPQ8lbr3Wj.jpg</thumb>
+  <fanart>
+    <thumb preview="https://image.tmdb.org/t/p/original/hJ5R9d6QuH3tzr8L8neZZTuzNXm.jpg">https://image.tmdb.org/t/p/original/hJ5R9d6QuH3tzr8L8neZZTuzNXm.jpg</thumb>
+  </fanart>
+  <mpaa>R</mpaa>
+  <playcount />
+  <lastplayed />
+  <id>78</id>
+  <uniqueid type="tmdb" default="true">78</uniqueid>
+  <uniqueid type="imdb">tt0083658</uniqueid>
+  <genre>Science Fiction</genre>
+  <genre>Drama</genre>
+  <genre>Thriller</genre>
+  <country />
+  <set tmdbcolid="422837">
+    <name>Blade Runner Collection</name>
+    <overview />
+  </set>
+  <tag>1-lilllamah</tag>
+  <status>Released</status>
+  <credits>Hampton Fancher</credits>
+  <credits>David Webb Peoples</credits>
+  <director>Ridley Scott</director>
+  <premiered>1982-06-25</premiered>
+  <year>1982</year>
+  <studio>Shaw Brothers</studio>
+  <trailer>plugin://plugin.video.youtube/play/?video_id=qoEyZoOTtss</trailer>
+  <watched>false</watched>
+  <fileinfo>
+    <streamdetails>
+      <video>
+        <aspect>2.4</aspect>
+        <bitrate>837584</bitrate>
+        <codec>AV1</codec>
+        <framerate>23.976023976023976023976023976</framerate>
+        <height>800</height>
+        <scantype>Progressive</scantype>
+        <width>1920</width>
+        <duration>117.16533333333334</duration>
+        <durationinseconds>7030</durationinseconds>
+        <hdrtype></hdrtype>
+      </video>
+      <audio>
+        <bitrate>640000</bitrate>
+        <channels>6</channels>
+        <codec>EAC3</codec>
+        <language>eng</language>
+      </audio>
+      <subtitle>
+        <language>eng</language>
+      </subtitle>
+      <subtitle>
+        <language>cze</language>
+      </subtitle>
+      <subtitle>
+        <language>dan</language>
+      </subtitle>
+      <subtitle>
+        <language>ger</language>
+      </subtitle>
+      <subtitle>
+        <language>gre</language>
+      </subtitle>
+      <subtitle>
+        <language>spa</language>
+      </subtitle>
+      <subtitle>
+        <language>fin</language>
+      </subtitle>
+      <subtitle>
+        <language>hun</language>
+      </subtitle>
+      <subtitle>
+        <language>ind</language>
+      </subtitle>
+      <subtitle>
+        <language>ita</language>
+      </subtitle>
+      <subtitle>
+        <language>jpn</language>
+      </subtitle>
+      <subtitle>
+        <language>nob</language>
+      </subtitle>
+      <subtitle>
+        <language>dut</language>
+      </subtitle>
+      <subtitle>
+        <language>pol</language>
+      </subtitle>
+      <subtitle>
+        <language>por</language>
+      </subtitle>
+      <subtitle>
+        <language>por</language>
+      </subtitle>
+      <subtitle>
+        <language>rum</language>
+      </subtitle>
+      <subtitle>
+        <language>swe</language>
+      </subtitle>
+      <subtitle>
+        <language>tur</language>
+      </subtitle>
+      <subtitle>
+        <language>vie</language>
+      </subtitle>
+    </streamdetails>
+  </fileinfo>
+  <actor>
+    <name>Harrison Ford</name>
+    <role>Deckard</role>
+    <order>0</order>
+    <thumb>https://image.tmdb.org/t/p/original/pjBMJVPpcZK23Vt1nzr1zEBTWrP.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Rutger Hauer</name>
+    <role>Batty</role>
+    <order>1</order>
+    <thumb>https://image.tmdb.org/t/p/original/xyag0LbjocTwx2Ht7B3RofvCNMT.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Sean Young</name>
+    <role>Rachael</role>
+    <order>2</order>
+    <thumb>https://image.tmdb.org/t/p/original/yfJADYt6xYPpg1g7Z7TTW0bcL2s.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Edward James Olmos</name>
+    <role>Gaff</role>
+    <order>3</order>
+    <thumb>https://image.tmdb.org/t/p/original/mXnilUrQBIMLHSQkPjQk99mX70x.jpg</thumb>
+  </actor>
+  <actor>
+    <name>M. Emmet Walsh</name>
+    <role>Bryant</role>
+    <order>4</order>
+    <thumb>https://image.tmdb.org/t/p/original/fVWvBxvwyk4aTA9vKZOV9qHRNNk.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Daryl Hannah</name>
+    <role>Pris</role>
+    <order>5</order>
+    <thumb>https://image.tmdb.org/t/p/original/5FllFmoiaru7tjXJ6Orc11OpQcw.jpg</thumb>
+  </actor>
+  <actor>
+    <name>William Sanderson</name>
+    <role>Sebastian</role>
+    <order>6</order>
+    <thumb>https://image.tmdb.org/t/p/original/i3JfaavAFq9ayeJ4doUaOGjHMMW.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Brion James</name>
+    <role>Leon</role>
+    <order>7</order>
+    <thumb>https://image.tmdb.org/t/p/original/qy5jIIsWrNCV1OVRaUiqYNhLLVT.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Joe Turkel</name>
+    <role>Tyrell</role>
+    <order>8</order>
+    <thumb>https://image.tmdb.org/t/p/original/rqpNzjLFCoMrvGSf6SIL5JnWwMT.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Joanna Cassidy</name>
+    <role>Zhora</role>
+    <order>9</order>
+    <thumb>https://image.tmdb.org/t/p/original/yzKVigHSkgi3KCRzUDvzgE3YtHU.jpg</thumb>
+  </actor>
+  <actor>
+    <name>James Hong</name>
+    <role>Chew</role>
+    <order>10</order>
+    <thumb>https://image.tmdb.org/t/p/original/v3lfw5aHOy0paOCx6WHiSnwzbH0.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Morgan Paull</name>
+    <role>Holden</role>
+    <order>11</order>
+    <thumb>https://image.tmdb.org/t/p/original/y8hQzCz4WEqgD8biDdoBVw8zmNp.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Kevin Thompson</name>
+    <role>Bear</role>
+    <order>12</order>
+    <thumb>https://image.tmdb.org/t/p/original/hhJNd4If3wWmhlKV1MLkDpWA6E5.jpg</thumb>
+  </actor>
+  <actor>
+    <name>John Edward Allen</name>
+    <role>Kaiser</role>
+    <order>13</order>
+  </actor>
+  <actor>
+    <name>Hy Pyke</name>
+    <role>Taffey Lewis</role>
+    <order>14</order>
+    <thumb>https://image.tmdb.org/t/p/original/uuSQqL8n4VkFXdWDq1XkEHDOvou.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Kimiko Hiroshige</name>
+    <role>Cambodian Lady</role>
+    <order>15</order>
+  </actor>
+  <actor>
+    <name>Bob Okazaki</name>
+    <role>Sushi Master</role>
+    <order>16</order>
+    <thumb>https://image.tmdb.org/t/p/original/qLapAz3PzkwUOREYxsI43Y8Xi4F.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Carolyn DeMirjian</name>
+    <role>Saleslady</role>
+    <order>17</order>
+    <thumb>https://image.tmdb.org/t/p/original/ifRke3Ct4urlagX33ekt8MJMP2o.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Ben Astar</name>
+    <role>Abdul Ben Hassan</role>
+    <order>18</order>
+    <thumb>https://image.tmdb.org/t/p/original/wJav95yX8J1tAjPuScD3L3Gq3Tk.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Dawna Lee Heising</name>
+    <role>Showgirl (uncredited)</role>
+    <order>19</order>
+    <thumb>https://image.tmdb.org/t/p/original/8Ky9a7fx4BhJzdkhbfHA0cOj8Xo.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Alexis Rhee</name>
+    <role>Geisha #1 (uncredited)</role>
+    <order>20</order>
+    <thumb>https://image.tmdb.org/t/p/original/hpOqDKHkzzXzPW0dbokXlPWIq2u.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Judith Burnett</name>
+    <role>Ming-Fa (uncredited)</role>
+    <order>21</order>
+    <thumb>https://image.tmdb.org/t/p/original/cSkw5OEUXzRCHgniWA4ARIrE77e.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Leo Gorcey Jr.</name>
+    <role>Louie - Bartender (uncredited)</role>
+    <order>22</order>
+    <thumb>https://image.tmdb.org/t/p/original/uCPaZ6sWC4sqkcKAFdaIyxbnbNi.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Sharon Hesky</name>
+    <role>Bar Patron (uncredited)</role>
+    <order>23</order>
+  </actor>
+  <actor>
+    <name>Kelly Hine</name>
+    <role>Showgirl (uncredited)</role>
+    <order>24</order>
+  </actor>
+  <actor>
+    <name>Tom Hutchinson</name>
+    <role>Bartender (uncredited)</role>
+    <order>25</order>
+  </actor>
+  <actor>
+    <name>Charles Knapp</name>
+    <role>Bartender (uncredited)</role>
+    <order>26</order>
+    <thumb>https://image.tmdb.org/t/p/original/pySATu1neWqZ3INnmdcLbGEhBbm.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Rose Mascari</name>
+    <role>Bar Patron (uncredited)</role>
+    <order>27</order>
+  </actor>
+  <actor>
+    <name>Jiro Okazaki</name>
+    <role>Policeman (uncredited)</role>
+    <order>28</order>
+    <thumb>https://image.tmdb.org/t/p/original/7B8WWT9WK7lmLXeI2lqc6gDcEwb.jpg</thumb>
+  </actor>
+  <actor>
+    <name>Steve Pope</name>
+    <role>Policeman (uncredited)</role>
+    <order>29</order>
+  </actor>
+</movie>
