@@ -532,14 +532,32 @@ function playFromIndex(i: number) {
    makes it wrap before reaching that zone instead of running under it.
    The album hero's action cluster is wider than the artist page's (it
    also carries the inline star-rating widget), hence the bigger offset
-   here. Scoped above the phone breakpoint: phone already stacks the
-   actions row below the meta text (see the max-width:720px block), so
-   there's nothing to collide with there. Not a narrow-band patch — holds
-   unchanged from just-above-phone through wide desktop, where the extra
-   padding is inert because the text never gets close to it. */
-@media (min-width: 721px) {
+   here. Desktop-only (>1200px): phone (<=720px) and the foldable/compact
+   band (720.02-1200px) both drop the actions into a static row below the
+   meta (see the two media blocks below), so there's nothing to collide with
+   there. Above 1200px the actions stay absolute and this reservation keeps
+   `.hero-sub` clear of them; it's inert at wide widths. */
+@media (min-width: 1201px) {
   .hero-sub {
     padding-right: 460px;
+  }
+}
+
+/* Foldable / compact band (720.02-1200px): keep the cover beside the meta,
+   but drop the floating actions (play/shuffle/rate/queue/radio/edit) out of
+   their absolute bottom-right anchor into a static full-width row of their
+   own below the meta, so they stop overlapping `.hero-sub`. Mirrors the
+   artist page's foldable hero fix. */
+@media (min-width: 720.02px) and (max-width: 1200px) {
+  .hero { flex-direction: column; min-height: 0; }
+  .hero-floating-actions {
+    position: static;
+    align-self: stretch;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
+    padding: 0 40px 26px;
   }
 }
 

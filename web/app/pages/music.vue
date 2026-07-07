@@ -9,16 +9,14 @@
       />
       <main class="music-main scroll">
         <!-- Phone-only compact header: replaces the persistent MusicSidebar
-             with a section title + a Browse button that opens the nav sheet
-             below. Desktop/tablet are unchanged (MusicSidebar stays). -->
+             with a section title. The nav itself opens from AppTopBar's burger
+             (the standardized section trigger — same as tablet), so there's no
+             per-page Browse button here anymore. Desktop/tablet are unchanged
+             (MusicSidebar stays). -->
         <div v-if="isPhone" class="music-phone-header">
           <!-- The title doubles as "back to music home" — same destination
                as the bottom nav's Music tab, one fewer reach. -->
           <NuxtLink to="/music" class="mph-title">{{ phoneSectionTitle }}</NuxtLink>
-          <button type="button" class="mph-browse-btn" @click="browseOpen = true">
-            <Icon name="list" :size="16" />
-            <span>Browse</span>
-          </button>
         </div>
         <NuxtPage />
       </main>
@@ -34,27 +32,15 @@
     <VisualizerFullscreen v-if="!isPhone" />
     <HotkeyHelp v-if="!isPhone" />
 
-    <!--
-      Phone nav sheet — the global MiniPlayer/NowPlayingSheet live
-      in layouts/default.vue, but the music section nav is specific to this
-      page, so it's owned here. MusicNavSheet holds the actual flat link
-      list (see its own header comment for why it's not a re-skinned
-      <MusicSidebar/>). Tapping any link (or the Create Playlist row) closes
-      the sheet.
-    -->
-    <AppSheet v-if="isPhone" v-model:open="browseOpen" title="Browse" size="full">
-      <MusicNavSheet
-        :current-section="currentSection"
-        :playlists="sidebarPlaylists"
-        @navigate="browseOpen = false"
-        @create-playlist="createOpen = true"
-      />
-    </AppSheet>
-    <!-- Compact band (720.02-1200px): same nav list as the phone sheet
-         above, but as a left-side drawer opened by AppTopBar's burger
-         (useSectionSidebar's shared `open` ref) instead of the phone
-         header's "Browse" button (that button only renders `v-if="isPhone"`). -->
-    <AppSheet v-if="isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Music">
+    <!-- Section nav left drawer — phone (<=720px) and the compact band
+         (720.02-1200px) both open it from AppTopBar's burger
+         (useSectionSidebar's shared `open` ref). MusicNavSheet holds the flat
+         link list (see its own header comment for why it's not a re-skinned
+         <MusicSidebar/>). The global MiniPlayer/NowPlayingSheet live in
+         layouts/default.vue, but the music section nav is specific to this
+         page, so it's owned here. Tapping any link (or Create Playlist) closes
+         the drawer. -->
+    <AppSheet v-if="isPhone || isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Music">
       <MusicNavSheet
         :current-section="currentSection"
         :playlists="sidebarPlaylists"
@@ -79,9 +65,8 @@ const { isPhone, isCompact } = useViewport()
 
 const eqOpen = useState('music_eq_open', () => false)
 const createOpen = useState('music_create_playlist_open', () => false)
-const browseOpen = ref(false)
-// Compact-band (720.02-1200px) left drawer, opened by AppTopBar's burger —
-// shared singleton state (module-level ref), see useSectionSidebar.ts.
+// Section-nav left drawer (phone + compact band), opened by AppTopBar's
+// burger — shared singleton state (module-level ref), see useSectionSidebar.ts.
 const sectionSidebar = useSectionSidebar()
 
 // Map the current route to a sidebar highlight key.
@@ -184,11 +169,10 @@ function onCreated(id: number) {
 }
 
 /* Phone-only compact header — replaces MusicSidebar's persistent presence
-   with a section title + a button that opens the nav sheet. */
+   with a section title (the nav opens from AppTopBar's burger). */
 .music-phone-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 14px 16px 10px;
 }
@@ -201,19 +185,4 @@ function onCreated(id: number) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mph-browse-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border);
-  color: var(--fg-1);
-  font-size: 13px;
-  font-weight: 500;
-  flex-shrink: 0;
-}
-.mph-browse-btn:active { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
 </style>

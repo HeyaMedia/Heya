@@ -33,6 +33,7 @@
             <Poster v-if="effectiveVisualMode === 'art'" :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
             <div v-else class="nps-viz-wrap">
               <VisualizerMilkdrop v-if="effectiveVisualMode === 'milkdrop'" />
+              <VisualizerStarfield v-else-if="effectiveVisualMode === 'starfield'" />
               <VisualizerSpectrum v-else :variant="spectrumVariant" :active="playing" />
             </div>
             <Transition name="nps-viz-toast-fade">
@@ -70,16 +71,18 @@
         </div>
 
         <div class="nps-seek">
-          <span class="nps-time">{{ formatTime(displayPosition) }}</span>
-          <AppSlider
-            :model-value="seekPct"
-            :min="0"
-            :max="100"
-            :step="0.1"
+          <span class="nps-time">{{ formatTime(position) }}</span>
+          <!-- Waveform scrubber — same component + facet source as the desktop
+               Playbar. Click/drag-to-seek is built in (touch-action: none, so
+               a drag scrubs rather than scrolling the sheet). Falls back to a
+               flat bar for un-analysed tracks. -->
+          <MusicWaveform
+            :peaks="waveform"
+            :progress="waveProgress"
             aria-label="Seek"
-            class="nps-seek-slider"
-            @update:model-value="onSeekInput"
-            @value-commit="onSeekCommit"
+            :value-text="`${formatTime(position)} of ${formatTime(duration)}`"
+            class="nps-waveform"
+            @seek="onWaveformSeek"
           />
           <span class="nps-time">{{ formatTime(duration) }}</span>
         </div>
@@ -156,24 +159,18 @@ const albumTo = computed(() =>
     ? `/music/artist/${currentTrack.value.artist_slug}/${currentTrack.value.album_slug}`
     : null)
 
-// --- Seek --------------------------------------------------------------
-// While the user is scrubbing, the local drag value drives the thumb (and
-// the time label) — otherwise the position tick that arrives every fraction
-// of a second would snap the thumb back under their finger. seek() fires
-// once on release via reka's value-commit (the @value-commit listener falls
-// through AppSlider onto its SliderRoot root element), not per drag step.
-const scrubPct = ref<number | null>(null)
-const seekPct = computed(() =>
-  scrubPct.value ?? (duration.value > 0 ? (position.value / duration.value) * 100 : 0))
-const displayPosition = computed(() =>
-  scrubPct.value != null ? (scrubPct.value / 100) * duration.value : position.value)
-function onSeekInput(v: number) {
-  scrubPct.value = v
-}
-function onSeekCommit(v: number[] | undefined) {
-  const pct = v?.[0] ?? scrubPct.value
-  if (pct != null) seek(pct / 100)
-  scrubPct.value = null
+// --- Seek (waveform scrubber) ------------------------------------------
+// Reactive waveform peaks for the current track — same facet source the
+// desktop Playbar uses; resolves to null for un-analysed tracks (MusicWaveform
+// then draws a flat bar). MusicWaveform seeks live on pointerdown/drag and
+// player.seek() writes position.value synchronously, so the played fill tracks
+// the finger without a separate drag-local value.
+const facetTrackId = computed<number | null>(() => currentTrack.value?.id ?? null)
+const { waveform } = useTrackFacets(facetTrackId)
+const waveProgress = computed(() => duration.value > 0 ? position.value / duration.value : 0)
+function onWaveformSeek(pct: number) {
+  if (!currentTrack.value) return
+  seek(pct)
 }
 
 // --- Long-press play/pause = stop (the phone equivalent of Playbar's 3s
@@ -216,18 +213,20 @@ function onPlayClick() {
 onScopeDispose(() => clearPlayHold())
 
 // --- Visualizer cycling (tap artwork) ---------------------------------
-// Cycles art -> milkdrop -> bars -> scope -> vu -> art. Persisted so the
-// choice survives closing/reopening the sheet and reloading the page.
+// Cycles art -> milkdrop -> bars -> scope -> vu -> starfield -> art. Persisted
+// so the choice survives closing/reopening the sheet and reloading the page.
 // Milkdrop is mounted with v-if (not v-show) so its WebGL context actually
 // tears down the instant it's cycled away, rather than idling offscreen.
-type VisualMode = 'art' | 'milkdrop' | 'bars' | 'scope' | 'vu'
-const VISUAL_MODES: VisualMode[] = ['art', 'milkdrop', 'bars', 'scope', 'vu']
+// Parity with the desktop VisualizerFullscreen mode set (useVisualizer.VisMode).
+type VisualMode = 'art' | 'milkdrop' | 'bars' | 'scope' | 'vu' | 'starfield'
+const VISUAL_MODES: VisualMode[] = ['art', 'milkdrop', 'bars', 'scope', 'vu', 'starfield']
 const VISUAL_LABELS: Record<VisualMode, string> = {
   art: 'Album Art',
   milkdrop: 'Milkdrop',
   bars: 'Spectrum',
   scope: 'Scope',
   vu: 'VU Meter',
+  starfield: 'Starfield',
 }
 const visualMode = useLocalStorage<VisualMode>('heya_np_visual_v1', 'art')
 // The direct-element engine (iOS compatibility mode, see
@@ -466,7 +465,9 @@ watch(activeLyricIdx, (i) => {
 .nps-link:hover, .nps-link:active { color: var(--gold); }
 
 .nps-seek { display: flex; align-items: center; gap: 10px; }
-.nps-seek-slider { flex: 1; min-width: 0; }
+/* Targets MusicWaveform's `.wf-wrap` root (the class merges onto it); this is
+   an unscoped block, so it reaches the child-component root fine. */
+.nps-waveform { flex: 1; min-width: 0; }
 .nps-time {
   font-size: 11px;
   font-family: var(--font-mono);

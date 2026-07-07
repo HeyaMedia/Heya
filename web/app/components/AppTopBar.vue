@@ -1,15 +1,19 @@
 <template>
   <header class="topbar">
-    <!-- topbar-left wraps the burger + brand as a flex row in the compact
-         band (720.02-1200px) — see useSectionSidebar()/useViewport() below.
-         The burger is a SIBLING of the brand anchor, never nested inside it
-         (the anchor is a link; nesting a button in it would fire both on
-         tap). At >1200px and <=720px the burger never renders (isCompact is
-         false there), so `.topbar-left` holds a single child and lays out
-         identically to the old bare `.topbar-brand` grid item. -->
+    <!-- topbar-left wraps the burger + brand as a flex row on phone (<=720px)
+         and in the compact band (720.02-1200px) — see
+         useSectionSidebar()/useViewport() below. The burger is a SIBLING of
+         the brand anchor, never nested inside it (the anchor is a link;
+         nesting a button in it would fire both on tap). At >1200px desktop the
+         burger never renders (persistent sidebars are visible there), so
+         `.topbar-left` holds a single child and lays out identically to the
+         old bare `.topbar-brand` grid item. Phone shows it too so the section
+         nav (movies/tv/books Library, music Browse) is always one tap away in
+         the same spot as tablet — the per-page Browse/Library buttons are
+         retired in favour of this single standardized trigger. -->
     <div class="topbar-left">
       <button
-        v-if="sidebar.kind.value && isCompact"
+        v-if="sidebar.kind.value && (isCompact || isPhone)"
         type="button"
         class="btn-icon topbar-burger-btn"
         aria-label="Toggle navigation"
@@ -952,6 +956,10 @@ watch(() => route.fullPath, () => { closeDropdown() })
     padding: 0 16px;
   }
   .topbar-tabs { display: none; }
+  /* Burger + brand sit in a row (mirrors the compact band below). The burger
+     only renders on section routes (`sidebar.kind.value`), so on Home/Settings
+     `.topbar-left` still holds just the brand mark and this is a no-op. */
+  .topbar-left { display: flex; align-items: center; gap: 6px; }
   /* Drop the wordmark, keep the gold ring mark — reclaims width for the
      search input, which is the thing that actually needs the room. */
   .brand-name { display: none; }

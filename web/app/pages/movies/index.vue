@@ -18,37 +18,14 @@
       @list-dragover="onListDragOver"
       @list-dragleave="onListDragLeave"
     />
-    <!-- Phone: the persistent 240px sidebar above doesn't mount at all
-         (v-if, not CSS) — its library/loved/lists/franchises picks move into
-         this sheet instead, opened from FilterBar's "Library" button. Same
-         component, `variant="sheet"` — see LibrarySidebar.vue for why this
-         one could just add a variant instead of MusicSidebar's (W1c) flat
-         re-listing workaround. -->
-    <AppSheet v-if="isPhone" v-model:open="librarySheetOpen" title="Library" size="full">
-      <LibrarySidebar
-        variant="sheet"
-        :libraries="libraries"
-        :active-lib="activeLib"
-        :active-view="activeView"
-        type-label="Movies"
-      :show-recommended="true"
-        :total-count="items.length"
-        :loved-count="favoritedSet.size"
-        :user-lists="userLists"
-        :collections="displayCollections"
-        :drag-over-list-id="dragState.overListId"
-        @select="activeLib = $event; activeView = null; librarySheetOpen = false"
-        @view="activeView = $event; librarySheetOpen = false"
-        @list-drop="onListDrop"
-        @list-dragover="onListDragOver"
-        @list-dragleave="onListDragLeave"
-      />
-    </AppSheet>
-    <!-- Compact band (720.02-1200px): same sidebar content as the phone
-         sheet above, but as a left-side drawer opened by AppTopBar's burger
-         (useSectionSidebar's shared `open` ref) rather than FilterBar's
-         "Library" button — that button only renders `v-if="isPhone"`. -->
-    <AppSheet v-if="isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Library">
+    <!-- Section-sidebar left drawer — phone (<=720px) and the compact band
+         (720.02-1200px) both open it from AppTopBar's burger
+         (useSectionSidebar's shared `open` ref); the persistent 240px sidebar
+         above doesn't mount below 1200px (v-if, not CSS). Same component,
+         `variant="sheet"` — see LibrarySidebar.vue for why this one could just
+         add a variant instead of MusicSidebar's (W1c) flat re-listing
+         workaround. -->
+    <AppSheet v-if="isPhone || isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Library">
       <LibrarySidebar
         variant="sheet"
         :libraries="libraries"
@@ -90,7 +67,6 @@
           hide-filters
           @sort="franchiseSort = $event"
           @view="view = $event"
-          @open-library="librarySheetOpen = true"
         />
 
         <div class="lib-content">
@@ -177,7 +153,6 @@
         @update:filters="onFiltersChange"
         @save-list="saveSmartList"
         @reset="resetBrowse"
-        @open-library="librarySheetOpen = true"
       />
 
       <div class="lib-content">
@@ -395,9 +370,8 @@ const collections = ref<CollectionBrowse[]>([])
 const loading = ref(true)
 
 const { isPhone, isCompact } = useViewport()
-const librarySheetOpen = ref(false)
-// Compact-band (720.02-1200px) left drawer, opened by AppTopBar's burger —
-// shared singleton state (module-level ref), see useSectionSidebar.ts.
+// Section-nav left drawer (phone + compact band), opened by AppTopBar's
+// burger — shared singleton state (module-level ref), see useSectionSidebar.ts.
 const sectionSidebar = useSectionSidebar()
 
 // Phone-only "..." action sheet for list/detail rows — see ActionSheet usage

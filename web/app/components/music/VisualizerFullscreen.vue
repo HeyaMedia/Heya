@@ -518,29 +518,41 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
 .viz-fade-enter-active, .viz-fade-leave-active { transition: opacity 0.25s ease; }
 .viz-fade-enter-from, .viz-fade-leave-to { opacity: 0; }
 
-/* Tablet / foldable (compact band, ≤1200px): the command bar packs a lot —
-   track, transport, seek, 8 Milkdrop controls, 5 mode pills, fullscreen — which
-   overflows the narrower width and reads as an oversized, too-wide bar. Slim
-   every section (tighter gaps/paddings, smaller controls, narrower seek + track
-   meta) so it fits comfortably instead of crowding or horizontal-scrolling. */
+/* Tablet / foldable (compact band, ≤1200px — this component never mounts on
+   phone, so in practice that's the 720-1200 fold band): the command bar packs a
+   lot — track, transport, seek, 8 Milkdrop controls, 5 mode pills, fullscreen —
+   which crowds the narrower width. Slim every section (tighter gaps/paddings,
+   smaller controls, narrower seek + track meta), and give the mode pills their
+   OWN dedicated second row (below) so the transport/seek line stays uncramped
+   at every fold width instead of the pills fighting it for horizontal space. */
 @media (max-width: 1200px) {
-  /* The mode-specific controls collapse into gear popovers below, so the bar is
-     track + transport + seek + gear + 5 mode pills + fullscreen — a single row
-     on a typical fold (~884px). `flex-wrap` is the safety net for the narrowest
-     widths: the mode pills flow to a second row rather than clip behind the
-     hidden-scrollbar overflow. */
-  .viz-bar { gap: 10px; row-gap: 12px; padding: 12px 14px 16px; flex-wrap: wrap; }
+  .viz-bar { gap: 10px; row-gap: 14px; padding: 12px 14px 16px; flex-wrap: wrap; }
   .viz-track { gap: 9px; }
   .viz-track-meta { max-width: 120px; }
   .viz-transport { gap: 8px; }
   .viz-play { width: 38px; height: 38px; }
   .viz-seek { flex-basis: 150px; min-width: 110px; gap: 8px; }
-  /* Collapse the 8-button Milkdrop cluster into the gear popover so the bar
+  /* Collapse the 8-button Milkdrop cluster into the gear popover so line 1
      holds a single row — same move the starfield settings use. */
   .viz-presetctl { display: none; }
   .viz-presetctl-compact { display: flex; align-items: center; gap: 5px; }
-  .viz-modes { gap: 4px; }
-  .viz-pill { padding: 5px 10px; font-size: 11px; }
+  /* Mode pills to their own full-width second row, always. `order: 99` makes
+     them the last flex item so the fullscreen button (DOM-after them) stays up
+     on line 1; `flex-basis: 100%` forces the line break deterministically
+     rather than relying on opportunistic wrap; they wrap + centre within their
+     row on the very narrowest folds. */
+  .viz-modes {
+    order: 99;
+    flex-basis: 100%;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  /* The separator that preceded the pills on the single-row layout is pointless
+     now they sit on their own line — drop just that one (the gear-cluster seps
+     are nested deeper and keep their height rule below). */
+  .viz-bar > .viz-sep { display: none; }
+  .viz-pill { padding: 5px 12px; font-size: 11px; }
   .viz-ic { width: 32px; height: 32px; }
   .viz-ic.sm { width: 27px; height: 27px; }
   .viz-sep { height: 20px; }

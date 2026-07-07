@@ -115,20 +115,23 @@
         >
         <li
           class="tt-row"
-          :class="{ 'tt-row-missing': !isTopTrackPlayable(t) }"
+          :class="{ 'tt-row-missing': !isTopTrackPlayable(t), 'tt-row-active': isTopTrackActive(t) }"
           :draggable="!isCoarse && !!t.local_track_id"
           @click="onTtRowTap(t)"
           @dragstart="t.local_track_id && onDragStart($event, { kind: 'track', track: { id: t.local_track_id, title: t.title } })"
           @dragend="onDragEnd"
         >
           <div class="tt-leader">
-            <span v-if="isTopTrackPlayable(t)" class="tt-rank">{{ idx + 1 }}</span>
+            <!-- Currently-playing row: equalizer bars stand in for the rank
+                 (and suppress the hover-play, which would overlap them). -->
+            <VuMeter v-if="isTopTrackActive(t)" :playing="playing" class="tt-vu" />
+            <span v-else-if="isTopTrackPlayable(t)" class="tt-rank">{{ idx + 1 }}</span>
             <Icon v-else name="trash" :size="12" class="tt-missing-icon" :title="`${t.title} — missing on disk`" />
             <!-- .stop: on touch this button is opacity-0 but still hit-
                  testable; without it a tap here fires both this handler and
                  the row-tap handler (playTopTrack twice, racing). -->
             <button
-              v-if="isTopTrackPlayable(t)"
+              v-if="isTopTrackPlayable(t) && !isTopTrackActive(t)"
               class="tt-hover-play"
               type="button"
               @click.stop="playTopTrack(t)"
@@ -222,7 +225,7 @@
           :key="album.id"
           :to="`/music/artist/${route.params.slug}/${album.slug}`"
           class="discog-tile card-tile"
-          :class="{ 'discog-missing': !albumPlayable(album) }"
+          :class="{ 'discog-missing': !albumPlayable(album), 'discog-active': isAlbumActive(album) }"
           :draggable="!isCoarse"
           @dragstart="onDragStart($event, discogDragPayload(album))"
           @dragend="onDragEnd"
@@ -230,6 +233,8 @@
           <div class="discog-art-wrap">
             <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="discog-art" />
             <MediaMissingBadge v-if="!albumPlayable(album)" />
+            <!-- Now-playing badge: this album has the currently-playing track. -->
+            <div v-if="isAlbumActive(album)" class="discog-nowplaying"><VuMeter :playing="playing" /></div>
             <button v-if="albumPlayable(album)" class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
               <Icon name="play" :size="14" />
             </button>
@@ -360,8 +365,21 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 const props = defineProps<{ mediaId: number; slug: string }>()
 
 const route = useRoute()
-const { play, queue, formatTime } = usePlayer()
+const { play, queue, currentTrack, playing, formatTime } = usePlayer()
 const radio = useRadio()
+
+// Now-playing markers. A Popular Tracks row lights up when the playing track
+// is it; a discography tile lights up when the playing track belongs to that
+// album (album ids are globally unique, so an id match is unambiguous). Both
+// read the shared usePlayer() state, so they react live as playback advances.
+function isTopTrackActive(t: ArtistTopTrackRow) {
+  const id = currentTrack.value?.id
+  return id != null && id === t.local_track_id
+}
+function isAlbumActive(al: AlbumView) {
+  const albumId = currentTrack.value?.album_id
+  return albumId != null && albumId > 0 && albumId === al.id
+}
 const { isPhone, isCoarse } = useViewport()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
 // Popular Tracks context/⋯ items — the phone rows hide the star widget, so
@@ -933,16 +951,47 @@ if (import.meta.client) {
    padding-right (40) and the actions' `right` inset (32), plus a small
    visual gap — same reservation on `.hero-ext` since external-link chips
    can land in the same bottom-right band when the stats line is short.
-   Scoped above the phone breakpoint: phone already stacks the actions row
-   below the meta text (see the max-width:720px block), so there's nothing
-   to collide with there and no reservation is needed. This isn't a
-   narrow-band patch — it holds unchanged from just-above-phone through
-   wide desktop, where the extra padding is inert because the text never
-   gets close to it. */
-@media (min-width: 721px) {
+   Desktop-only (>1200px): both phone (<=720px) and the foldable/compact band
+   (720.02-1200px) stack the actions row below the meta text as static flow
+   (see the two media blocks below), so there's nothing to collide with there
+   and no reservation is needed. Above 1200px the actions stay absolute
+   bottom-right and this reservation keeps the stats/links clear of them; it's
+   inert at very wide widths where the text never reaches the cluster anyway. */
+@media (min-width: 1201px) {
   .hero-stats,
   .hero-ext {
     padding-right: 290px;
+  }
+}
+
+/* Stars onto their own line for phone AND the foldable/compact band
+   (<=1200px). The star widget and the dot-separated stats used to share one
+   wrapping flex row and shuffle unpredictably as the width changed ("punking
+   each other around"); pinning the widget to a full row break makes the
+   ratings a clean first line with the stats flowing beneath. The separator dot
+   that immediately follows the widget would otherwise lead the stats line, so
+   it's dropped. Desktop (>1200px) keeps stars + stats inline, untouched. */
+@media (max-width: 1200px) {
+  .hero-stats-stars { flex-basis: 100%; margin-right: 0; }
+  .hero-stats-stars + .stat-dot { display: none; }
+}
+
+/* Foldable / compact band (720.02-1200px): the hero keeps poster-beside-meta,
+   but the floating actions drop out of their absolute bottom-right anchor into
+   a static full-width row of their own below the meta — same "buttons on their
+   own line" treatment as phone, so play/shuffle/queue/radio/edit stop
+   colliding with the stats. `.hero` flips to a column so the (still absolute)
+   backdrop/fade stay put while content + actions stack in flow. */
+@media (min-width: 720.02px) and (max-width: 1200px) {
+  .hero { flex-direction: column; min-height: 0; }
+  .hero-floating-actions {
+    position: static;
+    align-self: stretch;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
+    padding: 0 40px 26px;
   }
 }
 
@@ -1002,6 +1051,12 @@ if (import.meta.client) {
 .tt-row:hover .tt-rank { opacity: 0; }
 .tt-row:hover .tt-hover-play { opacity: 1; }
 .tt-row-missing { opacity: 0.55; }
+/* Currently-playing row — gold wash + gold title, matching TrackList's
+   .tl-active treatment. The VuMeter in the leader already animates. */
+.tt-row-active { background: var(--gold-soft); }
+.tt-row-active:hover { background: var(--gold-soft); }
+.tt-row-active .tt-title { color: var(--gold); }
+.tt-vu { margin-left: auto; }
 .tt-missing-icon { color: #d96b6b; }
 .tt-leader {
   position: relative;
@@ -1137,6 +1192,22 @@ if (import.meta.client) {
   box-shadow: 0 6px 18px var(--gold-glow);
 }
 .discog-tile:hover .discog-play { opacity: 1; transform: none; }
+/* Now-playing album — gold ring on the art + gold title, with an animated
+   VuMeter badge pinned top-left of the cover. */
+.discog-active .discog-art { box-shadow: 0 8px 18px rgba(0,0,0,0.45), 0 0 0 2px var(--gold); }
+.discog-active .discog-title { color: var(--gold); }
+.discog-nowplaying {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  border-radius: var(--r-xs);
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(6px);
+}
 .discog-meta { margin-top: 8px; padding: 0 2px; }
 .discog-title {
   font-size: 13px;
@@ -1260,6 +1331,9 @@ if (import.meta.client) {
   .hero-meta { width: 100%; }
   .tag-row { justify-content: center; }
   .hero-stats { justify-content: center; }
+  /* Stars sit on their own full-width line (shared <=1200px rule) — centre the
+     widget within it to match the rest of the centred phone hero. */
+  .hero-stats-stars { justify-content: center; }
   .hero-ext :deep(.ext-links) { justify-content: center; }
   .hero-floating-actions { position: static; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
   .hero-floating-actions .hero-round { width: 44px; height: 44px; }

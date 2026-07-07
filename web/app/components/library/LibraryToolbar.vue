@@ -5,13 +5,8 @@
       <span class="lib-toolbar-count">{{ count }} titles</span>
     </div>
     <div class="lib-toolbar-right">
-      <!-- Phone only: LibrarySidebar moves into a sheet (docs/responsive-plan.md
-           W3b). Books has no separate attribute-filter popover, so "Library"
-           can't collide with anything here. -->
-      <button v-if="isPhone" class="btn-ghost-sm lt-library-btn" @click="$emit('open-library')">
-        <Icon name="folder" :size="14" />
-        Library
-      </button>
+      <!-- The section sidebar opens from AppTopBar's burger on phone + the
+           compact band — no per-page button here. -->
       <AppMenu trigger-class="btn-ghost-sm" :width="220" align="end">
         <template #trigger>
           <Icon name="sort" :size="14" />
@@ -56,10 +51,7 @@ const props = defineProps<{
 defineEmits<{
   sort: [value: string]
   view: [value: string]
-  'open-library': []
 }>()
-
-const { isPhone } = useViewport()
 
 const sortOptions = [
   { label: 'Recently Added', value: 'added' },

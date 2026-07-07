@@ -17,30 +17,11 @@
       @list-dragover="onListDragOver"
       @list-dragleave="onListDragLeave"
     />
-    <AppSheet v-if="isPhone" v-model:open="librarySheetOpen" title="Library" size="full">
-      <LibrarySidebar
-        variant="sheet"
-        :libraries="libraries"
-        :active-lib="activeLib"
-        :active-view="activeView"
-        type-label="Shows"
-      :show-recommended="true"
-        :total-count="items.length"
-        :loved-count="favoritedSet.size"
-        :user-lists="userLists"
-        :drag-over-list-id="dragState.overListId"
-        @select="activeLib = $event; activeView = null; librarySheetOpen = false"
-        @view="activeView = $event; librarySheetOpen = false"
-        @list-drop="onListDrop"
-        @list-dragover="onListDragOver"
-        @list-dragleave="onListDragLeave"
-      />
-    </AppSheet>
-    <!-- Compact band (720.02-1200px): same sidebar content as the phone
-         sheet above, but as a left-side drawer opened by AppTopBar's burger
-         (useSectionSidebar's shared `open` ref) rather than FilterBar's
-         "Library" button — that button only renders `v-if="isPhone"`. -->
-    <AppSheet v-if="isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Library">
+    <!-- Section-sidebar left drawer — phone (<=720px) and the compact band
+         (720.02-1200px) both open it from AppTopBar's burger
+         (useSectionSidebar's shared `open` ref); the persistent sidebar above
+         doesn't mount below 1200px (v-if, not CSS). -->
+    <AppSheet v-if="isPhone || isCompact" side="left" v-model:open="sectionSidebar.open.value" title="Library">
       <LibrarySidebar
         variant="sheet"
         :libraries="libraries"
@@ -78,7 +59,6 @@
         @update:filters="onFiltersChange"
         @save-list="saveSmartList"
         @reset="resetBrowse"
-        @open-library="librarySheetOpen = true"
       />
 
       <div class="lib-content">
@@ -294,9 +274,8 @@ const userLists = ref<UserList[]>([])
 const loading = ref(true)
 
 const { isPhone, isCompact } = useViewport()
-const librarySheetOpen = ref(false)
-// Compact-band (720.02-1200px) left drawer, opened by AppTopBar's burger —
-// shared singleton state (module-level ref), see useSectionSidebar.ts.
+// Section-nav left drawer (phone + compact band), opened by AppTopBar's
+// burger — shared singleton state (module-level ref), see useSectionSidebar.ts.
 const sectionSidebar = useSectionSidebar()
 
 const listSheetOpen = ref(false)

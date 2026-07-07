@@ -19,15 +19,10 @@
         <span class="filter-bar-count">{{ count }} {{ countLabel ?? 'titles' }}</span>
       </div>
       <div class="filter-bar-right">
-        <!-- Phone only: LibrarySidebar (library/loved/lists/franchises) moves
-             into a sheet on phone (docs/responsive-plan.md W3b) — the popover
-             "Filters" button just below stays put, it's the separate
-             attribute-filter panel (genre/year/rating/...), so this one is
-             labeled "Library" to avoid the name collision. -->
-        <button v-if="isPhone" class="btn-ghost-sm fb-library-btn" @click="$emit('open-library')">
-          <Icon name="folder" :size="14" />
-          Library
-        </button>
+        <!-- The section sidebar (library/loved/lists/franchises) opens from
+             AppTopBar's burger on phone + the compact band — no per-page
+             button here. The "Filters" popover below is the separate
+             attribute-filter panel (genre/year/rating/...). -->
         <button v-if="dirty && !hideFilters" class="btn-ghost-sm fb-reset" title="Reset filters and sorting" @click="$emit('reset')">
           <Icon name="undo" :size="14" />
           Reset
@@ -250,10 +245,7 @@ const emits = defineEmits<{
   'update:filters': [filters: FilterState]
   'save-list': []
   reset: []
-  'open-library': []
 }>()
-
-const { isPhone } = useViewport()
 
 const panelOpen = ref(false)
 
@@ -519,7 +511,7 @@ function langName(code: string) {
 
 /* ── Phone (<=720px) ─────────────────────────────────────────────────
    Title above, controls below (wrapping onto a second line rather than
-   scroll-hunting — there's a "Library" button plus up to 4 more here).
+   scroll-hunting — Reset/Filters/Sort/view-toggle can add up).
    Buttons carrying `.btn-ghost-sm`/`.view-toggle-btn` are literal elements
    in this template (not AppMenu/Popover-rendered), so the scoped selector
    reaches them fine — see the unscoped block below for the one trigger

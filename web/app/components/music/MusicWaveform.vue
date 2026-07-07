@@ -1,5 +1,19 @@
 <template>
-  <div ref="wrap" class="wf-wrap" @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerleave="hoverPct = null">
+  <div
+    ref="wrap"
+    class="wf-wrap"
+    role="slider"
+    tabindex="0"
+    :aria-label="ariaLabel"
+    aria-valuemin="0"
+    aria-valuemax="100"
+    :aria-valuenow="valueNow"
+    :aria-valuetext="ariaValueText"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerleave="hoverPct = null"
+    @keydown="onKeydown"
+  >
     <canvas ref="canvas" class="wf-canvas" />
     <div v-if="hoverPct !== null" class="wf-hover" :style="{ left: hoverPct + '%' }" />
   </div>
@@ -16,15 +30,63 @@
 // Gracefully degrades: when `peaks` is empty, falls back to a flat
 // neutral bar so the playbar layout doesn't jump on tracks that
 // haven't been analyzed yet.
+//
+// Accessibility: the wrap is a keyboard-operable `role="slider"` (focusable,
+// arrow/Home/End/PageUp-Down seek) with live aria-value* — pointer users get
+// the canvas, keyboard/AT users get a real slider. Callers can pass a
+// human-readable `valueText` (e.g. "1:23 of 3:45") for a nicer announcement
+// than the bare percentage fallback.
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   peaks: number[] | null
   progress: number    // 0..1
-}>()
+  ariaLabel?: string
+  /** Overrides the aria-valuetext announcement (e.g. "1:23 of 3:45"). */
+  valueText?: string | null
+}>(), {
+  ariaLabel: 'Seek',
+  valueText: null,
+})
 
 const emit = defineEmits<{
   (e: 'seek', pct: number): void
 }>()
+
+const valueNow = computed(() => Math.round(Math.max(0, Math.min(1, props.progress)) * 100))
+const ariaValueText = computed(() => props.valueText ?? `${valueNow.value}%`)
+
+// Keyboard seek — the full WAI-ARIA slider key set. A focused slider OWNS all
+// of these, so it handles both axes' arrows (↑/→ increase, ↓/← decrease),
+// PageUp/Down for a larger step, and Home/End for the ends. Steps are in
+// percent (the component has no duration, so % is the only unit here). Emits
+// the same 0..1 fraction as a pointer seek.
+//
+// stopPropagation on every consumed key is load-bearing: the music shell mounts
+// a WINDOW-level keydown hotkey listener (useGlobalHotkeys) that suppresses only
+// for INPUT/TEXTAREA/SELECT/contenteditable — NOT for a role="slider" div. So
+// without stopping propagation a focused waveform's ←/→ would ALSO fire the
+// global ←/→ seek, and its ↑/↓ would ALSO fire the global ↑/↓ volume change —
+// both wrong for a focused slider. When the waveform is NOT focused those
+// global shortcuts still work; the slider only claims its keys while it has
+// focus.
+function onKeydown(e: KeyboardEvent) {
+  const cur = Math.max(0, Math.min(1, props.progress))
+  let next: number
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'ArrowUp': next = cur + 0.05; break
+    case 'ArrowLeft':
+    case 'ArrowDown': next = cur - 0.05; break
+    case 'PageUp': next = cur + 0.1; break
+    case 'PageDown': next = cur - 0.1; break
+    case 'Home': next = 0; break
+    case 'End': next = 1; break
+    default: return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  emit('seek', Math.max(0, Math.min(1, next)))
+}
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const wrap = ref<HTMLDivElement | null>(null)
@@ -142,6 +204,14 @@ useEventListener(window, 'pointerup', () => { dragging.value = false })
   cursor: pointer;
   user-select: none;
   touch-action: none;
+}
+/* Keyboard focus only — :focus-visible keeps mouse/touch interaction ring-free
+   so the visual layout is unchanged for pointer users. */
+.wf-wrap:focus { outline: none; }
+.wf-wrap:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 .wf-canvas {
   display: block;
