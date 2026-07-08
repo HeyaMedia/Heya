@@ -193,6 +193,71 @@ func TestScopedArtifactDropsOutOfScopeMovieData(t *testing.T) {
 	require.Equal(t, "title_year:dune|2021", loaded.MovieMaterialize[0].Key)
 }
 
+func TestEntityArtifactDropsOtherIdentities(t *testing.T) {
+	result := Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{
+			Root: "/media/movies",
+			Files: []InventoryFile{{
+				Root:    "/media/movies",
+				Path:    "/media/movies/Dune (2021)/Dune.mkv",
+				RelPath: "Dune (2021)/Dune.mkv",
+				Name:    "Dune.mkv",
+				Class:   ClassPrimaryMedia,
+			}, {
+				Root:    "/media/movies",
+				Path:    "/media/movies/The Matrix (1999)/The Matrix.mkv",
+				RelPath: "The Matrix (1999)/The Matrix.mkv",
+				Name:    "The Matrix.mkv",
+				Class:   ClassPrimaryMedia,
+			}},
+		}}},
+		MovieMatches: []MovieMatch{{
+			Key:   "title_year:dune|2021",
+			Title: "Dune",
+			Year:  "2021",
+			Files: []string{"Dune (2021)/Dune.mkv"},
+		}, {
+			Key:   "title_year:matrix|1999",
+			Title: "The Matrix",
+			Year:  "1999",
+			Files: []string{"The Matrix (1999)/The Matrix.mkv"},
+		}},
+		MovieSearch: []MovieSearchMatch{{
+			Key:        "title_year:dune|2021",
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:438631",
+			Title:      "Dune",
+			Year:       "2021",
+		}, {
+			Key:        "title_year:matrix|1999",
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:603",
+			Title:      "The Matrix",
+			Year:       "1999",
+		}},
+		MovieMetadata: []MovieFetchPreview{{
+			Key:        "title_year:dune|2021",
+			ProviderID: "heya:movie:tmdb:438631",
+			Detail:     &metadata.MediaDetail{Title: "Dune"},
+		}, {
+			Key:        "title_year:matrix|1999",
+			ProviderID: "heya:movie:tmdb:603",
+			Detail:     &metadata.MediaDetail{Title: "The Matrix"},
+		}},
+	}
+
+	filtered := filterResultToIdentityKey(result, "title_year:dune|2021")
+	require.Len(t, filtered.Inventory.Roots, 1)
+	require.Len(t, filtered.Inventory.Roots[0].Files, 1)
+	require.Equal(t, "Dune (2021)/Dune.mkv", filtered.Inventory.Roots[0].Files[0].RelPath)
+	require.Len(t, filtered.MovieMatches, 1)
+	require.Equal(t, "title_year:dune|2021", filtered.MovieMatches[0].Key)
+	require.Len(t, filtered.MovieSearch, 1)
+	require.Equal(t, "heya:movie:tmdb:438631", filtered.MovieSearch[0].ProviderID)
+	require.Len(t, filtered.MovieMetadata, 1)
+	require.Equal(t, "heya:movie:tmdb:438631", filtered.MovieMetadata[0].ProviderID)
+}
+
 func TestResumeSearchArtifactOverlaysManualDecision(t *testing.T) {
 	result := Result{
 		MovieSearch: []MovieSearchMatch{{

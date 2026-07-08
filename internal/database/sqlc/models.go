@@ -832,6 +832,41 @@ type ScanRunArtifact struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type ScannerEntity struct {
+	ID                 int64              `json:"id"`
+	LibraryID          int64              `json:"library_id"`
+	MediaType          MediaType          `json:"media_type"`
+	ScopeKey           string             `json:"scope_key"`
+	ScopePaths         []string           `json:"scope_paths"`
+	IdentityKey        string             `json:"identity_key"`
+	Title              string             `json:"title"`
+	Year               string             `json:"year"`
+	ProviderID         string             `json:"provider_id"`
+	Status             string             `json:"status"`
+	SearchScanRunID    pgtype.Int8        `json:"search_scan_run_id"`
+	FetchScanRunID     pgtype.Int8        `json:"fetch_scan_run_id"`
+	SearchArtifactID   pgtype.Int8        `json:"search_artifact_id"`
+	MetadataArtifactID pgtype.Int8        `json:"metadata_artifact_id"`
+	ApplyArtifactID    pgtype.Int8        `json:"apply_artifact_id"`
+	ErrorMessage       string             `json:"error_message"`
+	Data               []byte             `json:"data"`
+	DiscoveredAt       pgtype.Timestamptz `json:"discovered_at"`
+	SearchedAt         pgtype.Timestamptz `json:"searched_at"`
+	FetchedAt          pgtype.Timestamptz `json:"fetched_at"`
+	AppliedAt          pgtype.Timestamptz `json:"applied_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ScannerEntityArtifact struct {
+	ID            int64              `json:"id"`
+	EntityID      int64              `json:"entity_id"`
+	Stage         string             `json:"stage"`
+	SchemaVersion int32              `json:"schema_version"`
+	ScanRunID     pgtype.Int8        `json:"scan_run_id"`
+	Data          []byte             `json:"data"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ScheduledTask struct {
 	ID                    string             `json:"id"`
 	DisplayName           string             `json:"display_name"`

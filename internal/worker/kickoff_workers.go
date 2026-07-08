@@ -314,28 +314,45 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 
 	scanCtx, cancel := context.WithTimeout(ctx, scannerProcessTimeout)
 	defer cancel()
-	result, searchScanRunID, err := w.scanLibrarySearch(scanCtx, lib, job.Args.ScopePaths)
+	outcome, result, searchScanRunID, err := w.scanLibrarySearch(scanCtx, lib, job.Args.ScopePaths)
 	if err != nil {
 		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: scan error")
 		return err
 	}
 
-	if err := enqueueFetchLibraryMetadata(ctx, rc, FetchLibraryMetadataArgs{
-		LibraryID:       lib.ID,
-		ScopePaths:      job.Args.ScopePaths,
-		SearchScanRunID: searchScanRunID,
-		Force:           job.Args.Force,
-		ScheduledTaskID: job.Args.ScheduledTaskID,
-	}, PriorityScan, source); err != nil {
-		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("process_scan: enqueue metadata fetch failed")
+	entityOpts := scannerSearchOptions(w.DB, w.Heya)
+	entityOpts.ScopePaths = job.Args.ScopePaths
+	refs, err := scanner.PersistScannerSearchEntities(ctx, w.DB, lib, entityOpts, result, searchScanRunID)
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: persist scanner entities failed")
 		return err
+	}
+	enqueued := 0
+	for _, ref := range refs {
+		if !ref.Accepted || ref.ProviderID == "" {
+			continue
+		}
+		if err := enqueueFetchLibraryMetadata(ctx, rc, FetchLibraryMetadataArgs{
+			LibraryID:        lib.ID,
+			ScopePaths:       job.Args.ScopePaths,
+			ScannerEntityID:  ref.Entity.ID,
+			SearchArtifactID: ref.Artifact.ID,
+			Force:            job.Args.Force,
+			ScheduledTaskID:  job.Args.ScheduledTaskID,
+		}, PriorityScan, source); err != nil {
+			log.Warn().Err(err).Int64("library_id", lib.ID).Int64("scanner_entity_id", ref.Entity.ID).Msg("process_scan: enqueue metadata fetch failed")
+			return err
+		}
+		enqueued++
 	}
 
 	log.Info().
 		Int64("library_id", lib.ID).
 		Int("scopes", len(job.Args.ScopePaths)).
-		Int("discovered", result.Discovered).
-		Int("selected", result.New).
+		Int("discovered", outcome.Discovered).
+		Int("selected", outcome.New).
+		Int("entities", len(refs)).
+		Int("enqueued_fetch", enqueued).
 		Msg("process_scan: library done")
 	return nil
 }
@@ -379,19 +396,28 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 
 	scanCtx, cancel := context.WithTimeout(ctx, scannerFetchTimeout)
 	defer cancel()
-	result, fetchScanRunID, err := w.scanLibraryFetch(scanCtx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID)
+	result, fetchScanRunID, metadataArtifactID, err := w.scanLibraryFetch(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.SearchArtifactID)
 	if err != nil {
+		scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "metadata_error", err)
 		log.Error().Err(err).Int64("library_id", lib.ID).Msg("fetch_metadata: scan error")
 		return err
 	}
+	if result.New == 0 {
+		log.Info().
+			Int64("library_id", lib.ID).
+			Int64("scanner_entity_id", job.Args.ScannerEntityID).
+			Int64("metadata_artifact_id", metadataArtifactID).
+			Msg("fetch_metadata: no usable metadata fetched; apply not enqueued")
+		return nil
+	}
 
 	if err := enqueueApplyLibraryScan(ctx, rc, ApplyLibraryScanArgs{
-		LibraryID:       lib.ID,
-		ScopePaths:      job.Args.ScopePaths,
-		SearchScanRunID: job.Args.SearchScanRunID,
-		FetchScanRunID:  fetchScanRunID,
-		Force:           job.Args.Force,
-		ScheduledTaskID: job.Args.ScheduledTaskID,
+		LibraryID:          lib.ID,
+		ScopePaths:         job.Args.ScopePaths,
+		ScannerEntityID:    job.Args.ScannerEntityID,
+		MetadataArtifactID: metadataArtifactID,
+		Force:              job.Args.Force,
+		ScheduledTaskID:    job.Args.ScheduledTaskID,
 	}, PriorityScan, source); err != nil {
 		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("fetch_metadata: enqueue apply failed")
 		return err
@@ -399,9 +425,12 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 
 	log.Info().
 		Int64("library_id", lib.ID).
+		Int64("scanner_entity_id", job.Args.ScannerEntityID).
 		Int("scopes", len(job.Args.ScopePaths)).
 		Int("discovered", result.Discovered).
 		Int("fetched", result.New).
+		Int64("fetch_scan_run_id", fetchScanRunID).
+		Int64("metadata_artifact_id", metadataArtifactID).
 		Msg("fetch_metadata: library done")
 	return nil
 }
@@ -446,8 +475,9 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 
 	scanCtx, cancel := context.WithTimeout(ctx, scannerApplyTimeout)
 	defer cancel()
-	outcome, result, err := w.scanLibraryApply(scanCtx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID, job.Args.FetchScanRunID)
+	outcome, result, err := w.scanLibraryApply(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.MetadataArtifactID)
 	if err != nil {
+		scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "apply_error", err)
 		log.Error().Err(err).Int64("library_id", lib.ID).Msg("apply_metadata: scan error")
 		return err
 	}
@@ -769,6 +799,9 @@ func scannerScopeContains(parent, child string) bool {
 var scannerSeasonDirRE = regexp.MustCompile(`(?i)^(?:Season|Series|S)[ ._-]*(?:\d{1,2}|specials?)$`)
 
 func scannerScopeForInventoryFile(mediaType sqlc.MediaType, file scanner.InventoryFile) string {
+	if file.Class == scanner.ClassPrimaryMedia && filepath.Dir(file.RelPath) == "." {
+		return file.Path
+	}
 	return ScannerScopeForPath(mediaType, file.Path)
 }
 
@@ -894,114 +927,95 @@ func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], 
 	return err
 }
 
-func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, int64, error) {
+func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, scanner.Result, int64, error) {
 	opts := scannerSearchOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "process_scan")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
 	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
 		result := run.Result()
-		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, err
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, 0, err
 	}
 	result, err := run.Finish(ctx)
 	return libraryScanOutcome{
 		Discovered: countScannerInventoryFiles(result.Inventory),
 		New:        countScannerAcceptedSearch(result),
-	}, run.ScanRunID(), err
+	}, result, run.ScanRunID(), err
 }
 
-func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID int64) (libraryScanOutcome, int64, error) {
+func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib sqlc.Library, scopePaths []string, entityID, searchArtifactID int64) (libraryScanOutcome, int64, int64, error) {
+	if entityID == 0 || searchArtifactID == 0 {
+		return libraryScanOutcome{}, 0, 0, fmt.Errorf("fetch_metadata requires scanner_entity_id and search_artifact_id")
+	}
 	opts := scannerFetchOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "fetch_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
-	resumed := false
-	if searchScanRunID > 0 {
-		var err error
-		resumed, err = run.ResumeSearchArtifact(ctx, searchScanRunID)
-		if err != nil {
-			return libraryScanOutcome{}, 0, err
-		}
+	if _, err := sqlc.New(w.DB).MarkScannerEntityFetching(ctx, entityID); err != nil {
+		return libraryScanOutcome{}, 0, 0, fmt.Errorf("mark scanner entity fetching: %w", err)
 	}
-	if resumed {
-		if err := run.Run(ctx, scanner.PhaseFetch); err != nil {
-			result := run.Result()
-			return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, err
-		}
-		result, err := run.Finish(ctx)
-		return libraryScanOutcome{
-			Discovered: countScannerInventoryFiles(result.Inventory),
-			New:        countScannerFetchedMetadata(result),
-		}, run.ScanRunID(), err
+	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, searchArtifactID)
+	if err != nil {
+		return libraryScanOutcome{}, 0, 0, err
 	}
-	if searchScanRunID > 0 {
-		log.Warn().Int64("library_id", lib.ID).Int64("scan_run_id", searchScanRunID).Msg("fetch_metadata: search artifact unavailable; falling back to full fetch scan")
+	if err := run.ResumeSearchResult(ctx, result, searchArtifactID); err != nil {
+		return libraryScanOutcome{}, 0, 0, err
 	}
-	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
+	if err := run.Run(ctx, scanner.PhaseFetch); err != nil {
 		result := run.Result()
-		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, err
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, 0, err
 	}
-	result, err := run.Finish(ctx)
+	result, err = run.Finish(ctx)
+	if err != nil {
+		return libraryScanOutcome{}, run.ScanRunID(), 0, err
+	}
+	artifact, err := scanner.PersistScannerFetchEntity(ctx, w.DB, entityID, result, run.ScanRunID())
+	if err != nil {
+		return libraryScanOutcome{}, run.ScanRunID(), 0, err
+	}
 	return libraryScanOutcome{
 		Discovered: countScannerInventoryFiles(result.Inventory),
 		New:        countScannerFetchedMetadata(result),
-	}, run.ScanRunID(), err
+	}, run.ScanRunID(), artifact.ID, nil
 }
 
-func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID, fetchScanRunID int64) (libraryScanOutcome, scanner.Result, error) {
+func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.Library, scopePaths []string, entityID, metadataArtifactID int64) (libraryScanOutcome, scanner.Result, error) {
+	if entityID == 0 || metadataArtifactID == 0 {
+		return libraryScanOutcome{}, scanner.Result{}, fmt.Errorf("apply_metadata requires scanner_entity_id and metadata_artifact_id")
+	}
 	opts := scannerApplyOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "apply_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
-	resumed := false
-	if fetchScanRunID > 0 {
-		var err error
-		resumed, err = run.ResumeFetchArtifact(ctx, fetchScanRunID)
-		if err != nil {
-			return libraryScanOutcome{}, scanner.Result{}, err
-		}
+	if _, err := sqlc.New(w.DB).MarkScannerEntityApplying(ctx, entityID); err != nil {
+		return libraryScanOutcome{}, scanner.Result{}, fmt.Errorf("mark scanner entity applying: %w", err)
 	}
-	if resumed {
-		if err := run.Run(ctx, scanner.PhaseMaterialize, scanner.PhaseApply); err != nil {
-			result := run.Result()
-			return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, err
-		}
-		result, err := run.Finish(ctx)
-		return libraryScanOutcome{
-			Discovered: countScannerInventoryFiles(result.Inventory),
-			New:        countScannerAppliedFiles(result),
-		}, result, err
+	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, metadataArtifactID)
+	if err != nil {
+		return libraryScanOutcome{}, scanner.Result{}, err
 	}
-	if searchScanRunID > 0 {
-		var err error
-		resumed, err = run.ResumeSearchArtifact(ctx, searchScanRunID)
-		if err != nil {
-			return libraryScanOutcome{}, scanner.Result{}, err
-		}
+	resumed, err := run.ResumeFetchResult(ctx, result, metadataArtifactID)
+	if err != nil {
+		return libraryScanOutcome{}, scanner.Result{}, err
 	}
-	if resumed {
-		if err := run.Run(ctx, scanner.PhaseFetch, scanner.PhaseMaterialize, scanner.PhaseApply); err != nil {
-			result := run.Result()
-			return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, err
-		}
-		result, err := run.Finish(ctx)
-		return libraryScanOutcome{
-			Discovered: countScannerInventoryFiles(result.Inventory),
-			New:        countScannerAppliedFiles(result),
-		}, result, err
+	if !resumed {
+		return libraryScanOutcome{}, scanner.Result{}, fmt.Errorf("metadata artifact %d is stale for current search decision", metadataArtifactID)
 	}
-	if fetchScanRunID > 0 || searchScanRunID > 0 {
-		log.Warn().
-			Int64("library_id", lib.ID).
-			Int64("search_scan_run_id", searchScanRunID).
-			Int64("fetch_scan_run_id", fetchScanRunID).
-			Msg("apply_metadata: scanner artifacts unavailable or stale; running a fresh apply scan")
+	if err := run.Run(ctx, scanner.PhaseMaterialize, scanner.PhaseApply); err != nil {
+		result := run.Result()
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, err
 	}
-	result, err := scanner.RunLibrary(ctx, lib, opts, io.Discard)
+	result, err = run.Finish(ctx)
+	if err != nil {
+		return libraryScanOutcome{}, result, err
+	}
+	if _, err := scanner.PersistScannerApplyEntity(ctx, w.DB, entityID, result, run.ScanRunID()); err != nil {
+		return libraryScanOutcome{}, result, err
+	}
 	return libraryScanOutcome{
 		Discovered: countScannerInventoryFiles(result.Inventory),
 		New:        countScannerAppliedFiles(result),
-	}, result, err
+	}, result, nil
 }
 
 type postApplyFanout struct {

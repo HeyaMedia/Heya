@@ -70,6 +70,22 @@ func TestScannerScopeForPathUsesOwningMediaDirectory(t *testing.T) {
 	)
 }
 
+func TestScannerScopeForInventoryFileKeepsTopLevelMediaFileScoped(t *testing.T) {
+	file := scanner.InventoryFile{
+		Path:    "/library/Loose.Movie.2024.1080p.WEB-DL.mkv",
+		RelPath: "Loose.Movie.2024.1080p.WEB-DL.mkv",
+		Class:   scanner.ClassPrimaryMedia,
+	}
+	require.Equal(t, file.Path, scannerScopeForInventoryFile(sqlc.MediaTypeMovie, file))
+
+	nested := scanner.InventoryFile{
+		Path:    "/library/Movie (2024)/Movie.2024.mkv",
+		RelPath: "Movie (2024)/Movie.2024.mkv",
+		Class:   scanner.ClassPrimaryMedia,
+	}
+	require.Equal(t, "/library/Movie (2024)", scannerScopeForInventoryFile(sqlc.MediaTypeMovie, nested))
+}
+
 func TestLibraryScanProgressLabelIncludesScope(t *testing.T) {
 	lib := sqlc.Library{Name: "Movies", Paths: []string{"/storage/Movies"}}
 

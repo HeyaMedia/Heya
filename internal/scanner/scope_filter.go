@@ -18,6 +18,125 @@ func filterResultToScopes(result Result, scopes []string, emit Emitter) Result {
 	return result
 }
 
+func filterResultToIdentityKey(result Result, key string) Result {
+	if key == "" {
+		return result
+	}
+	relPaths := resultRelPathsForIdentityKey(result, key)
+	if len(relPaths) > 0 {
+		result.Inventory = filterInventoryToRelPaths(result.Inventory, relPaths)
+		result = filterMovieResultToRelPaths(result, relPaths)
+		result = filterTVResultToRelPaths(result, relPaths)
+		result = filterMusicResultToRelPaths(result, relPaths)
+		result = filterBookResultToRelPaths(result, relPaths)
+	}
+
+	keys := map[string]bool{key: true}
+	result.MovieSearch = filterMovieSearchToKeys(result.MovieSearch, keys)
+	result.MovieMetadata = filterMovieMetadataToKeys(result.MovieMetadata, keys)
+	result.MovieApply = filterMovieApplyToKeys(result.MovieApply, keys)
+
+	result.TVSearch = filterTVSearchToKeys(result.TVSearch, keys)
+	result.TVMetadata = filterTVMetadataToKeys(result.TVMetadata, keys)
+	result.TVApply = filterTVApplyToKeys(result.TVApply, keys)
+
+	result.MusicSearch = filterMusicSearchToKeys(result.MusicSearch, keys)
+	result.MusicApply = filterMusicApplyToKeys(result.MusicApply, keys)
+
+	result.BookSearch = filterBookSearchToKeys(result.BookSearch, keys)
+	result.BookMetadata = filterBookMetadataToKeys(result.BookMetadata, keys)
+	result.BookApply = filterBookApplyToKeys(result.BookApply, keys)
+	return result
+}
+
+func resultRelPathsForIdentityKey(result Result, key string) map[string]bool {
+	relPaths := map[string]bool{}
+	for _, match := range result.MovieMatches {
+		if match.Key != key {
+			continue
+		}
+		addStringsToSet(relPaths, match.Files)
+		for _, asset := range match.Assets {
+			relPaths[asset.RelPath] = true
+		}
+		addStringsToSet(relPaths, match.NFOs)
+	}
+	for _, match := range result.TVMatches {
+		if match.Key != key {
+			continue
+		}
+		addStringsToSet(relPaths, match.Files)
+		addStringsToSet(relPaths, match.Subtitles)
+		addStringsToSet(relPaths, match.NFOs)
+		addStringsToSet(relPaths, match.Plexmatches)
+		for _, asset := range match.Assets {
+			relPaths[asset.RelPath] = true
+		}
+		for _, plan := range match.Plans {
+			addStringsToSet(relPaths, plan.Files)
+			addStringsToSet(relPaths, plan.Subtitles)
+			if plan.NFO != "" {
+				relPaths[plan.NFO] = true
+			}
+			if plan.Plexmatch != "" {
+				relPaths[plan.Plexmatch] = true
+			}
+			for _, asset := range plan.Assets {
+				relPaths[asset.RelPath] = true
+			}
+		}
+	}
+	for _, artist := range result.MusicArtists {
+		if artist.Key != key {
+			continue
+		}
+		addStringsToSet(relPaths, artist.Files)
+		for _, album := range artist.Albums {
+			addStringsToSet(relPaths, album.Files)
+			addStringsToSet(relPaths, album.NFOs)
+			for _, track := range album.Tracks {
+				if track.RelPath != "" {
+					relPaths[track.RelPath] = true
+				}
+			}
+		}
+	}
+	for _, plan := range result.BookPlans {
+		if plan.Key != key {
+			continue
+		}
+		addStringsToSet(relPaths, plan.Files)
+		for _, asset := range plan.Assets {
+			relPaths[asset.RelPath] = true
+		}
+	}
+	return relPaths
+}
+
+func filterInventoryToRelPaths(inv Inventory, relPaths map[string]bool) Inventory {
+	out := Inventory{Roots: make([]InventoryRoot, 0, len(inv.Roots))}
+	for _, root := range inv.Roots {
+		next := InventoryRoot{Root: root.Root}
+		for _, file := range root.Files {
+			if relPaths[file.RelPath] {
+				next.Files = append(next.Files, file)
+			}
+		}
+		if len(next.Files) > 0 {
+			out.Roots = append(out.Roots, next)
+		}
+	}
+	return out
+}
+
+func addStringsToSet(set map[string]bool, items []string) {
+	for _, item := range items {
+		if item != "" {
+			set[item] = true
+		}
+	}
+}
+
 func inventoryRelPathSet(inv Inventory) map[string]bool {
 	out := map[string]bool{}
 	for _, root := range inv.Roots {

@@ -178,6 +178,177 @@ func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	require.False(t, approved.MediaItemID.Valid, "manual approval should wait for a follow-up apply to attach media")
 }
 
+func TestPersistScannerSearchEntitiesStoresNarrowArtifacts(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-entity-test",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	result := Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{
+			Root: "/media/movies",
+			Files: []InventoryFile{{
+				Root:    "/media/movies",
+				Path:    "/media/movies/Dune (2021)/Dune.mkv",
+				RelPath: "Dune (2021)/Dune.mkv",
+				Name:    "Dune.mkv",
+				Class:   ClassPrimaryMedia,
+			}, {
+				Root:    "/media/movies",
+				Path:    "/media/movies/The Matrix (1999)/The Matrix.mkv",
+				RelPath: "The Matrix (1999)/The Matrix.mkv",
+				Name:    "The Matrix.mkv",
+				Class:   ClassPrimaryMedia,
+			}},
+		}}},
+		MovieMatches: []MovieMatch{{
+			Key:   "title_year:dune|2021",
+			Title: "Dune",
+			Year:  "2021",
+			Files: []string{"Dune (2021)/Dune.mkv"},
+		}, {
+			Key:   "title_year:matrix|1999",
+			Title: "The Matrix",
+			Year:  "1999",
+			Files: []string{"The Matrix (1999)/The Matrix.mkv"},
+		}},
+		MovieSearch: []MovieSearchMatch{{
+			Key:        "title_year:dune|2021",
+			Query:      MovieSearchQuery{Title: "Dune", Year: "2021"},
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:438631",
+			Title:      "Dune",
+			Year:       "2021",
+			Confidence: 1.0,
+		}, {
+			Key:      "title_year:matrix|1999",
+			Query:    MovieSearchQuery{Title: "The Matrix", Year: "1999"},
+			Accepted: false,
+			Reason:   "ambiguous_or_low_confidence",
+			Title:    "The Matrix",
+			Year:     "1999",
+		}},
+	}
+
+	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: []string{"/media/movies"}}, result, 0)
+	require.NoError(t, err)
+	require.Len(t, refs, 2)
+
+	var duneArtifactID int64
+	for _, ref := range refs {
+		switch ref.IdentityKey {
+		case "title_year:dune|2021":
+			duneArtifactID = ref.Artifact.ID
+			require.True(t, ref.Accepted)
+			require.Equal(t, "matched", ref.Entity.Status)
+		case "title_year:matrix|1999":
+			require.False(t, ref.Accepted)
+			require.Equal(t, "needs_review", ref.Entity.Status)
+		}
+	}
+	require.NotZero(t, duneArtifactID)
+
+	_, loaded, err := LoadScannerEntityArtifactResult(ctx, pool, duneArtifactID)
+	require.NoError(t, err)
+	require.Len(t, loaded.MovieMatches, 1)
+	require.Equal(t, "title_year:dune|2021", loaded.MovieMatches[0].Key)
+	require.Len(t, loaded.MovieSearch, 1)
+	require.Equal(t, "heya:movie:tmdb:438631", loaded.MovieSearch[0].ProviderID)
+	require.Len(t, loaded.Inventory.Roots, 1)
+	require.Len(t, loaded.Inventory.Roots[0].Files, 1)
+	require.Equal(t, "Dune (2021)/Dune.mkv", loaded.Inventory.Roots[0].Files[0].RelPath)
+}
+
+func TestPersistScannerSearchEntitiesHonorsDottedSceneDirectoryScope(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-entity-scoped-test",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	sceneScope := "/media/movies/Anora.2024.1080p.BluRay.x264-PiGNUS"
+	result := Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{
+			Root: "/media/movies",
+			Files: []InventoryFile{{
+				Root:    "/media/movies",
+				Path:    sceneScope + "/Anora.2024.1080p.BluRay.x264-PiGNUS.mkv",
+				RelPath: "Anora.2024.1080p.BluRay.x264-PiGNUS/Anora.2024.1080p.BluRay.x264-PiGNUS.mkv",
+				Name:    "Anora.2024.1080p.BluRay.x264-PiGNUS.mkv",
+				Class:   ClassPrimaryMedia,
+			}, {
+				Root:    "/media/movies",
+				Path:    "/media/movies/Kill Bill Vol. 1 (2003)/Kill.Bill.Vol.1.2003.1080p.BluRay.x264-GRP-CD1.mkv",
+				RelPath: "Kill Bill Vol. 1 (2003)/Kill.Bill.Vol.1.2003.1080p.BluRay.x264-GRP-CD1.mkv",
+				Name:    "Kill.Bill.Vol.1.2003.1080p.BluRay.x264-GRP-CD1.mkv",
+				Class:   ClassPrimaryMedia,
+			}},
+		}}},
+		MovieMatches: []MovieMatch{{
+			Key:   "title_year:anora|2024",
+			Title: "Anora",
+			Year:  "2024",
+			Files: []string{"Anora.2024.1080p.BluRay.x264-PiGNUS/Anora.2024.1080p.BluRay.x264-PiGNUS.mkv"},
+		}, {
+			Key:   "title_year:kill bill vol 1|2003",
+			Title: "Kill Bill Vol 1",
+			Year:  "2003",
+			Files: []string{"Kill Bill Vol. 1 (2003)/Kill.Bill.Vol.1.2003.1080p.BluRay.x264-GRP-CD1.mkv"},
+		}},
+		MovieSearch: []MovieSearchMatch{{
+			Key:        "title_year:anora|2024",
+			Query:      MovieSearchQuery{Title: "Anora", Year: "2024"},
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:1064213",
+			Title:      "Anora",
+			Year:       "2024",
+			Confidence: 1.0,
+		}, {
+			Key:        "title_year:kill bill vol 1|2003",
+			Query:      MovieSearchQuery{Title: "Kill Bill Vol 1", Year: "2003"},
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:24",
+			Title:      "Kill Bill: Vol. 1",
+			Year:       "2003",
+			Confidence: 0.95,
+		}},
+	}
+
+	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: []string{sceneScope}}, result, 0)
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+	require.Equal(t, "title_year:anora|2024", refs[0].IdentityKey)
+
+	_, loaded, err := LoadScannerEntityArtifactResult(ctx, pool, refs[0].Artifact.ID)
+	require.NoError(t, err)
+	require.Len(t, loaded.MovieMatches, 1)
+	require.Equal(t, "title_year:anora|2024", loaded.MovieMatches[0].Key)
+	require.Len(t, loaded.Inventory.Roots, 1)
+	require.Len(t, loaded.Inventory.Roots[0].Files, 1)
+	require.Equal(t, "Anora.2024.1080p.BluRay.x264-PiGNUS/Anora.2024.1080p.BluRay.x264-PiGNUS.mkv", loaded.Inventory.Roots[0].Files[0].RelPath)
+}
+
 func musicCandidates(prefix string, artist string, n int) []MusicSearchCandidate {
 	out := make([]MusicSearchCandidate, 0, n)
 	for i := 1; i <= n; i++ {

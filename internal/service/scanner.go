@@ -491,10 +491,10 @@ func (a *App) enqueueScannerReviewApply(ctx context.Context, q *sqlc.Queries, id
 	if err != nil {
 		return err
 	}
-	args := worker.FetchLibraryMetadataArgs{
-		LibraryID:       identity.LibraryID,
-		ScopePaths:      scannerReviewScopePaths(lib.Paths, identity.RawIdentity),
-		SearchScanRunID: int8Value(identity.LastSeenScanRunID),
+	args := worker.ProcessLibraryScanArgs{
+		LibraryID:  identity.LibraryID,
+		ScopePaths: scannerReviewScopePaths(lib.Paths, identity.RawIdentity),
+		Force:      true,
 	}
 	opts := args.InsertOpts()
 	opts.Priority = worker.PriorityMatch

@@ -156,11 +156,12 @@ func (ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
 // FetchLibraryMetadataArgs resumes a persisted search result, fetches remote
 // metadata, and persists a fetch artifact for the apply phase.
 type FetchLibraryMetadataArgs struct {
-	LibraryID       int64    `json:"library_id" river:"unique"`
-	ScopePaths      []string `json:"scope_paths,omitempty" river:"unique"`
-	SearchScanRunID int64    `json:"search_scan_run_id,omitempty" river:"unique"`
-	Force           bool     `json:"force,omitempty"`
-	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
+	LibraryID        int64    `json:"library_id" river:"unique"`
+	ScopePaths       []string `json:"scope_paths,omitempty" river:"unique"`
+	ScannerEntityID  int64    `json:"scanner_entity_id" river:"unique"`
+	SearchArtifactID int64    `json:"search_artifact_id" river:"unique"`
+	Force            bool     `json:"force,omitempty"`
+	ScheduledTaskID  string   `json:"scheduled_task_id,omitempty"`
 }
 
 func (FetchLibraryMetadataArgs) Kind() string { return "fetch_metadata" }
@@ -173,19 +174,17 @@ func (FetchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
-// ApplyLibraryScanArgs runs the scanner's metadata fetch/materialize/apply
-// phases for a library scope after FetchLibraryMetadataArgs has persisted the
-// metadata result. FetchScanRunID pins the apply phase to exact fetched
-// metadata; SearchScanRunID lets old/stale fetch artifacts refetch without
-// repeating local analysis/search. Missing ids fall back to a full
-// self-contained scan for old/manual jobs.
+// ApplyLibraryScanArgs resumes one persisted entity metadata artifact,
+// materializes it, applies it to the database, then fans out file side effects.
+// The queue payload stays intentionally small; the rich scanner state lives in
+// scanner_entity_artifacts.
 type ApplyLibraryScanArgs struct {
-	LibraryID       int64    `json:"library_id" river:"unique"`
-	ScopePaths      []string `json:"scope_paths,omitempty" river:"unique"`
-	SearchScanRunID int64    `json:"search_scan_run_id,omitempty" river:"unique"`
-	FetchScanRunID  int64    `json:"fetch_scan_run_id,omitempty" river:"unique"`
-	Force           bool     `json:"force,omitempty"`
-	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
+	LibraryID          int64    `json:"library_id" river:"unique"`
+	ScopePaths         []string `json:"scope_paths,omitempty" river:"unique"`
+	ScannerEntityID    int64    `json:"scanner_entity_id" river:"unique"`
+	MetadataArtifactID int64    `json:"metadata_artifact_id" river:"unique"`
+	Force              bool     `json:"force,omitempty"`
+	ScheduledTaskID    string   `json:"scheduled_task_id,omitempty"`
 }
 
 func (ApplyLibraryScanArgs) Kind() string { return "apply_metadata" }

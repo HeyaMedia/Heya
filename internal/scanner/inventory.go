@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -283,7 +284,7 @@ func normalizeScopeDir(scope string) string {
 	}
 	if strings.Contains(scope, "://") {
 		scope = strings.TrimRight(scope, "/")
-		if filepath.Ext(scope) != "" {
+		if scopePathLooksLikeFile(scope) {
 			if idx := strings.LastIndex(scope, "/"); idx > strings.Index(scope, "://")+2 {
 				scope = scope[:idx]
 			}
@@ -292,10 +293,29 @@ func normalizeScopeDir(scope string) string {
 	}
 
 	scope = filepath.Clean(scope)
-	if filepath.Ext(scope) != "" {
+	if info, err := os.Stat(scope); err == nil {
+		if info.IsDir() {
+			return scope
+		}
+		return scope
+	}
+	if scopePathLooksLikeFile(scope) {
 		scope = filepath.Dir(scope)
 	}
 	return scope
+}
+
+func scopePathLooksLikeFile(scope string) bool {
+	base := filepath.Base(scope)
+	if strings.EqualFold(base, ".plexmatch") || isCanonicalNFO(strings.ToLower(base)) {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	return parser.IsMediaExtension(ext) ||
+		mediafile.IsImageExt(ext) ||
+		mediafile.IsSubtitleExt(ext) ||
+		mediafile.IsLyricsExt(ext) ||
+		ext == ".nfo"
 }
 
 func inventoryPathInAnyScope(filePath string, scopes []string) bool {

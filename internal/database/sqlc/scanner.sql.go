@@ -333,6 +333,41 @@ func (q *Queries) CreateScanRun(ctx context.Context, arg CreateScanRunParams) (S
 	return i, err
 }
 
+const createScannerEntityArtifact = `-- name: CreateScannerEntityArtifact :one
+INSERT INTO scanner_entity_artifacts (entity_id, stage, schema_version, scan_run_id, data)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, entity_id, stage, schema_version, scan_run_id, data, created_at
+`
+
+type CreateScannerEntityArtifactParams struct {
+	EntityID      int64       `json:"entity_id"`
+	Stage         string      `json:"stage"`
+	SchemaVersion int32       `json:"schema_version"`
+	ScanRunID     pgtype.Int8 `json:"scan_run_id"`
+	Data          []byte      `json:"data"`
+}
+
+func (q *Queries) CreateScannerEntityArtifact(ctx context.Context, arg CreateScannerEntityArtifactParams) (ScannerEntityArtifact, error) {
+	row := q.db.QueryRow(ctx, createScannerEntityArtifact,
+		arg.EntityID,
+		arg.Stage,
+		arg.SchemaVersion,
+		arg.ScanRunID,
+		arg.Data,
+	)
+	var i ScannerEntityArtifact
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.Stage,
+		&i.SchemaVersion,
+		&i.ScanRunID,
+		&i.Data,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deleteLibraryFileLinksByFile = `-- name: DeleteLibraryFileLinksByFile :exec
 DELETE FROM library_file_links WHERE library_file_id = $1
 `
@@ -411,6 +446,34 @@ func (q *Queries) GetLatestScanRunArtifactByLibrary(ctx context.Context, arg Get
 		&i.Kind,
 		&i.ScopeKey,
 		&i.SchemaVersion,
+		&i.Data,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLatestScannerEntityArtifact = `-- name: GetLatestScannerEntityArtifact :one
+SELECT id, entity_id, stage, schema_version, scan_run_id, data, created_at FROM scanner_entity_artifacts
+WHERE entity_id = $1
+  AND stage = $2
+ORDER BY id DESC
+LIMIT 1
+`
+
+type GetLatestScannerEntityArtifactParams struct {
+	EntityID int64  `json:"entity_id"`
+	Stage    string `json:"stage"`
+}
+
+func (q *Queries) GetLatestScannerEntityArtifact(ctx context.Context, arg GetLatestScannerEntityArtifactParams) (ScannerEntityArtifact, error) {
+	row := q.db.QueryRow(ctx, getLatestScannerEntityArtifact, arg.EntityID, arg.Stage)
+	var i ScannerEntityArtifact
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.Stage,
+		&i.SchemaVersion,
+		&i.ScanRunID,
 		&i.Data,
 		&i.CreatedAt,
 	)
@@ -577,6 +640,61 @@ func (q *Queries) GetScanRunArtifact(ctx context.Context, arg GetScanRunArtifact
 		&i.Kind,
 		&i.ScopeKey,
 		&i.SchemaVersion,
+		&i.Data,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getScannerEntity = `-- name: GetScannerEntity :one
+SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at FROM scanner_entities
+WHERE id = $1
+`
+
+func (q *Queries) GetScannerEntity(ctx context.Context, id int64) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, getScannerEntity, id)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getScannerEntityArtifact = `-- name: GetScannerEntityArtifact :one
+SELECT id, entity_id, stage, schema_version, scan_run_id, data, created_at FROM scanner_entity_artifacts
+WHERE id = $1
+`
+
+func (q *Queries) GetScannerEntityArtifact(ctx context.Context, id int64) (ScannerEntityArtifact, error) {
+	row := q.db.QueryRow(ctx, getScannerEntityArtifact, id)
+	var i ScannerEntityArtifact
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.Stage,
+		&i.SchemaVersion,
+		&i.ScanRunID,
 		&i.Data,
 		&i.CreatedAt,
 	)
@@ -1374,6 +1492,238 @@ func (q *Queries) ListTVEpisodeLinkTargetsByMediaItem(ctx context.Context, media
 	return items, nil
 }
 
+const markScannerEntityApplied = `-- name: MarkScannerEntityApplied :one
+UPDATE scanner_entities
+SET status = $2,
+    apply_artifact_id = $3,
+    error_message = $4,
+    applied_at = CASE WHEN $2 = 'applied' THEN now() ELSE applied_at END,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+`
+
+type MarkScannerEntityAppliedParams struct {
+	ID              int64       `json:"id"`
+	Status          string      `json:"status"`
+	ApplyArtifactID pgtype.Int8 `json:"apply_artifact_id"`
+	ErrorMessage    string      `json:"error_message"`
+}
+
+func (q *Queries) MarkScannerEntityApplied(ctx context.Context, arg MarkScannerEntityAppliedParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntityApplied,
+		arg.ID,
+		arg.Status,
+		arg.ApplyArtifactID,
+		arg.ErrorMessage,
+	)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markScannerEntityApplying = `-- name: MarkScannerEntityApplying :one
+UPDATE scanner_entities
+SET status = 'applying',
+    error_message = '',
+    updated_at = now()
+WHERE id = $1
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+`
+
+func (q *Queries) MarkScannerEntityApplying(ctx context.Context, id int64) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntityApplying, id)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markScannerEntityFailed = `-- name: MarkScannerEntityFailed :one
+UPDATE scanner_entities
+SET status = $2,
+    error_message = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+`
+
+type MarkScannerEntityFailedParams struct {
+	ID           int64  `json:"id"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message"`
+}
+
+func (q *Queries) MarkScannerEntityFailed(ctx context.Context, arg MarkScannerEntityFailedParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntityFailed, arg.ID, arg.Status, arg.ErrorMessage)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markScannerEntityFetched = `-- name: MarkScannerEntityFetched :one
+UPDATE scanner_entities
+SET status = $2,
+    fetch_scan_run_id = $3,
+    metadata_artifact_id = $4,
+    error_message = $5,
+    fetched_at = now(),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+`
+
+type MarkScannerEntityFetchedParams struct {
+	ID                 int64       `json:"id"`
+	Status             string      `json:"status"`
+	FetchScanRunID     pgtype.Int8 `json:"fetch_scan_run_id"`
+	MetadataArtifactID pgtype.Int8 `json:"metadata_artifact_id"`
+	ErrorMessage       string      `json:"error_message"`
+}
+
+func (q *Queries) MarkScannerEntityFetched(ctx context.Context, arg MarkScannerEntityFetchedParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntityFetched,
+		arg.ID,
+		arg.Status,
+		arg.FetchScanRunID,
+		arg.MetadataArtifactID,
+		arg.ErrorMessage,
+	)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markScannerEntityFetching = `-- name: MarkScannerEntityFetching :one
+UPDATE scanner_entities
+SET status = 'fetching',
+    error_message = '',
+    updated_at = now()
+WHERE id = $1
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+`
+
+func (q *Queries) MarkScannerEntityFetching(ctx context.Context, id int64) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntityFetching, id)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const rejectScannerIdentity = `-- name: RejectScannerIdentity :one
 WITH updated_identity AS (
     UPDATE local_media_identities lmi
@@ -1826,6 +2176,97 @@ func (q *Queries) UpsertScanRunArtifact(ctx context.Context, arg UpsertScanRunAr
 		&i.SchemaVersion,
 		&i.Data,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertScannerEntity = `-- name: UpsertScannerEntity :one
+INSERT INTO scanner_entities (
+    library_id, media_type, scope_key, scope_paths, identity_key,
+    title, year, provider_id, status, search_scan_run_id,
+    search_artifact_id, error_message, data
+)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10,
+    $11, $12, $13
+)
+ON CONFLICT (library_id, media_type, scope_key, identity_key) DO UPDATE
+SET scope_paths = EXCLUDED.scope_paths,
+    title = EXCLUDED.title,
+    year = EXCLUDED.year,
+    provider_id = EXCLUDED.provider_id,
+    status = EXCLUDED.status,
+    search_scan_run_id = EXCLUDED.search_scan_run_id,
+    search_artifact_id = EXCLUDED.search_artifact_id,
+    fetch_scan_run_id = NULL,
+    metadata_artifact_id = NULL,
+    apply_artifact_id = NULL,
+    error_message = EXCLUDED.error_message,
+    data = EXCLUDED.data,
+    searched_at = CASE WHEN EXCLUDED.search_artifact_id IS NOT NULL THEN now() ELSE scanner_entities.searched_at END,
+    fetched_at = NULL,
+    applied_at = NULL,
+    updated_at = now()
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+`
+
+type UpsertScannerEntityParams struct {
+	LibraryID        int64       `json:"library_id"`
+	MediaType        MediaType   `json:"media_type"`
+	ScopeKey         string      `json:"scope_key"`
+	ScopePaths       []string    `json:"scope_paths"`
+	IdentityKey      string      `json:"identity_key"`
+	Title            string      `json:"title"`
+	Year             string      `json:"year"`
+	ProviderID       string      `json:"provider_id"`
+	Status           string      `json:"status"`
+	SearchScanRunID  pgtype.Int8 `json:"search_scan_run_id"`
+	SearchArtifactID pgtype.Int8 `json:"search_artifact_id"`
+	ErrorMessage     string      `json:"error_message"`
+	Data             []byte      `json:"data"`
+}
+
+func (q *Queries) UpsertScannerEntity(ctx context.Context, arg UpsertScannerEntityParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, upsertScannerEntity,
+		arg.LibraryID,
+		arg.MediaType,
+		arg.ScopeKey,
+		arg.ScopePaths,
+		arg.IdentityKey,
+		arg.Title,
+		arg.Year,
+		arg.ProviderID,
+		arg.Status,
+		arg.SearchScanRunID,
+		arg.SearchArtifactID,
+		arg.ErrorMessage,
+		arg.Data,
+	)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

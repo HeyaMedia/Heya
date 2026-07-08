@@ -190,6 +190,19 @@ func (r *LibraryRun) ResumeSearchArtifact(ctx context.Context, scanRunID int64) 
 	return true, nil
 }
 
+func (r *LibraryRun) ResumeSearchResult(ctx context.Context, result Result, artifactID int64) error {
+	r.result = result
+	r.analyzed = true
+	r.sink.Emit(Event{Event: "scan.artifact_loaded", Data: map[string]any{
+		"kind":        scanArtifactKindSearch,
+		"artifact_id": artifactID,
+	}})
+	if err := r.refreshSearchDecisions(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *LibraryRun) ResumeFetchArtifact(ctx context.Context, scanRunID int64) (bool, error) {
 	result, ok, err := LoadFetchArtifact(ctx, r.opts.PersistenceDB, r.lib, r.opts, scanRunID)
 	if err != nil || !ok {
@@ -214,6 +227,30 @@ func (r *LibraryRun) ResumeFetchArtifact(ctx context.Context, scanRunID int64) (
 	r.sink.Emit(Event{Event: "scan.artifact_loaded", Data: map[string]any{
 		"kind":        scanArtifactKindFetch,
 		"scan_run_id": scanRunID,
+	}})
+	return true, nil
+}
+
+func (r *LibraryRun) ResumeFetchResult(ctx context.Context, result Result, artifactID int64) (bool, error) {
+	if err := r.refreshSearchDecisions(ctx); err != nil {
+		return true, err
+	}
+	applySearchDecisionsToResult(&result, r.lib, r.searchDecisions, r.sink)
+	if !fetchMetadataCoversAcceptedSearch(result, r.lib) {
+		r.sink.Emit(Event{Event: "scan.artifact_stale", Severity: SeverityInfo, Data: map[string]any{
+			"kind":        scanArtifactKindFetch,
+			"artifact_id": artifactID,
+			"reason":      "metadata_missing_or_incomplete_for_current_search_decision",
+		}})
+		return false, nil
+	}
+	r.result = result
+	r.analyzed = true
+	r.opts.RemoteSearch = true
+	r.opts.FetchPreview = true
+	r.sink.Emit(Event{Event: "scan.artifact_loaded", Data: map[string]any{
+		"kind":        scanArtifactKindFetch,
+		"artifact_id": artifactID,
 	}})
 	return true, nil
 }

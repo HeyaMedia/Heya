@@ -39,6 +39,101 @@ WHERE sr.library_id = $1
 ORDER BY sr.started_at DESC, sr.id DESC, sra.id DESC
 LIMIT 1;
 
+-- name: UpsertScannerEntity :one
+INSERT INTO scanner_entities (
+    library_id, media_type, scope_key, scope_paths, identity_key,
+    title, year, provider_id, status, search_scan_run_id,
+    search_artifact_id, error_message, data
+)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10,
+    $11, $12, $13
+)
+ON CONFLICT (library_id, media_type, scope_key, identity_key) DO UPDATE
+SET scope_paths = EXCLUDED.scope_paths,
+    title = EXCLUDED.title,
+    year = EXCLUDED.year,
+    provider_id = EXCLUDED.provider_id,
+    status = EXCLUDED.status,
+    search_scan_run_id = EXCLUDED.search_scan_run_id,
+    search_artifact_id = EXCLUDED.search_artifact_id,
+    fetch_scan_run_id = NULL,
+    metadata_artifact_id = NULL,
+    apply_artifact_id = NULL,
+    error_message = EXCLUDED.error_message,
+    data = EXCLUDED.data,
+    searched_at = CASE WHEN EXCLUDED.search_artifact_id IS NOT NULL THEN now() ELSE scanner_entities.searched_at END,
+    fetched_at = NULL,
+    applied_at = NULL,
+    updated_at = now()
+RETURNING *;
+
+-- name: GetScannerEntity :one
+SELECT * FROM scanner_entities
+WHERE id = $1;
+
+-- name: CreateScannerEntityArtifact :one
+INSERT INTO scanner_entity_artifacts (entity_id, stage, schema_version, scan_run_id, data)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: GetScannerEntityArtifact :one
+SELECT * FROM scanner_entity_artifacts
+WHERE id = $1;
+
+-- name: GetLatestScannerEntityArtifact :one
+SELECT * FROM scanner_entity_artifacts
+WHERE entity_id = $1
+  AND stage = $2
+ORDER BY id DESC
+LIMIT 1;
+
+-- name: MarkScannerEntityFetching :one
+UPDATE scanner_entities
+SET status = 'fetching',
+    error_message = '',
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkScannerEntityFetched :one
+UPDATE scanner_entities
+SET status = $2,
+    fetch_scan_run_id = $3,
+    metadata_artifact_id = $4,
+    error_message = $5,
+    fetched_at = now(),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkScannerEntityApplying :one
+UPDATE scanner_entities
+SET status = 'applying',
+    error_message = '',
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkScannerEntityApplied :one
+UPDATE scanner_entities
+SET status = $2,
+    apply_artifact_id = $3,
+    error_message = $4,
+    applied_at = CASE WHEN $2 = 'applied' THEN now() ELSE applied_at END,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkScannerEntityFailed :one
+UPDATE scanner_entities
+SET status = $2,
+    error_message = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpsertLocalMediaIdentity :one
 INSERT INTO local_media_identities (
     library_id, media_type, identity_key, title, year, confidence, source,
