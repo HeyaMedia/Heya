@@ -44,6 +44,7 @@ const (
 	scannerProcessTimeout = 30 * time.Minute
 	scannerFetchTimeout   = 30 * time.Minute
 	scannerApplyTimeout   = 10 * time.Minute
+	scannerRichTimeout    = 5 * time.Minute
 )
 
 type jobSourceMetadata struct {
@@ -449,6 +450,14 @@ type ApplyLibraryScanWorker struct {
 	Progress     *TaskProgressBroadcaster
 }
 
+type ApplyRichMetadataWorker struct {
+	river.WorkerDefaults[ApplyRichMetadataArgs]
+	DB       *pgxpool.Pool
+	Matcher  MatchService
+	Hub      EventPublisher
+	Progress *TaskProgressBroadcaster
+}
+
 func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyLibraryScanArgs]) error {
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
@@ -481,6 +490,7 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		log.Error().Err(err).Int64("library_id", lib.ID).Msg("apply_metadata: scan error")
 		return err
 	}
+	richQueued, richFailed := w.enqueueRichMetadataWork(ctx, rc, lib, result, job.Args.MetadataArtifactID, job.Args.ScannerEntityID, job.Args.ScheduledTaskID, source)
 	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
 
 	log.Info().
@@ -498,6 +508,8 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		Int("fingerprint", fanout.Fingerprint).
 		Int("loudness", fanout.Loudness).
 		Int("sonic", fanout.Sonic).
+		Int("rich_metadata", richQueued).
+		Int("rich_metadata_failed", richFailed).
 		Int("fanout_failed", fanout.Failed).
 		Msg("apply_metadata: library done")
 
@@ -507,6 +519,169 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		Discovered:  outcome.Discovered,
 		New:         outcome.New,
 	})
+	return nil
+}
+
+func (w *ApplyLibraryScanWorker) enqueueRichMetadataWork(ctx context.Context, rc *river.Client[pgx.Tx], lib sqlc.Library, result scanner.Result, metadataArtifactID, scannerEntityID int64, taskID string, source string) (queued, failed int) {
+	if rc == nil || metadataArtifactID == 0 {
+		return 0, 0
+	}
+	for _, target := range scannerRichMetadataTargets(lib, result) {
+		if target.mediaItemID == 0 {
+			continue
+		}
+		args := ApplyRichMetadataArgs{
+			LibraryID:          lib.ID,
+			MediaItemID:        target.mediaItemID,
+			ScannerEntityID:    scannerEntityID,
+			MetadataArtifactID: metadataArtifactID,
+			MediaKind:          string(target.kind),
+			Key:                target.key,
+			ScheduledTaskID:    taskID,
+		}
+		opts := args.InsertOpts()
+		opts.Priority = PriorityScan
+		if _, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source)); err != nil {
+			log.Warn().Err(err).Int64("library_id", lib.ID).Int64("media_item_id", target.mediaItemID).Msg("apply_metadata: enqueue rich metadata failed")
+			failed++
+			continue
+		}
+		queued++
+	}
+	return queued, failed
+}
+
+type scannerRichMetadataTarget struct {
+	key         string
+	mediaItemID int64
+	kind        metadata.MediaKind
+}
+
+func scannerRichMetadataTargets(lib sqlc.Library, result scanner.Result) []scannerRichMetadataTarget {
+	switch {
+	case lib.MediaType == sqlc.MediaTypeMovie:
+		out := make([]scannerRichMetadataTarget, 0, len(result.MovieApply))
+		for _, item := range result.MovieApply {
+			if item.MediaItemID == 0 || item.Action == "failed" || item.Action == "skipped" || item.Action == "blocked" {
+				continue
+			}
+			out = append(out, scannerRichMetadataTarget{key: item.Key, mediaItemID: item.MediaItemID, kind: metadata.KindMovie})
+		}
+		return out
+	case mediatype.IsTVLike(lib.MediaType):
+		out := make([]scannerRichMetadataTarget, 0, len(result.TVApply))
+		for _, item := range result.TVApply {
+			if item.MediaItemID == 0 || item.Action == "failed" || item.Action == "skipped" || item.Action == "blocked" {
+				continue
+			}
+			out = append(out, scannerRichMetadataTarget{key: item.Key, mediaItemID: item.MediaItemID, kind: metadata.KindTV})
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func richMetadataDetailForJob(result scanner.Result, args ApplyRichMetadataArgs) (*metadata.MediaDetail, metadata.MediaKind, error) {
+	kind := metadata.MediaKind(args.MediaKind)
+	switch kind {
+	case metadata.KindMovie:
+		for _, item := range result.MovieMetadata {
+			if item.Detail != nil && (args.Key == "" || item.Key == args.Key) {
+				return item.Detail, kind, nil
+			}
+		}
+	case metadata.KindTV:
+		for _, item := range result.TVMetadata {
+			if item.Detail == nil {
+				continue
+			}
+			if args.Key == "" || item.Key == args.Key || stringSliceContains(item.Keys, args.Key) {
+				return item.Detail, kind, nil
+			}
+		}
+	default:
+		return nil, kind, fmt.Errorf("apply_rich_metadata unsupported media kind %q", args.MediaKind)
+	}
+	return nil, kind, fmt.Errorf("apply_rich_metadata metadata detail missing for key %q", args.Key)
+}
+
+func stringSliceContains(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[ApplyRichMetadataArgs]) error {
+	q := sqlc.New(w.DB)
+	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	if err != nil {
+		return err
+	}
+	w.Progress.Set("scan_libraries", "apply_rich_metadata", libraryScanProgressLabel(lib, nil))
+	if w.Matcher == nil {
+		return fmt.Errorf("apply_rich_metadata requires matcher")
+	}
+	if job.Args.MediaItemID == 0 || job.Args.MetadataArtifactID == 0 {
+		return fmt.Errorf("apply_rich_metadata requires media_item_id and metadata_artifact_id")
+	}
+
+	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, job.Args.MetadataArtifactID)
+	if err != nil {
+		_ = q.MarkEnrichPartial(ctx, job.Args.MediaItemID)
+		return err
+	}
+	detail, kind, err := richMetadataDetailForJob(result, job.Args)
+	if err != nil {
+		_ = q.MarkEnrichPartial(ctx, job.Args.MediaItemID)
+		return err
+	}
+
+	richCtx, cancel := context.WithTimeout(ctx, scannerRichTimeout)
+	defer cancel()
+	if err := w.Matcher.StoreRichMetadata(richCtx, job.Args.MediaItemID, detail); err != nil {
+		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = q.MarkEnrichPartial(markCtx, job.Args.MediaItemID)
+		markCancel()
+		log.Warn().
+			Err(err).
+			Int64("library_id", job.Args.LibraryID).
+			Int64("media_item_id", job.Args.MediaItemID).
+			Int64("scanner_entity_id", job.Args.ScannerEntityID).
+			Str("kind", string(kind)).
+			Msg("apply_rich_metadata: rich metadata failed")
+		return err
+	}
+	if err := q.MarkEnrichPeopleDone(ctx, job.Args.MediaItemID); err != nil {
+		return err
+	}
+	if err := q.MarkEnrichExtrasDone(ctx, job.Args.MediaItemID); err != nil {
+		return err
+	}
+	if err := q.MarkEnrichComplete(ctx, job.Args.MediaItemID); err != nil {
+		return err
+	}
+	if w.Hub != nil {
+		w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+			MediaItemID: job.Args.MediaItemID,
+			LibraryID:   job.Args.LibraryID,
+			Title:       detail.Title,
+			MediaType:   string(lib.MediaType),
+		})
+	}
+	log.Info().
+		Int64("library_id", job.Args.LibraryID).
+		Int64("media_item_id", job.Args.MediaItemID).
+		Int64("scanner_entity_id", job.Args.ScannerEntityID).
+		Str("kind", string(kind)).
+		Int("cast", len(detail.Cast)).
+		Int("crew", len(detail.Crew)).
+		Int("keywords", len(detail.Keywords)).
+		Int("videos", len(detail.Videos)).
+		Msg("apply_rich_metadata: complete")
 	return nil
 }
 

@@ -151,15 +151,6 @@ func ApplyMovieMaterialization(ctx context.Context, lib sqlc.Library, result Res
 			return results, fmt.Errorf("load movie row %s: %w", preview.Key, err)
 		}
 
-		if err := txMatcher.StoreRichMetadata(ctx, item.ID, detail); err != nil {
-			applied.Action = "failed"
-			applied.Error = err.Error()
-			results = append(results, applied)
-			emitMovieApplyResult(applied, emit)
-			return results, fmt.Errorf("apply rich metadata %s: %w", preview.Key, err)
-		}
-		applied.RichMetadata = true
-
 		fileCounts, err := applyMovieFiles(ctx, q, lib.ID, item.ID, movieRow.ID, preview, filesByRel)
 		if err != nil {
 			applied.Action = "failed"
@@ -206,7 +197,7 @@ func ApplyMovieMaterialization(ctx context.Context, lib sqlc.Library, result Res
 		}
 		applied.RemoteAssets = remoteAssets
 
-		if err := markMovieApplyEnriched(ctx, q, item.ID); err != nil {
+		if err := markMovieApplyCoreEnriched(ctx, q, item.ID); err != nil {
 			applied.Action = "failed"
 			applied.Error = err.Error()
 			results = append(results, applied)
@@ -586,6 +577,16 @@ func markMovieApplyEnriched(ctx context.Context, q *sqlc.Queries, mediaItemID in
 		return err
 	}
 	return q.MarkEnrichComplete(ctx, mediaItemID)
+}
+
+func markMovieApplyCoreEnriched(ctx context.Context, q *sqlc.Queries, mediaItemID int64) error {
+	if err := q.MarkEnrichBaseDone(ctx, mediaItemID); err != nil {
+		return err
+	}
+	if err := q.MarkEnrichImagesDone(ctx, mediaItemID); err != nil {
+		return err
+	}
+	return q.MarkEnrichPartial(ctx, mediaItemID)
 }
 
 func singleInventoryFile(filesByRel map[string][]InventoryFile, relPath string) (InventoryFile, bool) {

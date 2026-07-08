@@ -197,6 +197,29 @@ func (ApplyLibraryScanArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// ApplyRichMetadataArgs resumes the scanner fetch artifact for one applied
+// entity and persists slow side-data (cast, crew, keywords, videos,
+// certifications, recommendations, collections) outside the core apply path.
+type ApplyRichMetadataArgs struct {
+	LibraryID          int64  `json:"library_id" river:"unique"`
+	MediaItemID        int64  `json:"media_item_id" river:"unique"`
+	ScannerEntityID    int64  `json:"scanner_entity_id,omitempty" river:"unique"`
+	MetadataArtifactID int64  `json:"metadata_artifact_id" river:"unique"`
+	MediaKind          string `json:"media_kind" river:"unique"`
+	Key                string `json:"key,omitempty" river:"unique"`
+	ScheduledTaskID    string `json:"scheduled_task_id,omitempty"`
+}
+
+func (ApplyRichMetadataArgs) Kind() string { return "apply_rich_metadata" }
+func (ApplyRichMetadataArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "apply_rich_metadata",
+		MaxAttempts: 5,
+		Priority:    PriorityScan,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 // KickoffRefreshStaleArgs replaces scheduler.RefreshStaleItemsTask.
 // Finds every media_item past its automatic refresh window (see
 // refreshWindowDays) and enqueues an enrich_media_item job per item.

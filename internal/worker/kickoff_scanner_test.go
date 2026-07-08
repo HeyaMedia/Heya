@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/stretchr/testify/require"
 )
@@ -84,6 +85,38 @@ func TestScannerScopeForInventoryFileKeepsTopLevelMediaFileScoped(t *testing.T) 
 		Class:   scanner.ClassPrimaryMedia,
 	}
 	require.Equal(t, "/library/Movie (2024)", scannerScopeForInventoryFile(sqlc.MediaTypeMovie, nested))
+}
+
+func TestScannerRichMetadataTargetsAndDetail(t *testing.T) {
+	detail := &metadata.MediaDetail{Title: "Dune"}
+	result := scanner.Result{
+		MovieApply: []scanner.MovieApplyResult{{
+			Key:         "tmdb:438631",
+			Action:      "applied",
+			MediaItemID: 42,
+		}, {
+			Key:         "tmdb:999001",
+			Action:      "skipped",
+			MediaItemID: 43,
+		}},
+		MovieMetadata: []scanner.MovieFetchPreview{{
+			Key:    "tmdb:438631",
+			Detail: detail,
+		}},
+	}
+
+	targets := scannerRichMetadataTargets(sqlc.Library{MediaType: sqlc.MediaTypeMovie}, result)
+	require.Len(t, targets, 1)
+	require.Equal(t, int64(42), targets[0].mediaItemID)
+	require.Equal(t, metadata.KindMovie, targets[0].kind)
+
+	got, kind, err := richMetadataDetailForJob(result, ApplyRichMetadataArgs{
+		MediaKind: string(metadata.KindMovie),
+		Key:       "tmdb:438631",
+	})
+	require.NoError(t, err)
+	require.Equal(t, metadata.KindMovie, kind)
+	require.Same(t, detail, got)
 }
 
 func TestLibraryScanProgressLabelIncludesScope(t *testing.T) {

@@ -143,6 +143,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &ProcessLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &FetchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, SonicEnabled: cfg.SonicEnabled, Progress: cfg.Progress})
+	river.AddWorker(workers, &ApplyRichMetadataWorker{DB: cfg.DB, Matcher: cfg.Matcher, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffRefreshStaleWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffMusicLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffMusicFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
@@ -175,6 +176,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},         // local analysis + search; scoped for watcher-triggered folders
 			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},       // remote metadata fetch from persisted search artifact
 			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},       // materialize + apply from persisted fetch artifact
+			"apply_rich_metadata":  {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 1)},  // slow rich side-data from persisted fetch artifact; keep off the critical apply path
 			"ffprobe":              {MaxWorkers: queueWorkers(cfg, "ffprobe", 1)},
 			"detect_local_assets":  {MaxWorkers: queueWorkers(cfg, "detect_local_assets", 1)},
 

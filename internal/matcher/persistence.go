@@ -251,11 +251,22 @@ func (r *richErrs) result() error {
 	return errors.Join(out...)
 }
 
+func (r *richErrs) stopIfDone(ctx context.Context) bool {
+	if err := ctx.Err(); err != nil {
+		r.add(err)
+		return true
+	}
+	return false
+}
+
 func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
 	var re richErrs
 
 	seenCast := map[string]bool{}
 	for _, c := range d.Cast {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		dedup := c.Name + "|" + c.Character
 		if seenCast[dedup] {
 			continue
@@ -276,11 +287,17 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			Source:       c.Source,
 		}); err != nil {
 			re.add(fmt.Errorf("cast %q: %w", c.Name, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
 	seenCrew := map[string]bool{}
 	for _, c := range d.Crew {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		dedup := c.Name + "|" + c.Job
 		if seenCrew[dedup] {
 			continue
@@ -301,11 +318,17 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			Source:      c.Source,
 		}); err != nil {
 			re.add(fmt.Errorf("crew %q: %w", c.Name, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
 	seenKeywords := map[string]bool{}
 	for _, k := range d.Keywords {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		if seenKeywords[k.Name] {
 			continue
 		}
@@ -321,11 +344,17 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			KeywordID:   kw.ID,
 		}); err != nil {
 			re.add(fmt.Errorf("keyword %q: %w", k.Name, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
 	seenCompanies := map[string]bool{}
 	for _, pc := range d.ProductionCompanies {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		if seenCompanies[pc.Name] {
 			continue
 		}
@@ -341,10 +370,16 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			CompanyID:   co.ID,
 		}); err != nil {
 			re.add(fmt.Errorf("company %q: %w", pc.Name, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
 	for _, v := range d.Videos {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		if err := m.q.CreateMediaVideo(ctx, sqlc.CreateMediaVideoParams{
 			MediaItemID: mediaItemID,
 			ProviderKey: v.ProviderKey,
@@ -356,10 +391,16 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			Official:    v.Official,
 		}); err != nil {
 			re.add(fmt.Errorf("video %q: %w", v.Name, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
 	for _, c := range d.Certifications {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		if err := m.q.CreateMediaCertification(ctx, sqlc.CreateMediaCertificationParams{
 			MediaItemID:   mediaItemID,
 			Country:       c.Country,
@@ -369,10 +410,16 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			Source:        c.Source,
 		}); err != nil {
 			re.add(fmt.Errorf("certification %s: %w", c.Country, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
 	for _, r := range d.Recommendations {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		if err := m.q.CreateMediaRecommendation(ctx, sqlc.CreateMediaRecommendationParams{
 			MediaItemID: mediaItemID,
 			ExternalIds: mustJSON(r.ExternalIDs),
@@ -383,9 +430,15 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			ReleaseDate: r.ReleaseDate,
 		}); err != nil {
 			re.add(fmt.Errorf("recommendation %q: %w", r.Title, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
+	if re.stopIfDone(ctx) {
+		return re.result()
+	}
 	if d.Collection != nil && d.Collection.Name != "" && m.shouldAutoCollect(ctx, mediaItemID) {
 		m.linkCollection(ctx, mediaItemID, d.Collection)
 	}
@@ -433,6 +486,9 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 	}
 
 	for _, t := range d.Titles {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		if err := m.q.CreateMediaTitle(ctx, sqlc.CreateMediaTitleParams{
 			MediaItemID: mediaItemID,
 			Title:       t.Title,
@@ -442,16 +498,25 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			Source:      t.Source,
 		}); err != nil {
 			re.add(fmt.Errorf("title %q: %w", t.Title, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 
 	for lang, text := range d.Overviews {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
 		if err := m.q.CreateMediaOverview(ctx, sqlc.CreateMediaOverviewParams{
 			MediaItemID: mediaItemID,
 			Language:    lang,
 			Overview:    text,
 		}); err != nil {
 			re.add(fmt.Errorf("overview %s: %w", lang, err))
+			if ctx.Err() != nil {
+				return re.result()
+			}
 		}
 	}
 

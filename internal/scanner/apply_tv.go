@@ -167,15 +167,6 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 		}
 		applied.TVSeriesID = series.ID
 
-		if err := txMatcher.StoreRichMetadata(ctx, item.ID, detail); err != nil {
-			applied.Action = "failed"
-			applied.Error = err.Error()
-			results = append(results, applied)
-			emitTVApplyResult(applied, domain, emit)
-			return results, fmt.Errorf("apply rich metadata %s: %w", preview.Key, err)
-		}
-		applied.RichMetadata = true
-
 		episodeLinks, err := loadTVEpisodeLinkIndex(ctx, q, item.ID)
 		if err != nil {
 			applied.Action = "failed"
@@ -237,7 +228,7 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 			emitTVApplyResult(applied, domain, emit)
 			return results, fmt.Errorf("reconcile absolute episodes %s: %w", preview.Key, err)
 		}
-		if err := markTVApplyEnriched(ctx, q, item.ID); err != nil {
+		if err := markTVApplyCoreEnriched(ctx, q, item.ID); err != nil {
 			applied.Action = "failed"
 			applied.Error = err.Error()
 			results = append(results, applied)
@@ -640,6 +631,19 @@ func markTVApplyEnriched(ctx context.Context, q *sqlc.Queries, mediaItemID int64
 		return err
 	}
 	return q.MarkEnrichComplete(ctx, mediaItemID)
+}
+
+func markTVApplyCoreEnriched(ctx context.Context, q *sqlc.Queries, mediaItemID int64) error {
+	if err := q.MarkEnrichBaseDone(ctx, mediaItemID); err != nil {
+		return err
+	}
+	if err := q.MarkEnrichStructureDone(ctx, mediaItemID); err != nil {
+		return err
+	}
+	if err := q.MarkEnrichImagesDone(ctx, mediaItemID); err != nil {
+		return err
+	}
+	return q.MarkEnrichPartial(ctx, mediaItemID)
 }
 
 func emitTVApplyResult(result TVApplyResult, domain string, emit Emitter) {
