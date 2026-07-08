@@ -49,7 +49,7 @@ export interface LibrarySources {
   media_type?: { source: 'env'; env_var: string }
 }
 
-export type MediaType = 'movie' | 'tv' | 'music' | 'book'
+export type MediaType = 'movie' | 'tv' | 'anime' | 'music' | 'book'
 
 export interface MediaItem {
   id: number

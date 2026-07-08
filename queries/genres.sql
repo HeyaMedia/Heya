@@ -9,7 +9,7 @@ ORDER BY genre;
 
 -- name: ListMediaByGenre :many
 SELECT mi.*
-FROM media_items mi
+FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres))
@@ -18,14 +18,14 @@ LIMIT $2 OFFSET $3;
 
 -- name: CountMediaByGenre :one
 SELECT count(*)
-FROM media_items mi
+FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres));
 
 -- name: ListMediaByKeyword :many
 SELECT mi.*
-FROM media_items mi
+FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower($1::text)
@@ -34,7 +34,7 @@ LIMIT $2 OFFSET $3;
 
 -- name: CountMediaByKeyword :one
 SELECT count(*)
-FROM media_items mi
+FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower($1::text);

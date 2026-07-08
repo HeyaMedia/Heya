@@ -1,13 +1,61 @@
--- name: CreateMediaItem :one
-INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-RETURNING *;
+-- name: CreateMediaItemRaw :one
+WITH entity AS (
+  INSERT INTO media_items (library_id, media_type, provider_kind, heya_slug)
+  VALUES (
+    sqlc.arg(library_id),
+    sqlc.arg(media_type),
+    sqlc.arg(provider_kind),
+    sqlc.arg(heya_slug)
+  )
+  RETURNING id
+),
+profile AS (
+  INSERT INTO media_item_profiles (
+    media_item_id, title, sort_title, year, description, poster_path,
+    backdrop_path, tagline, original_title, original_language, status
+  )
+  SELECT
+    entity.id,
+    sqlc.arg(title),
+    sqlc.arg(sort_title),
+    sqlc.arg(year),
+    sqlc.arg(description),
+    sqlc.arg(poster_path),
+    sqlc.arg(backdrop_path),
+    sqlc.arg(tagline),
+    sqlc.arg(original_title),
+    sqlc.arg(original_language),
+    sqlc.arg(status)
+  FROM entity
+  RETURNING media_item_id
+),
+external_ids AS (
+  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
+  SELECT entity.id, sqlc.arg(library_id), kv.key, kv.value, 'media_items.external_ids'
+  FROM entity, jsonb_each_text(
+    CASE
+      WHEN jsonb_typeof(sqlc.arg(external_ids)::jsonb) = 'object' THEN sqlc.arg(external_ids)::jsonb
+      ELSE '{}'::jsonb
+    END
+  ) AS kv(key, value)
+  WHERE kv.key <> '' AND kv.value <> ''
+  ON CONFLICT (media_item_id, provider) DO UPDATE SET
+    library_id = EXCLUDED.library_id,
+    external_id = EXCLUDED.external_id,
+    source = EXCLUDED.source,
+    updated_at = now()
+  RETURNING provider
+)
+SELECT entity.id
+FROM entity
+JOIN profile ON profile.media_item_id = entity.id
+CROSS JOIN (SELECT count(*) FROM external_ids) external_write_count;
 
 -- name: GetMediaItemByID :one
-SELECT * FROM media_items WHERE id = $1;
+SELECT * FROM media_item_cards WHERE id = $1;
 
 -- name: GetMediaItemBySlug :one
-SELECT * FROM media_items WHERE slug = $1;
+SELECT * FROM media_item_cards WHERE slug = $1;
 
 -- name: UpdateMediaItemSlug :exec
 UPDATE media_items SET slug = $2 WHERE id = $1;
@@ -25,13 +73,13 @@ UPDATE media_items SET heya_slug = $2, updated_at = now() WHERE id = $1;
 SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND id != $2) as exists;
 
 -- name: ListMediaItemsByLibrary :many
-SELECT * FROM media_items
+SELECT * FROM media_item_cards
 WHERE library_id = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
 
 -- name: ListMediaItemsByType :many
-SELECT * FROM media_items
+SELECT * FROM media_item_cards
 WHERE media_type = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
@@ -39,19 +87,74 @@ LIMIT $2 OFFSET $3;
 -- name: ListMediaItemsByTypeRecent :many
 -- Same page shape as ListMediaItemsByType but newest-first — powers the
 -- home "Recently Added" rails (created_at is when the first file matched).
-SELECT * FROM media_items
+SELECT * FROM media_item_cards
 WHERE media_type = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3;
 
--- name: UpdateMediaItem :one
-UPDATE media_items
-SET title = $2, sort_title = $3, year = $4, description = $5,
-    poster_path = $6, backdrop_path = $7, external_ids = $8,
-    tagline = $9, original_title = $10, original_language = $11,
-    status = $12, provider_kind = $13, heya_slug = $14, updated_at = now()
-WHERE id = $1
-RETURNING *;
+-- name: UpdateMediaItemRaw :one
+WITH entity AS (
+  UPDATE media_items
+     SET provider_kind = sqlc.arg(provider_kind),
+         heya_slug = sqlc.arg(heya_slug),
+         updated_at = now()
+   WHERE media_items.id = sqlc.arg(id)
+   RETURNING *
+),
+profile AS (
+  INSERT INTO media_item_profiles (
+    media_item_id, title, sort_title, year, description, poster_path,
+    backdrop_path, tagline, original_title, original_language, status, updated_at
+  )
+  SELECT
+    entity.id,
+    sqlc.arg(title),
+    sqlc.arg(sort_title),
+    sqlc.arg(year),
+    sqlc.arg(description),
+    sqlc.arg(poster_path),
+    sqlc.arg(backdrop_path),
+    sqlc.arg(tagline),
+    sqlc.arg(original_title),
+    sqlc.arg(original_language),
+    sqlc.arg(status),
+    now()
+  FROM entity
+  ON CONFLICT (media_item_id) DO UPDATE SET
+    title = EXCLUDED.title,
+    sort_title = EXCLUDED.sort_title,
+    year = EXCLUDED.year,
+    description = EXCLUDED.description,
+    poster_path = EXCLUDED.poster_path,
+    backdrop_path = EXCLUDED.backdrop_path,
+    tagline = EXCLUDED.tagline,
+    original_title = EXCLUDED.original_title,
+    original_language = EXCLUDED.original_language,
+    status = EXCLUDED.status,
+    updated_at = now()
+  RETURNING media_item_id
+),
+deleted_external_ids AS (
+  DELETE FROM media_item_external_ids WHERE media_item_id = sqlc.arg(id)
+  RETURNING 1
+),
+inserted_external_ids AS (
+  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
+  SELECT entity.id, entity.library_id, kv.key, kv.value, 'media_items.external_ids'
+  FROM entity, jsonb_each_text(
+    CASE
+      WHEN jsonb_typeof(sqlc.arg(external_ids)::jsonb) = 'object' THEN sqlc.arg(external_ids)::jsonb
+      ELSE '{}'::jsonb
+    END
+  ) AS kv(key, value)
+  WHERE kv.key <> '' AND kv.value <> ''
+  RETURNING provider
+)
+SELECT entity.id
+FROM entity
+JOIN profile ON profile.media_item_id = entity.id
+CROSS JOIN (SELECT count(*) FROM deleted_external_ids) deleted_write_count
+CROSS JOIN (SELECT count(*) FROM inserted_external_ids) inserted_write_count;
 
 -- name: DeleteMediaItem :exec
 DELETE FROM media_items WHERE id = $1;
@@ -90,7 +193,7 @@ WHERE id = $1;
 --           "needs review" path: re-scan dedup still works, but a coincidental
 --           title+year collision can NEVER silently attach onto a published,
 --           remotely-matched item.
-SELECT * FROM media_items
+SELECT * FROM media_item_cards
 WHERE library_id = $1
   AND media_type = sqlc.arg(media_type)
   AND year       = sqlc.arg(year)
@@ -169,7 +272,7 @@ UPDATE media_items
 
 -- name: ListUnavailableMediaItemIDs :many
 SELECT DISTINCT mi.id
-FROM media_items mi
+FROM media_item_cards mi
 WHERE mi.media_type = $1
   AND NOT EXISTS (
     SELECT 1 FROM library_files lf
@@ -182,7 +285,7 @@ WHERE mi.media_type = $1
 -- ListUnavailableMediaItemIDs above scans the entire media type on every list /
 -- rail load (twice per dashboard); this bounds the anti-join to the visible page.
 SELECT mi.id
-FROM media_items mi
+FROM media_item_cards mi
 WHERE mi.id = ANY(sqlc.arg(ids)::bigint[])
   AND NOT EXISTS (
     SELECT 1 FROM library_files lf
@@ -190,17 +293,23 @@ WHERE mi.id = ANY(sqlc.arg(ids)::bigint[])
   );
 
 -- name: SearchMediaItemsByLibrary :many
-SELECT * FROM media_items
+SELECT * FROM media_item_cards
 WHERE library_id = $1
   AND ($4::text = '' OR title ILIKE '%' || $4 || '%')
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
 
 -- name: UpdateMediaItemPosterPath :exec
-UPDATE media_items SET poster_path = $2, updated_at = now() WHERE id = $1;
+WITH profile AS (
+  UPDATE media_item_profiles SET poster_path = $2, updated_at = now() WHERE media_item_id = $1
+)
+UPDATE media_items SET updated_at = now() WHERE id = $1;
 
 -- name: UpdateMediaItemBackdropPath :exec
-UPDATE media_items SET backdrop_path = $2, updated_at = now() WHERE id = $1;
+WITH profile AS (
+  UPDATE media_item_profiles SET backdrop_path = $2, updated_at = now() WHERE media_item_id = $1
+)
+UPDATE media_items SET updated_at = now() WHERE id = $1;
 
 -- mi.description holds the provider's base (English) overview; rows enriched
 -- before that field existed have it empty, with only media_overviews
@@ -222,7 +331,7 @@ SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.slug,
        mi.external_ids, mi.created_at, mi.updated_at,
        m.genres, m.rating, m.runtime_minutes, m.original_language,
        m.release_date, m.collection_id
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 ORDER BY mi.sort_title ASC, mi.title ASC
 LIMIT $1 OFFSET $2;
@@ -240,7 +349,7 @@ SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.slug,
        mi.external_ids, mi.created_at, mi.updated_at,
        ts.genres, ts.rating, ts.first_air_date, ts.last_air_date,
        ts.status, ts.original_language, ts.number_of_seasons, ts.number_of_episodes
-FROM media_items mi
+FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 ORDER BY mi.sort_title ASC, mi.title ASC
 LIMIT $1 OFFSET $2;

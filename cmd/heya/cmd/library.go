@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/ingestv2"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
@@ -136,6 +137,59 @@ var libraryScanCmd = &cobra.Command{
 			ui.Println(ui.Dim("Jobs will be processed by 'heya serve', or run 'heya queue process'."))
 
 			return nil
+		})
+	},
+}
+
+var libraryScanV2Cmd = &cobra.Command{
+	Use:   "scan-v2",
+	Short: "Run the experimental v2 library scanner",
+	Long:  "Runs the experimental ingest v2 scanner synchronously and emits every observed fact and plan decision. Writes only when --apply is set.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, _ := cmd.Flags().GetInt64("id")
+		apply, _ := cmd.Flags().GetBool("apply")
+		fetch, _ := cmd.Flags().GetBool("fetch")
+		jsonl, _ := cmd.Flags().GetBool("jsonl")
+		materialize, _ := cmd.Flags().GetBool("materialize")
+		report, _ := cmd.Flags().GetBool("report")
+		search, _ := cmd.Flags().GetBool("search")
+		if apply {
+			materialize = true
+		}
+		if materialize {
+			fetch = true
+		}
+		if fetch {
+			search = true
+		}
+
+		if id == 0 {
+			return fmt.Errorf("--id is required")
+		}
+
+		return withApp(func(ctx context.Context, app *service.App) error {
+			lib, err := app.GetLibrary(ctx, id)
+			if err != nil {
+				return err
+			}
+			_, err = ingestv2.RunLibrary(ctx, lib, ingestv2.Options{
+				Apply:              apply,
+				ApplyDB:            app.DBPool(),
+				JSONL:              jsonl,
+				PersistenceDB:      app.DBPool(),
+				PersistScan:        true,
+				Report:             report,
+				FetchPreview:       fetch,
+				MaterializePreview: materialize,
+				RemoteSearch:       search,
+				MovieSearcher:      app.Metadata(),
+				MovieFetcher:       app.Metadata(),
+				MovieMaterializer:  ingestv2.NewSQLMovieMaterializeStore(app.DBPool()),
+				TVFetcher:          app.Metadata(),
+				TVMaterializer:     ingestv2.NewSQLTVMaterializeStore(app.DBPool()),
+				TVSearcher:         app.Metadata(),
+			}, cmd.OutOrStdout())
+			return err
 		})
 	},
 }
@@ -370,6 +424,14 @@ func init() {
 	libraryScanCmd.Flags().Bool("all", false, "Scan all libraries")
 	libraryScanCmd.Flags().Bool("force", false, "Force re-scan all files")
 
+	libraryScanV2Cmd.Flags().Int64("id", 0, "Library ID to scan")
+	libraryScanV2Cmd.Flags().Bool("apply", false, "Apply the v2 materialization plan to the database")
+	libraryScanV2Cmd.Flags().Bool("fetch", false, "Fetch selected metadata details and report what would be applied without writing")
+	libraryScanV2Cmd.Flags().Bool("jsonl", false, "Emit one JSON event per line")
+	libraryScanV2Cmd.Flags().Bool("materialize", false, "Preview media item, movie row, and file writes without applying them")
+	libraryScanV2Cmd.Flags().Bool("report", false, "Emit a compact review report instead of the event stream")
+	libraryScanV2Cmd.Flags().Bool("search", false, "Search heya.media for candidate matches without fetching metadata")
+
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
 
 	libraryFilesCmd.Flags().Int64("id", 0, "Library ID")
@@ -388,6 +450,7 @@ func init() {
 	libraryCmd.AddCommand(libraryAddCmd)
 	libraryCmd.AddCommand(libraryListCmd)
 	libraryCmd.AddCommand(libraryScanCmd)
+	libraryCmd.AddCommand(libraryScanV2Cmd)
 	libraryCmd.AddCommand(libraryRemoveCmd)
 	libraryCmd.AddCommand(libraryFilesCmd)
 	libraryCmd.AddCommand(libraryStatsCmd)

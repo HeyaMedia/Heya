@@ -50,7 +50,7 @@ FROM user_track_ratings utr
 JOIN tracks      t  ON t.id  = utr.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE utr.user_id = sqlc.arg(user_id)
   AND utr.rating  >= sqlc.arg(min_rating)
 ORDER BY utr.rating DESC, utr.updated_at DESC

@@ -37,7 +37,7 @@ FROM cand
 JOIN tracks t ON t.id = cand.id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
 ORDER BY random()
@@ -122,7 +122,7 @@ SELECT t.id              AS track_id,
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 LEFT JOIN LATERAL (
     SELECT count(*) AS plays
@@ -216,7 +216,7 @@ FROM cand
 JOIN tracks t ON t.id = cand.id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
 ORDER BY random()
@@ -300,7 +300,7 @@ SELECT t.id              AS track_id,
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
 ORDER BY random()
@@ -385,7 +385,7 @@ FROM tracks t
 JOIN cand_albums ca ON ca.id = t.album_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
 ORDER BY random()
@@ -461,7 +461,7 @@ WITH chosen AS (
     SELECT al.id
     FROM albums al
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     JOIN libraries   l  ON l.id  = mi.library_id
     WHERE l.media_type = 'music'
     ORDER BY random()
@@ -483,7 +483,7 @@ SELECT t.id              AS track_id,
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE al.id = (SELECT id FROM chosen)
 ORDER BY t.disc_number ASC, t.track_number ASC
 `

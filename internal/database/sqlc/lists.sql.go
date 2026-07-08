@@ -140,7 +140,7 @@ func (q *Queries) IsInList(ctx context.Context, arg IsInListParams) (bool, error
 
 const listItemsInList = `-- name: ListItemsInList :many
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked
-FROM media_items mi
+FROM media_item_cards mi
 JOIN user_list_items li ON li.media_item_id = mi.id
 WHERE li.list_id = $1
   AND EXISTS (SELECT 1 FROM user_lists WHERE id = $1 AND user_id = $2)
@@ -152,15 +152,15 @@ type ListItemsInListParams struct {
 	UserID int64 `json:"user_id"`
 }
 
-func (q *Queries) ListItemsInList(ctx context.Context, arg ListItemsInListParams) ([]MediaItem, error) {
+func (q *Queries) ListItemsInList(ctx context.Context, arg ListItemsInListParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listItemsInList, arg.ListID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MediaItem{}
+	items := []MediaItemCard{}
 	for rows.Next() {
-		var i MediaItem
+		var i MediaItemCard
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,

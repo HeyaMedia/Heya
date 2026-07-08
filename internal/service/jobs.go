@@ -225,7 +225,7 @@ func (a *App) MetadataQueueStatus(ctx context.Context) (MetadataQueueStatus, err
 			running.Source = args.Source
 			var title, mt string
 			if titleErr := a.db.QueryRow(ctx,
-				`SELECT title, media_type::text FROM media_items WHERE id = $1`,
+				`SELECT title, media_type::text FROM media_item_cards WHERE id = $1`,
 				args.ItemID,
 			).Scan(&title, &mt); titleErr == nil {
 				running.ItemTitle = title

@@ -5,7 +5,7 @@
 
 -- name: SearchMediaByType :many
 SELECT mi.*
-FROM media_items mi
+FROM media_item_cards mi
 WHERE mi.media_type = $2
   AND (
     lower(mi.title) % lower($1)
@@ -23,7 +23,7 @@ LIMIT $3 OFFSET $4;
 
 -- name: SearchMediaByTypeCount :one
 SELECT count(*)
-FROM media_items mi
+FROM media_item_cards mi
 WHERE mi.media_type = $2
   AND (
     lower(mi.title) % lower($1)
@@ -33,7 +33,7 @@ WHERE mi.media_type = $2
 
 -- name: SearchAllMedia :many
 SELECT mi.*
-FROM media_items mi
+FROM media_item_cards mi
 WHERE (
     lower(mi.title) % lower($1)
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)
@@ -107,7 +107,7 @@ FROM (
   LIMIT $2 OFFSET $3
 ) a
 JOIN artists ar ON ar.id = a.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 ORDER BY
   greatest(
     similarity(lower(a.title), lower($1)),
@@ -160,7 +160,7 @@ FROM (
 ) t
 JOIN albums a ON a.id = t.album_id
 JOIN artists ar ON ar.id = a.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 ORDER BY
   greatest(
     ts_rank(t.search_vector, websearch_to_tsquery('simple', sqlc.arg(query))),

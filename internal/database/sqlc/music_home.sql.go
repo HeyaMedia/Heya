@@ -18,7 +18,7 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE al.artist_id = $1
   AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
@@ -144,7 +144,7 @@ SELECT al.id              AS album_id,
        mi.slug            AS artist_slug
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lower(al.label) = lower($2::text)
@@ -223,7 +223,7 @@ WITH ranked AS (
     FROM tracks t
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE a.id = ANY($2::bigint[])
       AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 )
@@ -314,7 +314,7 @@ SELECT t.id              AS track_id,
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.slug = $2
   AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY user_play_count DESC, al.year DESC NULLS LAST,
@@ -401,7 +401,7 @@ FROM (
                     mi.poster_path AS poster_path
     FROM artists a
     JOIN albums       al ON al.artist_id = a.id
-    JOIN media_items  mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     JOIN libraries    l  ON l.id  = mi.library_id
     WHERE l.media_type = 'music'
       AND $2::text = ANY(al.genres)
@@ -476,7 +476,7 @@ WITH artist_last_played AS (
     JOIN tracks      t  ON t.id  = pe.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = $3
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
     GROUP BY a.id, a.name, mi.id, mi.slug
@@ -551,7 +551,7 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
        (EXTRACT(YEAR FROM al.release_date))::int                    AS release_year
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND al.release_date IS NOT NULL
@@ -758,7 +758,7 @@ WITH artist_plays AS (
     JOIN tracks      t  ON t.id  = pe.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = $1
     ORDER BY a.id, pe.played_at DESC
 )
@@ -836,7 +836,7 @@ WITH ranked AS (
     JOIN tracks      t  ON t.id  = pe.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = $2
       AND pe.played_at >= $3
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
@@ -907,7 +907,7 @@ FROM play_events pe
 JOIN tracks      t  ON t.id  = pe.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE pe.user_id = $1
   AND pe.played_at >= $3
   AND pe.played_at <  $4
@@ -1037,7 +1037,7 @@ WITH artist_play_counts AS (
     JOIN tracks  t  ON t.id  = pe.track_id
     JOIN albums  al ON al.id = t.album_id
     JOIN artists a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = $3
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
     GROUP BY a.id, a.name, mi.id, mi.slug

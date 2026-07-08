@@ -16,7 +16,7 @@ SELECT EXISTS(
 
 -- name: ListUserFavoriteMediaItems :many
 SELECT mi.*
-FROM media_items mi
+FROM media_item_cards mi
 JOIN user_favorites uf ON uf.entity_id = mi.id AND uf.entity_type = 'media_item'
 WHERE uf.user_id = $1
 ORDER BY uf.created_at DESC
@@ -49,7 +49,7 @@ FROM user_favorites uf
 JOIN tracks      t  ON t.id  = uf.entity_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uf.user_id = $1 AND uf.entity_type = 'track'
 ORDER BY uf.created_at DESC
 LIMIT $2 OFFSET $3;
@@ -86,7 +86,7 @@ SELECT a.*,
        uf.created_at AS loved_at
 FROM user_favorites uf
 JOIN artists     a  ON a.id  = uf.entity_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE uf.user_id = $1 AND uf.entity_type = 'artist' AND l.media_type = 'music'
 ORDER BY uf.created_at DESC
@@ -106,7 +106,7 @@ SELECT al.*,
 FROM user_favorites uf
 JOIN albums      al ON al.id = uf.entity_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE uf.user_id = $1 AND uf.entity_type = 'album' AND l.media_type = 'music'
 ORDER BY uf.created_at DESC

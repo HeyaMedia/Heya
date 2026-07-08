@@ -222,9 +222,9 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 	}
 
 	// Preferred-language title overlay, batched like the flat rails.
-	stubs := make([]sqlc.MediaItem, 0, len(entries))
+	stubs := make([]sqlc.MediaItemCard, 0, len(entries))
 	for _, e := range entries {
-		stubs = append(stubs, sqlc.MediaItem{ID: e.MediaItemID, LibraryID: shows[e.MediaItemID].libraryID})
+		stubs = append(stubs, sqlc.MediaItemCard{ID: e.MediaItemID, LibraryID: shows[e.MediaItemID].libraryID})
 	}
 	overlay := a.preferredTitleOverlay(ctx, q, stubs)
 	for i := range entries {

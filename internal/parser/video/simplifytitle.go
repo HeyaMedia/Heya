@@ -37,6 +37,7 @@ var requestInfoRegex = regexp.MustCompile(`(?i)\[.+?\]`)
 var editionExp = regexp.MustCompile(`(?i)\b(?:(?:Extended\.|Ultimate\.)?(?:Director\.?s|Collector\.?s|Theatrical|Anniversary|The\.Uncut|DC|Ultimate|Final)[. ](?:Cut|Edition|Version)(?:[. ](?:Extended|Uncensored|Remastered|Unrated|Uncut|IMAX|Fan\.?Edit))?|Extended[. ](?:Cut|Edition|Version)|Special[. ]Edition|Despecialized|unrated|\d{2,3}(?:th)?\.Anniversary|(?:Uncensored|Remastered|Unrated|Uncut|IMAX|Fan\.?Edit|Edition|Restored|(?:2|3|4)in1)){1,3}`)
 var languageCleanExp = regexp.MustCompile(`(?i)\b(?:TRUE\.?FRENCH|videomann|SUBFRENCH|PLDUB|MULTI)\b`)
 var sceneGarbageExp = regexp.MustCompile(`\b(PROPER|REAL|READ\.NFO)`)
+var numericTitleSuffixExp = regexp.MustCompile(`\.\.(\d+)[.\s]*$`)
 
 func ReleaseTitleCleaner(title string) string {
 	if title == "" || title == "(" {
@@ -56,6 +57,12 @@ func ReleaseTitleCleaner(title string) string {
 	trimmed = strings.TrimSpace(trimmed)
 	trimmed = regexp.MustCompile(`(?i)`+sceneGarbageExp.String()).ReplaceAllString(trimmed, "")
 	trimmed = strings.TrimSpace(trimmed)
+
+	numericSuffix := ""
+	if loc := numericTitleSuffixExp.FindStringSubmatchIndex(trimmed); loc != nil {
+		numericSuffix = "." + trimmed[loc[2]:loc[3]]
+		trimmed = strings.TrimRight(strings.TrimSpace(trimmed[:loc[0]]), ". ")
+	}
 
 	languages := []string{
 		"English", "French", "Spanish", "German", "Italian", "Danish", "Dutch",
@@ -108,7 +115,11 @@ func ReleaseTitleCleaner(title string) string {
 		}
 	}
 
-	return strings.TrimFunc(result.String(), func(r rune) bool {
+	cleaned := strings.TrimFunc(result.String(), func(r rune) bool {
 		return unicode.IsSpace(r)
 	})
+	if numericSuffix != "" {
+		cleaned = strings.TrimSpace(cleaned + " " + numericSuffix)
+	}
+	return cleaned
 }

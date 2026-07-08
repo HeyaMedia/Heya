@@ -45,7 +45,7 @@ type UniqueID struct {
 	Value   string   `xml:",chardata"`
 }
 
-func WriteMovieNFO(mediaDir string, item sqlc.MediaItem, movie sqlc.Movie) error {
+func WriteMovieNFO(mediaDir string, item sqlc.MediaItemCard, movie sqlc.Movie) error {
 	nfoPath := filepath.Join(mediaDir, "movie.nfo")
 	if _, err := os.Stat(nfoPath); err == nil {
 		log.Debug().Str("path", nfoPath).Msg("NFO already exists, skipping")
@@ -73,7 +73,7 @@ func WriteMovieNFO(mediaDir string, item sqlc.MediaItem, movie sqlc.Movie) error
 	return writeXML(nfoPath, nfo)
 }
 
-func WriteTVShowNFO(mediaDir string, item sqlc.MediaItem, series sqlc.TvSeries) error {
+func WriteTVShowNFO(mediaDir string, item sqlc.MediaItemCard, series sqlc.TvSeries) error {
 	nfoPath := filepath.Join(mediaDir, "tvshow.nfo")
 	if _, err := os.Stat(nfoPath); err == nil {
 		log.Debug().Str("path", nfoPath).Msg("NFO already exists, skipping")
@@ -94,7 +94,7 @@ func WriteTVShowNFO(mediaDir string, item sqlc.MediaItem, series sqlc.TvSeries) 
 	return writeXML(nfoPath, nfo)
 }
 
-func buildUniqueIDs(item sqlc.MediaItem) []UniqueID {
+func buildUniqueIDs(item sqlc.MediaItemCard) []UniqueID {
 	ids := parseExternalIDs(item.ExternalIds)
 	var result []UniqueID
 
@@ -164,7 +164,7 @@ type AlbumTrackNFO struct {
 // WriteArtistNFO writes an artist.nfo at the artist directory. Overwrites
 // any existing file (the matcher's enrichment data is canonical and replaces
 // stale on-disk NFOs). artistDir is typically Library/Artist/.
-func WriteArtistNFO(artistDir string, artist sqlc.Artist, mediaItem sqlc.MediaItem, albumTitles []string) error {
+func WriteArtistNFO(artistDir string, artist sqlc.Artist, mediaItem sqlc.MediaItemCard, albumTitles []string) error {
 	nfoPath := filepath.Join(artistDir, "artist.nfo")
 
 	refs := make([]AlbumRefNFO, 0, len(albumTitles))

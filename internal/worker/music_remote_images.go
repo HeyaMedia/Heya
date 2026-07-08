@@ -184,7 +184,7 @@ func rankRemoteArtistImages(images []metadata.ArtworkResult, posterURL, backdrop
 func queueArtistArtworkGaps(
 	ctx context.Context,
 	client *river.Client[pgx.Tx],
-	item sqlc.MediaItem,
+	item sqlc.MediaItemCard,
 	mediaType string,
 	local musicLocalAssets,
 	remote remoteArtistImages,

@@ -38,7 +38,7 @@ WHERE user_id = $1 AND entity_type = $2;
 -- name: ListFavoritedMediaIDsByType :many
 SELECT f.entity_id
 FROM user_favorites f
-JOIN media_items mi ON mi.id = f.entity_id
+JOIN media_item_cards mi ON mi.id = f.entity_id
 WHERE f.user_id = $1 AND f.entity_type = 'media_item' AND mi.media_type = $2;
 
 -- Watched movie IDs

@@ -357,10 +357,10 @@ func (a *App) JFSimilarLocalItemIDs(ctx context.Context, mediaItemID int64, limi
 	}
 	out := make([]int64, 0, limit)
 	for _, r := range rows {
-		if !r.LocalMediaItemID.Valid {
+		if r.LocalMediaItemID == 0 {
 			continue
 		}
-		out = append(out, r.LocalMediaItemID.Int64)
+		out = append(out, r.LocalMediaItemID)
 		if int32(len(out)) >= limit {
 			break
 		}

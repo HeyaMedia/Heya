@@ -102,9 +102,8 @@ func (w *TrickplayFileWorker) Work(ctx context.Context, job *river.Job[Trickplay
 	})
 }
 
-// ThumbnailExtraArgs extracts a thumbnail frame for one media_extra
-// (deleted-scene/featurette/etc.). One job per extra row so the
-// kickoff_thumbnails fan-out is cancellable per item.
+// ThumbnailExtraArgs extracts a thumbnail frame for one extra library-file link.
+// One job per extra link so the kickoff_thumbnails fan-out is cancellable per item.
 type ThumbnailExtraArgs struct {
 	ExtraID         int64  `json:"extra_id" river:"unique"`
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
@@ -130,7 +129,7 @@ type ThumbnailExtraWorker struct {
 func (w *ThumbnailExtraWorker) Work(ctx context.Context, job *river.Job[ThumbnailExtraArgs]) error {
 	q := sqlc.New(w.DB)
 
-	row, err := q.GetMediaExtraByID(ctx, job.Args.ExtraID)
+	row, err := q.GetMediaExtraLinkByID(ctx, job.Args.ExtraID)
 	if err != nil {
 		return err
 	}
@@ -159,7 +158,7 @@ func (w *ThumbnailExtraWorker) Work(ctx context.Context, job *river.Job[Thumbnai
 		return fmt.Errorf("extract thumbnail: %w", err)
 	}
 
-	return q.UpdateExtraThumbnail(ctx, sqlc.UpdateExtraThumbnailParams{
+	return q.UpdateMediaExtraLinkThumbnail(ctx, sqlc.UpdateMediaExtraLinkThumbnailParams{
 		ID:            row.ID,
 		ThumbnailPath: outPath,
 	})

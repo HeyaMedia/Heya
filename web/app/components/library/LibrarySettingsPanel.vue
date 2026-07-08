@@ -104,7 +104,7 @@
             @update:model-value="toggleBool('save_images')"
           />
         </div>
-        <div v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click="toggleBool('enable_trickplay')">
+        <div v-if="mediaType === 'movie' || mediaType === 'tv' || mediaType === 'anime'" class="toggle-row" @click="toggleBool('enable_trickplay')">
           <div class="toggle-info">
             <span class="toggle-name">Trickplay thumbnails</span>
             <span class="toggle-desc">Generate seek preview sprites for the video player</span>
@@ -117,7 +117,7 @@
             @update:model-value="toggleBool('enable_trickplay')"
           />
         </div>
-        <div v-if="mediaType === 'movie' || mediaType === 'tv'" class="toggle-row" @click="toggleBool('generate_thumbnails')">
+        <div v-if="mediaType === 'movie' || mediaType === 'tv' || mediaType === 'anime'" class="toggle-row" @click="toggleBool('generate_thumbnails')">
           <div class="toggle-info">
             <span class="toggle-name">Generate missing thumbnails</span>
             <span class="toggle-desc">Extract video frames for extras and episodes without artwork</span>

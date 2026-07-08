@@ -881,7 +881,9 @@ func MediaTypeToKind(mt sqlc.MediaType) metadata.MediaKind {
 	switch mt {
 	case sqlc.MediaTypeMovie:
 		return metadata.KindMovie
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
+		// Anime is a library-level signal only; its content is matched,
+		// stored and enriched as TV. See internal/mediatype.
 		return metadata.KindTV
 	case sqlc.MediaTypeMusic:
 		return metadata.KindMusic

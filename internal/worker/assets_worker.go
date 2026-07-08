@@ -43,31 +43,6 @@ var (
 	backdropRE     = regexp.MustCompile(`^backdrop(\d*)\.`)
 	seasonPosterRE = regexp.MustCompile(`^season(\d+|specials|all)-poster\.`)
 	thumbRE        = regexp.MustCompile(`-thumb\.`)
-
-	extraFolders = map[string]sqlc.ExtraType{
-		"trailers":          sqlc.ExtraTypeTrailer,
-		"trailer":           sqlc.ExtraTypeTrailer,
-		"behind the scenes": sqlc.ExtraTypeBehindTheScenes,
-		"deleted scenes":    sqlc.ExtraTypeDeletedScene,
-		"featurettes":       sqlc.ExtraTypeFeaturette,
-		"interviews":        sqlc.ExtraTypeInterview,
-		"scenes":            sqlc.ExtraTypeScene,
-		"shorts":            sqlc.ExtraTypeShort,
-		"other":             sqlc.ExtraTypeOther,
-	}
-
-	extraSuffixes = map[string]sqlc.ExtraType{
-		"(trailer)":           sqlc.ExtraTypeTrailer,
-		"(teaser)":            sqlc.ExtraTypeTeaser,
-		"(behind the scenes)": sqlc.ExtraTypeBehindTheScenes,
-		"(deleted scene)":     sqlc.ExtraTypeDeletedScene,
-		"(featurette)":        sqlc.ExtraTypeFeaturette,
-		"(interview)":         sqlc.ExtraTypeInterview,
-		"(scene)":             sqlc.ExtraTypeScene,
-		"(short)":             sqlc.ExtraTypeShort,
-		"-trailer":            sqlc.ExtraTypeTrailer,
-		"-teaser":             sqlc.ExtraTypeTeaser,
-	}
 )
 
 type DetectLocalAssetsWorker struct {
@@ -137,7 +112,6 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	if source != nil {
 		defer source.Close()
 		assetsCreated += w.detectShowLevelImages(ctx, q, mediaItemID, source.FS, cacheDir)
-		w.detectExtras(ctx, q, mediaItemID, source.FS, showDir)
 	}
 
 	if filePath != "" && !vfs.IsSMBPath(dir) {
@@ -381,78 +355,6 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 	}
 
 	return created
-}
-
-func (w *DetectLocalAssetsWorker) detectExtras(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, showDir string) {
-	entries, err := fs.ReadDir(fsys, ".")
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			name := e.Name()
-			ext := strings.ToLower(filepath.Ext(name))
-			if !mediafile.IsVideoExt(ext) {
-				continue
-			}
-			nameLower := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
-			for suffix, extraType := range extraSuffixes {
-				if strings.HasSuffix(nameLower, suffix) {
-					title := strings.TrimSuffix(name, filepath.Ext(name))
-					info, _ := e.Info()
-					size := int64(0)
-					if info != nil {
-						size = info.Size()
-					}
-					q.CreateMediaExtra(ctx, sqlc.CreateMediaExtraParams{
-						MediaItemID: mediaItemID,
-						ExtraType:   extraType,
-						Title:       title,
-						FilePath:    vfs.Join(showDir, name),
-						FileSize:    size,
-					})
-					break
-				}
-			}
-			continue
-		}
-
-		folderName := strings.ToLower(e.Name())
-		extraType, ok := extraFolders[folderName]
-		if !ok {
-			continue
-		}
-
-		extraEntries, err := fs.ReadDir(fsys, e.Name())
-		if err != nil {
-			continue
-		}
-
-		for _, ee := range extraEntries {
-			if ee.IsDir() {
-				continue
-			}
-			ext := strings.ToLower(filepath.Ext(ee.Name()))
-			if !mediafile.IsVideoExt(ext) {
-				continue
-			}
-			title := strings.TrimSuffix(ee.Name(), filepath.Ext(ee.Name()))
-			info, _ := ee.Info()
-			size := int64(0)
-			if info != nil {
-				size = info.Size()
-			}
-			q.CreateMediaExtra(ctx, sqlc.CreateMediaExtraParams{
-				MediaItemID: mediaItemID,
-				ExtraType:   extraType,
-				Title:       title,
-				FilePath:    vfs.Join(showDir, e.Name(), ee.Name()),
-				FileSize:    size,
-			})
-			log.Debug().Str("title", title).Str("type", string(extraType)).Msg("found extra")
-		}
-	}
 }
 
 // detectSiblingAssetsFS returns the number of media_assets rows it created,

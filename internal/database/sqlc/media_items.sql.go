@@ -33,87 +33,99 @@ func (q *Queries) CountMediaItemsByType(ctx context.Context, mediaType MediaType
 	return count, err
 }
 
-const createMediaItem = `-- name: CreateMediaItem :one
-INSERT INTO media_items (library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, tagline, original_title, original_language, status, provider_kind, heya_slug)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked
+const createMediaItemRaw = `-- name: CreateMediaItemRaw :one
+WITH entity AS (
+  INSERT INTO media_items (library_id, media_type, provider_kind, heya_slug)
+  VALUES (
+    $1,
+    $2,
+    $3,
+    $4
+  )
+  RETURNING id
+),
+profile AS (
+  INSERT INTO media_item_profiles (
+    media_item_id, title, sort_title, year, description, poster_path,
+    backdrop_path, tagline, original_title, original_language, status
+  )
+  SELECT
+    entity.id,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9,
+    $10,
+    $11,
+    $12,
+    $13,
+    $14
+  FROM entity
+  RETURNING media_item_id
+),
+external_ids AS (
+  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
+  SELECT entity.id, $1, kv.key, kv.value, 'media_items.external_ids'
+  FROM entity, jsonb_each_text(
+    CASE
+      WHEN jsonb_typeof($15::jsonb) = 'object' THEN $15::jsonb
+      ELSE '{}'::jsonb
+    END
+  ) AS kv(key, value)
+  WHERE kv.key <> '' AND kv.value <> ''
+  ON CONFLICT (media_item_id, provider) DO UPDATE SET
+    library_id = EXCLUDED.library_id,
+    external_id = EXCLUDED.external_id,
+    source = EXCLUDED.source,
+    updated_at = now()
+  RETURNING provider
+)
+SELECT entity.id
+FROM entity
+JOIN profile ON profile.media_item_id = entity.id
+CROSS JOIN (SELECT count(*) FROM external_ids) external_write_count
 `
 
-type CreateMediaItemParams struct {
+type CreateMediaItemRawParams struct {
 	LibraryID        int64     `json:"library_id"`
 	MediaType        MediaType `json:"media_type"`
+	ProviderKind     string    `json:"provider_kind"`
+	HeyaSlug         string    `json:"heya_slug"`
 	Title            string    `json:"title"`
 	SortTitle        string    `json:"sort_title"`
 	Year             string    `json:"year"`
 	Description      string    `json:"description"`
 	PosterPath       string    `json:"poster_path"`
 	BackdropPath     string    `json:"backdrop_path"`
-	ExternalIds      []byte    `json:"external_ids"`
 	Tagline          string    `json:"tagline"`
 	OriginalTitle    string    `json:"original_title"`
 	OriginalLanguage string    `json:"original_language"`
 	Status           string    `json:"status"`
-	ProviderKind     string    `json:"provider_kind"`
-	HeyaSlug         string    `json:"heya_slug"`
+	ExternalIds      []byte    `json:"external_ids"`
 }
 
-func (q *Queries) CreateMediaItem(ctx context.Context, arg CreateMediaItemParams) (MediaItem, error) {
-	row := q.db.QueryRow(ctx, createMediaItem,
+func (q *Queries) CreateMediaItemRaw(ctx context.Context, arg CreateMediaItemRawParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createMediaItemRaw,
 		arg.LibraryID,
 		arg.MediaType,
+		arg.ProviderKind,
+		arg.HeyaSlug,
 		arg.Title,
 		arg.SortTitle,
 		arg.Year,
 		arg.Description,
 		arg.PosterPath,
 		arg.BackdropPath,
-		arg.ExternalIds,
 		arg.Tagline,
 		arg.OriginalTitle,
 		arg.OriginalLanguage,
 		arg.Status,
-		arg.ProviderKind,
-		arg.HeyaSlug,
+		arg.ExternalIds,
 	)
-	var i MediaItem
-	err := row.Scan(
-		&i.ID,
-		&i.LibraryID,
-		&i.MediaType,
-		&i.Title,
-		&i.SortTitle,
-		&i.Year,
-		&i.Description,
-		&i.PosterPath,
-		&i.BackdropPath,
-		&i.ExternalIds,
-		&i.Slug,
-		&i.Homepage,
-		&i.Tagline,
-		&i.OriginalTitle,
-		&i.OriginalLanguage,
-		&i.Status,
-		&i.ProviderKind,
-		&i.HeyaSlug,
-		&i.HeyaEnrichedAt,
-		&i.MetadataRefreshedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.SearchVector,
-		&i.MatchedAt,
-		&i.EnrichmentStatus,
-		&i.BaseEnrichedAt,
-		&i.PeopleEnrichedAt,
-		&i.ExtrasEnrichedAt,
-		&i.ImagesEnrichedAt,
-		&i.StructureEnrichedAt,
-		&i.LastEnrichAttemptAt,
-		&i.LastEnrichError,
-		&i.FieldProvenance,
-		&i.MatchConfidence,
-		&i.SlugLocked,
-	)
-	return i, err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const deleteMediaItem = `-- name: DeleteMediaItem :exec
@@ -126,7 +138,7 @@ func (q *Queries) DeleteMediaItem(ctx context.Context, id int64) error {
 }
 
 const findMediaItemByIdentity = `-- name: FindMediaItemByIdentity :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_item_cards
 WHERE library_id = $1
   AND media_type = $2
   AND year       = $3
@@ -158,7 +170,7 @@ type FindMediaItemByIdentityParams struct {
 //	        "needs review" path: re-scan dedup still works, but a coincidental
 //	        title+year collision can NEVER silently attach onto a published,
 //	        remotely-matched item.
-func (q *Queries) FindMediaItemByIdentity(ctx context.Context, arg FindMediaItemByIdentityParams) (MediaItem, error) {
+func (q *Queries) FindMediaItemByIdentity(ctx context.Context, arg FindMediaItemByIdentityParams) (MediaItemCard, error) {
 	row := q.db.QueryRow(ctx, findMediaItemByIdentity,
 		arg.LibraryID,
 		arg.MediaType,
@@ -166,7 +178,7 @@ func (q *Queries) FindMediaItemByIdentity(ctx context.Context, arg FindMediaItem
 		arg.Title,
 		arg.IncludeMatched,
 	)
-	var i MediaItem
+	var i MediaItemCard
 	err := row.Scan(
 		&i.ID,
 		&i.LibraryID,
@@ -208,12 +220,12 @@ func (q *Queries) FindMediaItemByIdentity(ctx context.Context, arg FindMediaItem
 }
 
 const getMediaItemByID = `-- name: GetMediaItemByID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items WHERE id = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_item_cards WHERE id = $1
 `
 
-func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, error) {
+func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItemCard, error) {
 	row := q.db.QueryRow(ctx, getMediaItemByID, id)
-	var i MediaItem
+	var i MediaItemCard
 	err := row.Scan(
 		&i.ID,
 		&i.LibraryID,
@@ -255,12 +267,12 @@ func (q *Queries) GetMediaItemByID(ctx context.Context, id int64) (MediaItem, er
 }
 
 const getMediaItemBySlug = `-- name: GetMediaItemBySlug :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items WHERE slug = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_item_cards WHERE slug = $1
 `
 
-func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaItem, error) {
+func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaItemCard, error) {
 	row := q.db.QueryRow(ctx, getMediaItemBySlug, slug)
-	var i MediaItem
+	var i MediaItemCard
 	err := row.Scan(
 		&i.ID,
 		&i.LibraryID,
@@ -314,7 +326,7 @@ SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.slug,
        mi.external_ids, mi.created_at, mi.updated_at,
        m.genres, m.rating, m.runtime_minutes, m.original_language,
        m.release_date, m.collection_id
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 ORDER BY mi.sort_title ASC, mi.title ASC
 LIMIT $1 OFFSET $2
@@ -407,7 +419,7 @@ SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.slug,
        mi.external_ids, mi.created_at, mi.updated_at,
        ts.genres, ts.rating, ts.first_air_date, ts.last_air_date,
        ts.status, ts.original_language, ts.number_of_seasons, ts.number_of_episodes
-FROM media_items mi
+FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 ORDER BY mi.sort_title ASC, mi.title ASC
 LIMIT $1 OFFSET $2
@@ -485,7 +497,7 @@ func (q *Queries) ListEnrichedTVSeries(ctx context.Context, arg ListEnrichedTVSe
 }
 
 const listMediaItemsByLibrary = `-- name: ListMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_item_cards
 WHERE library_id = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -497,15 +509,15 @@ type ListMediaItemsByLibraryParams struct {
 	Offset    int32 `json:"offset"`
 }
 
-func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItemsByLibraryParams) ([]MediaItem, error) {
+func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItemsByLibraryParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listMediaItemsByLibrary, arg.LibraryID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MediaItem{}
+	items := []MediaItemCard{}
 	for rows.Next() {
-		var i MediaItem
+		var i MediaItemCard
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,
@@ -554,7 +566,7 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 }
 
 const listMediaItemsByType = `-- name: ListMediaItemsByType :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_item_cards
 WHERE media_type = $1
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
@@ -566,15 +578,15 @@ type ListMediaItemsByTypeParams struct {
 	Offset    int32     `json:"offset"`
 }
 
-func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsByTypeParams) ([]MediaItem, error) {
+func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsByTypeParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listMediaItemsByType, arg.MediaType, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MediaItem{}
+	items := []MediaItemCard{}
 	for rows.Next() {
-		var i MediaItem
+		var i MediaItemCard
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,
@@ -623,7 +635,7 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 }
 
 const listMediaItemsByTypeRecent = `-- name: ListMediaItemsByTypeRecent :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_item_cards
 WHERE media_type = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3
@@ -637,15 +649,15 @@ type ListMediaItemsByTypeRecentParams struct {
 
 // Same page shape as ListMediaItemsByType but newest-first — powers the
 // home "Recently Added" rails (created_at is when the first file matched).
-func (q *Queries) ListMediaItemsByTypeRecent(ctx context.Context, arg ListMediaItemsByTypeRecentParams) ([]MediaItem, error) {
+func (q *Queries) ListMediaItemsByTypeRecent(ctx context.Context, arg ListMediaItemsByTypeRecentParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listMediaItemsByTypeRecent, arg.MediaType, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MediaItem{}
+	items := []MediaItemCard{}
 	for rows.Next() {
-		var i MediaItem
+		var i MediaItemCard
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,
@@ -695,7 +707,7 @@ func (q *Queries) ListMediaItemsByTypeRecent(ctx context.Context, arg ListMediaI
 
 const listUnavailableMediaItemIDs = `-- name: ListUnavailableMediaItemIDs :many
 SELECT DISTINCT mi.id
-FROM media_items mi
+FROM media_item_cards mi
 WHERE mi.media_type = $1
   AND NOT EXISTS (
     SELECT 1 FROM library_files lf
@@ -725,7 +737,7 @@ func (q *Queries) ListUnavailableMediaItemIDs(ctx context.Context, mediaType Med
 
 const listUnavailableMediaItemIDsForItems = `-- name: ListUnavailableMediaItemIDsForItems :many
 SELECT mi.id
-FROM media_items mi
+FROM media_item_cards mi
 WHERE mi.id = ANY($1::bigint[])
   AND NOT EXISTS (
     SELECT 1 FROM library_files lf
@@ -931,7 +943,7 @@ func (q *Queries) MediaItemSlugExists(ctx context.Context, arg MediaItemSlugExis
 }
 
 const searchMediaItemsByLibrary = `-- name: SearchMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_item_cards
 WHERE library_id = $1
   AND ($4::text = '' OR title ILIKE '%' || $4 || '%')
 ORDER BY sort_title ASC, title ASC
@@ -945,7 +957,7 @@ type SearchMediaItemsByLibraryParams struct {
 	Column4   string `json:"column_4"`
 }
 
-func (q *Queries) SearchMediaItemsByLibrary(ctx context.Context, arg SearchMediaItemsByLibraryParams) ([]MediaItem, error) {
+func (q *Queries) SearchMediaItemsByLibrary(ctx context.Context, arg SearchMediaItemsByLibraryParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, searchMediaItemsByLibrary,
 		arg.LibraryID,
 		arg.Limit,
@@ -956,9 +968,9 @@ func (q *Queries) SearchMediaItemsByLibrary(ctx context.Context, arg SearchMedia
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MediaItem{}
+	items := []MediaItemCard{}
 	for rows.Next() {
-		var i MediaItem
+		var i MediaItemCard
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,
@@ -1024,93 +1036,11 @@ func (q *Queries) SetMediaItemFieldProvenance(ctx context.Context, arg SetMediaI
 	return err
 }
 
-const updateMediaItem = `-- name: UpdateMediaItem :one
-UPDATE media_items
-SET title = $2, sort_title = $3, year = $4, description = $5,
-    poster_path = $6, backdrop_path = $7, external_ids = $8,
-    tagline = $9, original_title = $10, original_language = $11,
-    status = $12, provider_kind = $13, heya_slug = $14, updated_at = now()
-WHERE id = $1
-RETURNING id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked
-`
-
-type UpdateMediaItemParams struct {
-	ID               int64  `json:"id"`
-	Title            string `json:"title"`
-	SortTitle        string `json:"sort_title"`
-	Year             string `json:"year"`
-	Description      string `json:"description"`
-	PosterPath       string `json:"poster_path"`
-	BackdropPath     string `json:"backdrop_path"`
-	ExternalIds      []byte `json:"external_ids"`
-	Tagline          string `json:"tagline"`
-	OriginalTitle    string `json:"original_title"`
-	OriginalLanguage string `json:"original_language"`
-	Status           string `json:"status"`
-	ProviderKind     string `json:"provider_kind"`
-	HeyaSlug         string `json:"heya_slug"`
-}
-
-func (q *Queries) UpdateMediaItem(ctx context.Context, arg UpdateMediaItemParams) (MediaItem, error) {
-	row := q.db.QueryRow(ctx, updateMediaItem,
-		arg.ID,
-		arg.Title,
-		arg.SortTitle,
-		arg.Year,
-		arg.Description,
-		arg.PosterPath,
-		arg.BackdropPath,
-		arg.ExternalIds,
-		arg.Tagline,
-		arg.OriginalTitle,
-		arg.OriginalLanguage,
-		arg.Status,
-		arg.ProviderKind,
-		arg.HeyaSlug,
-	)
-	var i MediaItem
-	err := row.Scan(
-		&i.ID,
-		&i.LibraryID,
-		&i.MediaType,
-		&i.Title,
-		&i.SortTitle,
-		&i.Year,
-		&i.Description,
-		&i.PosterPath,
-		&i.BackdropPath,
-		&i.ExternalIds,
-		&i.Slug,
-		&i.Homepage,
-		&i.Tagline,
-		&i.OriginalTitle,
-		&i.OriginalLanguage,
-		&i.Status,
-		&i.ProviderKind,
-		&i.HeyaSlug,
-		&i.HeyaEnrichedAt,
-		&i.MetadataRefreshedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.SearchVector,
-		&i.MatchedAt,
-		&i.EnrichmentStatus,
-		&i.BaseEnrichedAt,
-		&i.PeopleEnrichedAt,
-		&i.ExtrasEnrichedAt,
-		&i.ImagesEnrichedAt,
-		&i.StructureEnrichedAt,
-		&i.LastEnrichAttemptAt,
-		&i.LastEnrichError,
-		&i.FieldProvenance,
-		&i.MatchConfidence,
-		&i.SlugLocked,
-	)
-	return i, err
-}
-
 const updateMediaItemBackdropPath = `-- name: UpdateMediaItemBackdropPath :exec
-UPDATE media_items SET backdrop_path = $2, updated_at = now() WHERE id = $1
+WITH profile AS (
+  UPDATE media_item_profiles SET backdrop_path = $2, updated_at = now() WHERE media_item_id = $1
+)
+UPDATE media_items SET updated_at = now() WHERE id = $1
 `
 
 type UpdateMediaItemBackdropPathParams struct {
@@ -1144,7 +1074,10 @@ func (q *Queries) UpdateMediaItemHeyaSlug(ctx context.Context, arg UpdateMediaIt
 }
 
 const updateMediaItemPosterPath = `-- name: UpdateMediaItemPosterPath :exec
-UPDATE media_items SET poster_path = $2, updated_at = now() WHERE id = $1
+WITH profile AS (
+  UPDATE media_item_profiles SET poster_path = $2, updated_at = now() WHERE media_item_id = $1
+)
+UPDATE media_items SET updated_at = now() WHERE id = $1
 `
 
 type UpdateMediaItemPosterPathParams struct {
@@ -1155,6 +1088,110 @@ type UpdateMediaItemPosterPathParams struct {
 func (q *Queries) UpdateMediaItemPosterPath(ctx context.Context, arg UpdateMediaItemPosterPathParams) error {
 	_, err := q.db.Exec(ctx, updateMediaItemPosterPath, arg.ID, arg.PosterPath)
 	return err
+}
+
+const updateMediaItemRaw = `-- name: UpdateMediaItemRaw :one
+WITH entity AS (
+  UPDATE media_items
+     SET provider_kind = $1,
+         heya_slug = $2,
+         updated_at = now()
+   WHERE media_items.id = $3
+   RETURNING id, library_id, media_type, slug, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked
+),
+profile AS (
+  INSERT INTO media_item_profiles (
+    media_item_id, title, sort_title, year, description, poster_path,
+    backdrop_path, tagline, original_title, original_language, status, updated_at
+  )
+  SELECT
+    entity.id,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9,
+    $10,
+    $11,
+    $12,
+    $13,
+    now()
+  FROM entity
+  ON CONFLICT (media_item_id) DO UPDATE SET
+    title = EXCLUDED.title,
+    sort_title = EXCLUDED.sort_title,
+    year = EXCLUDED.year,
+    description = EXCLUDED.description,
+    poster_path = EXCLUDED.poster_path,
+    backdrop_path = EXCLUDED.backdrop_path,
+    tagline = EXCLUDED.tagline,
+    original_title = EXCLUDED.original_title,
+    original_language = EXCLUDED.original_language,
+    status = EXCLUDED.status,
+    updated_at = now()
+  RETURNING media_item_id
+),
+deleted_external_ids AS (
+  DELETE FROM media_item_external_ids WHERE media_item_id = $3
+  RETURNING 1
+),
+inserted_external_ids AS (
+  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
+  SELECT entity.id, entity.library_id, kv.key, kv.value, 'media_items.external_ids'
+  FROM entity, jsonb_each_text(
+    CASE
+      WHEN jsonb_typeof($14::jsonb) = 'object' THEN $14::jsonb
+      ELSE '{}'::jsonb
+    END
+  ) AS kv(key, value)
+  WHERE kv.key <> '' AND kv.value <> ''
+  RETURNING provider
+)
+SELECT entity.id
+FROM entity
+JOIN profile ON profile.media_item_id = entity.id
+CROSS JOIN (SELECT count(*) FROM deleted_external_ids) deleted_write_count
+CROSS JOIN (SELECT count(*) FROM inserted_external_ids) inserted_write_count
+`
+
+type UpdateMediaItemRawParams struct {
+	ProviderKind     string `json:"provider_kind"`
+	HeyaSlug         string `json:"heya_slug"`
+	ID               int64  `json:"id"`
+	Title            string `json:"title"`
+	SortTitle        string `json:"sort_title"`
+	Year             string `json:"year"`
+	Description      string `json:"description"`
+	PosterPath       string `json:"poster_path"`
+	BackdropPath     string `json:"backdrop_path"`
+	Tagline          string `json:"tagline"`
+	OriginalTitle    string `json:"original_title"`
+	OriginalLanguage string `json:"original_language"`
+	Status           string `json:"status"`
+	ExternalIds      []byte `json:"external_ids"`
+}
+
+func (q *Queries) UpdateMediaItemRaw(ctx context.Context, arg UpdateMediaItemRawParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateMediaItemRaw,
+		arg.ProviderKind,
+		arg.HeyaSlug,
+		arg.ID,
+		arg.Title,
+		arg.SortTitle,
+		arg.Year,
+		arg.Description,
+		arg.PosterPath,
+		arg.BackdropPath,
+		arg.Tagline,
+		arg.OriginalTitle,
+		arg.OriginalLanguage,
+		arg.Status,
+		arg.ExternalIds,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateMediaItemSlug = `-- name: UpdateMediaItemSlug :exec

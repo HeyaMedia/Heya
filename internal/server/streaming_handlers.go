@@ -53,10 +53,7 @@ func handleDirectStream(app *service.App) http.HandlerFunc {
 	}
 }
 
-// handleExtraStream range-serves a media extra's video file (trailer,
-// featurette, …). Same shape as handleDirectStream but resolved through
-// media_extras — extras aren't library_files, they carry their own absolute
-// file_path.
+// handleExtraStream range-serves a media extra's video file from library_file_links.
 func handleExtraStream(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

@@ -79,7 +79,7 @@ FROM user_playlist_tracks upt
 JOIN tracks      t  ON t.id  = upt.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 LEFT JOIN track_files bf ON bf.id = (
     SELECT tf.id
     FROM track_files tf

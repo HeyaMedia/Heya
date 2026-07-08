@@ -51,7 +51,7 @@ func (q *Queries) CountTrickplayEligible(ctx context.Context) (CountTrickplayEli
 }
 
 const listThumbnailEligibleItems = `-- name: ListThumbnailEligibleItems :many
-SELECT id, title, file_path, thumbnail_path, extra_type, media_title
+SELECT id, title, file_path, thumbnail_path, extra_type::text AS extra_type, media_title
 FROM thumbnail_eligible_extras
 WHERE ($1::text = ''
    OR ($1::text = 'complete' AND thumbnail_path != '')
@@ -66,16 +66,25 @@ type ListThumbnailEligibleItemsParams struct {
 	RowLimit  int32  `json:"row_limit"`
 }
 
+type ListThumbnailEligibleItemsRow struct {
+	ID            int64  `json:"id"`
+	Title         string `json:"title"`
+	FilePath      string `json:"file_path"`
+	ThumbnailPath string `json:"thumbnail_path"`
+	ExtraType     string `json:"extra_type"`
+	MediaTitle    string `json:"media_title"`
+}
+
 // status: ” = all, 'complete', or 'pending'.
-func (q *Queries) ListThumbnailEligibleItems(ctx context.Context, arg ListThumbnailEligibleItemsParams) ([]ThumbnailEligibleExtra, error) {
+func (q *Queries) ListThumbnailEligibleItems(ctx context.Context, arg ListThumbnailEligibleItemsParams) ([]ListThumbnailEligibleItemsRow, error) {
 	rows, err := q.db.Query(ctx, listThumbnailEligibleItems, arg.Status, arg.RowOffset, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ThumbnailEligibleExtra{}
+	items := []ListThumbnailEligibleItemsRow{}
 	for rows.Next() {
-		var i ThumbnailEligibleExtra
+		var i ListThumbnailEligibleItemsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
@@ -95,7 +104,7 @@ func (q *Queries) ListThumbnailEligibleItems(ctx context.Context, arg ListThumbn
 }
 
 const listThumbnailPendingKickoff = `-- name: ListThumbnailPendingKickoff :many
-SELECT id, title, file_path
+SELECT id, title::text AS title, file_path
 FROM thumbnail_eligible_extras
 WHERE thumbnail_path = ''
 `

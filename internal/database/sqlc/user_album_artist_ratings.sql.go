@@ -190,7 +190,7 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
 FROM user_album_ratings uar
 JOIN albums      al ON al.id = uar.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = $1
   AND uar.rating  >= $2
 ORDER BY uar.rating DESC, uar.updated_at DESC
@@ -323,7 +323,7 @@ SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambigu
        uar.updated_at  AS rated_at
 FROM user_artist_ratings uar
 JOIN artists     a  ON a.id  = uar.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = $1
   AND uar.rating  >= $2
 ORDER BY uar.rating DESC, uar.updated_at DESC

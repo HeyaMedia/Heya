@@ -148,7 +148,7 @@ UPDATE track_facets tf
   FROM tracks t
   JOIN albums a ON a.id = t.album_id
   JOIN artists ar ON ar.id = a.artist_id
-  JOIN media_items mi ON mi.id = ar.media_item_id
+  JOIN media_item_cards mi ON mi.id = ar.media_item_id
  WHERE tf.track_id = t.id AND mi.library_id = $1;
 
 -- name: RefreshArtistCentroid :exec
@@ -219,7 +219,7 @@ FROM track_facets tf
 JOIN tracks      t  ON t.id = tf.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE tf.track_embedding IS NOT NULL
   AND NOT (tf.track_id = ANY(sqlc.arg(exclude_ids)::bigint[]))
 ORDER BY tf.track_embedding <=> $1
@@ -271,7 +271,7 @@ SELECT * FROM (
     JOIN tracks      t  ON t.id = tf.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE (tf.mood_tags->>sqlc.arg(mood_key)::text)::real > sqlc.arg(threshold)::real
       AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
     ORDER BY a.id, lower(t.title), t.duration / 15,
@@ -323,7 +323,7 @@ SELECT * FROM (
     JOIN tracks      t  ON t.id = tf.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
     WHERE (elem->>'name') = sqlc.arg(genre_name)::text
       AND (elem->>'score')::real >= sqlc.arg(min_score)::real
@@ -371,7 +371,7 @@ SELECT * FROM (
     JOIN tracks      t  ON t.id = tf.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE tf.bpm IS NOT NULL
       AND tf.bpm >= sqlc.arg(min_bpm)::real
       AND tf.bpm <  sqlc.arg(max_bpm)::real
@@ -416,7 +416,7 @@ FROM track_facets tf
 JOIN tracks      t  ON t.id = tf.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE tf.track_embedding IS NOT NULL
   AND tf.bpm IS NOT NULL
   AND tf.bpm BETWEEN sqlc.arg(bpm_min)::real AND sqlc.arg(bpm_max)::real
@@ -436,7 +436,7 @@ SELECT t.id AS track_id
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN track_facets tf ON tf.track_id = t.id
 WHERE mi.slug = $1
   AND tf.track_embedding IS NOT NULL
@@ -484,7 +484,7 @@ FROM track_facets tf
 JOIN tracks      t  ON t.id = tf.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE tf.text_embedding IS NOT NULL
 ORDER BY tf.text_embedding <=> $1
 LIMIT sqlc.arg(track_limit);
@@ -494,7 +494,7 @@ SELECT ar.id, ar.name, ar.media_item_id, mi.slug AS media_slug,
        (ac.sonic_centroid <=> $1)::real AS distance
 FROM artist_centroids ac
 JOIN artists ar ON ar.id = ac.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 WHERE ac.artist_id != $2
   AND ac.sonic_centroid IS NOT NULL
 ORDER BY ac.sonic_centroid <=> $1
@@ -512,7 +512,7 @@ SELECT al.id, al.title, al.artist_id, al.slug AS album_slug,
 FROM album_centroids alc
 JOIN albums      al ON al.id = alc.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE alc.album_id != $2
   AND alc.sonic_centroid IS NOT NULL
 ORDER BY alc.sonic_centroid <=> $1

@@ -13,6 +13,69 @@ const loading = ref(true)
 const scanning = ref<number | null>(null)
 const scanningAll = ref(false)
 const { flash } = useFlash()
+const route = useRoute()
+const router = useRouter()
+
+const SCANNABLE = ['movie', 'tv', 'anime']
+function isScannable(lib: Library): boolean {
+  return SCANNABLE.includes(lib.media_type)
+}
+
+// Per-library drill-down into the Scanner V2 state. Selecting a library swaps
+// the list for the scanner detail view (deep-linked via ?library=).
+const scannerLibId = ref<number | null>(null)
+const scannerLib = computed(() => libraries.value.find(l => l.id === scannerLibId.value) ?? null)
+
+function scannerIDFromQuery(): number | null {
+  const q = route.query.library
+  const raw = Array.isArray(q) ? q[0] : q
+  const id = Number(raw)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function syncScannerFromRoute() {
+  const id = scannerIDFromQuery()
+  scannerLibId.value = id && libraries.value.some(l => l.id === id && isScannable(l)) ? id : null
+}
+
+function openScanner(lib: Library) {
+  scannerLibId.value = lib.id
+  router.push({ query: { ...route.query, library: String(lib.id) } })
+}
+function closeScanner() {
+  scannerLibId.value = null
+  const q = { ...route.query }
+  delete q.library
+  router.replace({ query: q })
+}
+
+// Latest persisted scan run per scannable library — a cheap runs-only fetch
+// (no identity/finding payload) so each card can show a scanner status line
+// without pulling the full scan-v2 view.
+type ScanRunLite = { id: number; status: string; mode: string; summary: Record<string, any>; started_at?: string; finished_at?: string }
+const latestRun = ref<Record<number, ScanRunLite | null>>({})
+
+async function fetchLatestRuns() {
+  const heya = $heya as any
+  await Promise.all(libraries.value.filter(isScannable).map(async (lib) => {
+    try {
+      const rows = await heya('/api/libraries/{id}/scan-v2/runs', {
+        path: { id: lib.id },
+        query: { limit: 1, offset: 0 },
+      }) as ScanRunLite[]
+      latestRun.value[lib.id] = rows?.[0] ?? null
+    } catch {
+      // Non-fatal — the card just omits the scanner status line.
+    }
+  }))
+}
+
+function shortDate(value?: string): string {
+  if (!value) return 'never'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+}
 
 const showAdd = ref(false)
 const addError = ref('')
@@ -43,7 +106,10 @@ function defaultSettings(type: string): LibrarySettings {
 }
 
 function mediaIcon(type: string): string {
-  return type === 'movie' ? 'film' : type === 'tv' ? 'tv' : type === 'music' ? 'music' : 'book'
+  if (type === 'movie') return 'film'
+  if (type === 'tv' || type === 'anime') return 'tv'
+  if (type === 'music') return 'music'
+  return 'book'
 }
 
 // Placeholder tracks the selected type so the Name field reads as an obvious
@@ -51,6 +117,7 @@ function mediaIcon(type: string): string {
 const namePlaceholder = computed(() => {
   switch (newLib.value.media_type) {
     case 'tv': return 'e.g. My TV Shows'
+    case 'anime': return 'e.g. My Anime'
     case 'music': return 'e.g. My Music'
     case 'book': return 'e.g. My Books'
     default: return 'e.g. My Movies'
@@ -70,6 +137,8 @@ const hasAnyProgress = computed(() => Object.keys(scanProgress.value).length > 0
 async function fetchLibraries() {
   try {
     libraries.value = await $heya('/api/libraries') ?? []
+    syncScannerFromRoute()
+    fetchLatestRuns()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load libraries.' }
   } finally {
@@ -278,14 +347,23 @@ async function cleanupMissing() {
   }
 }
 
-onMounted(() => {
-  fetchLibraries()
+onMounted(async () => {
+  await fetchLibraries()
   fetchMissingCount()
 })
+
+watch(() => route.query.library, () => syncScannerFromRoute())
 </script>
 
 <template>
   <div>
+    <LibraryScannerView
+      v-if="scannerLib"
+      :key="scannerLib.id"
+      :library="scannerLib"
+      @back="closeScanner"
+    />
+    <template v-else>
     <header class="sv2-page-head">
       <h2 class="sv2-page-title">Libraries</h2>
       <p class="sv2-page-desc">
@@ -299,6 +377,7 @@ onMounted(() => {
       <MetricTile label="Total" :value="libraries.length" icon="folder" />
       <MetricTile label="Movies" :value="totalByKind.movie ?? 0" icon="film" />
       <MetricTile label="TV"     :value="totalByKind.tv ?? 0"    icon="tv" />
+      <MetricTile label="Anime"  :value="totalByKind.anime ?? 0" icon="tv" />
       <MetricTile label="Music"  :value="totalByKind.music ?? 0" icon="music" />
       <MetricTile label="Books"  :value="totalByKind.book ?? 0"  icon="book" />
       <MetricTile
@@ -394,11 +473,24 @@ onMounted(() => {
               <span v-if="lib.settings?.enable_trickplay" class="tag trick">Trickplay</span>
               <span v-if="lib.settings?.preferred_language" class="tag lang">{{ lib.settings.preferred_language.toUpperCase() }}</span>
             </div>
+
+            <button v-if="isScannable(lib)" class="lib-scanner" @click="openScanner(lib)">
+              <Icon name="database" :size="11" />
+              <span v-if="latestRun[lib.id]">
+                Scanner · {{ latestRun[lib.id]!.status }} · {{ shortDate(latestRun[lib.id]!.finished_at || latestRun[lib.id]!.started_at) }}
+              </span>
+              <span v-else>Scanner · not run yet</span>
+              <Icon name="chevright" :size="11" class="lib-scanner-go" />
+            </button>
           </div>
 
           <div class="lib-actions">
             <button class="row-btn" :title="`Configure ${lib.name}`" @click="openEdit(lib)">
               <Icon name="settings" :size="14" />
+            </button>
+
+            <button v-if="isScannable(lib)" class="row-btn" title="Scanner state" @click="openScanner(lib)">
+              <Icon name="database" :size="14" />
             </button>
 
             <AppMenu align="end" :side-offset="8">
@@ -478,6 +570,7 @@ onMounted(() => {
             <select v-model="newLib.media_type" class="sv2-select" @change="onTypeChange">
               <option value="movie">Movie</option>
               <option value="tv">TV Show</option>
+              <option value="anime">Anime</option>
               <option value="music">Music</option>
               <option value="book">Book</option>
             </select>
@@ -577,6 +670,7 @@ onMounted(() => {
         </button>
       </template>
     </AppDialog>
+    </template>
   </div>
 </template>
 
@@ -636,7 +730,8 @@ onMounted(() => {
   position: relative;
   flex-shrink: 0;
 }
-.lib-icon.kind-tv    { color: rgb(140, 160, 255); background: rgba(140, 160, 255, 0.10); }
+.lib-icon.kind-tv,
+.lib-icon.kind-anime { color: rgb(140, 160, 255); background: rgba(140, 160, 255, 0.10); }
 .lib-icon.kind-music { color: rgb(200, 140, 255); background: rgba(200, 140, 255, 0.10); }
 .lib-icon.kind-book  { color: rgb(140, 220, 180); background: rgba(140, 220, 180, 0.10); }
 
@@ -698,6 +793,22 @@ onMounted(() => {
 .tag.trick { background: rgba(200, 140, 255, 0.10); color: rgb(200, 140, 255); }
 .tag.lang  { background: rgba(140, 160, 255, 0.10); color: rgb(140, 160, 255); }
 
+.lib-scanner {
+  display: inline-flex; align-items: center; gap: 5px;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 3px 8px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+  color: var(--fg-3);
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.02em;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.lib-scanner:hover { color: var(--fg-0); border-color: var(--border-strong); background: rgba(255,255,255,0.04); }
+.lib-scanner-go { color: var(--fg-4); }
+
 .lib-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .row-btn {
   width: 30px; height: 30px;
@@ -743,7 +854,8 @@ onMounted(() => {
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.dialog-icon.kind-tv    { color: rgb(140, 160, 255); background: rgba(140, 160, 255, 0.10); }
+.dialog-icon.kind-tv,
+.dialog-icon.kind-anime { color: rgb(140, 160, 255); background: rgba(140, 160, 255, 0.10); }
 .dialog-icon.kind-music { color: rgb(200, 140, 255); background: rgba(200, 140, 255, 0.10); }
 .dialog-icon.kind-book  { color: rgb(140, 220, 180); background: rgba(140, 220, 180, 0.10); }
 .dialog-identity-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

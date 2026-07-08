@@ -249,7 +249,7 @@ func mediaColor(mt string) color.Color {
 	switch mt {
 	case "movie":
 		return lipgloss.Color("#5B9FE4")
-	case "tv":
+	case "tv", "anime":
 		return lipgloss.Color("#9B7DD4")
 	case "music":
 		return lipgloss.Color("#5BC48C")

@@ -113,7 +113,7 @@ var mediaInfoCmd = &cobra.Command{
 	},
 }
 
-func renderMovieDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem) {
+func renderMovieDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard) {
 	movie, err := q.GetMovieByMediaItemID(ctx, item.ID)
 	if err != nil {
 		return
@@ -168,7 +168,7 @@ func renderMovieDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem
 	}
 }
 
-func renderTVDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem) {
+func renderTVDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard) {
 	series, err := q.GetTVSeriesByMediaItemID(ctx, item.ID)
 	if err != nil {
 		return
@@ -207,7 +207,7 @@ func renderTVDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem) {
 	}
 }
 
-func renderMusicDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem) {
+func renderMusicDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard) {
 	artist, err := q.GetArtistByMediaItemID(ctx, item.ID)
 	if err != nil {
 		return
@@ -239,7 +239,7 @@ func renderMusicDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem
 	}
 }
 
-func renderBookDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem) {
+func renderBookDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard) {
 	book, err := q.GetBookByMediaItemID(ctx, item.ID)
 	if err != nil {
 		return

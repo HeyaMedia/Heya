@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/rs/zerolog/log"
 )
 
@@ -288,7 +289,9 @@ func (s *Server) resolveLevel(ctx context.Context, req *itemsRequest) (itemLevel
 		if err != nil {
 			return levelNone, ""
 		}
-		return levelItems, lib.MediaType
+		// A library's declared type may be 'anime', but its media_items are
+		// stored as 'tv' — query under the runtime type or we'd find nothing.
+		return levelItems, mediatype.Runtime(lib.MediaType)
 	case KindItem:
 		// A media_item parent: series → seasons (episodes when recursive),
 		// artist → albums. Movie/book parents have no children.

@@ -18,7 +18,7 @@ import (
 
 // MediaItemView wraps a media item with its availability status.
 type MediaItemView struct {
-	sqlc.MediaItem
+	sqlc.MediaItemCard
 	Available bool `json:"available"`
 }
 
@@ -54,7 +54,7 @@ func (a *App) ListMediaRecent(ctx context.Context, mediaType sqlc.MediaType, lim
 func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, offset int32, recentFirst bool) ([]MediaItemView, error) {
 	q := sqlc.New(a.db)
 
-	var items []sqlc.MediaItem
+	var items []sqlc.MediaItemCard
 	var err error
 	if recentFirst {
 		items, err = q.ListMediaItemsByTypeRecent(ctx, sqlc.ListMediaItemsByTypeRecentParams{
@@ -94,8 +94,8 @@ func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 			item.Title = t
 		}
 		views[i] = MediaItemView{
-			MediaItem: item,
-			Available: !unavailable[item.ID],
+			MediaItemCard: item,
+			Available:     !unavailable[item.ID],
 		}
 	}
 
@@ -104,7 +104,7 @@ func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 
 // titleTarget is the minimal (media item, its library) pair the batched title
 // overlay needs — so callers holding slim rows (recommendation rails) can reuse
-// it without a full sqlc.MediaItem.
+// it without a full sqlc.MediaItemCard.
 type titleTarget struct {
 	ID        int64
 	LibraryID int64
@@ -115,7 +115,7 @@ type titleTarget struct {
 // an 'en' fallback for the misses) instead of one per item — the home rails
 // paid ~60 sequential round trips per load through the per-item resolver.
 // Returns mediaItemID → overlay title; absent keys mean "keep the raw title".
-func (a *App) preferredTitleOverlay(ctx context.Context, q *sqlc.Queries, items []sqlc.MediaItem) map[int64]string {
+func (a *App) preferredTitleOverlay(ctx context.Context, q *sqlc.Queries, items []sqlc.MediaItemCard) map[int64]string {
 	targets := make([]titleTarget, len(items))
 	for i, it := range items {
 		targets[i] = titleTarget{ID: it.ID, LibraryID: it.LibraryID}
@@ -204,7 +204,7 @@ func (a *App) preferredTitleResolver(ctx context.Context, q *sqlc.Queries) func(
 }
 
 // GetMediaItem resolves a media item by numeric ID or slug string.
-func (a *App) GetMediaItem(ctx context.Context, idOrSlug string) (sqlc.MediaItem, error) {
+func (a *App) GetMediaItem(ctx context.Context, idOrSlug string) (sqlc.MediaItemCard, error) {
 	q := sqlc.New(a.db)
 
 	if id, err := strconv.ParseInt(idOrSlug, 10, 64); err == nil {
@@ -410,8 +410,8 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		result["assets"] = assets
 	}
 
-	// Extras
-	if extras, extErr := q.ListMediaExtras(ctx, item.ID); extErr == nil && len(extras) > 0 {
+	// Extras are local files linked by Scanner V2 through library_file_links.
+	if extras, extErr := q.ListMediaExtraLinks(ctx, item.ID); extErr == nil && len(extras) > 0 {
 		result["extras"] = extras
 	}
 

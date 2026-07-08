@@ -439,7 +439,7 @@ func collectionType(mt sqlc.MediaType) string {
 	switch mt {
 	case sqlc.MediaTypeMovie:
 		return "movies"
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		return "tvshows"
 	case sqlc.MediaTypeMusic:
 		return "music"

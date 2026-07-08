@@ -43,7 +43,7 @@ WITH dedup AS (
     JOIN tracks      t  ON t.id = pe.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = $3
     ORDER BY t.id, pe.played_at DESC
 )

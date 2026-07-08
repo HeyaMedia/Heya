@@ -55,7 +55,7 @@ func PriorityFor(source EnrichSource, mediaType sqlc.MediaType) int {
 		return 1
 	}
 	switch mediaType {
-	case sqlc.MediaTypeMovie, sqlc.MediaTypeTv:
+	case sqlc.MediaTypeMovie, sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		return 2
 	default:
 		return 3

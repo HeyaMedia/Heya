@@ -11,7 +11,7 @@
 -- when the file landed (that's "Recently Added"). Only dated, already-released.
 -- name: ListRecentlyReleasedMovies :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
   AND m.release_date IS NOT NULL
@@ -23,7 +23,7 @@ LIMIT $1;
 -- Highly-rated films the user hasn't finished yet.
 -- name: ListTopUnwatchedMovies :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
   AND m.rating > 0
@@ -50,7 +50,7 @@ LIMIT 5;
 -- Top-rated unseen films in a genre (the payload for "More <Genre>").
 -- name: ListTopMoviesInGenreUnseen :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
   AND sqlc.arg(genre)::text = ANY(m.genres)
@@ -78,7 +78,7 @@ LIMIT $2;
 -- name: ListPersonUnseenMovies :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_cast mc
-JOIN media_items mi ON mi.id = mc.media_item_id
+JOIN media_item_cards mi ON mi.id = mc.media_item_id
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mc.person_id = sqlc.arg(person_id)
   AND mi.media_type = 'movie'
@@ -95,7 +95,7 @@ LIMIT sqlc.arg(lim);
 -- Highest-rated shows we own.
 -- name: ListTopRatedTV :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
   AND ts.rating > 0
@@ -120,7 +120,7 @@ LIMIT 5;
 -- Top-rated shows in a genre (payload for TV "More <Genre>").
 -- name: ListTopTVInGenre :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
   AND sqlc.arg(genre)::text = ANY(ts.genres)
@@ -142,7 +142,7 @@ WITH watched AS (
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
 FROM watched w
-JOIN media_items mi ON mi.id = w.media_item_id
+JOIN media_item_cards mi ON mi.id = w.media_item_id
 WHERE w.last_watched < now() - interval '30 days'
   -- The newer episode must be one we actually hold a playable file for — not
   -- just a catalog row. tv_episodes lists every aired episode (owned or not),
@@ -177,7 +177,18 @@ WITH agg AS (
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
 FROM agg
-JOIN media_items mi ON mi.external_ids @> agg.external_ids
+JOIN LATERAL (
+  SELECT local_mi.*
+  FROM jsonb_each_text(agg.external_ids) AS wanted(provider, external_id)
+  JOIN media_item_external_ids ei
+    ON ei.provider = wanted.provider
+   AND ei.external_id = wanted.external_id
+  JOIN media_item_cards local_mi ON local_mi.id = ei.media_item_id
+  WHERE wanted.provider IN ('tmdb', 'imdb', 'tvdb')
+  ORDER BY CASE wanted.provider WHEN 'tmdb' THEN 0 WHEN 'imdb' THEN 1 WHEN 'tvdb' THEN 2 ELSE 3 END,
+           local_mi.id
+  LIMIT 1
+) mi ON true
 WHERE mi.media_type = sqlc.arg(item_type)::media_type
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
   AND NOT EXISTS (

@@ -20,6 +20,7 @@ data/*
 data/postgres/*
 !data/postgres/.gitkeep
 tmp/
+exports/
 
 # IDE
 .idea/

@@ -105,7 +105,7 @@ func (q *Queries) ListFavoritesByEntity(ctx context.Context, arg ListFavoritesBy
 
 const listUserFavoriteMediaItems = `-- name: ListUserFavoriteMediaItems :many
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked
-FROM media_items mi
+FROM media_item_cards mi
 JOIN user_favorites uf ON uf.entity_id = mi.id AND uf.entity_type = 'media_item'
 WHERE uf.user_id = $1
 ORDER BY uf.created_at DESC
@@ -118,15 +118,15 @@ type ListUserFavoriteMediaItemsParams struct {
 	Offset int32 `json:"offset"`
 }
 
-func (q *Queries) ListUserFavoriteMediaItems(ctx context.Context, arg ListUserFavoriteMediaItemsParams) ([]MediaItem, error) {
+func (q *Queries) ListUserFavoriteMediaItems(ctx context.Context, arg ListUserFavoriteMediaItemsParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listUserFavoriteMediaItems, arg.UserID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MediaItem{}
+	items := []MediaItemCard{}
 	for rows.Next() {
-		var i MediaItem
+		var i MediaItemCard
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,
@@ -209,7 +209,7 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
 FROM user_favorites uf
 JOIN albums      al ON al.id = uf.entity_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE uf.user_id = $1 AND uf.entity_type = 'album' AND l.media_type = 'music'
 ORDER BY uf.created_at DESC
@@ -360,7 +360,7 @@ SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambigu
        uf.created_at AS loved_at
 FROM user_favorites uf
 JOIN artists     a  ON a.id  = uf.entity_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE uf.user_id = $1 AND uf.entity_type = 'artist' AND l.media_type = 'music'
 ORDER BY uf.created_at DESC
@@ -514,7 +514,7 @@ FROM user_favorites uf
 JOIN tracks      t  ON t.id  = uf.entity_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uf.user_id = $1 AND uf.entity_type = 'track'
 ORDER BY uf.created_at DESC
 LIMIT $2 OFFSET $3

@@ -146,10 +146,21 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 }
 
 const getMediaItemByExternalID = `-- name: GetMediaItemByExternalID :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked FROM media_items
-WHERE library_id = $1
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked
+FROM media_item_cards mi
+WHERE mi.library_id = $1
   AND $2::jsonb <> '{}'::jsonb
-  AND external_ids @> $2::jsonb
+  AND NOT EXISTS (
+    SELECT 1
+    FROM jsonb_each_text($2::jsonb) AS wanted(provider, external_id)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM media_item_external_ids ei
+      WHERE ei.media_item_id = mi.id
+        AND ei.provider = wanted.provider
+        AND ei.external_id = wanted.external_id
+    )
+  )
 ORDER BY id
 LIMIT 1
 `
@@ -164,9 +175,9 @@ type GetMediaItemByExternalIDParams struct {
 // provider IDs would link onto an arbitrary existing media_item. Callers must
 // still skip this for empty IDs; the filter + deterministic ORDER BY are
 // defense in depth so a future caller can't reintroduce the mis-link.
-func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItemByExternalIDParams) (MediaItem, error) {
+func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItemByExternalIDParams) (MediaItemCard, error) {
 	row := q.db.QueryRow(ctx, getMediaItemByExternalID, arg.LibraryID, arg.ExtFilter)
-	var i MediaItem
+	var i MediaItemCard
 	err := row.Scan(
 		&i.ID,
 		&i.LibraryID,

@@ -27,7 +27,7 @@ func (a *App) GetActivityFeed(ctx context.Context) []ActivityItem {
 
 	if mediaRows, err := a.db.Query(ctx, `
 		SELECT mi.id, mi.title, mi.media_type, mi.slug, mi.created_at
-		FROM media_items mi
+		FROM media_item_cards mi
 		WHERE mi.created_at > now() - interval '7 days'
 		ORDER BY mi.created_at DESC
 		LIMIT 30`); err == nil {

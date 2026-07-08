@@ -680,7 +680,7 @@ func (q *Queries) ListMediaCrewSlim(ctx context.Context, mediaItemID int64) ([]L
 const listPersonCastCredits = `-- name: ListPersonCastCredits :many
 SELECT mc.character, mc.display_order, mi.id as media_item_id, mi.title, mi.year, mi.media_type, mi.poster_path
 FROM media_cast mc
-JOIN media_items mi ON mi.id = mc.media_item_id
+JOIN media_item_cards mi ON mi.id = mc.media_item_id
 WHERE mc.person_id = $1
 ORDER BY mi.year DESC, mi.title
 `
@@ -726,7 +726,7 @@ func (q *Queries) ListPersonCastCredits(ctx context.Context, personID int64) ([]
 const listPersonCrewCredits = `-- name: ListPersonCrewCredits :many
 SELECT mc.job, mc.department, mi.id as media_item_id, mi.title, mi.year, mi.media_type, mi.poster_path
 FROM media_crew mc
-JOIN media_items mi ON mi.id = mc.media_item_id
+JOIN media_item_cards mi ON mi.id = mc.media_item_id
 WHERE mc.person_id = $1
 ORDER BY mi.year DESC, mi.title
 `

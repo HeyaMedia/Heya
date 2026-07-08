@@ -54,7 +54,7 @@ type UpdateEpisodeReq struct {
 // current row. Callers override the one or two fields they're changing —
 // UpdateMediaItem is a full-row write, so any field not copied here would be
 // silently blanked. (Mirrors the builder in internal/worker.)
-func updateMediaItemParamsFrom(item sqlc.MediaItem) sqlc.UpdateMediaItemParams {
+func updateMediaItemParamsFrom(item sqlc.MediaItemCard) sqlc.UpdateMediaItemParams {
 	return sqlc.UpdateMediaItemParams{
 		ID:               item.ID,
 		Title:            item.Title,
@@ -89,7 +89,7 @@ func (a *App) emitMediaUpdated(mediaItemID, libraryID int64, title, mediaType st
 }
 
 // ListLibraryMedia returns media items belonging to a library with optional search.
-func (a *App) ListLibraryMedia(ctx context.Context, libraryID int64, limit, offset int32, query string) ([]sqlc.MediaItem, error) {
+func (a *App) ListLibraryMedia(ctx context.Context, libraryID int64, limit, offset int32, query string) ([]sqlc.MediaItemCard, error) {
 	q := sqlc.New(a.db)
 	return q.SearchMediaItemsByLibrary(ctx, sqlc.SearchMediaItemsByLibraryParams{
 		LibraryID: libraryID,
@@ -748,7 +748,7 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 // new identity is already present — the safe path for chimera repairs, where
 // writing media_items.external_ids here would trip idx_media_items_mbid_unique
 // instead). Name / bio / albums / top-tracks all adopt on that refresh.
-func (a *App) applyIdentifyMusic(ctx context.Context, item sqlc.MediaItem, detail *metadata.MediaDetail) error {
+func (a *App) applyIdentifyMusic(ctx context.Context, item sqlc.MediaItemCard, detail *metadata.MediaDetail) error {
 	newMBID := detail.ExternalIDs["mbid"]
 	if newMBID == "" {
 		return fmt.Errorf("selected match has no MusicBrainz id yet — heya.media could not resolve it; try again once the upstream record is enriched")

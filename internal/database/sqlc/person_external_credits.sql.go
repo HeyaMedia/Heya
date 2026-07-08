@@ -39,22 +39,22 @@ SELECT
     -- concrete int64/string types instead of interface{} (which would
     -- break the ` + "`" + `!= 0` + "`" + ` / ` + "`" + `!= ""` + "`" + ` checks at the call site). Callers
     -- treat ` + "`" + `matched_media_item_id == 0` + "`" + ` as "no library match".
-    COALESCE((SELECT mi.id FROM media_items mi WHERE
-        (ec.external_ids ? 'tmdb' AND mi.external_ids ->> 'tmdb' = ec.external_ids ->> 'tmdb')
-        OR (ec.external_ids ? 'tvdb' AND mi.external_ids ->> 'tvdb' = ec.external_ids ->> 'tvdb')
-        OR (ec.external_ids ? 'imdb' AND mi.external_ids ->> 'imdb' = ec.external_ids ->> 'imdb')
-        LIMIT 1), 0)::BIGINT         AS matched_media_item_id,
-    COALESCE((SELECT mi.slug FROM media_items mi WHERE
-        (ec.external_ids ? 'tmdb' AND mi.external_ids ->> 'tmdb' = ec.external_ids ->> 'tmdb')
-        OR (ec.external_ids ? 'tvdb' AND mi.external_ids ->> 'tvdb' = ec.external_ids ->> 'tvdb')
-        OR (ec.external_ids ? 'imdb' AND mi.external_ids ->> 'imdb' = ec.external_ids ->> 'imdb')
-        LIMIT 1), '')::TEXT          AS matched_slug,
-    COALESCE((SELECT mi.media_type::TEXT FROM media_items mi WHERE
-        (ec.external_ids ? 'tmdb' AND mi.external_ids ->> 'tmdb' = ec.external_ids ->> 'tmdb')
-        OR (ec.external_ids ? 'tvdb' AND mi.external_ids ->> 'tvdb' = ec.external_ids ->> 'tvdb')
-        OR (ec.external_ids ? 'imdb' AND mi.external_ids ->> 'imdb' = ec.external_ids ->> 'imdb')
-        LIMIT 1), '')::TEXT          AS matched_media_type
+    COALESCE(matched.id, 0)::BIGINT AS matched_media_item_id,
+    COALESCE(matched.slug, '')::TEXT AS matched_slug,
+    COALESCE(matched.media_type, '')::TEXT AS matched_media_type
 FROM person_external_credits ec
+LEFT JOIN LATERAL (
+    SELECT mi.id, mi.slug, mi.media_type::TEXT AS media_type
+    FROM jsonb_each_text(ec.external_ids) AS wanted(provider, external_id)
+    JOIN media_item_external_ids ei
+      ON ei.provider = wanted.provider
+     AND ei.external_id = wanted.external_id
+    JOIN media_item_cards mi ON mi.id = ei.media_item_id
+    WHERE wanted.provider IN ('tmdb', 'tvdb', 'imdb')
+    ORDER BY CASE wanted.provider WHEN 'tmdb' THEN 0 WHEN 'imdb' THEN 1 WHEN 'tvdb' THEN 2 ELSE 3 END,
+             mi.id
+    LIMIT 1
+) matched ON true
 WHERE ec.person_id = $1
 ORDER BY ec.kind, ec.display_order, ec.year DESC NULLS LAST, ec.title
 `
@@ -87,9 +87,8 @@ type ListPersonExternalCreditsRow struct {
 // the matched columns — a LEFT JOIN with column refs would otherwise be
 // typed non-nullable and scan-fail on NULL.
 //
-// The JSONB equality check matches the credit's recorded external_ids
-// against the library's media_items.external_ids one provider at a time
-// (tmdb / tvdb / imdb). Any single match counts; we take the first.
+// The external-id match uses normalized media_item_external_ids. Any strong
+// provider match counts; we take the first with a stable provider preference.
 func (q *Queries) ListPersonExternalCredits(ctx context.Context, personID int64) ([]ListPersonExternalCreditsRow, error) {
 	rows, err := q.db.Query(ctx, listPersonExternalCredits, personID)
 	if err != nil {

@@ -23,7 +23,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			Q      string `query:"q" maxLength:"200" doc:"Optional title filter"`
 			Limit  int32  `query:"limit" minimum:"1" maximum:"5000" default:"500"`
 			Offset int32  `query:"offset" minimum:"0" default:"0"`
-		}) (*JSONOutput[[]sqlc.MediaItem], error) {
+		}) (*JSONOutput[[]sqlc.MediaItemCard], error) {
 			items, err := app.ListLibraryMedia(ctx, in.ID, in.Limit, in.Offset, in.Q)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())

@@ -158,6 +158,8 @@ func TestParseFileResultRawFormat(t *testing.T) {
 func TestMediaTypeToKind(t *testing.T) {
 	assert.Equal(t, metadata.KindMovie, MediaTypeToKind(sqlc.MediaTypeMovie))
 	assert.Equal(t, metadata.KindTV, MediaTypeToKind(sqlc.MediaTypeTv))
+	// Anime is a library-level signal that resolves to the TV pipeline.
+	assert.Equal(t, metadata.KindTV, MediaTypeToKind(sqlc.MediaTypeAnime))
 	assert.Equal(t, metadata.KindMusic, MediaTypeToKind(sqlc.MediaTypeMusic))
 	assert.Equal(t, metadata.KindBook, MediaTypeToKind(sqlc.MediaTypeBook))
 }

@@ -343,7 +343,7 @@ SELECT track_id, track_title, duration, disc_number, track_number, album_id, alb
     JOIN tracks      t  ON t.id = tf.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
     WHERE (elem->>'name') = $1::text
       AND (elem->>'score')::real >= $2::real
@@ -443,7 +443,7 @@ SELECT track_id, track_title, duration, disc_number, track_number, album_id, alb
     JOIN tracks      t  ON t.id = tf.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE (tf.mood_tags->>$1::text)::real > $2::real
       AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
     ORDER BY a.id, lower(t.title), t.duration / 15,
@@ -543,7 +543,7 @@ SELECT track_id, track_title, duration, disc_number, track_number, album_id, alb
     JOIN tracks      t  ON t.id = tf.track_id
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE tf.bpm IS NOT NULL
       AND tf.bpm >= $1::real
       AND tf.bpm <  $2::real
@@ -643,7 +643,7 @@ FROM track_facets tf
 JOIN tracks      t  ON t.id = tf.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE tf.track_embedding IS NOT NULL
   AND tf.bpm IS NOT NULL
   AND tf.bpm BETWEEN $2::real AND $3::real
@@ -837,7 +837,7 @@ SELECT t.id AS track_id
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN track_facets tf ON tf.track_id = t.id
 WHERE mi.slug = $1
   AND tf.track_embedding IS NOT NULL
@@ -931,7 +931,7 @@ UPDATE track_facets tf
   FROM tracks t
   JOIN albums a ON a.id = t.album_id
   JOIN artists ar ON ar.id = a.artist_id
-  JOIN media_items mi ON mi.id = ar.media_item_id
+  JOIN media_item_cards mi ON mi.id = ar.media_item_id
  WHERE tf.track_id = t.id AND mi.library_id = $1
 `
 
@@ -951,7 +951,7 @@ SELECT al.id, al.title, al.artist_id, al.slug AS album_slug,
 FROM album_centroids alc
 JOIN albums      al ON al.id = alc.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE alc.album_id != $2
   AND alc.sonic_centroid IS NOT NULL
 ORDER BY alc.sonic_centroid <=> $1
@@ -1013,7 +1013,7 @@ SELECT ar.id, ar.name, ar.media_item_id, mi.slug AS media_slug,
        (ac.sonic_centroid <=> $1)::real AS distance
 FROM artist_centroids ac
 JOIN artists ar ON ar.id = ac.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 WHERE ac.artist_id != $2
   AND ac.sonic_centroid IS NOT NULL
 ORDER BY ac.sonic_centroid <=> $1
@@ -1079,7 +1079,7 @@ FROM track_facets tf
 JOIN tracks      t  ON t.id = tf.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE tf.text_embedding IS NOT NULL
 ORDER BY tf.text_embedding <=> $1
 LIMIT $2
@@ -1164,7 +1164,7 @@ FROM track_facets tf
 JOIN tracks      t  ON t.id = tf.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE tf.track_embedding IS NOT NULL
   AND NOT (tf.track_id = ANY($2::bigint[]))
 ORDER BY tf.track_embedding <=> $1

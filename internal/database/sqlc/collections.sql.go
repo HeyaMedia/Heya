@@ -234,21 +234,21 @@ func (q *Queries) ListCollectionKeywords(ctx context.Context, collectionID pgtyp
 
 const listCollectionMovies = `-- name: ListCollectionMovies :many
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE m.collection_id = $1
 ORDER BY m.release_date NULLS LAST
 `
 
-func (q *Queries) ListCollectionMovies(ctx context.Context, collectionID pgtype.Int8) ([]MediaItem, error) {
+func (q *Queries) ListCollectionMovies(ctx context.Context, collectionID pgtype.Int8) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listCollectionMovies, collectionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MediaItem{}
+	items := []MediaItemCard{}
 	for rows.Next() {
-		var i MediaItem
+		var i MediaItemCard
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,
@@ -339,10 +339,12 @@ func (q *Queries) ListCollectionsWithLocalMedia(ctx context.Context) ([]ListColl
 }
 
 const listMoviesByTmdbIDs = `-- name: ListMoviesByTmdbIDs :many
-SELECT id, slug, external_ids
-FROM media_items
-WHERE media_type = 'movie'
-  AND external_ids->>'tmdb' = ANY($1::text[])
+SELECT mi.id, mi.slug, mi.external_ids
+FROM media_item_cards mi
+JOIN media_item_external_ids ei ON ei.media_item_id = mi.id
+WHERE mi.media_type = 'movie'
+  AND ei.provider = 'tmdb'
+  AND ei.external_id = ANY($1::text[])
 `
 
 type ListMoviesByTmdbIDsRow struct {

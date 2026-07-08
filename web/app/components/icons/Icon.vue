@@ -42,6 +42,7 @@ const nameMap: Record<string, string> = {
   cast: 'airplay',
   download: 'download-simple',
   globe: 'globe',
+  image: 'image',
   mic: 'microphone',
   radio: 'radio',
   list: 'list',

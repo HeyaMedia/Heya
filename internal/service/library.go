@@ -11,6 +11,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/matcher"
+	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
@@ -20,6 +21,7 @@ import (
 var validMediaTypes = map[string]sqlc.MediaType{
 	"movie":   sqlc.MediaTypeMovie,
 	"tv":      sqlc.MediaTypeTv,
+	"anime":   sqlc.MediaTypeAnime,
 	"music":   sqlc.MediaTypeMusic,
 	"book":    sqlc.MediaTypeBook,
 	"comic":   sqlc.MediaTypeComic,
@@ -30,7 +32,7 @@ var validMediaTypes = map[string]sqlc.MediaType{
 func ParseMediaType(s string) (sqlc.MediaType, error) {
 	mt, ok := validMediaTypes[s]
 	if !ok {
-		return "", fmt.Errorf("invalid media type %q (valid: movie, tv, music, book, comic, podcast, radio)", s)
+		return "", fmt.Errorf("invalid media type %q (valid: movie, tv, anime, music, book, comic, podcast, radio)", s)
 	}
 	return mt, nil
 }
@@ -214,7 +216,8 @@ func (a *App) MatchLibrary(ctx context.Context, id int64) (matcher.MatchResult, 
 	if err != nil {
 		return matcher.MatchResult{}, fmt.Errorf("library %d: %w", id, err)
 	}
-	return a.matcher.MatchLibrary(ctx, id, lib.MediaType)
+	// anime libraries match through the TV pipeline; see internal/mediatype.
+	return a.matcher.MatchLibrary(ctx, id, mediatype.Runtime(lib.MediaType))
 }
 
 func (a *App) ResolveMatch(ctx context.Context, fileID, candidateID int64) error {

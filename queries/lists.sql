@@ -36,7 +36,7 @@ WHERE list_id = $1 AND media_item_id = $2
 
 -- name: ListItemsInList :many
 SELECT mi.*
-FROM media_items mi
+FROM media_item_cards mi
 JOIN user_list_items li ON li.media_item_id = mi.id
 WHERE li.list_id = $1
   AND EXISTS (SELECT 1 FROM user_lists WHERE id = $1 AND user_id = $2)

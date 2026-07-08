@@ -133,8 +133,9 @@ func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 			count(*),
 			count(*) FILTER (WHERE mi.enrichment_status = 'complete'),
 			count(*) FILTER (WHERE mi.enrichment_status = 'failed')
-		FROM media_items mi
-		WHERE mi.media_type = 'music' OR mi.external_ids != '{}'
+		FROM media_item_cards mi
+		WHERE mi.media_type = 'music'
+		   OR EXISTS (SELECT 1 FROM media_item_external_ids ei WHERE ei.media_item_id = mi.id)
 	`)
 	if row.Scan(&metaTotal, &metaComplete, &metaFailed) == nil {
 		stats["refresh_stale_items"] = TaskStats{
@@ -440,8 +441,9 @@ func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limi
 			count(*),
 			count(*) FILTER (WHERE mi.enrichment_status = 'complete'),
 			count(*) FILTER (WHERE mi.enrichment_status = 'failed')
-		FROM media_items mi
-		WHERE mi.media_type = 'music' OR mi.external_ids != '{}'
+		FROM media_item_cards mi
+		WHERE mi.media_type = 'music'
+		   OR EXISTS (SELECT 1 FROM media_item_external_ids ei WHERE ei.media_item_id = mi.id)
 	`).Scan(&total, &complete, &failed)
 	if err != nil {
 		return nil, err
@@ -462,8 +464,9 @@ func (a *App) QueryRefreshMetadataItems(ctx context.Context, status string, limi
 	rows, err := a.db.Query(ctx, `
 		SELECT mi.id, mi.title, mi.media_type, mi.enrichment_status,
 		       mi.last_enrich_error, mi.metadata_refreshed_at
-		FROM media_items mi
-		WHERE (mi.media_type = 'music' OR mi.external_ids != '{}')
+		FROM media_item_cards mi
+		WHERE (mi.media_type = 'music'
+		       OR EXISTS (SELECT 1 FROM media_item_external_ids ei WHERE ei.media_item_id = mi.id))
 		  `+statusFilter+`
 		ORDER BY
 		  CASE mi.enrichment_status

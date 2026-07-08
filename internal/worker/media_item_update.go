@@ -16,7 +16,7 @@ import (
 // backdrop_path alone), not a full-row rewrite — so a concurrent
 // poster-download and backdrop-download for the same item can't stomp each
 // other's column from a stale in-memory snapshot.
-func updateArtworkPathColumns(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, posterPath, backdropPath string) {
+func updateArtworkPathColumns(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard, posterPath, backdropPath string) {
 	if item.PosterPath != posterPath {
 		if err := q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: item.ID, PosterPath: posterPath}); err != nil {
 			log.Debug().Err(err).Int64("item_id", item.ID).Msg("update poster_path failed")

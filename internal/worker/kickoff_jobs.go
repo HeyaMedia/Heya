@@ -204,9 +204,8 @@ func (KickoffTrickplayArgs) InsertOpts() river.InsertOpts {
 }
 
 // KickoffThumbnailsArgs replaces scheduler.GenerateThumbnailsTask.
-// Finds media_extras missing thumbnail_path on a library where
-// generate_thumbnails is set, and enqueues one thumbnail_extra job
-// per extra.
+// Finds extra library-file links missing thumbnail_path on a library where
+// generate_thumbnails is set, and enqueues one thumbnail_extra job per extra.
 type KickoffThumbnailsArgs struct {
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }

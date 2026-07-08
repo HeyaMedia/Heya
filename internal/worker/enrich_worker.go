@@ -73,7 +73,7 @@ func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichM
 // enrichGeneric handles movies / TV / books — call GetDetail, populate
 // type-specific rows + rich metadata, kick off image + person + ratings +
 // NFO downstream jobs.
-func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, job *river.Job[EnrichMediaItemArgs]) error {
+func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard, job *river.Job[EnrichMediaItemArgs]) error {
 	start := time.Now()
 	kind := matcher.MediaTypeToKind(item.MediaType)
 
@@ -266,7 +266,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 // enrichMusic delegates to matcher.RefreshMusicArtist (which already does the
 // heya.media artist fetch + canonical upsert) and layers the new status
 // stamps on top.
-func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem, job *river.Job[EnrichMediaItemArgs]) error {
+func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard, job *river.Job[EnrichMediaItemArgs]) error {
 	start := time.Now()
 	artist, err := q.GetArtistByMediaItemID(ctx, item.ID)
 	if err != nil {

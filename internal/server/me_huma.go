@@ -472,7 +472,7 @@ type watchedBody struct {
 
 type userListDetailBody struct {
 	List  sqlc.UserList    `json:"list"`
-	Items []sqlc.MediaItem `json:"items"`
+	Items []sqlc.MediaItemCard `json:"items"`
 }
 
 type mediaStateBody struct {

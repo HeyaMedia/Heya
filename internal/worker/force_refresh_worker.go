@@ -73,7 +73,7 @@ func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[Forc
 		tag, _ := w.DB.Exec(ctx,
 			`UPDATE albums SET cover_path = '' WHERE artist_id IN
 			   (SELECT a.id FROM artists a
-			    JOIN media_items mi ON mi.id = a.media_item_id
+			    JOIN media_item_cards mi ON mi.id = a.media_item_id
 			    WHERE mi.library_id = $1)`,
 			job.Args.LibraryID,
 		)
@@ -88,8 +88,11 @@ func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[Forc
 		)
 		log.Debug().Int64("library_id", job.Args.LibraryID).Int64("assets_deleted", tag.RowsAffected()).Msg("force_refresh_images: cleared remote assets")
 		tag2, _ := w.DB.Exec(ctx,
-			`UPDATE media_items SET poster_path = '', backdrop_path = ''
-			 WHERE library_id = $1`,
+			`UPDATE media_item_profiles mip
+			    SET poster_path = '', backdrop_path = '', updated_at = now()
+			   FROM media_items mi
+			  WHERE mi.id = mip.media_item_id
+			    AND mi.library_id = $1`,
 			job.Args.LibraryID,
 		)
 		log.Debug().Int64("library_id", job.Args.LibraryID).Int64("items_cleared", tag2.RowsAffected()).Msg("force_refresh_images: cleared poster/backdrop paths")
@@ -111,7 +114,7 @@ func (w *ForceRefreshImagesWorker) Work(ctx context.Context, job *river.Job[Forc
 func enqueueForceForLibrary(ctx context.Context, db *pgxpool.Pool, libraryID int64) (int, error) {
 	rows, err := db.Query(ctx,
 		`SELECT mi.id, mi.media_type, mi.external_ids, mi.heya_slug
-		 FROM media_items mi
+		 FROM media_item_cards mi
 		 WHERE mi.library_id = $1`,
 		libraryID,
 	)

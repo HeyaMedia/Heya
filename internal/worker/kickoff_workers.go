@@ -12,6 +12,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
+	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -242,9 +243,11 @@ func enqueueRematchTransient(ctx context.Context, q *sqlc.Queries, rc *river.Cli
 			return n
 		}
 		if _, err := rc.Insert(ctx, MetadataMatchArgs{
-			LibraryFileID:   f.ID,
-			LibraryID:       libraryID,
-			MediaType:       string(lib.MediaType),
+			LibraryFileID: f.ID,
+			LibraryID:     libraryID,
+			// Same runtime normalization as the scan-time enqueue in
+			// process_worker: anime files re-match through the tv pipeline.
+			MediaType:       string(mediatype.Runtime(lib.MediaType)),
 			ScheduledTaskID: taskID,
 		}, nil); err != nil {
 			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue rematch failed")
@@ -314,8 +317,9 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 
 	rows, err := w.DB.Query(ctx, `
 		SELECT mi.id, mi.media_type, mi.title, mi.status, mi.metadata_refreshed_at, mi.enrichment_status
-		FROM media_items mi
-		WHERE mi.media_type = 'music' OR mi.external_ids != '{}'
+		FROM media_item_cards mi
+		WHERE mi.media_type = 'music'
+		   OR EXISTS (SELECT 1 FROM media_item_external_ids ei WHERE ei.media_item_id = mi.id)
 		ORDER BY mi.metadata_refreshed_at ASC NULLS FIRST
 	`)
 	if err != nil {

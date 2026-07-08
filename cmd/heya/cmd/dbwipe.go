@@ -34,7 +34,7 @@ var dbWipeCmd = &cobra.Command{
 			"media_recommendations", "media_videos", "media_certifications",
 			"media_production_companies", "media_keywords",
 			"media_crew", "media_cast",
-			"match_candidates", "media_extras", "media_assets",
+			"match_candidates", "media_assets",
 			"tracks", "albums", "artists",
 			"tv_episodes", "tv_seasons", "tv_series",
 			"movies", "books", "authors",

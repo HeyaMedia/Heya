@@ -74,11 +74,11 @@ SELECT wp.id, wp.entity_type, wp.entity_id, wp.progress_seconds, wp.total_second
        ep.title AS episode_title,
        s.season_number
 FROM user_watch_progress wp
-LEFT JOIN media_items mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
+LEFT JOIN media_item_cards mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
 LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
 LEFT JOIN tv_seasons s ON ep.season_id = s.id
 LEFT JOIN tv_series ts ON s.series_id = ts.id
-LEFT JOIN media_items ep_mi ON ts.media_item_id = ep_mi.id
+LEFT JOIN media_item_cards ep_mi ON ts.media_item_id = ep_mi.id
 WHERE wp.user_id = $1 AND wp.completed = false AND wp.progress_seconds > 30
   -- Skip items whose file is missing on disk. For a movie that's any live
   -- file on the media item; for an episode it must be the specific file
@@ -110,11 +110,11 @@ SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
        COALESCE(mi.slug, ep_mi.slug) AS slug,
        COALESCE(mi.media_type, ep_mi.media_type)::text AS media_type
 FROM user_watch_progress wp
-LEFT JOIN media_items mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
+LEFT JOIN media_item_cards mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
 LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
 LEFT JOIN tv_seasons s ON ep.season_id = s.id
 LEFT JOIN tv_series ts ON s.series_id = ts.id
-LEFT JOIN media_items ep_mi ON ts.media_item_id = ep_mi.id
+LEFT JOIN media_item_cards ep_mi ON ts.media_item_id = ep_mi.id
 WHERE wp.user_id = $1 AND wp.completed = true
 ORDER BY COALESCE(mi.id, ep_mi.id), wp.updated_at DESC
 LIMIT 20;
@@ -136,7 +136,7 @@ FROM user_watch_progress wp
 JOIN tv_episodes ep ON ep.id = wp.entity_id
 JOIN tv_seasons s ON s.id = ep.season_id
 JOIN tv_series ts ON ts.id = s.series_id
-JOIN media_items ep_mi ON ep_mi.id = ts.media_item_id
+JOIN media_item_cards ep_mi ON ep_mi.id = ts.media_item_id
 WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
 ORDER BY wp.updated_at DESC
 LIMIT 24;

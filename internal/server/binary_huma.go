@@ -38,7 +38,7 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handleStudioImage(app))))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/extras/{id}/thumbnail", "extra-thumbnail", "Extras thumbnail bytes", "Images"),
-		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handleExtraThumbnail(app))))
+		wrapStreamAs[extraBinaryInput](proxiedImage(imgProxy, handleExtraThumbnail(app))))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
 		wrapStreamAs[tmdbImageInput](handleTMDBImageProxy()))
@@ -51,7 +51,7 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 		wrapStreamAs[streamFileInput](handleDirectStream(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/extras/{id}/stream", "extra-stream", "Media extra video stream (trailer/featurette, range-served bytes)", "Streaming"),
-		wrapStreamAs[idBinaryInput](handleExtraStream(app)))
+		wrapStreamAs[extraBinaryInput](handleExtraStream(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}/hls/master.m3u8", "stream-hls-master", "HLS master playlist", "Streaming"),
 		wrapStreamAs[streamFileInput](handleHLSMaster(app)))
@@ -142,6 +142,10 @@ func streamResponse(h http.HandlerFunc) *huma.StreamResponse {
 
 type idBinaryInput struct {
 	ID int64 `path:"id" minimum:"1"`
+}
+
+type extraBinaryInput struct {
+	ID int64 `path:"id" minimum:"-9223372036854775808"`
 }
 
 type mediaImageInput struct {

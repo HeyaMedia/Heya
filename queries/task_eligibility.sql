@@ -30,7 +30,7 @@ FROM thumbnail_eligible_extras;
 
 -- name: ListThumbnailEligibleItems :many
 -- status: '' = all, 'complete', or 'pending'.
-SELECT id, title, file_path, thumbnail_path, extra_type, media_title
+SELECT id, title, file_path, thumbnail_path, extra_type::text AS extra_type, media_title
 FROM thumbnail_eligible_extras
 WHERE (@status::text = ''
    OR (@status::text = 'complete' AND thumbnail_path != '')
@@ -39,6 +39,6 @@ ORDER BY (thumbnail_path = '') DESC, media_title ASC, title ASC
 LIMIT @row_limit OFFSET @row_offset;
 
 -- name: ListThumbnailPendingKickoff :many
-SELECT id, title, file_path
+SELECT id, title::text AS title, file_path
 FROM thumbnail_eligible_extras
 WHERE thumbnail_path = '';

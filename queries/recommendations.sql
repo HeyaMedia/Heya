@@ -14,11 +14,23 @@ DELETE FROM media_recommendations WHERE media_item_id = $1;
 
 -- name: ListMediaRecommendationsWithLibrary :many
 SELECT mr.*,
-  mi.id as local_media_item_id,
-  mi.slug as local_slug,
-  mi.poster_path as local_poster_path
+  COALESCE(mi.id, 0)::bigint as local_media_item_id,
+  COALESCE(mi.slug, '')::text as local_slug,
+  COALESCE(mi.poster_path, '')::text as local_poster_path
 FROM media_recommendations mr
-LEFT JOIN media_items mi ON mi.external_ids @> mr.external_ids AND mr.external_ids != '{}'
+LEFT JOIN LATERAL (
+  SELECT local_mi.id, local_mi.slug, local_mi.poster_path
+  FROM jsonb_each_text(mr.external_ids) AS wanted(provider, external_id)
+  JOIN media_item_external_ids ei
+    ON ei.provider = wanted.provider
+   AND ei.external_id = wanted.external_id
+  JOIN media_item_cards local_mi ON local_mi.id = ei.media_item_id
+  WHERE mr.external_ids != '{}'
+    AND wanted.provider IN ('tmdb', 'imdb', 'tvdb')
+  ORDER BY CASE wanted.provider WHEN 'tmdb' THEN 0 WHEN 'imdb' THEN 1 WHEN 'tvdb' THEN 2 ELSE 3 END,
+           local_mi.id
+  LIMIT 1
+) mi ON true
 WHERE mr.media_item_id = $1
 ORDER BY (mi.id IS NOT NULL) DESC, mr.vote_average DESC;
 
@@ -40,10 +52,22 @@ WITH agg AS (
   LIMIT $1
 )
 SELECT agg.external_ids, agg.title, agg.poster_path, agg.media_type, agg.vote_average, agg.release_date,
-  mi.id as local_media_item_id,
-  mi.slug as local_slug,
-  mi.poster_path as local_poster_path,
+  COALESCE(mi.id, 0)::bigint as local_media_item_id,
+  COALESCE(mi.slug, '')::text as local_slug,
+  COALESCE(mi.poster_path, '')::text as local_poster_path,
   agg.source_count
 FROM agg
-LEFT JOIN media_items mi ON mi.external_ids @> agg.external_ids AND agg.external_ids != '{}'
+LEFT JOIN LATERAL (
+  SELECT local_mi.id, local_mi.slug, local_mi.poster_path
+  FROM jsonb_each_text(agg.external_ids) AS wanted(provider, external_id)
+  JOIN media_item_external_ids ei
+    ON ei.provider = wanted.provider
+   AND ei.external_id = wanted.external_id
+  JOIN media_item_cards local_mi ON local_mi.id = ei.media_item_id
+  WHERE agg.external_ids != '{}'
+    AND wanted.provider IN ('tmdb', 'imdb', 'tvdb')
+  ORDER BY CASE wanted.provider WHEN 'tmdb' THEN 0 WHEN 'imdb' THEN 1 WHEN 'tvdb' THEN 2 ELSE 3 END,
+           local_mi.id
+  LIMIT 1
+) mi ON true
 ORDER BY agg.source_count DESC, agg.vote_average DESC;

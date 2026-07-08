@@ -25,7 +25,7 @@ func DefaultSettings(mediaType string) LibrarySettings {
 		base.PreferredCountry = "US"
 		base.AutoCollections = true
 		base.GenerateThumbnails = true
-	case "tv":
+	case "tv", "anime":
 		base.PreferredCountry = "US"
 		base.GenerateThumbnails = true
 	}

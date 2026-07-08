@@ -307,7 +307,7 @@ func (a *App) GetSimilarArtists(ctx context.Context, artistID int64) ([]SimilarA
 	rows, err := a.db.Query(ctx, `
 		SELECT a.id, a.name, a.musicbrainz_id, mi.slug
 		FROM artists a
-		JOIN media_items mi ON mi.id = a.media_item_id
+		JOIN media_item_cards mi ON mi.id = a.media_item_id
 		JOIN libraries   l  ON l.id  = mi.library_id
 		WHERE l.media_type = 'music'
 	`)

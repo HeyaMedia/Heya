@@ -90,7 +90,7 @@ func (q *Queries) AllAlbumTracksHaveLoudness(ctx context.Context, albumID int64)
 const countAlbumsByArtistSlug = `-- name: CountAlbumsByArtistSlug :one
 SELECT count(*) FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.slug = $1
 `
 
@@ -146,7 +146,7 @@ const countTracksByArtistSlug = `-- name: CountTracksByArtistSlug :one
 SELECT count(*) FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.slug = $1
 `
 
@@ -523,7 +523,7 @@ const getAlbumByArtistAndSlug = `-- name: GetAlbumByArtistAndSlug :one
 SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits
 FROM albums al
 JOIN artists a ON a.id = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.slug = $1 AND al.slug = $2
 LIMIT 1
 `
@@ -782,8 +782,10 @@ func (q *Queries) GetArtistByID(ctx context.Context, id int64) (Artist, error) {
 const getArtistByLibraryMediaItemMBID = `-- name: GetArtistByLibraryMediaItemMBID :one
 SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags FROM artists a
 JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_external_ids ei ON ei.media_item_id = mi.id
 WHERE mi.library_id = $1
-  AND mi.external_ids->>'mbid' = $2::text
+  AND ei.provider = 'mbid'
+  AND ei.external_id = $2::text
 LIMIT 1
 `
 
@@ -1081,7 +1083,7 @@ SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambigu
        (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
        EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
 FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE mi.slug = $1 AND l.media_type = 'music'
 LIMIT 1
@@ -1376,7 +1378,7 @@ SELECT t.id,
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE t.id = $1
 LIMIT 1
 `
@@ -1677,7 +1679,7 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
        EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.slug = $1
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
 LIMIT $2 OFFSET $3
@@ -1877,7 +1879,7 @@ const listAlbumsPendingLoudness = `-- name: ListAlbumsPendingLoudness :many
 SELECT al.id, al.title
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND al.loudness_analyzed_at IS NULL
@@ -1943,7 +1945,7 @@ SELECT
     COALESCE(local_mi.id, 0)::bigint  AS local_media_item_id
 FROM artist_similar_artists asa
 LEFT JOIN artists      local_a  ON local_a.id  = asa.local_artist_id
-LEFT JOIN media_items  local_mi ON local_mi.id = local_a.media_item_id
+LEFT JOIN media_item_cards local_mi ON local_mi.id = local_a.media_item_id
 WHERE asa.artist_id = $1
 ORDER BY asa.rank ASC
 LIMIT $2
@@ -2052,7 +2054,7 @@ func (q *Queries) ListArtistTopTracksRawByArtistID(ctx context.Context, arg List
 
 const listArtistsByLibrary = `-- name: ListArtistsByLibrary :many
 SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.library_id = $1
 ORDER BY a.name
 `
@@ -2116,7 +2118,7 @@ FROM (
            mi.slug AS artist_slug
     FROM albums al
     JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_items mi ON mi.id = a.media_item_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE mi.media_type = 'music'
     ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC, al.id ASC
     LIMIT $1 OFFSET $2
@@ -2253,7 +2255,7 @@ SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambigu
        (SELECT count(*) FROM tracks  t  JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
        EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
 FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
 ORDER BY lower(coalesce(NULLIF(a.sort_name, ''), a.name)) ASC
@@ -2378,7 +2380,7 @@ FROM (
   FROM tracks t
   JOIN albums      al ON al.id = t.album_id
   JOIN artists     a  ON a.id  = al.artist_id
-  JOIN media_items mi ON mi.id = a.media_item_id
+  JOIN media_item_cards mi ON mi.id = a.media_item_id
   WHERE mi.media_type = 'music'
   ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC,
            t.disc_number ASC, t.track_number ASC, t.id ASC
@@ -2471,7 +2473,7 @@ FROM (
   SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits FROM albums ORDER BY id DESC LIMIT $1
 ) al
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.media_type = 'music'
 ORDER BY al.id DESC
 `
@@ -2592,7 +2594,7 @@ SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambigu
        (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
        EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
 FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
 ORDER BY a.discography_enriched_at DESC NULLS LAST, a.id DESC
@@ -2695,7 +2697,7 @@ func (q *Queries) ListRecentlyAddedArtists(ctx context.Context, limit int32) ([]
 
 const listStaleArtistsByLibrary = `-- name: ListStaleArtistsByLibrary :many
 SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.library_id = $1
   AND (a.discography_enriched_at IS NULL OR a.discography_enriched_at < $2)
 ORDER BY a.name
@@ -2941,7 +2943,7 @@ JOIN library_files lf ON lf.id = tf.library_file_id
 JOIN tracks t  ON t.id  = tf.track_id
 JOIN albums al ON al.id = t.album_id
 JOIN artists a ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lf.deleted_at IS NULL
@@ -2999,7 +3001,7 @@ JOIN library_files lf ON lf.id = tf.library_file_id
 JOIN tracks t  ON t.id  = tf.track_id
 JOIN albums al ON al.id = t.album_id
 JOIN artists a ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
 WHERE l.media_type = 'music'
   AND lf.deleted_at IS NULL
@@ -3156,7 +3158,7 @@ SELECT t.id              AS track_id,
 FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.slug = $1
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC,
          t.disc_number ASC, t.track_number ASC
@@ -4148,7 +4150,24 @@ func (q *Queries) UpdateArtistExtendedMetadata(ctx context.Context, arg UpdateAr
 }
 
 const updateMediaItemExternalIds = `-- name: UpdateMediaItemExternalIds :exec
-UPDATE media_items SET external_ids = $2 WHERE id = $1
+WITH entity AS (
+  SELECT id, library_id FROM media_items WHERE id = $1
+),
+deleted AS (
+  DELETE FROM media_item_external_ids WHERE media_item_id = $1
+),
+inserted AS (
+  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
+  SELECT entity.id, entity.library_id, kv.key, kv.value, 'music.enrichment'
+  FROM entity, jsonb_each_text(
+    CASE
+      WHEN jsonb_typeof($2::jsonb) = 'object' THEN $2::jsonb
+      ELSE '{}'::jsonb
+    END
+  ) AS kv(key, value)
+  WHERE kv.key <> '' AND kv.value <> ''
+)
+UPDATE media_items SET updated_at = now() WHERE media_items.id = $1
 `
 
 type UpdateMediaItemExternalIdsParams struct {

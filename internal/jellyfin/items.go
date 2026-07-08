@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediatype"
 )
 
 // routeUserOK validates an explicit userId (path param or query) the way
@@ -230,7 +231,7 @@ func (s *Server) handleUserViews(w http.ResponseWriter, r *http.Request, p Param
 		dto := s.dtoFromLibrary(lib, serverID)
 		// ChildCount like upstream: item total for the view. A count query
 		// per view is fine — views are a handful of rows.
-		if _, total, err := s.app.JFListLibraryItems(r.Context(), sqlc.JFListLibraryItemsParams{MediaType: lib.MediaType, LibraryID: lib.ID, Lim: 1}); err == nil {
+		if _, total, err := s.app.JFListLibraryItems(r.Context(), sqlc.JFListLibraryItemsParams{MediaType: mediatype.Runtime(lib.MediaType), LibraryID: lib.ID, Lim: 1}); err == nil {
 			n := int32(total)
 			dto.ChildCount = &n
 		}
@@ -249,7 +250,7 @@ func (s *Server) handleGroupingOptions(w http.ResponseWriter, r *http.Request, _
 	}
 	out := []nameGuidPair{}
 	for _, lib := range libs {
-		if lib.MediaType == sqlc.MediaTypeMovie || lib.MediaType == sqlc.MediaTypeTv {
+		if mediatype.IsVideo(lib.MediaType) {
 			out = append(out, nameGuidPair{Name: lib.Name, ID: EncodeID(KindLibrary, lib.ID)})
 		}
 	}

@@ -259,12 +259,17 @@ func (q *Queries) ListEpisodeFilesForSeasonDetection(ctx context.Context, arg Li
 const listFilesPendingSegments = `-- name: ListFilesPendingSegments :many
 SELECT lf.id, lf.path
 FROM library_files lf
-JOIN media_items mi ON mi.id = lf.media_item_id
+JOIN media_item_cards mi ON mi.id = lf.media_item_id
 JOIN libraries l ON l.id = lf.library_id
 WHERE l.media_type IN ('movie', 'tv')
   AND lf.deleted_at IS NULL
   AND lf.media_info IS NOT NULL
-  AND mi.external_ids ?| ARRAY['tmdb', 'imdb', 'tvdb']
+  AND EXISTS (
+    SELECT 1
+    FROM media_item_external_ids ei
+    WHERE ei.media_item_id = mi.id
+      AND ei.provider IN ('tmdb', 'imdb', 'tvdb')
+  )
   AND lf.id > $1::bigint
   AND (
     lf.segments_analyzed_at IS NULL

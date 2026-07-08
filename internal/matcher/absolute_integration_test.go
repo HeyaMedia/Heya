@@ -29,7 +29,15 @@ func TestReconcileAbsoluteEpisodesIntegration(t *testing.T) {
 
 	var itemID int64
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO media_items (library_id, media_type, title, slug) VALUES ($1,'tv','Yamato','yamato-abs-test') RETURNING id`,
+		`WITH item AS (
+		    INSERT INTO media_items (library_id, media_type, slug)
+		    VALUES ($1, 'tv', 'yamato-abs-test')
+		    RETURNING id
+		  ), profile AS (
+		    INSERT INTO media_item_profiles (media_item_id, title)
+		    SELECT id, 'Yamato' FROM item
+		  )
+		  SELECT id FROM item`,
 		libraryID).Scan(&itemID))
 
 	var seriesID int64

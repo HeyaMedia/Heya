@@ -21,6 +21,8 @@ func TestBackfillAbsoluteEpisodesIntegration(t *testing.T) {
 	ctx := context.Background()
 	app := &App{db: pool}
 	userID := testutil.TestUserID(t, pool)
+	_, err := app.BackfillAbsoluteEpisodes(ctx)
+	require.NoError(t, err)
 
 	var libraryID int64
 	require.NoError(t, pool.QueryRow(ctx,
@@ -30,7 +32,15 @@ func TestBackfillAbsoluteEpisodesIntegration(t *testing.T) {
 
 	var itemID int64
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO media_items (library_id, media_type, title, slug) VALUES ($1,'tv','Yamato','yamato-backfill') RETURNING id`,
+		`WITH item AS (
+		    INSERT INTO media_items (library_id, media_type, slug)
+		    VALUES ($1, 'tv', 'yamato-backfill')
+		    RETURNING id
+		  ), profile AS (
+		    INSERT INTO media_item_profiles (media_item_id, title)
+		    SELECT id, 'Yamato' FROM item
+		  )
+		  SELECT id FROM item`,
 		libraryID).Scan(&itemID))
 	var seriesID int64
 	require.NoError(t, pool.QueryRow(ctx,
@@ -38,7 +48,7 @@ func TestBackfillAbsoluteEpisodesIntegration(t *testing.T) {
 	var seasonMain int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tv_seasons (series_id, season_number) VALUES ($1, 2) RETURNING id`, seriesID).Scan(&seasonMain))
-	_, err := pool.Exec(ctx,
+	_, err = pool.Exec(ctx,
 		`INSERT INTO tv_episodes (season_id, episode_number, absolute_number) VALUES ($1, 2, 24)`, seasonMain)
 	require.NoError(t, err)
 

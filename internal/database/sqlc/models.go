@@ -64,55 +64,6 @@ func (ns NullAssetType) Value() (driver.Value, error) {
 	return string(ns.AssetType), nil
 }
 
-type ExtraType string
-
-const (
-	ExtraTypeTrailer         ExtraType = "trailer"
-	ExtraTypeTeaser          ExtraType = "teaser"
-	ExtraTypeBehindTheScenes ExtraType = "behind_the_scenes"
-	ExtraTypeDeletedScene    ExtraType = "deleted_scene"
-	ExtraTypeFeaturette      ExtraType = "featurette"
-	ExtraTypeInterview       ExtraType = "interview"
-	ExtraTypeScene           ExtraType = "scene"
-	ExtraTypeShort           ExtraType = "short"
-	ExtraTypeOther           ExtraType = "other"
-)
-
-func (e *ExtraType) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = ExtraType(s)
-	case string:
-		*e = ExtraType(s)
-	default:
-		return fmt.Errorf("unsupported scan type for ExtraType: %T", src)
-	}
-	return nil
-}
-
-type NullExtraType struct {
-	ExtraType ExtraType `json:"extra_type"`
-	Valid     bool      `json:"valid"` // Valid is true if ExtraType is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullExtraType) Scan(value interface{}) error {
-	if value == nil {
-		ns.ExtraType, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.ExtraType.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullExtraType) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.ExtraType), nil
-}
-
 type FileStatus string
 
 const (
@@ -168,6 +119,7 @@ const (
 	MediaTypeComic   MediaType = "comic"
 	MediaTypePodcast MediaType = "podcast"
 	MediaTypeRadio   MediaType = "radio"
+	MediaTypeAnime   MediaType = "anime"
 )
 
 func (e *MediaType) Scan(src interface{}) error {
@@ -436,12 +388,64 @@ type LibraryFile struct {
 	SegmentsDetectedAt pgtype.Timestamptz `json:"segments_detected_at"`
 }
 
+type LibraryFileLink struct {
+	ID             int64              `json:"id"`
+	LibraryFileID  int64              `json:"library_file_id"`
+	MediaItemID    int64              `json:"media_item_id"`
+	MovieID        pgtype.Int8        `json:"movie_id"`
+	TvEpisodeID    pgtype.Int8        `json:"tv_episode_id"`
+	RelationType   string             `json:"relation_type"`
+	SeasonNumber   pgtype.Int4        `json:"season_number"`
+	EpisodeNumber  pgtype.Int4        `json:"episode_number"`
+	AbsoluteNumber pgtype.Int4        `json:"absolute_number"`
+	PartIndex      pgtype.Int4        `json:"part_index"`
+	Title          string             `json:"title"`
+	Source         string             `json:"source"`
+	Confidence     float32            `json:"confidence"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	IdentityID     pgtype.Int8        `json:"identity_id"`
+	ScanRunID      pgtype.Int8        `json:"scan_run_id"`
+	ExtraType      string             `json:"extra_type"`
+	ThumbnailPath  string             `json:"thumbnail_path"`
+	Metadata       []byte             `json:"metadata"`
+}
+
 type LibraryNfoDir struct {
 	LibraryID int64              `json:"library_id"`
 	DirPath   string             `json:"dir_path"`
 	NfoName   string             `json:"nfo_name"`
 	Mtime     pgtype.Timestamptz `json:"mtime"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LocalMediaIdentity struct {
+	ID                 int64              `json:"id"`
+	LibraryID          int64              `json:"library_id"`
+	MediaType          MediaType          `json:"media_type"`
+	IdentityKey        string             `json:"identity_key"`
+	Title              string             `json:"title"`
+	Year               string             `json:"year"`
+	Confidence         float32            `json:"confidence"`
+	Source             string             `json:"source"`
+	ReviewStatus       string             `json:"review_status"`
+	MetadataProviderID string             `json:"metadata_provider_id"`
+	MediaItemID        pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity        []byte             `json:"raw_identity"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LocalMediaIdentityExternalID struct {
+	ID         int64              `json:"id"`
+	IdentityID int64              `json:"identity_id"`
+	Provider   string             `json:"provider"`
+	ExternalID string             `json:"external_id"`
+	Source     string             `json:"source"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MatchCandidate struct {
@@ -508,19 +512,32 @@ type MediaCrew struct {
 	Source      string `json:"source"`
 }
 
-type MediaExtra struct {
-	ID            int64              `json:"id"`
-	MediaItemID   int64              `json:"media_item_id"`
-	ExtraType     ExtraType          `json:"extra_type"`
-	Title         string             `json:"title"`
-	FilePath      string             `json:"file_path"`
-	DurationMs    int32              `json:"duration_ms"`
-	FileSize      int64              `json:"file_size"`
-	ThumbnailPath string             `json:"thumbnail_path"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+type MediaItem struct {
+	ID                  int64              `json:"id"`
+	LibraryID           int64              `json:"library_id"`
+	MediaType           MediaType          `json:"media_type"`
+	Slug                string             `json:"slug"`
+	ProviderKind        string             `json:"provider_kind"`
+	HeyaSlug            string             `json:"heya_slug"`
+	HeyaEnrichedAt      pgtype.Timestamptz `json:"heya_enriched_at"`
+	MetadataRefreshedAt pgtype.Timestamptz `json:"metadata_refreshed_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	MatchedAt           pgtype.Timestamptz `json:"matched_at"`
+	EnrichmentStatus    string             `json:"enrichment_status"`
+	BaseEnrichedAt      pgtype.Timestamptz `json:"base_enriched_at"`
+	PeopleEnrichedAt    pgtype.Timestamptz `json:"people_enriched_at"`
+	ExtrasEnrichedAt    pgtype.Timestamptz `json:"extras_enriched_at"`
+	ImagesEnrichedAt    pgtype.Timestamptz `json:"images_enriched_at"`
+	StructureEnrichedAt pgtype.Timestamptz `json:"structure_enriched_at"`
+	LastEnrichAttemptAt pgtype.Timestamptz `json:"last_enrich_attempt_at"`
+	LastEnrichError     string             `json:"last_enrich_error"`
+	FieldProvenance     []byte             `json:"field_provenance"`
+	MatchConfidence     float32            `json:"match_confidence"`
+	SlugLocked          bool               `json:"slug_locked"`
 }
 
-type MediaItem struct {
+type MediaItemCard struct {
 	ID                  int64              `json:"id"`
 	LibraryID           int64              `json:"library_id"`
 	MediaType           MediaType          `json:"media_type"`
@@ -556,6 +573,34 @@ type MediaItem struct {
 	FieldProvenance     []byte             `json:"field_provenance"`
 	MatchConfidence     float32            `json:"match_confidence"`
 	SlugLocked          bool               `json:"slug_locked"`
+}
+
+type MediaItemExternalID struct {
+	ID          int64              `json:"id"`
+	MediaItemID int64              `json:"media_item_id"`
+	LibraryID   int64              `json:"library_id"`
+	Provider    string             `json:"provider"`
+	ExternalID  string             `json:"external_id"`
+	Source      string             `json:"source"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MediaItemProfile struct {
+	MediaItemID      int64              `json:"media_item_id"`
+	Title            string             `json:"title"`
+	SortTitle        string             `json:"sort_title"`
+	Year             string             `json:"year"`
+	Description      string             `json:"description"`
+	PosterPath       string             `json:"poster_path"`
+	BackdropPath     string             `json:"backdrop_path"`
+	Homepage         string             `json:"homepage"`
+	Tagline          string             `json:"tagline"`
+	OriginalTitle    string             `json:"original_title"`
+	OriginalLanguage string             `json:"original_language"`
+	Status           string             `json:"status"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	SearchVector     interface{}        `json:"search_vector"`
 }
 
 type MediaKeyword struct {
@@ -617,6 +662,25 @@ type MediaVideo struct {
 	Language    string             `json:"language"`
 	Official    bool               `json:"official"`
 	PublishedAt pgtype.Timestamptz `json:"published_at"`
+}
+
+type MetadataMatchCandidate struct {
+	ID              int64              `json:"id"`
+	IdentityID      int64              `json:"identity_id"`
+	ScanRunID       pgtype.Int8        `json:"scan_run_id"`
+	ProviderName    string             `json:"provider_name"`
+	ProviderID      string             `json:"provider_id"`
+	ProviderKind    string             `json:"provider_kind"`
+	Title           string             `json:"title"`
+	Year            string             `json:"year"`
+	Score           pgtype.Numeric     `json:"score"`
+	Rank            int32              `json:"rank"`
+	Status          string             `json:"status"`
+	RejectionReason string             `json:"rejection_reason"`
+	ExternalIds     []byte             `json:"external_ids"`
+	RawData         []byte             `json:"raw_data"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Movie struct {
@@ -727,6 +791,37 @@ type ProductionCompany struct {
 	OriginCountry string `json:"origin_country"`
 }
 
+type ScanFinding struct {
+	ID            int64              `json:"id"`
+	ScanRunID     pgtype.Int8        `json:"scan_run_id"`
+	LibraryID     int64              `json:"library_id"`
+	MediaType     MediaType          `json:"media_type"`
+	IdentityID    pgtype.Int8        `json:"identity_id"`
+	MediaItemID   pgtype.Int8        `json:"media_item_id"`
+	LibraryFileID pgtype.Int8        `json:"library_file_id"`
+	Severity      string             `json:"severity"`
+	Code          string             `json:"code"`
+	RelPath       string             `json:"rel_path"`
+	Message       string             `json:"message"`
+	Data          []byte             `json:"data"`
+	ResolvedAt    pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type ScanRun struct {
+	ID             int64              `json:"id"`
+	LibraryID      int64              `json:"library_id"`
+	MediaType      MediaType          `json:"media_type"`
+	ScannerVersion string             `json:"scanner_version"`
+	Mode           string             `json:"mode"`
+	Status         string             `json:"status"`
+	Summary        []byte             `json:"summary"`
+	ErrorMessage   string             `json:"error_message"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type ScheduledTask struct {
 	ID                    string             `json:"id"`
 	DisplayName           string             `json:"display_name"`
@@ -767,12 +862,12 @@ type SystemSetting struct {
 }
 
 type ThumbnailEligibleExtra struct {
-	ID            int64     `json:"id"`
-	Title         string    `json:"title"`
-	FilePath      string    `json:"file_path"`
-	ThumbnailPath string    `json:"thumbnail_path"`
-	ExtraType     ExtraType `json:"extra_type"`
-	MediaTitle    string    `json:"media_title"`
+	ID            int64       `json:"id"`
+	Title         string      `json:"title"`
+	FilePath      string      `json:"file_path"`
+	ThumbnailPath string      `json:"thumbnail_path"`
+	ExtraType     interface{} `json:"extra_type"`
+	MediaTitle    string      `json:"media_title"`
 }
 
 type Track struct {

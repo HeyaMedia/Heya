@@ -19,7 +19,7 @@ FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
          mi.library_id, mi.title, mi.slug
   FROM library_files lf
-  JOIN media_items mi ON mi.id = lf.media_item_id
+  JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type = 'tv' AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
   LIMIT $1
@@ -60,7 +60,7 @@ SELECT r.created_at, r.media_item_id,
 FROM (
   SELECT lf.id, lf.created_at, lf.media_item_id
   FROM library_files lf
-  JOIN media_items mi ON mi.id = lf.media_item_id
+  JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type = 'music' AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
   LIMIT $1
@@ -92,5 +92,5 @@ SELECT a.id, a.name, a.media_item_id, mi.slug,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
        (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
 FROM artists a
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE a.id = ANY(@artist_ids::bigint[]);

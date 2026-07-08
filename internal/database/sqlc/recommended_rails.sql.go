@@ -21,7 +21,18 @@ WITH agg AS (
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
 FROM agg
-JOIN media_items mi ON mi.external_ids @> agg.external_ids
+JOIN LATERAL (
+  SELECT local_mi.id, local_mi.library_id, local_mi.media_type, local_mi.title, local_mi.sort_title, local_mi.year, local_mi.description, local_mi.poster_path, local_mi.backdrop_path, local_mi.external_ids, local_mi.slug, local_mi.homepage, local_mi.tagline, local_mi.original_title, local_mi.original_language, local_mi.status, local_mi.provider_kind, local_mi.heya_slug, local_mi.heya_enriched_at, local_mi.metadata_refreshed_at, local_mi.created_at, local_mi.updated_at, local_mi.search_vector, local_mi.matched_at, local_mi.enrichment_status, local_mi.base_enriched_at, local_mi.people_enriched_at, local_mi.extras_enriched_at, local_mi.images_enriched_at, local_mi.structure_enriched_at, local_mi.last_enrich_attempt_at, local_mi.last_enrich_error, local_mi.field_provenance, local_mi.match_confidence, local_mi.slug_locked
+  FROM jsonb_each_text(agg.external_ids) AS wanted(provider, external_id)
+  JOIN media_item_external_ids ei
+    ON ei.provider = wanted.provider
+   AND ei.external_id = wanted.external_id
+  JOIN media_item_cards local_mi ON local_mi.id = ei.media_item_id
+  WHERE wanted.provider IN ('tmdb', 'imdb', 'tvdb')
+  ORDER BY CASE wanted.provider WHEN 'tmdb' THEN 0 WHEN 'imdb' THEN 1 WHEN 'tvdb' THEN 2 ELSE 3 END,
+           local_mi.id
+  LIMIT 1
+) mi ON true
 WHERE mi.media_type = $1::media_type
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
   AND NOT EXISTS (
@@ -90,7 +101,7 @@ func (q *Queries) ListLocalRecommendations(ctx context.Context, arg ListLocalRec
 const listPersonUnseenMovies = `-- name: ListPersonUnseenMovies :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
 FROM media_cast mc
-JOIN media_items mi ON mi.id = mc.media_item_id
+JOIN media_item_cards mi ON mi.id = mc.media_item_id
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mc.person_id = $1
   AND mi.media_type = 'movie'
@@ -152,7 +163,7 @@ const listRecentlyReleasedMovies = `-- name: ListRecentlyReleasedMovies :many
 
 
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
   AND m.release_date IS NOT NULL
@@ -221,7 +232,7 @@ WITH watched AS (
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
 FROM watched w
-JOIN media_items mi ON mi.id = w.media_item_id
+JOIN media_item_cards mi ON mi.id = w.media_item_id
 WHERE w.last_watched < now() - interval '30 days'
   -- The newer episode must be one we actually hold a playable file for — not
   -- just a catalog row. tv_episodes lists every aired episode (owned or not),
@@ -287,7 +298,7 @@ func (q *Queries) ListRediscoverTV(ctx context.Context, arg ListRediscoverTVPara
 
 const listTopMoviesInGenreUnseen = `-- name: ListTopMoviesInGenreUnseen :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
   AND $1::text = ANY(m.genres)
@@ -348,7 +359,7 @@ func (q *Queries) ListTopMoviesInGenreUnseen(ctx context.Context, arg ListTopMov
 const listTopRatedTV = `-- name: ListTopRatedTV :many
 
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
   AND ts.rating > 0
@@ -399,7 +410,7 @@ func (q *Queries) ListTopRatedTV(ctx context.Context, limit int32) ([]ListTopRat
 
 const listTopTVInGenre = `-- name: ListTopTVInGenre :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = 'tv'
   AND $1::text = ANY(ts.genres)
@@ -454,7 +465,7 @@ func (q *Queries) ListTopTVInGenre(ctx context.Context, arg ListTopTVInGenrePara
 
 const listTopUnwatchedMovies = `-- name: ListTopUnwatchedMovies :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, m.rating
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
   AND m.rating > 0

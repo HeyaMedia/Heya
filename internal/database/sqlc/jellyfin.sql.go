@@ -64,7 +64,7 @@ const jFCountAlbums = `-- name: JFCountAlbums :one
 SELECT count(*)
 FROM albums al
 JOIN artists ar ON ar.id = al.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 WHERE ($1::bigint = 0 OR ar.media_item_id = $1)
   AND ($2::bigint = 0 OR mi.library_id = $2)
   AND (cardinality($3::bigint[]) = 0 OR al.id = ANY($3::bigint[]))
@@ -95,7 +95,7 @@ SELECT count(*)
 FROM tv_episodes e
 JOIN tv_seasons s ON s.id = e.season_id
 JOIN tv_series ser ON ser.id = s.series_id
-JOIN media_items smi ON smi.id = ser.media_item_id
+JOIN media_item_cards smi ON smi.id = ser.media_item_id
 WHERE ($1::bigint = 0 OR e.season_id = $1)
   AND ($2::bigint = 0 OR ser.media_item_id = $2)
   AND ($3::bigint = 0 OR smi.library_id = $3)
@@ -126,7 +126,7 @@ func (q *Queries) JFCountEpisodes(ctx context.Context, arg JFCountEpisodesParams
 
 const jFCountLibraryItems = `-- name: JFCountLibraryItems :one
 SELECT count(*)
-FROM media_items mi
+FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE mi.media_type = $1
@@ -182,7 +182,7 @@ SELECT count(*)
 FROM tracks t
 JOIN albums al ON al.id = t.album_id
 JOIN artists ar ON ar.id = al.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 WHERE ($1::bigint = 0 OR t.album_id = $1)
   AND ($2::bigint = 0 OR ar.media_item_id = $2)
   AND ($3::bigint = 0 OR mi.library_id = $3)
@@ -287,7 +287,7 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.album_type,
        mi.library_id
 FROM albums al
 JOIN artists ar ON ar.id = al.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 WHERE ($1::bigint = 0 OR ar.media_item_id = $1)
   AND ($2::bigint = 0 OR mi.library_id = $2)
   AND (cardinality($3::bigint[]) = 0 OR al.id = ANY($3::bigint[]))
@@ -400,7 +400,7 @@ SELECT e.id, e.season_id, e.episode_number,
 FROM tv_episodes e
 JOIN tv_seasons s ON s.id = e.season_id
 JOIN tv_series ser ON ser.id = s.series_id
-JOIN media_items smi ON smi.id = ser.media_item_id
+JOIN media_item_cards smi ON smi.id = ser.media_item_id
 WHERE ($1::bigint = 0 OR e.season_id = $1)
   AND ($2::bigint = 0 OR ser.media_item_id = $2)
   AND ($3::bigint = 0 OR smi.library_id = $3)
@@ -517,7 +517,7 @@ SELECT mi.id, mi.library_id, mi.media_type,
                    WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL AND lf.status = 'matched'
                    ORDER BY lf.id LIMIT 1), '')
        ELSE '' END::text AS primary_path
-FROM media_items mi
+FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 LEFT JOIN artists ar ON ar.media_item_id = mi.id
@@ -686,7 +686,7 @@ SELECT s.id, s.series_id, s.season_number, s.title, s.overview, s.air_date,
        (SELECT count(*) FROM tv_episodes e WHERE e.season_id = s.id)::int AS episode_count
 FROM tv_seasons s
 JOIN tv_series ser ON ser.id = s.series_id
-JOIN media_items smi ON smi.id = ser.media_item_id
+JOIN media_item_cards smi ON smi.id = ser.media_item_id
 WHERE ($1::bigint = 0 OR ser.media_item_id = $1)
   AND (cardinality($2::bigint[]) = 0 OR s.id = ANY($2::bigint[]))
 ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC
@@ -759,7 +759,7 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration,
 FROM tracks t
 JOIN albums al ON al.id = t.album_id
 JOIN artists ar ON ar.id = al.artist_id
-JOIN media_items mi ON mi.id = ar.media_item_id
+JOIN media_item_cards mi ON mi.id = ar.media_item_id
 WHERE ($1::bigint = 0 OR t.album_id = $1)
   AND ($2::bigint = 0 OR ar.media_item_id = $2)
   AND ($3::bigint = 0 OR mi.library_id = $3)

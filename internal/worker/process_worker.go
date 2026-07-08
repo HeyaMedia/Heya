@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediafile"
+	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -59,9 +60,13 @@ func (w *ProcessFileWorker) Work(ctx context.Context, job *river.Job[ProcessFile
 	}
 
 	if _, err := client.Insert(ctx, MetadataMatchArgs{
-		LibraryFileID:   file.ID,
-		LibraryID:       lib.ID,
-		MediaType:       string(lib.MediaType),
+		LibraryFileID: file.ID,
+		LibraryID:     lib.ID,
+		// Normalize the library's declared type to its runtime type here so the
+		// match/enrich pipeline (and the WS media-added event it emits) only
+		// ever sees real content types — anime enters as tv. The 'anime' domain
+		// signal stays on the library row for the v2 scanner. See internal/mediatype.
+		MediaType:       string(mediatype.Runtime(lib.MediaType)),
 		ScheduledTaskID: job.Args.ScheduledTaskID,
 	}, nil); err != nil {
 		return fmt.Errorf("enqueue metadata match: %w", err)

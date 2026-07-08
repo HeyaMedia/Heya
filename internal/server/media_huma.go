@@ -309,14 +309,14 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 					ReleaseDate: r.ReleaseDate,
 					SourceCount: r.SourceCount,
 				}
-				if r.LocalMediaItemID.Valid {
-					items[i].LocalMediaID = &r.LocalMediaItemID.Int64
+				if r.LocalMediaItemID != 0 {
+					items[i].LocalMediaID = &r.LocalMediaItemID
 				}
-				if r.LocalSlug.Valid {
-					items[i].LocalSlug = &r.LocalSlug.String
+				if r.LocalSlug != "" {
+					items[i].LocalSlug = &r.LocalSlug
 				}
-				if r.LocalPosterPath.Valid {
-					items[i].LocalPosterPath = &r.LocalPosterPath.String
+				if r.LocalPosterPath != "" {
+					items[i].LocalPosterPath = &r.LocalPosterPath
 				}
 			}
 			return cachedJSON(items, 120), nil

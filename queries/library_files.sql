@@ -188,10 +188,21 @@ WHERE media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[])
 -- provider IDs would link onto an arbitrary existing media_item. Callers must
 -- still skip this for empty IDs; the filter + deterministic ORDER BY are
 -- defense in depth so a future caller can't reintroduce the mis-link.
-SELECT * FROM media_items
-WHERE library_id = $1
+SELECT mi.*
+FROM media_item_cards mi
+WHERE mi.library_id = $1
   AND sqlc.arg(ext_filter)::jsonb <> '{}'::jsonb
-  AND external_ids @> sqlc.arg(ext_filter)::jsonb
+  AND NOT EXISTS (
+    SELECT 1
+    FROM jsonb_each_text(sqlc.arg(ext_filter)::jsonb) AS wanted(provider, external_id)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM media_item_external_ids ei
+      WHERE ei.media_item_id = mi.id
+        AND ei.provider = wanted.provider
+        AND ei.external_id = wanted.external_id
+    )
+  )
 ORDER BY id
 LIMIT 1;
 

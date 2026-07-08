@@ -117,7 +117,7 @@ func (a *App) missingCountCached(ctx context.Context) int {
 		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
 		)
 		SELECT
-		  (SELECT count(*) FROM media_items mi WHERE NOT EXISTS (
+		  (SELECT count(*) FROM media_item_cards mi WHERE NOT EXISTS (
 		      SELECT 1 FROM library_files lf
 		      WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL))
 		+ (SELECT count(*) FROM albums a
@@ -166,7 +166,7 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
 		)
 		SELECT mi.id, mi.title, mi.year, mi.media_type::text, mi.poster_path, mi.slug
-		FROM media_items mi
+		FROM media_item_cards mi
 		WHERE NOT EXISTS (
 			SELECT 1 FROM library_files lf
 			WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
@@ -254,7 +254,7 @@ func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 	//    explicitly; the rest of the graph (movies/tv_series/artists/books/
 	//    cast/assets/...) is ON DELETE CASCADE from media_items.
 	rows, err := tx.Query(ctx, `
-		SELECT mi.id FROM media_items mi
+		SELECT mi.id FROM media_item_cards mi
 		WHERE NOT EXISTS (
 			SELECT 1 FROM library_files lf
 			WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL

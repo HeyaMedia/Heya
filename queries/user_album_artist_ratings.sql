@@ -35,7 +35,7 @@ SELECT al.*,
 FROM user_album_ratings uar
 JOIN albums      al ON al.id = uar.album_id
 JOIN artists     a  ON a.id  = al.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = sqlc.arg(user_id)
   AND uar.rating  >= sqlc.arg(min_rating)
 ORDER BY uar.rating DESC, uar.updated_at DESC
@@ -79,7 +79,7 @@ SELECT a.*,
        uar.updated_at  AS rated_at
 FROM user_artist_ratings uar
 JOIN artists     a  ON a.id  = uar.artist_id
-JOIN media_items mi ON mi.id = a.media_item_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = sqlc.arg(user_id)
   AND uar.rating  >= sqlc.arg(min_rating)
 ORDER BY uar.rating DESC, uar.updated_at DESC

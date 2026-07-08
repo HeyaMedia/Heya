@@ -24,14 +24,16 @@ SELECT * FROM collections WHERE id = $1;
 -- Resolves a collection's franchise-part tmdb ids to local movies (owned vs
 -- missing on the collection page). external_ids->>'tmdb' is the string form the
 -- enrich mapper writes; parsing back to a part happens in the service.
-SELECT id, slug, external_ids
-FROM media_items
-WHERE media_type = 'movie'
-  AND external_ids->>'tmdb' = ANY(@tmdb_ids::text[]);
+SELECT mi.id, mi.slug, mi.external_ids
+FROM media_item_cards mi
+JOIN media_item_external_ids ei ON ei.media_item_id = mi.id
+WHERE mi.media_type = 'movie'
+  AND ei.provider = 'tmdb'
+  AND ei.external_id = ANY(@tmdb_ids::text[]);
 
 -- name: ListCollectionMovies :many
 SELECT mi.*
-FROM media_items mi
+FROM media_item_cards mi
 JOIN movies m ON m.media_item_id = mi.id
 WHERE m.collection_id = $1
 ORDER BY m.release_date NULLS LAST;

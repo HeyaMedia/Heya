@@ -62,7 +62,7 @@ func (a *App) CreateUserList(ctx context.Context, userID int64, name, descriptio
 
 // GetUserList returns a list and its items, scoped to the owner. A list owned by
 // another user (or absent) yields ErrNoRows from the ownership-scoped lookup.
-func (a *App) GetUserList(ctx context.Context, listID, userID int64) (sqlc.UserList, []sqlc.MediaItem, error) {
+func (a *App) GetUserList(ctx context.Context, listID, userID int64) (sqlc.UserList, []sqlc.MediaItemCard, error) {
 	q := sqlc.New(a.db)
 
 	list, err := q.GetUserListByID(ctx, sqlc.GetUserListByIDParams{ID: listID, UserID: userID})

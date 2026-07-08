@@ -85,7 +85,7 @@ func TestLocalFirstUpserts(t *testing.T) {
 		countDragonKeep := func() int {
 			var n int
 			require.NoError(t, tx.QueryRow(ctx,
-				"SELECT count(*) FROM media_items WHERE library_id=$1 AND lower(btrim(title))='dragon keep'", lib,
+				"SELECT count(*) FROM media_item_cards WHERE library_id=$1 AND lower(btrim(title))='dragon keep'", lib,
 			).Scan(&n))
 			return n
 		}
