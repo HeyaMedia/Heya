@@ -37,11 +37,11 @@ const debounceDelay = 2 * time.Second
 var watchWalkStallTimeout = 60 * time.Second
 
 type LibraryWatcher struct {
-	libraryID int64
-	rootPath  string
-	fsw       *fsnotify.Watcher
-	cancel    context.CancelFunc
-	paused    atomic.Bool
+	libraryID  int64
+	rootPath   string
+	fsw        *fsnotify.Watcher
+	cancel     context.CancelFunc
+	pauseDepth atomic.Int32
 }
 
 type ScanFunc func(libraryID int64, force bool)
@@ -175,7 +175,7 @@ func (m *Manager) Pause(libraryID int64) {
 	defer m.mu.Unlock()
 	for _, lw := range m.watchers {
 		if lw.libraryID == libraryID {
-			lw.paused.Store(true)
+			lw.pauseDepth.Add(1)
 		}
 	}
 	log.Debug().Int64("library_id", libraryID).Msg("watcher paused")
@@ -186,7 +186,15 @@ func (m *Manager) Resume(libraryID int64) {
 	defer m.mu.Unlock()
 	for _, lw := range m.watchers {
 		if lw.libraryID == libraryID {
-			lw.paused.Store(false)
+			for {
+				depth := lw.pauseDepth.Load()
+				if depth <= 0 {
+					break
+				}
+				if lw.pauseDepth.CompareAndSwap(depth, depth-1) {
+					break
+				}
+			}
 		}
 	}
 	log.Debug().Int64("library_id", libraryID).Msg("watcher resumed")
@@ -241,7 +249,7 @@ func (m *Manager) eventLoop(ctx context.Context, lw *LibraryWatcher) {
 			if !ok {
 				return
 			}
-			if lw.paused.Load() {
+			if lw.pauseDepth.Load() > 0 {
 				continue
 			}
 			m.handleEvent(ctx, lw, event, pending, &mu)
@@ -336,9 +344,14 @@ func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, tri
 		log.Warn().Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("cannot enqueue scanner run: river client unavailable")
 		return
 	}
+	lib, err := sqlc.New(m.db).GetLibraryByID(ctx, libraryID)
+	if err != nil {
+		log.Warn().Err(err).Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("enqueue scanner run failed: library lookup failed")
+		return
+	}
 	args := worker.ProcessLibraryScanArgs{
 		LibraryID:  libraryID,
-		ScopePaths: []string{scannerScopeForChangedPath(triggerPath)},
+		ScopePaths: []string{worker.ScannerScopeForPath(lib.MediaType, triggerPath)},
 	}
 	opts := args.InsertOpts()
 	opts.Priority = worker.PriorityWatcher
@@ -347,14 +360,6 @@ func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, tri
 		return
 	}
 	log.Info().Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("watcher-triggered scanner run enqueued")
-}
-
-func scannerScopeForChangedPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return path
-	}
-	return filepath.Dir(path)
 }
 
 var (

@@ -52,10 +52,42 @@ type Inventory struct {
 	Roots []InventoryRoot
 }
 
+type InventoryObserver struct {
+	OnFile func(InventoryFile)
+}
+
 func WalkInventory(ctx context.Context, roots []string, emit Emitter) (Inventory, error) {
+	return WalkInventoryWithObserver(ctx, roots, emit, nil)
+}
+
+func WalkInventoryWithObserver(ctx context.Context, roots []string, emit Emitter, observer *InventoryObserver) (Inventory, error) {
+	return walkInventory(ctx, roots, nil, emit, observer)
+}
+
+func WalkInventoryScoped(ctx context.Context, roots []string, scopes []string, emit Emitter) (Inventory, error) {
+	return WalkInventoryScopedWithObserver(ctx, roots, scopes, emit, nil)
+}
+
+func WalkInventoryScopedWithObserver(ctx context.Context, roots []string, scopes []string, emit Emitter, observer *InventoryObserver) (Inventory, error) {
+	return walkInventory(ctx, roots, normalizedScopeDirs(scopes), emit, observer)
+}
+
+func walkInventory(ctx context.Context, roots []string, scopes []string, emit Emitter, observer *InventoryObserver) (Inventory, error) {
 	var inv Inventory
 	for _, root := range roots {
-		emit.Emit(Event{Event: "root.enter", Root: root})
+		relStarts := []string{"."}
+		if len(scopes) > 0 {
+			relStarts = scopeRelPathsForRoot(root, scopes)
+			if len(relStarts) == 0 {
+				continue
+			}
+		}
+
+		data := map[string]any{}
+		if len(scopes) > 0 {
+			data["scopes"] = len(relStarts)
+		}
+		emit.Emit(Event{Event: "root.enter", Root: root, Data: data})
 		source, err := vfs.Open(root)
 		if err != nil {
 			emit.Emit(Event{Event: "root.error", Severity: SeverityWarn, Root: root, Message: err.Error()})
@@ -64,58 +96,77 @@ func WalkInventory(ctx context.Context, roots []string, emit Emitter) (Inventory
 
 		rootInv := InventoryRoot{Root: root, FS: source.FS}
 		isSMB := vfs.IsSMBPath(root)
-		err = fs.WalkDir(source.FS, ".", func(relPath string, d fs.DirEntry, err error) error {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
+		seen := map[string]bool{}
+		for _, relStart := range relStarts {
+			if len(scopes) > 0 {
+				if _, statErr := fs.Stat(source.FS, relStart); statErr != nil {
+					emit.Emit(Event{Event: "walk.error", Severity: SeverityWarn, Root: root, RelPath: relStart, Message: statErr.Error()})
+					continue
+				}
 			}
-			if err != nil {
-				emit.Emit(Event{Event: "walk.error", Severity: SeverityWarn, Root: root, RelPath: relPath, Message: err.Error()})
-				return err
-			}
+			err = fs.WalkDir(source.FS, relStart, func(relPath string, d fs.DirEntry, err error) error {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				if err != nil {
+					emit.Emit(Event{Event: "walk.error", Severity: SeverityWarn, Root: root, RelPath: relPath, Message: err.Error()})
+					return err
+				}
 
-			if d.IsDir() {
-				if relPath == "." {
+				if d.IsDir() {
+					if relPath == "." {
+						return nil
+					}
+					name := d.Name()
+					switch {
+					case strings.HasPrefix(name, "."):
+						emit.Emit(Event{Event: "dir.ignored", Root: root, RelPath: relPath, Kind: "directory", Reason: "hidden_directory"})
+						return fs.SkipDir
+					case mediafile.IsSkipDir(name):
+						emit.Emit(Event{Event: "dir.ignored", Root: root, RelPath: relPath, Kind: "directory", Reason: "system_directory"})
+						return fs.SkipDir
+					case mediafile.IsExtrasDir(name):
+						emit.Emit(Event{Event: "dir.extra", Root: root, RelPath: relPath, Kind: "directory", Reason: mediafile.ExtraTypeFromDir(name)})
+						return nil
+					default:
+						return nil
+					}
+				}
+
+				file := classifyFile(root, relPath, d, isSMB)
+				if seen[file.Path] {
 					return nil
 				}
-				name := d.Name()
-				switch {
-				case strings.HasPrefix(name, "."):
-					emit.Emit(Event{Event: "dir.ignored", Root: root, RelPath: relPath, Kind: "directory", Reason: "hidden_directory"})
-					return fs.SkipDir
-				case mediafile.IsSkipDir(name):
-					emit.Emit(Event{Event: "dir.ignored", Root: root, RelPath: relPath, Kind: "directory", Reason: "system_directory"})
-					return fs.SkipDir
-				case mediafile.IsExtrasDir(name):
-					emit.Emit(Event{Event: "dir.extra", Root: root, RelPath: relPath, Kind: "directory", Reason: mediafile.ExtraTypeFromDir(name)})
+				seen[file.Path] = true
+				switch file.Class {
+				case ClassJunk:
+					emit.Emit(Event{Event: "file.ignored", Root: root, Path: file.Path, RelPath: file.RelPath, Kind: string(file.Class), Reason: "junk_file"})
+					return nil
+				case ClassUnknown:
 					return nil
 				default:
+					rootInv.Files = append(rootInv.Files, file)
+					if observer != nil && observer.OnFile != nil {
+						observer.OnFile(file)
+					}
+					data := map[string]any{"class": string(file.Class)}
+					if file.Kind != "" {
+						data["kind"] = file.Kind
+					}
+					if file.AssetType != "" {
+						data["asset_type"] = file.AssetType
+					}
+					if file.Size > 0 {
+						data["size"] = file.Size
+					}
+					emit.Emit(Event{Event: "file.classified", Root: root, Path: file.Path, RelPath: file.RelPath, Kind: string(file.Class), Data: data})
 					return nil
 				}
+			})
+			if err != nil {
+				break
 			}
-
-			file := classifyFile(root, relPath, d, isSMB)
-			switch file.Class {
-			case ClassJunk:
-				emit.Emit(Event{Event: "file.ignored", Root: root, Path: file.Path, RelPath: file.RelPath, Kind: string(file.Class), Reason: "junk_file"})
-				return nil
-			case ClassUnknown:
-				return nil
-			default:
-				rootInv.Files = append(rootInv.Files, file)
-				data := map[string]any{"class": string(file.Class)}
-				if file.Kind != "" {
-					data["kind"] = file.Kind
-				}
-				if file.AssetType != "" {
-					data["asset_type"] = file.AssetType
-				}
-				if file.Size > 0 {
-					data["size"] = file.Size
-				}
-				emit.Emit(Event{Event: "file.classified", Root: root, Path: file.Path, RelPath: file.RelPath, Kind: string(file.Class), Data: data})
-				return nil
-			}
-		})
+		}
 		closeErr := source.Close()
 		if err != nil {
 			return inv, err
@@ -130,6 +181,51 @@ func WalkInventory(ctx context.Context, roots []string, emit Emitter) (Inventory
 		emit.Emit(Event{Event: "root.complete", Root: root, Data: map[string]any{"files": len(rootInv.Files)}})
 	}
 	return inv, nil
+}
+
+func scopeRelPathsForRoot(root string, scopes []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, scope := range scopes {
+		rel, ok := scopeRelPathForRoot(root, scope)
+		if !ok || seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		out = append(out, rel)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func scopeRelPathForRoot(root, scope string) (string, bool) {
+	root = strings.TrimRight(strings.TrimSpace(root), "/")
+	scope = strings.TrimRight(strings.TrimSpace(scope), "/")
+	if root == "" || scope == "" {
+		return "", false
+	}
+	if strings.Contains(root, "://") || strings.Contains(scope, "://") {
+		if scope != root && !strings.HasPrefix(scope, root+"/") {
+			return "", false
+		}
+		rel := strings.TrimPrefix(scope, root)
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return ".", true
+		}
+		return rel, true
+	}
+	rel, err := filepath.Rel(root, scope)
+	if err != nil {
+		return "", false
+	}
+	if rel == "." {
+		return ".", true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
 }
 
 func FilterInventoryToScopes(inv Inventory, scopes []string, emit Emitter) Inventory {

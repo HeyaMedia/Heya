@@ -221,6 +221,9 @@ func acceptedSearchNeedsFetch(accepted bool, providerID string) bool {
 func movieFetchCoverage(items []MovieFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
+		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+			continue
+		}
 		out[searchFetchKey(item.Key, item.ProviderID)] = true
 	}
 	return out
@@ -229,6 +232,9 @@ func movieFetchCoverage(items []MovieFetchPreview) map[string]bool {
 func bookFetchCoverage(items []BookFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
+		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+			continue
+		}
 		out[searchFetchKey(item.Key, item.ProviderID)] = true
 	}
 	return out
@@ -237,6 +243,9 @@ func bookFetchCoverage(items []BookFetchPreview) map[string]bool {
 func musicFetchCoverage(items []MusicFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
+		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+			continue
+		}
 		out[searchFetchKey(item.Key, item.ProviderID)] = true
 	}
 	return out
@@ -245,6 +254,9 @@ func musicFetchCoverage(items []MusicFetchPreview) map[string]bool {
 func tvFetchCoverage(items []TVFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
+		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+			continue
+		}
 		out[searchFetchKey(item.Key, item.ProviderID)] = true
 		for _, key := range item.Keys {
 			out[searchFetchKey(key, item.ProviderID)] = true

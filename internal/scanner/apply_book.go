@@ -100,11 +100,13 @@ func ApplyBookMaterialization(ctx context.Context, lib sqlc.Library, result Resu
 
 		meta, ok := metadataByKey[preview.Key]
 		if !ok || meta.Detail == nil {
-			applied.Action = "failed"
+			applied.Action = "skipped"
+			applied.Skipped = true
+			applied.Reason = "metadata_detail_missing"
 			applied.Error = "metadata detail is required for apply"
 			results = append(results, applied)
 			emitBookApplyResult(applied, emit)
-			return results, fmt.Errorf("apply %s: metadata detail is required", preview.Key)
+			continue
 		}
 		if meta.Error != "" {
 			applied.Action = "failed"

@@ -203,7 +203,7 @@ func (r *LibraryRun) ResumeFetchArtifact(ctx context.Context, scanRunID int64) (
 		r.sink.Emit(Event{Event: "scan.artifact_stale", Severity: SeverityInfo, Data: map[string]any{
 			"kind":        scanArtifactKindFetch,
 			"scan_run_id": scanRunID,
-			"reason":      "metadata_missing_for_current_search_decision",
+			"reason":      "metadata_missing_or_incomplete_for_current_search_decision",
 		}})
 		return false, nil
 	}
@@ -268,13 +268,18 @@ func (r *LibraryRun) runAnalyze(ctx context.Context) error {
 	}
 	lib := r.lib
 	r.sink.Emit(Event{Event: "scan.start", Data: map[string]any{"paths": len(lib.Paths)}})
-	inv, err := WalkInventory(ctx, lib.Paths, r.sink)
+	var (
+		inv Inventory
+		err error
+	)
+	if len(r.opts.ScopePaths) > 0 {
+		inv, err = WalkInventoryScoped(ctx, lib.Paths, r.opts.ScopePaths, r.sink)
+	} else {
+		inv, err = WalkInventory(ctx, lib.Paths, r.sink)
+	}
 	if err != nil {
 		r.result.Inventory = inv
 		return r.fail(err)
-	}
-	if len(r.opts.ScopePaths) > 0 {
-		inv = FilterInventoryToScopes(inv, r.opts.ScopePaths, r.sink)
 	}
 
 	r.result = Result{Inventory: inv}

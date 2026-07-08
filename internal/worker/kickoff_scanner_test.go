@@ -39,6 +39,37 @@ func TestScannerInventoryPostApplyPaths(t *testing.T) {
 	}, scannerInventoryPostApplyPaths(inv))
 }
 
+func TestCompactScannerScopesDropsChildren(t *testing.T) {
+	require.Equal(t, []string{
+		"/library/Movie (2021)",
+		"/library/Other (2022)",
+	}, compactScannerScopes([]string{
+		"/library/Movie (2021)",
+		"/library/Movie (2021)/trailers",
+		"/library/Movie (2021)/featurettes",
+		"/library/Other (2022)",
+	}))
+}
+
+func TestScannerScopeForPathUsesOwningMediaDirectory(t *testing.T) {
+	require.Equal(t,
+		"/library/Show (2024)",
+		ScannerScopeForPath(sqlc.MediaTypeTv, "/library/Show (2024)/Season 01/Show.S01E01.mkv"),
+	)
+	require.Equal(t,
+		"/library/Show (2024)",
+		ScannerScopeForPath(sqlc.MediaTypeAnime, "/library/Show (2024)/Season 01/featurettes/Behind The Scenes.mkv"),
+	)
+	require.Equal(t,
+		"/library/Movie (2024)",
+		ScannerScopeForPath(sqlc.MediaTypeMovie, "/library/Movie (2024)/trailers/trailer.mkv"),
+	)
+	require.Equal(t,
+		"/library/Music/Samples",
+		ScannerScopeForPath(sqlc.MediaTypeMusic, "/library/Music/Samples/01 Track.flac"),
+	)
+}
+
 func TestLibraryFileNeedsProbe(t *testing.T) {
 	require.True(t, libraryFileNeedsProbe(sqlc.LibraryFile{}))
 	require.True(t, libraryFileNeedsProbe(sqlc.LibraryFile{MediaInfo: []byte("{}")}))

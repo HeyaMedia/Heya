@@ -43,7 +43,7 @@ type MovieFetchPreview struct {
 	Crew           int                   `json:"crew,omitempty"`
 	WouldApply     []string              `json:"would_apply,omitempty"`
 	Error          string                `json:"error,omitempty"`
-	Detail         *metadata.MediaDetail `json:"-"`
+	Detail         *metadata.MediaDetail `json:"detail,omitempty"`
 }
 
 type TVFetchPreview struct {
@@ -71,7 +71,7 @@ type TVFetchPreview struct {
 	Crew            int                   `json:"crew,omitempty"`
 	WouldApply      []string              `json:"would_apply,omitempty"`
 	Error           string                `json:"error,omitempty"`
-	Detail          *metadata.MediaDetail `json:"-"`
+	Detail          *metadata.MediaDetail `json:"detail,omitempty"`
 }
 
 type MusicFetchPreview struct {
@@ -96,7 +96,7 @@ type MusicFetchPreview struct {
 	Issues               []string                        `json:"issues,omitempty"`
 	WouldApply           []string                        `json:"would_apply,omitempty"`
 	Error                string                          `json:"error,omitempty"`
-	Detail               *metadata.MediaDetail           `json:"-"`
+	Detail               *metadata.MediaDetail           `json:"detail,omitempty"`
 }
 
 type BookFetchPreview struct {
@@ -117,7 +117,7 @@ type BookFetchPreview struct {
 	Issues      []string              `json:"issues,omitempty"`
 	WouldApply  []string              `json:"would_apply,omitempty"`
 	Error       string                `json:"error,omitempty"`
-	Detail      *metadata.MediaDetail `json:"-"`
+	Detail      *metadata.MediaDetail `json:"detail,omitempty"`
 }
 
 type MusicCandidateFetchEvaluation struct {

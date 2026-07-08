@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -88,6 +89,7 @@ type KickoffLibraryScanWorker struct {
 	DB       *pgxpool.Pool
 	Heya     *heyamedia.HeyaProvider
 	Hub      EventPublisher
+	Queue    *river.Client[pgx.Tx]
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
 }
@@ -136,7 +138,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 			LibraryName: lib.Name,
 		})
 
-		result, scopes, scanErr := w.planLibraryScan(ctx, lib, job.Args.Force)
+		result, remainingScopes, scanErr := w.planLibraryScan(ctx, lib, job.Args.Force, taskID, source)
 
 		if w.Watcher != nil {
 			w.Watcher.Resume(lib.ID)
@@ -155,28 +157,25 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 			}
 		}
 
-		n := 0
-		processQueued := false
-		if supportsScanner(lib.MediaType) && (job.Args.Force || result.New > 0) {
-			if err := enqueueProcessLibraryScan(ctx, rc, ProcessLibraryScanArgs{
+		n := result.Enqueued
+		failed += result.EnqueueFailed
+		processQueued := n > 0
+		if supportsScanner(lib.MediaType) && (job.Args.Force || result.New > 0) && (len(remainingScopes) > 0 || n == 0) {
+			queued, enqueueFailed := enqueueProcessLibraryScanFanout(ctx, rc, ProcessLibraryScanArgs{
 				LibraryID:       lib.ID,
-				ScopePaths:      scopes,
 				Force:           job.Args.Force,
 				ScheduledTaskID: taskID,
-			}, PriorityScan, source); err != nil {
-				log.Warn().Err(err).Int64("library_id", lib.ID).Msg("kickoff_library_scan: enqueue scanner processing failed")
-				failed++
-			} else {
-				n++
-				processQueued = true
-			}
+			}, remainingScopes, PriorityScan, source)
+			n += queued
+			failed += enqueueFailed
+			processQueued = processQueued || queued > 0
 		}
 		// Self-heal files that were matched but never successfully probed (their
 		// first ffprobe failed on a flaky mount, and the size+mtime skip means
 		// plain rescans never revisit them). ffprobe jobs are unique-while-active,
 		// so this can't stack duplicates against probes still in flight.
 		reprobed := enqueueReprobeUnprobed(ctx, q, rc, lib.ID, taskID, source)
-		enqueued += reprobed
+		enqueued += n + reprobed
 
 		log.Info().
 			Int64("library_id", lib.ID).
@@ -207,9 +206,11 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 }
 
 type libraryScanOutcome struct {
-	Discovered int
-	New        int
-	Deleted    int
+	Discovered    int
+	New           int
+	Deleted       int
+	Enqueued      int
+	EnqueueFailed int
 }
 
 // ---------------------------------------------------------------------------
@@ -427,9 +428,9 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 	return nil
 }
 
-func (w *KickoffLibraryScanWorker) planLibraryScan(ctx context.Context, lib sqlc.Library, force bool) (libraryScanOutcome, []string, error) {
+func (w *KickoffLibraryScanWorker) planLibraryScan(ctx context.Context, lib sqlc.Library, force bool, taskID string, source string) (libraryScanOutcome, []string, error) {
 	if supportsScanner(lib.MediaType) {
-		return w.inspectLibraryChanges(ctx, lib, force)
+		return w.inspectLibraryChanges(ctx, lib, force, taskID, source)
 	}
 	log.Warn().
 		Int64("library_id", lib.ID).
@@ -440,9 +441,7 @@ func (w *KickoffLibraryScanWorker) planLibraryScan(ctx context.Context, lib sqlc
 	return libraryScanOutcome{}, nil, nil
 }
 
-const scannerScopeLimit = 100
-
-func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, lib sqlc.Library, force bool) (libraryScanOutcome, []string, error) {
+func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, lib sqlc.Library, force bool, taskID string, source string) (libraryScanOutcome, []string, error) {
 	q := sqlc.New(w.DB)
 	sink := scanner.NewEventSink(scanner.Event{
 		LibraryID:   lib.ID,
@@ -450,50 +449,80 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 		LibraryType: string(lib.MediaType),
 		Domain:      string(lib.MediaType),
 	})
-	inv, err := scanner.WalkInventory(ctx, lib.Paths, sink)
-	if err != nil {
-		return libraryScanOutcome{Discovered: countScannerInventoryFiles(inv)}, nil, err
-	}
-
-	outcome := libraryScanOutcome{Discovered: countScannerInventoryFiles(inv)}
-	nfoScopes, nfoChanges, err := syncLibraryNFODirs(ctx, q, lib.ID, inv)
-	if err != nil {
-		return outcome, nil, err
-	}
 	existingRows, err := q.ListLibraryFilesForScan(ctx, lib.ID)
 	if err != nil {
-		return outcome, nil, err
+		return libraryScanOutcome{}, nil, err
 	}
-	if force || len(existingRows) == 0 {
-		outcome.New = outcome.Discovered
-		return outcome, nil, nil
-	}
-	outcome.New += nfoChanges
 
 	existingByPath := make(map[string]sqlc.ListLibraryFilesForScanRow, len(existingRows))
 	for _, row := range existingRows {
 		existingByPath[row.Path] = row
 	}
 
-	seen := make(map[string]bool, outcome.Discovered)
+	initialFullScan := force || len(existingRows) == 0
+	var outcome libraryScanOutcome
+	seen := make(map[string]bool)
 	scopeSet := map[string]bool{}
-	for _, scope := range nfoScopes {
+	enqueuedScopes := map[string]bool{}
+	markChangedScope := func(scope string) {
+		if scope == "" || scopeSet[scope] {
+			return
+		}
 		scopeSet[scope] = true
+		if w.Queue == nil {
+			return
+		}
+		if err := enqueueProcessLibraryScan(ctx, w.Queue, ProcessLibraryScanArgs{
+			LibraryID:       lib.ID,
+			ScopePaths:      []string{scope},
+			Force:           force,
+			ScheduledTaskID: taskID,
+		}, PriorityScan, source); err != nil {
+			outcome.EnqueueFailed++
+			log.Warn().Err(err).Int64("library_id", lib.ID).Str("scope", scope).Msg("kickoff_library_scan: enqueue scanner processing failed")
+			return
+		}
+		enqueuedScopes[scope] = true
+		outcome.Enqueued++
 	}
-	for _, root := range inv.Roots {
-		for _, file := range root.Files {
+
+	inv, err := scanner.WalkInventoryWithObserver(ctx, lib.Paths, sink, &scanner.InventoryObserver{
+		OnFile: func(file scanner.InventoryFile) {
 			if !scannerInventoryFileTracked(file) {
-				continue
+				return
 			}
 			seen[file.Path] = true
+			scope := scannerScopeForInventoryFile(lib.MediaType, file)
+			if initialFullScan {
+				markChangedScope(scope)
+				return
+			}
 			existing, found := existingByPath[file.Path]
 			if !found || existing.DeletedAt.Valid || libraryFileChanged(existing, file) {
 				outcome.New++
-				if scope := scannerScopeForPath(file.Path); scope != "" {
-					scopeSet[scope] = true
-				}
+				markChangedScope(scope)
 			}
-		}
+		},
+	})
+	if err != nil {
+		outcome.Discovered = countScannerInventoryFiles(inv)
+		return outcome, remainingScannerScopes(scopeSet, enqueuedScopes), err
+	}
+
+	outcome.Discovered = countScannerInventoryFiles(inv)
+	if initialFullScan {
+		outcome.New = outcome.Discovered
+	}
+
+	nfoScopes, nfoChanges, err := syncLibraryNFODirs(ctx, q, lib.ID, inv)
+	if err != nil {
+		return outcome, remainingScannerScopes(scopeSet, enqueuedScopes), err
+	}
+	if !initialFullScan {
+		outcome.New += nfoChanges
+	}
+	for _, scope := range nfoScopes {
+		markChangedScope(scannerOwnerScope(lib.MediaType, scope))
 	}
 
 	var missing []string
@@ -514,11 +543,7 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 		outcome.Deleted = len(missing)
 	}
 
-	scopes := sortedMapKeys(scopeSet)
-	if len(scopes) > scannerScopeLimit {
-		scopes = nil
-	}
-	return outcome, scopes, nil
+	return outcome, remainingScannerScopes(scopeSet, enqueuedScopes), nil
 }
 
 type scannerNFODirState struct {
@@ -636,6 +661,117 @@ func sortedMapKeys(set map[string]bool) []string {
 	return out
 }
 
+func remainingScannerScopes(scopes map[string]bool, enqueued map[string]bool) []string {
+	remaining := map[string]bool{}
+	for scope := range scopes {
+		if !enqueued[scope] {
+			remaining[scope] = true
+		}
+	}
+	return compactScannerScopes(sortedMapKeys(remaining))
+}
+
+func compactScannerScopes(scopes []string) []string {
+	if len(scopes) < 2 {
+		return scopes
+	}
+	var out []string
+	for _, scope := range scopes {
+		if scope == "" {
+			continue
+		}
+		covered := false
+		for _, parent := range out {
+			if scannerScopeContains(parent, scope) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			out = append(out, scope)
+		}
+	}
+	return out
+}
+
+func scannerScopeContains(parent, child string) bool {
+	parent = strings.TrimSpace(parent)
+	child = strings.TrimSpace(child)
+	if parent == "" || child == "" {
+		return false
+	}
+	if strings.Contains(parent, "://") || strings.Contains(child, "://") {
+		parent = strings.TrimRight(parent, "/")
+		child = strings.TrimRight(child, "/")
+		return parent == child || strings.HasPrefix(child, parent+"/")
+	}
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+var scannerSeasonDirRE = regexp.MustCompile(`(?i)^(?:Season|Series|S)[ ._-]*(?:\d{1,2}|specials?)$`)
+
+func scannerScopeForInventoryFile(mediaType sqlc.MediaType, file scanner.InventoryFile) string {
+	return ScannerScopeForPath(mediaType, file.Path)
+}
+
+func ScannerScopeForPath(mediaType sqlc.MediaType, path string) string {
+	return scannerOwnerScope(mediaType, scannerScopeForPath(path))
+}
+
+func scannerOwnerScope(mediaType sqlc.MediaType, scope string) string {
+	for {
+		base := scannerScopeBase(scope)
+		if (scannerMediaTypeUsesExtrasDirs(mediaType) && mediafile.IsExtrasDir(base)) || (mediatype.IsTVLike(mediaType) && scannerSeasonDirRE.MatchString(base)) {
+			parent := scannerScopeParent(scope)
+			if parent == "" || parent == scope {
+				return scope
+			}
+			scope = parent
+			continue
+		}
+		return scope
+	}
+}
+
+func scannerMediaTypeUsesExtrasDirs(mediaType sqlc.MediaType) bool {
+	return mediaType == sqlc.MediaTypeMovie || mediatype.IsTVLike(mediaType)
+}
+
+func scannerScopeBase(scope string) string {
+	scope = strings.TrimRight(strings.TrimSpace(scope), "/")
+	if scope == "" {
+		return ""
+	}
+	if strings.Contains(scope, "://") {
+		if idx := strings.LastIndex(scope, "/"); idx >= 0 {
+			return scope[idx+1:]
+		}
+		return scope
+	}
+	return filepath.Base(scope)
+}
+
+func scannerScopeParent(scope string) string {
+	scope = strings.TrimRight(strings.TrimSpace(scope), "/")
+	if scope == "" {
+		return ""
+	}
+	if strings.Contains(scope, "://") {
+		idx := strings.LastIndex(scope, "/")
+		if idx <= strings.Index(scope, "://")+2 {
+			return scope
+		}
+		return scope[:idx]
+	}
+	return filepath.Dir(scope)
+}
+
 func scannerScopeForPath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -659,6 +795,31 @@ func enqueueProcessLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], ar
 	opts.Priority = priority
 	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
 	return err
+}
+
+func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.Tx], base ProcessLibraryScanArgs, scopes []string, priority int, source string) (queued, failed int) {
+	if len(scopes) == 0 {
+		if err := enqueueProcessLibraryScan(ctx, rc, base, priority, source); err != nil {
+			log.Warn().Err(err).Int64("library_id", base.LibraryID).Msg("kickoff_library_scan: enqueue scanner processing failed")
+			return 0, 1
+		}
+		return 1, 0
+	}
+	for _, scope := range scopes {
+		if err := ctx.Err(); err != nil {
+			log.Warn().Err(err).Int64("library_id", base.LibraryID).Msg("kickoff_library_scan: enqueue scanner processing canceled")
+			return queued, failed + 1
+		}
+		args := base
+		args.ScopePaths = []string{scope}
+		if err := enqueueProcessLibraryScan(ctx, rc, args, priority, source); err != nil {
+			log.Warn().Err(err).Int64("library_id", base.LibraryID).Str("scope", scope).Msg("kickoff_library_scan: enqueue scanner processing failed")
+			failed++
+			continue
+		}
+		queued++
+	}
+	return queued, failed
 }
 
 func enqueueApplyLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], args ApplyLibraryScanArgs, priority int, source string) error {

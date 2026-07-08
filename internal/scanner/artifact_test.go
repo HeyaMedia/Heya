@@ -77,6 +77,12 @@ func TestFetchArtifactRoundTripRestoresMetadata(t *testing.T) {
 			ProviderID: "heya:movie:tmdb:438631",
 			Title:      "Dune",
 			Year:       "2021",
+			Detail: &metadata.MediaDetail{
+				Title:       "Dune",
+				Year:        "2021",
+				Description: "Spice must flow.",
+				ExternalIDs: map[string]string{"tmdb": "438631"},
+			},
 		}},
 	}
 
@@ -87,6 +93,9 @@ func TestFetchArtifactRoundTripRestoresMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, loaded.Inventory.Roots[0].FS)
 	require.Equal(t, result.MovieMetadata[0].ProviderID, loaded.MovieMetadata[0].ProviderID)
+	require.NotNil(t, loaded.MovieMetadata[0].Detail)
+	require.Equal(t, "Spice must flow.", loaded.MovieMetadata[0].Detail.Description)
+	require.Equal(t, "438631", loaded.MovieMetadata[0].Detail.ExternalIDs["tmdb"])
 	require.True(t, fetchMetadataCoversAcceptedSearch(loaded, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
 }
 
@@ -170,6 +179,33 @@ func TestFetchArtifactCoverageDetectsChangedDecision(t *testing.T) {
 	applySearchDecisionsToResult(&result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}, decisions, NewEventSink(Event{}))
 
 	require.False(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
+}
+
+func TestFetchArtifactCoverageRequiresDetailForApply(t *testing.T) {
+	result := Result{
+		MovieSearch: []MovieSearchMatch{{
+			Key:        "tmdb:584",
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:584",
+			Title:      "2 Fast 2 Furious",
+			Year:       "2003",
+		}},
+		MovieMetadata: []MovieFetchPreview{{
+			Key:        "tmdb:584",
+			ProviderID: "heya:movie:tmdb:584",
+			Title:      "2 Fast 2 Furious",
+			Year:       "2003",
+		}},
+	}
+
+	require.False(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
+
+	result.MovieMetadata[0].Detail = &metadata.MediaDetail{Title: "2 Fast 2 Furious", Year: "2003"}
+	require.True(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
+
+	result.MovieMetadata[0].Detail = nil
+	result.MovieMetadata[0].Error = "upstream failed"
+	require.True(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
 }
 
 func TestResumeSearchArtifactMissingDBIsNoop(t *testing.T) {

@@ -133,7 +133,8 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	// these on the cadence set in the scheduled_tasks table. "Run Now"
 	// from the UI hits the same insertion path with UniqueByArgs so
 	// concurrent clicks coalesce.
-	river.AddWorker(workers, &KickoffLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
+	kickoffLibraryWorker := &KickoffLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress}
+	river.AddWorker(workers, kickoffLibraryWorker)
 	river.AddWorker(workers, &ProcessLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &FetchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, SonicEnabled: cfg.SonicEnabled, Progress: cfg.Progress})
@@ -271,6 +272,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	if err != nil {
 		return nil, fmt.Errorf("river client: %w", err)
 	}
+	kickoffLibraryWorker.Queue = client
 
 	return client, nil
 }
