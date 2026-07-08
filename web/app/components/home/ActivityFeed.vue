@@ -67,7 +67,7 @@ function labelFor(type: string) {
 
 function mediaPath(item: ActivityItem) {
   if (!item.slug || !item.media_type) return '/'
-  const base = item.media_type === 'movie' ? '/movies' : item.media_type === 'tv' ? '/tv' : `/${item.media_type}s`
+  const base = item.media_type === 'movie' ? '/movies' : (item.media_type === 'tv' || item.media_type === 'anime') ? '/tv' : `/${item.media_type}s`
   return `${base}/${item.slug}`
 }
 

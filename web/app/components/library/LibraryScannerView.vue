@@ -60,11 +60,44 @@ type ScanCandidate = {
   provider_kind: string
   title: string
   year?: string
+  author?: string
+  description?: string
+  poster_url?: string
+  heya_slug?: string
   score?: number
   rank: number
   status: string
   rejection_reason?: string
   external_ids?: Record<string, string>
+}
+
+type ScanCandidateDetail = {
+  candidate_id: number
+  provider_id: string
+  provider_name: string
+  provider_kind: string
+  title: string
+  year?: string
+  author?: string
+  description?: string
+  poster_url?: string
+  backdrop_url?: string
+  heya_slug?: string
+  status?: string
+  genres?: string[]
+  external_ids?: Record<string, string>
+  runtime_minutes?: number
+  number_of_seasons?: number
+  number_of_episodes?: number
+  first_air_date?: string
+  last_air_date?: string
+  networks?: string[]
+  isbn?: string
+  page_count?: number
+  publisher?: string
+  publish_date?: string
+  language?: string
+  subjects?: string[]
 }
 
 type BucketCounts = {
@@ -108,6 +141,10 @@ const runs = ref<ScanRun[]>([])
 const activeFilter = ref<'all' | Bucket>('all')
 const search = ref('')
 const expanded = ref<Set<number>>(new Set())
+const detailOpen = ref<Set<number>>(new Set())
+const candidateDetails = ref<Record<number, ScanCandidateDetail>>({})
+const candidateDetailLoading = ref<number | null>(null)
+const candidateDetailError = ref<Record<number, string>>({})
 
 // Human labels for the raw finding codes the scanner persists.
 const FINDING_LABELS: Record<string, string> = {
@@ -115,10 +152,18 @@ const FINDING_LABELS: Record<string, string> = {
   nfo_parse_failed: 'NFO parse failed',
   plexmatch_parse_failed: '.plexmatch parse failed',
   local_identity_issue: 'Local identity issue',
+  music_album_issue: 'Music album issue',
+  music_track_issue: 'Music track issue',
+  music_metadata_mapping: 'Music metadata mapping',
+  book_metadata_mapping: 'Book metadata mapping',
+  metadata_fetch_failed: 'Metadata fetch failed',
   search_rejected: 'Search rejected',
+  search_error: 'Search error',
   search_suspicious: 'Search suspicious',
   title_only_identity: 'Title-only match',
   materialization_blocked: 'Materialize blocked',
+  materialization_failed: 'Materialize failed',
+  materialization_skipped: 'Materialize skipped',
 }
 
 const FILTERS: { key: 'all' | Bucket; label: string }[] = [
@@ -210,6 +255,10 @@ function awaitingApply(identity: ScanIdentity): boolean {
   return identity.review_status === 'accepted' && !identity.media_item_id
 }
 
+function canApproveSelectedCandidate(identity: ScanIdentity, candidate: ScanCandidate): boolean {
+  return candidate.status === 'selected' && identity.bucket === 'needs_review'
+}
+
 const filteredIdentities = computed(() => {
   const q = search.value.trim().toLowerCase()
   return identities.value.filter((i) => {
@@ -243,11 +292,11 @@ async function refresh(opts: { silent?: boolean } = {}) {
   try {
     const heya = $heya as any
     const [scanView, runHistory] = await Promise.all([
-      heya('/api/libraries/{id}/scan-v2', {
+      heya('/api/libraries/{id}/scanner', {
         path: { id: props.library.id },
         query: { candidates: includeCandidates.value },
       }) as Promise<ScannerView>,
-      heya('/api/libraries/{id}/scan-v2/runs', {
+      heya('/api/libraries/{id}/scanner/runs', {
         path: { id: props.library.id },
         query: { limit: 10, offset: 0 },
       }) as Promise<ScanRun[]>,
@@ -275,7 +324,7 @@ async function runAction(identity: ScanIdentity, action: string, body: Record<st
   actionError.value = ''
   try {
     const heya = $heya as any
-    await heya(`/api/libraries/{id}/scan-v2/identities/{identity_id}/${action}`, {
+    await heya(`/api/libraries/{id}/scanner/identities/{identity_id}/${action}`, {
       method: 'POST',
       path: { id: props.library.id, identity_id: identity.id },
       ...(body ? { body } : {}),
@@ -316,6 +365,35 @@ function toggleExpand(id: number) {
   expanded.value = next
 }
 
+async function toggleCandidateDetail(identity: ScanIdentity, candidate: ScanCandidate) {
+  const next = new Set(detailOpen.value)
+  if (next.has(candidate.id)) {
+    next.delete(candidate.id)
+    detailOpen.value = next
+    return
+  }
+  next.add(candidate.id)
+  detailOpen.value = next
+  if (candidateDetails.value[candidate.id]) return
+
+  candidateDetailLoading.value = candidate.id
+  candidateDetailError.value = { ...candidateDetailError.value, [candidate.id]: '' }
+  try {
+    const heya = $heya as any
+    const detail = await heya('/api/libraries/{id}/scanner/identities/{identity_id}/candidates/{candidate_id}/detail', {
+      path: { id: props.library.id, identity_id: identity.id, candidate_id: candidate.id },
+    }) as ScanCandidateDetail
+    candidateDetails.value = { ...candidateDetails.value, [candidate.id]: detail }
+  } catch (e: any) {
+    candidateDetailError.value = {
+      ...candidateDetailError.value,
+      [candidate.id]: e?.data?.error || e?.message || 'Failed to fetch candidate detail.',
+    }
+  } finally {
+    candidateDetailLoading.value = null
+  }
+}
+
 function formatDate(value?: string): string {
   if (!value) return 'never'
   const d = new Date(value)
@@ -345,9 +423,43 @@ function selectedMatchLine(identity: ScanIdentity): string {
 }
 
 function candidateSub(candidate: ScanCandidate): string {
-  const parts = [candidate.provider_id, `#${candidate.rank}`, score(candidate.score)]
+  const parts: string[] = []
+  if (candidate.author) parts.push(`by ${candidate.author}`)
+  parts.push(candidate.provider_id, `#${candidate.rank}`, score(candidate.score))
   if (candidate.rejection_reason) parts.push(candidate.rejection_reason)
   return parts.join(' · ')
+}
+
+function candidateDetailFacts(detail: ScanCandidateDetail): string[] {
+  const facts: string[] = []
+  if (detail.status) facts.push(detail.status)
+  if (detail.number_of_seasons) facts.push(`${detail.number_of_seasons} seasons`)
+  if (detail.number_of_episodes) facts.push(`${detail.number_of_episodes} episodes`)
+  if (detail.first_air_date) facts.push(`first aired ${detail.first_air_date}`)
+  if (detail.networks?.length) facts.push(detail.networks.slice(0, 2).join(', '))
+  if (detail.author) facts.push(`by ${detail.author}`)
+  if (detail.page_count) facts.push(`${detail.page_count} pages`)
+  if (detail.publisher) facts.push(detail.publisher)
+  if (detail.publish_date) facts.push(detail.publish_date)
+  if (detail.language) facts.push(detail.language.toUpperCase())
+  if (detail.isbn) facts.push(`ISBN ${detail.isbn}`)
+  return facts
+}
+
+function candidateDetailTags(detail: ScanCandidateDetail): string[] {
+  return (detail.genres?.length ? detail.genres : detail.subjects)?.slice(0, 8) ?? []
+}
+
+function candidateDetailHeyaURL(detail: ScanCandidateDetail): string {
+  if (detail.heya_slug) return `https://heya.media/${detail.heya_slug}`
+  const parts = detail.provider_id.split(':')
+  if (parts.length >= 4 && parts[0] === 'heya') {
+    const kind = parts[1]
+    const provider = parts[2]
+    const value = parts.slice(3).join(':')
+    return `https://heya.media/heya_${kind}:${provider}:${value}`
+  }
+  return 'https://heya.media'
 }
 
 function runFiles(run: ScanRun): number {
@@ -357,8 +469,8 @@ function runFiles(run: ScanRun): number {
 </script>
 
 <template>
-  <div class="scanner-view">
-    <header class="scanner-head">
+  <div class="sv2-view">
+    <header class="sv2-head">
       <button class="back-btn" @click="emit('back')">
         <Icon name="back" :size="14" />
         Libraries
@@ -390,19 +502,19 @@ function runFiles(run: ScanRun): number {
       </div>
     </header>
 
-    <div v-if="error" class="scanner-note error">
+    <div v-if="error" class="sv2-note error">
       <Icon name="warning" :size="13" /> {{ error }}
     </div>
 
-    <div v-else class="scanner-body" :class="{ loading }">
-      <div v-if="actionError" class="scanner-note error">
+    <div v-else class="sv2-body" :class="{ loading }">
+      <div v-if="actionError" class="sv2-note error">
         <Icon name="warning" :size="13" /> {{ actionError }}
       </div>
-      <div v-else-if="actionNote" class="scanner-note ok">
+      <div v-else-if="actionNote" class="sv2-note ok">
         <Icon name="check" :size="13" /> {{ actionNote }}
       </div>
 
-      <div class="scanner-tiles">
+      <div class="sv2-tiles">
         <MetricTile label="Files" :value="summaryNumber('files', 'classified_files')" icon="folder" />
         <MetricTile label="Identities" :value="bucketCount('all')" icon="list" />
         <MetricTile label="Matched" :value="bucketCount('matched')" icon="check" tone="good" />
@@ -412,7 +524,7 @@ function runFiles(run: ScanRun): number {
         <MetricTile label="Ignored" :value="bucketCount('ignored')" icon="eye" tone="neutral" />
       </div>
 
-      <div v-if="orphanFindings.length" class="scanner-note">
+      <div v-if="orphanFindings.length" class="sv2-note">
         <Icon name="warning" :size="13" />
         {{ orphanFindings.length }} scan issue{{ orphanFindings.length === 1 ? '' : 's' }} not tied to an identity
         (parse or scan-level problems) — listed under Scan issues below.
@@ -524,19 +636,45 @@ function runFiles(run: ScanRun): number {
                         class="candidate-row"
                       >
                         <div class="candidate-rank mono">{{ candidate.rank }}</div>
+                        <img
+                          v-if="candidate.poster_url"
+                          class="candidate-poster"
+                          :src="candidate.poster_url"
+                          alt=""
+                          loading="lazy"
+                        >
                         <div class="candidate-main">
                           <div class="candidate-title">
                             {{ candidate.title }}
                             <span v-if="candidate.year" class="dim">({{ candidate.year }})</span>
                           </div>
                           <div class="candidate-sub mono">{{ candidateSub(candidate) }}</div>
+                          <div v-if="candidate.description" class="candidate-description">
+                            {{ candidate.description }}
+                          </div>
                         </div>
                         <StatusBadge :state="candidate.status === 'selected' ? 'ok' : candidate.status === 'review_candidate' ? 'warn' : candidate.status === 'rejected' ? 'error' : 'idle'">
                           {{ candidate.status }}
                         </StatusBadge>
                         <div class="candidate-actions">
                           <button
-                            v-if="candidate.status === 'selected'"
+                            class="mini-btn"
+                            :disabled="candidateDetailLoading === candidate.id"
+                            @click.stop="toggleCandidateDetail(identity, candidate)"
+                          >
+                            <Icon :name="candidateDetailLoading === candidate.id ? 'spinner' : 'info'" :size="11" />
+                            {{ detailOpen.has(candidate.id) ? 'Hide details' : 'Details' }}
+                          </button>
+                          <button
+                            v-if="canApproveSelectedCandidate(identity, candidate)"
+                            class="mini-btn accept"
+                            :disabled="busyId === identity.id"
+                            @click.stop="approveCandidate(identity, candidate)"
+                          >
+                            <Icon name="check" :size="11" /> Accept selected
+                          </button>
+                          <button
+                            v-else-if="candidate.status === 'selected'"
                             class="mini-btn selected"
                             disabled
                           >
@@ -550,6 +688,50 @@ function runFiles(run: ScanRun): number {
                           >
                             Use this
                           </button>
+                        </div>
+                        <div v-if="detailOpen.has(candidate.id)" class="candidate-detail">
+                          <div v-if="candidateDetailError[candidate.id]" class="candidate-detail-error">
+                            {{ candidateDetailError[candidate.id] }}
+                          </div>
+                          <div v-else-if="candidateDetails[candidate.id]" class="candidate-detail-body">
+                            <img
+                              v-if="candidateDetails[candidate.id]!.poster_url"
+                              class="candidate-detail-poster"
+                              :src="candidateDetails[candidate.id]!.poster_url"
+                              alt=""
+                              loading="lazy"
+                            >
+                            <div class="candidate-detail-main">
+                              <div class="candidate-detail-title">
+                                {{ candidateDetails[candidate.id]!.title }}
+                                <span v-if="candidateDetails[candidate.id]!.year" class="dim">({{ candidateDetails[candidate.id]!.year }})</span>
+                              </div>
+                              <div class="candidate-detail-sub mono">
+                                {{ candidateDetails[candidate.id]!.provider_id }}
+                              </div>
+                              <div v-if="candidateDetailFacts(candidateDetails[candidate.id]!).length" class="candidate-detail-facts">
+                                <span v-for="fact in candidateDetailFacts(candidateDetails[candidate.id]!)" :key="fact">{{ fact }}</span>
+                              </div>
+                              <p v-if="candidateDetails[candidate.id]!.description" class="candidate-detail-description">
+                                {{ candidateDetails[candidate.id]!.description }}
+                              </p>
+                              <div v-if="candidateDetailTags(candidateDetails[candidate.id]!).length" class="candidate-detail-genres">
+                                <span v-for="tag in candidateDetailTags(candidateDetails[candidate.id]!)" :key="tag">{{ tag }}</span>
+                              </div>
+                              <div class="candidate-detail-actions">
+                                <a
+                                  class="mini-btn link"
+                                  :href="candidateDetailHeyaURL(candidateDetails[candidate.id]!)"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  @click.stop
+                                >
+                                  <Icon name="link" :size="11" /> Open on Heya
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                          <div v-else class="detail-empty">Fetching candidate detail…</div>
                         </div>
                       </div>
                     </div>
@@ -624,9 +806,9 @@ function runFiles(run: ScanRun): number {
 </template>
 
 <style scoped>
-.scanner-view { display: flex; flex-direction: column; gap: 16px; }
+.sv2-view { display: flex; flex-direction: column; gap: 16px; }
 
-.scanner-head {
+.sv2-head {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -657,16 +839,16 @@ function runFiles(run: ScanRun): number {
 .head-text p { margin: 2px 0 0; font-size: 11px; color: var(--fg-3); text-transform: capitalize; }
 .head-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
-.scanner-body { display: flex; flex-direction: column; gap: 18px; }
-.scanner-body.loading { opacity: 0.6; pointer-events: none; }
+.sv2-body { display: flex; flex-direction: column; gap: 18px; }
+.sv2-body.loading { opacity: 0.6; pointer-events: none; }
 
-.scanner-tiles {
+.sv2-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
 }
 
-.scanner-note {
+.sv2-note {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px;
   border-radius: var(--r-md);
@@ -675,12 +857,12 @@ function runFiles(run: ScanRun): number {
   color: var(--gold);
   font-size: 12px;
 }
-.scanner-note.error {
+.sv2-note.error {
   background: rgba(217,107,107,0.06);
   border-color: rgba(217,107,107,0.28);
   color: var(--bad);
 }
-.scanner-note.ok {
+.sv2-note.ok {
   background: rgba(111,191,124,0.08);
   border-color: rgba(111,191,124,0.28);
   color: var(--good);
@@ -756,7 +938,7 @@ function runFiles(run: ScanRun): number {
    key/value only, so this is a plain semantic <table>. A width:100% spacer
    column soaks up slack, so every other column hugs its content and the
    columns line up across all rows (status, local, match, flags). */
-.idt { width: 100%; border-collapse: collapse; }
+.idt { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .idt-row { cursor: pointer; }
 .idt-row > td {
   padding: 9px 10px;
@@ -771,8 +953,13 @@ function runFiles(run: ScanRun): number {
 .idt-row > td:first-child { padding-left: 14px; }
 .idt-row > td:last-child { padding-right: 14px; }
 
-.idt-chev, .idt-status, .idt-local, .idt-match, .idt-flags, .idt-link { width: 1%; }
-.idt-spacer { width: 100%; padding: 0 !important; }
+.idt-chev { width: 38px; }
+.idt-status { width: 110px; }
+.idt-local { width: 27%; }
+.idt-match { width: 34%; }
+.idt-flags { width: 150px; }
+.idt-link { width: 38px; text-align: right; }
+.idt-spacer { width: auto; padding: 0 !important; }
 
 .idt-toggle {
   display: inline-flex; align-items: center; justify-content: center;
@@ -784,17 +971,18 @@ function runFiles(run: ScanRun): number {
 .chev { transition: transform 0.15s ease; }
 .chev.rot { transform: rotate(90deg); }
 
-.cell-title { font-size: 13px; font-weight: 600; color: var(--fg-0); }
+.cell-title {
+  font-size: 13px; font-weight: 600; color: var(--fg-0);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .idt-match .cell-title { font-weight: 500; color: var(--fg-1); }
 .cell-sub {
   margin-top: 2px; font-size: 11px; color: var(--fg-3);
-  max-width: 280px; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
 }
 .arrow-in { color: var(--fg-4); }
 
 .idt-flags .flag + .flag { margin-left: 6px; }
-.idt-link { text-align: right; }
-
 .flag {
   display: inline-block;
   font-family: var(--font-mono); font-size: 10px;
@@ -839,7 +1027,7 @@ function runFiles(run: ScanRun): number {
   border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden;
 }
 .candidate-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 9px 12px;
   border-top: 1px solid var(--border);
   background: var(--bg-1);
@@ -850,10 +1038,48 @@ function runFiles(run: ScanRun): number {
   display: flex; align-items: center; justify-content: center;
   background: var(--bg-0); color: var(--fg-3); font-size: 11px; flex-shrink: 0;
 }
+.candidate-poster {
+  width: 34px; height: 50px; border-radius: var(--r-xs);
+  object-fit: cover; background: var(--bg-0); flex-shrink: 0;
+}
 .candidate-main { flex: 1; min-width: 0; }
 .candidate-title { font-size: 12.5px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .candidate-sub { margin-top: 2px; font-size: 11px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.candidate-actions { display: flex; gap: 5px; flex-shrink: 0; }
+.candidate-description {
+  margin-top: 5px; color: var(--fg-2); font-size: 11.5px; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.candidate-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.candidate-detail {
+  flex: 0 0 100%;
+  margin-left: 34px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.candidate-detail-body {
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.candidate-detail-poster {
+  width: 72px; height: 108px; border-radius: var(--r-sm);
+  object-fit: cover; background: var(--bg-0); flex-shrink: 0;
+}
+.candidate-detail-main { flex: 1; min-width: 0; }
+.candidate-detail-title { font-size: 13px; font-weight: 650; color: var(--fg-0); }
+.candidate-detail-sub { margin-top: 2px; font-size: 11px; color: var(--fg-3); }
+.candidate-detail-facts, .candidate-detail-genres {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px;
+}
+.candidate-detail-facts span, .candidate-detail-genres span {
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 2px 7px; font-size: 10.5px; color: var(--fg-2); background: rgba(255,255,255,0.03);
+}
+.candidate-detail-description {
+  margin: 8px 0 0; color: var(--fg-1); font-size: 12px; line-height: 1.45;
+}
+.candidate-detail-actions { display: flex; margin-top: 10px; }
+.candidate-detail-error {
+  color: var(--bad); font-size: 12px;
+}
 .mini-btn {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 4px 9px; border-radius: var(--r-xs);
@@ -862,6 +1088,7 @@ function runFiles(run: ScanRun): number {
   font-size: 11px;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
+.mini-btn.link { text-decoration: none; }
 .mini-btn:hover:not(:disabled) { color: var(--fg-0); border-color: var(--border-strong); background: rgba(255,255,255,0.05); }
 .mini-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .mini-btn.accept { color: var(--gold); border-color: rgba(230,185,74,0.35); }
@@ -888,11 +1115,10 @@ function runFiles(run: ScanRun): number {
 .sv2-btn.active { color: var(--gold); border-color: rgba(230,185,74,0.35); background: var(--gold-soft); }
 
 @media (max-width: 820px) {
-  .scanner-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  /* Table is wider than a phone; let it scroll horizontally inside the panel
-     rather than crushing the columns out of alignment. */
-  .identity-panel { overflow-x: auto; }
-  .cell-sub { max-width: 200px; }
+  .sv2-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Table is wider than a phone; the base `.identity-panel { overflow-x: auto }`
+     already lets it scroll rather than crushing columns out of alignment. */
+  .cell-sub { max-width: 160px; }
   .filter-search input { width: 140px; }
 }
 </style>

@@ -2,11 +2,13 @@ package heyamedia
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -199,7 +201,13 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 	if apiKind == "" {
 		return nil, fmt.Errorf("heya: unsupported kind %s", kind)
 	}
-	hits, err := p.searchHits(ctx, apiKind, query.Title, query.Year, query.Artist, 20)
+	searchAuthor := query.Author
+	searchFormat := query.Format
+	if apiKind != "book" {
+		searchAuthor = ""
+		searchFormat = ""
+	}
+	hits, err := p.searchHits(ctx, apiKind, query.Title, query.Year, query.Artist, searchAuthor, searchFormat, 20)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +219,7 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 // the returned ProviderIDs look like "heya:album:mbid:<uuid>". Used by the
 // metadata editor's per-album re-identify.
 func (p *HeyaProvider) SearchAlbums(ctx context.Context, title, artist string) ([]metadata.SearchResult, error) {
-	hits, err := p.searchHits(ctx, "album", title, "", artist, 20)
+	hits, err := p.searchHits(ctx, "album", title, "", artist, "", "", 20)
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +230,11 @@ func mapHitsToResults(apiKind string, hits []SearchHit) []metadata.SearchResult 
 	results := make([]metadata.SearchResult, 0, len(hits))
 	for _, h := range hits {
 		providerID := "heya:" + apiKind + ":" + h.ID
-		confidence := 0.7
-		if h.Enriched {
+		confidence := h.Score
+		if confidence == 0 {
+			confidence = 0.7
+		}
+		if h.Enriched && confidence < 0.95 {
 			confidence = 0.95
 		}
 		year := ""
@@ -248,12 +259,15 @@ func mapHitsToResults(apiKind string, hits []SearchHit) []metadata.SearchResult 
 }
 
 // searchHits is the shared lookup used by Search() and SearchArtistBest().
-func (p *HeyaProvider) searchHits(ctx context.Context, apiKind, query, year, artist string, limit int) ([]SearchHit, error) {
+func (p *HeyaProvider) searchHits(ctx context.Context, apiKind, query, year, artist, author, format string, limit int) ([]SearchHit, error) {
 	if query == "" {
 		return nil, fmt.Errorf("heya: empty search query")
 	}
 	if limit <= 0 {
 		limit = 10
+	}
+	if apiKind == "book" && (author != "" || format != "") {
+		return p.searchHitsRaw(ctx, apiKind, query, year, artist, author, format, limit)
 	}
 	params := &gen.SearchParams{
 		Type: gen.SearchParamsType(apiKind),
@@ -300,6 +314,80 @@ func (p *HeyaProvider) searchHits(ctx context.Context, apiKind, query, year, art
 	return out, nil
 }
 
+func (p *HeyaProvider) searchHitsRaw(ctx context.Context, apiKind, query, year, artist, author, format string, limit int) ([]SearchHit, error) {
+	if p.client == nil || p.client.httpClient == nil || p.client.baseURL == "" {
+		return nil, fmt.Errorf("heya: raw search client is not initialized")
+	}
+	endpoint, err := url.JoinPath(p.client.baseURL, "/api/v1/search")
+	if err != nil {
+		return nil, fmt.Errorf("heya search url: %w", err)
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("heya search url parse: %w", err)
+	}
+	q := u.Query()
+	q.Set("type", apiKind)
+	q.Set("q", query)
+	q.Set("limit", strconv.Itoa(limit))
+	if year != "" {
+		q.Set("year", year)
+	}
+	if artist != "" {
+		q.Set("artist", artist)
+	}
+	if author != "" {
+		q.Set("author", author)
+	}
+	if format != "" {
+		q.Set("format", format)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("heya search request: %w", err)
+	}
+	resp, err := p.client.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("heya search: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("heya search read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, upstreamErr("search", resp.StatusCode, body)
+	}
+	var parsed gen.SearchOutputBody
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("heya search decode: %w", err)
+	}
+	if parsed.Results == nil {
+		return nil, nil
+	}
+	out := make([]SearchHit, 0, len(*parsed.Results))
+	for _, h := range *parsed.Results {
+		out = append(out, SearchHit{
+			ID:          h.Id,
+			Kind:        h.Kind,
+			Name:        h.Name,
+			Year:        intPtr64AsInt(h.Year),
+			Country:     strPtr(h.Country),
+			Image:       strPtr(h.Image),
+			Snippet:     strPtr(h.Snippet),
+			Sources:     strs(h.Sources),
+			ExternalIDs: mergeExternalIDs(h.ExternalIds, nil),
+			AltTitles:   strs(h.AltTitles),
+			Score:       h.Score,
+			Enriched:    h.Enriched,
+			Slug:        strPtr(h.Slug),
+		})
+	}
+	return out, nil
+}
+
 // SearchArtistBest searches for an artist by name and picks the best hit
 // to fetch. heya.media sorts the merged result list with enriched warm-
 // cache rows first, then by score within source tier, so hits[0] is
@@ -307,7 +395,7 @@ func (p *HeyaProvider) searchHits(ctx context.Context, apiKind, query, year, art
 // MBID in our DB (cross-reference key) rather than an apple/deezer id we
 // can fetch but not cross-reference later.
 func (p *HeyaProvider) SearchArtistBest(ctx context.Context, name string) (*SearchHit, error) {
-	hits, err := p.searchHits(ctx, "artist", name, "", "", 20)
+	hits, err := p.searchHits(ctx, "artist", name, "", "", "", "", 20)
 	if err != nil {
 		return nil, err
 	}

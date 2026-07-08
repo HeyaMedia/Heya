@@ -288,15 +288,213 @@ func mapBookDoc(body *gen.BookDocBody) *metadata.MediaDetail {
 	if body.Year != nil && *body.Year > 0 {
 		yearStr = strconv.FormatInt(*body.Year, 10)
 	}
+	extIDs := mergeExternalIDs(body.Ids, nil)
+	if extIDs["ol_work_id"] != "" && extIDs["openlibrary"] == "" {
+		extIDs["openlibrary"] = extIDs["ol_work_id"]
+	}
+	payload := body.Payload
+	edition := bookPayloadMap(payload, "edition")
+	authorName, authorIDs := bookPayloadAuthor(payload)
+	extIDs = mergeBookPayloadIDs(extIDs, authorIDs)
+	description := firstBookPayloadString(payload, "description", "overview")
+	if description == "" {
+		description = firstBookPayloadString(edition, "description")
+	}
+	publisher := firstBookPayloadString(edition, "publisher")
+	if publisher == "" {
+		publisher = firstBookPayloadString(payload, "publisher")
+	}
+	isbn := firstBookPayloadString(edition, "isbn_13", "isbn13", "isbn", "isbn_10", "isbn10")
+	if isbn == "" {
+		isbn = firstBookPayloadString(payload, "isbn_13", "isbn13", "isbn", "isbn_10", "isbn10")
+	}
+	publishDate := firstBookPayloadString(edition, "published_date", "publish_date", "publication_date")
+	if publishDate == "" {
+		publishDate = firstBookPayloadString(payload, "published_date", "publish_date", "publication_date", "first_publish_date")
+	}
+	language := firstBookPayloadString(edition, "language")
+	if language == "" {
+		language = firstBookPayloadString(payload, "language")
+	}
 	return &metadata.MediaDetail{
 		Title:        body.Title,
 		SortTitle:    strings.ToLower(body.Title),
 		Year:         yearStr,
+		Description:  description,
 		PosterURL:    strPtr(body.Poster),
-		ExternalIDs:  mergeExternalIDs(body.Ids, nil),
+		ExternalIDs:  extIDs,
 		ProviderKind: body.Kind,
 		HeyaSlug:     body.Slug,
+		AuthorName:   authorName,
+		ISBN:         isbn,
+		PageCount:    firstBookPayloadInt(edition, "page_count", "pages"),
+		Publisher:    publisher,
+		PublishDate:  publishDate,
+		Subjects:     firstBookPayloadStrings(payload, "subjects", "subject", "genres"),
+		Language:     language,
 	}
+}
+
+func bookPayloadMap(payload map[string]interface{}, key string) map[string]interface{} {
+	if payload == nil {
+		return nil
+	}
+	if m, ok := payload[key].(map[string]interface{}); ok {
+		return m
+	}
+	return nil
+}
+
+func bookPayloadAuthor(payload map[string]interface{}) (string, map[string]string) {
+	authors, ok := payload["authors"].([]interface{})
+	if !ok || len(authors) == 0 {
+		return firstBookPayloadString(payload, "author", "author_name"), nil
+	}
+	for _, raw := range authors {
+		switch v := raw.(type) {
+		case string:
+			if strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v), nil
+			}
+		case map[string]interface{}:
+			name := firstBookPayloadString(v, "name", "title")
+			if name == "" {
+				continue
+			}
+			ids := map[string]string{}
+			for _, key := range []string{"ol_author_id", "openlibrary_author", "openlibrary"} {
+				if value := firstBookPayloadString(v, key); value != "" {
+					ids["openlibrary_author"] = value
+					break
+				}
+			}
+			if nested := bookPayloadMap(v, "external_ids"); nested != nil {
+				if value := firstBookPayloadString(nested, "ol_author_id", "openlibrary_author", "openlibrary"); value != "" {
+					ids["openlibrary_author"] = value
+				}
+			}
+			if len(ids) == 0 {
+				ids = nil
+			}
+			return name, ids
+		}
+	}
+	return "", nil
+}
+
+func mergeBookPayloadIDs(base map[string]string, extra map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range base {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	for k, v := range extra {
+		if v != "" && out[k] == "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func firstBookPayloadString(payload map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			if strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+		case fmt.Stringer:
+			if strings.TrimSpace(v.String()) != "" {
+				return strings.TrimSpace(v.String())
+			}
+		case map[string]interface{}:
+			if s := firstBookPayloadString(v, "value", "text", "description"); s != "" {
+				return s
+			}
+		case []interface{}:
+			for _, item := range v {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					return strings.TrimSpace(s)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func firstBookPayloadInt(payload map[string]interface{}, keys ...string) int {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case int:
+			return v
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		case string:
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+func firstBookPayloadStrings(payload map[string]interface{}, keys ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case []string:
+			for _, item := range v {
+				out = appendBookPayloadString(out, seen, item)
+			}
+		case []interface{}:
+			for _, item := range v {
+				switch t := item.(type) {
+				case string:
+					out = appendBookPayloadString(out, seen, t)
+				case map[string]interface{}:
+					out = appendBookPayloadString(out, seen, firstBookPayloadString(t, "name", "title", "value"))
+				}
+			}
+		case string:
+			out = appendBookPayloadString(out, seen, v)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return nil
+}
+
+func appendBookPayloadString(out []string, seen map[string]bool, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return out
+	}
+	key := strings.ToLower(value)
+	if seen[key] {
+		return out
+	}
+	seen[key] = true
+	return append(out, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +869,7 @@ func mapCreators(refs *[]gen.NamedRef) []metadata.CreatorDetail {
 
 func mapSeasons(seasons []gen.Season) []metadata.SeasonDetail {
 	out := make([]metadata.SeasonDetail, 0, len(seasons))
+	absoluteBase := 0
 	for _, s := range seasons {
 		posterURL := ""
 		if s.PosterUrls != nil && len(*s.PosterUrls) > 0 {
@@ -679,6 +878,14 @@ func mapSeasons(seasons []gen.Season) []metadata.SeasonDetail {
 		episodes := []metadata.EpisodeDetail{}
 		if s.Episodes != nil {
 			episodes = mapEpisodes(*s.Episodes)
+		}
+		if len(episodes) == 0 {
+			episodes = synthesizeSeasonEpisodes(s, absoluteBase)
+		}
+		if s.Number > 0 {
+			if count := seasonEpisodeCount(s); count > 0 {
+				absoluteBase += count
+			}
 		}
 		out = append(out, metadata.SeasonDetail{
 			Number:        intPtr64AsInt(&s.Number),
@@ -696,6 +903,30 @@ func mapSeasons(seasons []gen.Season) []metadata.SeasonDetail {
 		})
 	}
 	return out
+}
+
+func synthesizeSeasonEpisodes(s gen.Season, absoluteBase int) []metadata.EpisodeDetail {
+	count := seasonEpisodeCount(s)
+	if count <= 0 {
+		return nil
+	}
+	episodes := make([]metadata.EpisodeDetail, 0, count)
+	for i := 1; i <= count; i++ {
+		episode := metadata.EpisodeDetail{Number: i}
+		if s.Number > 0 {
+			episode.AbsoluteNumber = absoluteBase + i
+		}
+		episodes = append(episodes, episode)
+	}
+	return episodes
+}
+
+func seasonEpisodeCount(s gen.Season) int {
+	count := intPtr64AsInt(s.EpisodeCount)
+	if count == 0 {
+		count = intPtr64AsInt(s.AiredEpisodes)
+	}
+	return count
 }
 
 func mapEpisodes(eps []gen.Episode) []metadata.EpisodeDetail {

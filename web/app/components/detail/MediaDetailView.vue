@@ -63,8 +63,8 @@
           </div>
 
           <div class="detail-actions">
-            <button v-if="playableFileId" class="btn btn-primary" @click="navigateToPlayer"><Icon name="play" :size="16" /> Play</button>
-            <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No File</button>
+            <button v-if="playableFileId" class="btn btn-primary" @click="navigateToPrimaryFile"><Icon :name="primaryActionIcon" :size="16" /> {{ primaryActionLabel }}</button>
+            <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon :name="primaryActionIcon" :size="16" /> No File</button>
             <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
             <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
               <Icon :name="isFavorited ? 'heartfill' : 'heart'" :size="20" />
@@ -78,7 +78,7 @@
           </div>
 
           <!-- Playback preferences (audio/subtitle language selection) -->
-          <PlaybackPrefs v-if="detail.available" :media-item-id="detail.media_item.id" />
+          <PlaybackPrefs v-if="showPlaybackPrefs" :media-item-id="detail.media_item.id" />
 
           <p v-if="detail.preferred_overview || detail.media_item.description" class="detail-synopsis">{{ detail.preferred_overview || detail.media_item.description }}</p>
 
@@ -95,6 +95,22 @@
             <template v-if="detail.movie?.original_language">
               <div class="info-label">Language</div>
               <div class="info-value">{{ detail.movie.original_language.toUpperCase() }}</div>
+            </template>
+            <template v-if="detail.author?.name">
+              <div class="info-label">Author</div>
+              <div class="info-value">{{ detail.author.name }}</div>
+            </template>
+            <template v-if="bookFormatLabel">
+              <div class="info-label">Format</div>
+              <div class="info-value">{{ bookFormatLabel }}</div>
+            </template>
+            <template v-if="detail.book?.page_count">
+              <div class="info-label">Pages</div>
+              <div class="info-value">{{ detail.book.page_count }}</div>
+            </template>
+            <template v-if="detail.book?.publisher">
+              <div class="info-label">Publisher</div>
+              <div class="info-value">{{ detail.book.publisher }}</div>
             </template>
             <template v-if="detail.movie?.budget">
               <div class="info-label">Budget</div>
@@ -363,9 +379,18 @@ function openPosterLightbox() {
 }
 
 const playableFileId = computed(() => detail.value?.files?.[0]?.id)
+const isBook = computed(() => detail.value?.media_item.media_type === 'book')
+const isAudiobook = computed(() => detail.value?.book?.format === 'audiobook')
+const primaryActionLabel = computed(() => (isBook.value && !isAudiobook.value ? 'Read' : 'Play'))
+const primaryActionIcon = computed(() => (isBook.value && !isAudiobook.value ? 'book' : 'play'))
+const showPlaybackPrefs = computed(() => detail.value?.available && (!isBook.value || isAudiobook.value))
 
-function navigateToPlayer() {
+function navigateToPrimaryFile() {
   if (!playableFileId.value || !detail.value) return
+  if (isBook.value && !isAudiobook.value) {
+    window.open(`/api/stream/${playableFileId.value}`, '_blank', 'noopener,noreferrer')
+    return
+  }
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
     title: detail.value.media_item.title,
@@ -373,7 +398,20 @@ function navigateToPlayer() {
   navigateTo(`/watch/${playableFileId.value}?${params}`)
 }
 
-const genres = computed(() => detail.value?.movie?.genres || detail.value?.tv_series?.genres || detail.value?.book?.genres || [])
+const genres = computed(() => {
+  const movieGenres = detail.value?.movie?.genres
+  if (movieGenres?.length) return movieGenres
+  const tvGenres = detail.value?.tv_series?.genres
+  if (tvGenres?.length) return tvGenres
+  const bookGenres = detail.value?.book?.genres
+  if (bookGenres?.length) return bookGenres
+  return detail.value?.book?.subjects || []
+})
+const bookFormatLabel = computed(() => {
+  const format = detail.value?.book?.format || ''
+  if (format === 'audiobook') return 'Audiobook'
+  return format ? format.toUpperCase() : ''
+})
 
 const rating = computed(() => {
   const r = detail.value?.movie?.rating || detail.value?.tv_series?.rating || detail.value?.book?.rating

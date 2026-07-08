@@ -417,7 +417,7 @@ onMounted(async () => {
               loading="lazy"
             />
             <div v-else class="missing-empty">
-              <Icon :name="item.media_type === 'movie' ? 'film' : item.media_type === 'tv' ? 'tv' : 'music'" :size="16" />
+              <Icon :name="item.media_type === 'movie' ? 'film' : (item.media_type === 'tv' || item.media_type === 'anime') ? 'tv' : 'music'" :size="16" />
             </div>
             <div class="missing-badge">Missing</div>
           </div>

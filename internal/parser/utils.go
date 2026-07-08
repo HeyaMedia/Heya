@@ -10,15 +10,15 @@ import (
 var knownFileSuffixes = []string{
 	".mkv.part", ".zip.001", ".!qb", ".tmp",
 	".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv",
-	".flac", ".m4a", ".mp3", ".aac", ".wav", ".ogg", ".opus",
+	".flac", ".m4a", ".m4b", ".mp3", ".aac", ".wav", ".ogg", ".opus",
 	".rar", ".r00", ".r01", ".zip", ".7z", ".001",
 	".nfo", ".sfv", ".srr",
 	".jpg", ".jpeg", ".png", ".gif", ".webp",
-	".lrc", ".epub", ".pdf",
+	".lrc", ".epub", ".pdf", ".mobi", ".azw", ".azw3", ".cbr", ".cbz", ".djvu",
 }
 
 var audioExtensions = map[string]bool{
-	".flac": true, ".m4a": true, ".mp3": true, ".aac": true,
+	".flac": true, ".m4a": true, ".m4b": true, ".mp3": true, ".aac": true,
 	".wav": true, ".ogg": true, ".opus": true, ".lrc": true,
 }
 
@@ -28,7 +28,8 @@ var videoExtensions = map[string]bool{
 }
 
 var bookExtensions = map[string]bool{
-	".epub": true, ".pdf": true,
+	".epub": true, ".pdf": true, ".mobi": true, ".azw": true,
+	".azw3": true, ".cbr": true, ".cbz": true, ".djvu": true,
 }
 
 func IsMediaExtension(ext string) bool {

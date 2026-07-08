@@ -7,8 +7,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/taskdefs"
 	"github.com/rs/zerolog/log"
@@ -224,6 +226,14 @@ func (a *App) UpdateScheduledTask(ctx context.Context, taskID string, enabled bo
 		dailyEndTime = "06:00"
 	}
 
+	nextRunAt := pgtype.Timestamptz{}
+	if enabled {
+		nextRunAt = pgtype.Timestamptz{
+			Time:  scheduler.InitialNextRunAfter(time.Now(), intervalHours, dailyStartTime, dailyEndTime),
+			Valid: true,
+		}
+	}
+
 	q := sqlc.New(a.db)
 	return q.UpdateScheduledTaskConfig(ctx, sqlc.UpdateScheduledTaskConfigParams{
 		ID:                taskID,
@@ -232,6 +242,7 @@ func (a *App) UpdateScheduledTask(ctx context.Context, taskID string, enabled bo
 		DailyStartTime:    dailyStartTime,
 		DailyEndTime:      dailyEndTime,
 		MaxRuntimeMinutes: maxRuntimeMinutes,
+		NextRunAt:         nextRunAt,
 	})
 }
 

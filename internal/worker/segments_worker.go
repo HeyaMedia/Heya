@@ -236,13 +236,21 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	if err != nil {
 		return fmt.Errorf("get library_file %d: %w", job.Args.LibraryFileID, err)
 	}
-	if lf.DeletedAt.Valid || !lf.MediaItemID.Valid {
+	if lf.DeletedAt.Valid {
 		return nil
 	}
 
-	mi, err := q.GetMediaItemByID(ctx, lf.MediaItemID.Int64)
+	mediaItemID, ok, err := mediaItemIDForSegmentFile(ctx, q, lf)
 	if err != nil {
-		return fmt.Errorf("get media_item %d: %w", lf.MediaItemID.Int64, err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	mi, err := q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return fmt.Errorf("get media_item %d: %w", mediaItemID, err)
 	}
 
 	providerID := heyamedia.SegmentProviderID(externalIDStrings(mi.ExternalIds))
@@ -267,7 +275,7 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	switch mi.MediaType {
 	case sqlc.MediaTypeMovie:
 		cands, _, err = w.Heya.MovieSegments(fetchCtx, providerID, durationMs)
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		season, episode, ok := parseFirstEpisodeRef(lf.ParseResult)
 		if !ok {
 			// Extras/specials the parser couldn't address — mark done so the
@@ -298,6 +306,22 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func mediaItemIDForSegmentFile(ctx context.Context, q *sqlc.Queries, lf sqlc.LibraryFile) (int64, bool, error) {
+	if lf.MediaItemID.Valid {
+		return lf.MediaItemID.Int64, true, nil
+	}
+	links, err := q.ListLibraryFileLinksByFile(ctx, lf.ID)
+	if err != nil {
+		return 0, false, fmt.Errorf("list library_file_links %d: %w", lf.ID, err)
+	}
+	for _, link := range links {
+		if link.RelationType != "extra" {
+			return link.MediaItemID, true, nil
+		}
+	}
+	return 0, false, nil
 }
 
 // writeCommunitySegments applies the precedence-guarded insert for one
@@ -460,7 +484,7 @@ func (w *KickoffMediaSegmentsWorker) Work(ctx context.Context, job *river.Job[Ki
 				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 			}
 			w.Progress.Set("scan_media_segments", "kickoff_media_segments", row.Path)
-			res, err := rc.Insert(ctx, ScanMediaSegmentsFileArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID}, nil)
+			res, err := rc.Insert(ctx, ScanMediaSegmentsFileArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
 			switch {
 			case err != nil:
 				log.Warn().Err(err).Int64("library_file_id", row.ID).Msg("kickoff_media_segments: enqueue failed")

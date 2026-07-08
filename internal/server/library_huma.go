@@ -205,39 +205,39 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(stats), nil
 		})
 
-	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scan-v2", "library-scan-v2-view", "Scanner V2 latest run, findings, and identities", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner", "library-scanner-view", "scanner latest run, findings, and identities", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Candidates bool `query:"candidates" doc:"Include all metadata match candidates for the library"`
-		}) (*JSONOutput[service.ScannerV2View], error) {
-			view, err := app.GetLibraryScannerV2View(ctx, in.ID, in.Candidates)
+		}) (*JSONOutput[service.ScannerView], error) {
+			view, err := app.GetLibraryScannerView(ctx, in.ID, in.Candidates)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return noStoreJSON(view), nil
 		})
 
-	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scan-v2/runs", "library-scan-v2-runs", "Scanner V2 run history", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/runs", "library-scanner-runs", "scanner run history", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			Pagination
-		}) (*JSONOutput[[]service.ScannerV2RunView], error) {
-			runs, err := app.ListLibraryScannerV2Runs(ctx, in.ID, in.Limit, in.Offset)
+		}) (*JSONOutput[[]service.ScannerRunView], error) {
+			runs, err := app.ListLibraryScannerRuns(ctx, in.ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return noStoreJSON(runs), nil
 		})
 
-	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scan-v2/identities/{identity_id}/approve-candidate", "library-scan-v2-approve-candidate", "Approve a scanner V2 match candidate", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scanner/identities/{identity_id}/approve-candidate", "library-scanner-approve-candidate", "Approve a scanner match candidate", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			IdentityID int64 `path:"identity_id" minimum:"1"`
 			Body       struct {
 				CandidateID int64 `json:"candidate_id" minimum:"1"`
 			}
-		}) (*JSONOutput[service.ScannerV2IdentityView], error) {
-			identity, err := app.ApproveScannerV2Candidate(ctx, in.ID, in.IdentityID, in.Body.CandidateID)
+		}) (*JSONOutput[service.ScannerIdentityView], error) {
+			identity, err := app.ApproveScannerCandidate(ctx, in.ID, in.IdentityID, in.Body.CandidateID)
 			if err != nil {
 				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
 					return nil, huma.Error404NotFound("scanner identity or candidate not found")
@@ -247,15 +247,31 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(identity), nil
 		})
 
-	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scan-v2/identities/{identity_id}/reject", "library-scan-v2-reject-identity", "Reject a scanner V2 identity", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/identities/{identity_id}/candidates/{candidate_id}/detail", "library-scanner-candidate-detail", "Fetch scanner match candidate detail", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			IdentityID  int64 `path:"identity_id" minimum:"1"`
+			CandidateID int64 `path:"candidate_id" minimum:"1"`
+		}) (*JSONOutput[service.ScannerCandidateDetailView], error) {
+			detail, err := app.GetScannerCandidateDetail(ctx, in.ID, in.IdentityID, in.CandidateID)
+			if err != nil {
+				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
+					return nil, huma.Error404NotFound("scanner identity or candidate not found")
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(detail), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scanner/identities/{identity_id}/reject", "library-scanner-reject-identity", "Reject a scanner identity", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			IdentityID int64 `path:"identity_id" minimum:"1"`
 			Body       struct {
 				Reason string `json:"reason,omitempty" maxLength:"256"`
 			}
-		}) (*JSONOutput[service.ScannerV2IdentityView], error) {
-			identity, err := app.RejectScannerV2Identity(ctx, in.ID, in.IdentityID, in.Body.Reason)
+		}) (*JSONOutput[service.ScannerIdentityView], error) {
+			identity, err := app.RejectScannerIdentity(ctx, in.ID, in.IdentityID, in.Body.Reason)
 			if err != nil {
 				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
 					return nil, huma.Error404NotFound("scanner identity not found")
@@ -265,15 +281,15 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(identity), nil
 		})
 
-	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scan-v2/identities/{identity_id}/ignore", "library-scan-v2-ignore-identity", "Ignore a scanner V2 identity", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scanner/identities/{identity_id}/ignore", "library-scanner-ignore-identity", "Ignore a scanner identity", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			IdentityID int64 `path:"identity_id" minimum:"1"`
 			Body       struct {
 				Reason string `json:"reason,omitempty" maxLength:"256"`
 			}
-		}) (*JSONOutput[service.ScannerV2IdentityView], error) {
-			identity, err := app.IgnoreScannerV2Identity(ctx, in.ID, in.IdentityID, in.Body.Reason)
+		}) (*JSONOutput[service.ScannerIdentityView], error) {
+			identity, err := app.IgnoreScannerIdentity(ctx, in.ID, in.IdentityID, in.Body.Reason)
 			if err != nil {
 				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
 					return nil, huma.Error404NotFound("scanner identity not found")
@@ -283,12 +299,12 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(identity), nil
 		})
 
-	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scan-v2/identities/{identity_id}/rematch", "library-scan-v2-rematch-identity", "Reset a scanner V2 identity for rematch", "Libraries")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scanner/identities/{identity_id}/rematch", "library-scanner-rematch-identity", "Reset a scanner identity for rematch", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath
 			IdentityID int64 `path:"identity_id" minimum:"1"`
-		}) (*JSONOutput[service.ScannerV2IdentityView], error) {
-			identity, err := app.ResetScannerV2IdentityReview(ctx, in.ID, in.IdentityID)
+		}) (*JSONOutput[service.ScannerIdentityView], error) {
+			identity, err := app.ResetScannerIdentityReview(ctx, in.ID, in.IdentityID)
 			if err != nil {
 				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
 					return nil, huma.Error404NotFound("scanner identity not found")

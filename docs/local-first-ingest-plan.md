@@ -145,19 +145,14 @@ None are optional.
    - Harden the SQL itself: `AND $2::jsonb <> '{}'::jsonb` + explicit `ORDER BY`
      so a future caller can't reintroduce the mislink.
 
-4. **Music identity needs the probe to have run.** `media_info.format.tags`
-   (`mediaprobe/probe.go:61`) is the tag source, but ffprobe and match are
-   enqueued as two **independent, unordered** River jobs in different queues
-   (`process_worker.go:46,55`; `jobs.go:49,92`), and by design `PriorityMatch`
-   (1) runs *before* `PriorityEnrichment`/ffprobe (3) — so `media_info` is
-   normally empty/`{}` at match time. Reading tags there as the plan assumes
-   would make tag-based identity (artist/album/track/disc) never fire. Fix:
-   in the music match path, when `trackFile.MediaInfo` is empty/`"{}"` for an
-   ffprobeable audio file, call the existing synchronous
-   `App.EnsureFileProbed` → `worker.ProbeFile` (`service/probe.go:38`) to
-   populate tags *before* deriving identity. (Acceptable alternatives:
-   audio-scoped reorder where `FFProbeWorker` enqueues the match job on success,
-   or matcher River-snooze/retry when `media_info` is empty — but the
+4. **Music identity needs probe data.** The current scanner calls the injected
+   synchronous probe path (`worker.ProbeFile`) during music analysis when tags
+   are needed, so artist/album/track identity can use embedded tags without
+   waiting for a separate ffprobe worker. If we later split metadata fetching
+   further, keep that property: local music identity must not depend on an
+   unordered background probe finishing first. (Acceptable alternatives:
+   audio-scoped reorder where an ffprobe worker enqueues music scanner work on
+   success, or scanner River-snooze/retry when `media_info` is empty — but the
    synchronous local probe is lowest-churn and matches the plan's
    "synchronous-local signal" framing.)
 

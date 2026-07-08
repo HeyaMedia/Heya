@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 )
 
 // TestAddRecursiveBounded verifies the happy path: a healthy tree arms fully
@@ -129,5 +132,38 @@ func TestWatchDoesNotResurrectUnwatched(t *testing.T) {
 	m.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("Watch resurrected a library unwatched during arming: %d watcher(s) remain", n)
+	}
+}
+
+func TestSyncLibraryDisabledUnwatches(t *testing.T) {
+	m := &Manager{watchers: make(map[string]*LibraryWatcher)}
+	fsw, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cancel := context.WithCancel(context.Background())
+	m.watchers[watcherKey(9, "/library")] = &LibraryWatcher{
+		libraryID: 9,
+		rootPath:  "/library",
+		fsw:       fsw,
+		cancel:    cancel,
+	}
+
+	settings, err := json.Marshal(metadata.LibrarySettings{Watch: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SyncLibrary(context.Background(), sqlc.Library{
+		ID:       9,
+		Name:     "Disabled",
+		Paths:    []string{"/library"},
+		Settings: settings,
+	})
+
+	m.mu.Lock()
+	n := len(m.watchers)
+	m.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("disabled library should remove watchers, got %d", n)
 	}
 }

@@ -100,3 +100,47 @@ func TestKickoffFinishingHandshake(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, run)
 }
+
+func TestScheduledTaskExceededRuntimeIgnoresManualJobs(t *testing.T) {
+	pool := queueopsTestPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	const taskID = "scan_libraries"
+	const kickoffKind = "kickoff_library_scan"
+	const childKind = "process_library_scan"
+	old := `now() - interval '2 hours'`
+
+	var kickoffID, childID int64
+	require.NoError(t, tx.QueryRow(ctx, `
+		INSERT INTO river_job (state, max_attempts, kind, queue, args, metadata, created_at)
+		VALUES ('scheduled', 1, $1, $1, $2::jsonb, '{}'::jsonb, `+old+`)
+		RETURNING id
+	`, kickoffKind, `{"scheduled_task_id": "`+taskID+`"}`).Scan(&kickoffID))
+	require.NoError(t, tx.QueryRow(ctx, `
+		INSERT INTO river_job (state, max_attempts, kind, queue, args, metadata, created_at)
+		VALUES ('available', 1, $1, $1, $2::jsonb, '{}'::jsonb, `+old+`)
+		RETURNING id
+	`, childKind, `{"scheduled_task_id": "`+taskID+`"}`).Scan(&childID))
+
+	exceeded, err := ScheduledTaskExceededRuntime(ctx, tx, taskID, []string{kickoffKind, childKind}, 30)
+	require.NoError(t, err)
+	assert.True(t, exceeded)
+
+	n, err := MarkActiveKickoffManual(ctx, tx, kickoffKind, taskID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n)
+
+	var childSource string
+	require.NoError(t, tx.QueryRow(ctx, `SELECT COALESCE(metadata->>'source', '') FROM river_job WHERE id = $1`, childID).Scan(&childSource))
+	assert.Equal(t, KickoffSourceManual, childSource)
+
+	exceeded, err = ScheduledTaskExceededRuntime(ctx, tx, taskID, []string{kickoffKind, childKind}, 30)
+	require.NoError(t, err)
+	assert.False(t, exceeded)
+
+	_ = kickoffID
+}

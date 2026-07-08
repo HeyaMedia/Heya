@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -208,7 +209,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		QueueEnrich:     true,
 		LibraryID:       item.LibraryID,
 		ScheduledTaskID: job.Args.ScheduledTaskID,
-	}, nil); err != nil {
+	}, scheduledJobInsertOpts(scheduledJobSource(job.Metadata))); err != nil {
 		log.Warn().Err(err).Int64("item_id", item.ID).Msg("enqueue DetectLocalAssets failed")
 	}
 	_ = q.MarkEnrichImagesDone(ctx, item.ID)
@@ -227,17 +228,20 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	// also pre-warms top-billed cast/crew on its own side, so the common people
 	// are usually warm by the time anyone opens their page.
 
-	if settings.FetchRatings {
-		_, _ = client.Insert(ctx, RatingsFetchArgs{MediaItemID: item.ID, LibraryID: item.LibraryID}, nil)
-		log.Debug().Int64("item_id", item.ID).Msg("enrich: ratings fetch queued")
-	}
+	_, _ = client.Insert(ctx, RatingsFetchArgs{MediaItemID: item.ID, LibraryID: item.LibraryID}, nil)
+	log.Debug().Int64("item_id", item.ID).Msg("enrich: ratings fetch queued")
 
 	if settings.SaveNFO {
-		_, _ = client.Insert(ctx, SaveNFOArgs{
-			MediaItemID: item.ID,
-			MediaType:   string(item.MediaType),
-		}, nil)
-		log.Debug().Int64("item_id", item.ID).Msg("enrich: save nfo queued")
+		files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: item.ID, Valid: true})
+		if err == nil && len(files) > 0 {
+			_, _ = client.Insert(ctx, SaveNFOArgs{
+				MediaItemID:   item.ID,
+				LibraryFileID: files[0].ID,
+				FilePath:      files[0].Path,
+				MediaType:     string(item.MediaType),
+			}, nil)
+			log.Debug().Int64("item_id", item.ID).Msg("enrich: save nfo queued")
+		}
 	}
 
 	_ = q.MarkEnrichComplete(ctx, item.ID)
@@ -285,6 +289,10 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	// stamps so the UI's component view stays accurate.
 	_ = q.MarkEnrichBaseDone(ctx, item.ID)
 	_ = q.MarkEnrichStructureDone(ctx, item.ID) // artist → albums → tracks tree
+	settings := metadata.LibrarySettings{UseLocalData: true}
+	if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
+		settings = metadata.ParseSettings(lib.Settings)
+	}
 
 	// Artist artwork: local-first, heya.media fills any gaps.
 	//
@@ -301,7 +309,7 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	//    5 unique backdrops) and queues DownloadImageArgs for the missing
 	//    slots from heya.media's pool. Already-used remote URLs are
 	//    skipped so repeated refreshes don't re-download the same file.
-	local := detectLocalMusicAssets(ctx, q, w.DataDir, item.ID)
+	local := detectLocalMusicAssets(ctx, q, w.DataDir, item.ID, settings.UseLocalData)
 	log.Debug().Int64("item_id", item.ID).Int("local_poster", local.Poster).Int("local_backdrop", local.Backdrop).Int("local_logo", local.Logo).Int("local_banner", local.Banner).Msg("enrich music: local asset scan done")
 	// A skipped refresh (no upstream record, or an identity-conflict guard
 	// fired) carries no trustworthy upstream artwork — only fill gaps from
@@ -319,14 +327,11 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 
 	// SaveMusicNFO is the music-specific analogue of SaveNFO. Mirror the
 	// behaviour from the old RefreshMusicArtistWorker.
-	if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
-		settings := metadata.ParseSettings(lib.Settings)
-		if settings.SaveNFO {
-			if _, err := client.Insert(ctx, SaveMusicNFOArgs{ArtistID: artist.ID}, nil); err != nil {
-				log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("enqueue SaveMusicNFO failed")
-			} else {
-				log.Debug().Int64("artist_id", artist.ID).Msg("enrich music: save nfo queued")
-			}
+	if settings.SaveNFO {
+		if _, err := client.Insert(ctx, SaveMusicNFOArgs{ArtistID: artist.ID}, nil); err != nil {
+			log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("enqueue SaveMusicNFO failed")
+		} else {
+			log.Debug().Int64("artist_id", artist.ID).Msg("enrich music: save nfo queued")
 		}
 	}
 
@@ -444,7 +449,7 @@ func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, itemID int64, d
 	if detail.BackdropURL != "" && count["backdrop"] == 0 {
 		count["backdrop"] = 1
 	}
-	sortOrder := 10
+	sortOrder := 1
 	for _, art := range detail.Artwork {
 		if art.URL == "" || art.URL == detail.PosterURL || art.URL == detail.BackdropURL {
 			continue

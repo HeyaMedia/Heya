@@ -122,10 +122,11 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 	// album collapse to a single refresh.
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	if client != nil {
-		if _, err := client.Insert(ctx, RefreshArtistCentroidArgs{ArtistID: row.ArtistID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
+		source := scheduledJobSource(job.Metadata)
+		if _, err := client.Insert(ctx, RefreshArtistCentroidArgs{ArtistID: row.ArtistID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
 			log.Warn().Err(err).Int64("artist_id", row.ArtistID).Msg("analyze_track_facets: enqueue artist centroid refresh failed")
 		}
-		if _, err := client.Insert(ctx, RefreshAlbumCentroidArgs{AlbumID: row.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
+		if _, err := client.Insert(ctx, RefreshAlbumCentroidArgs{AlbumID: row.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
 			log.Warn().Err(err).Int64("album_id", row.AlbumID).Msg("analyze_track_facets: enqueue album centroid refresh failed")
 		}
 	}

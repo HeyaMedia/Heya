@@ -86,17 +86,18 @@ const updateScheduledTaskConfig = `-- name: UpdateScheduledTaskConfig :one
 UPDATE scheduled_tasks
 SET enabled = $2, interval_hours = $3,
     daily_start_time = $4, daily_end_time = $5,
-    max_runtime_minutes = $6, updated_at = now()
+    max_runtime_minutes = $6, next_run_at = $7, updated_at = now()
 WHERE id = $1 RETURNING id, display_name, description, category, enabled, interval_hours, daily_start_time, daily_end_time, max_runtime_minutes, last_run_at, last_run_result, last_run_duration_sec, last_run_items_processed, last_run_items_total, next_run_at, created_at, updated_at
 `
 
 type UpdateScheduledTaskConfigParams struct {
-	ID                string `json:"id"`
-	Enabled           bool   `json:"enabled"`
-	IntervalHours     int32  `json:"interval_hours"`
-	DailyStartTime    string `json:"daily_start_time"`
-	DailyEndTime      string `json:"daily_end_time"`
-	MaxRuntimeMinutes int32  `json:"max_runtime_minutes"`
+	ID                string             `json:"id"`
+	Enabled           bool               `json:"enabled"`
+	IntervalHours     int32              `json:"interval_hours"`
+	DailyStartTime    string             `json:"daily_start_time"`
+	DailyEndTime      string             `json:"daily_end_time"`
+	MaxRuntimeMinutes int32              `json:"max_runtime_minutes"`
+	NextRunAt         pgtype.Timestamptz `json:"next_run_at"`
 }
 
 func (q *Queries) UpdateScheduledTaskConfig(ctx context.Context, arg UpdateScheduledTaskConfigParams) (ScheduledTask, error) {
@@ -107,6 +108,7 @@ func (q *Queries) UpdateScheduledTaskConfig(ctx context.Context, arg UpdateSched
 		arg.DailyStartTime,
 		arg.DailyEndTime,
 		arg.MaxRuntimeMinutes,
+		arg.NextRunAt,
 	)
 	var i ScheduledTask
 	err := row.Scan(

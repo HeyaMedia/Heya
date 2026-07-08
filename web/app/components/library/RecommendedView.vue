@@ -122,7 +122,7 @@ const continueQuery = useQuery({
   staleTime: 1000 * 30,
 })
 const continueItems = computed<ContinueWatchingItem[]>(() =>
-  (continueQuery.data.value ?? []).filter(i => i.media_type === props.section),
+  (continueQuery.data.value ?? []).filter(i => mediaTypeInSection(i.media_type, props.section)),
 )
 
 // Movies: one tile per watched movie (/watch/recent, deduped to the item).
@@ -246,7 +246,7 @@ function tvEntrySub(e: RecentTVEntry): string {
 useLiveRefresh([
   {
     events: ['media.added', 'media.updated'],
-    filter: byMediaType(props.section),
+    filter: props.section === 'tv' ? byMediaType('tv', 'anime') : byMediaType(props.section),
     keys: [
       ['recommended', props.section],
       ['media', 'recent', props.section],
@@ -254,6 +254,11 @@ useLiveRefresh([
   },
   { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['me', 'watch', 'recent-episodes'], ['recommended', props.section]] },
 ])
+
+function mediaTypeInSection(mediaType: string, section: 'movie' | 'tv') {
+  if (section === 'tv') return mediaType === 'tv' || mediaType === 'anime'
+  return mediaType === section
+}
 </script>
 
 <style scoped>

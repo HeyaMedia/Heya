@@ -11,6 +11,10 @@ type parserEntry struct {
 	parse    func(PreparedSegment) *SceneReleaseParse
 }
 
+type ParseOptions struct {
+	ForceAnimeContext bool
+}
+
 var parsers = []parserEntry{
 	{media: MediaVideo, canParse: canParseTv, parse: parseTv},
 	{media: MediaVideo, canParse: canParseMovie, parse: parseMovie},
@@ -19,6 +23,10 @@ var parsers = []parserEntry{
 }
 
 func ParseStoragePath(inputPath string) ParsedStorageEntry {
+	return ParseStoragePathWithOptions(inputPath, ParseOptions{})
+}
+
+func ParseStoragePathWithOptions(inputPath string, opts ParseOptions) ParsedStorageEntry {
 	normalizedPath := NormalizeInputPath(inputPath)
 	segments := splitSegments(normalizedPath)
 
@@ -34,7 +42,7 @@ func ParseStoragePath(inputPath string) ParsedStorageEntry {
 	if leafSegment.Extension != "" {
 		forcedHint = MediaKindForExtension(leafSegment.Extension)
 	}
-	releaseCandidate := findBestReleaseCandidate(segments, forcedHint)
+	releaseCandidate := findBestReleaseCandidate(segments, forcedHint, opts)
 	media := InferMediaKind(segments, leafSegment.Extension, releaseFromCandidate(releaseCandidate))
 
 	var entryType StorageEntryType
@@ -112,7 +120,12 @@ func ParseStoragePaths(inputPaths []string) []ParsedStorageEntry {
 }
 
 func ParseSceneReleaseName(name string, mediaHint SceneMediaKind) *SceneReleaseParse {
+	return ParseSceneReleaseNameWithOptions(name, mediaHint, ParseOptions{})
+}
+
+func ParseSceneReleaseNameWithOptions(name string, mediaHint SceneMediaKind, opts ParseOptions) *SceneReleaseParse {
 	prepared := PrepareSegment(name)
+	prepared.AnimeContext = opts.ForceAnimeContext
 	return parsePreparedRelease(prepared, mediaHint)
 }
 
@@ -122,10 +135,10 @@ type releaseCandidate struct {
 	index   int
 }
 
-func findBestReleaseCandidate(segments []string, forcedHint SceneMediaKind) *releaseCandidate {
+func findBestReleaseCandidate(segments []string, forcedHint SceneMediaKind, opts ParseOptions) *releaseCandidate {
 	var best *releaseCandidate
 
-	animeContext := PathLooksLikeAnime(segments)
+	animeContext := opts.ForceAnimeContext || PathLooksLikeAnime(segments)
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		seg := segments[i]

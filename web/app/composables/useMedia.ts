@@ -29,6 +29,7 @@ export function mediaTypeColor(type: string) {
   const colors: Record<string, string> = {
     movie: 'text-heya-movie',
     tv: 'text-heya-tv',
+    anime: 'text-heya-tv',
     music: 'text-heya-music',
     book: 'text-heya-book',
   }
@@ -39,6 +40,7 @@ export function mediaTypeBg(type: string) {
   const colors: Record<string, string> = {
     movie: 'bg-heya-movie/20 text-heya-movie',
     tv: 'bg-heya-tv/20 text-heya-tv',
+    anime: 'bg-heya-tv/20 text-heya-tv',
     music: 'bg-heya-music/20 text-heya-music',
     book: 'bg-heya-book/20 text-heya-book',
   }
@@ -59,6 +61,7 @@ export function mediaUrl(item: { id: number; title: string; year?: string; media
   const typeMap: Record<string, string> = {
     movie: 'movies',
     tv: 'tv',
+    anime: 'tv',
     music: 'music/artist',
     book: 'books',
   }
@@ -81,6 +84,7 @@ export function mediaTypeLabel(type: string) {
   const labels: Record<string, string> = {
     movie: 'Movie',
     tv: 'TV Show',
+    anime: 'Anime',
     music: 'Music',
     book: 'Book',
   }

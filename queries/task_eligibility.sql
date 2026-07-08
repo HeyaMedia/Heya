@@ -1,4 +1,4 @@
--- Task-eligibility queries. All read the views from migration 00035 —
+-- Task-eligibility queries. All read the baseline eligibility views —
 -- trickplay_eligible_files / thumbnail_eligible_extras — so the eligibility
 -- predicate exists exactly once (in the view), and the Settings counts, the
 -- task item listings, and the kickoff enqueues can never drift apart.

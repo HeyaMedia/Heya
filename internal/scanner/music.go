@@ -1,0 +1,1031 @@
+package scanner
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/karbowiak/heya/internal/audiotags"
+	"github.com/karbowiak/heya/internal/mediafile"
+	"github.com/karbowiak/heya/internal/mediaprobe"
+	"github.com/karbowiak/heya/internal/nfo"
+	"github.com/karbowiak/heya/internal/parser"
+	"github.com/karbowiak/heya/internal/slug"
+	"github.com/karbowiak/heya/internal/titlematch"
+)
+
+const musicProbeTimeout = 90 * time.Second
+
+type MusicProbeFunc func(ctx context.Context, path string) (*mediaprobe.MediaInfo, error)
+
+type MusicAnalysisOptions struct {
+	Probe MusicProbeFunc
+}
+
+type MusicTrackPlan struct {
+	Key                  string            `json:"key"`
+	Artist               string            `json:"artist"`
+	ArtistDisambiguation string            `json:"artist_disambiguation,omitempty"`
+	Album                string            `json:"album"`
+	Year                 string            `json:"year,omitempty"`
+	ReleaseKind          string            `json:"release_kind,omitempty"`
+	ExternalIDs          map[string]string `json:"external_ids,omitempty"`
+	IdentityKeys         []string          `json:"identity_keys,omitempty"`
+	NFO                  string            `json:"nfo,omitempty"`
+	DiscNumber           int               `json:"disc_number,omitempty"`
+	TrackNumber          int               `json:"track_number,omitempty"`
+	TrackTitle           string            `json:"track_title"`
+	RelPath              string            `json:"rel_path"`
+	Format               string            `json:"format,omitempty"`
+	Source               string            `json:"source"`
+	Confidence           float64           `json:"confidence"`
+	Issues               []string          `json:"issues,omitempty"`
+}
+
+type MusicAlbumPlan struct {
+	Key                  string            `json:"key"`
+	Artist               string            `json:"artist"`
+	ArtistDisambiguation string            `json:"artist_disambiguation,omitempty"`
+	Album                string            `json:"album"`
+	Aliases              []string          `json:"aliases,omitempty"`
+	Year                 string            `json:"year,omitempty"`
+	ReleaseKind          string            `json:"release_kind,omitempty"`
+	ExternalIDs          map[string]string `json:"external_ids,omitempty"`
+	NFOs                 []string          `json:"nfos,omitempty"`
+	Tracks               []MusicTrackPlan  `json:"tracks"`
+	Files                []string          `json:"files"`
+	Issues               []string          `json:"issues,omitempty"`
+	Confidence           float64           `json:"confidence"`
+}
+
+type MusicArtistPlan struct {
+	Key                  string            `json:"key"`
+	Artist               string            `json:"artist"`
+	ArtistDisambiguation string            `json:"artist_disambiguation,omitempty"`
+	ExternalIDs          map[string]string `json:"external_ids,omitempty"`
+	Albums               []MusicAlbumPlan  `json:"albums"`
+	Files                []string          `json:"files"`
+	Issues               []string          `json:"issues,omitempty"`
+	Confidence           float64           `json:"confidence"`
+}
+
+type musicAlbumFolderInfo struct {
+	Artist      string
+	Album       string
+	Year        string
+	ReleaseKind string
+	Source      string
+	Confidence  float64
+}
+
+type musicTrackInfo struct {
+	Disc         int
+	DiscExplicit bool
+	Track        int
+	Title        string
+}
+
+type musicNFOEntry struct {
+	file InventoryFile
+	nfo  *nfo.ParsedNFO
+}
+
+var (
+	musicStructuredAlbumRE      = regexp.MustCompile(`(?i)^(.+?)\s+-\s+(album|ep|single|compilation|soundtrack)\s+-\s+((?:19|20)\d{2}|1)\s+-\s+(.+)$`)
+	musicArtistAlbumYearTailRE  = regexp.MustCompile(`^(.+?)\s+-\s+(.+?)\s+[\[(]((?:19|20)\d{2})[\])](?:\s+.*)?$`)
+	musicYearPrefixRE           = regexp.MustCompile(`^((?:19|20)\d{2})\s+-\s+(.+)$`)
+	musicTitleYearRE            = regexp.MustCompile(`^(.+?)\s+[\[(]((?:19|20)\d{2})[\])](?:.*)?$`)
+	musicSceneCatalogRE         = regexp.MustCompile(`(?i)^\[[^\]]+\]\s*(.+?)\s+-\s+(.+?)(?:-\([^)]+\))?-(single|ep|album)-.*?((?:19|20)\d{2})`)
+	musicDiscFolderRE           = regexp.MustCompile(`(?i)^(?:disc|disk|cd)\s*[_ -]*(\d+).*$`)
+	musicFourDigitTrackRE       = regexp.MustCompile(`^(\d{2})(\d{2})\s*-\s*(.+)$`)
+	musicTwoDigitTrackRE        = regexp.MustCompile(`^(\d{1,2})\s*[-_. ]+\s*(.+)$`)
+	musicTrackArtistTitleDashRE = regexp.MustCompile(`^(.+?)\s+-\s+(.+)$`)
+	musicTrailingFormatTagRE    = regexp.MustCompile(`(?i)\s*[\[(](?:flac|mp3|aac|m4a|ogg|opus|web|web[- ]?dl|cd|vinyl|lossless|remaster(?:ed)?|24bit|16bit|320|v0)[\])]$`)
+	musicNumberedDisambigRE     = regexp.MustCompile(`(?i)\s+\(\d+\)\s*$`)
+	musicSyntheticProbeTitleRE  = regexp.MustCompile(`(?i)^(?:sine|brown|pink|purple)\s*\((?:flac|mp3|aac|m4a|ogg|opus|wav)\)$`)
+	musicWeakTrackTitleRE       = regexp.MustCompile(`(?i)^(?:bonus|sample|test)\s*\d+$`)
+	musicKeyPartRE              = regexp.MustCompile(`[^\p{L}\p{N}]+`)
+)
+
+func AnalyzeMusic(ctx context.Context, inv Inventory, emit Emitter) ([]MusicTrackPlan, []MusicAlbumPlan, []MusicArtistPlan, error) {
+	return AnalyzeMusicWithOptions(ctx, inv, emit, MusicAnalysisOptions{})
+}
+
+func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, opts MusicAnalysisOptions) ([]MusicTrackPlan, []MusicAlbumPlan, []MusicArtistPlan, error) {
+	var tracks []MusicTrackPlan
+	for _, root := range inv.Roots {
+		nfos := parseMusicNFOs(root, emit)
+		for _, file := range root.Files {
+			if err := ctx.Err(); err != nil {
+				return tracks, nil, nil, err
+			}
+			if file.Class != ClassPrimaryMedia || !mediafile.IsAudioExt(file.Ext) {
+				continue
+			}
+			tags := probeMusicTags(ctx, file, opts, emit)
+			plan, ok := planMusicTrack(file, nfos, tags)
+			if !ok {
+				emit.Emit(Event{
+					Event:   "music.file.unplanned",
+					RelPath: file.RelPath,
+					Reason:  "no_music_identity",
+					Message: "audio file could not be assigned to an artist and album",
+				})
+				continue
+			}
+			tracks = append(tracks, plan)
+			emit.Emit(Event{
+				Event:   "music.track.planned",
+				RelPath: file.RelPath,
+				Data: map[string]any{
+					"album":      plan.Album,
+					"artist":     plan.Artist,
+					"confidence": plan.Confidence,
+					"disc":       plan.DiscNumber,
+					"track":      plan.TrackNumber,
+				},
+			})
+		}
+	}
+	sortMusicTracks(tracks)
+	albums := groupMusicAlbums(tracks)
+	artists := groupMusicArtists(albums)
+	for _, album := range albums {
+		emit.Emit(Event{
+			Event: "music.album.planned",
+			Data: map[string]any{
+				"album":      album.Album,
+				"artist":     album.Artist,
+				"files":      len(album.Files),
+				"tracks":     len(album.Tracks),
+				"confidence": album.Confidence,
+			},
+		})
+	}
+	for _, artist := range artists {
+		emit.Emit(Event{
+			Event: "music.artist.planned",
+			Data: map[string]any{
+				"albums":     len(artist.Albums),
+				"artist":     artist.Artist,
+				"confidence": artist.Confidence,
+				"files":      len(artist.Files),
+			},
+		})
+	}
+	return tracks, albums, artists, nil
+}
+
+func probeMusicTags(ctx context.Context, file InventoryFile, opts MusicAnalysisOptions, emit Emitter) audiotags.Tags {
+	if opts.Probe == nil {
+		return audiotags.Tags{}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, musicProbeTimeout)
+	defer cancel()
+	info, err := opts.Probe(probeCtx, file.Path)
+	if err != nil {
+		emit.Emit(Event{
+			Event:    "music.tags.probe_failed",
+			Severity: SeverityWarn,
+			RelPath:  file.RelPath,
+			Message:  err.Error(),
+		})
+		return audiotags.Tags{}
+	}
+	tags := audiotags.FromMediaInfo(info)
+	if tags.HasAny() {
+		emit.Emit(Event{
+			Event:   "music.tags.probed",
+			RelPath: file.RelPath,
+			Data: map[string]any{
+				"album":        tags.Album,
+				"album_artist": tags.AlbumArtist,
+				"artist":       tags.Artist,
+				"title":        tags.Title,
+				"track":        tags.TrackNumber,
+				"year":         tags.Year,
+			},
+		})
+	}
+	return tags
+}
+
+func planMusicTrack(file InventoryFile, nfos map[string]musicNFOEntry, tags audiotags.Tags) (MusicTrackPlan, bool) {
+	segments := splitRelPath(file.RelPath)
+	if len(segments) < 2 {
+		return MusicTrackPlan{}, false
+	}
+
+	parsed := parser.ParseStoragePath(file.RelPath)
+	release := parsed.Release
+
+	discFolder, discFromFolder := musicDiscFromFolder(parentSegment(segments))
+	albumIndex := len(segments) - 2
+	if discFolder && len(segments) >= 3 {
+		albumIndex = len(segments) - 3
+	}
+	if albumIndex < 0 {
+		return MusicTrackPlan{}, false
+	}
+	albumDir := strings.Join(segments[:albumIndex+1], "/")
+	albumFolder := segments[albumIndex]
+	artistFolder := ""
+	if albumIndex > 0 {
+		artistFolder = segments[albumIndex-1]
+	}
+
+	artist, disambig := splitMusicArtistFolder(artistFolder)
+	albumInfo := parseMusicAlbumFolder(albumFolder, artist)
+	if albumInfo.Artist != "" {
+		artist = albumInfo.Artist
+	}
+	album := albumInfo.Album
+	year := albumInfo.Year
+	releaseKind := albumInfo.ReleaseKind
+	source := albumInfo.Source
+	confidence := albumInfo.Confidence
+	externalIDs := map[string]string{}
+	var localNFO musicNFOEntry
+	hasNFO := false
+
+	if release != nil && release.Media == parser.MediaAudio {
+		if release.Artist != "" {
+			artist = release.Artist
+		}
+		if release.ArtistDisambiguation != "" {
+			disambig = release.ArtistDisambiguation
+		}
+		if release.Album != "" {
+			releaseAlbum := cleanMusicAlbumName(release.Album)
+			if shouldUseMusicReleaseAlbum(album, releaseAlbum, source) {
+				album = releaseAlbum
+			}
+		} else if release.Title != "" && album == "" && source == "" {
+			album = release.Title
+		}
+		if release.Year != "" {
+			year = release.Year
+		}
+		if release.ReleaseKind != "" {
+			releaseKind = release.ReleaseKind
+		}
+		if release.Strategy != "" {
+			source = string(release.Strategy)
+		}
+		if release.Score > 0 {
+			confidence = maxFloat(confidence, float64(release.Score)/100)
+		}
+	}
+
+	track := parseMusicTrackFilename(file.Name)
+	if discFromFolder > 0 && !track.DiscExplicit {
+		track.Disc = discFromFolder
+	}
+	if release != nil && release.HasTrackInfo {
+		track.Disc = release.DiscNumber
+		track.Track = release.TrackNumber
+		track.Title = release.TrackTitle
+	}
+	if track.Disc == 0 {
+		track.Disc = 1
+	}
+	if track.Title == "" {
+		track.Title = strings.TrimSuffix(file.Name, filepath.Ext(file.Name))
+	}
+	pathTrackTitle := track.Title
+	pathTrackNumber := track.Track
+
+	tagsApplied := false
+	tagArtist := firstNonEmpty(tags.AlbumArtist, tags.Artist)
+	if shouldUseMusicTagName(artist, tagArtist, source) {
+		artist = tagArtist
+		tagsApplied = true
+	}
+	if shouldUseMusicTagText(album, tags.Album, source) {
+		album = cleanMusicAlbumName(tags.Album)
+		tagsApplied = true
+	}
+	if year == "" && tags.Year != "" {
+		year = tags.Year
+		tagsApplied = true
+	}
+	if tags.DiscNumber > 0 && (!track.DiscExplicit || track.Disc == 0) {
+		track.Disc = tags.DiscNumber
+		tagsApplied = true
+	}
+	if tags.TrackNumber > 0 && track.Track == 0 {
+		track.Track = tags.TrackNumber
+		tagsApplied = true
+	}
+	if shouldUseMusicTagTitle(track.Title, tags.Title, pathTrackNumber, pathTrackTitle) {
+		track.Title = tags.Title
+		tagsApplied = true
+	}
+	for k, v := range musicExternalIDsFromTags(tags) {
+		externalIDs[k] = v
+		tagsApplied = true
+	}
+	if tagsApplied {
+		if source == "" || source == "path" || source == "plain_album_folder" {
+			source = "tag"
+		} else {
+			source += "+tag"
+		}
+		confidence = maxFloat(confidence, 0.88)
+	}
+
+	if entry, ok := nfos[albumDir]; ok && entry.nfo != nil {
+		localNFO = entry
+		hasNFO = true
+		if localNFO.nfo.AlbumArtist != "" {
+			artist = localNFO.nfo.AlbumArtist
+		}
+		if localNFO.nfo.Title != "" {
+			album = cleanMusicAlbumName(localNFO.nfo.Title)
+		}
+		if localNFO.nfo.Year != "" {
+			year = localNFO.nfo.Year
+		}
+		if localNFO.nfo.AlbumType != "" {
+			releaseKind = localNFO.nfo.AlbumType
+		}
+		for k, v := range musicExternalIDsFromNFO(localNFO.nfo) {
+			externalIDs[k] = v
+		}
+		if title := musicTrackTitleFromNFO(localNFO.nfo, track.Disc, track.Track); title != "" {
+			track.Title = title
+		}
+		source = "nfo"
+		confidence = maxFloat(confidence, 0.96)
+	}
+
+	var issues []string
+	if artist == "" || looksLikeUnusableMusicIdentity(artist) {
+		issues = append(issues, "missing_artist")
+	}
+	if album == "" || looksLikeUnusableMusicIdentity(album) {
+		issues = append(issues, "missing_album")
+	}
+	if track.Track == 0 {
+		issues = append(issues, "missing_track_number")
+	}
+	if source == "" {
+		source = "path"
+	}
+	if confidence == 0 {
+		confidence = 0.55
+	}
+	if len(issues) > 0 {
+		confidence = minFloat(confidence, 0.45)
+	}
+
+	if contains(issues, "missing_artist") || contains(issues, "missing_album") {
+		return MusicTrackPlan{}, false
+	}
+
+	plan := MusicTrackPlan{
+		Artist:               strings.TrimSpace(artist),
+		ArtistDisambiguation: strings.TrimSpace(disambig),
+		Album:                strings.TrimSpace(album),
+		Year:                 strings.TrimSpace(year),
+		ReleaseKind:          normalizeMusicReleaseKind(releaseKind),
+		ExternalIDs:          nonEmptyStringMap(externalIDs),
+		DiscNumber:           track.Disc,
+		TrackNumber:          track.Track,
+		TrackTitle:           strings.TrimSpace(track.Title),
+		RelPath:              file.RelPath,
+		Format:               strings.TrimPrefix(strings.ToLower(file.Ext), "."),
+		Source:               source,
+		Confidence:           confidence,
+		Issues:               issues,
+	}
+	if hasNFO {
+		plan.NFO = localNFO.file.RelPath
+	}
+	plan.IdentityKeys = musicAlbumIdentityKeys(plan)
+	plan.Key = plan.IdentityKeys[0]
+	return plan, true
+}
+
+func groupMusicAlbums(tracks []MusicTrackPlan) []MusicAlbumPlan {
+	byKey := map[string]*MusicAlbumPlan{}
+	var grouped []*MusicAlbumPlan
+	for _, track := range tracks {
+		key := musicAlbumGroupKey(track, byKey)
+		album := byKey[key]
+		if album == nil {
+			album = &MusicAlbumPlan{
+				Key:                  key,
+				Artist:               track.Artist,
+				ArtistDisambiguation: track.ArtistDisambiguation,
+				Album:                track.Album,
+				Year:                 track.Year,
+				ReleaseKind:          track.ReleaseKind,
+				ExternalIDs:          copyMusicExternalIDs(track.ExternalIDs),
+				Confidence:           track.Confidence,
+			}
+			byKey[key] = album
+			grouped = append(grouped, album)
+		}
+		for _, identityKey := range track.IdentityKeys {
+			if identityKey != "" {
+				byKey[identityKey] = album
+			}
+		}
+		album.Tracks = append(album.Tracks, track)
+		album.Files = append(album.Files, track.RelPath)
+		album.Confidence = minFloat(album.Confidence, track.Confidence)
+		for k, v := range track.ExternalIDs {
+			if album.ExternalIDs == nil {
+				album.ExternalIDs = map[string]string{}
+			}
+			if album.ExternalIDs[k] == "" {
+				album.ExternalIDs[k] = v
+			}
+		}
+		if track.NFO != "" && !contains(album.NFOs, track.NFO) {
+			album.NFOs = append(album.NFOs, track.NFO)
+		}
+		if track.Album != "" && track.Album != album.Album && !contains(album.Aliases, track.Album) {
+			album.Aliases = append(album.Aliases, track.Album)
+		}
+		for _, issue := range track.Issues {
+			if !contains(album.Issues, issue) {
+				album.Issues = append(album.Issues, issue)
+			}
+		}
+		if album.ReleaseKind == "" && track.ReleaseKind != "" {
+			album.ReleaseKind = track.ReleaseKind
+		}
+	}
+	albums := make([]MusicAlbumPlan, 0, len(grouped))
+	for _, album := range grouped {
+		sortMusicTracks(album.Tracks)
+		sort.Strings(album.Files)
+		sort.Strings(album.Aliases)
+		sort.Strings(album.NFOs)
+		sort.Strings(album.Issues)
+		albums = append(albums, *album)
+	}
+	sort.Slice(albums, func(i, j int) bool {
+		if albums[i].Artist == albums[j].Artist {
+			if albums[i].Year == albums[j].Year {
+				return albums[i].Album < albums[j].Album
+			}
+			return albums[i].Year < albums[j].Year
+		}
+		return albums[i].Artist < albums[j].Artist
+	})
+	return albums
+}
+
+func musicAlbumGroupKey(track MusicTrackPlan, existing map[string]*MusicAlbumPlan) string {
+	for _, key := range track.IdentityKeys {
+		if key == "" {
+			continue
+		}
+		if _, ok := existing[key]; ok {
+			return key
+		}
+	}
+	for key, album := range existing {
+		if !sameMusicArtist(track.Artist, album.Artist) || track.Year != album.Year {
+			continue
+		}
+		if titlematch.FuzzyEqual(track.Album, album.Album) {
+			return key
+		}
+		for _, alias := range album.Aliases {
+			if titlematch.FuzzyEqual(track.Album, alias) {
+				return key
+			}
+		}
+	}
+	if len(track.IdentityKeys) > 0 {
+		return track.IdentityKeys[0]
+	}
+	return musicAlbumKey(track.Artist, track.Album, track.Year)
+}
+
+func sameMusicArtist(a, b string) bool {
+	return normalizeMusicKeyPart(a) == normalizeMusicKeyPart(b)
+}
+
+func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
+	byKey := map[string]*MusicArtistPlan{}
+	for _, album := range albums {
+		key := musicArtistKey(album.Artist, album.ArtistDisambiguation)
+		artist := byKey[key]
+		if artist == nil {
+			artist = &MusicArtistPlan{
+				Key:                  key,
+				Artist:               album.Artist,
+				ArtistDisambiguation: album.ArtistDisambiguation,
+				ExternalIDs:          musicArtistExternalIDsFromAlbum(album),
+				Confidence:           album.Confidence,
+			}
+			byKey[key] = artist
+		}
+		artist.Albums = append(artist.Albums, album)
+		artist.Files = append(artist.Files, album.Files...)
+		artist.Confidence = minFloat(artist.Confidence, album.Confidence)
+		for k, v := range musicArtistExternalIDsFromAlbum(album) {
+			if artist.ExternalIDs == nil {
+				artist.ExternalIDs = map[string]string{}
+			}
+			if artist.ExternalIDs[k] == "" {
+				artist.ExternalIDs[k] = v
+			}
+		}
+		for _, issue := range album.Issues {
+			if !contains(artist.Issues, issue) {
+				artist.Issues = append(artist.Issues, issue)
+			}
+		}
+	}
+	artists := make([]MusicArtistPlan, 0, len(byKey))
+	for _, artist := range byKey {
+		sortMusicAlbums(artist.Albums)
+		sort.Strings(artist.Files)
+		sort.Strings(artist.Issues)
+		artists = append(artists, *artist)
+	}
+	sort.Slice(artists, func(i, j int) bool {
+		return artists[i].Artist < artists[j].Artist
+	})
+	return artists
+}
+
+func musicArtistExternalIDsFromAlbum(album MusicAlbumPlan) map[string]string {
+	ids := map[string]string{}
+	if album.ExternalIDs["musicbrainz_album_artist"] != "" {
+		ids["mbid"] = album.ExternalIDs["musicbrainz_album_artist"]
+	} else if album.ExternalIDs["musicbrainz_artist"] != "" {
+		ids["mbid"] = album.ExternalIDs["musicbrainz_artist"]
+	}
+	if album.ExternalIDs["itunes_artist"] != "" {
+		ids["apple"] = album.ExternalIDs["itunes_artist"]
+	}
+	return nonEmptyStringMap(ids)
+}
+
+func parseMusicAlbumFolder(folder, fallbackArtist string) musicAlbumFolderInfo {
+	name := strings.TrimSpace(folder)
+	if name == "" {
+		return musicAlbumFolderInfo{}
+	}
+	if m := musicStructuredAlbumRE.FindStringSubmatch(name); m != nil {
+		return musicAlbumFolderInfo{
+			Artist:      strings.TrimSpace(m[1]),
+			ReleaseKind: normalizeMusicReleaseKind(m[2]),
+			Year:        normalizeMusicYear(m[3]),
+			Album:       strings.TrimSpace(m[4]),
+			Source:      "curated_folder",
+			Confidence:  0.92,
+		}
+	}
+	if m := musicSceneCatalogRE.FindStringSubmatch(name); m != nil {
+		return musicAlbumFolderInfo{
+			Artist:      strings.TrimSpace(m[1]),
+			Album:       strings.TrimSpace(strings.TrimSuffix(m[2], "-")),
+			ReleaseKind: normalizeMusicReleaseKind(m[3]),
+			Year:        m[4],
+			Source:      "scene_folder",
+			Confidence:  0.72,
+		}
+	}
+	if m := musicArtistAlbumYearTailRE.FindStringSubmatch(name); m != nil {
+		return musicAlbumFolderInfo{
+			Artist:     strings.TrimSpace(m[1]),
+			Album:      strings.TrimSpace(m[2]),
+			Year:       m[3],
+			Source:     "artist_album_year_folder",
+			Confidence: 0.66,
+		}
+	}
+	if m := musicYearPrefixRE.FindStringSubmatch(name); m != nil {
+		return musicAlbumFolderInfo{
+			Artist:     fallbackArtist,
+			Year:       m[1],
+			Album:      strings.TrimSpace(m[2]),
+			Source:     "year_album_folder",
+			Confidence: 0.68,
+		}
+	}
+	if m := musicTitleYearRE.FindStringSubmatch(name); m != nil {
+		return musicAlbumFolderInfo{
+			Artist:     fallbackArtist,
+			Album:      strings.TrimSpace(m[1]),
+			Year:       m[2],
+			Source:     "album_year_folder",
+			Confidence: 0.66,
+		}
+	}
+	if strings.Contains(name, " - ") {
+		left, right, _ := strings.Cut(name, " - ")
+		left = strings.TrimSpace(left)
+		right = strings.TrimSpace(right)
+		if fallbackArtist == "" || strings.EqualFold(left, fallbackArtist) {
+			return musicAlbumFolderInfo{Artist: left, Album: right, Source: "artist_album_folder", Confidence: 0.62}
+		}
+	}
+	return musicAlbumFolderInfo{Artist: fallbackArtist, Album: name, Source: "plain_album_folder", Confidence: 0.55}
+}
+
+func parseMusicNFOs(root InventoryRoot, emit Emitter) map[string]musicNFOEntry {
+	out := make(map[string]musicNFOEntry)
+	for _, file := range root.Files {
+		if file.Class != ClassNFO || file.Kind != "album" {
+			continue
+		}
+		parsed := nfo.ParseFile(root.FS, file.RelPath, file.Kind)
+		if parsed == nil {
+			emit.Emit(Event{
+				Event:    "nfo.parse_failed",
+				Severity: SeverityWarn,
+				RelPath:  file.RelPath,
+				Message:  "album NFO could not be parsed",
+			})
+			continue
+		}
+		dir := filepath.Dir(file.RelPath)
+		if dir == "." {
+			dir = ""
+		}
+		out[filepath.ToSlash(dir)] = musicNFOEntry{file: file, nfo: parsed}
+		emit.Emit(Event{
+			Event:   "nfo.parsed",
+			RelPath: file.RelPath,
+			Data: map[string]any{
+				"kind":  parsed.Kind,
+				"title": parsed.Title,
+				"ids":   musicExternalIDsFromNFO(parsed),
+			},
+		})
+	}
+	return out
+}
+
+func musicExternalIDsFromNFO(parsed *nfo.ParsedNFO) map[string]string {
+	if parsed == nil {
+		return nil
+	}
+	ids := map[string]string{}
+	if parsed.MBAlbumID != "" {
+		ids["musicbrainz_album"] = parsed.MBAlbumID
+	}
+	if parsed.MBReleaseGroupID != "" {
+		ids["musicbrainz_release_group"] = parsed.MBReleaseGroupID
+	}
+	if parsed.MBAlbumArtistID != "" {
+		ids["musicbrainz_album_artist"] = parsed.MBAlbumArtistID
+	}
+	if parsed.AudioDBAlbumID != "" {
+		ids["audiodb_album"] = parsed.AudioDBAlbumID
+	}
+	if parsed.AudioDBArtistID != "" {
+		ids["audiodb_artist"] = parsed.AudioDBArtistID
+	}
+	if parsed.ITunesAlbumID != "" {
+		ids["itunes_album"] = parsed.ITunesAlbumID
+	}
+	if parsed.ITunesArtistID != "" {
+		ids["itunes_artist"] = parsed.ITunesArtistID
+	}
+	return nonEmptyStringMap(ids)
+}
+
+func musicExternalIDsFromTags(tags audiotags.Tags) map[string]string {
+	ids := map[string]string{}
+	if tags.AlbumMBID != "" {
+		ids["musicbrainz_album"] = tags.AlbumMBID
+	}
+	if tags.ReleaseGroupMBID != "" {
+		ids["musicbrainz_release_group"] = tags.ReleaseGroupMBID
+	}
+	if tags.AlbumArtistMBID != "" {
+		ids["musicbrainz_album_artist"] = tags.AlbumArtistMBID
+	}
+	if tags.ArtistMBID != "" {
+		ids["musicbrainz_artist"] = tags.ArtistMBID
+	}
+	return nonEmptyStringMap(ids)
+}
+
+func musicTrackTitleFromNFO(parsed *nfo.ParsedNFO, disc, track int) string {
+	if parsed == nil || track == 0 {
+		return ""
+	}
+	if disc == 0 {
+		disc = 1
+	}
+	for _, nfoTrack := range parsed.Tracks {
+		nfoDisc := nfoTrack.Disc
+		if nfoDisc == 0 {
+			nfoDisc = 1
+		}
+		if nfoDisc == disc && nfoTrack.Position == track && strings.TrimSpace(nfoTrack.Title) != "" {
+			return strings.TrimSpace(nfoTrack.Title)
+		}
+	}
+	return ""
+}
+
+func musicAlbumIdentityKeys(plan MusicTrackPlan) []string {
+	var keys []string
+	add := func(key string) {
+		if key != "" && !contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	if plan.ExternalIDs["musicbrainz_release_group"] != "" {
+		add("musicbrainz_release_group:" + plan.ExternalIDs["musicbrainz_release_group"])
+	}
+	if plan.ExternalIDs["musicbrainz_album"] != "" {
+		add("musicbrainz_album:" + plan.ExternalIDs["musicbrainz_album"])
+	}
+	if plan.ExternalIDs["itunes_album"] != "" {
+		add("itunes_album:" + plan.ExternalIDs["itunes_album"])
+	}
+	if plan.ExternalIDs["audiodb_album"] != "" {
+		add("audiodb_album:" + plan.ExternalIDs["audiodb_album"])
+	}
+	add(musicAlbumKey(plan.Artist, plan.Album, plan.Year))
+	return keys
+}
+
+func nonEmptyStringMap(values map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range values {
+		if k != "" && v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func copyMusicExternalIDs(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for k, v := range values {
+		out[k] = v
+	}
+	return out
+}
+
+func parseMusicTrackFilename(name string) musicTrackInfo {
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	base = strings.TrimSpace(base)
+	if m := musicFourDigitTrackRE.FindStringSubmatch(base); m != nil {
+		disc, _ := strconv.Atoi(m[1])
+		track, _ := strconv.Atoi(m[2])
+		if disc == 0 {
+			disc = 1
+		}
+		return musicTrackInfo{Disc: disc, DiscExplicit: true, Track: track, Title: strings.TrimSpace(m[3])}
+	}
+	if m := musicTwoDigitTrackRE.FindStringSubmatch(base); m != nil {
+		track, _ := strconv.Atoi(m[1])
+		return musicTrackInfo{Disc: 1, Track: track, Title: strings.TrimSpace(m[2])}
+	}
+	if m := musicTrackArtistTitleDashRE.FindStringSubmatch(base); m != nil {
+		return musicTrackInfo{Title: strings.TrimSpace(m[2])}
+	}
+	return musicTrackInfo{Title: base}
+}
+
+func musicDiscFromFolder(folder string) (bool, int) {
+	if m := musicDiscFolderRE.FindStringSubmatch(strings.TrimSpace(folder)); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		if n <= 0 {
+			n = 1
+		}
+		return true, n
+	}
+	return false, 0
+}
+
+func splitMusicArtistFolder(folder string) (artist, disambig string) {
+	name := strings.TrimSpace(folder)
+	if name == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(name, ".") {
+		return "", ""
+	}
+	if i := strings.LastIndex(name, " ("); i > 0 && strings.HasSuffix(name, ")") {
+		return strings.TrimSpace(name[:i]), strings.TrimSuffix(strings.TrimSpace(name[i+2:]), ")")
+	}
+	return name, ""
+}
+
+func normalizeMusicReleaseKind(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "album":
+		return "album"
+	case "ep":
+		return "ep"
+	case "single":
+		return "single"
+	case "compilation":
+		return "compilation"
+	case "soundtrack", "ost":
+		return "soundtrack"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func normalizeMusicYear(value string) string {
+	if value == "1" {
+		return ""
+	}
+	return value
+}
+
+func musicAlbumKey(artist, album, year string) string {
+	base := fmt.Sprintf("artist_album:%s|%s", normalizeMusicKeyPart(artist), normalizeMusicKeyPart(album))
+	if year != "" {
+		base += "|" + year
+	}
+	return base
+}
+
+func musicArtistKey(artist, disambig string) string {
+	key := "artist:" + normalizeMusicKeyPart(artist)
+	if disambig != "" {
+		key += "|" + normalizeMusicKeyPart(disambig)
+	}
+	return key
+}
+
+func normalizeMusicKeyPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(slug.Transliterate(value)))
+	value = musicKeyPartRE.ReplaceAllString(value, " ")
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func looksLikeUnusableMusicIdentity(value string) bool {
+	if strings.TrimSpace(value) == "" {
+		return true
+	}
+	v := normalizeMusicKeyPart(value)
+	switch v {
+	case "track", "unknown", "unknown artist", "untitled", "absolutely cursed audio", "loose tracks":
+		return true
+	default:
+		return false
+	}
+}
+
+func cleanMusicAlbumName(value string) string {
+	name := strings.TrimSpace(value)
+	for {
+		next := strings.TrimSpace(musicTrailingFormatTagRE.ReplaceAllString(name, ""))
+		if next == name {
+			break
+		}
+		name = next
+	}
+	if m := musicTitleYearRE.FindStringSubmatch(name); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return name
+}
+
+func shouldUseMusicReleaseAlbum(current, releaseAlbum, source string) bool {
+	if releaseAlbum == "" {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	switch source {
+	case "", "path", "plain_album_folder":
+		return true
+	default:
+		return normalizeMusicKeyPart(current) == normalizeMusicKeyPart(releaseAlbum)
+	}
+}
+
+func shouldUseMusicTagName(current, tagged, source string) bool {
+	tagged = strings.TrimSpace(tagged)
+	if audiotags.IsPlaceholderName(tagged) {
+		return false
+	}
+	current = strings.TrimSpace(current)
+	if current == "" || looksLikeUnusableMusicIdentity(current) {
+		return true
+	}
+	if titlematch.FuzzyEqual(current, tagged) {
+		return false
+	}
+	return source == "" || source == "path" || source == "plain_album_folder"
+}
+
+func shouldUseMusicTagText(current, tagged, source string) bool {
+	tagged = strings.TrimSpace(tagged)
+	if audiotags.IsPlaceholderValue(tagged) {
+		return false
+	}
+	current = strings.TrimSpace(current)
+	if current == "" || looksLikeUnusableMusicIdentity(current) {
+		return true
+	}
+	if titlematch.FuzzyEqual(current, tagged) {
+		return false
+	}
+	return source == "" || source == "path" || source == "plain_album_folder"
+}
+
+func shouldUseMusicTagTitle(current, tagged string, pathTrackNumber int, pathTrackTitle string) bool {
+	tagged = strings.TrimSpace(tagged)
+	if audiotags.IsPlaceholderValue(tagged) || musicSyntheticProbeTitleRE.MatchString(tagged) {
+		return false
+	}
+	current = strings.TrimSpace(current)
+	if current == "" || audiotags.IsPlaceholderValue(current) {
+		return true
+	}
+	if pathTrackNumber == 0 && current == strings.TrimSpace(pathTrackTitle) && !strings.Contains(current, " - ") {
+		return true
+	}
+	return false
+}
+
+func musicLocalTrackTitleWeak(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" || audiotags.IsPlaceholderValue(title) {
+		return true
+	}
+	return musicSyntheticProbeTitleRE.MatchString(title) || musicWeakTrackTitleRE.MatchString(title)
+}
+
+func splitRelPath(path string) []string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" && part != "." {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func parentSegment(segments []string) string {
+	if len(segments) < 2 {
+		return ""
+	}
+	return segments[len(segments)-2]
+}
+
+func sortMusicTracks(tracks []MusicTrackPlan) {
+	sort.Slice(tracks, func(i, j int) bool {
+		if tracks[i].Artist == tracks[j].Artist {
+			if tracks[i].Album == tracks[j].Album {
+				if tracks[i].DiscNumber == tracks[j].DiscNumber {
+					if tracks[i].TrackNumber == tracks[j].TrackNumber {
+						return tracks[i].RelPath < tracks[j].RelPath
+					}
+					return tracks[i].TrackNumber < tracks[j].TrackNumber
+				}
+				return tracks[i].DiscNumber < tracks[j].DiscNumber
+			}
+			return tracks[i].Album < tracks[j].Album
+		}
+		return tracks[i].Artist < tracks[j].Artist
+	})
+}
+
+func sortMusicAlbums(albums []MusicAlbumPlan) {
+	sort.Slice(albums, func(i, j int) bool {
+		if albums[i].Year == albums[j].Year {
+			return albums[i].Album < albums[j].Album
+		}
+		return albums[i].Year < albums[j].Year
+	})
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}

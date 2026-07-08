@@ -55,7 +55,7 @@ func (a *App) GetActivityFeed(ctx context.Context) []ActivityItem {
 	if scanRows, err := a.db.Query(ctx, `
 		SELECT rj.finalized_at, rj.args->>'library_id' AS lib_id
 		FROM river_job rj
-		WHERE rj.kind = 'scan_library' AND rj.state = 'completed'
+		WHERE rj.kind IN ('apply_library_scan', 'kickoff_library_scan') AND rj.state = 'completed'
 		  AND rj.finalized_at > now() - interval '7 days'
 		ORDER BY rj.finalized_at DESC
 		LIMIT 10`); err == nil {

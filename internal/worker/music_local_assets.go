@@ -53,7 +53,7 @@ const maxArtistBackdrops = 5
 //
 // Best-effort throughout: each file failure is logged and skipped — the
 // chain continues so a single unreadable image doesn't block the others.
-func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string, mediaItemID int64) musicLocalAssets {
+func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string, mediaItemID int64, useLocalArtwork bool) musicLocalAssets {
 	result := musicLocalAssets{UsedURLs: map[string]bool{}}
 
 	item, err := q.GetMediaItemByID(ctx, mediaItemID)
@@ -62,27 +62,9 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 		return result
 	}
 
-	artistDir := resolveArtistDir(ctx, q, mediaItemID)
-	if artistDir == "" {
-		log.Debug().Int64("item_id", mediaItemID).Msg("detect local music: no artist dir resolved")
-		return result
-	}
-
-	source, err := vfs.Open(artistDir)
-	if err != nil {
-		log.Debug().Err(err).Str("dir", artistDir).Msg("detect local music: cannot open artist dir")
-		return result
-	}
-	defer source.Close() //nolint:errcheck // defer-close on vfs source
-
 	dirName := item.Slug
 	if dirName == "" {
 		dirName = strings.ToLower(strings.ReplaceAll(item.Title, " ", "-"))
-	}
-	cacheDir := filepath.Join(dataDir, "images", "music", dirName)
-	if err := ensureDir(cacheDir); err != nil {
-		log.Warn().Err(err).Str("cache_dir", cacheDir).Msg("detect local music: mkdir failed")
-		return result
 	}
 
 	// Existing locally-sourced assets so we don't re-copy or duplicate rows
@@ -103,94 +85,92 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 		}
 	}
 
-	// Poster: pick the first Kodi-conventional file that exists. folder.jpg
-	// is the dominant Kodi music convention; poster.jpg / artist.jpg are
-	// the next most common variants. .png variants checked too.
-	posterCandidates := []string{
-		"folder.jpg", "folder.png",
-		"poster.jpg", "poster.png",
-		"artist.jpg", "artist.png",
-	}
-	if posterPath := copyFirstMatch(source.FS, posterCandidates, cacheDir, "poster"); posterPath != "" {
-		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypePoster, posterPath, 0, "", existingLocal)
-		// Mirror to media_items.poster_path so /api/media/{id}/image/poster
-		// returns it directly without the media_assets fallback hop.
-		updateArtworkPathColumns(ctx, q, item, posterPath, item.BackdropPath)
-		item.PosterPath = posterPath
-		result.Poster++
-	}
+	artistDir := ""
+	if useLocalArtwork {
+		artistDir = resolveArtistDir(ctx, q, mediaItemID)
+		if artistDir == "" {
+			log.Debug().Int64("item_id", mediaItemID).Msg("detect local music: no artist dir resolved")
+		} else if source, err := vfs.Open(artistDir); err != nil {
+			log.Debug().Err(err).Str("dir", artistDir).Msg("detect local music: cannot open artist dir")
+		} else {
+			defer source.Close() //nolint:errcheck // defer-close on vfs source
 
-	// Backdrop: primary at sort_order=0, then additional backdrop1, backdrop2
-	// etc. land at sort_order=1+. Also fall back to fanart.jpg naming.
-	backdropCandidates := []string{
-		"backdrop.jpg", "backdrop.png",
-		"fanart.jpg", "fanart.png",
-	}
-	primaryBackdrop := copyFirstMatch(source.FS, backdropCandidates, cacheDir, "backdrop")
-	numbered := findNumberedExtras(source.FS, []string{"backdrop", "fanart"}, []string{".jpg", ".png"})
-	if primaryBackdrop == "" && len(numbered) > 0 {
-		// No unsuffixed primary on disk — promote the lowest-numbered
-		// variant to the primary slot so media_items.backdrop_path stays
-		// populated. Common in libraries that only keep `backdrop1.jpg`
-		// / `backdrop2.jpg` style names.
-		first := numbered[0]
-		dst := filepath.Join(cacheDir, "backdrop"+filepath.Ext(first))
-		if err := copyFromFS(source.FS, first, dst, true); err == nil {
-			primaryBackdrop = dst
-			numbered = numbered[1:] // already promoted; don't re-add as a numbered extra
+			cacheDir := filepath.Join(dataDir, "images", "music", dirName)
+			if err := ensureDir(cacheDir); err != nil {
+				log.Warn().Err(err).Str("cache_dir", cacheDir).Msg("detect local music: mkdir failed")
+			} else {
+				// Poster: pick the first Kodi-conventional file that exists.
+				posterCandidates := []string{
+					"folder.jpg", "folder.png",
+					"poster.jpg", "poster.png",
+					"artist.jpg", "artist.png",
+				}
+				if posterPath := copyFirstMatch(source.FS, posterCandidates, cacheDir, "poster"); posterPath != "" {
+					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypePoster, posterPath, 0, "", existingLocal)
+					updateArtworkPathColumns(ctx, q, item, posterPath, item.BackdropPath)
+					item.PosterPath = posterPath
+					result.Poster++
+				}
+
+				// Backdrop: primary at sort_order=0, then numbered extras.
+				backdropCandidates := []string{
+					"backdrop.jpg", "backdrop.png",
+					"fanart.jpg", "fanart.png",
+				}
+				primaryBackdrop := copyFirstMatch(source.FS, backdropCandidates, cacheDir, "backdrop")
+				numbered := findNumberedExtras(source.FS, []string{"backdrop", "fanart"}, []string{".jpg", ".png"})
+				if primaryBackdrop == "" && len(numbered) > 0 {
+					first := numbered[0]
+					dst := filepath.Join(cacheDir, "backdrop"+filepath.Ext(first))
+					if err := copyFromFS(source.FS, first, dst, true); err == nil {
+						primaryBackdrop = dst
+						numbered = numbered[1:]
+					}
+				}
+				if primaryBackdrop != "" {
+					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop, primaryBackdrop, 0, "", existingLocal)
+					updateArtworkPathColumns(ctx, q, item, item.PosterPath, primaryBackdrop)
+					item.BackdropPath = primaryBackdrop
+					result.Backdrop++
+				}
+				if room := maxArtistBackdrops - result.Backdrop; room < len(numbered) {
+					if room < 0 {
+						room = 0
+					}
+					numbered = numbered[:room]
+				}
+				for i, extra := range numbered {
+					dst := filepath.Join(cacheDir, "backdrop"+strconv.Itoa(i+1)+filepath.Ext(extra))
+					if err := copyFromFS(source.FS, extra, dst, true); err == nil {
+						writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop, dst, int32(i+1), "", existingLocal)
+						result.Backdrop++
+					}
+				}
+
+				if logoPath := copyFirstMatch(source.FS, []string{"logo.png", "clearlogo.png"}, cacheDir, "logo"); logoPath != "" {
+					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeLogo, logoPath, 0, "", existingLocal)
+					result.Logo++
+				}
+				if bannerPath := copyFirstMatch(source.FS, []string{"banner.jpg", "banner.png", "landscape.jpg", "landscape.png"}, cacheDir, "banner"); bannerPath != "" {
+					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBanner, bannerPath, 0, "", existingLocal)
+					result.Banner++
+				}
+				if clearart := copyFirstMatch(source.FS, []string{"clearart.png"}, cacheDir, "clearart"); clearart != "" {
+					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeClearart, clearart, 0, "", existingLocal)
+					result.Clearart++
+				}
+				if thumb := copyFirstMatch(source.FS, []string{"thumb.jpg", "thumb.png"}, cacheDir, "thumb"); thumb != "" {
+					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeThumb, thumb, 0, "", existingLocal)
+					result.Thumb++
+				}
+			}
 		}
-	}
-	if primaryBackdrop != "" {
-		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop, primaryBackdrop, 0, "", existingLocal)
-		updateArtworkPathColumns(ctx, q, item, item.PosterPath, primaryBackdrop)
-		item.BackdropPath = primaryBackdrop
-		result.Backdrop++
-	}
-	// Cap the numbered set so primary + extras never exceed
-	// maxArtistBackdrops. The gap-fill orchestrator assumes the same cap on
-	// the remote side; truncating here keeps the contract symmetric.
-	if room := maxArtistBackdrops - result.Backdrop; room < len(numbered) {
-		if room < 0 {
-			room = 0
-		}
-		numbered = numbered[:room]
-	}
-	for i, extra := range numbered {
-		dst := filepath.Join(cacheDir, "backdrop"+strconv.Itoa(i+1)+filepath.Ext(extra))
-		if err := copyFromFS(source.FS, extra, dst, true); err == nil {
-			writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop, dst, int32(i+1), "", existingLocal)
-			result.Backdrop++
-		}
-	}
-
-	// Logo (transparent): logo.png / clearlogo.png.
-	if logoPath := copyFirstMatch(source.FS, []string{"logo.png", "clearlogo.png"}, cacheDir, "logo"); logoPath != "" {
-		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeLogo, logoPath, 0, "", existingLocal)
-		result.Logo++
-	}
-
-	// Banner: landscape banner image used for wide-aspect tiles.
-	if bannerPath := copyFirstMatch(source.FS, []string{"banner.jpg", "banner.png", "landscape.jpg", "landscape.png"}, cacheDir, "banner"); bannerPath != "" {
-		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBanner, bannerPath, 0, "", existingLocal)
-		result.Banner++
-	}
-
-	// Clearart (transparent character art).
-	if clearart := copyFirstMatch(source.FS, []string{"clearart.png"}, cacheDir, "clearart"); clearart != "" {
-		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeClearart, clearart, 0, "", existingLocal)
-		result.Clearart++
-	}
-
-	// Thumbnail.
-	if thumb := copyFirstMatch(source.FS, []string{"thumb.jpg", "thumb.png"}, cacheDir, "thumb"); thumb != "" {
-		writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeThumb, thumb, 0, "", existingLocal)
-		result.Thumb++
 	}
 
 	// Per-album passes: walk each album folder for covers (cover.jpg /
 	// folder.jpg / front.jpg / disc.png / cdart.png) and bind sibling
 	// lyrics files (.lrc / .elrc / .txt) onto their tracks.
-	albumsScanned, coversFound, lyricsBound := scanAlbumAssets(ctx, q, dataDir, dirName, mediaItemID)
+	albumsScanned, coversFound, lyricsBound := scanAlbumAssets(ctx, q, dataDir, dirName, mediaItemID, useLocalArtwork)
 
 	log.Info().
 		Int64("item_id", mediaItemID).
@@ -366,7 +346,7 @@ func ensureDir(path string) error {
 // Lyrics are NOT copied — `tracks.lyrics_path` points at the original
 // sidecar next to the audio file (tiny text, no upside to duplicating into
 // the data dir).
-func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug string, mediaItemID int64) (int, int, int) {
+func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug string, mediaItemID int64, useLocalArtwork bool) (int, int, int) {
 	artist, err := q.GetArtistByMediaItemID(ctx, mediaItemID)
 	if err != nil {
 		return 0, 0, 0
@@ -395,45 +375,47 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 			continue
 		}
 
-		albumSlug := album.Slug
-		if albumSlug == "" {
-			albumSlug = strconv.FormatInt(album.ID, 10)
-		}
-		coverCacheDir := filepath.Join(dataDir, "images", "music", artistSlug, "albums", albumSlug)
+		if useLocalArtwork {
+			albumSlug := album.Slug
+			if albumSlug == "" {
+				albumSlug = strconv.FormatInt(album.ID, 10)
+			}
+			coverCacheDir := filepath.Join(dataDir, "images", "music", artistSlug, "albums", albumSlug)
 
-		coverPath := ""
-		for _, d := range albumDirs {
-			coverPath = copyAlbumCover(d, coverCacheDir)
+			coverPath := ""
+			for _, d := range albumDirs {
+				coverPath = copyAlbumCover(d, coverCacheDir)
+				if coverPath != "" {
+					break
+				}
+			}
+			// Embedded-art fallback: most rippers (Apple Music, Deezer, some
+			// Bandcamp/Discogs flows) put art only inside the audio container
+			// itself, not as a sidecar. Pull the first attached picture out
+			// via ffmpeg when no folder image was found.
+			if coverPath == "" {
+				coverPath = extractEmbeddedCover(ctx, tracks, coverCacheDir)
+			}
+
 			if coverPath != "" {
-				break
+				if album.CoverPath != coverPath {
+					_ = q.UpdateAlbumCoverPath(ctx, sqlc.UpdateAlbumCoverPathParams{
+						ID:        album.ID,
+						CoverPath: coverPath,
+					})
+				}
+				coversFound++
 			}
-		}
-		// Embedded-art fallback: most rippers (Apple Music, Deezer, some
-		// Bandcamp/Discogs flows) put art only inside the audio container
-		// itself, not as a sidecar. Pull the first attached picture out
-		// via ffmpeg when no folder image was found.
-		if coverPath == "" {
-			coverPath = extractEmbeddedCover(ctx, tracks, coverCacheDir)
-		}
 
-		if coverPath != "" {
-			if album.CoverPath != coverPath {
-				_ = q.UpdateAlbumCoverPath(ctx, sqlc.UpdateAlbumCoverPathParams{
-					ID:        album.ID,
-					CoverPath: coverPath,
-				})
+			// Disc art (transparent CD/vinyl render): conventionally
+			// disc.png / cdart.png / disc.jpg next to cover.jpg. We don't
+			// have an "album-level media_assets" table — media_assets keys
+			// on media_item_id, not album_id — so disc art landing in the
+			// album cache dir means it's served as a sibling of cover.jpg
+			// for the UI to pick up by predictable URL convention.
+			for _, d := range albumDirs {
+				copyAlbumDiscArt(d, coverCacheDir)
 			}
-			coversFound++
-		}
-
-		// Disc art (transparent CD/vinyl render): conventionally
-		// disc.png / cdart.png / disc.jpg next to cover.jpg. We don't
-		// have an "album-level media_assets" table — media_assets keys
-		// on media_item_id, not album_id — so disc art landing in the
-		// album cache dir means it's served as a sibling of cover.jpg
-		// for the UI to pick up by predictable URL convention.
-		for _, d := range albumDirs {
-			copyAlbumDiscArt(d, coverCacheDir)
 		}
 
 		// Per-track lyrics binding. For each track with a file_path,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
@@ -19,7 +20,9 @@ import (
 // MediaItemView wraps a media item with its availability status.
 type MediaItemView struct {
 	sqlc.MediaItemCard
-	Available bool `json:"available"`
+	Available  bool   `json:"available"`
+	BookFormat string `json:"book_format,omitempty"`
+	BookAuthor string `json:"book_author,omitempty"`
 }
 
 // UnmatchedFile wraps a library file with its match candidates.
@@ -88,18 +91,57 @@ func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 	}
 
 	overlay := a.preferredTitleOverlay(ctx, q, items)
+	bookInfo := map[int64]bookListInfo{}
+	if mediaType == sqlc.MediaTypeBook {
+		bookInfo = a.bookListInfo(ctx, ids)
+	}
 	views := make([]MediaItemView, len(items))
 	for i, item := range items {
 		if t := overlay[item.ID]; t != "" {
 			item.Title = t
 		}
-		views[i] = MediaItemView{
+		view := MediaItemView{
 			MediaItemCard: item,
 			Available:     !unavailable[item.ID],
 		}
+		if info, ok := bookInfo[item.ID]; ok {
+			view.BookFormat = info.Format
+			view.BookAuthor = info.Author
+		}
+		views[i] = view
 	}
 
 	return views, nil
+}
+
+type bookListInfo struct {
+	Format string
+	Author string
+}
+
+func (a *App) bookListInfo(ctx context.Context, ids []int64) map[int64]bookListInfo {
+	out := map[int64]bookListInfo{}
+	if len(ids) == 0 {
+		return out
+	}
+	rows, err := a.db.Query(ctx, `
+		SELECT b.media_item_id, b.format, COALESCE(author.name, '') AS author_name
+		FROM books b
+		LEFT JOIN authors author ON author.id = b.author_id
+		WHERE b.media_item_id = ANY($1::bigint[])
+	`, ids)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var info bookListInfo
+		if err := rows.Scan(&id, &info.Format, &info.Author); err == nil {
+			out[id] = info
+		}
+	}
+	return out
 }
 
 // titleTarget is the minimal (media item, its library) pair the batched title
@@ -269,7 +311,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 				}
 			}
 		}
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		series, seriesErr := q.GetTVSeriesByMediaItemID(ctx, item.ID)
 		if seriesErr == nil {
 			result["tv_series"] = series
@@ -410,7 +452,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		result["assets"] = assets
 	}
 
-	// Extras are local files linked by Scanner V2 through library_file_links.
+	// Extras are local files linked by scanner through library_file_links.
 	if extras, extErr := q.ListMediaExtraLinks(ctx, item.ID); extErr == nil && len(extras) > 0 {
 		result["extras"] = extras
 	}
@@ -430,8 +472,8 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		result["external_ratings"] = ratings
 	}
 
-	// Episode file map (TV only) — reuses the fetch from the TV branch above.
-	if item.MediaType == sqlc.MediaTypeTv && len(tvEpisodeFiles) > 0 {
+	// Episode file map for TV-like media — reuses the fetch from the branch above.
+	if mediatype.IsTVLike(item.MediaType) && len(tvEpisodeFiles) > 0 {
 		episodeFileMap := BuildEpisodeFileMap(tvEpisodeFiles)
 		if len(episodeFileMap) > 0 {
 			result["episode_files"] = episodeFileMap
@@ -637,7 +679,12 @@ func (a *App) ListEnrichedTVSeries(ctx context.Context, limit, offset int32) ([]
 	}
 
 	resMap := buildResolutionMap(ctx, q, ids)
-	unavailMap := buildUnavailableMap(ctx, q, sqlc.MediaTypeTv)
+	unavailMap := map[int64]bool{}
+	if unavailableIDs, err := q.ListUnavailableMediaItemIDsForItems(ctx, ids); err == nil {
+		for _, id := range unavailableIDs {
+			unavailMap[id] = true
+		}
+	}
 
 	views := make([]EnrichedTVView, len(series))
 	for i, s := range series {
@@ -708,12 +755,14 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 	// 1. media_assets: a matching row's local file wins; else remember its
 	//    remote URL (+ cache identity) for the on-demand fetch below.
 	remoteURL, assetType, remoteSort := "", imageType, 0
+	var remoteAsset *sqlc.MediaAsset
 	if assets, err := q.ListMediaAssets(ctx, mediaItemID); err == nil {
 		if row := pickMediaAsset(assets, imageType, sortOrder, label); row != nil {
 			if row.LocalPath != "" {
 				return row.LocalPath, true
 			}
 			remoteURL, assetType, remoteSort = row.RemoteUrl, string(row.AssetType), int(row.SortOrder)
+			remoteAsset = row
 		}
 	}
 
@@ -747,7 +796,58 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 	if item.Slug != "" {
 		dirName = item.Slug
 	}
-	return a.onDemandImage(ctx, remoteURL, string(item.MediaType), dirName, imageCacheFilename(assetType, remoteSort, remoteURL))
+	localPath, ok := a.onDemandImage(ctx, remoteURL, string(item.MediaType), dirName, imageCacheFilename(assetType, remoteSort, remoteURL))
+	if !ok {
+		return "", false
+	}
+	if remoteAsset != nil {
+		if err := q.UpdateMediaAssetLocalPath(ctx, sqlc.UpdateMediaAssetLocalPathParams{
+			ID:        remoteAsset.ID,
+			LocalPath: localPath,
+		}); err != nil {
+			log.Debug().Err(err).Int64("asset_id", remoteAsset.ID).Msg("image: update media asset local path failed")
+		}
+	} else if imageType == "poster" || imageType == "backdrop" {
+		if imageType == "poster" {
+			if err := q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: item.ID, PosterPath: localPath}); err != nil {
+				log.Debug().Err(err).Int64("item_id", item.ID).Msg("image: update poster_path failed")
+			}
+		} else if err := q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: item.ID, BackdropPath: localPath}); err != nil {
+			log.Debug().Err(err).Int64("item_id", item.ID).Msg("image: update backdrop_path failed")
+		}
+	}
+	a.maybeQueueImageSidecarWrite(ctx, q, item, assetType, remoteSort, label, localPath)
+	return localPath, true
+}
+
+func (a *App) maybeQueueImageSidecarWrite(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard, assetType string, sortOrder int, label, localPath string) {
+	if a.river == nil || localPath == "" || !worker.ShouldSaveImageSidecar(assetType, sortOrder, label) {
+		return
+	}
+	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		return
+	}
+	if !metadata.ParseSettings(lib.Settings).SaveImages {
+		return
+	}
+	files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: item.ID, Valid: true})
+	if err != nil || len(files) == 0 {
+		return
+	}
+
+	qctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := a.river.Insert(qctx, worker.SaveImagesArgs{
+		MediaItemID: item.ID,
+		FilePath:    files[0].Path,
+		CachedPath:  localPath,
+		AssetType:   assetType,
+		SortOrder:   sortOrder,
+		Label:       label,
+	}, nil); err != nil {
+		log.Debug().Err(err).Int64("item_id", item.ID).Str("asset_type", assetType).Msg("image: enqueue save_images failed")
+	}
 }
 
 // pickMediaAsset selects the best asset row for a request, matching the legacy

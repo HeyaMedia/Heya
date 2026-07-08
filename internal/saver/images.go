@@ -1,6 +1,7 @@
 package saver
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,10 +19,13 @@ var assetTypeToFilename = map[string]string{
 	"disc":     "disc",
 }
 
-func SaveImageToMediaDir(mediaDir, cachedPath, assetType string) error {
+func SaveImageToMediaDir(mediaDir, cachedPath, assetType string, sortOrder int) error {
 	baseName, ok := assetTypeToFilename[assetType]
 	if !ok {
 		return nil
+	}
+	if sortOrder > 0 {
+		baseName = fmt.Sprintf("%s%d", baseName, sortOrder)
 	}
 
 	ext := filepath.Ext(cachedPath)

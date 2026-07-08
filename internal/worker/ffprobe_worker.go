@@ -13,8 +13,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/mediaprobe"
-	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
@@ -41,6 +42,7 @@ type FFProbeWorker struct {
 
 func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) error {
 	w.Progress.SetCurrent(FFProbeArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(job.Args.FilePath))
+	source := scheduledJobSource(job.Metadata)
 	probeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
@@ -64,7 +66,7 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 	}
 
 	file, _ := q.GetLibraryFileByID(ctx, job.Args.LibraryFileID)
-	contentHash := scanner.ComputeContentHash(file.Size, infoJSON)
+	contentHash := mediafile.ComputeContentHash(file.Size, infoJSON)
 	if contentHash != "" {
 		q.UpdateLibraryFileContentHash(ctx, sqlc.UpdateLibraryFileContentHashParams{
 			ID:          job.Args.LibraryFileID,
@@ -97,31 +99,73 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 
 	if hasAudio && primaryAudio != nil {
 		UpdateAudioTrackFileFromProbe(ctx, q, job.Args.LibraryFileID, info, primaryAudio)
-		w.enqueueLoudnessIfMusic(ctx, q, job.Args.LibraryFileID, job.Args.ScheduledTaskID)
+		w.enqueueLoudnessIfMusic(ctx, q, job.Args.LibraryFileID, job.Args.ScheduledTaskID, source)
 	}
 
-	if hasVideo && !vfs.IsSMBPath(job.Args.FilePath) {
-		kf, err := transcoder.ExtractKeyframes(ctx, job.Args.FilePath)
-		if err != nil {
-			log.Warn().Err(err).Int64("file_id", job.Args.LibraryFileID).Msg("keyframe extraction failed")
-		} else if kf != nil && len(kf.IFrames) > 0 {
-			kfJSON, err := json.Marshal(kf)
-			if err == nil {
-				q.UpdateLibraryFileKeyframes(ctx, sqlc.UpdateLibraryFileKeyframesParams{
-					ID:        job.Args.LibraryFileID,
-					Keyframes: kfJSON,
-				})
-				log.Debug().
-					Int64("file_id", job.Args.LibraryFileID).
-					Int("keyframes", len(kf.IFrames)).
-					Float64("duration", kf.Duration).
-					Msg("keyframes extracted")
+	if hasVideo {
+		if !vfs.IsSMBPath(job.Args.FilePath) {
+			kf, err := transcoder.ExtractKeyframes(ctx, job.Args.FilePath)
+			if err != nil {
+				log.Warn().Err(err).Int64("file_id", job.Args.LibraryFileID).Msg("keyframe extraction failed")
+			} else if kf != nil && len(kf.IFrames) > 0 {
+				kfJSON, err := json.Marshal(kf)
+				if err == nil {
+					if err := q.UpdateLibraryFileKeyframes(ctx, sqlc.UpdateLibraryFileKeyframesParams{
+						ID:        job.Args.LibraryFileID,
+						Keyframes: kfJSON,
+					}); err != nil {
+						log.Warn().Err(err).Int64("file_id", job.Args.LibraryFileID).Msg("keyframe persistence failed")
+					}
+					log.Debug().
+						Int64("file_id", job.Args.LibraryFileID).
+						Int("keyframes", len(kf.IFrames)).
+						Float64("duration", kf.Duration).
+						Msg("keyframes extracted")
+				}
 			}
 		}
-
+		w.enqueuePostProbeVideoWork(ctx, q, file, job.Args.ScheduledTaskID, source)
 	}
 
 	return nil
+}
+
+func (w *FFProbeWorker) enqueuePostProbeVideoWork(ctx context.Context, q *sqlc.Queries, file sqlc.LibraryFile, scheduledTaskID string, source string) {
+	rc := river.ClientFromContext[pgx.Tx](ctx)
+	if rc == nil {
+		return
+	}
+	lib, err := q.GetLibraryByID(ctx, file.LibraryID)
+	if err != nil {
+		log.Warn().Err(err).Int64("library_id", file.LibraryID).Msg("ffprobe: library lookup for post-probe fanout failed")
+		return
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+	links, err := q.ListLibraryFileLinksByFile(ctx, file.ID)
+	if err != nil {
+		log.Warn().Err(err).Int64("file_id", file.ID).Msg("ffprobe: file link lookup for post-probe fanout failed")
+		return
+	}
+
+	if settings.EnableTrickplay && !file.HasTrickplay && !vfs.IsSMBPath(file.Path) {
+		if _, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: file.ID, ScheduledTaskID: scheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("ffprobe: enqueue trickplay failed")
+		}
+	}
+	if scannerMediaTypeScansSegments(lib.MediaType) && !file.SegmentsAnalyzedAt.Valid && libraryFileHasPrimaryLink(links) {
+		if _, err := rc.Insert(ctx, ScanMediaSegmentsFileArgs{LibraryFileID: file.ID, ScheduledTaskID: scheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("ffprobe: enqueue media segments failed")
+		}
+	}
+	if !vfs.IsSMBPath(file.Path) {
+		for _, link := range links {
+			if link.RelationType == "extra" && link.ThumbnailPath == "" {
+				if _, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: link.ID, ScheduledTaskID: scheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
+					log.Warn().Err(err).Int64("extra_id", link.ID).Msg("ffprobe: enqueue extra thumbnail failed")
+				}
+			}
+		}
+	}
 }
 
 // ProbeFile runs ffprobe against a local or SMB path and returns parsed
@@ -235,7 +279,7 @@ func UpdateAudioTrackFileFromProbe(ctx context.Context, q *sqlc.Queries, library
 // enqueueLoudnessIfMusic schedules an ebur128 pass for the file's track_files
 // row when the file lives in a music library. Silently noops outside music
 // libraries or when no track_files row exists yet (matcher hasn't run).
-func (w *FFProbeWorker) enqueueLoudnessIfMusic(ctx context.Context, q *sqlc.Queries, libraryFileID int64, scheduledTaskID string) {
+func (w *FFProbeWorker) enqueueLoudnessIfMusic(ctx context.Context, q *sqlc.Queries, libraryFileID int64, scheduledTaskID string, source string) {
 	tf, err := q.GetTrackFileByLibraryFileID(ctx, libraryFileID)
 	if err != nil {
 		// Matcher hasn't created the track_files row yet. It'll re-trigger
@@ -257,7 +301,7 @@ func (w *FFProbeWorker) enqueueLoudnessIfMusic(ctx context.Context, q *sqlc.Quer
 	if client == nil {
 		return
 	}
-	if _, err := client.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: tf.ID, ScheduledTaskID: scheduledTaskID}, nil); err != nil {
+	if _, err := client.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: tf.ID, ScheduledTaskID: scheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
 		log.Warn().Err(err).Int64("track_file_id", tf.ID).Msg("enqueue track loudness failed")
 	}
 }

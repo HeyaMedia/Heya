@@ -76,7 +76,7 @@
             page-mode
             v-slot="{ item: row, index: rowIdx }"
           >
-            <div class="grid-row" :style="{ gridTemplateColumns: `repeat(${gridCols}, 1fr)` }">
+            <div class="grid-row" :style="{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }">
               <AppContextMenu
                 v-for="(item, colIdx) in row.items"
                 :key="item.id"
@@ -328,6 +328,10 @@ const { dragState, onDragStart, onDragEnd, onListDragOver, onListDragLeave, onLi
 
 const { $heya } = useNuxtApp()
 const invalidateContinueWatching = useInvalidateContinueWatching()
+function isShowLibrary(library: Library) {
+  return library.media_type === 'tv' || library.media_type === 'anime'
+}
+
 const cardCtxOpts = computed(() => {
   return {
     watchedSet: watchedSet.value,
@@ -534,7 +538,7 @@ async function loadItems() {
 useLiveRefresh([
   // Only refetch the grid once it's actually been loaded — on the Recommended
   // landing the item list is deferred and RecommendedView refreshes its own rails.
-  { events: ['media.added', 'media.updated'], filter: byMediaType('tv'), refetch: () => { if (itemsLoaded.value) loadItems() } },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('tv', 'anime'), refetch: () => { if (itemsLoaded.value) loadItems() } },
 ])
 
 onMounted(async () => {
@@ -544,7 +548,7 @@ onMounted(async () => {
     fetchUserState('series'),
     $heya('/api/me/lists') as Promise<UserList[]>,
   ])
-  if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'tv')
+  if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(isShowLibrary)
   if (stateRes.status === 'fulfilled') {
     const st = stateRes.value
     for (const s of (st.shows || [])) {

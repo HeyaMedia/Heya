@@ -915,7 +915,7 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 			MediaItemID:   mediaItemID,
 			AuthorID:      authorID,
 			Isbn:          d.ISBN,
-			OpenlibraryID: d.ExternalIDs["openlibrary"],
+			OpenlibraryID: firstNonEmptyString(d.ExternalIDs["openlibrary"], d.ExternalIDs["ol_work_id"]),
 			PageCount:     int32(d.PageCount),
 			Publisher:     d.Publisher,
 			PublishDate:   pgDateFromString(d.PublishDate),
@@ -938,7 +938,7 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 			ID:            existing.ID,
 			AuthorID:      authorID,
 			Isbn:          d.ISBN,
-			OpenlibraryID: d.ExternalIDs["openlibrary"],
+			OpenlibraryID: firstNonEmptyString(d.ExternalIDs["openlibrary"], d.ExternalIDs["ol_work_id"]),
 			PageCount:     int32(d.PageCount),
 			Publisher:     d.Publisher,
 			PublishDate:   pgDateFromString(d.PublishDate),
@@ -956,6 +956,15 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 		return gerr
 	}
 	return nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func kindToMediaType(kind metadata.MediaKind) sqlc.MediaType {

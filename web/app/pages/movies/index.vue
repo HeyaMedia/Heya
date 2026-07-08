@@ -170,7 +170,7 @@
             page-mode
             v-slot="{ item: row, index: rowIdx }"
           >
-            <div class="grid-row" :style="{ gridTemplateColumns: `repeat(${gridCols}, 1fr)` }">
+            <div class="grid-row" :style="{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }">
               <AppContextMenu
                 v-for="(item, colIdx) in row.items"
                 :key="item.id"

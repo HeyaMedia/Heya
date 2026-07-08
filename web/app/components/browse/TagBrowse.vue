@@ -139,7 +139,7 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortMode.valu
 
 // One segment per media_type actually present, plus "All" — hidden entirely
 // (via the >1 guard in the template) when the list is single-type.
-const TYPE_PLURALS: Record<string, string> = { movie: 'Movies', tv: 'TV Shows', book: 'Books', music: 'Music' }
+const TYPE_PLURALS: Record<string, string> = { movie: 'Movies', tv: 'TV Shows', anime: 'Anime', book: 'Books', music: 'Music' }
 const typeSegments = computed(() => {
   const counts: Record<string, number> = {}
   for (const it of items.value) counts[it.media_type] = (counts[it.media_type] || 0) + 1

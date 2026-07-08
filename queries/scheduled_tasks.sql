@@ -8,7 +8,7 @@ SELECT * FROM scheduled_tasks WHERE id = $1;
 UPDATE scheduled_tasks
 SET enabled = $2, interval_hours = $3,
     daily_start_time = $4, daily_end_time = $5,
-    max_runtime_minutes = $6, updated_at = now()
+    max_runtime_minutes = $6, next_run_at = $7, updated_at = now()
 WHERE id = $1 RETURNING *;
 
 -- name: UpdateScheduledTaskRun :exec

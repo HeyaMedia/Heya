@@ -46,6 +46,25 @@ func TestParseTVShowNFO(t *testing.T) {
 	assert.Equal(t, "Walter White", parsed.Actors[0].Role)
 }
 
+func TestParseTVShowAnimeIDs(t *testing.T) {
+	xml := `<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Attack on Titan</title>
+  <year>2013</year>
+  <anidbid>10944</anidbid>
+  <anilistid>16498</anilistid>
+  <malid>16498</malid>
+  <uniqueid type="anidb">10944</uniqueid>
+  <uniqueid type="mal">16498</uniqueid>
+</tvshow>`
+
+	parsed, err := parseNFO(strings.NewReader(xml), "tvshow")
+	require.NoError(t, err)
+	assert.Equal(t, "10944", parsed.AniDBID)
+	assert.Equal(t, "16498", parsed.AniListID)
+	assert.Equal(t, "16498", parsed.MALID)
+}
+
 func TestParseMovieNFO(t *testing.T) {
 	xml := `<?xml version="1.0"?>
 <movie>
@@ -185,6 +204,7 @@ func TestFindAndParseRealFixture(t *testing.T) {
 	assert.Equal(t, "Attack on Titan", parsed.Title)
 	assert.Equal(t, "1429", parsed.TMDBID)
 	assert.Equal(t, "tt2560140", parsed.IMDBID)
+	assert.Equal(t, "10944", parsed.AniDBID)
 	assert.Equal(t, "2013", parsed.Year)
 	assert.Equal(t, "tvshow", parsed.Kind)
 }

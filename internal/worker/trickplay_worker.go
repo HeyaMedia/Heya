@@ -90,7 +90,7 @@ func (w *TrickplayFileWorker) Work(ctx context.Context, job *river.Job[Trickplay
 		return nil
 	}
 
-	outDir := filepath.Join(filepath.Dir(file.Path), "trickplay")
+	outDir := trickplay.SidecarDir(file.Path)
 	if _, err := trickplay.GenerateSprites(ctx, file.Path, info.Duration, outDir); err != nil {
 		log.Warn().Err(err).Str("file", file.Path).Msg("trickplay_file: generation failed")
 		return fmt.Errorf("generate sprites: %w", err)

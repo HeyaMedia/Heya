@@ -100,21 +100,38 @@ func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []
 	}
 
 	q := sqlc.New(a.db)
-	return q.UpdateLibrary(ctx, sqlc.UpdateLibraryParams{
+	lib, err := q.UpdateLibrary(ctx, sqlc.UpdateLibraryParams{
 		ID:           id,
 		Name:         name,
 		Paths:        paths,
 		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
 	})
+	if err != nil {
+		return sqlc.Library{}, err
+	}
+	a.syncLibraryWatcher(lib)
+	return lib, nil
 }
 
 func (a *App) UpdateLibrarySettings(ctx context.Context, id int64, settings metadata.LibrarySettings) (sqlc.Library, error) {
 	settingsJSON, _ := json.Marshal(settings)
 	q := sqlc.New(a.db)
-	return q.UpdateLibrarySettings(ctx, sqlc.UpdateLibrarySettingsParams{
+	lib, err := q.UpdateLibrarySettings(ctx, sqlc.UpdateLibrarySettingsParams{
 		ID:       id,
 		Settings: settingsJSON,
 	})
+	if err != nil {
+		return sqlc.Library{}, err
+	}
+	a.syncLibraryWatcher(lib)
+	return lib, nil
+}
+
+func (a *App) syncLibraryWatcher(lib sqlc.Library) {
+	if a.watcher == nil || a.lifetimeCtx == nil {
+		return
+	}
+	a.watcher.SyncLibrary(a.lifetimeCtx, lib)
 }
 
 func (a *App) GetLibrarySettings(ctx context.Context, id int64) (metadata.LibrarySettings, error) {

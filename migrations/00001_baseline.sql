@@ -1,6 +1,6 @@
 -- +goose Up
 
--- Consolidated local baseline after the scanner-v2 schema reset.
+-- Consolidated local baseline after the scanner schema reset.
 -- This is intentionally a fresh-install schema, not a production migration.
 
 --
@@ -450,7 +450,7 @@ CREATE TABLE public.library_file_links (
     absolute_number integer,
     part_index integer,
     title text DEFAULT ''::text NOT NULL,
-    source text DEFAULT 'scanner_v2'::text NOT NULL,
+    source text DEFAULT 'scanner'::text NOT NULL,
     confidence real DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1094,7 +1094,7 @@ CREATE TABLE public.scan_runs (
     id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
     library_id bigint NOT NULL,
     media_type public.media_type NOT NULL,
-    scanner_version text DEFAULT 'v2'::text NOT NULL,
+    scanner_version text DEFAULT 'scanner'::text NOT NULL,
     mode text DEFAULT 'scan'::text NOT NULL,
     status text DEFAULT 'running'::text NOT NULL,
     summary jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -1180,7 +1180,7 @@ CREATE VIEW public.thumbnail_eligible_extras AS
      JOIN public.library_files lf ON ((lf.id = lfl.library_file_id)))
      JOIN public.media_item_cards mi ON ((mi.id = lfl.media_item_id)))
      JOIN public.libraries l ON ((l.id = mi.library_id)))
-  WHERE ((lfl.relation_type = 'extra'::text) AND (lf.deleted_at IS NULL) AND (lf.path <> ''::text) AND ((l.settings ->> 'generate_thumbnails'::text) = 'true'::text));
+  WHERE ((lfl.relation_type = 'extra'::text) AND (lf.deleted_at IS NULL) AND (lf.path <> ''::text));
 
 
 --

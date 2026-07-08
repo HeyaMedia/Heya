@@ -21,7 +21,7 @@ func (w *SaveImagesWorker) Work(ctx context.Context, job *river.Job[SaveImagesAr
 
 	mediaDir := saver.MediaDir(job.Args.FilePath)
 
-	if err := saver.SaveImageToMediaDir(mediaDir, job.Args.CachedPath, job.Args.AssetType); err != nil {
+	if err := saver.SaveImageToMediaDir(mediaDir, job.Args.CachedPath, job.Args.AssetType, job.Args.SortOrder); err != nil {
 		log.Warn().Err(err).Str("asset", job.Args.AssetType).Msg("failed to save image to media dir")
 	}
 

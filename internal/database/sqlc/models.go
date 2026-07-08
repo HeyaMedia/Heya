@@ -822,6 +822,16 @@ type ScanRun struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type ScanRunArtifact struct {
+	ID            int64              `json:"id"`
+	ScanRunID     int64              `json:"scan_run_id"`
+	Kind          string             `json:"kind"`
+	ScopeKey      string             `json:"scope_key"`
+	SchemaVersion int32              `json:"schema_version"`
+	Data          []byte             `json:"data"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ScheduledTask struct {
 	ID                    string             `json:"id"`
 	DisplayName           string             `json:"display_name"`

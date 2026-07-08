@@ -499,7 +499,7 @@ func (w *KickoffDetectSegmentsWorker) Work(ctx context.Context, job *river.Job[K
 				MediaItemID:     row.MediaItemID.Int64,
 				Season:          int(row.Season),
 				ScheduledTaskID: taskID,
-			}, nil)
+			}, scheduledJobInsertOpts(st.Source))
 			switch {
 			case err != nil:
 				log.Warn().Err(err).Int64("media_item_id", row.MediaItemID.Int64).Int32("season", row.Season).Msg("kickoff_detect_segments: enqueue season failed")
@@ -537,7 +537,7 @@ func (w *KickoffDetectSegmentsWorker) Work(ctx context.Context, job *river.Job[K
 					return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 				}
 				w.Progress.Set("detect_media_segments", "kickoff_detect_segments", filepath.Base(row.Path))
-				res, err := rc.Insert(ctx, DetectMovieCreditsArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID}, nil)
+				res, err := rc.Insert(ctx, DetectMovieCreditsArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
 				switch {
 				case err != nil:
 					log.Warn().Err(err).Int64("library_file_id", row.ID).Msg("kickoff_detect_segments: enqueue movie failed")

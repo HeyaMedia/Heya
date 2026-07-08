@@ -85,9 +85,10 @@ func clearStaleUniqueJobStates(ctx context.Context, db *pgxpool.Pool) error {
 	return nil
 }
 
-// KickoffLibraryScanArgs replaces scheduler.ScanLibrariesTask. Walks
-// every library (or a specific one when LibraryID > 0) via the scanner,
-// fans out one ProcessFile job per discovered pending file.
+// KickoffLibraryScanArgs replaces scheduler.ScanLibrariesTask. It is the fast
+// inventory/change-detection front door: walk every library (or one library),
+// skip unchanged inputs, soft-delete missing inputs, and enqueue
+// ProcessLibraryScanArgs for changed scopes.
 type KickoffLibraryScanArgs struct {
 	LibraryID       int64  `json:"library_id,omitempty"` // 0 = all libraries
 	Force           bool   `json:"force,omitempty"`
@@ -99,6 +100,77 @@ func (KickoffLibraryScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
 		Queue:       "kickoff_library_scan",
 		MaxAttempts: 1,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
+// ProcessLibraryScanArgs runs the scanner's local analysis + search phase for
+// a library and persists the review candidates. Heavy metadata fetching and DB
+// materialization are delegated to later scanner jobs so the first response to
+// a library refresh is fast and reviewable.
+//
+// When ScopePaths is present, each value is treated as a directory scope; the
+// scanner still walks the library roots but only analyzes files under those
+// scopes so a watcher event can process one movie/show/album folder with its
+// sidecars.
+type ProcessLibraryScanArgs struct {
+	LibraryID       int64    `json:"library_id" river:"unique"`
+	ScopePaths      []string `json:"scope_paths,omitempty" river:"unique"`
+	Force           bool     `json:"force,omitempty"`
+	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
+}
+
+func (ProcessLibraryScanArgs) Kind() string { return "process_library_scan" }
+func (ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "process_library_scan",
+		MaxAttempts: 1,
+		Priority:    PriorityScan,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
+// FetchLibraryMetadataArgs resumes a persisted search result, fetches remote
+// metadata, and persists a fetch artifact for the apply phase.
+type FetchLibraryMetadataArgs struct {
+	LibraryID       int64    `json:"library_id" river:"unique"`
+	ScopePaths      []string `json:"scope_paths,omitempty" river:"unique"`
+	SearchScanRunID int64    `json:"search_scan_run_id,omitempty" river:"unique"`
+	Force           bool     `json:"force,omitempty"`
+	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
+}
+
+func (FetchLibraryMetadataArgs) Kind() string { return "fetch_library_metadata" }
+func (FetchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "fetch_library_metadata",
+		MaxAttempts: 1,
+		Priority:    PriorityScan,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
+// ApplyLibraryScanArgs runs the scanner's metadata fetch/materialize/apply
+// phases for a library scope after FetchLibraryMetadataArgs has persisted the
+// metadata result. FetchScanRunID pins the apply phase to exact fetched
+// metadata; SearchScanRunID lets old/stale fetch artifacts refetch without
+// repeating local analysis/search. Missing ids fall back to a full
+// self-contained scan for old/manual jobs.
+type ApplyLibraryScanArgs struct {
+	LibraryID       int64    `json:"library_id" river:"unique"`
+	ScopePaths      []string `json:"scope_paths,omitempty" river:"unique"`
+	SearchScanRunID int64    `json:"search_scan_run_id,omitempty" river:"unique"`
+	FetchScanRunID  int64    `json:"fetch_scan_run_id,omitempty" river:"unique"`
+	Force           bool     `json:"force,omitempty"`
+	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
+}
+
+func (ApplyLibraryScanArgs) Kind() string { return "apply_library_scan" }
+func (ApplyLibraryScanArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "apply_library_scan",
+		MaxAttempts: 1,
+		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),
 	}
 }
@@ -204,8 +276,9 @@ func (KickoffTrickplayArgs) InsertOpts() river.InsertOpts {
 }
 
 // KickoffThumbnailsArgs replaces scheduler.GenerateThumbnailsTask.
-// Finds extra library-file links missing thumbnail_path on a library where
-// generate_thumbnails is set, and enqueues one thumbnail_extra job per extra.
+// Finds extra library-file links missing thumbnail_path and enqueues one
+// thumbnail_extra job per extra. Extra thumbnails are cheap fallback metadata,
+// so they are no longer gated by a per-library toggle.
 type KickoffThumbnailsArgs struct {
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }

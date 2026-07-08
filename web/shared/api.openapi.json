@@ -4244,13 +4244,13 @@
         ],
         "type": "object"
       },
-      "Library-scan-v2-approve-candidateRequest": {
+      "Library-scanner-approve-candidateRequest": {
         "additionalProperties": false,
         "properties": {
           "$schema": {
             "description": "A URL to the JSON Schema for this object.",
             "examples": [
-              "https://example.com/schemas/Library-scan-v2-approve-candidateRequest.json"
+              "https://example.com/schemas/Library-scanner-approve-candidateRequest.json"
             ],
             "format": "uri",
             "readOnly": true,
@@ -4267,13 +4267,13 @@
         ],
         "type": "object"
       },
-      "Library-scan-v2-ignore-identityRequest": {
+      "Library-scanner-ignore-identityRequest": {
         "additionalProperties": false,
         "properties": {
           "$schema": {
             "description": "A URL to the JSON Schema for this object.",
             "examples": [
-              "https://example.com/schemas/Library-scan-v2-ignore-identityRequest.json"
+              "https://example.com/schemas/Library-scanner-ignore-identityRequest.json"
             ],
             "format": "uri",
             "readOnly": true,
@@ -4286,13 +4286,13 @@
         },
         "type": "object"
       },
-      "Library-scan-v2-reject-identityRequest": {
+      "Library-scanner-reject-identityRequest": {
         "additionalProperties": false,
         "properties": {
           "$schema": {
             "description": "A URL to the JSON Schema for this object.",
             "examples": [
-              "https://example.com/schemas/Library-scan-v2-reject-identityRequest.json"
+              "https://example.com/schemas/Library-scanner-reject-identityRequest.json"
             ],
             "format": "uri",
             "readOnly": true,
@@ -4488,6 +4488,9 @@
           "save_nfo": {
             "type": "boolean"
           },
+          "use_local_data": {
+            "type": "boolean"
+          },
           "watch": {
             "type": "boolean"
           }
@@ -4496,6 +4499,7 @@
           "watch",
           "preferred_language",
           "preferred_country",
+          "use_local_data",
           "auto_collections",
           "fetch_ratings",
           "save_nfo",
@@ -8368,6 +8372,12 @@
           "base_enriched_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "book_author": {
+            "type": "string"
+          },
+          "book_format": {
+            "type": "string"
+          },
           "created_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -11559,7 +11569,7 @@
         ],
         "type": "object"
       },
-      "ScannerV2BucketCounts": {
+      "ScannerBucketCounts": {
         "additionalProperties": false,
         "properties": {
           "ignored": {
@@ -11597,14 +11607,149 @@
         ],
         "type": "object"
       },
-      "ScannerV2CandidateView": {
+      "ScannerCandidateDetailView": {
         "additionalProperties": false,
         "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ScannerCandidateDetailView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "backdrop_url": {
+            "type": "string"
+          },
+          "candidate_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
           "external_ids": {
             "additionalProperties": {
               "type": "string"
             },
             "type": "object"
+          },
+          "first_air_date": {
+            "type": "string"
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "heya_slug": {
+            "type": "string"
+          },
+          "isbn": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "last_air_date": {
+            "type": "string"
+          },
+          "networks": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "number_of_episodes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "number_of_seasons": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "page_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_kind": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "publish_date": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "runtime_minutes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subjects": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "provider_id",
+          "provider_name",
+          "provider_kind",
+          "title"
+        ],
+        "type": "object"
+      },
+      "ScannerCandidateView": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "external_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "heya_slug": {
+            "type": "string"
           },
           "id": {
             "format": "int64",
@@ -11621,6 +11766,9 @@
             "type": "string"
           },
           "identity_year": {
+            "type": "string"
+          },
+          "poster_url": {
             "type": "string"
           },
           "provider_id": {
@@ -11671,7 +11819,7 @@
         ],
         "type": "object"
       },
-      "ScannerV2FindingView": {
+      "ScannerFindingView": {
         "additionalProperties": false,
         "properties": {
           "code": {
@@ -11745,13 +11893,13 @@
         ],
         "type": "object"
       },
-      "ScannerV2IdentityView": {
+      "ScannerIdentityView": {
         "additionalProperties": false,
         "properties": {
           "$schema": {
             "description": "A URL to the JSON Schema for this object.",
             "examples": [
-              "https://example.com/schemas/ScannerV2IdentityView.json"
+              "https://example.com/schemas/ScannerIdentityView.json"
             ],
             "format": "uri",
             "readOnly": true,
@@ -11842,7 +11990,7 @@
         ],
         "type": "object"
       },
-      "ScannerV2RunView": {
+      "ScannerRunView": {
         "additionalProperties": false,
         "properties": {
           "created_at": {
@@ -11896,24 +12044,24 @@
         ],
         "type": "object"
       },
-      "ScannerV2View": {
+      "ScannerView": {
         "additionalProperties": false,
         "properties": {
           "$schema": {
             "description": "A URL to the JSON Schema for this object.",
             "examples": [
-              "https://example.com/schemas/ScannerV2View.json"
+              "https://example.com/schemas/ScannerView.json"
             ],
             "format": "uri",
             "readOnly": true,
             "type": "string"
           },
           "bucket_counts": {
-            "$ref": "#/components/schemas/ScannerV2BucketCounts"
+            "$ref": "#/components/schemas/ScannerBucketCounts"
           },
           "candidates": {
             "items": {
-              "$ref": "#/components/schemas/ScannerV2CandidateView"
+              "$ref": "#/components/schemas/ScannerCandidateView"
             },
             "type": [
               "array",
@@ -11922,7 +12070,7 @@
           },
           "identities": {
             "items": {
-              "$ref": "#/components/schemas/ScannerV2IdentityView"
+              "$ref": "#/components/schemas/ScannerIdentityView"
             },
             "type": [
               "array",
@@ -11930,11 +12078,11 @@
             ]
           },
           "latest_run": {
-            "$ref": "#/components/schemas/ScannerV2RunView"
+            "$ref": "#/components/schemas/ScannerRunView"
           },
           "open_findings": {
             "items": {
-              "$ref": "#/components/schemas/ScannerV2FindingView"
+              "$ref": "#/components/schemas/ScannerFindingView"
             },
             "type": [
               "array",
@@ -19185,9 +19333,69 @@
         ]
       }
     },
-    "/api/libraries/{id}/scan-v2": {
+    "/api/libraries/{id}/scan/cancel": {
+      "post": {
+        "operationId": "cancel-library-scan",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Cancel queued scan jobs for this library",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
+    "/api/libraries/{id}/scanner": {
       "get": {
-        "operationId": "library-scan-v2-view",
+        "operationId": "library-scanner-view",
         "parameters": [
           {
             "description": "Numeric ID",
@@ -19220,7 +19428,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ScannerV2View"
+                  "$ref": "#/components/schemas/ScannerView"
                 }
               }
             },
@@ -19249,15 +19457,15 @@
             "bearer": null
           }
         ],
-        "summary": "Scanner V2 latest run, findings, and identities",
+        "summary": "scanner latest run, findings, and identities",
         "tags": [
           "Libraries"
         ]
       }
     },
-    "/api/libraries/{id}/scan-v2/identities/{identity_id}/approve-candidate": {
+    "/api/libraries/{id}/scanner/identities/{identity_id}/approve-candidate": {
       "post": {
-        "operationId": "library-scan-v2-approve-candidate",
+        "operationId": "library-scanner-approve-candidate",
         "parameters": [
           {
             "description": "Numeric ID",
@@ -19289,7 +19497,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Library-scan-v2-approve-candidateRequest"
+                "$ref": "#/components/schemas/Library-scanner-approve-candidateRequest"
               }
             }
           },
@@ -19300,7 +19508,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ScannerV2IdentityView"
+                  "$ref": "#/components/schemas/ScannerIdentityView"
                 }
               }
             },
@@ -19329,245 +19537,325 @@
             "bearer": null
           }
         ],
-        "summary": "Approve a scanner V2 match candidate",
+        "summary": "Approve a scanner match candidate",
         "tags": [
           "Libraries"
         ]
       }
     },
-    "/api/libraries/{id}/scan-v2/identities/{identity_id}/ignore": {
-      "post": {
-        "operationId": "library-scan-v2-ignore-identity",
-        "parameters": [
-          {
-            "description": "Numeric ID",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "description": "Numeric ID",
-              "examples": [
-                42
-              ],
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "identity_id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Library-scan-v2-ignore-identityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScannerV2IdentityView"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": null
-          }
-        ],
-        "summary": "Ignore a scanner V2 identity",
-        "tags": [
-          "Libraries"
-        ]
-      }
-    },
-    "/api/libraries/{id}/scan-v2/identities/{identity_id}/reject": {
-      "post": {
-        "operationId": "library-scan-v2-reject-identity",
-        "parameters": [
-          {
-            "description": "Numeric ID",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "description": "Numeric ID",
-              "examples": [
-                42
-              ],
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "identity_id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Library-scan-v2-reject-identityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScannerV2IdentityView"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": null
-          }
-        ],
-        "summary": "Reject a scanner V2 identity",
-        "tags": [
-          "Libraries"
-        ]
-      }
-    },
-    "/api/libraries/{id}/scan-v2/identities/{identity_id}/rematch": {
-      "post": {
-        "operationId": "library-scan-v2-rematch-identity",
-        "parameters": [
-          {
-            "description": "Numeric ID",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "description": "Numeric ID",
-              "examples": [
-                42
-              ],
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "identity_id",
-            "required": true,
-            "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScannerV2IdentityView"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": null
-          }
-        ],
-        "summary": "Reset a scanner V2 identity for rematch",
-        "tags": [
-          "Libraries"
-        ]
-      }
-    },
-    "/api/libraries/{id}/scan-v2/runs": {
+    "/api/libraries/{id}/scanner/identities/{identity_id}/candidates/{candidate_id}/detail": {
       "get": {
-        "operationId": "library-scan-v2-runs",
+        "operationId": "library-scanner-candidate-detail",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScannerCandidateDetailView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Fetch scanner match candidate detail",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
+    "/api/libraries/{id}/scanner/identities/{identity_id}/ignore": {
+      "post": {
+        "operationId": "library-scanner-ignore-identity",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Library-scanner-ignore-identityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScannerIdentityView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Ignore a scanner identity",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
+    "/api/libraries/{id}/scanner/identities/{identity_id}/reject": {
+      "post": {
+        "operationId": "library-scanner-reject-identity",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Library-scanner-reject-identityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScannerIdentityView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Reject a scanner identity",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
+    "/api/libraries/{id}/scanner/identities/{identity_id}/rematch": {
+      "post": {
+        "operationId": "library-scanner-rematch-identity",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScannerIdentityView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Reset a scanner identity for rematch",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
+    "/api/libraries/{id}/scanner/runs": {
+      "get": {
+        "operationId": "library-scanner-runs",
         "parameters": [
           {
             "description": "Numeric ID",
@@ -19624,7 +19912,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/ScannerV2RunView"
+                    "$ref": "#/components/schemas/ScannerRunView"
                   },
                   "type": [
                     "array",
@@ -19658,67 +19946,7 @@
             "bearer": null
           }
         ],
-        "summary": "Scanner V2 run history",
-        "tags": [
-          "Libraries"
-        ]
-      }
-    },
-    "/api/libraries/{id}/scan/cancel": {
-      "post": {
-        "operationId": "cancel-library-scan",
-        "parameters": [
-          {
-            "description": "Numeric ID",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "description": "Numeric ID",
-              "examples": [
-                42
-              ],
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CancelBody"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": null
-          }
-        ],
-        "summary": "Cancel queued scan jobs for this library",
+        "summary": "scanner run history",
         "tags": [
           "Libraries"
         ]

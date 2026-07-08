@@ -246,7 +246,7 @@ var katakana = map[rune]string{
 
 // kanaDigraph covers the combining small-ya/yu/yo cases. A base kana
 // followed by small ya/yu/yo (either script) collapses to one syllable.
-var kanaDigraph = map[[2]rune]string{
+var kanaDigraph = withMixedSmallKanaDigraphs(map[[2]rune]string{
 	// Hiragana digraphs
 	{'き', 'ゃ'}: "kya", {'き', 'ゅ'}: "kyu", {'き', 'ょ'}: "kyo",
 	{'し', 'ゃ'}: "sha", {'し', 'ゅ'}: "shu", {'し', 'ょ'}: "sho",
@@ -276,4 +276,19 @@ var kanaDigraph = map[[2]rune]string{
 	{'ウ', 'ィ'}: "wi", {'ウ', 'ェ'}: "we", {'ウ', 'ォ'}: "wo",
 	{'ヴ', 'ァ'}: "va", {'ヴ', 'ィ'}: "vi", {'ヴ', 'ェ'}: "ve", {'ヴ', 'ォ'}: "vo",
 	{'テ', 'ィ'}: "ti", {'デ', 'ィ'}: "di", {'ト', 'ゥ'}: "tu", {'ド', 'ゥ'}: "du",
+})
+
+func withMixedSmallKanaDigraphs(m map[[2]rune]string) map[[2]rune]string {
+	alts := map[rune]rune{
+		'ゃ': 'ャ', 'ゅ': 'ュ', 'ょ': 'ョ',
+		'ぁ': 'ァ', 'ぃ': 'ィ', 'ぅ': 'ゥ', 'ぇ': 'ェ', 'ぉ': 'ォ',
+		'ャ': 'ゃ', 'ュ': 'ゅ', 'ョ': 'ょ',
+		'ァ': 'ぁ', 'ィ': 'ぃ', 'ゥ': 'ぅ', 'ェ': 'ぇ', 'ォ': 'ぉ',
+	}
+	for pair, romaji := range m {
+		if alt, ok := alts[pair[1]]; ok {
+			m[[2]rune{pair[0], alt}] = romaji
+		}
+	}
+	return m
 }

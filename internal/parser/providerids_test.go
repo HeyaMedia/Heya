@@ -73,3 +73,19 @@ func TestParseStoragePathCleanMovieWithFolderID(t *testing.T) {
 		})
 	}
 }
+
+func TestParseStoragePathWithForcedAnimeContext(t *testing.T) {
+	p := ParseStoragePathWithOptions("Anime/Uchuu Senkan Yamato 2/Uchuu Senkan Yamato 2 - 24 - Life and death struggle.mkv", ParseOptions{ForceAnimeContext: true})
+	if p.Release == nil {
+		t.Fatal("expected a release parse")
+	}
+	if p.Release.Title != "Uchuu Senkan Yamato 2" {
+		t.Fatalf("title = %q; want Uchuu Senkan Yamato 2", p.Release.Title)
+	}
+	if len(p.Release.AbsoluteEpisodes) != 1 || p.Release.AbsoluteEpisodes[0] != 24 {
+		t.Fatalf("absolute episodes = %#v; want [24]", p.Release.AbsoluteEpisodes)
+	}
+	if len(p.Release.Episodes) != 0 {
+		t.Fatalf("episodes = %#v; want none", p.Release.Episodes)
+	}
+}

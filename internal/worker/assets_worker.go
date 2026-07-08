@@ -74,6 +74,12 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		}
 	}
 
+	settings := metadata.LibrarySettings{UseLocalData: true}
+	if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
+		settings = metadata.ParseSettings(lib.Settings)
+	}
+	useLocalData := settings.UseLocalData
+
 	current := item.Title
 	if filePath != "" {
 		current = vfs.Base(filePath)
@@ -109,21 +115,23 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 
 	assetsCreated := 0
 
-	if source != nil {
-		defer source.Close()
+	if source != nil && useLocalData {
+		defer func() { _ = source.Close() }()
 		assetsCreated += w.detectShowLevelImages(ctx, q, mediaItemID, source.FS, cacheDir)
+	} else if source != nil {
+		defer func() { _ = source.Close() }()
 	}
 
 	if filePath != "" && !vfs.IsSMBPath(dir) {
 		// Local path: os.DirFS + vfs.Join ≡ os.ReadDir + filepath.Join here,
 		// so the FS-based walker covers both the local and SMB shapes.
-		assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, os.DirFS(dir), dir, base)
+		assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, os.DirFS(dir), dir, base, useLocalData)
 	} else if source != nil {
 		relDir := vfs.Base(dir)
 		if relDir != vfs.Base(showDir) {
 			subFS, err := fs.Sub(source.FS, relDir)
 			if err == nil {
-				assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, subFS, dir, base)
+				assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, subFS, dir, base, useLocalData)
 			}
 		}
 	}
@@ -134,7 +142,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	hasPoster := false
 	hasBackdrop := false
 
-	if source != nil {
+	if source != nil && useLocalData {
 		for _, name := range []string{"poster.jpg", "poster.png", "folder.jpg", "folder.png"} {
 			if findAndCopyFS(source.FS, name, posterPath) != "" {
 				hasPoster = true
@@ -142,7 +150,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 			}
 		}
 	}
-	if source != nil {
+	if source != nil && useLocalData {
 		for _, name := range []string{"backdrop.jpg", "backdrop.png", "fanart.jpg", "fanart.png"} {
 			if findAndCopyFS(source.FS, name, backdropPath) != "" {
 				hasBackdrop = true
@@ -189,10 +197,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	// poster/backdrop bytes on disk to copy next to the media file, so keep the
 	// eager download for those. Everyone else records a pending remote asset row
 	// and the serve path pulls the bytes on first view (images on-demand).
-	saveImages := false
-	if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
-		saveImages = metadata.ParseSettings(lib.Settings).SaveImages
-	}
+	saveImages := settings.SaveImages
 
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	for _, img := range job.Args.PendingImages {
@@ -359,7 +364,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 
 // detectSiblingAssetsFS returns the number of media_assets rows it created,
 // so the caller can decide whether to emit media.updated.
-func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, dir, baseName string) int {
+func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *sqlc.Queries, mediaItemID int64, fsys fs.FS, dir, baseName string, useLocalImages bool) int {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return 0
@@ -414,7 +419,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 			}
 		}
 
-		if mediafile.IsImageExt(ext) && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
+		if useLocalImages && mediafile.IsImageExt(ext) && thumbRE.MatchString(name) && strings.HasPrefix(name, baseName) {
 			if hasThumb {
 				continue
 			}

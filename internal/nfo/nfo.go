@@ -27,6 +27,9 @@ type TVShowNFO struct {
 	IMDBID        string     `xml:"imdb_id"`
 	TMDBID        string     `xml:"tmdbid"`
 	TVDBID        string     `xml:"tvdbid"`
+	AniDBID       string     `xml:"anidbid"`
+	AniListID     string     `xml:"anilistid"`
+	MALID         string     `xml:"malid"`
 	Runtime       string     `xml:"runtime"`
 	Trailer       []string   `xml:"trailer"`
 	UniqueIDs     []UniqueID `xml:"uniqueid"`
@@ -95,6 +98,8 @@ type AlbumNFO struct {
 	MBReleaseGroupID string     `xml:"musicbrainzreleasegroupid"`
 	AudioDBAlbumID   string     `xml:"audiodbalbumid"`
 	AudioDBArtistID  string     `xml:"audiodbartistid"`
+	ITunesAlbumID    string     `xml:"itunesalbumid"`
+	ITunesArtistID   string     `xml:"itunesalbumartistid"`
 	Art              ArtNFO     `xml:"art"`
 	Tracks           []TrackNFO `xml:"track"`
 }
@@ -137,10 +142,17 @@ type ParsedNFO struct {
 	TMDBID           string
 	IMDBID           string
 	TVDBID           string
+	AniDBID          string
+	AniListID        string
+	MALID            string
 	MBID             string
 	MBAlbumID        string
 	MBAlbumArtistID  string
 	MBReleaseGroupID string
+	AudioDBAlbumID   string
+	AudioDBArtistID  string
+	ITunesAlbumID    string
+	ITunesArtistID   string
 	AlbumArtist      string
 	ReleaseDate      string
 	Disambiguation   string
@@ -268,6 +280,9 @@ func parseNFOBytes(data []byte, kind string) (*ParsedNFO, error) {
 			IMDBID:        tv.IMDBID,
 			TMDBID:        tv.TMDBID,
 			TVDBID:        tv.TVDBID,
+			AniDBID:       tv.AniDBID,
+			AniListID:     tv.AniListID,
+			MALID:         tv.MALID,
 			Rating:        tv.Rating,
 			Genres:        tv.Genre,
 			Tags:          tv.Tag,
@@ -352,6 +367,10 @@ func parseNFOBytes(data []byte, kind string) (*ParsedNFO, error) {
 			MBAlbumID:        al.MBAlbumID,
 			MBAlbumArtistID:  al.MBAlbumArtistID,
 			MBReleaseGroupID: al.MBReleaseGroupID,
+			AudioDBAlbumID:   al.AudioDBAlbumID,
+			AudioDBArtistID:  al.AudioDBArtistID,
+			ITunesAlbumID:    al.ITunesAlbumID,
+			ITunesArtistID:   al.ITunesArtistID,
 			Tracks:           al.Tracks,
 			Art:              al.Art,
 			Kind:             "album",
@@ -388,6 +407,18 @@ func fillFromUniqueIDs(p *ParsedNFO, ids []UniqueID) {
 		case "tvdb":
 			if p.TVDBID == "" {
 				p.TVDBID = val
+			}
+		case "anidb", "anidbid":
+			if p.AniDBID == "" {
+				p.AniDBID = val
+			}
+		case "anilist", "anilistid":
+			if p.AniListID == "" {
+				p.AniListID = val
+			}
+		case "mal", "malid", "myanimelist":
+			if p.MALID == "" {
+				p.MALID = val
 			}
 		}
 	}

@@ -16,11 +16,21 @@ SELECT * FROM media_titles WHERE media_item_id = $1 ORDER BY language, title_typ
 --     rather than 'official', so a strict title_type='official' filter
 --     would miss them entirely and the UI would fall back to the raw
 --     canonical Japanese title.
+--   * Prefer series-level catalog sources over AniDB when titles collide.
+--     Merged anime records can carry AniDB movie/edition titles tagged as
+--     "official"; those should not outrank the TMDB/TVDB series title.
 SELECT * FROM media_titles
 WHERE media_item_id = $1
   AND (language = $2 OR language LIKE $2 || '-%')
 ORDER BY
   CASE WHEN language = $2 THEN 0 ELSE 1 END,
+  CASE source
+    WHEN 'tmdb' THEN 0
+    WHEN 'tvdb' THEN 1
+    WHEN 'heya' THEN 2
+    WHEN 'anidb' THEN 3
+    ELSE 4
+  END,
   CASE title_type
     WHEN 'official' THEN 0
     WHEN 'original' THEN 1
@@ -43,6 +53,13 @@ WHERE media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[])
 ORDER BY
   media_item_id,
   CASE WHEN language = sqlc.arg(language) THEN 0 ELSE 1 END,
+  CASE source
+    WHEN 'tmdb' THEN 0
+    WHEN 'tvdb' THEN 1
+    WHEN 'heya' THEN 2
+    WHEN 'anidb' THEN 3
+    ELSE 4
+  END,
   CASE title_type
     WHEN 'official' THEN 0
     WHEN 'original' THEN 1

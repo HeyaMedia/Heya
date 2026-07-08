@@ -52,7 +52,7 @@ func TestListUnprobedProbeableFiles(t *testing.T) {
 
 	want := mk("/x/A.mkv", sqlc.FileStatusMatched, false, false) // matched + unprobed → returned
 	mk("/x/B.mkv", sqlc.FileStatusMatched, true, false)          // already probed → excluded
-	mk("/x/C.mkv", sqlc.FileStatusPending, false, false)         // pending (ProcessFile handles it) → excluded
+	mk("/x/C.mkv", sqlc.FileStatusPending, false, false)         // pending scanner input → excluded
 	mk("/x/D.mkv", sqlc.FileStatusMatched, false, true)          // soft-deleted → excluded
 
 	got, err := q.ListUnprobedProbeableFiles(ctx, sqlc.ListUnprobedProbeableFilesParams{LibraryID: lib.ID, Limit: 100})

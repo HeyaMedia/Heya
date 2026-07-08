@@ -263,3 +263,19 @@ func (q *Queries) ShiftAssetSortOrders(ctx context.Context, arg ShiftAssetSortOr
 	_, err := q.db.Exec(ctx, shiftAssetSortOrders, arg.MediaItemID, arg.Column2)
 	return err
 }
+
+const updateMediaAssetLocalPath = `-- name: UpdateMediaAssetLocalPath :exec
+UPDATE media_assets
+SET local_path = $2
+WHERE id = $1
+`
+
+type UpdateMediaAssetLocalPathParams struct {
+	ID        int64  `json:"id"`
+	LocalPath string `json:"local_path"`
+}
+
+func (q *Queries) UpdateMediaAssetLocalPath(ctx context.Context, arg UpdateMediaAssetLocalPathParams) error {
+	_, err := q.db.Exec(ctx, updateMediaAssetLocalPath, arg.ID, arg.LocalPath)
+	return err
+}

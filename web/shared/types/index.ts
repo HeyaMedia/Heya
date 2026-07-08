@@ -22,6 +22,7 @@ export interface LibrarySettings {
   watch: boolean
   preferred_language: string
   preferred_country: string
+  use_local_data: boolean
   auto_collections: boolean
   fetch_ratings: boolean
   save_nfo: boolean
@@ -73,6 +74,8 @@ export interface MediaItem {
   created_at: string
   updated_at: string
   available?: boolean
+  book_format?: string
+  book_author?: string
 }
 
 // Mirrors sqlc.Movie (pgtype.Numeric serializes to either number or string).
@@ -324,16 +327,24 @@ export interface MusicTrackRow {
 export interface Book {
   id: number
   media_item_id: number
-  author_id: number | null
+  author_id: number | { int64?: number; valid?: boolean } | null
   isbn: string
-  isbn13: string
-  pages: number
+  openlibrary_id?: string
+  page_count?: number
   publisher: string
-  publish_date: string
-  genres: string[]
+  publish_date: string | null
+  file_path?: string
   subjects: string[]
-  rating: string | null
-  open_library_key: string
+  language?: string
+  series_name?: string
+  series_number?: number
+  format: string
+  description?: string
+  isbn13?: string
+  pages?: number
+  genres?: string[]
+  rating?: string | null
+  open_library_key?: string
 }
 
 export interface MediaAsset {

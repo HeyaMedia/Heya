@@ -103,6 +103,33 @@ func MarkActiveKickoffManual(ctx context.Context, db DB, kickoffKind, taskID str
 	if err != nil {
 		return 0, err
 	}
+	n := tag.RowsAffected()
+	if n > 0 {
+		if _, err := MarkScheduledTaskJobsManual(ctx, db, taskID); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// MarkScheduledTaskJobsManual marks every active job owned by the scheduled
+// task as user-initiated. This is deliberately broader than the kickoff row:
+// for non-pump tasks the kickoff can finish quickly after fanning out child
+// work, and a later "Run Now" should still upgrade the already-active children
+// so the max-runtime sweep does not cancel them under the user's feet.
+func MarkScheduledTaskJobsManual(ctx context.Context, db DB, taskID string) (int64, error) {
+	if taskID == "" {
+		return 0, nil
+	}
+	tag, err := db.Exec(ctx, `
+		UPDATE river_job
+		   SET metadata = metadata || '{"source": "manual"}'::jsonb
+		 WHERE args->>'scheduled_task_id' = $1
+		   AND state IN `+kickoffActiveStates+`
+	`, taskID)
+	if err != nil {
+		return 0, err
+	}
 	return tag.RowsAffected(), nil
 }
 
@@ -214,8 +241,9 @@ func ScheduledTaskExceededRuntime(ctx context.Context, db DB, taskID string, kin
 			  AND kind = ANY($1::text[])
 			  AND args->>'scheduled_task_id' = $2
 			  AND created_at < now() - ($3::int * interval '1 minute')
+			  AND COALESCE(metadata->>'source', '') <> $4
 		)
-	`, kinds, taskID, minutes).Scan(&exceeded)
+	`, kinds, taskID, minutes, KickoffSourceManual).Scan(&exceeded)
 	return exceeded, err
 }
 

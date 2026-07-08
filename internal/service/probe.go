@@ -9,7 +9,6 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/mediaprobe"
-	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
@@ -68,7 +67,7 @@ func (a *App) EnsureFileProbed(ctx context.Context, fileID int64) (sqlc.LibraryF
 	}
 	file.MediaInfo = infoJSON
 
-	if hash := scanner.ComputeContentHash(file.Size, infoJSON); hash != "" {
+	if hash := mediafile.ComputeContentHash(file.Size, infoJSON); hash != "" {
 		_ = q.UpdateLibraryFileContentHash(ctx, sqlc.UpdateLibraryFileContentHashParams{
 			ID:          fileID,
 			ContentHash: hash,

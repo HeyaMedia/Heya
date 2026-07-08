@@ -155,10 +155,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 }
 
 func (w *DownloadImageWorker) maybeSaveToMediaDir(ctx context.Context, job *river.Job[DownloadImageArgs], localPath string) {
-	if job.Args.AssetType != "poster" && job.Args.AssetType != "backdrop" {
-		return
-	}
-	if job.Args.SortOrder > 0 {
+	if !ShouldSaveImageSidecar(job.Args.AssetType, job.Args.SortOrder, job.Args.Label) {
 		return
 	}
 
@@ -187,6 +184,8 @@ func (w *DownloadImageWorker) maybeSaveToMediaDir(ctx context.Context, job *rive
 		FilePath:    files[0].Path,
 		CachedPath:  localPath,
 		AssetType:   job.Args.AssetType,
+		SortOrder:   job.Args.SortOrder,
+		Label:       job.Args.Label,
 	}, nil)
 }
 

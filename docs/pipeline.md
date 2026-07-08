@@ -1,8 +1,9 @@
-# Match + enrich pipeline
+# Scanner + enrich pipeline
 
 The path from "file appears on disk" to "fully enriched media item" is split
-into two phases: a **match** phase that produces a stub from a single search
-call, and an **enrich** phase that fans out the heavy detail work.
+into two phases: a **scanner** phase that inventories local files, maps local
+identities, applies playable rows, and records review state; and an **enrich**
+phase that refreshes heavy metadata/artwork on queue workers.
 
 ## Scan (change detection first)
 
@@ -22,27 +23,35 @@ cost near-zero I/O beyond the directory walk itself:
   and re-enter the pipeline as `pending` — so local-metadata changes land on
   the next scan without a force rescan.
 - **No redundant ffprobe on re-apply.** The walk upsert clears `media_info`
-  when bytes change; `ProcessFile` skips the probe when `media_info` is still
-  populated (NFO-only re-apply), so probe work tracks byte changes only.
+  when bytes change. NFO-only re-apply keeps `media_info`, so probe work tracks
+  byte changes only.
 
-`ScanOptions.ForceRescan` bypasses the unchanged check and re-upserts
-everything (which also clears probe data → full re-probe + re-match).
+`KickoffLibraryScanArgs.Force` bypasses the unchanged check and enqueues a full
+library processing run.
 
-## Match (search-only stub)
+## Scanner processing
 
-`internal/matcher/`. The scanner emits a parsed filename; the
-`MetadataMatchWorker` calls HeyaMedia's `/api/v1/search` exactly once, scores
-each hit locally, and on auto-match writes a stub `media_items` row containing
-only what the search response carries (title, year, snippet → description,
-image → poster URL, external_ids, `alt_titles`). No `GetDetail` call.
-Sub-second per file. The item is now visible in the UI as a stub.
+`internal/scanner/`. The scanner runs the same phases from the CLI and the
+queue. Queue workers split those phases so slow remote metadata calls do not
+hold the whole library scan hostage:
 
-- **Scoring**: `internal/matcher/confidence.go::ScoreConfidence` (Levenshtein
-  on normalized titles + year boost + substring-containment bonus for the
-  "Title: Subtitle" pattern), then
-  `internal/matcher/matcher.go::scoreBestTitle` projects that over
-  `[primary, ...AltTitles]` and takes the max — that's how romaji filenames
-  resolve against English canonical titles via HeyaMedia's `alt_titles[]`.
+- `process_library_scan`: local inventory/parse/identity + HeyaMedia search.
+  Persists review identities, candidates, findings, and a `search_result`
+  artifact.
+- `fetch_library_metadata`: resumes that exact search artifact, overlays any
+  admin/manual decisions made after search, fetches remote metadata, and
+  persists a `fetch_result` artifact.
+- `apply_library_scan`: resumes the fetch artifact, materializes rows and
+  `library_file_links`, and fans out post-apply jobs such as ffprobe, ratings,
+  NFO saves, thumbnails, chromaprint, loudness, and sonic analysis.
+
+Each stage can process a full library or a directory scope from the watcher.
+The scanner emits structured events and records local
+identities/candidates/findings for the admin review UI.
+
+- **Scoring**: scanner search modules call HeyaMedia search, score candidates
+  locally, auto-accept strong matches, and persist ambiguous/rejected cases for
+  manual review.
 - **Threshold**: `MatchOptions.AutoMatchThreshold` (default `0.85`) —
   `internal/matcher/matcher.go::autoMatchThresholdFor` lowers it to `0.75`
   when the hit is `enriched` (HeyaMedia has it warm-cached and
@@ -78,9 +87,13 @@ In `internal/worker/worker.go`:
   cancellation simple (cancel-by-kind cancels exactly the work it should), and
   lets each external dependency (HeyaMedia search, TMDB, ratings providers)
   carry its own concurrency knob without contending with unrelated work.
-- **Scanner pipeline** (`process_file`, `ffprobe`, `detect_local_assets`,
-  `metadata_match`, `kickoff_library_scan`) is **MaxWorkers=1 end-to-end** —
-  protects the source filesystem / SMB share from concurrent IO during a scan.
+- **Scanner pipeline** (`kickoff_library_scan`, `process_library_scan`,
+  `fetch_library_metadata`, `apply_library_scan`, `ffprobe`,
+  `detect_local_assets`) is **MaxWorkers=1 end-to-end** — protects the source
+  filesystem / SMB share from concurrent IO during a scan.
+  `kickoff_library_scan` is the fast inventory/change detector; it skips
+  unchanged paths, soft-deletes missing paths, and enqueues
+  `process_library_scan` for the changed library scope.
 - **Enrich pipeline** (`enrich_media_item`, `person_fetch`, `ratings_fetch`,
   `force_refresh_metadata`) is MaxWorkers=1 per kind for upstream rate-limit
   safety. The `enrich_media_item` queue keeps the priority-banded ordering:
@@ -88,8 +101,8 @@ In `internal/worker/worker.go`:
   - **P2** = movies + TV
   - **P3** = music + books
   - **P4** = analysis tier
-- `process_file` uses two priority bands: **P1** = watcher (`fsnotify`-discovered),
-  **P2** = scan.
+- `process_library_scan` uses two priority bands: **P1** = watcher
+  (`fsnotify`-discovered folder), **P2** = scheduled/manual library scan.
 - `download_image` is **MaxWorkers=4** — the lone exception, since downloads
   hit provider CDNs (not the source FS). Everything else is 1.
 - River caps priority at **1..4 (hardcoded)**. Need ≥5 bands → introduce
@@ -129,7 +142,7 @@ Same pattern for all six scheduled tasks:
 
 | Task                   | Kickoff kind                | Per-item kind        |
 | ---------------------- | --------------------------- | -------------------- |
-| `scan_libraries`       | `kickoff_library_scan`      | `process_file`       |
+| `scan_libraries`       | `kickoff_library_scan`      | `process_library_scan` → `fetch_library_metadata` → `apply_library_scan` |
 | `refresh_stale_items`  | `kickoff_refresh_stale`     | `enrich_media_item`  |
 | `scan_music_loudness`  | `kickoff_music_loudness`    | `scan_track_loudness`|
 | `generate_trickplay`   | `kickoff_trickplay`         | `trickplay_file`     |

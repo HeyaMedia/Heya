@@ -92,7 +92,7 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 			if err == nil && done {
 				client := river.ClientFromContext[pgx.Tx](ctx)
 				if client != nil {
-					if _, err := client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, nil); err != nil {
+					if _, err := client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(scheduledJobSource(job.Metadata))); err != nil {
 						return fmt.Errorf("enqueue album loudness: %w", err)
 					}
 				}
@@ -235,12 +235,11 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 // (and its CPU appetite) to the critical-path queues. River reschedules
 // snoozed jobs after the requested delay without counting it as a failure.
 //
-// "Matching work" = any non-final ProcessFile / MetadataMatch /
-// MetadataFetch / RefreshMusicArtist job. We don't care about queue
-// boundaries here — these run in parallel queues but all compete for the
+// "Matching work" = any non-final scanner/enrich work. We don't care about
+// queue boundaries here — these run in parallel queues but all compete for the
 // same CPU/disk/heya.media bandwidth as loudness scanning.
 func snoozeIfMatchingPending(ctx context.Context, db *pgxpool.Pool) error {
-	n, err := queueops.CountActiveByKinds(ctx, db, []string{"process_file", "metadata_match", "metadata_fetch", "refresh_music_artist"})
+	n, err := queueops.CountActiveByKinds(ctx, db, []string{"kickoff_library_scan", "process_library_scan", "fetch_library_metadata", "apply_library_scan", "enrich_media_item"})
 	if err != nil {
 		// Don't block loudness work on a transient DB hiccup — better to
 		// run loudness than to wedge the queue entirely.

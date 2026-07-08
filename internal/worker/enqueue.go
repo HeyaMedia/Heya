@@ -96,7 +96,15 @@ func EnqueueEnrichForceTx(ctx context.Context, itemID int64, mediaType sqlc.Medi
 }
 
 func enqueueEnrich(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource, force bool, scheduledTaskID string, batchLibraryID int64, batchTotal, batchPosition int) error {
+	return enqueueEnrichWithMetadata(ctx, rc, itemID, mediaType, source, force, scheduledTaskID, batchLibraryID, batchTotal, batchPosition, nil)
+}
+
+func enqueueEnrichWithMetadata(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, mediaType sqlc.MediaType, source EnrichSource, force bool, scheduledTaskID string, batchLibraryID int64, batchTotal, batchPosition int, metadata []byte) error {
 	priority := PriorityFor(source, mediaType)
+	opts := &river.InsertOpts{Priority: priority}
+	if len(metadata) > 0 {
+		opts.Metadata = metadata
+	}
 	_, err := rc.Insert(ctx, EnrichMediaItemArgs{
 		ItemID:          itemID,
 		Source:          string(source),
@@ -105,6 +113,6 @@ func enqueueEnrich(ctx context.Context, rc *river.Client[pgx.Tx], itemID int64, 
 		BatchLibraryID:  batchLibraryID,
 		BatchTotal:      batchTotal,
 		BatchPosition:   batchPosition,
-	}, &river.InsertOpts{Priority: priority})
+	}, opts)
 	return err
 }

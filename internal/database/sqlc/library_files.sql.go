@@ -725,7 +725,7 @@ type ListRetryableUnmatchedFilesParams struct {
 // matcher records "search error: ..." there). A genuine "no results" / "no
 // title" match is NOT retried (different error_message), so this only re-drives
 // files that could plausibly match once the provider recovers. Capped;
-// metadata_match is unique-while-active so re-drives coalesce across scans.
+// scanner runs are unique-while-active so re-drives coalesce across scans.
 func (q *Queries) ListRetryableUnmatchedFiles(ctx context.Context, arg ListRetryableUnmatchedFilesParams) ([]LibraryFile, error) {
 	rows, err := q.db.Query(ctx, listRetryableUnmatchedFiles, arg.LibraryID, arg.Limit)
 	if err != nil {
@@ -820,11 +820,11 @@ type ListUnprobedProbeableFilesParams struct {
 	Limit     int32 `json:"limit"`
 }
 
-// Files that are already known (not 'pending' — those flow through ProcessFile)
-// but were never successfully probed (media_info still empty). The scan
-// re-enqueues ffprobe for these so a file whose first probe failed (e.g. a
-// flaky mount) isn't stuck unprobed forever. Capped per call; ffprobe jobs are
-// unique-while-active, so repeating this across scans never stacks duplicates.
+// Files that are already known but were never successfully probed (media_info
+// still empty). The scan re-enqueues ffprobe for these so a file whose first
+// probe failed (e.g. a flaky mount) isn't stuck unprobed forever. Capped per
+// call; ffprobe jobs are unique-while-active, so repeating this across scans
+// never stacks duplicates.
 func (q *Queries) ListUnprobedProbeableFiles(ctx context.Context, arg ListUnprobedProbeableFilesParams) ([]LibraryFile, error) {
 	rows, err := q.db.Query(ctx, listUnprobedProbeableFiles, arg.LibraryID, arg.Limit)
 	if err != nil {
@@ -892,8 +892,8 @@ type ReapplyLibraryFileParseParams struct {
 }
 
 // Local-metadata re-apply for a file whose bytes did NOT change (its NFO
-// did). Refreshes parse_result and re-drives the match pipeline, but keeps
-// media_info/keyframes so ProcessFile won't re-probe unchanged bytes.
+// did). Refreshes parse_result and re-drives scanner processing, but keeps
+// media_info/keyframes so unchanged bytes won't be re-probed.
 func (q *Queries) ReapplyLibraryFileParse(ctx context.Context, arg ReapplyLibraryFileParseParams) error {
 	_, err := q.db.Exec(ctx, reapplyLibraryFileParse, arg.ID, arg.ParseResult)
 	return err
@@ -1122,10 +1122,8 @@ type UpsertLibraryFileParams struct {
 }
 
 // The conflict branch means the bytes changed (or a force rescan), so stale
-// probe artifacts are cleared — ProcessFile skips ffprobe when media_info is
-// already populated, and this reset is what makes that skip safe. NFO-only
-// re-applies must NOT come through here (they'd wipe good probe data); they
-// use ReapplyLibraryFileParse instead.
+// probe artifacts are cleared. NFO-only re-applies must NOT come through here
+// (they'd wipe good probe data); they use ReapplyLibraryFileParse instead.
 func (q *Queries) UpsertLibraryFile(ctx context.Context, arg UpsertLibraryFileParams) (LibraryFile, error) {
 	row := q.db.QueryRow(ctx, upsertLibraryFile,
 		arg.LibraryID,

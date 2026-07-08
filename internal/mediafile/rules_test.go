@@ -16,6 +16,9 @@ func TestExtraTypeFromPath(t *testing.T) {
 		"Show (2024)/Season 01/Show (2024) - S01E01 - Pilot.mkv":    "",
 		"Show (2024)/Season 01/Show (2024) - S01E01-trailer.mkv":    "trailer",
 		"Show (2024)/Season 01/Show (2024) - S01E01 Featurette.mkv": "",
+		"Anime (2024)/NCOPs/Creditless Opening.mkv":                 "opening",
+		"Anime (2024)/NCEDs/Creditless Ending.mkv":                  "ending",
+		"Anime (2024)/PVs/Announcement PV.mkv":                      "trailer",
 	}
 	for path, want := range cases {
 		if got := ExtraTypeFromPath(path); got != want {

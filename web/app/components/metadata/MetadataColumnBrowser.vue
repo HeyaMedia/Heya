@@ -21,7 +21,7 @@
               @click="selectItem(item)"
             >
               <Icon
-                v-if="item.media_type === 'tv'"
+                v-if="isSeriesType(item.media_type)"
                 :name="expandedItems.has(item.id) ? 'chevdown' : 'chevright'"
                 :size="10"
                 class="mtb-chevron"
@@ -101,10 +101,15 @@ function libIcon(type: string) {
   switch (type) {
     case 'movie': return 'film'
     case 'tv': return 'tv'
+    case 'anime': return 'tv'
     case 'music': return 'music'
     case 'book': return 'book'
     default: return 'folder'
   }
+}
+
+function isSeriesType(type: string) {
+  return type === 'tv' || type === 'anime'
 }
 
 function filteredMedia(libId: number): MediaItem[] {
@@ -144,7 +149,7 @@ async function toggleItem(item: MediaItem) {
   expandedItems.value.add(item.id)
   expandedItems.value = new Set(expandedItems.value)
 
-  if (!itemSeasons.value[item.id] && item.media_type === 'tv') {
+  if (!itemSeasons.value[item.id] && isSeriesType(item.media_type)) {
     try {
       const { $heya } = useNuxtApp()
       const detail = await $heya('/api/media/{id}', { path: { id: String(item.id) } }) as MediaDetail
@@ -158,7 +163,7 @@ function selectItem(item: MediaItem) {
   selectedSeasonId.value = null
   selectedEpisodeId.value = null
   emit('selectMedia', item.id)
-  if (item.media_type === 'tv' && !expandedItems.value.has(item.id)) {
+  if (isSeriesType(item.media_type) && !expandedItems.value.has(item.id)) {
     toggleItem(item)
   }
 }

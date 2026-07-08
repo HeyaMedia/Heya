@@ -86,7 +86,7 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 	}
 	log.Debug().Int64("media_item_id", item.ID).Int("returned", len(artworks)).Msg("artwork: heya.media returned candidates")
 
-	sortOrder := 10
+	sortOrder := 1
 	skippedCap := 0
 	for _, art := range artworks {
 		if art.URL == "" {
@@ -118,7 +118,7 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 	}
 
 	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("skipped_cap", skippedCap).Dur("duration", time.Since(start)).Msg("artwork: fan-out summary")
-	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("artworks_queued", sortOrder-10).Msg("enrichment complete")
+	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("artworks_queued", sortOrder-1).Msg("enrichment complete")
 
 	// No emit here: this worker only enqueues DownloadImageArgs jobs — nothing
 	// is stored yet. DownloadImageWorker emits media.updated at store-time when

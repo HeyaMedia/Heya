@@ -16,6 +16,7 @@ type SearchQuery struct {
 	Album    string
 	Author   string
 	ISBN     string
+	Format   string
 	Seasons  []int
 	Language string
 	Country  string

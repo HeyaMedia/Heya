@@ -23,6 +23,10 @@ func (w *SaveNFOWorker) Work(ctx context.Context, job *river.Job[SaveNFOArgs]) e
 	if err != nil {
 		return nil
 	}
+	if job.Args.FilePath == "" {
+		log.Debug().Int64("media_id", item.ID).Msg("save_nfo: no file path supplied, skipping")
+		return nil
+	}
 
 	w.Progress.SetCurrentByKind(SaveNFOArgs{}.Kind(), item.Title)
 
@@ -38,7 +42,7 @@ func (w *SaveNFOWorker) Work(ctx context.Context, job *river.Job[SaveNFOArgs]) e
 			log.Warn().Err(err).Int64("media_id", item.ID).Msg("failed to write movie NFO")
 		}
 
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		series, err := q.GetTVSeriesByMediaItemID(ctx, item.ID)
 		if err != nil {
 			return nil

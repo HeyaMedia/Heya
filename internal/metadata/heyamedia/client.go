@@ -19,7 +19,9 @@ import (
 // That way swapping the codegen out later (or wrapping the transport
 // with retry / caching middleware) stays a single-package change.
 type Client struct {
-	gen *gen.ClientWithResponses
+	gen        *gen.ClientWithResponses
+	baseURL    string
+	httpClient *http.Client
 }
 
 // NewClient constructs a Client pointed at the given heya.media base URL.
@@ -45,5 +47,5 @@ func NewClient(baseURL string) *Client {
 		// future config mishap surfaces at startup, not on first request.
 		panic("heyamedia: NewClientWithResponses unexpectedly failed: " + err.Error())
 	}
-	return &Client{gen: c}
+	return &Client{gen: c, baseURL: baseURL, httpClient: httpClient}
 }

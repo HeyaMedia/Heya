@@ -156,7 +156,7 @@ func (t *Trigger) tick(ctx context.Context) {
 			// immediately — that surprises users who just enabled a
 			// task and find a kickoff queued before they finished
 			// configuring the window.
-			next := initialNextRunAfter(now, row.IntervalHours, row.DailyStartTime, row.DailyEndTime)
+			next := InitialNextRunAfter(now, row.IntervalHours, row.DailyStartTime, row.DailyEndTime)
 			if _, err := t.db.Exec(ctx,
 				"UPDATE scheduled_tasks SET next_run_at = $1 WHERE id = $2",
 				pgtype.Timestamptz{Time: next, Valid: true}, row.ID,
@@ -232,6 +232,11 @@ func (t *Trigger) TriggerNow(ctx context.Context, taskID string, manual bool) er
 	if err != nil {
 		return err
 	}
+	if manual && !res.UniqueSkippedAsDuplicate {
+		if _, err := queueops.MarkScheduledTaskJobsManual(ctx, t.db, taskID); err != nil {
+			return err
+		}
+	}
 	if !manual || !res.UniqueSkippedAsDuplicate {
 		return nil
 	}
@@ -290,7 +295,9 @@ func nextRunAfter(now time.Time, intervalHours int32, dailyStartTime, dailyEndTi
 	return nextWindowStartAfter(candidate, dailyStartTime)
 }
 
-func initialNextRunAfter(now time.Time, intervalHours int32, dailyStartTime, dailyEndTime string) time.Time {
+// InitialNextRunAfter computes the first non-immediate scheduled fire time for
+// a task whose next_run_at is being initialized or recalculated.
+func InitialNextRunAfter(now time.Time, intervalHours int32, dailyStartTime, dailyEndTime string) time.Time {
 	if inTimeWindow(now, dailyStartTime, dailyEndTime) {
 		return nextRunAfter(now, intervalHours, dailyStartTime, dailyEndTime)
 	}

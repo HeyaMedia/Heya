@@ -1,18 +1,26 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/mediatype"
+	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -29,18 +37,56 @@ type WatcherPauser interface {
 	Resume(libraryID int64)
 }
 
+const manualJobMetadata = `{"source":"manual"}`
+
+type jobSourceMetadata struct {
+	Source string `json:"source"`
+}
+
+func scheduledJobSource(metadata []byte) string {
+	var src jobSourceMetadata
+	if len(metadata) > 0 {
+		_ = json.Unmarshal(metadata, &src)
+	}
+	return src.Source
+}
+
+func scheduledJobMetadata(source string) []byte {
+	if source == queueops.KickoffSourceManual {
+		return []byte(manualJobMetadata)
+	}
+	return nil
+}
+
+func scheduledJobInsertOpts(source string) *river.InsertOpts {
+	if source == queueops.KickoffSourceManual {
+		return &river.InsertOpts{Metadata: []byte(manualJobMetadata)}
+	}
+	return nil
+}
+
+func applyScheduledJobSource(opts river.InsertOpts, source string) *river.InsertOpts {
+	if source == queueops.KickoffSourceManual {
+		opts.Metadata = []byte(manualJobMetadata)
+	}
+	return &opts
+}
+
 // ---------------------------------------------------------------------------
 // kickoff_library_scan
 // ---------------------------------------------------------------------------
 
-// KickoffLibraryScanWorker walks one or all libraries, runs the
-// scanner, and enqueues ProcessFile jobs for every pending file. When
-// args.LibraryID > 0 it scans that single library; otherwise it walks
-// every library in the priority order movies → tv → music → books so a
-// fresh DB fills predictably for the user's primary media type first.
+// KickoffLibraryScanWorker walks one or all libraries, records which inputs
+// changed, and enqueues scanner processing for changed scopes. Unsupported
+// domains are deliberately skipped instead of falling back to the legacy
+// scanner.
+// When args.LibraryID > 0 it scans that single library; otherwise it walks
+// every library in the priority order movies → tv → music → books so a fresh DB
+// fills predictably for the user's primary media type first.
 type KickoffLibraryScanWorker struct {
 	river.WorkerDefaults[KickoffLibraryScanArgs]
 	DB       *pgxpool.Pool
+	Heya     *heyamedia.HeyaProvider
 	Hub      EventPublisher
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
@@ -49,6 +95,7 @@ type KickoffLibraryScanWorker struct {
 func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[KickoffLibraryScanArgs]) error {
 	startedAt := time.Now()
 	taskID := job.Args.ScheduledTaskID
+	source := scheduledJobSource(job.Metadata)
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -70,7 +117,6 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 		sortLibrariesByMediaPriority(libs)
 	}
 
-	s := scanner.New(w.DB)
 	enqueued := 0
 	failed := 0
 
@@ -90,9 +136,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 			LibraryName: lib.Name,
 		})
 
-		result, scanErr := s.ScanLibrary(ctx, lib, scanner.ScanOptions{
-			ForceRescan: job.Args.Force,
-		})
+		result, scopes, scanErr := w.planLibraryScan(ctx, lib, job.Args.Force)
 
 		if w.Watcher != nil {
 			w.Watcher.Resume(lib.ID)
@@ -111,40 +155,48 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 			}
 		}
 
-		n, enqueueFailed := enqueuePendingFiles(ctx, q, rc, lib.ID, taskID)
-		enqueued += n
-		failed += enqueueFailed
-
+		n := 0
+		processQueued := false
+		if supportsScanner(lib.MediaType) && (job.Args.Force || result.New > 0) {
+			if err := enqueueProcessLibraryScan(ctx, rc, ProcessLibraryScanArgs{
+				LibraryID:       lib.ID,
+				ScopePaths:      scopes,
+				Force:           job.Args.Force,
+				ScheduledTaskID: taskID,
+			}, PriorityScan, source); err != nil {
+				log.Warn().Err(err).Int64("library_id", lib.ID).Msg("kickoff_library_scan: enqueue scanner processing failed")
+				failed++
+			} else {
+				n++
+				processQueued = true
+			}
+		}
 		// Self-heal files that were matched but never successfully probed (their
 		// first ffprobe failed on a flaky mount, and the size+mtime skip means
 		// plain rescans never revisit them). ffprobe jobs are unique-while-active,
 		// so this can't stack duplicates against probes still in flight.
-		reprobed := enqueueReprobeUnprobed(ctx, q, rc, lib.ID, taskID)
+		reprobed := enqueueReprobeUnprobed(ctx, q, rc, lib.ID, taskID, source)
 		enqueued += reprobed
-
-		// Self-heal files stranded 'unmatched' by a transient provider search
-		// error — the match analogue of the reprobe pass. metadata_match is
-		// unique-while-active, so re-drives coalesce.
-		rematched := enqueueRematchTransient(ctx, q, rc, lib.ID, taskID)
-		enqueued += rematched
 
 		log.Info().
 			Int64("library_id", lib.ID).
 			Int("discovered", result.Discovered).
-			Int("new", result.New).
+			Int("changed", result.New).
 			Int("deleted", result.Deleted).
+			Bool("scanner", supportsScanner(lib.MediaType)).
 			Int("enqueued", n).
 			Int("reprobed", reprobed).
-			Int("rematched", rematched).
 			Msg("kickoff_library_scan: library done")
 
-		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
-			LibraryID:   lib.ID,
-			LibraryName: lib.Name,
-			Discovered:  result.Discovered,
-			New:         result.New,
-			Missing:     result.Deleted,
-		})
+		if !processQueued {
+			emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
+				LibraryID:   lib.ID,
+				LibraryName: lib.Name,
+				Discovered:  result.Discovered,
+				New:         result.New,
+				Missing:     result.Deleted,
+			})
+		}
 		if result.Deleted > 0 {
 			emit(w.Hub, eventhub.EventMediaRemoved, eventhub.MediaPayload{LibraryID: lib.ID})
 		}
@@ -154,12 +206,1003 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 	return nil
 }
 
+type libraryScanOutcome struct {
+	Discovered int
+	New        int
+	Deleted    int
+}
+
+// ---------------------------------------------------------------------------
+// process_library_scan
+// ---------------------------------------------------------------------------
+
+type ProcessLibraryScanWorker struct {
+	river.WorkerDefaults[ProcessLibraryScanArgs]
+	DB       *pgxpool.Pool
+	Heya     *heyamedia.HeyaProvider
+	Hub      EventPublisher
+	Watcher  WatcherPauser
+	Progress *TaskProgressBroadcaster
+}
+
+func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[ProcessLibraryScanArgs]) error {
+	q := sqlc.New(w.DB)
+	rc := river.ClientFromContext[pgx.Tx](ctx)
+	source := scheduledJobSource(job.Metadata)
+	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	if err != nil {
+		return err
+	}
+	if !supportsScanner(lib.MediaType) {
+		log.Warn().
+			Int64("library_id", lib.ID).
+			Str("library", lib.Name).
+			Str("media_type", string(lib.MediaType)).
+			Msg("process_library_scan: scanner does not support this library type")
+		return nil
+	}
+
+	label := lib.Name
+	if len(job.Args.ScopePaths) > 0 {
+		label += " (scoped)"
+	}
+	w.Progress.Set("scan_libraries", "process_library_scan", label)
+
+	if w.Watcher != nil {
+		w.Watcher.Pause(lib.ID)
+		defer w.Watcher.Resume(lib.ID)
+	}
+	emit(w.Hub, eventhub.EventScanStarted, eventhub.ScanPayload{
+		LibraryID:   lib.ID,
+		LibraryName: lib.Name,
+	})
+
+	result, searchScanRunID, err := w.scanLibrarySearch(ctx, lib, job.Args.ScopePaths)
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_library_scan: scan error")
+		return err
+	}
+
+	if err := enqueueFetchLibraryMetadata(ctx, rc, FetchLibraryMetadataArgs{
+		LibraryID:       lib.ID,
+		ScopePaths:      job.Args.ScopePaths,
+		SearchScanRunID: searchScanRunID,
+		Force:           job.Args.Force,
+		ScheduledTaskID: job.Args.ScheduledTaskID,
+	}, PriorityScan, source); err != nil {
+		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("process_library_scan: enqueue metadata fetch failed")
+		return err
+	}
+
+	log.Info().
+		Int64("library_id", lib.ID).
+		Int("scopes", len(job.Args.ScopePaths)).
+		Int("discovered", result.Discovered).
+		Int("selected", result.New).
+		Msg("process_library_scan: library done")
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// fetch_library_metadata
+// ---------------------------------------------------------------------------
+
+type FetchLibraryMetadataWorker struct {
+	river.WorkerDefaults[FetchLibraryMetadataArgs]
+	DB       *pgxpool.Pool
+	Heya     *heyamedia.HeyaProvider
+	Hub      EventPublisher
+	Watcher  WatcherPauser
+	Progress *TaskProgressBroadcaster
+}
+
+func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[FetchLibraryMetadataArgs]) error {
+	q := sqlc.New(w.DB)
+	rc := river.ClientFromContext[pgx.Tx](ctx)
+	source := scheduledJobSource(job.Metadata)
+	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	if err != nil {
+		return err
+	}
+	if !supportsScanner(lib.MediaType) {
+		log.Warn().
+			Int64("library_id", lib.ID).
+			Str("library", lib.Name).
+			Str("media_type", string(lib.MediaType)).
+			Msg("fetch_library_metadata: scanner does not support this library type")
+		return nil
+	}
+
+	label := lib.Name
+	if len(job.Args.ScopePaths) > 0 {
+		label += " (scoped)"
+	}
+	w.Progress.Set("scan_libraries", "fetch_library_metadata", label)
+
+	if w.Watcher != nil {
+		w.Watcher.Pause(lib.ID)
+		defer w.Watcher.Resume(lib.ID)
+	}
+
+	result, fetchScanRunID, err := w.scanLibraryFetch(ctx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID)
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("fetch_library_metadata: scan error")
+		return err
+	}
+
+	if err := enqueueApplyLibraryScan(ctx, rc, ApplyLibraryScanArgs{
+		LibraryID:       lib.ID,
+		ScopePaths:      job.Args.ScopePaths,
+		SearchScanRunID: job.Args.SearchScanRunID,
+		FetchScanRunID:  fetchScanRunID,
+		Force:           job.Args.Force,
+		ScheduledTaskID: job.Args.ScheduledTaskID,
+	}, PriorityScan, source); err != nil {
+		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("fetch_library_metadata: enqueue apply failed")
+		return err
+	}
+
+	log.Info().
+		Int64("library_id", lib.ID).
+		Int("scopes", len(job.Args.ScopePaths)).
+		Int("discovered", result.Discovered).
+		Int("fetched", result.New).
+		Msg("fetch_library_metadata: library done")
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// apply_library_scan
+// ---------------------------------------------------------------------------
+
+type ApplyLibraryScanWorker struct {
+	river.WorkerDefaults[ApplyLibraryScanArgs]
+	DB           *pgxpool.Pool
+	Heya         *heyamedia.HeyaProvider
+	Hub          EventPublisher
+	Watcher      WatcherPauser
+	SonicEnabled SonicEnabledFn
+	Progress     *TaskProgressBroadcaster
+}
+
+func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyLibraryScanArgs]) error {
+	q := sqlc.New(w.DB)
+	rc := river.ClientFromContext[pgx.Tx](ctx)
+	source := scheduledJobSource(job.Metadata)
+	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	if err != nil {
+		return err
+	}
+	if !supportsScanner(lib.MediaType) {
+		log.Warn().
+			Int64("library_id", lib.ID).
+			Str("library", lib.Name).
+			Str("media_type", string(lib.MediaType)).
+			Msg("apply_library_scan: scanner does not support this library type")
+		return nil
+	}
+
+	label := lib.Name
+	if len(job.Args.ScopePaths) > 0 {
+		label += " (scoped)"
+	}
+	w.Progress.Set("scan_libraries", "apply_library_scan", label)
+
+	if w.Watcher != nil {
+		w.Watcher.Pause(lib.ID)
+		defer w.Watcher.Resume(lib.ID)
+	}
+
+	outcome, result, err := w.scanLibraryApply(ctx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID, job.Args.FetchScanRunID)
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("apply_library_scan: scan error")
+		return err
+	}
+	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
+
+	log.Info().
+		Int64("library_id", lib.ID).
+		Int("scopes", len(job.Args.ScopePaths)).
+		Int("discovered", outcome.Discovered).
+		Int("applied", outcome.New).
+		Int("ratings", fanout.Ratings).
+		Int("save_nfo", fanout.SaveNFO).
+		Int("save_music_nfo", fanout.SaveMusicNFO).
+		Int("ffprobe", fanout.FFProbe).
+		Int("trickplay", fanout.Trickplay).
+		Int("segments", fanout.Segments).
+		Int("thumbnails", fanout.Thumbnails).
+		Int("fingerprint", fanout.Fingerprint).
+		Int("loudness", fanout.Loudness).
+		Int("sonic", fanout.Sonic).
+		Int("fanout_failed", fanout.Failed).
+		Msg("apply_library_scan: library done")
+
+	emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
+		LibraryID:   lib.ID,
+		LibraryName: lib.Name,
+		Discovered:  outcome.Discovered,
+		New:         outcome.New,
+	})
+	return nil
+}
+
+func (w *KickoffLibraryScanWorker) planLibraryScan(ctx context.Context, lib sqlc.Library, force bool) (libraryScanOutcome, []string, error) {
+	if supportsScanner(lib.MediaType) {
+		return w.inspectLibraryChanges(ctx, lib, force)
+	}
+	log.Warn().
+		Int64("library_id", lib.ID).
+		Str("library", lib.Name).
+		Str("media_type", string(lib.MediaType)).
+		Bool("force", force).
+		Msg("kickoff_library_scan: scanner does not support this library type yet; legacy scanner skipped")
+	return libraryScanOutcome{}, nil, nil
+}
+
+const scannerScopeLimit = 100
+
+func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, lib sqlc.Library, force bool) (libraryScanOutcome, []string, error) {
+	q := sqlc.New(w.DB)
+	sink := scanner.NewEventSink(scanner.Event{
+		LibraryID:   lib.ID,
+		LibraryName: lib.Name,
+		LibraryType: string(lib.MediaType),
+		Domain:      string(lib.MediaType),
+	})
+	inv, err := scanner.WalkInventory(ctx, lib.Paths, sink)
+	if err != nil {
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(inv)}, nil, err
+	}
+
+	outcome := libraryScanOutcome{Discovered: countScannerInventoryFiles(inv)}
+	nfoScopes, nfoChanges, err := syncLibraryNFODirs(ctx, q, lib.ID, inv)
+	if err != nil {
+		return outcome, nil, err
+	}
+	existingRows, err := q.ListLibraryFilesForScan(ctx, lib.ID)
+	if err != nil {
+		return outcome, nil, err
+	}
+	if force || len(existingRows) == 0 {
+		outcome.New = outcome.Discovered
+		return outcome, nil, nil
+	}
+	outcome.New += nfoChanges
+
+	existingByPath := make(map[string]sqlc.ListLibraryFilesForScanRow, len(existingRows))
+	for _, row := range existingRows {
+		existingByPath[row.Path] = row
+	}
+
+	seen := make(map[string]bool, outcome.Discovered)
+	scopeSet := map[string]bool{}
+	for _, scope := range nfoScopes {
+		scopeSet[scope] = true
+	}
+	for _, root := range inv.Roots {
+		for _, file := range root.Files {
+			if !scannerInventoryFileTracked(file) {
+				continue
+			}
+			seen[file.Path] = true
+			existing, found := existingByPath[file.Path]
+			if !found || existing.DeletedAt.Valid || libraryFileChanged(existing, file) {
+				outcome.New++
+				if scope := scannerScopeForPath(file.Path); scope != "" {
+					scopeSet[scope] = true
+				}
+			}
+		}
+	}
+
+	var missing []string
+	for _, row := range existingRows {
+		if row.DeletedAt.Valid || seen[row.Path] {
+			continue
+		}
+		missing = append(missing, row.Path)
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		if err := q.SoftDeleteLibraryFilesByPath(ctx, sqlc.SoftDeleteLibraryFilesByPathParams{
+			LibraryID: lib.ID,
+			Column2:   missing,
+		}); err != nil {
+			return outcome, nil, err
+		}
+		outcome.Deleted = len(missing)
+	}
+
+	scopes := sortedMapKeys(scopeSet)
+	if len(scopes) > scannerScopeLimit {
+		scopes = nil
+	}
+	return outcome, scopes, nil
+}
+
+type scannerNFODirState struct {
+	DirPath string
+	NFOName string
+	MTime   pgtype.Timestamptz
+}
+
+func syncLibraryNFODirs(ctx context.Context, q *sqlc.Queries, libraryID int64, inv scanner.Inventory) ([]string, int, error) {
+	current := map[string]scannerNFODirState{}
+	for _, root := range inv.Roots {
+		for _, file := range root.Files {
+			if file.Class != scanner.ClassNFO {
+				continue
+			}
+			dir := scannerScopeForPath(file.Path)
+			if dir == "" {
+				continue
+			}
+			if _, exists := current[dir]; exists {
+				continue
+			}
+			current[dir] = scannerNFODirState{
+				DirPath: dir,
+				NFOName: file.Name,
+				MTime: pgtype.Timestamptz{
+					Time:  file.MTime,
+					Valid: !file.MTime.IsZero(),
+				},
+			}
+		}
+	}
+
+	rows, err := q.ListLibraryNFODirs(ctx, libraryID)
+	if err != nil {
+		return nil, 0, err
+	}
+	existing := make(map[string]sqlc.ListLibraryNFODirsRow, len(rows))
+	for _, row := range rows {
+		existing[row.DirPath] = row
+	}
+
+	scopeSet := map[string]bool{}
+	changes := 0
+	for dir, state := range current {
+		row, found := existing[dir]
+		if !found || row.NfoName != state.NFOName || timestamptzChanged(row.Mtime, state.MTime) {
+			scopeSet[dir] = true
+			changes++
+		}
+		if err := q.UpsertLibraryNFODir(ctx, sqlc.UpsertLibraryNFODirParams{
+			LibraryID: libraryID,
+			DirPath:   state.DirPath,
+			NfoName:   state.NFOName,
+			Mtime:     state.MTime,
+		}); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	var removed []string
+	for dir := range existing {
+		if _, ok := current[dir]; ok {
+			continue
+		}
+		removed = append(removed, dir)
+		scopeSet[dir] = true
+		changes++
+	}
+	sort.Strings(removed)
+	if len(removed) > 0 {
+		if err := q.DeleteLibraryNFODirs(ctx, sqlc.DeleteLibraryNFODirsParams{
+			LibraryID: libraryID,
+			Column2:   removed,
+		}); err != nil {
+			return nil, 0, err
+		}
+	}
+	return sortedMapKeys(scopeSet), changes, nil
+}
+
+func scannerInventoryFileTracked(file scanner.InventoryFile) bool {
+	return file.Class == scanner.ClassPrimaryMedia || file.Class == scanner.ClassExtraMedia
+}
+
+func libraryFileChanged(row sqlc.ListLibraryFilesForScanRow, file scanner.InventoryFile) bool {
+	if row.Size != file.Size {
+		return true
+	}
+	if row.Mtime.Valid != !file.MTime.IsZero() {
+		return true
+	}
+	if row.Mtime.Valid && !row.Mtime.Time.Equal(file.MTime) {
+		return true
+	}
+	return false
+}
+
+func timestamptzChanged(a, b pgtype.Timestamptz) bool {
+	if a.Valid != b.Valid {
+		return true
+	}
+	if a.Valid && !a.Time.Equal(b.Time) {
+		return true
+	}
+	return false
+}
+
+func sortedMapKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for key := range set {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func scannerScopeForPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.Contains(path, "://") {
+		path = strings.TrimRight(path, "/")
+		if idx := strings.LastIndex(path, "/"); idx >= 0 {
+			return path[:idx]
+		}
+		return path
+	}
+	return filepath.Dir(path)
+}
+
+func enqueueProcessLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], args ProcessLibraryScanArgs, priority int, source string) error {
+	if rc == nil {
+		return fmt.Errorf("river client unavailable")
+	}
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	return err
+}
+
+func enqueueApplyLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], args ApplyLibraryScanArgs, priority int, source string) error {
+	if rc == nil {
+		return fmt.Errorf("river client unavailable")
+	}
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	return err
+}
+
+func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], args FetchLibraryMetadataArgs, priority int, source string) error {
+	if rc == nil {
+		return fmt.Errorf("river client unavailable")
+	}
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	return err
+}
+
+func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, int64, error) {
+	opts := scannerSearchOptions(w.DB, w.Heya)
+	opts.ScopePaths = scopePaths
+	run := scanner.NewLibraryRun(lib, opts, io.Discard)
+	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
+		result := run.Result()
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, err
+	}
+	result, err := run.Finish(ctx)
+	return libraryScanOutcome{
+		Discovered: countScannerInventoryFiles(result.Inventory),
+		New:        countScannerAcceptedSearch(result),
+	}, run.ScanRunID(), err
+}
+
+func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID int64) (libraryScanOutcome, int64, error) {
+	opts := scannerFetchOptions(w.DB, w.Heya)
+	opts.ScopePaths = scopePaths
+	run := scanner.NewLibraryRun(lib, opts, io.Discard)
+	resumed := false
+	if searchScanRunID > 0 {
+		var err error
+		resumed, err = run.ResumeSearchArtifact(ctx, searchScanRunID)
+		if err != nil {
+			return libraryScanOutcome{}, 0, err
+		}
+	}
+	if resumed {
+		if err := run.Run(ctx, scanner.PhaseFetch); err != nil {
+			result := run.Result()
+			return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, err
+		}
+		result, err := run.Finish(ctx)
+		return libraryScanOutcome{
+			Discovered: countScannerInventoryFiles(result.Inventory),
+			New:        countScannerFetchedMetadata(result),
+		}, run.ScanRunID(), err
+	}
+	if searchScanRunID > 0 {
+		log.Warn().Int64("library_id", lib.ID).Int64("scan_run_id", searchScanRunID).Msg("fetch_library_metadata: search artifact unavailable; falling back to full fetch scan")
+	}
+	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
+		result := run.Result()
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, err
+	}
+	result, err := run.Finish(ctx)
+	return libraryScanOutcome{
+		Discovered: countScannerInventoryFiles(result.Inventory),
+		New:        countScannerFetchedMetadata(result),
+	}, run.ScanRunID(), err
+}
+
+func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID, fetchScanRunID int64) (libraryScanOutcome, scanner.Result, error) {
+	opts := scannerApplyOptions(w.DB, w.Heya)
+	opts.ScopePaths = scopePaths
+	run := scanner.NewLibraryRun(lib, opts, io.Discard)
+	resumed := false
+	if fetchScanRunID > 0 {
+		var err error
+		resumed, err = run.ResumeFetchArtifact(ctx, fetchScanRunID)
+		if err != nil {
+			return libraryScanOutcome{}, scanner.Result{}, err
+		}
+	}
+	if resumed {
+		if err := run.Run(ctx, scanner.PhaseMaterialize, scanner.PhaseApply); err != nil {
+			result := run.Result()
+			return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, err
+		}
+		result, err := run.Finish(ctx)
+		return libraryScanOutcome{
+			Discovered: countScannerInventoryFiles(result.Inventory),
+			New:        countScannerAppliedFiles(result),
+		}, result, err
+	}
+	if searchScanRunID > 0 {
+		var err error
+		resumed, err = run.ResumeSearchArtifact(ctx, searchScanRunID)
+		if err != nil {
+			return libraryScanOutcome{}, scanner.Result{}, err
+		}
+	}
+	if resumed {
+		if err := run.Run(ctx, scanner.PhaseFetch, scanner.PhaseMaterialize, scanner.PhaseApply); err != nil {
+			result := run.Result()
+			return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, err
+		}
+		result, err := run.Finish(ctx)
+		return libraryScanOutcome{
+			Discovered: countScannerInventoryFiles(result.Inventory),
+			New:        countScannerAppliedFiles(result),
+		}, result, err
+	}
+	if fetchScanRunID > 0 || searchScanRunID > 0 {
+		log.Warn().
+			Int64("library_id", lib.ID).
+			Int64("search_scan_run_id", searchScanRunID).
+			Int64("fetch_scan_run_id", fetchScanRunID).
+			Msg("apply_library_scan: scanner artifacts unavailable or stale; running a fresh apply scan")
+	}
+	result, err := scanner.RunLibrary(ctx, lib, opts, io.Discard)
+	return libraryScanOutcome{
+		Discovered: countScannerInventoryFiles(result.Inventory),
+		New:        countScannerAppliedFiles(result),
+	}, result, err
+}
+
+type postApplyFanout struct {
+	Files        int
+	Ratings      int
+	SaveNFO      int
+	SaveMusicNFO int
+	FFProbe      int
+	Trickplay    int
+	Segments     int
+	Thumbnails   int
+	Fingerprint  int
+	Loudness     int
+	Sonic        int
+	Skipped      int
+	Failed       int
+}
+
+func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], lib sqlc.Library, result scanner.Result, taskID string, source string) postApplyFanout {
+	var fanout postApplyFanout
+	if rc == nil {
+		return fanout
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+	mediaItemIDs := map[int64]bool{}
+	saveNFOQueued := map[int64]bool{}
+	saveMusicNFOQueued := map[int64]bool{}
+	trickplayQueued := map[int64]bool{}
+	segmentsQueued := map[int64]bool{}
+	for _, path := range scannerInventoryPostApplyPaths(result.Inventory) {
+		if err := ctx.Err(); err != nil {
+			return fanout
+		}
+		file, err := q.GetLibraryFileByPath(ctx, sqlc.GetLibraryFileByPathParams{
+			LibraryID: lib.ID,
+			Path:      path,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			log.Warn().Err(err).Int64("library_id", lib.ID).Str("path", path).Msg("apply_library_scan: post-apply file lookup failed")
+			fanout.Failed++
+			continue
+		}
+		if file.DeletedAt.Valid {
+			continue
+		}
+		fanout.Files++
+
+		links, err := q.ListLibraryFileLinksByFile(ctx, file.ID)
+		if err != nil {
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: file link lookup failed")
+			fanout.Failed++
+			continue
+		}
+		for _, link := range links {
+			mediaItemIDs[link.MediaItemID] = true
+			if link.RelationType == "extra" {
+				if link.ThumbnailPath == "" {
+					if res, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: link.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
+						log.Warn().Err(err).Int64("extra_id", link.ID).Msg("apply_library_scan: enqueue extra thumbnail failed")
+						fanout.Failed++
+					} else if res.UniqueSkippedAsDuplicate {
+						fanout.Skipped++
+					} else {
+						fanout.Thumbnails++
+					}
+				}
+				continue
+			}
+			if settings.SaveNFO && scannerMediaTypeWritesVideoNFO(lib.MediaType) && !saveNFOQueued[link.MediaItemID] {
+				if res, err := rc.Insert(ctx, SaveNFOArgs{
+					MediaItemID:   link.MediaItemID,
+					LibraryFileID: file.ID,
+					FilePath:      file.Path,
+					MediaType:     string(lib.MediaType),
+				}, nil); err != nil {
+					log.Warn().Err(err).Int64("media_item_id", link.MediaItemID).Msg("apply_library_scan: enqueue save nfo failed")
+					fanout.Failed++
+				} else if res.UniqueSkippedAsDuplicate {
+					fanout.Skipped++
+				} else {
+					fanout.SaveNFO++
+				}
+				saveNFOQueued[link.MediaItemID] = true
+			}
+		}
+
+		probeable := mediafile.IsProbeable(file.Path)
+		needsProbe := probeable && libraryFileNeedsProbe(file)
+		if needsProbe {
+			if res, err := rc.Insert(ctx, FFProbeArgs{
+				LibraryFileID:   file.ID,
+				FilePath:        file.Path,
+				ScheduledTaskID: taskID,
+			}, scheduledJobInsertOpts(source)); err != nil {
+				log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: enqueue ffprobe failed")
+				fanout.Failed++
+			} else if res.UniqueSkippedAsDuplicate {
+				fanout.Skipped++
+			} else {
+				fanout.FFProbe++
+			}
+		}
+		if probeable && !needsProbe && libraryFileHasVideo(file) {
+			if settings.EnableTrickplay && !file.HasTrickplay && !trickplayQueued[file.ID] {
+				if res, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
+					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: enqueue trickplay failed")
+					fanout.Failed++
+				} else if res.UniqueSkippedAsDuplicate {
+					fanout.Skipped++
+				} else {
+					fanout.Trickplay++
+				}
+				trickplayQueued[file.ID] = true
+			}
+			if scannerMediaTypeScansSegments(lib.MediaType) && !file.SegmentsAnalyzedAt.Valid && !segmentsQueued[file.ID] && libraryFileHasPrimaryLink(links) {
+				if res, err := rc.Insert(ctx, ScanMediaSegmentsFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
+					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: enqueue media segments failed")
+					fanout.Failed++
+				} else if res.UniqueSkippedAsDuplicate {
+					fanout.Skipped++
+				} else {
+					fanout.Segments++
+				}
+				segmentsQueued[file.ID] = true
+			}
+		}
+
+		trackFile, err := q.GetTrackFileByLibraryFileID(ctx, file.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: track file lookup failed")
+			fanout.Failed++
+			continue
+		}
+		if !trackFile.FingerprintedAt.Valid {
+			if res, err := rc.Insert(ctx, ScanTrackFingerprintArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
+				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_library_scan: enqueue chromaprint failed")
+				fanout.Failed++
+			} else if res.UniqueSkippedAsDuplicate {
+				fanout.Skipped++
+			} else {
+				fanout.Fingerprint++
+			}
+		}
+		if trackFileNeedsLoudness(trackFile) {
+			if res, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
+				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_library_scan: enqueue loudness failed")
+				fanout.Failed++
+			} else if res.UniqueSkippedAsDuplicate {
+				fanout.Skipped++
+			} else {
+				fanout.Loudness++
+			}
+		}
+		if w.sonicEnabled(ctx) && trackNeedsSonicAnalysis(ctx, q, trackFile.TrackID) {
+			if res, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: trackFile.TrackID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
+				log.Warn().Err(err).Int64("track_id", trackFile.TrackID).Msg("apply_library_scan: enqueue sonic analysis failed")
+				fanout.Failed++
+			} else if res.UniqueSkippedAsDuplicate {
+				fanout.Skipped++
+			} else {
+				fanout.Sonic++
+			}
+		}
+	}
+	for mediaItemID := range mediaItemIDs {
+		if scannerMediaTypeFetchesRatings(lib.MediaType) {
+			if res, err := rc.Insert(ctx, RatingsFetchArgs{MediaItemID: mediaItemID, LibraryID: lib.ID}, nil); err != nil {
+				log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("apply_library_scan: enqueue ratings failed")
+				fanout.Failed++
+			} else if res.UniqueSkippedAsDuplicate {
+				fanout.Skipped++
+			} else {
+				fanout.Ratings++
+			}
+		}
+		if settings.SaveNFO && lib.MediaType == sqlc.MediaTypeMusic && !saveMusicNFOQueued[mediaItemID] {
+			artist, err := q.GetArtistByMediaItemID(ctx, mediaItemID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("apply_library_scan: artist lookup for music nfo failed")
+				fanout.Failed++
+				continue
+			}
+			if res, err := rc.Insert(ctx, SaveMusicNFOArgs{ArtistID: artist.ID}, nil); err != nil {
+				log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("apply_library_scan: enqueue music nfo failed")
+				fanout.Failed++
+			} else if res.UniqueSkippedAsDuplicate {
+				fanout.Skipped++
+			} else {
+				fanout.SaveMusicNFO++
+			}
+			saveMusicNFOQueued[mediaItemID] = true
+		}
+	}
+	return fanout
+}
+
+func (w *ApplyLibraryScanWorker) sonicEnabled(ctx context.Context) bool {
+	return w != nil && w.SonicEnabled != nil && w.SonicEnabled(ctx)
+}
+
+func scannerInventoryPostApplyPaths(inv scanner.Inventory) []string {
+	set := map[string]bool{}
+	for _, root := range inv.Roots {
+		for _, file := range root.Files {
+			if !scannerInventoryFileTracked(file) {
+				continue
+			}
+			set[file.Path] = true
+		}
+	}
+	return sortedMapKeys(set)
+}
+
+func scannerMediaTypeFetchesRatings(mt sqlc.MediaType) bool {
+	return mt != sqlc.MediaTypeMusic
+}
+
+func scannerMediaTypeWritesVideoNFO(mt sqlc.MediaType) bool {
+	return mt == sqlc.MediaTypeMovie || mt == sqlc.MediaTypeTv || mt == sqlc.MediaTypeAnime
+}
+
+func scannerMediaTypeScansSegments(mt sqlc.MediaType) bool {
+	return mt == sqlc.MediaTypeMovie || mt == sqlc.MediaTypeTv || mt == sqlc.MediaTypeAnime
+}
+
+func libraryFileHasVideo(file sqlc.LibraryFile) bool {
+	if libraryFileNeedsProbe(file) {
+		return false
+	}
+	var info struct {
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(file.MediaInfo, &info); err != nil {
+		return false
+	}
+	for _, s := range info.Streams {
+		if s.CodecType == "video" {
+			return true
+		}
+	}
+	return false
+}
+
+func libraryFileHasPrimaryLink(links []sqlc.LibraryFileLink) bool {
+	for _, link := range links {
+		if link.RelationType != "extra" {
+			return true
+		}
+	}
+	return false
+}
+
+func libraryFileNeedsProbe(file sqlc.LibraryFile) bool {
+	mediaInfo := bytes.TrimSpace(file.MediaInfo)
+	return len(mediaInfo) == 0 || bytes.Equal(mediaInfo, []byte("{}")) || bytes.Equal(mediaInfo, []byte("null"))
+}
+
+func trackFileNeedsLoudness(file sqlc.TrackFile) bool {
+	return !file.IntegratedLufs.Valid || !file.BoundariesAnalyzedAt.Valid
+}
+
+func trackNeedsSonicAnalysis(ctx context.Context, q *sqlc.Queries, trackID int64) bool {
+	if trackID <= 0 {
+		return false
+	}
+	ids, err := q.ListPendingAnalysisTracks(ctx, sqlc.ListPendingAnalysisTracksParams{
+		AfterID:            trackID - 1,
+		MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+		AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+		LimitCount:         1,
+	})
+	if err != nil {
+		log.Warn().Err(err).Int64("track_id", trackID).Msg("apply_library_scan: sonic eligibility lookup failed")
+		return false
+	}
+	return len(ids) > 0 && ids[0] == trackID
+}
+
+func scannerSearchOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+	opts := scannerBaseOptions(db, heya)
+	opts.RemoteSearch = true
+	return opts
+}
+
+func scannerFetchOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+	opts := scannerBaseOptions(db, heya)
+	opts.FetchPreview = true
+	return scanner.NormalizeOptions(opts)
+}
+
+func scannerApplyOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+	opts := scannerBaseOptions(db, heya)
+	opts.Apply = true
+	return scanner.NormalizeOptions(opts)
+}
+
+func scannerBaseOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+	return scanner.Options{
+		ApplyDB:           db,
+		BookFetcher:       heya,
+		BookMaterializer:  scanner.NewSQLBookMaterializeStore(db),
+		BookSearcher:      heya,
+		MovieFetcher:      heya,
+		MovieMaterializer: scanner.NewSQLMovieMaterializeStore(db),
+		MovieSearcher:     heya,
+		MusicFetcher:      heya,
+		MusicMaterializer: scanner.NewSQLMusicMaterializeStore(db),
+		MusicProbe:        ProbeFile,
+		MusicSearcher:     heya,
+		PersistenceDB:     db,
+		PersistScan:       true,
+		TVFetcher:         heya,
+		TVMaterializer:    scanner.NewSQLTVMaterializeStore(db),
+		TVSearcher:        heya,
+	}
+}
+
+func supportsScanner(mt sqlc.MediaType) bool {
+	return mt == sqlc.MediaTypeMovie || mt == sqlc.MediaTypeMusic || mt == sqlc.MediaTypeBook || mediatype.IsTVLike(mt)
+}
+
+func countScannerInventoryFiles(inv scanner.Inventory) int {
+	total := 0
+	for _, root := range inv.Roots {
+		total += len(root.Files)
+	}
+	return total
+}
+
+func countScannerAppliedFiles(result scanner.Result) int {
+	total := 0
+	for _, applied := range result.BookApply {
+		total += applied.FilesCreated + applied.FilesAttached + applied.FilesReassigned
+	}
+	for _, applied := range result.MovieApply {
+		total += applied.FilesCreated + applied.FilesAttached + applied.FilesReassigned
+	}
+	for _, applied := range result.TVApply {
+		total += applied.FilesCreated + applied.FilesAttached + applied.FilesReassigned
+	}
+	for _, applied := range result.MusicApply {
+		total += applied.FilesCreated + applied.FilesAttached + applied.FilesReassigned
+	}
+	return total
+}
+
+func countScannerAcceptedSearch(result scanner.Result) int {
+	total := 0
+	for _, match := range result.BookSearch {
+		if match.Accepted {
+			total++
+		}
+	}
+	for _, match := range result.MovieSearch {
+		if match.Accepted {
+			total++
+		}
+	}
+	for _, match := range result.TVSearch {
+		if match.Accepted {
+			total++
+		}
+	}
+	for _, match := range result.MusicSearch {
+		if match.Accepted {
+			total++
+		}
+	}
+	return total
+}
+
+func countScannerFetchedMetadata(result scanner.Result) int {
+	return countFetchedResultItems(result.MovieMetadata, result.BookMetadata, result.TVMetadata, result.MusicMetadata)
+}
+
+func countFetchedResultItems(movie []scanner.MovieFetchPreview, book []scanner.BookFetchPreview, tv []scanner.TVFetchPreview, music []scanner.MusicFetchPreview) int {
+	total := 0
+	for _, item := range movie {
+		if item.ProviderID != "" {
+			total++
+		}
+	}
+	for _, item := range book {
+		if item.ProviderID != "" {
+			total++
+		}
+	}
+	for _, item := range tv {
+		if item.ProviderID != "" {
+			total++
+		}
+	}
+	for _, item := range music {
+		if item.ProviderID != "" {
+			total++
+		}
+	}
+	return total
+}
+
 func sortLibrariesByMediaPriority(libs []sqlc.Library) {
 	rank := func(mt sqlc.MediaType) int {
 		switch mt {
 		case sqlc.MediaTypeMovie:
 			return 0
-		case sqlc.MediaTypeTv:
+		case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 			return 1
 		case sqlc.MediaTypeMusic:
 			return 2
@@ -183,7 +1226,7 @@ const reprobeCap = 2000
 // (matched) but never got media_info — the "scanned once, probe failed, never
 // retried" gap. Files that already carry media_info are left untouched, so a
 // probed-and-unchanged file is never needlessly re-probed.
-func enqueueReprobeUnprobed(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string) int {
+func enqueueReprobeUnprobed(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string, source string) int {
 	if rc == nil {
 		return 0
 	}
@@ -207,89 +1250,13 @@ func enqueueReprobeUnprobed(ctx context.Context, q *sqlc.Queries, rc *river.Clie
 			LibraryFileID:   f.ID,
 			FilePath:        f.Path,
 			ScheduledTaskID: taskID,
-		}, nil); err != nil {
+		}, scheduledJobInsertOpts(source)); err != nil {
 			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue reprobe failed")
 			continue
 		}
 		n++
 	}
 	return n
-}
-
-// enqueueRematchTransient re-enqueues metadata match for files stranded
-// 'unmatched' by a transient provider search error, so a network/upstream blip
-// during matching doesn't leave a file invisible forever. Only files whose
-// error_message marks a transient search error are retried — a genuine "no
-// results" is left alone. Capped per scan; metadata_match is unique-while-active.
-func enqueueRematchTransient(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string) int {
-	if rc == nil {
-		return 0
-	}
-	files, err := q.ListRetryableUnmatchedFiles(ctx, sqlc.ListRetryableUnmatchedFilesParams{
-		LibraryID: libraryID,
-		Limit:     reprobeCap,
-	})
-	if err != nil {
-		log.Error().Err(err).Int64("library_id", libraryID).Msg("kickoff_library_scan: list retryable-unmatched failed")
-		return 0
-	}
-	lib, err := q.GetLibraryByID(ctx, libraryID)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, f := range files {
-		if err := ctx.Err(); err != nil {
-			return n
-		}
-		if _, err := rc.Insert(ctx, MetadataMatchArgs{
-			LibraryFileID: f.ID,
-			LibraryID:     libraryID,
-			// Same runtime normalization as the scan-time enqueue in
-			// process_worker: anime files re-match through the tv pipeline.
-			MediaType:       string(mediatype.Runtime(lib.MediaType)),
-			ScheduledTaskID: taskID,
-		}, nil); err != nil {
-			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue rematch failed")
-			continue
-		}
-		n++
-	}
-	return n
-}
-
-func enqueuePendingFiles(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], libraryID int64, taskID string) (int, int) {
-	files, err := q.ListLibraryFilesByStatus(ctx, sqlc.ListLibraryFilesByStatusParams{
-		LibraryID: libraryID,
-		Status:    sqlc.FileStatusPending,
-		Limit:     100000,
-		Offset:    0,
-	})
-	if err != nil {
-		log.Error().Err(err).Int64("library_id", libraryID).Msg("kickoff_library_scan: list pending failed")
-		return 0, 1
-	}
-	if rc == nil {
-		return 0, len(files)
-	}
-	enqueued, failed := 0, 0
-	for i, f := range files {
-		if err := ctx.Err(); err != nil {
-			return enqueued, failed + len(files) - i
-		}
-		if _, err := rc.Insert(ctx, ProcessFileArgs{
-			LibraryFileID:   f.ID,
-			LibraryID:       libraryID,
-			FilePath:        f.Path,
-			ScheduledTaskID: taskID,
-		}, nil); err != nil {
-			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue process_file failed")
-			failed++
-			continue
-		}
-		enqueued++
-	}
-	return enqueued, failed
 }
 
 func emit(hub EventPublisher, t eventhub.EventType, p any) {
@@ -312,6 +1279,7 @@ type KickoffRefreshStaleWorker struct {
 func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[KickoffRefreshStaleArgs]) error {
 	startedAt := time.Now()
 	taskID := job.Args.ScheduledTaskID
+	source := scheduledJobSource(job.Metadata)
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -380,7 +1348,7 @@ func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[Kic
 			return err
 		}
 		w.Progress.Set("refresh_stale_items", "kickoff_refresh_stale", it.Title)
-		if err := enqueueEnrich(ctx, rc, it.ID, it.MediaType, EnrichSourceScheduled, it.Force, taskID, 0, 0, 0); err != nil {
+		if err := enqueueEnrichWithMetadata(ctx, rc, it.ID, it.MediaType, EnrichSourceScheduled, it.Force, taskID, 0, 0, 0, scheduledJobMetadata(source)); err != nil {
 			log.Warn().Err(err).Int64("item_id", it.ID).Msg("kickoff_refresh_stale: enqueue failed")
 			failed++
 			continue
@@ -725,7 +1693,7 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 			}
 			w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Path)
-			res, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: row.ID, ScheduledTaskID: taskID}, nil)
+			res, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
 			switch {
 			case err != nil:
 				log.Warn().Err(err).Int64("track_file_id", row.ID).Msg("kickoff_music_loudness: enqueue track failed")
@@ -766,7 +1734,7 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 					return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 				}
 				w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Title)
-				res, err := rc.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: row.ID, ScheduledTaskID: taskID}, nil)
+				res, err := rc.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
 				switch {
 				case err != nil:
 					log.Warn().Err(err).Int64("album_id", row.ID).Msg("kickoff_music_loudness: enqueue album failed")
@@ -817,6 +1785,7 @@ type KickoffTrickplayWorker struct {
 func (w *KickoffTrickplayWorker) Work(ctx context.Context, job *river.Job[KickoffTrickplayArgs]) error {
 	startedAt := time.Now()
 	taskID := job.Args.ScheduledTaskID
+	source := scheduledJobSource(job.Metadata)
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
@@ -836,7 +1805,7 @@ func (w *KickoffTrickplayWorker) Work(ctx context.Context, job *river.Job[Kickof
 			return err
 		}
 		w.Progress.Set("generate_trickplay", "kickoff_trickplay", filepathBase(f.Path))
-		if _, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: f.ID, ScheduledTaskID: taskID}, nil); err != nil {
+		if _, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: f.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
 			log.Warn().Err(err).Int64("library_file_id", f.ID).Msg("kickoff_trickplay: enqueue failed")
 			failed++
 			continue
@@ -872,10 +1841,11 @@ type KickoffThumbnailsWorker struct {
 func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[KickoffThumbnailsArgs]) error {
 	startedAt := time.Now()
 	taskID := job.Args.ScheduledTaskID
+	source := scheduledJobSource(job.Metadata)
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 
-	// Eligibility lives in the thumbnail_eligible_extras view (migration 00035),
+	// Eligibility lives in the thumbnail_eligible_extras view,
 	// shared with the Settings counts and task item listings — one predicate,
 	// no count-vs-enqueue drift.
 	pending, err := q.ListThumbnailPendingKickoff(ctx)
@@ -895,7 +1865,7 @@ func (w *KickoffThumbnailsWorker) Work(ctx context.Context, job *river.Job[Kicko
 			label = filepathBase(e.FilePath)
 		}
 		w.Progress.Set("generate_thumbnails", "kickoff_thumbnails", label)
-		if _, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: e.ID, ScheduledTaskID: taskID}, nil); err != nil {
+		if _, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: e.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
 			log.Warn().Err(err).Int64("extra_id", e.ID).Msg("kickoff_thumbnails: enqueue failed")
 			failed++
 			continue
@@ -997,7 +1967,7 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 			if ctx.Err() != nil {
 				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 			}
-			res, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: id, ScheduledTaskID: taskID}, nil)
+			res, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: id, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
 			switch {
 			case err != nil:
 				log.Warn().Err(err).Int64("track_id", id).Msg("kickoff_sonic_analysis: enqueue failed")

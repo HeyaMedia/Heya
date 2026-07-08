@@ -26,6 +26,11 @@ GROUP BY asset_type;
 -- name: GetMediaAssetByID :one
 SELECT * FROM media_assets WHERE id = $1;
 
+-- name: UpdateMediaAssetLocalPath :exec
+UPDATE media_assets
+SET local_path = $2
+WHERE id = $1;
+
 -- name: DeleteMediaAsset :exec
 DELETE FROM media_assets WHERE id = $1;
 

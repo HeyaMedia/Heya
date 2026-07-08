@@ -17,11 +17,25 @@ var skipDirs = map[string]bool{
 var extrasDirs = map[string]string{
 	"behindthescenes": "behindthescenes",
 	"deletedscenes":   "deleted",
+	"ed":              "ending",
+	"eds":             "ending",
+	"ending":          "ending",
+	"endings":         "ending",
 	"featurette":      "featurette",
 	"featurettes":     "featurette",
 	"interview":       "interview",
 	"interviews":      "interview",
+	"nced":            "ending",
+	"nceds":           "ending",
+	"ncop":            "opening",
+	"ncops":           "opening",
+	"op":              "opening",
+	"ops":             "opening",
+	"opening":         "opening",
+	"openings":        "opening",
 	"other":           "other",
+	"pv":              "trailer",
+	"pvs":             "trailer",
 	"sample":          "sample",
 	"samples":         "sample",
 	"scene":           "scene",
@@ -47,7 +61,7 @@ var extrasSuffixes = map[string]string{
 var imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
 var subtitleExts = map[string]bool{".srt": true, ".ass": true, ".ssa": true, ".sub": true, ".vtt": true}
 var videoExts = map[string]bool{".mkv": true, ".mp4": true, ".avi": true, ".mov": true, ".m4v": true, ".wmv": true, ".webm": true, ".ts": true, ".mpg": true, ".mpeg": true}
-var audioExts = map[string]bool{".flac": true, ".mp3": true, ".m4a": true, ".aac": true, ".wav": true, ".ogg": true, ".oga": true, ".opus": true, ".wma": true, ".alac": true, ".aiff": true, ".aif": true}
+var audioExts = map[string]bool{".flac": true, ".mp3": true, ".m4a": true, ".m4b": true, ".aac": true, ".wav": true, ".ogg": true, ".oga": true, ".opus": true, ".wma": true, ".alac": true, ".aiff": true, ".aif": true}
 var lyricsExts = map[string]bool{".lrc": true}
 
 func IsJunkFile(name string) bool { return junkFiles[name] }

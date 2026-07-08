@@ -13,41 +13,15 @@ var SingleAssetTypes = map[string]bool{
 }
 
 // Job priority bands. River runs higher-priority (lower number) jobs first
-// within a queue. The watcher's new-file path overrides ProcessFile to
-// PriorityWatcher at insert-time.
+// within a queue. Watcher-triggered scanner runs use PriorityWatcher so fresh
+// filesystem changes jump ahead of scheduled background scans.
 const (
 	PriorityWatcher    = 1 // fsnotify-discovered file — user just touched this, run ASAP
-	PriorityMatch      = 1 // metadata_match / metadata_fetch — matching is the critical path
-	PriorityScan       = 2 // bulk library-scan ProcessFile + matching support jobs
+	PriorityMatch      = 1 // metadata fetch/review work — matching is the critical path
+	PriorityScan       = 2 // bulk library-scan support jobs
 	PriorityEnrichment = 3 // ffprobe / images / nfo writing / ratings — happens after match
 	PriorityAnalysis   = 4 // ebur128, future ML / fingerprinting — runs whenever spare
 )
-
-type ProcessFileArgs struct {
-	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
-	LibraryID       int64  `json:"library_id"`
-	FilePath        string `json:"file_path"`
-	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
-}
-
-func (ProcessFileArgs) Kind() string { return "process_file" }
-func (ProcessFileArgs) InsertOpts() river.InsertOpts {
-	// Default to bulk-scan priority; watcher path overrides to PriorityWatcher
-	// at insert-time so single-file changes jump ahead of any in-flight scan.
-	return river.InsertOpts{Queue: "process_file", MaxAttempts: 3, Priority: PriorityScan, UniqueOpts: uniqueWhileActive()}
-}
-
-type MetadataMatchArgs struct {
-	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
-	LibraryID       int64  `json:"library_id"`
-	MediaType       string `json:"media_type"`
-	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
-}
-
-func (MetadataMatchArgs) Kind() string { return "metadata_match" }
-func (MetadataMatchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "metadata_match", MaxAttempts: 3, Priority: PriorityMatch, UniqueOpts: uniqueWhileActive()}
-}
 
 type PersonFetchArgs struct {
 	PersonID int64  `json:"person_id"`
@@ -188,7 +162,7 @@ func (EnrichMediaItemArgs) InsertOpts() river.InsertOpts {
 }
 
 type SaveNFOArgs struct {
-	MediaItemID   int64  `json:"media_item_id"`
+	MediaItemID   int64  `json:"media_item_id" river:"unique"`
 	LibraryFileID int64  `json:"library_file_id"`
 	FilePath      string `json:"file_path"`
 	MediaType     string `json:"media_type"`
@@ -196,7 +170,7 @@ type SaveNFOArgs struct {
 
 func (SaveNFOArgs) Kind() string { return "save_nfo" }
 func (SaveNFOArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "save_nfo", MaxAttempts: 2, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "save_nfo", MaxAttempts: 2, Priority: PriorityEnrichment, UniqueOpts: uniqueWhileActive()}
 }
 
 type SaveImagesArgs struct {
@@ -204,6 +178,8 @@ type SaveImagesArgs struct {
 	FilePath    string `json:"file_path"`
 	CachedPath  string `json:"cached_path"`
 	AssetType   string `json:"asset_type"`
+	SortOrder   int    `json:"sort_order"`
+	Label       string `json:"label,omitempty"`
 }
 
 func (SaveImagesArgs) Kind() string { return "save_images" }
@@ -211,14 +187,25 @@ func (SaveImagesArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "save_images", MaxAttempts: 2, Priority: PriorityEnrichment}
 }
 
+func ShouldSaveImageSidecar(assetType string, sortOrder int, label string) bool {
+	switch assetType {
+	case "backdrop":
+		return sortOrder >= 0 && sortOrder < 1000
+	case "poster", "clearart", "art", "banner", "logo", "thumb", "disc":
+		return sortOrder == 0 && label == ""
+	default:
+		return false
+	}
+}
+
 type RatingsFetchArgs struct {
-	MediaItemID int64 `json:"media_item_id"`
+	MediaItemID int64 `json:"media_item_id" river:"unique"`
 	LibraryID   int64 `json:"library_id"`
 }
 
 func (RatingsFetchArgs) Kind() string { return "ratings_fetch" }
 func (RatingsFetchArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "ratings_fetch", MaxAttempts: 3, Priority: PriorityEnrichment}
+	return river.InsertOpts{Queue: "ratings_fetch", MaxAttempts: 3, Priority: PriorityEnrichment, UniqueOpts: uniqueWhileActive()}
 }
 
 type TranscodeArgs struct {

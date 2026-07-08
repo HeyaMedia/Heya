@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -130,6 +131,7 @@ func TestListTrackFilesPendingLoudnessCursor(t *testing.T) {
 	defer tx.Rollback(ctx)
 	qtx := sqlc.New(pool).WithTx(tx)
 
+	baseTrackFileID := maxTableID(t, ctx, tx, "track_files")
 	libID, albumID := seedPumpMusicTree(t, ctx, qtx)
 	_, tfDone := seedPumpTrackFile(t, ctx, qtx, libID, albumID, 1, "/music/a/01.flac")
 	_, tfPending1 := seedPumpTrackFile(t, ctx, qtx, libID, albumID, 2, "/music/a/02.flac")
@@ -145,7 +147,7 @@ func TestListTrackFilesPendingLoudnessCursor(t *testing.T) {
 	}
 
 	// Full sweep from zero: only the two unmeasured files, in id order.
-	rows, err := qtx.ListTrackFilesPendingLoudness(ctx, sqlc.ListTrackFilesPendingLoudnessParams{AfterID: 0, RowLimit: 100})
+	rows, err := qtx.ListTrackFilesPendingLoudness(ctx, sqlc.ListTrackFilesPendingLoudnessParams{AfterID: baseTrackFileID, RowLimit: 100})
 	require.NoError(t, err)
 	assert.Equal(t, []int64{tfPending1, tfPending2}, ids(rows))
 
@@ -160,7 +162,7 @@ func TestListTrackFilesPendingLoudnessCursor(t *testing.T) {
 	assert.Empty(t, rows)
 
 	// RowLimit bounds the wave.
-	rows, err = qtx.ListTrackFilesPendingLoudness(ctx, sqlc.ListTrackFilesPendingLoudnessParams{AfterID: 0, RowLimit: 1})
+	rows, err = qtx.ListTrackFilesPendingLoudness(ctx, sqlc.ListTrackFilesPendingLoudnessParams{AfterID: baseTrackFileID, RowLimit: 1})
 	require.NoError(t, err)
 	assert.Equal(t, []int64{tfPending1}, ids(rows))
 }
@@ -177,19 +179,20 @@ func TestListAlbumsPendingLoudnessCursor(t *testing.T) {
 	defer tx.Rollback(ctx)
 	qtx := sqlc.New(pool).WithTx(tx)
 
+	baseAlbumID := maxTableID(t, ctx, tx, "albums")
 	libID, albumID := seedPumpMusicTree(t, ctx, qtx)
 	_, tf1 := seedPumpTrackFile(t, ctx, qtx, libID, albumID, 1, "/music/a/01.flac")
 	_, tf2 := seedPumpTrackFile(t, ctx, qtx, libID, albumID, 2, "/music/a/02.flac")
 	markTrackFileMeasured(t, ctx, qtx, tf1)
 
 	// One track still unmeasured → album not eligible.
-	rows, err := qtx.ListAlbumsPendingLoudness(ctx, sqlc.ListAlbumsPendingLoudnessParams{AfterID: 0, RowLimit: 100})
+	rows, err := qtx.ListAlbumsPendingLoudness(ctx, sqlc.ListAlbumsPendingLoudnessParams{AfterID: baseAlbumID, RowLimit: 100})
 	require.NoError(t, err)
 	assert.Empty(t, rows)
 
 	// All tracks measured → eligible.
 	markTrackFileMeasured(t, ctx, qtx, tf2)
-	rows, err = qtx.ListAlbumsPendingLoudness(ctx, sqlc.ListAlbumsPendingLoudnessParams{AfterID: 0, RowLimit: 100})
+	rows, err = qtx.ListAlbumsPendingLoudness(ctx, sqlc.ListAlbumsPendingLoudnessParams{AfterID: baseAlbumID, RowLimit: 100})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, albumID, rows[0].ID)
@@ -204,7 +207,7 @@ func TestListAlbumsPendingLoudnessCursor(t *testing.T) {
 		ID: albumID, IntegratedLufs: pgNumericFromFloat(-13.9),
 		TruePeakDb: pgNumericFromFloat(-0.2), LoudnessRangeDb: pgNumericFromFloat(7.7),
 	}))
-	rows, err = qtx.ListAlbumsPendingLoudness(ctx, sqlc.ListAlbumsPendingLoudnessParams{AfterID: 0, RowLimit: 100})
+	rows, err = qtx.ListAlbumsPendingLoudness(ctx, sqlc.ListAlbumsPendingLoudnessParams{AfterID: baseAlbumID, RowLimit: 100})
 	require.NoError(t, err)
 	assert.Empty(t, rows)
 }
@@ -221,6 +224,7 @@ func TestListPendingAnalysisTracksCursor(t *testing.T) {
 	defer tx.Rollback(ctx)
 	qtx := sqlc.New(pool).WithTx(tx)
 
+	baseTrackID := maxTableID(t, ctx, tx, "tracks")
 	libID, albumID := seedPumpMusicTree(t, ctx, qtx)
 	track1, _ := seedPumpTrackFile(t, ctx, qtx, libID, albumID, 1, "/music/a/01.flac")
 	track2, _ := seedPumpTrackFile(t, ctx, qtx, libID, albumID, 2, "/music/a/02.flac")
@@ -236,7 +240,7 @@ func TestListPendingAnalysisTracksCursor(t *testing.T) {
 		return rows
 	}
 
-	assert.Equal(t, []int64{track1, track2}, list(0))
+	assert.Equal(t, []int64{track1, track2}, list(baseTrackID))
 	assert.Equal(t, []int64{track2}, list(track1))
 	assert.Empty(t, list(track2))
 
@@ -245,5 +249,12 @@ func TestListPendingAnalysisTracksCursor(t *testing.T) {
 	require.NoError(t, qtx.UpsertTrackFacetsStub(ctx, sqlc.UpsertTrackFacetsStubParams{
 		TrackID: track1, AnalyzerVersion: sonicanalysis.AnalyzerVersion,
 	}))
-	assert.Equal(t, []int64{track2}, list(0))
+	assert.Equal(t, []int64{track2}, list(baseTrackID))
+}
+
+func maxTableID(t *testing.T, ctx context.Context, tx pgx.Tx, table string) int64 {
+	t.Helper()
+	var id int64
+	require.NoError(t, tx.QueryRow(ctx, "SELECT COALESCE(MAX(id), 0) FROM "+table).Scan(&id))
+	return id
 }

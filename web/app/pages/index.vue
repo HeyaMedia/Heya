@@ -476,7 +476,7 @@ function onHeroPlay(item: MediaItem) {
 // scan matching hundreds of files must not trigger hundreds of refetches.
 useLiveRefresh([
   { events: ['media.added', 'media.updated'], filter: byMediaType('movie'), keys: [['media', 'recent', 'movie']] },
-  { events: ['media.added', 'media.updated'], filter: byMediaType('tv'), keys: [['media', 'recent', 'tv']] },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('tv', 'anime'), keys: [['media', 'recent', 'tv']] },
   { events: ['media.added', 'media.updated'], filter: byMediaType('book'), keys: [['media', 'recent', 'book']] },
   { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['home', 'recent-albums']] },
 ])

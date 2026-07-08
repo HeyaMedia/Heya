@@ -109,9 +109,13 @@ export function useLiveRefresh(groups: LiveRefreshGroup[]) {
 
 /**
  * Convenience filter for the common case: gate a group on
- * `media.added` / `media.updated`'s `media_type` field (movie / tv / music /
- * book / ...) so e.g. a new movie doesn't retrigger the TV page's group.
+ * `media.added` / `media.updated`'s `media_type` field (movie / tv / anime /
+ * music / book / ...), so e.g. a new movie doesn't retrigger the TV page's group.
  */
-export function byMediaType(mediaType: string) {
-  return (event: WsEvent) => (event.payload as MediaPayload | undefined)?.media_type === mediaType
+export function byMediaType(...mediaTypes: string[]) {
+  const allowed = new Set(mediaTypes)
+  return (event: WsEvent) => {
+    const mediaType = (event.payload as MediaPayload | undefined)?.media_type
+    return !!mediaType && allowed.has(mediaType)
+  }
 }

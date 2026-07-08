@@ -2,7 +2,6 @@ package watcher
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,12 +13,10 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/parser"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/riverqueue/river"
@@ -74,23 +71,30 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	}
 
 	for _, lib := range libs {
-		settings := metadata.ParseSettings(lib.Settings)
-		if !settings.Watch {
-			log.Debug().Int64("library_id", lib.ID).Str("name", lib.Name).Msg("skipping watcher (watch disabled)")
-			continue
-		}
-		for _, p := range lib.Paths {
-			if isLocalPath(p) {
-				// Arm each watcher concurrently: the recursive walk can be slow
-				// (or stall on a flaky mount), and one library must never block
-				// startup or its siblings. Watch is self-synchronizing.
-				go m.Watch(ctx, lib.ID, p)
-			}
-		}
+		m.SyncLibrary(ctx, lib)
 	}
 
 	log.Info().Msg("filesystem watchers arming in background")
 	return nil
+}
+
+func (m *Manager) SyncLibrary(ctx context.Context, lib sqlc.Library) {
+	m.Unwatch(lib.ID)
+
+	settings := metadata.ParseSettings(lib.Settings)
+	if !settings.Watch {
+		log.Debug().Int64("library_id", lib.ID).Str("name", lib.Name).Msg("skipping watcher (watch disabled)")
+		return
+	}
+
+	for _, p := range lib.Paths {
+		if isLocalPath(p) {
+			// Arm each watcher concurrently: the recursive walk can be slow
+			// (or stall on a flaky mount), and one library must never block
+			// startup or its siblings. Watch is self-synchronizing.
+			go m.Watch(ctx, lib.ID, p)
+		}
+	}
 }
 
 func (m *Manager) Watch(ctx context.Context, libraryID int64, rootPath string) {
@@ -270,6 +274,7 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 				} else {
 					log.Debug().Str("path", vfs.RedactPath(path)).Msg("watching new directory")
 				}
+				m.enqueueScannerRescan(ctx, lw.libraryID, path)
 			}
 			return
 		}
@@ -277,8 +282,8 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 
 	if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
 		ext := strings.ToLower(filepath.Ext(path))
-		if parser.IsMediaExtension(ext) {
-			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Msg("media file removed")
+		if isScannerTriggerPath(path) {
+			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Msg("scanner input removed")
 			m.enqueueSoftDelete(ctx, lw.libraryID, path)
 		} else if ext == "" {
 			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Int64("library_id", lw.libraryID).Msg("directory removed, scheduling rescan")
@@ -288,66 +293,24 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 	}
 
 	if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) {
-		ext := strings.ToLower(filepath.Ext(path))
-		if !parser.IsMediaExtension(ext) {
+		if !isScannerTriggerPath(path) {
 			return
 		}
 
+		dir := filepath.Dir(path)
+		key := strconv.FormatInt(lw.libraryID, 10) + "\x00" + dir
 		mu.Lock()
-		if t, ok := pending[path]; ok {
+		if t, ok := pending[key]; ok {
 			t.Stop()
 		}
-		pending[path] = time.AfterFunc(debounceDelay, func() {
+		pending[key] = time.AfterFunc(debounceDelay, func() {
 			mu.Lock()
-			delete(pending, path)
+			delete(pending, key)
 			mu.Unlock()
-			m.enqueueNewFile(ctx, lw, path)
+			m.enqueueScannerRescan(ctx, lw.libraryID, path)
 		})
 		mu.Unlock()
 	}
-}
-
-func (m *Manager) enqueueNewFile(ctx context.Context, lw *LibraryWatcher, filePath string) {
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return
-	}
-
-	relPath, _ := filepath.Rel(lw.rootPath, filePath)
-	parsed := parser.ParseStoragePath(relPath)
-	parseJSON, _ := json.Marshal(map[string]any{"parsed": parsed})
-
-	q := sqlc.New(m.db)
-	file, err := q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
-		LibraryID:   lw.libraryID,
-		Path:        filePath,
-		Size:        info.Size(),
-		Mtime:       pgtype.Timestamptz{Time: info.ModTime(), Valid: true},
-		ParseResult: parseJSON,
-		Status:      sqlc.FileStatusPending,
-	})
-	if err != nil {
-		log.Error().Err(err).Str("path", vfs.RedactPath(filePath)).Msg("upsert failed")
-		return
-	}
-
-	// fsnotify-discovered file: the user just dropped this into the library,
-	// so it jumps ahead of any in-flight bulk scan. PriorityWatcher (1) wins
-	// against PriorityScan (2) which is what the scheduler enqueues at.
-	if m.river == nil {
-		log.Warn().Str("path", vfs.RedactPath(filePath)).Msg("cannot enqueue process file: river client unavailable")
-		return
-	}
-	if _, err := m.river.Insert(ctx, worker.ProcessFileArgs{
-		LibraryFileID: file.ID,
-		LibraryID:     lw.libraryID,
-		FilePath:      filePath,
-	}, &river.InsertOpts{Priority: worker.PriorityWatcher}); err != nil {
-		log.Warn().Err(err).Str("path", vfs.RedactPath(filePath)).Int64("file_id", file.ID).Msg("enqueue process file failed")
-		return
-	}
-
-	log.Info().Str("path", relPath).Int64("file_id", file.ID).Msg("new media file detected, enqueued for processing")
 }
 
 func (m *Manager) enqueueSoftDelete(ctx context.Context, libraryID int64, path string) {
@@ -361,6 +324,37 @@ func (m *Manager) enqueueSoftDelete(ctx context.Context, libraryID int64, path s
 	}, nil); err != nil {
 		log.Warn().Err(err).Str("path", vfs.RedactPath(path)).Int64("library_id", libraryID).Msg("enqueue soft delete failed")
 	}
+}
+
+func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, triggerPath string) {
+	if m.river == nil {
+		if m.onScan != nil {
+			m.onScan(libraryID, false)
+			log.Info().Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("watcher-triggered scanner run enqueued via direct callback")
+			return
+		}
+		log.Warn().Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("cannot enqueue scanner run: river client unavailable")
+		return
+	}
+	args := worker.ProcessLibraryScanArgs{
+		LibraryID:  libraryID,
+		ScopePaths: []string{scannerScopeForChangedPath(triggerPath)},
+	}
+	opts := args.InsertOpts()
+	opts.Priority = worker.PriorityWatcher
+	if _, err := m.river.Insert(ctx, args, &opts); err != nil {
+		log.Warn().Err(err).Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("enqueue scanner run failed")
+		return
+	}
+	log.Info().Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("watcher-triggered scanner run enqueued")
+}
+
+func scannerScopeForChangedPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return path
+	}
+	return filepath.Dir(path)
 }
 
 var (
@@ -381,9 +375,28 @@ func (m *Manager) enqueueRescan(_ context.Context, libraryID int64) {
 		delete(rescanTimers, libraryID)
 		rescanTimersMu.Unlock()
 
-		m.onScan(libraryID, false)
+		if m.onScan != nil {
+			m.onScan(libraryID, false)
+		}
 		log.Info().Int64("library_id", libraryID).Msg("rescan enqueued after directory change")
 	})
+}
+
+func isScannerTriggerPath(path string) bool {
+	name := filepath.Base(path)
+	ext := strings.ToLower(filepath.Ext(name))
+	switch {
+	case mediafile.IsVideoExt(ext), mediafile.IsAudioExt(ext):
+		return true
+	case mediafile.IsImageExt(ext), mediafile.IsSubtitleExt(ext), mediafile.IsLyricsExt(ext):
+		return true
+	case ext == ".nfo":
+		return true
+	case strings.EqualFold(name, ".plexmatch"):
+		return true
+	default:
+		return false
+	}
 }
 
 // addRecursiveBounded runs addRecursive with a stall watchdog. The walk issues

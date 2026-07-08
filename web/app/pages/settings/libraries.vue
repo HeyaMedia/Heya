@@ -16,12 +16,12 @@ const { flash } = useFlash()
 const route = useRoute()
 const router = useRouter()
 
-const SCANNABLE = ['movie', 'tv', 'anime']
+const SCANNABLE = ['movie', 'tv', 'anime', 'music', 'book']
 function isScannable(lib: Library): boolean {
   return SCANNABLE.includes(lib.media_type)
 }
 
-// Per-library drill-down into the Scanner V2 state. Selecting a library swaps
+// Per-library drill-down into the scanner state. Selecting a library swaps
 // the list for the scanner detail view (deep-linked via ?library=).
 const scannerLibId = ref<number | null>(null)
 const scannerLib = computed(() => libraries.value.find(l => l.id === scannerLibId.value) ?? null)
@@ -51,7 +51,7 @@ function closeScanner() {
 
 // Latest persisted scan run per scannable library — a cheap runs-only fetch
 // (no identity/finding payload) so each card can show a scanner status line
-// without pulling the full scan-v2 view.
+// without pulling the full scanner view.
 type ScanRunLite = { id: number; status: string; mode: string; summary: Record<string, any>; started_at?: string; finished_at?: string }
 const latestRun = ref<Record<number, ScanRunLite | null>>({})
 
@@ -59,7 +59,7 @@ async function fetchLatestRuns() {
   const heya = $heya as any
   await Promise.all(libraries.value.filter(isScannable).map(async (lib) => {
     try {
-      const rows = await heya('/api/libraries/{id}/scan-v2/runs', {
+      const rows = await heya('/api/libraries/{id}/scanner/runs', {
         path: { id: lib.id },
         query: { limit: 1, offset: 0 },
       }) as ScanRunLite[]
@@ -97,6 +97,7 @@ const showEdit = computed({
 function defaultSettings(type: string): LibrarySettings {
   const base: LibrarySettings = {
     watch: true, preferred_language: 'en', preferred_country: 'US',
+    use_local_data: true,
     auto_collections: false, fetch_ratings: true,
     save_nfo: false, save_images: false,
     enable_trickplay: false, generate_thumbnails: true,
@@ -480,7 +481,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
                 Scanner · {{ latestRun[lib.id]!.status }} · {{ shortDate(latestRun[lib.id]!.finished_at || latestRun[lib.id]!.started_at) }}
               </span>
               <span v-else>Scanner · not run yet</span>
-              <Icon name="chevright" :size="11" class="lib-scanner-go" />
+              <Icon name="chevright" :size="11" class="lib-sv2-go" />
             </button>
           </div>
 
@@ -807,7 +808,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 .lib-scanner:hover { color: var(--fg-0); border-color: var(--border-strong); background: rgba(255,255,255,0.04); }
-.lib-scanner-go { color: var(--fg-4); }
+.lib-sv2-go { color: var(--fg-4); }
 
 .lib-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .row-btn {

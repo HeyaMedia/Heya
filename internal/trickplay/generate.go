@@ -22,22 +22,71 @@ const (
 	Cols          = 10
 	Rows          = 10
 	TilesPerSheet = Cols * Rows
+	GridDirName   = "320 - 10x10"
 )
+
+func SidecarDir(filePath string) string {
+	return filepath.Join(filepath.Dir(filePath), filepath.Base(filePath)+".trickplay")
+}
+
+func GridDir(sidecarDir string) string {
+	return filepath.Join(sidecarDir, GridDirName)
+}
+
+func SpriteName(spriteIdx int) string {
+	return fmt.Sprintf("%d.jpg", spriteIdx)
+}
+
+func IntervalForDuration(duration float64) float64 {
+	if duration > 7200 {
+		return 10
+	}
+	return 5
+}
+
+func BuildVTT(duration float64, spriteExists func(int) bool) (string, error) {
+	if duration <= 0 {
+		return "", nil
+	}
+	interval := IntervalForDuration(duration)
+	totalTiles := int(math.Ceil(duration / interval))
+	if totalTiles < 1 {
+		return "", nil
+	}
+
+	var vtt strings.Builder
+	vtt.WriteString("WEBVTT\n\n")
+	for tileGlobal := 0; tileGlobal < totalTiles; tileGlobal++ {
+		spriteIdx := tileGlobal / TilesPerSheet
+		if spriteExists != nil && !spriteExists(spriteIdx) {
+			return "", fmt.Errorf("missing trickplay sprite %s", SpriteName(spriteIdx))
+		}
+
+		slot := tileGlobal % TilesPerSheet
+		col := slot % Cols
+		row := slot / Cols
+		startTime := float64(tileGlobal) * interval
+		endTime := startTime + interval
+		if endTime > duration {
+			endTime = duration
+		}
+
+		fmt.Fprintf(&vtt, "%s --> %s\n", formatVTTTime(startTime), formatVTTTime(endTime))
+		fmt.Fprintf(&vtt, "%s#xywh=%d,%d,%d,%d\n\n", SpriteName(spriteIdx), col*TileW, row*TileH, TileW, TileH)
+	}
+	return vtt.String(), nil
+}
 
 func GenerateSprites(ctx context.Context, filePath string, duration float64, outDir string) (int, error) {
 	if duration <= 0 {
 		return 0, nil
 	}
 
-	vttPath := filepath.Join(outDir, "index.vtt")
-	if _, err := os.Stat(vttPath); err == nil {
+	if _, err := os.Stat(filepath.Join(GridDir(outDir), SpriteName(0))); err == nil {
 		return 0, nil
 	}
 
-	interval := 5.0
-	if duration > 7200 {
-		interval = 10.0
-	}
+	interval := IntervalForDuration(duration)
 
 	totalTiles := int(math.Ceil(duration / interval))
 	if totalTiles < 1 {
@@ -76,11 +125,12 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 		return 0, fmt.Errorf("no frames extracted")
 	}
 
-	os.MkdirAll(outDir, 0755)
+	sheetDir := GridDir(outDir)
+	if err := os.MkdirAll(sheetDir, 0750); err != nil {
+		return 0, fmt.Errorf("create trickplay dir: %w", err)
+	}
 
 	spriteCount := int(math.Ceil(float64(len(tiles)) / float64(TilesPerSheet)))
-	var vtt strings.Builder
-	vtt.WriteString("WEBVTT\n\n")
 
 	for spriteIdx := 0; spriteIdx < spriteCount; spriteIdx++ {
 		startTile := spriteIdx * TilesPerSheet
@@ -115,23 +165,9 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 				(col+1)*TileW, (row+1)*TileH,
 			)
 			draw.Draw(sprite, dst, img, image.Point{}, draw.Src)
-
-			tileGlobal := startTile + i
-			startTime := float64(tileGlobal) * interval
-			endTime := startTime + interval
-			if endTime > duration {
-				endTime = duration
-			}
-
-			spriteName := fmt.Sprintf("sprite_%d.jpg", spriteIdx)
-			x := col * TileW
-			y := row * TileH
-
-			vtt.WriteString(fmt.Sprintf("%s --> %s\n", formatVTTTime(startTime), formatVTTTime(endTime)))
-			vtt.WriteString(fmt.Sprintf("%s#xywh=%d,%d,%d,%d\n\n", spriteName, x, y, TileW, TileH))
 		}
 
-		spritePath := filepath.Join(outDir, fmt.Sprintf("sprite_%d.jpg", spriteIdx))
+		spritePath := filepath.Join(sheetDir, SpriteName(spriteIdx))
 		sf, err := os.Create(spritePath)
 		if err != nil {
 			return 0, fmt.Errorf("create sprite: %w", err)
@@ -141,10 +177,6 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 			return 0, fmt.Errorf("encode sprite: %w", err)
 		}
 		sf.Close()
-	}
-
-	if err := os.WriteFile(vttPath, []byte(vtt.String()), 0644); err != nil {
-		return 0, fmt.Errorf("write vtt: %w", err)
 	}
 
 	log.Info().

@@ -32,9 +32,8 @@ type MatchInfo struct {
 	ProviderName string
 	ProviderID   string
 	IsNew        bool
-	// ArtistID is set when a music match creates or links to an artist. The
-	// MetadataMatchWorker uses it to enqueue a RefreshMusicArtist job for
-	// post-match enrichment.
+	// ArtistID is set when a music match creates or links to an artist. Legacy
+	// matcher call sites use it to enqueue post-match artist enrichment.
 	ArtistID int64
 }
 

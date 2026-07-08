@@ -334,10 +334,11 @@ const progressLibs = computed(() => Object.values(scanProgress.value))
 const KIND_LABELS: Record<string, { label: string, icon: string }> = {
   // Scanner pipeline
   kickoff_library_scan:    { label: 'Library scan kickoff',  icon: 'folder' },
-  process_file:            { label: 'Processing file',       icon: 'list' },
+  process_library_scan:    { label: 'Scanning library',      icon: 'folder' },
+  fetch_library_metadata:  { label: 'Fetching metadata',     icon: 'cloud-download' },
+  apply_library_scan:      { label: 'Applying scanner data', icon: 'folder' },
   ffprobe:                 { label: 'Probing media',         icon: 'eq' },
   detect_local_assets:     { label: 'Detecting sidecars',    icon: 'list' },
-  metadata_match:          { label: 'Matching metadata',     icon: 'database' },
   // Enrich pipeline
   kickoff_refresh_stale:   { label: 'Refresh kickoff',       icon: 'refresh' },
   enrich_media_item:       { label: 'Enriching item',        icon: 'cloud-download' },
@@ -646,7 +647,7 @@ async function cancelAllJobs() {
 // backend's worker.TaskKinds (scheduled + synthetic).
 const TASK_KINDS_BY_TASK: Record<string, string[]> = {
   // Scheduled.
-  scan_libraries:       ['kickoff_library_scan', 'process_file', 'ffprobe', 'detect_local_assets', 'metadata_match'],
+  scan_libraries:       ['kickoff_library_scan', 'process_library_scan', 'fetch_library_metadata', 'apply_library_scan', 'ffprobe', 'detect_local_assets', 'enrich_media_item', 'scan_track_fingerprint', 'scan_track_loudness', 'scan_album_loudness', 'analyze_track_facets', 'refresh_artist_centroids', 'refresh_album_centroids'],
   refresh_stale_items:  ['kickoff_refresh_stale', 'enrich_media_item'],
   scan_music_loudness:  ['kickoff_music_loudness', 'scan_track_loudness', 'scan_album_loudness'],
   scan_music_fingerprint: ['kickoff_music_fingerprint', 'scan_track_fingerprint'],

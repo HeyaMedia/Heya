@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
@@ -27,7 +26,6 @@ var _ pgx.Tx // ensure import used
 // MatchService abstracts the matcher operations used by workers so that tests
 // can supply lightweight fakes instead of a fully-wired *matcher.Matcher.
 type MatchService interface {
-	MatchSingleFile(ctx context.Context, file sqlc.LibraryFile, mediaType sqlc.MediaType, libraryID int64) (matcher.MatchInfo, error)
 	StoreEntityMetadata(ctx context.Context, mediaItemID int64, kind metadata.MediaKind, detail *metadata.MediaDetail) error
 	StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) error
 	ResolveMatch(ctx context.Context, fileID, candidateID int64) error
@@ -103,8 +101,6 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	}
 
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &ProcessFileWorker{DB: cfg.DB, Progress: cfg.Progress})
-	river.AddWorker(workers, &MetadataMatchWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, HeyaMedia: cfg.HeyaMedia, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
@@ -137,7 +133,10 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	// these on the cadence set in the scheduled_tasks table. "Run Now"
 	// from the UI hits the same insertion path with UniqueByArgs so
 	// concurrent clicks coalesce.
-	river.AddWorker(workers, &KickoffLibraryScanWorker{DB: cfg.DB, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
+	river.AddWorker(workers, &KickoffLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
+	river.AddWorker(workers, &ProcessLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
+	river.AddWorker(workers, &FetchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
+	river.AddWorker(workers, &ApplyLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, SonicEnabled: cfg.SonicEnabled, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffRefreshStaleWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffMusicLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffMusicFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
@@ -166,11 +165,12 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		// also live here at MaxWorkers=1.
 		Queues: map[string]river.QueueConfig{
 			// Scanner pipeline (source-throttled).
-			"kickoff_library_scan": {MaxWorkers: 1},
-			"process_file":         {MaxWorkers: 1}, // priority bands: P1=watcher, P2=scan
-			"ffprobe":              {MaxWorkers: 1},
-			"detect_local_assets":  {MaxWorkers: 1},
-			"metadata_match":       {MaxWorkers: 1},
+			"kickoff_library_scan":   {MaxWorkers: 1}, // priority bands: P1=watcher, P2=scheduled/manual
+			"process_library_scan":   {MaxWorkers: 1}, // local analysis + search; scoped for watcher-triggered folders
+			"fetch_library_metadata": {MaxWorkers: 1}, // remote metadata fetch from persisted search artifact
+			"apply_library_scan":     {MaxWorkers: 1}, // materialize + apply from persisted fetch artifact
+			"ffprobe":                {MaxWorkers: 1},
+			"detect_local_assets":    {MaxWorkers: 1},
 
 			// Enrich pipeline (external rate-limit safety).
 			"enrich_media_item":      {MaxWorkers: 1}, // priority bands P1=watcher/view, P2=movies+tv, P3=music+books

@@ -52,6 +52,19 @@
             @update:model-value="toggleBool('watch')"
           />
         </div>
+        <div class="toggle-row" @click="toggleBool('use_local_data')">
+          <div class="toggle-info">
+            <span class="toggle-name">Use local data</span>
+            <span class="toggle-desc">Use local artwork during scans while still reading NFO, lyrics, and subtitles</span>
+          </div>
+          <AppSwitch
+            :model-value="local.use_local_data"
+            size="sm"
+            aria-label="Use local data"
+            @click.stop
+            @update:model-value="toggleBool('use_local_data')"
+          />
+        </div>
         <div class="toggle-row" @click="toggleBool('fetch_ratings')">
           <div class="toggle-info">
             <span class="toggle-name">Fetch external ratings</span>
@@ -157,6 +170,7 @@ const local = reactive<LibrarySettings>({
   watch: false,
   preferred_language: 'en',
   preferred_country: 'US',
+  use_local_data: true,
   auto_collections: false,
   fetch_ratings: true,
   save_nfo: false,
@@ -170,6 +184,7 @@ function syncFromProps() {
   local.watch = s.watch ?? false
   local.preferred_language = s.preferred_language || 'en'
   local.preferred_country = s.preferred_country || 'US'
+  local.use_local_data = s.use_local_data ?? true
   local.auto_collections = s.auto_collections ?? false
   local.fetch_ratings = s.fetch_ratings ?? true
   local.save_nfo = s.save_nfo ?? false
@@ -184,7 +199,7 @@ function emitUpdate() {
   emit('update:modelValue', { ...toRaw(local) })
 }
 
-function toggleBool(field: 'watch' | 'auto_collections' | 'fetch_ratings' | 'save_nfo' | 'save_images' | 'enable_trickplay' | 'generate_thumbnails') {
+function toggleBool(field: 'watch' | 'use_local_data' | 'auto_collections' | 'fetch_ratings' | 'save_nfo' | 'save_images' | 'enable_trickplay' | 'generate_thumbnails') {
   local[field] = !local[field]
   emitUpdate()
 }

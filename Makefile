@@ -1,4 +1,7 @@
 GOBIN := $(shell go env GOPATH)/bin
+GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
+GO_MODCACHE_DIR ?= $(CURDIR)/.cache/go-mod
+GO := GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MODCACHE_DIR) go
 
 .PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyamedia-client deadcode dead-components docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
 
@@ -14,10 +17,10 @@ build-frontend:
 	touch web/dist/.gitkeep
 
 build: build-frontend
-	go build -o bin/heya ./cmd/heya
+	$(GO) build -o bin/heya ./cmd/heya
 
 build-go:
-	go build -o bin/heya ./cmd/heya
+	$(GO) build -o bin/heya ./cmd/heya
 
 run: build-go
 	./bin/heya serve
@@ -38,35 +41,35 @@ dev:
 
 # Same trio as `make dev`, split across terminals if you want separate control.
 dev-front:
-	mkdir -p tmp && go build -o tmp/heya-dev ./cmd/heya && exec tmp/heya-dev dev-proxy
+	mkdir -p tmp && $(GO) build -o tmp/heya-dev ./cmd/heya && exec tmp/heya-dev dev-proxy
 
 dev-go:
-	mkdir -p tmp && go run github.com/air-verse/air@latest
+	mkdir -p tmp && $(GO) run github.com/air-verse/air@latest
 
 dev-web:
 	cd web && bun run dev
 
 test:
-	go test ./...
+	$(GO) test ./...
 
 test-unit:
-	go test -short -count=1 ./...
+	$(GO) test -short -count=1 ./...
 
 test-integration:
-	go test -count=1 ./...
+	$(GO) test -count=1 ./...
 
 test-coverage:
-	go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html
+	$(GO) test -coverprofile=coverage.out ./... && $(GO) tool cover -html=coverage.out -o coverage.html
 
 lint:
-	go vet ./...
+	$(GO) vet ./...
 
 # Report Go dead-code candidates via x/tools' deadcode analyzer. Needs
 # network on the first run (go run downloads the tool). Output is a list of
 # CANDIDATES for manual review — reflection, build tags, and CLI-only paths
 # produce false positives — so this is a report, not an error gate.
 deadcode:
-	go run golang.org/x/tools/cmd/deadcode@latest ./...
+	$(GO) run golang.org/x/tools/cmd/deadcode@latest ./...
 
 # Report Vue components under web/app/components with zero references in
 # web/app + web/shared (PascalCase/kebab tags, Lazy prefix, imports,
