@@ -1,0 +1,93 @@
+# syntax=docker/dockerfile:1.7
+#
+# Heya CPU runtime image.
+#
+# Heavy, app-stable dependencies live here so ordinary Heya releases only push
+# the small binary layer from .docker/Dockerfile.
+
+FROM bitnami/minideb:trixie AS runtime
+
+# Pinned versions. Bump deliberately:
+# - jellyfin-ffmpeg: tied to Jellyfin's release cadence; tracks ffmpeg upstream.
+# - onnxruntime: must stay ABI-compatible with `github.com/yalue/onnxruntime_go`.
+ARG JELLYFIN_FFMPEG_PACKAGE=jellyfin-ffmpeg7
+# ONNX Runtime must satisfy the onnxruntime_go binding's ORT_API_VERSION
+# (v1.27.0 → API 24 → needs ORT ≥ 1.24.0). 1.24.1 is the version pinned across
+# ALL runtime images so the single Heya binary's C-API version matches every
+# variant's libonnxruntime.
+ARG ONNXRUNTIME_VERSION=1.24.1
+
+# minideb's install_packages handles apt update + install + cache cleanup
+# in one shot, but we need to add the Jellyfin apt repo first, so we go
+# manual to control the layering.
+#
+# Arch is read from `dpkg --print-architecture` (amd64 | arm64) and mapped to
+# the two upstream naming schemes that differ per-arch:
+#   - onnxruntime release asset:  linux-x64 (amd64) | linux-aarch64 (arm64)
+#   - Debian multiarch lib dir:   x86_64-linux-gnu  | aarch64-linux-gnu
+# jellyfin's apt repo already names archs amd64/arm64, so DPKG_ARCH feeds it
+# directly. Keep this in sync with defaultOnnxLib() in
+# internal/sonicanalysis/onnx.go, which resolves the same per-arch lib path.
+RUN DPKG_ARCH="$(dpkg --print-architecture)" && \
+    case "${DPKG_ARCH}" in \
+        amd64) ORT_ARCH=x64;     LIB_DIR=x86_64-linux-gnu ;; \
+        arm64) ORT_ARCH=aarch64; LIB_DIR=aarch64-linux-gnu ;; \
+        *) echo "unsupported architecture: ${DPKG_ARCH}" >&2; exit 1 ;; \
+    esac && \
+    install_packages \
+        ca-certificates \
+        curl \
+        gnupg \
+        tzdata && \
+    \
+    # Jellyfin ffmpeg apt repo (trixie). Key is published at the team URL
+    # and signs the per-distro Release files.
+    install -d /etc/apt/keyrings && \
+    curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg && \
+    echo "deb [arch=${DPKG_ARCH} signed-by=/etc/apt/keyrings/jellyfin.gpg] https://repo.jellyfin.org/master/debian trixie main" \
+        > /etc/apt/sources.list.d/jellyfin.list && \
+    install_packages ${JELLYFIN_FFMPEG_PACKAGE} && \
+    \
+    # Heya looks up ffmpeg/ffprobe via $PATH (exec.LookPath). Symlink the
+    # jellyfin binaries onto the standard locations so no Go-side config
+    # is required.
+    ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg  /usr/local/bin/ffmpeg && \
+    ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe && \
+    \
+    # ONNX Runtime shared library, into the arch's Debian multiarch dir where
+    # defaultOnnxLib() expects it.
+    curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}.tgz" \
+        -o /tmp/onnxruntime.tgz && \
+    tar -xzf /tmp/onnxruntime.tgz -C /tmp && \
+    # -P preserves symlinks: the tarball ships libonnxruntime.so ->
+    # libonnxruntime.so.1 -> libonnxruntime.so.X.Y.Z, three names for one
+    # ~50 MB blob. Without -P, cp resolves them and we'd ship the file
+    # three times.
+    cp -P /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so* \
+        /usr/lib/${LIB_DIR}/ && \
+    ldconfig && \
+    \
+    # Drop bootstrap tools — they were only needed to fetch keys + tarball.
+    apt-get purge -y curl gnupg && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/onnxruntime*
+
+# Data lives outside the image. Mount a host directory or named volume here.
+# Inside the container the binary defaults HEYA_DATA_DIR to /data so the
+# Tailscale state, transcode cache, and any uploaded assets all land here.
+RUN mkdir -p /data
+WORKDIR /data
+
+# HEYA_ALLOW_REMOTE_ACTIVE: the deployed image legitimately owns its (often
+# remote) database, so it may run active mode against it. Source/dev checkouts
+# do NOT get this and must stay passive when pointed at a remote DB — the
+# active-mode guard in serve.go enforces it. CUDA/OpenVINO runtime images build
+# FROM this one and inherit the value.
+ENV HEYA_DATA_DIR=/data \
+    HEYA_HOST=0.0.0.0 \
+    HEYA_PORT=8080 \
+    HEYA_ALLOW_REMOTE_ACTIVE=true
+
+EXPOSE 8080
+VOLUME ["/data"]

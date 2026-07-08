@@ -11,7 +11,8 @@
 # The base is built NATIVELY per-arch — amd64 on ubuntu-latest, arm64 on the
 # GitHub-hosted ubuntu-24.04-arm runner (free for public repos), NO QEMU. Each
 # arch is pushed by digest, then a merge job assembles one multi-arch manifest
-# with the version tags. The GPU variants build FROM that merged base.
+# with the version tags. Every variant builds the same app layer on top of a
+# prebuilt runtime image from the Runtime Images workflow.
 # Auth: GITHUB_TOKEN — no manual secrets needed.
 
 name: Container
@@ -34,6 +35,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     outputs:
       image: ${{ steps.img.outputs.image }}
+      runtime_image: ${{ steps.img.outputs.runtime_image }}
     strategy:
       fail-fast: false
       matrix:
@@ -47,7 +49,10 @@ jobs:
       # (e.g. HeyaMedia/Heya).
       - name: Lowercase image ref
         id: img
-        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=${image}-runtime" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -73,7 +78,10 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          file: .docker/Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: |
+            BASE_RUNTIME_IMAGE=${{ steps.img.outputs.runtime_image }}:latest
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=base-${{ matrix.arch }}
@@ -99,6 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image: ${{ needs.base.outputs.image }}
+      runtime_image: ${{ needs.base.outputs.runtime_image }}
       version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Download digests
@@ -175,17 +184,16 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      # FROM the merged base manifest (by version tag pushed above) — amd64 only
-      # (the GPU runtimes are x86_64). Reuses the base's layers, so it's a thin
-      # build (no frontend/Go recompile).
+      # Build the same app layer on top of the prebuilt GPU runtime — amd64
+      # only because CUDA/OpenVINO runtime images are x86_64.
       - name: Build and push ${{ matrix.variant }}
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.${{ matrix.variant }}
+          file: .docker/Dockerfile
           platforms: linux/amd64
           build-args: |
-            BASE_IMAGE=${{ needs.merge.outputs.image }}:${{ needs.merge.outputs.version }}
+            BASE_RUNTIME_IMAGE=${{ needs.merge.outputs.runtime_image }}:latest-${{ matrix.variant }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -1,0 +1,150 @@
+name: Runtime Images
+
+on:
+  schedule:
+    # Saturday 04:00 UTC. Runtime layers are dependency-heavy but app-stable, so
+    # build them ahead of release tags instead of during every release.
+    - cron: '0 4 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: runtime-images
+  cancel-in-progress: false
+
+jobs:
+  cpu:
+    name: cpu runtime ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      image: ${{ steps.img.outputs.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, platform: linux/amd64, runner: ubuntu-latest }
+          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Runtime image ref
+        id: img
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-runtime" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push runtime by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: .docker/Dockerfile.cpu
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=runtime-cpu-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=runtime-cpu-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: cpu runtime manifest
+    needs: cpu
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ needs.cpu.outputs.image }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: runtime-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create + push runtime manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          image="${{ needs.cpu.outputs.image }}"
+          docker buildx imagetools create \
+            -t "${image}:latest" \
+            -t "${image}:cpu-trixie-ffmpeg7-onnxruntime-1.24.1" \
+            $(printf "${image}@sha256:%s " *)
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "${{ needs.cpu.outputs.image }}:latest"
+
+  variants:
+    name: ${{ matrix.variant }} runtime
+    needs: merge
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cuda
+            file: .docker/Dockerfile.cuda
+            latest_tag: latest-cuda
+            version_tag: cuda-onnxruntime-1.24.1-cuda12.6
+          - variant: openvino
+            file: .docker/Dockerfile.openvino
+            latest_tag: latest-openvino
+            version_tag: openvino-onnxruntime-1.24.1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push ${{ matrix.variant }} runtime
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          build-args: |
+            BASE_RUNTIME_IMAGE=${{ needs.merge.outputs.image }}:latest
+          push: true
+          tags: |
+            ${{ needs.merge.outputs.image }}:${{ matrix.latest_tag }}
+            ${{ needs.merge.outputs.image }}:${{ matrix.version_tag }}
+          cache-from: type=gha,scope=runtime-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=runtime-${{ matrix.variant }}

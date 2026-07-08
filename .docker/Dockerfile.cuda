@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1.7
 #
-# Heya — NVIDIA CUDA variant. Built FROM the main image; adds GPU ONNX
-# Runtime (CUDA + TensorRT execution providers) for sonic-analysis and
+# Heya — NVIDIA CUDA runtime variant. Built FROM the base runtime image; adds
+# GPU ONNX Runtime (CUDA + TensorRT execution providers) for sonic-analysis and
 # enables NVENC/NVDEC video transcoding.
 #
-#   docker build -t heya:base .                                  # the main image
-#   docker build -f Dockerfile.cuda --build-arg BASE_IMAGE=heya:base -t heya:cuda .
+#   docker build -f .docker/Dockerfile.cpu -t heya:runtime-cpu .
+#   docker build -f .docker/Dockerfile.cuda --build-arg BASE_RUNTIME_IMAGE=heya:runtime-cpu -t heya:runtime-cuda .
 #
 # amd64 ONLY — the onnxruntime GPU build and the NVIDIA CUDA wheels are
 # x86_64-only. There is no arm64 desktop CUDA target (Jetson is a separate
@@ -28,7 +28,7 @@
 # NVIDIA GPU on the test bench). The CUDA EP self-falls back to CPU if the
 # GPU/driver is absent, so the image still boots without `--gpus`.
 
-ARG BASE_IMAGE=heya:base
+ARG BASE_RUNTIME_IMAGE=heya:runtime-cpu
 
 # ────────────────────────────────────────────────────────────────
 # Stage 1 — fetch the GPU onnxruntime + CUDA/cuDNN runtime libs
@@ -41,7 +41,7 @@ ARG ONNXRUNTIME_VERSION=1.24.1
 # CUDA/cuDNN wheel versions. onnxruntime 1.24.x is built against CUDA 12.x +
 # cuDNN 9.x; any CUDA 12.x runtime is minor-compatible, so these float within
 # the 12 / 9 majors. Bump deliberately alongside ONNXRUNTIME_VERSION. (1.24.1
-# matches the binding's ORT API 24 — see the base Dockerfile note.)
+# matches the binding's ORT API 24 — see the CPU runtime Dockerfile note.)
 ARG CUDA_RUNTIME_VERSION=12.6.77
 ARG CUBLAS_VERSION=12.6.4.1
 ARG CUFFT_VERSION=11.3.0.4
@@ -72,9 +72,9 @@ RUN python3 -m pip install --no-cache-dir --no-deps --target=/tmp/cuda \
     find /tmp/cuda/nvidia -name '*.so*' -exec cp -P {} /staging/lib/ \;
 
 # ────────────────────────────────────────────────────────────────
-# Stage 2 — final: main image + the GPU libs
+# Stage 2 — final: base runtime + the GPU libs
 # ────────────────────────────────────────────────────────────────
-FROM ${BASE_IMAGE} AS runtime
+FROM ${BASE_RUNTIME_IMAGE} AS runtime
 
 # Drop the CPU onnxruntime that ships in the base and replace the whole set
 # with the GPU build + CUDA runtime. Same multiarch dir defaultOnnxLib()
@@ -89,6 +89,3 @@ ENV HEYA_SONIC_ACCELERATOR=cuda \
     HEYA_HWACCEL=nvenc \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
-
-ENTRYPOINT ["/usr/local/bin/heya"]
-CMD ["serve"]

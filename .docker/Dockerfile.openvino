@@ -1,12 +1,13 @@
 # syntax=docker/dockerfile:1.7
 #
-# Heya — Intel OpenVINO variant. Built FROM the main image; adds the OpenVINO
-# ONNX Runtime execution provider for sonic-analysis on Intel iGPU / Arc GPUs
-# (tested target: Arc A380 / DG2), plus the Intel GPU user-mode compute stack.
-# VAAPI/QSV video transcoding already works from the base via /dev/dri.
+# Heya — Intel OpenVINO runtime variant. Built FROM the base runtime image;
+# adds the OpenVINO ONNX Runtime execution provider for sonic-analysis on Intel
+# iGPU / Arc GPUs (tested target: Arc A380 / DG2), plus the Intel GPU user-mode
+# compute stack. VAAPI/QSV video transcoding already works from the base via
+# /dev/dri.
 #
-#   docker build -t heya:base .
-#   docker build -f Dockerfile.openvino --build-arg BASE_IMAGE=heya:base -t heya:openvino .
+#   docker build -f .docker/Dockerfile.cpu -t heya:runtime-cpu .
+#   docker build -f .docker/Dockerfile.openvino --build-arg BASE_RUNTIME_IMAGE=heya:runtime-cpu -t heya:runtime-openvino .
 #
 # amd64 ONLY — OpenVINO runtime + the onnxruntime-openvino wheel are x86_64.
 #
@@ -14,13 +15,13 @@
 # only prebuilt ORT+OpenVINO distribution (no MS/Intel C/C++ archive exists).
 # It pins ORT 1.24.1, which is exactly why the whole repo targets
 # onnxruntime_go v1.27.0 (ORT API 24): the single heya binary's C API must
-# match every variant's libonnxruntime. Keep all three in lockstep.
+# match every variant's libonnxruntime. Keep all runtime images in lockstep.
 #
 # Run — grant the Intel render node + the host's render group:
 #   docker run --device /dev/dri:/dev/dri --group-add "$(getent group render | cut -d: -f3)" \
 #     -p 8080:8080 -v $PWD/data:/data -e HEYA_DATABASE_URL=... heya:openvino
 
-ARG BASE_IMAGE=heya:base
+ARG BASE_RUNTIME_IMAGE=heya:runtime-cpu
 
 # ────────────────────────────────────────────────────────────────
 # Stage 1 — extract ORT + OpenVINO provider + bundled OV runtime from the wheel
@@ -45,9 +46,9 @@ RUN python3 -m pip download --no-deps --no-cache-dir \
     ln -sf "libonnxruntime.so.${ONNXRUNTIME_OPENVINO_VERSION}" libonnxruntime.so
 
 # ────────────────────────────────────────────────────────────────
-# Stage 2 — final: main image + OpenVINO ORT + Intel GPU runtime
+# Stage 2 — final: base runtime + OpenVINO ORT + Intel GPU runtime
 # ────────────────────────────────────────────────────────────────
-FROM ${BASE_IMAGE} AS runtime
+FROM ${BASE_RUNTIME_IMAGE} AS runtime
 
 # Intel GPU user-mode stack for the Arc / DG2 OpenVINO GPU plugin. trixie ships
 # the kernel i915 driver + libze1 (Level Zero loader) but NOT the Intel compute
@@ -90,6 +91,3 @@ RUN ldconfig
 ENV HEYA_SONIC_ACCELERATOR=openvino \
     HEYA_SONIC_OPENVINO_DEVICE=GPU \
     HEYA_SONIC_OPENVINO_CACHE_DIR=/data/openvino-cache
-
-ENTRYPOINT ["/usr/local/bin/heya"]
-CMD ["serve"]

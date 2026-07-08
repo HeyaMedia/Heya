@@ -3,6 +3,7 @@
 
 # Build outputs (regenerated in the image)
 bin/
+heya
 web/.nuxt/
 web/.output/
 web/dist/
@@ -11,6 +12,7 @@ web/node_modules/
 # Local runtime data — never bake into the image
 data/
 fulldata/
+exports/
 tmp/
 
 # VCS + CI metadata — not needed for compile
@@ -22,6 +24,7 @@ tmp/
 # Editor / tooling state
 .idea/
 .vscode/
+.cache/
 .air.toml
 .editorconfig
 

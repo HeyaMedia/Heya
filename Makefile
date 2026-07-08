@@ -3,7 +3,7 @@ GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_MODCACHE_DIR ?= $(CURDIR)/.cache/go-mod
 GO := GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MODCACHE_DIR) go
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyamedia-client deadcode dead-components docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyamedia-client deadcode dead-components docker-runtime-cpu docker-runtime-cuda docker-runtime-openvino docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
 
 # Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
 # bumps occasionally break field shapes and we want clients to match.
@@ -136,41 +136,50 @@ gen-heyamedia-client:
 		-config clients/heyamedia/cfg.yaml \
 		clients/heyamedia/openapi-3.0.json
 
-# Build the production container locally. Multi-stage: bun frontend ->
-# go backend -> minideb runtime with jellyfin-ffmpeg + libonnxruntime.
-# Tag is `heya:base` — the main image and the FROM base for the GPU variants.
+# Build the production container locally. Runtime images live in `.docker/`;
+# the app image builds frontend/backend and copies only the Heya binary onto
+# the selected runtime.
 #
 # Builds for the host arch by default — fast and native (no QEMU) on both
-# Apple Silicon and Linux amd64. The Dockerfile is arch-agnostic (it derives
+# Apple Silicon and Linux amd64. The CPU runtime is arch-agnostic (it derives
 # the per-arch bits from dpkg), so override PLATFORM to cross-build a single
 # arch, e.g. `make docker PLATFORM=linux/amd64`. NOTE: the Nuxt prerender step
 # is much slower under bun on amd64 than arm64 — an amd64 build can take several
 # extra minutes at `bun run build`; this is a bun node-compat quirk, not a hang.
 #
-# The base image already does Intel + AMD **video transcode** via VAAPI/QSV —
-# just pass the GPU at run time (see docker-run-gpu). The GPU **ONNX** variants
-# (sonic-analysis) are separate, smaller layers FROM this base:
+# The CPU runtime already does Intel + AMD **video transcode** via VAAPI/QSV —
+# just pass the GPU at run time (see docker-run-gpu). The GPU **ONNX** runtimes
+# (sonic-analysis) are separate amd64-only layers FROM the CPU runtime.
 PLATFORM ?=
-docker:
-	docker build $(if $(PLATFORM),--platform=$(PLATFORM),) -t heya:base .
+docker-runtime-cpu:
+	docker build $(if $(PLATFORM),--platform=$(PLATFORM),) -f .docker/Dockerfile.cpu -t heya:runtime-cpu .
 
-# GPU ONNX variants — built FROM heya:base, amd64 only. Build the base first.
-#   heya:cuda      NVIDIA  — CUDA/TensorRT ONNX EP + NVENC transcode (run: --gpus all)
-#   heya:openvino  Intel   — OpenVINO ONNX EP for Arc/iGPU + QSV/VAAPI (run: --device /dev/dri)
-docker-cuda:
-	docker build --platform=linux/amd64 -f Dockerfile.cuda \
-		--build-arg BASE_IMAGE=heya:base -t heya:cuda .
+docker: docker-runtime-cpu
+	docker build $(if $(PLATFORM),--platform=$(PLATFORM),) -f .docker/Dockerfile \
+		--build-arg BASE_RUNTIME_IMAGE=heya:runtime-cpu -t heya:base .
 
-docker-openvino:
-	docker build --platform=linux/amd64 -f Dockerfile.openvino \
-		--build-arg BASE_IMAGE=heya:base -t heya:openvino .
+docker-runtime-cuda:
+	docker build --platform=linux/amd64 -f .docker/Dockerfile.cuda \
+		--build-arg BASE_RUNTIME_IMAGE=heya:runtime-cpu -t heya:runtime-cuda .
+
+docker-cuda: docker-runtime-cpu docker-runtime-cuda
+	docker build --platform=linux/amd64 -f .docker/Dockerfile \
+		--build-arg BASE_RUNTIME_IMAGE=heya:runtime-cuda -t heya:cuda .
+
+docker-runtime-openvino:
+	docker build --platform=linux/amd64 -f .docker/Dockerfile.openvino \
+		--build-arg BASE_RUNTIME_IMAGE=heya:runtime-cpu -t heya:runtime-openvino .
+
+docker-openvino: docker-runtime-cpu docker-runtime-openvino
+	docker build --platform=linux/amd64 -f .docker/Dockerfile \
+		--build-arg BASE_RUNTIME_IMAGE=heya:runtime-openvino -t heya:openvino .
 
 # Build + push the base as one multi-arch manifest (what CI does on a tag).
 # Requires a buildx builder with QEMU; multi-platform images can't be loaded
 # into the local docker engine, so this pushes — set IMAGE to your registry ref.
 IMAGE ?= heya:base
 docker-multiarch:
-	docker buildx build --platform=linux/amd64,linux/arm64 -t $(IMAGE) --push .
+	docker buildx build -f .docker/Dockerfile --platform=linux/amd64,linux/arm64 -t $(IMAGE) --push .
 
 # Run the locally-built image against the docker-compose postgres on the
 # host. Bind-mounts ./data so the Tailscale state + transcode cache survive.

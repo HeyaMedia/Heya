@@ -108,8 +108,8 @@ Validated end-to-end on an Intel Arc A380 (DG2): sonic-analysis runs on the GPU.
 
 ```bash
 make docker                 # base, host arch (override: make docker PLATFORM=linux/amd64)
-make docker-cuda            # heya:cuda      (amd64, FROM heya:base)
-make docker-openvino        # heya:openvino  (amd64, FROM heya:base)
+make docker-cuda            # heya:cuda      (amd64, app image on CUDA runtime)
+make docker-openvino        # heya:openvino  (amd64, app image on OpenVINO runtime)
 make docker-run             # run base against the compose Postgres
 make docker-run-gpu         # run base with /dev/dri for hw transcode
 make docker-multiarch IMAGE=ghcr.io/...  # push base as one amd64+arm64 manifest
@@ -120,8 +120,10 @@ make docker-multiarch IMAGE=ghcr.io/...  # push base as one amd64+arm64 manifest
 > minutes at that step. It is **not** a hang; let it finish. (Native arm64,
 > e.g. an Apple-Silicon `make docker`, is fast.)
 
-CI (`.github/workflows/container.yml`) builds the base multi-arch on a tag,
-then builds both GPU variants FROM that exact base digest and pushes all three.
+CI (`.github/workflows/container.yml`) builds the app binary on a tag and
+layers it onto prebuilt runtime images. Runtime images are built by
+`.github/workflows/runtime.yml` every Saturday and can be run manually when
+ffmpeg, ONNX Runtime, CUDA, or OpenVINO dependencies change.
 
 ## Version lockstep (maintainers)
 
@@ -131,8 +133,8 @@ image's `libonnxruntime`. The only prebuilt ORT+OpenVINO is the
 and must never be bumped in isolation:
 
 - `go.mod` → `github.com/yalue/onnxruntime_go v1.27.0` (ORT API 24)
-- `Dockerfile`, `Dockerfile.cuda` → `ONNXRUNTIME_VERSION=1.24.1`
-- `Dockerfile.openvino` → `ONNXRUNTIME_OPENVINO_VERSION=1.24.1`
+- `.docker/Dockerfile.cpu`, `.docker/Dockerfile.cuda` → `ONNXRUNTIME_VERSION=1.24.1`
+- `.docker/Dockerfile.openvino` → `ONNXRUNTIME_OPENVINO_VERSION=1.24.1`
 
 A mismatch fails sonic-analysis init at runtime with
 `Error setting ORT API base: 2` (`GetApi(N)` → NULL). Keep `go.sum` free of
