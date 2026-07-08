@@ -2,11 +2,11 @@
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import type { Library, LibrarySettings } from '~~/shared/types'
-import type { LibraryScanProgress } from '~/composables/useEventBus'
+import type { LibraryScanProgress, ScannerEventPayload } from '~/composables/useEventBus'
 
 const { $heya, $queryClient } = useNuxtApp()
 const { confirm } = useConfirm()
-const { scanProgress } = useEventBus()
+const { scanProgress, scannerEvents } = useEventBus()
 
 const libraries = ref<Library[]>([])
 const loading = ref(true)
@@ -128,12 +128,61 @@ const namePlaceholder = computed(() => {
 function libProgress(id: number): LibraryScanProgress | null {
   return scanProgress.value[id] ?? null
 }
+function libScanEvent(id: number): ScannerEventPayload | null {
+  return scannerEvents.value[id] ?? null
+}
 function libPercent(id: number): number {
   const p = scanProgress.value[id]
   if (!p || p.total === 0) return 0
   return Math.min(p.processed / p.total, 1)
 }
 const hasAnyProgress = computed(() => Object.keys(scanProgress.value).length > 0)
+const activeScanCount = computed(() => {
+  const ids = new Set([
+    ...Object.keys(scanProgress.value),
+    ...Object.keys(scannerEvents.value),
+  ])
+  return ids.size
+})
+const hasAnyActiveScan = computed(() => activeScanCount.value > 0)
+
+const SCANNER_EVENT_LABELS: Record<string, string> = {
+  'scan.start': 'Starting',
+  'scan.phase.start': 'Starting phase',
+  'scan.phase.complete': 'Finished phase',
+  'root.enter': 'Scanning folder',
+  'root.complete': 'Finished folder',
+  'file.classified': 'Reading file',
+  'parse.result': 'Parsed',
+  'match.search': 'Searching',
+  'match.selected': 'Matched',
+  'match.rejected': 'Needs review',
+  'match.search_summary': 'Search summary',
+  'metadata.fetch': 'Fetching metadata',
+  'metadata.preview': 'Fetched metadata',
+  'metadata.preview_summary': 'Metadata summary',
+  'materialize.preview': 'Planning apply',
+  'materialize.preview_summary': 'Apply plan ready',
+  'materialize.apply': 'Applying',
+  'materialize.apply_summary': 'Apply summary',
+  'scan.summary': 'Scan summary',
+  'scan.persisted': 'Saved scan result',
+}
+
+function scanEventLabel(ev: ScannerEventPayload): string {
+  const phase = ev.phase ? `${ev.phase}` : ''
+  const action = SCANNER_EVENT_LABELS[ev.event] ?? ev.event.replaceAll('.', ' ')
+  const target = scanEventTarget(ev)
+  return [phase, action, target].filter(Boolean).join(' · ')
+}
+
+function scanEventTarget(ev: ScannerEventPayload): string {
+  const data = ev.data ?? {}
+  return ev.rel_path ||
+    ev.root ||
+    ev.path ||
+    String(data.title || data.artist || data.album || data.key || data.provider_id || '')
+}
 
 async function fetchLibraries() {
   try {
@@ -383,15 +432,15 @@ watch(() => route.query.library, () => syncScannerFromRoute())
       <MetricTile label="Books"  :value="totalByKind.book ?? 0"  icon="book" />
       <MetricTile
         label="Active scans"
-        :value="Object.keys(scanProgress).length"
+        :value="activeScanCount"
         icon="pulse"
-        :tone="hasAnyProgress ? 'good' : 'neutral'"
+        :tone="hasAnyActiveScan ? 'good' : 'neutral'"
       />
     </div>
 
     <SettingsSection title="Configured libraries" icon="folder">
       <template #actions>
-        <button v-if="hasAnyProgress" class="sv2-btn danger" @click="cancelAll">
+        <button v-if="hasAnyActiveScan" class="sv2-btn danger" @click="cancelAll">
           <Icon name="close" :size="12" />
           Cancel all
         </button>
@@ -422,17 +471,17 @@ watch(() => route.query.library, () => syncScannerFromRoute())
           v-for="lib in libraries"
           :key="lib.id"
           class="lib-card"
-          :class="{ scanning: libProgress(lib.id) }"
+          :class="{ scanning: libProgress(lib.id) || libScanEvent(lib.id) }"
         >
           <div class="lib-left">
             <div class="lib-icon" :class="`kind-${lib.media_type}`">
-              <svg v-if="libProgress(lib.id)" class="progress-ring" viewBox="0 0 48 48">
+              <svg v-if="libProgress(lib.id) || libScanEvent(lib.id)" class="progress-ring" viewBox="0 0 48 48">
                 <circle class="ring-track" cx="24" cy="24" r="20" />
                 <circle
                   class="ring-fill"
                   cx="24" cy="24" r="20"
                   :stroke-dasharray="125.66"
-                  :stroke-dashoffset="125.66 - 125.66 * libPercent(lib.id)"
+                  :stroke-dashoffset="125.66 - 125.66 * (libProgress(lib.id) ? libPercent(lib.id) : 0.18)"
                 />
               </svg>
               <Icon :name="mediaIcon(lib.media_type)" :size="18" />
@@ -448,13 +497,17 @@ watch(() => route.query.library, () => syncScannerFromRoute())
               </span>
             </div>
 
-            <div v-if="libProgress(lib.id)" class="lib-progress">
-              <div class="prog-track">
+            <div v-if="libProgress(lib.id) || libScanEvent(lib.id)" class="lib-progress">
+              <div v-if="libProgress(lib.id)" class="prog-track">
                 <div class="prog-fill" :style="{ width: (libPercent(lib.id) * 100) + '%' }" />
               </div>
-              <div class="prog-meta">
+              <div v-if="libProgress(lib.id)" class="prog-meta">
                 Processed {{ libProgress(lib.id)!.processed }} / {{ libProgress(lib.id)!.total }} files
                 <template v-if="libProgress(lib.id)!.matched">· {{ libProgress(lib.id)!.matched }} matched</template>
+              </div>
+              <div v-if="libScanEvent(lib.id)" class="prog-current" :title="scanEventLabel(libScanEvent(lib.id)!)">
+                <Icon name="spinner" :size="11" />
+                <span>{{ scanEventLabel(libScanEvent(lib.id)!) }}</span>
               </div>
             </div>
 
@@ -778,6 +831,21 @@ watch(() => route.query.library, () => syncScannerFromRoute())
 }
 .prog-fill { height: 100%; background: var(--gold); transition: width 0.4s ease; }
 .prog-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+.prog-current {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--gold);
+}
+.prog-current span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .lib-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .tag {

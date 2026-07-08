@@ -684,6 +684,7 @@ func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], 
 func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, int64, error) {
 	opts := scannerSearchOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
+	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "process_library_scan")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
 	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
 		result := run.Result()
@@ -699,6 +700,7 @@ func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sq
 func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID int64) (libraryScanOutcome, int64, error) {
 	opts := scannerFetchOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
+	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "fetch_library_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
 	resumed := false
 	if searchScanRunID > 0 {
@@ -736,6 +738,7 @@ func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib s
 func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID, fetchScanRunID int64) (libraryScanOutcome, scanner.Result, error) {
 	opts := scannerApplyOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
+	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "apply_library_scan")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
 	resumed := false
 	if fetchScanRunID > 0 {

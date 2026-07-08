@@ -17,6 +17,7 @@ const (
 	EventActiveJobs     EventType = "active_jobs"
 	EventStatsUpdated   EventType = "stats.updated"
 	EventScanProgress   EventType = "scan.progress"
+	EventScannerEvent   EventType = "scan.event"
 	EventTaskProgress   EventType = "task.progress"
 	EventTailscale      EventType = "tailscale.status"
 	// Radio ICY metadata — fired by the radio stream proxy each time an
@@ -106,6 +107,29 @@ type ActiveJobsPayload struct {
 
 type ScanProgressPayload struct {
 	Libraries []LibraryScanProgress `json:"libraries"`
+}
+
+// ScannerEventPayload carries the scanner's structured internal event stream
+// over WebSocket. It is intentionally finer-grained than ScanProgressPayload:
+// queue workers use it to report the active phase, current root/folder/file,
+// matching decisions, metadata fetches, materialization, and apply actions.
+type ScannerEventPayload struct {
+	Seq         int64          `json:"seq"`
+	Event       string         `json:"event"`
+	Severity    string         `json:"severity,omitempty"`
+	LibraryID   int64          `json:"library_id"`
+	LibraryName string         `json:"library_name,omitempty"`
+	LibraryType string         `json:"library_type,omitempty"`
+	Domain      string         `json:"domain,omitempty"`
+	Worker      string         `json:"worker,omitempty"`
+	Phase       string         `json:"phase,omitempty"`
+	Root        string         `json:"root,omitempty"`
+	Path        string         `json:"path,omitempty"`
+	RelPath     string         `json:"rel_path,omitempty"`
+	Kind        string         `json:"kind,omitempty"`
+	Reason      string         `json:"reason,omitempty"`
+	Message     string         `json:"message,omitempty"`
+	Data        map[string]any `json:"data,omitempty"`
 }
 
 type LibraryScanProgress struct {

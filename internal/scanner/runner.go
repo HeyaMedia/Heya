@@ -31,6 +31,7 @@ type Options struct {
 	MusicMaterializer  MusicMaterializeStore
 	MusicProbe         MusicProbeFunc
 	MusicSearcher      MusicSearchProvider
+	EventWriters       []EventWriter
 	ScopePaths         []string
 	TVFetcher          TVDetailProvider
 	TVMaterializer     TVMaterializeStore
@@ -141,6 +142,11 @@ func NewLibraryRun(lib sqlc.Library, opts Options, out io.Writer) *LibraryRun {
 		writers = []EventWriter{recorder}
 	} else {
 		writers = append(writers, recorder)
+	}
+	for _, extra := range opts.EventWriters {
+		if extra != nil {
+			writers = append(writers, extra)
+		}
 	}
 	domain := string(lib.MediaType)
 	sink := NewEventSink(Event{

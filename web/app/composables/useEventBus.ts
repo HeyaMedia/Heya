@@ -74,6 +74,25 @@ export interface ScanProgressPayload {
   libraries: LibraryScanProgress[]
 }
 
+export interface ScannerEventPayload {
+  seq: number
+  event: string
+  severity?: string
+  library_id: number
+  library_name?: string
+  library_type?: string
+  domain?: string
+  worker?: string
+  phase?: string
+  root?: string
+  path?: string
+  rel_path?: string
+  kind?: string
+  reason?: string
+  message?: string
+  data?: Record<string, any>
+}
+
 export interface StatsPayload {
   libraries: number
   media_counts: Record<string, number>
@@ -118,6 +137,7 @@ export function useEventBus() {
   const activeJobs = useState<ActiveJob[]>('ws_active_jobs', () => [])
   const queueStatus = useState<QueueStatusPayload>('ws_queue_status', () => ({ pending: 0, running: 0 }))
   const scanProgress = useState<Record<number, LibraryScanProgress>>('ws_scan_progress', () => ({}))
+  const scannerEvents = useState<Record<number, ScannerEventPayload>>('ws_scanner_events', () => ({}))
   const taskProgress = useState<Record<string, TaskProgressPayload>>('ws_task_progress', () => ({}))
 
   function connect() {
@@ -139,7 +159,7 @@ export function useEventBus() {
     ws.onmessage = (msg) => {
       try {
         const event = JSON.parse(msg.data) as WsEvent
-        handleEvent(event, connected, activeScans, activeJobs, queueStatus, scanProgress, taskProgress)
+        handleEvent(event, connected, activeScans, activeJobs, queueStatus, scanProgress, scannerEvents, taskProgress)
       } catch {}
     }
 
@@ -184,6 +204,7 @@ export function useEventBus() {
     activeJobs: readonly(activeJobs),
     queueStatus: readonly(queueStatus),
     scanProgress: readonly(scanProgress),
+    scannerEvents: readonly(scannerEvents),
     taskProgress: readonly(taskProgress),
     connect,
     disconnect,
@@ -198,6 +219,7 @@ function handleEvent(
   activeJobs: Ref<ActiveJob[]>,
   queueStatus: Ref<QueueStatusPayload>,
   scanProgress: Ref<Record<number, LibraryScanProgress>>,
+  scannerEvents: Ref<Record<number, ScannerEventPayload>>,
   taskProgress: Ref<Record<string, TaskProgressPayload>>,
 ) {
   switch (event.type) {
@@ -208,6 +230,12 @@ function handleEvent(
     }
     case 'scan.completed':
       activeScans.value = activeScans.value.filter(s => s.library_id !== (event.payload as ScanPayload).library_id)
+      {
+        const id = (event.payload as ScanPayload).library_id
+        const next = { ...scannerEvents.value }
+        delete next[id]
+        scannerEvents.value = next
+      }
       break
     case 'queue.status':
       queueStatus.value = event.payload as QueueStatusPayload
@@ -225,6 +253,13 @@ function handleEvent(
         next[lib.library_id] = lib
       }
       scanProgress.value = next
+      break
+    }
+    case 'scan.event': {
+      const p = event.payload as ScannerEventPayload
+      if (p.library_id) {
+        scannerEvents.value = { ...scannerEvents.value, [p.library_id]: p }
+      }
       break
     }
     case 'task.progress': {

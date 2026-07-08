@@ -225,16 +225,19 @@
                     <circle class="mini-track" cx="13" cy="13" r="10" />
                     <circle class="mini-fill" cx="13" cy="13" r="10"
                       :stroke-dasharray="62.83"
-                      :stroke-dashoffset="62.83 - 62.83 * (lp.total > 0 ? lp.processed / lp.total : 0)"
+                      :stroke-dashoffset="62.83 - 62.83 * (lp.total > 0 ? lp.processed / lp.total : 0.18)"
                     />
                   </svg>
                   <Icon name="folder" :size="10" class="mini-icon" />
                 </div>
                 <div class="activity-item-text">
                   <span class="activity-item-name">{{ lp.name }}</span>
-                  <span class="activity-item-detail">{{ lp.processed }}/{{ lp.total }} files · {{ lp.matched }} matched</span>
+                  <span v-if="lp.total > 0" class="activity-item-detail">{{ lp.processed }}/{{ lp.total }} files · {{ lp.matched }} matched</span>
+                  <span v-if="lp.event" class="activity-item-detail scan-event-detail" :title="scanEventDetail(lp.event)">
+                    {{ scanEventDetail(lp.event) }}
+                  </span>
                 </div>
-                <span class="activity-pct">{{ lp.total > 0 ? Math.round(lp.processed / lp.total * 100) : 0 }}%</span>
+                <span v-if="lp.total > 0" class="activity-pct">{{ Math.round(lp.processed / lp.total * 100) }}%</span>
               </div>
             </div>
 
@@ -314,11 +317,11 @@
 </template>
 
 <script setup lang="ts">
-import type { TaskProgressPayload } from '~/composables/useEventBus'
+import type { ScannerEventPayload, TaskProgressPayload } from '~/composables/useEventBus'
 
 const route = useRoute()
 const { user } = useAuth()
-const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgress, taskProgress } = useEventBus()
+const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgress, scannerEvents, taskProgress } = useEventBus()
 // Compact-band (720.02-1200px) burger trigger — see useSectionSidebar.ts.
 // `kind` gates whether the current route even has a section sidebar to
 // open; the drawer itself is mounted by the section pages, not here.
@@ -329,7 +332,41 @@ const sidebar = useSectionSidebar()
 const isDev = import.meta.dev
 const devQueryOpen = useState('dev_query_panel', () => false)
 
-const progressLibs = computed(() => Object.values(scanProgress.value))
+type ActivityLibraryProgress = {
+  library_id: number
+  name: string
+  total: number
+  processed: number
+  matched: number
+  event?: ScannerEventPayload
+}
+
+const progressLibs = computed<ActivityLibraryProgress[]>(() => {
+  const rows = new Map<number, ActivityLibraryProgress>()
+  for (const p of Object.values(scanProgress.value)) {
+    rows.set(p.library_id, {
+      library_id: p.library_id,
+      name: p.name,
+      total: p.total,
+      processed: p.processed,
+      matched: p.matched,
+      event: scannerEvents.value[p.library_id],
+    })
+  }
+  for (const ev of Object.values(scannerEvents.value)) {
+    if (!rows.has(ev.library_id)) {
+      rows.set(ev.library_id, {
+        library_id: ev.library_id,
+        name: ev.library_name || `Library ${ev.library_id}`,
+        total: 0,
+        processed: 0,
+        matched: 0,
+        event: ev,
+      })
+    }
+  }
+  return [...rows.values()]
+})
 
 const KIND_LABELS: Record<string, { label: string, icon: string }> = {
   // Scanner pipeline
@@ -597,6 +634,37 @@ function goToResult(kind: Section['key'], item: any) {
 
 const runningTasks = computed(() => Object.values(taskProgress.value))
 
+const SCANNER_EVENT_LABELS: Record<string, string> = {
+  'scan.start': 'Starting',
+  'scan.phase.start': 'Starting phase',
+  'scan.phase.complete': 'Finished phase',
+  'root.enter': 'Scanning folder',
+  'root.complete': 'Finished folder',
+  'file.classified': 'Reading file',
+  'parse.result': 'Parsed',
+  'match.search': 'Searching',
+  'match.selected': 'Matched',
+  'match.rejected': 'Needs review',
+  'match.search_summary': 'Search summary',
+  'metadata.fetch': 'Fetching metadata',
+  'metadata.preview': 'Fetched metadata',
+  'metadata.preview_summary': 'Metadata summary',
+  'materialize.preview': 'Planning apply',
+  'materialize.preview_summary': 'Apply plan ready',
+  'materialize.apply': 'Applying',
+  'materialize.apply_summary': 'Apply summary',
+  'scan.summary': 'Scan summary',
+  'scan.persisted': 'Saved scan result',
+}
+
+function scanEventDetail(ev?: ScannerEventPayload): string {
+  if (!ev) return ''
+  const data = ev.data ?? {}
+  const action = SCANNER_EVENT_LABELS[ev.event] ?? ev.event.replaceAll('.', ' ')
+  const target = ev.rel_path || ev.root || ev.path || String(data.title || data.artist || data.album || data.key || '')
+  return [ev.phase, action, target].filter(Boolean).join(' · ')
+}
+
 // Live playback sessions — populated by the WS push from
 // session.update events (see useActiveSessions). Shown in the activity
 // panel so you can see who's watching what across all clients.
@@ -631,7 +699,7 @@ function taskTitle(tp: TaskProgressPayload): string {
 }
 
 const hasActivity = computed(() =>
-  activeScans.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || runningTasks.value.length > 0 || nowPlayingSessions.value.length > 0
+  activeScans.value.length > 0 || progressLibs.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || runningTasks.value.length > 0 || nowPlayingSessions.value.length > 0
 )
 
 async function cancelAllJobs() {
@@ -1315,6 +1383,13 @@ watch(() => route.fullPath, () => { closeDropdown() })
 .activity-item-text { min-width: 0; }
 .activity-item-name { display: block; font-size: 12px; font-weight: 500; color: var(--fg-0); }
 .activity-item-detail { display: block; font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); }
+.scan-event-detail {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--gold);
+}
 
 .activity-empty {
   display: flex;
