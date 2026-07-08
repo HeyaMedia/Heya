@@ -108,6 +108,7 @@ func loadResultArtifact(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library,
 	if err != nil {
 		return Result{}, false, err
 	}
+	result = filterResultToScopes(result, opts.ScopePaths, nil)
 	return result, true, nil
 }
 
@@ -120,6 +121,7 @@ func marshalFetchArtifact(opts Options, result Result) ([]byte, error) {
 }
 
 func marshalResultArtifact(kind string, opts Options, result Result) ([]byte, error) {
+	result = filterResultToScopes(result, opts.ScopePaths, nil)
 	artifact := scanRunArtifact{
 		SchemaVersion: int(scanArtifactSchemaV1),
 		ScopePaths:    normalizedScopePaths(opts.ScopePaths),

@@ -65,6 +65,12 @@ func TestFetchArtifactRoundTripRestoresMetadata(t *testing.T) {
 				MTime:   time.Unix(100, 0).UTC(),
 			}},
 		}}},
+		MovieMatches: []MovieMatch{{
+			Key:   "title_year:dune|2021",
+			Title: "Dune",
+			Year:  "2021",
+			Files: []string{"Dune (2021)/Dune.mkv"},
+		}},
 		MovieSearch: []MovieSearchMatch{{
 			Key:        "title_year:dune|2021",
 			Accepted:   true,
@@ -97,6 +103,94 @@ func TestFetchArtifactRoundTripRestoresMetadata(t *testing.T) {
 	require.Equal(t, "Spice must flow.", loaded.MovieMetadata[0].Detail.Description)
 	require.Equal(t, "438631", loaded.MovieMetadata[0].Detail.ExternalIDs["tmdb"])
 	require.True(t, fetchMetadataCoversAcceptedSearch(loaded, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
+}
+
+func TestScopedArtifactDropsOutOfScopeMovieData(t *testing.T) {
+	result := Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{
+			Root: "/media/movies",
+			Files: []InventoryFile{{
+				Root:    "/media/movies",
+				Path:    "/media/movies/Dune (2021)/Dune.mkv",
+				RelPath: "Dune (2021)/Dune.mkv",
+				Name:    "Dune.mkv",
+				Class:   ClassPrimaryMedia,
+			}, {
+				Root:    "/media/movies",
+				Path:    "/media/movies/The Matrix (1999)/The Matrix.mkv",
+				RelPath: "The Matrix (1999)/The Matrix.mkv",
+				Name:    "The Matrix.mkv",
+				Class:   ClassPrimaryMedia,
+			}},
+		}}},
+		MovieMatches: []MovieMatch{{
+			Key:   "title_year:dune|2021",
+			Title: "Dune",
+			Year:  "2021",
+			Files: []string{"Dune (2021)/Dune.mkv"},
+		}, {
+			Key:   "title_year:matrix|1999",
+			Title: "The Matrix",
+			Year:  "1999",
+			Files: []string{"The Matrix (1999)/The Matrix.mkv"},
+		}},
+		MovieSearch: []MovieSearchMatch{{
+			Key:        "title_year:dune|2021",
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:438631",
+			Title:      "Dune",
+			Year:       "2021",
+		}, {
+			Key:        "title_year:matrix|1999",
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:603",
+			Title:      "The Matrix",
+			Year:       "1999",
+		}},
+		MovieMetadata: []MovieFetchPreview{{
+			Key:        "title_year:dune|2021",
+			ProviderID: "heya:movie:tmdb:438631",
+			Title:      "Dune",
+			Year:       "2021",
+			Detail:     &metadata.MediaDetail{Title: "Dune", Year: "2021"},
+		}, {
+			Key:        "title_year:matrix|1999",
+			ProviderID: "heya:movie:tmdb:603",
+			Title:      "The Matrix",
+			Year:       "1999",
+			Detail:     &metadata.MediaDetail{Title: "The Matrix", Year: "1999"},
+		}},
+		MovieMaterialize: []MovieMaterializePreview{{
+			Key:         "title_year:dune|2021",
+			Title:       "Dune",
+			Year:        "2021",
+			ProviderID:  "heya:movie:tmdb:438631",
+			FileActions: []MovieMaterializeFileAction{{RelPath: "Dune (2021)/Dune.mkv", Action: "create_library_file_and_attach"}},
+		}, {
+			Key:         "title_year:matrix|1999",
+			Title:       "The Matrix",
+			Year:        "1999",
+			ProviderID:  "heya:movie:tmdb:603",
+			FileActions: []MovieMaterializeFileAction{{RelPath: "The Matrix (1999)/The Matrix.mkv", Action: "create_library_file_and_attach"}},
+		}},
+	}
+
+	data, err := marshalFetchArtifact(Options{ScopePaths: []string{"/media/movies/Dune (2021)"}}, result)
+	require.NoError(t, err)
+
+	loaded, err := unmarshalFetchArtifact(data)
+	require.NoError(t, err)
+	require.Len(t, loaded.Inventory.Roots, 1)
+	require.Len(t, loaded.Inventory.Roots[0].Files, 1)
+	require.Equal(t, "Dune (2021)/Dune.mkv", loaded.Inventory.Roots[0].Files[0].RelPath)
+	require.Len(t, loaded.MovieMatches, 1)
+	require.Equal(t, "title_year:dune|2021", loaded.MovieMatches[0].Key)
+	require.Len(t, loaded.MovieSearch, 1)
+	require.Equal(t, "title_year:dune|2021", loaded.MovieSearch[0].Key)
+	require.Len(t, loaded.MovieMetadata, 1)
+	require.Equal(t, "title_year:dune|2021", loaded.MovieMetadata[0].Key)
+	require.Len(t, loaded.MovieMaterialize, 1)
+	require.Equal(t, "title_year:dune|2021", loaded.MovieMaterialize[0].Key)
 }
 
 func TestResumeSearchArtifactOverlaysManualDecision(t *testing.T) {

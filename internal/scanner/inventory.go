@@ -241,7 +241,7 @@ func FilterInventoryToScopes(inv Inventory, scopes []string, emit Emitter) Inven
 		filtered := InventoryRoot{Root: root.Root, FS: root.FS}
 		totalBefore += len(root.Files)
 		for _, file := range root.Files {
-			if inventoryPathInAnyScope(file.Path, scopeDirs) {
+			if inventoryFileInAnyScope(file, scopeDirs) {
 				filtered.Files = append(filtered.Files, file)
 			}
 		}
@@ -305,6 +305,10 @@ func inventoryPathInAnyScope(filePath string, scopes []string) bool {
 		}
 	}
 	return false
+}
+
+func inventoryFileInAnyScope(file InventoryFile, scopes []string) bool {
+	return inventoryPathInAnyScope(file.Path, scopes) || inventoryPathInAnyScope(file.RelPath, scopes)
 }
 
 func inventoryPathInScope(filePath, scope string) bool {
