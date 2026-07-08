@@ -104,29 +104,54 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 
 	if hasVideo {
 		if !vfs.IsSMBPath(job.Args.FilePath) {
-			kf, err := transcoder.ExtractKeyframes(ctx, job.Args.FilePath)
-			if err != nil {
-				log.Warn().Err(err).Int64("file_id", job.Args.LibraryFileID).Msg("keyframe extraction failed")
-			} else if kf != nil && len(kf.IFrames) > 0 {
-				kfJSON, err := json.Marshal(kf)
-				if err == nil {
-					if err := q.UpdateLibraryFileKeyframes(ctx, sqlc.UpdateLibraryFileKeyframesParams{
-						ID:        job.Args.LibraryFileID,
-						Keyframes: kfJSON,
-					}); err != nil {
-						log.Warn().Err(err).Int64("file_id", job.Args.LibraryFileID).Msg("keyframe persistence failed")
-					}
-					log.Debug().
-						Int64("file_id", job.Args.LibraryFileID).
-						Int("keyframes", len(kf.IFrames)).
-						Float64("duration", kf.Duration).
-						Msg("keyframes extracted")
-				}
+			args := ScanKeyframesArgs{
+				LibraryFileID:   job.Args.LibraryFileID,
+				FilePath:        job.Args.FilePath,
+				ScheduledTaskID: job.Args.ScheduledTaskID,
+			}
+			opts := args.InsertOpts()
+			if _, err := river.ClientFromContext[pgx.Tx](ctx).Insert(ctx, args, applyScheduledJobSource(opts, source)); err != nil {
+				log.Warn().Err(err).Int64("file_id", job.Args.LibraryFileID).Msg("ffprobe: enqueue keyframes failed")
 			}
 		}
 		w.enqueuePostProbeVideoWork(ctx, q, file, job.Args.ScheduledTaskID, source)
 	}
 
+	return nil
+}
+
+type ScanKeyframesWorker struct {
+	river.WorkerDefaults[ScanKeyframesArgs]
+	DB       *pgxpool.Pool
+	Progress *TaskProgressBroadcaster
+}
+
+func (w *ScanKeyframesWorker) Work(ctx context.Context, job *river.Job[ScanKeyframesArgs]) error {
+	w.Progress.SetCurrent(ScanKeyframesArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(job.Args.FilePath))
+	kf, err := transcoder.ExtractKeyframes(ctx, job.Args.FilePath)
+	if err != nil {
+		log.Warn().Err(err).Str("path", vfs.RedactPath(job.Args.FilePath)).Msg("keyframe extraction failed")
+		return fmt.Errorf("keyframes: %w", err)
+	}
+	if kf == nil || len(kf.IFrames) == 0 {
+		return nil
+	}
+	kfJSON, err := json.Marshal(kf)
+	if err != nil {
+		return fmt.Errorf("keyframes marshal: %w", err)
+	}
+	q := sqlc.New(w.DB)
+	if err := q.UpdateLibraryFileKeyframes(ctx, sqlc.UpdateLibraryFileKeyframesParams{
+		ID:        job.Args.LibraryFileID,
+		Keyframes: kfJSON,
+	}); err != nil {
+		return fmt.Errorf("keyframes persistence: %w", err)
+	}
+	log.Debug().
+		Int64("file_id", job.Args.LibraryFileID).
+		Int("keyframes", len(kf.IFrames)).
+		Float64("duration", kf.Duration).
+		Msg("keyframes extracted")
 	return nil
 }
 

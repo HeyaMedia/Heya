@@ -35,13 +35,13 @@ library processing run.
 queue. Queue workers split those phases so slow remote metadata calls do not
 hold the whole library scan hostage:
 
-- `process_library_scan`: local inventory/parse/identity + HeyaMedia search.
+- `process_scan`: local inventory/parse/identity + HeyaMedia search.
   Persists review identities, candidates, findings, and a `search_result`
   artifact.
-- `fetch_library_metadata`: resumes that exact search artifact, overlays any
+- `fetch_metadata`: resumes that exact search artifact, overlays any
   admin/manual decisions made after search, fetches remote metadata, and
   persists a `fetch_result` artifact.
-- `apply_library_scan`: resumes the fetch artifact, materializes rows and
+- `apply_metadata`: resumes the fetch artifact, materializes rows and
   `library_file_links`, and fans out post-apply jobs such as ffprobe, ratings,
   NFO saves, thumbnails, chromaprint, loudness, and sonic analysis.
 
@@ -87,13 +87,14 @@ In `internal/worker/worker.go`:
   cancellation simple (cancel-by-kind cancels exactly the work it should), and
   lets each external dependency (HeyaMedia search, TMDB, ratings providers)
   carry its own concurrency knob without contending with unrelated work.
-- **Scanner pipeline** (`kickoff_library_scan`, `process_library_scan`,
-  `fetch_library_metadata`, `apply_library_scan`, `ffprobe`,
-  `detect_local_assets`) is **MaxWorkers=1 end-to-end** — protects the source
-  filesystem / SMB share from concurrent IO during a scan.
+- **Scanner pipeline** (`kickoff_library_scan`, `process_scan`,
+  `fetch_metadata`, `apply_metadata`, `ffprobe`, `scan_keyframes`,
+  `detect_local_assets`) has per-queue worker counts. The default scanner
+  stages use 4 workers for `process_scan`, `fetch_metadata`, and
+  `apply_metadata`; heavier file/analysis queues keep lower defaults.
   `kickoff_library_scan` is the fast inventory/change detector; it skips
   unchanged paths, soft-deletes missing paths, and enqueues
-  `process_library_scan` for the changed library scope.
+  `process_scan` for changed scopes.
 - **Enrich pipeline** (`enrich_media_item`, `person_fetch`, `ratings_fetch`,
   `force_refresh_metadata`) is MaxWorkers=1 per kind for upstream rate-limit
   safety. The `enrich_media_item` queue keeps the priority-banded ordering:
@@ -101,7 +102,7 @@ In `internal/worker/worker.go`:
   - **P2** = movies + TV
   - **P3** = music + books
   - **P4** = analysis tier
-- `process_library_scan` uses two priority bands: **P1** = watcher
+- `process_scan` uses two priority bands: **P1** = watcher
   (`fsnotify`-discovered folder), **P2** = scheduled/manual library scan.
 - `download_image` is **MaxWorkers=4** — the lone exception, since downloads
   hit provider CDNs (not the source FS). Everything else is 1.
@@ -142,7 +143,7 @@ Same pattern for all six scheduled tasks:
 
 | Task                   | Kickoff kind                | Per-item kind        |
 | ---------------------- | --------------------------- | -------------------- |
-| `scan_libraries`       | `kickoff_library_scan`      | `process_library_scan` → `fetch_library_metadata` → `apply_library_scan` |
+| `scan_libraries`       | `kickoff_library_scan`      | `process_scan` → `fetch_metadata` → `apply_metadata` |
 | `refresh_stale_items`  | `kickoff_refresh_stale`     | `enrich_media_item`  |
 | `scan_music_loudness`  | `kickoff_music_loudness`    | `scan_track_loudness`|
 | `generate_trickplay`   | `kickoff_trickplay`         | `trickplay_file`     |

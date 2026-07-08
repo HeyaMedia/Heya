@@ -20,6 +20,12 @@ var allHeyaEnvKeys = []string{
 	"HEYA_PODCAST_INDEX_KEY", "HEYA_PODCAST_INDEX_SECRET",
 }
 
+func init() {
+	for kind := range DefaultJobWorkerCounts {
+		allHeyaEnvKeys = append(allHeyaEnvKeys, JobWorkerEnvVar(kind))
+	}
+}
+
 // clearHeyaEnv unsets every HEYA_ env var for the duration of the test.
 // t.Setenv("") would set the var to empty but still present, which LookupEnv
 // reports as ok=true — not what we want when asserting default fallbacks.
@@ -46,6 +52,9 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "./data", cfg.DataDir.Value)
 	assert.Equal(t, "auto", cfg.HWAccel.Value)
 	assert.Equal(t, 50, cfg.TranscodeCacheMaxGB.Value)
+	assert.Equal(t, 4, cfg.Jobs.Workers["process_scan"].Value)
+	assert.Equal(t, 4, cfg.Jobs.Workers["fetch_metadata"].Value)
+	assert.Equal(t, 4, cfg.Jobs.Workers["apply_metadata"].Value)
 	assert.False(t, cfg.Tailscale.Enabled.Value)
 	assert.False(t, cfg.Tailscale.HTTPS.Value)
 	assert.False(t, cfg.Tailscale.Funnel.Value)
@@ -59,6 +68,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("HEYA_TAILSCALE_ENABLED", "true")
 	t.Setenv("HEYA_TAILSCALE_HTTPS", "true")
 	t.Setenv("HEYA_TRANSCODE_CACHE_MAX_GB", "200")
+	t.Setenv("HEYA_JOB_WORKERS_APPLY_METADATA", "6")
 
 	cfg := Load()
 
@@ -73,6 +83,8 @@ func TestLoadEnvOverrides(t *testing.T) {
 	assert.Equal(t, SourceEnv, cfg.Tailscale.Enabled.Source)
 	assert.True(t, cfg.Tailscale.HTTPS.Value)
 	assert.Equal(t, 200, cfg.TranscodeCacheMaxGB.Value)
+	assert.Equal(t, 6, cfg.Jobs.Workers["apply_metadata"].Value)
+	assert.Equal(t, SourceEnv, cfg.Jobs.Workers["apply_metadata"].Source)
 }
 
 func TestAddr(t *testing.T) {
@@ -94,6 +106,7 @@ func TestSources(t *testing.T) {
 	assert.Equal(t, "HEYA_HOST", sources["infra.host"].EnvVar)
 	assert.Equal(t, SourceDefault, sources["infra.port"].Source)
 	assert.Empty(t, sources["infra.port"].EnvVar)
+	assert.Equal(t, SourceDefault, sources["jobs.workers.process_scan"].Source)
 }
 
 func TestAllowRemoteActiveSourceRegistered(t *testing.T) {

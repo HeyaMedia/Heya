@@ -4076,6 +4076,99 @@
         ],
         "type": "object"
       },
+      "JobWorkerSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "env_var": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "value": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "value",
+          "default",
+          "source",
+          "locked"
+        ],
+        "type": "object"
+      },
+      "JobWorkerSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobWorkerSettings.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "restart_required": {
+            "type": "boolean"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/JobWorkerSetting"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "workers",
+          "restart_required"
+        ],
+        "type": "object"
+      },
+      "JobWorkerUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/JobWorkerUpdate.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "workers": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "workers"
+        ],
+        "type": "object"
+      },
       "KeyView": {
         "additionalProperties": false,
         "properties": {
@@ -18374,6 +18467,100 @@
           }
         ],
         "summary": "Job state summary",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/api/jobs/worker-settings": {
+      "get": {
+        "operationId": "job-worker-settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobWorkerSettings"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Queue worker concurrency settings",
+        "tags": [
+          "Jobs"
+        ]
+      },
+      "put": {
+        "operationId": "set-job-worker-settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobWorkerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Save queue worker concurrency settings",
         "tags": [
           "Jobs"
         ]

@@ -161,6 +161,8 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	hub := eventhub.New()
 
+	LoadJobWorkersFromDB(ctx, db, cfg)
+
 	m := matcher.New(db, matcher.DefaultOptions(), heya, worker.ProbeFile)
 
 	var tc *transcoder.SessionManager
@@ -220,9 +222,10 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 			}
 			return sonicEnabledFn(ctx)
 		},
-		Watcher:  lazyWatcher{ptr: &watcherPauser},
-		Progress: progress,
-		Passive:  cfg.PassiveMode.Value,
+		Watcher:      lazyWatcher{ptr: &watcherPauser},
+		Progress:     progress,
+		Passive:      cfg.PassiveMode.Value,
+		WorkerCounts: cfg.JobWorkerCounts(),
 	})
 	if err != nil {
 		db.Close()

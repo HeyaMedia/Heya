@@ -36,14 +36,14 @@ func TestWorkToTaskOmitsSharedKinds(t *testing.T) {
 	if owner := workToTask["ffprobe"]; owner != "scan_libraries" {
 		t.Fatalf("ffprobe resolved to %q, want scan_libraries", owner)
 	}
-	if owner := workToTask["process_library_scan"]; owner != "scan_libraries" {
-		t.Fatalf("process_library_scan resolved to %q, want scan_libraries", owner)
+	if owner := workToTask["process_scan"]; owner != "scan_libraries" {
+		t.Fatalf("process_scan resolved to %q, want scan_libraries", owner)
 	}
-	if owner := workToTask["fetch_library_metadata"]; owner != "scan_libraries" {
-		t.Fatalf("fetch_library_metadata resolved to %q, want scan_libraries", owner)
+	if owner := workToTask["fetch_metadata"]; owner != "scan_libraries" {
+		t.Fatalf("fetch_metadata resolved to %q, want scan_libraries", owner)
 	}
-	if owner := workToTask["apply_library_scan"]; owner != "scan_libraries" {
-		t.Fatalf("apply_library_scan resolved to %q, want scan_libraries", owner)
+	if owner := workToTask["apply_metadata"]; owner != "scan_libraries" {
+		t.Fatalf("apply_metadata resolved to %q, want scan_libraries", owner)
 	}
 }
 
@@ -52,9 +52,10 @@ func TestTaskOwnsKind(t *testing.T) {
 		task string
 		kind string
 	}{
-		{task: "scan_libraries", kind: "process_library_scan"},
-		{task: "scan_libraries", kind: "fetch_library_metadata"},
-		{task: "scan_libraries", kind: "apply_library_scan"},
+		{task: "scan_libraries", kind: "process_scan"},
+		{task: "scan_libraries", kind: "fetch_metadata"},
+		{task: "scan_libraries", kind: "apply_metadata"},
+		{task: "scan_libraries", kind: "scan_keyframes"},
 		{task: "scan_libraries", kind: "enrich_media_item"},
 		{task: "scan_libraries", kind: "scan_track_fingerprint"},
 		{task: "scan_libraries", kind: "analyze_track_facets"},

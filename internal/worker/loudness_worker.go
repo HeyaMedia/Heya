@@ -239,7 +239,7 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 // queue boundaries here — these run in parallel queues but all compete for the
 // same CPU/disk/heya.media bandwidth as loudness scanning.
 func snoozeIfMatchingPending(ctx context.Context, db *pgxpool.Pool) error {
-	n, err := queueops.CountActiveByKinds(ctx, db, []string{"kickoff_library_scan", "process_library_scan", "fetch_library_metadata", "apply_library_scan", "enrich_media_item"})
+	n, err := queueops.CountActiveByKinds(ctx, db, []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata", "enrich_media_item"})
 	if err != nil {
 		// Don't block loudness work on a transient DB hiccup — better to
 		// run loudness than to wedge the queue entirely.

@@ -37,12 +37,15 @@
           <slot name="header">
             <header v-if="title || closable" class="app-dialog-header">
               <DialogTitle v-if="title" as="h3" class="app-dialog-title">{{ title }}</DialogTitle>
-              <p v-if="description" class="app-dialog-description">{{ description }}</p>
+              <DialogDescription v-if="description" as="p" class="app-dialog-description">{{ description }}</DialogDescription>
               <DialogClose v-if="closable" class="app-dialog-close" aria-label="Close">
                 <Icon name="close" :size="18" />
               </DialogClose>
             </header>
           </slot>
+          <DialogDescription v-if="!description" as="p" class="app-dialog-sr-only">
+            {{ title || 'Dialog' }}
+          </DialogDescription>
 
           <div class="app-dialog-body">
             <slot />
@@ -60,7 +63,7 @@
 <script setup lang="ts">
 import {
   DialogRoot, DialogPortal, DialogOverlay, DialogContent,
-  DialogTitle, DialogClose,
+  DialogTitle, DialogDescription, DialogClose,
 } from 'reka-ui'
 
 const props = withDefaults(defineProps<{
@@ -145,6 +148,17 @@ function close() { open.value = false }
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--fg-2);
+}
+.app-dialog-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .app-dialog-close {
   width: 30px;

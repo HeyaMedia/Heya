@@ -95,6 +95,19 @@ func registerJobRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/queue/metadata", "metadata-queue-status", "Snapshot of the unified metadata enrich queue (pending counts by priority, current item, throughput)", "Jobs")),
 		simpleGet(app.MetadataQueueStatus, 0))
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/worker-settings", "job-worker-settings", "Queue worker concurrency settings", "Jobs")),
+		simpleGet(app.JobWorkerSettings, 0))
+
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/jobs/worker-settings", "set-job-worker-settings", "Save queue worker concurrency settings", "Jobs")),
+		func(ctx context.Context, in *struct {
+			Body service.JobWorkerUpdate
+		}) (*JSONOutput[statusBody], error) {
+			if err := app.SaveJobWorkerSettings(ctx, in.Body); err != nil {
+				return nil, humaServiceError(err)
+			}
+			return &JSONOutput[statusBody]{Body: statusBody{Status: "saved"}}, nil
+		})
 }
 
 // registerTaskRoutes covers /api/tasks/* — the scheduled-task UI for trickplay,

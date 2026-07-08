@@ -63,7 +63,8 @@ type Config struct {
 	// Progress is the per-task "currently working on X" emitter.
 	// Workers call SetCurrentByKind at the top of Work() so the UI
 	// shows live labels. nil-safe — emissions become no-ops.
-	Progress *TaskProgressBroadcaster
+	Progress     *TaskProgressBroadcaster
+	WorkerCounts map[string]int
 	// Passive marks this process a read-mostly guest on a shared DB
 	// (dev box on prod, `heya doctor` on any box). Setup then skips its
 	// two writes — River's schema migrations and the one-time
@@ -97,6 +98,9 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			if err := clearStaleUniqueJobStates(cleanupCtx, cfg.DB); err != nil {
 				log.Warn().Err(err).Msg("clear stale unique_states: skipped")
 			}
+			if err := renameLegacyScannerJobs(cleanupCtx, cfg.DB); err != nil {
+				log.Warn().Err(err).Msg("rename legacy scanner jobs: skipped")
+			}
 		}()
 	}
 
@@ -104,6 +108,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, HeyaMedia: cfg.HeyaMedia, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &ScanKeyframesWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, HeyaMedia: cfg.HeyaMedia, Progress: cfg.Progress})
 	river.AddWorker(workers, &FetchArtworkWorker{DB: cfg.DB, Heya: cfg.Heya, Progress: cfg.Progress})
@@ -166,78 +171,79 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		// also live here at MaxWorkers=1.
 		Queues: map[string]river.QueueConfig{
 			// Scanner pipeline (source-throttled).
-			"kickoff_library_scan":   {MaxWorkers: 1}, // priority bands: P1=watcher, P2=scheduled/manual
-			"process_library_scan":   {MaxWorkers: 1}, // local analysis + search; scoped for watcher-triggered folders
-			"fetch_library_metadata": {MaxWorkers: 1}, // remote metadata fetch from persisted search artifact
-			"apply_library_scan":     {MaxWorkers: 1}, // materialize + apply from persisted fetch artifact
-			"ffprobe":                {MaxWorkers: 1},
-			"detect_local_assets":    {MaxWorkers: 1},
+			"kickoff_library_scan": {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)}, // priority bands: P1=watcher, P2=scheduled/manual
+			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},         // local analysis + search; scoped for watcher-triggered folders
+			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},       // remote metadata fetch from persisted search artifact
+			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},       // materialize + apply from persisted fetch artifact
+			"ffprobe":              {MaxWorkers: queueWorkers(cfg, "ffprobe", 1)},
+			"detect_local_assets":  {MaxWorkers: queueWorkers(cfg, "detect_local_assets", 1)},
 
 			// Enrich pipeline (external rate-limit safety).
-			"enrich_media_item":      {MaxWorkers: 1}, // priority bands P1=watcher/view, P2=movies+tv, P3=music+books
-			"person_fetch":           {MaxWorkers: 8}, // I/O-bound on heya.media; now lazy (on-view backfill) so backlog is small, but let concurrent person-page visits parallelize. Slug-race in person_worker is guarded (retry-on-conflict merge).
-			"ratings_fetch":          {MaxWorkers: 4}, // per-item heya.media call, clean upserts, no cross-item state — safe to parallelize (semaphore-8 in the client is the real ceiling)
-			"force_refresh_metadata": {MaxWorkers: 1},
-			"fetch_artwork":          {MaxWorkers: 4}, // secondary artwork pass — heya.media call + pending asset rows (ON CONFLICT DO NOTHING), no cross-item state
+			"enrich_media_item":      {MaxWorkers: queueWorkers(cfg, "enrich_media_item", 1)}, // priority bands P1=watcher/view, P2=movies+tv, P3=music+books
+			"person_fetch":           {MaxWorkers: queueWorkers(cfg, "person_fetch", 8)},      // I/O-bound on heya.media; now lazy (on-view backfill) so backlog is small, but let concurrent person-page visits parallelize. Slug-race in person_worker is guarded (retry-on-conflict merge).
+			"ratings_fetch":          {MaxWorkers: queueWorkers(cfg, "ratings_fetch", 4)},     // per-item heya.media call, clean upserts, no cross-item state — safe to parallelize (semaphore-8 in the client is the real ceiling)
+			"force_refresh_metadata": {MaxWorkers: queueWorkers(cfg, "force_refresh_metadata", 1)},
+			"fetch_artwork":          {MaxWorkers: queueWorkers(cfg, "fetch_artwork", 4)}, // secondary artwork pass — heya.media call + pending asset rows (ON CONFLICT DO NOTHING), no cross-item state
 
 			// Images.
-			"download_image":       {MaxWorkers: 4}, // hits CDN/heya.media, not source FS
-			"save_images":          {MaxWorkers: 1},
-			"force_refresh_images": {MaxWorkers: 1},
+			"download_image":       {MaxWorkers: queueWorkers(cfg, "download_image", 4)}, // hits CDN/heya.media, not source FS
+			"save_images":          {MaxWorkers: queueWorkers(cfg, "save_images", 1)},
+			"force_refresh_images": {MaxWorkers: queueWorkers(cfg, "force_refresh_images", 1)},
 
 			// NFOs.
-			"save_nfo":       {MaxWorkers: 1},
-			"save_music_nfo": {MaxWorkers: 1},
+			"save_nfo":       {MaxWorkers: queueWorkers(cfg, "save_nfo", 1)},
+			"save_music_nfo": {MaxWorkers: queueWorkers(cfg, "save_music_nfo", 1)},
 
 			// CPU/heavy work (one at a time so they can't starve scans).
-			"scan_track_loudness":    {MaxWorkers: 1}, // ebur128 ~10-20× real-time
-			"scan_album_loudness":    {MaxWorkers: 1}, // concat demuxer + ebur128
-			"scan_track_fingerprint": {MaxWorkers: 1}, // chromaprint, first 120s only
+			"scan_track_loudness":    {MaxWorkers: queueWorkers(cfg, "scan_track_loudness", 1)},    // ebur128 ~10-20× real-time
+			"scan_album_loudness":    {MaxWorkers: queueWorkers(cfg, "scan_album_loudness", 1)},    // concat demuxer + ebur128
+			"scan_track_fingerprint": {MaxWorkers: queueWorkers(cfg, "scan_track_fingerprint", 1)}, // chromaprint, first 120s only
 
 			// Skip segments — network calls to heya.media, not local
 			// decode. Parallelized: heya.media does its own rate limiting and
 			// the client caps in-flight requests (semaphore-8), so a cold sweep
 			// no longer needs to trickle. Job key is per-file (unique-while-
 			// active), no cross-item state.
-			"scan_media_segments_file": {MaxWorkers: 8},
+			"scan_media_segments_file": {MaxWorkers: queueWorkers(cfg, "scan_media_segments_file", 8)},
+			"scan_keyframes":           {MaxWorkers: queueWorkers(cfg, "scan_keyframes", 1)},
 
 			// Local skip-segment detection — the fallback pass for files
 			// the community databases had nothing for. Real audio decode
 			// (chromaprint cross-episode matching / ffmpeg blackdetect),
 			// so each stays MaxWorkers=1 like the other CPU-heavy queues.
-			"detect_segments_season": {MaxWorkers: 1}, // cross-episode chromaprint matching — heaviest of the two
-			"detect_segments_movie":  {MaxWorkers: 1}, // ffmpeg blackdetect over the tail window
+			"detect_segments_season": {MaxWorkers: queueWorkers(cfg, "detect_segments_season", 1)}, // cross-episode chromaprint matching — heaviest of the two
+			"detect_segments_movie":  {MaxWorkers: queueWorkers(cfg, "detect_segments_movie", 1)},  // ffmpeg blackdetect over the tail window
 
-			"trickplay":      {MaxWorkers: 1}, // ffmpeg sprites
-			"thumbnails":     {MaxWorkers: 1}, // ffmpeg thumbnail extraction
-			"sonic_analysis": {MaxWorkers: 1}, // full model bundle (Discogs heads + EffNet base + classifier heads + CLAP audio) held by AnalyzerHolder singleton; ~hundreds of MB resident
-			"transcode":      {MaxWorkers: 1},
+			"trickplay":      {MaxWorkers: queueWorkers(cfg, "trickplay", 1)},      // ffmpeg sprites
+			"thumbnails":     {MaxWorkers: queueWorkers(cfg, "thumbnails", 1)},     // ffmpeg thumbnail extraction
+			"sonic_analysis": {MaxWorkers: queueWorkers(cfg, "sonic_analysis", 1)}, // full model bundle (Discogs heads + EffNet base + classifier heads + CLAP audio) held by AnalyzerHolder singleton; ~hundreds of MB resident
+			"transcode":      {MaxWorkers: queueWorkers(cfg, "transcode", 1)},
 
 			// Sonic centroid refreshes (cheap; own queue so they don't
 			// block the next track analysis).
-			"artist_centroid": {MaxWorkers: 1},
-			"album_centroid":  {MaxWorkers: 1},
+			"artist_centroid": {MaxWorkers: queueWorkers(cfg, "artist_centroid", 1)},
+			"album_centroid":  {MaxWorkers: queueWorkers(cfg, "album_centroid", 1)},
 
 			// Disk-usage scan — read-only walk of library paths to populate
 			// the Storage page. Own queue so a multi-TB walk doesn't block
 			// any other admin-triggered work.
-			"scan_library_disk": {MaxWorkers: 1},
+			"scan_library_disk": {MaxWorkers: queueWorkers(cfg, "scan_library_disk", 1)},
 
 			// Kickoffs (each their own queue, UniqueByArgs so click-spam
 			// is a no-op while one is queued/running).
-			"kickoff_refresh_stale":     {MaxWorkers: 1},
-			"kickoff_music_loudness":    {MaxWorkers: 1},
-			"kickoff_music_fingerprint": {MaxWorkers: 1},
-			"kickoff_media_segments":    {MaxWorkers: 1},
-			"kickoff_detect_segments":   {MaxWorkers: 1},
-			"kickoff_trickplay":         {MaxWorkers: 1},
-			"kickoff_thumbnails":        {MaxWorkers: 1},
-			"kickoff_sonic_analysis":    {MaxWorkers: 1},
+			"kickoff_refresh_stale":     {MaxWorkers: queueWorkers(cfg, "kickoff_refresh_stale", 1)},
+			"kickoff_music_loudness":    {MaxWorkers: queueWorkers(cfg, "kickoff_music_loudness", 1)},
+			"kickoff_music_fingerprint": {MaxWorkers: queueWorkers(cfg, "kickoff_music_fingerprint", 1)},
+			"kickoff_media_segments":    {MaxWorkers: queueWorkers(cfg, "kickoff_media_segments", 1)},
+			"kickoff_detect_segments":   {MaxWorkers: queueWorkers(cfg, "kickoff_detect_segments", 1)},
+			"kickoff_trickplay":         {MaxWorkers: queueWorkers(cfg, "kickoff_trickplay", 1)},
+			"kickoff_thumbnails":        {MaxWorkers: queueWorkers(cfg, "kickoff_thumbnails", 1)},
+			"kickoff_sonic_analysis":    {MaxWorkers: queueWorkers(cfg, "kickoff_sonic_analysis", 1)},
 
 			// Misc.
-			"soft_delete":      {MaxWorkers: 1},
-			"debounce_sweep":   {MaxWorkers: 1}, // periodic sweep; trailing-edge debounce of child-content enriches
-			river.QueueDefault: {MaxWorkers: 1}, // fallback only; we shouldn't actually use it after the split
+			"soft_delete":      {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},
+			"debounce_sweep":   {MaxWorkers: queueWorkers(cfg, "debounce_sweep", 1)},   // periodic sweep; trailing-edge debounce of child-content enriches
+			river.QueueDefault: {MaxWorkers: queueWorkers(cfg, river.QueueDefault, 1)}, // fallback only; we shouldn't actually use it after the split
 		},
 		// Periodic jobs — River-managed cron. The DebounceSweep fires
 		// every 10s so the trailing-edge debounce on child-content
@@ -275,4 +281,13 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	kickoffLibraryWorker.Queue = client
 
 	return client, nil
+}
+
+func queueWorkers(cfg Config, kind string, fallback int) int {
+	if cfg.WorkerCounts != nil {
+		if n, ok := cfg.WorkerCounts[kind]; ok && n > 0 {
+			return n
+		}
+	}
+	return fallback
 }

@@ -111,7 +111,7 @@ func TestScheduledTaskExceededRuntimeIgnoresManualJobs(t *testing.T) {
 
 	const taskID = "scan_libraries"
 	const kickoffKind = "kickoff_library_scan"
-	const childKind = "process_library_scan"
+	const childKind = "process_scan"
 	old := `now() - interval '2 hours'`
 
 	var kickoffID, childID int64

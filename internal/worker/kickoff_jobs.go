@@ -85,6 +85,29 @@ func clearStaleUniqueJobStates(ctx context.Context, db *pgxpool.Pool) error {
 	return nil
 }
 
+func renameLegacyScannerJobs(ctx context.Context, db *pgxpool.Pool) error {
+	renames := map[string]string{
+		"process_library_scan":   "process_scan",
+		"fetch_library_metadata": "fetch_metadata",
+		"apply_library_scan":     "apply_metadata",
+	}
+	for oldKind, newKind := range renames {
+		tag, err := db.Exec(ctx, `
+			UPDATE river_job
+			   SET kind = $2,
+			       queue = CASE WHEN queue = $1 THEN $2 ELSE queue END
+			 WHERE kind = $1 OR queue = $1
+		`, oldKind, newKind)
+		if err != nil {
+			return err
+		}
+		if n := tag.RowsAffected(); n > 0 {
+			log.Info().Str("old", oldKind).Str("new", newKind).Int64("rows", n).Msg("renamed legacy scanner jobs")
+		}
+	}
+	return nil
+}
+
 // KickoffLibraryScanArgs replaces scheduler.ScanLibrariesTask. It is the fast
 // inventory/change-detection front door: walk every library (or one library),
 // skip unchanged inputs, soft-delete missing inputs, and enqueue
@@ -120,11 +143,11 @@ type ProcessLibraryScanArgs struct {
 	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
 }
 
-func (ProcessLibraryScanArgs) Kind() string { return "process_library_scan" }
+func (ProcessLibraryScanArgs) Kind() string { return "process_scan" }
 func (ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "process_library_scan",
-		MaxAttempts: 1,
+		Queue:       "process_scan",
+		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),
 	}
@@ -140,11 +163,11 @@ type FetchLibraryMetadataArgs struct {
 	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
 }
 
-func (FetchLibraryMetadataArgs) Kind() string { return "fetch_library_metadata" }
+func (FetchLibraryMetadataArgs) Kind() string { return "fetch_metadata" }
 func (FetchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "fetch_library_metadata",
-		MaxAttempts: 1,
+		Queue:       "fetch_metadata",
+		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),
 	}
@@ -165,11 +188,11 @@ type ApplyLibraryScanArgs struct {
 	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
 }
 
-func (ApplyLibraryScanArgs) Kind() string { return "apply_library_scan" }
+func (ApplyLibraryScanArgs) Kind() string { return "apply_metadata" }
 func (ApplyLibraryScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "apply_library_scan",
-		MaxAttempts: 1,
+		Queue:       "apply_metadata",
+		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),
 	}

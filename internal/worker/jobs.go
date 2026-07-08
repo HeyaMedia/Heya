@@ -76,6 +76,22 @@ func (FFProbeArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+type ScanKeyframesArgs struct {
+	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
+	FilePath        string `json:"file_path"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (ScanKeyframesArgs) Kind() string { return "scan_keyframes" }
+func (ScanKeyframesArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "scan_keyframes",
+		MaxAttempts: 2,
+		Priority:    PriorityEnrichment,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 type PendingImage struct {
 	URL       string `json:"url"`
 	AssetType string `json:"asset_type"`

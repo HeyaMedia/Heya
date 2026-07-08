@@ -40,6 +40,12 @@ type WatcherPauser interface {
 
 const manualJobMetadata = `{"source":"manual"}`
 
+const (
+	scannerProcessTimeout = 30 * time.Minute
+	scannerFetchTimeout   = 30 * time.Minute
+	scannerApplyTimeout   = 10 * time.Minute
+)
+
 type jobSourceMetadata struct {
 	Source string `json:"source"`
 }
@@ -266,7 +272,7 @@ type libraryScanOutcome struct {
 }
 
 // ---------------------------------------------------------------------------
-// process_library_scan
+// process_scan
 // ---------------------------------------------------------------------------
 
 type ProcessLibraryScanWorker struct {
@@ -291,11 +297,11 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 			Int64("library_id", lib.ID).
 			Str("library", lib.Name).
 			Str("media_type", string(lib.MediaType)).
-			Msg("process_library_scan: scanner does not support this library type")
+			Msg("process_scan: scanner does not support this library type")
 		return nil
 	}
 
-	w.Progress.Set("scan_libraries", "process_library_scan", libraryScanProgressLabel(lib, job.Args.ScopePaths))
+	w.Progress.Set("scan_libraries", "process_scan", libraryScanProgressLabel(lib, job.Args.ScopePaths))
 
 	if w.Watcher != nil {
 		w.Watcher.Pause(lib.ID)
@@ -306,9 +312,11 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		LibraryName: lib.Name,
 	})
 
-	result, searchScanRunID, err := w.scanLibrarySearch(ctx, lib, job.Args.ScopePaths)
+	scanCtx, cancel := context.WithTimeout(ctx, scannerProcessTimeout)
+	defer cancel()
+	result, searchScanRunID, err := w.scanLibrarySearch(scanCtx, lib, job.Args.ScopePaths)
 	if err != nil {
-		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_library_scan: scan error")
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: scan error")
 		return err
 	}
 
@@ -319,7 +327,7 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		Force:           job.Args.Force,
 		ScheduledTaskID: job.Args.ScheduledTaskID,
 	}, PriorityScan, source); err != nil {
-		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("process_library_scan: enqueue metadata fetch failed")
+		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("process_scan: enqueue metadata fetch failed")
 		return err
 	}
 
@@ -328,12 +336,12 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		Int("scopes", len(job.Args.ScopePaths)).
 		Int("discovered", result.Discovered).
 		Int("selected", result.New).
-		Msg("process_library_scan: library done")
+		Msg("process_scan: library done")
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// fetch_library_metadata
+// fetch_metadata
 // ---------------------------------------------------------------------------
 
 type FetchLibraryMetadataWorker struct {
@@ -358,20 +366,22 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 			Int64("library_id", lib.ID).
 			Str("library", lib.Name).
 			Str("media_type", string(lib.MediaType)).
-			Msg("fetch_library_metadata: scanner does not support this library type")
+			Msg("fetch_metadata: scanner does not support this library type")
 		return nil
 	}
 
-	w.Progress.Set("scan_libraries", "fetch_library_metadata", libraryScanProgressLabel(lib, job.Args.ScopePaths))
+	w.Progress.Set("scan_libraries", "fetch_metadata", libraryScanProgressLabel(lib, job.Args.ScopePaths))
 
 	if w.Watcher != nil {
 		w.Watcher.Pause(lib.ID)
 		defer w.Watcher.Resume(lib.ID)
 	}
 
-	result, fetchScanRunID, err := w.scanLibraryFetch(ctx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID)
+	scanCtx, cancel := context.WithTimeout(ctx, scannerFetchTimeout)
+	defer cancel()
+	result, fetchScanRunID, err := w.scanLibraryFetch(scanCtx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID)
 	if err != nil {
-		log.Error().Err(err).Int64("library_id", lib.ID).Msg("fetch_library_metadata: scan error")
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("fetch_metadata: scan error")
 		return err
 	}
 
@@ -383,7 +393,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 		Force:           job.Args.Force,
 		ScheduledTaskID: job.Args.ScheduledTaskID,
 	}, PriorityScan, source); err != nil {
-		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("fetch_library_metadata: enqueue apply failed")
+		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("fetch_metadata: enqueue apply failed")
 		return err
 	}
 
@@ -392,12 +402,12 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 		Int("scopes", len(job.Args.ScopePaths)).
 		Int("discovered", result.Discovered).
 		Int("fetched", result.New).
-		Msg("fetch_library_metadata: library done")
+		Msg("fetch_metadata: library done")
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// apply_library_scan
+// apply_metadata
 // ---------------------------------------------------------------------------
 
 type ApplyLibraryScanWorker struct {
@@ -423,20 +433,22 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 			Int64("library_id", lib.ID).
 			Str("library", lib.Name).
 			Str("media_type", string(lib.MediaType)).
-			Msg("apply_library_scan: scanner does not support this library type")
+			Msg("apply_metadata: scanner does not support this library type")
 		return nil
 	}
 
-	w.Progress.Set("scan_libraries", "apply_library_scan", libraryScanProgressLabel(lib, job.Args.ScopePaths))
+	w.Progress.Set("scan_libraries", "apply_metadata", libraryScanProgressLabel(lib, job.Args.ScopePaths))
 
 	if w.Watcher != nil {
 		w.Watcher.Pause(lib.ID)
 		defer w.Watcher.Resume(lib.ID)
 	}
 
-	outcome, result, err := w.scanLibraryApply(ctx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID, job.Args.FetchScanRunID)
+	scanCtx, cancel := context.WithTimeout(ctx, scannerApplyTimeout)
+	defer cancel()
+	outcome, result, err := w.scanLibraryApply(scanCtx, lib, job.Args.ScopePaths, job.Args.SearchScanRunID, job.Args.FetchScanRunID)
 	if err != nil {
-		log.Error().Err(err).Int64("library_id", lib.ID).Msg("apply_library_scan: scan error")
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("apply_metadata: scan error")
 		return err
 	}
 	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
@@ -457,7 +469,7 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		Int("loudness", fanout.Loudness).
 		Int("sonic", fanout.Sonic).
 		Int("fanout_failed", fanout.Failed).
-		Msg("apply_library_scan: library done")
+		Msg("apply_metadata: library done")
 
 	emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
 		LibraryID:   lib.ID,
@@ -885,7 +897,7 @@ func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], 
 func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, int64, error) {
 	opts := scannerSearchOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
-	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "process_library_scan")}
+	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "process_scan")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
 	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
 		result := run.Result()
@@ -901,7 +913,7 @@ func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sq
 func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID int64) (libraryScanOutcome, int64, error) {
 	opts := scannerFetchOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
-	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "fetch_library_metadata")}
+	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "fetch_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
 	resumed := false
 	if searchScanRunID > 0 {
@@ -923,7 +935,7 @@ func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib s
 		}, run.ScanRunID(), err
 	}
 	if searchScanRunID > 0 {
-		log.Warn().Int64("library_id", lib.ID).Int64("scan_run_id", searchScanRunID).Msg("fetch_library_metadata: search artifact unavailable; falling back to full fetch scan")
+		log.Warn().Int64("library_id", lib.ID).Int64("scan_run_id", searchScanRunID).Msg("fetch_metadata: search artifact unavailable; falling back to full fetch scan")
 	}
 	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
 		result := run.Result()
@@ -939,7 +951,7 @@ func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib s
 func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.Library, scopePaths []string, searchScanRunID, fetchScanRunID int64) (libraryScanOutcome, scanner.Result, error) {
 	opts := scannerApplyOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
-	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "apply_library_scan")}
+	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "apply_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
 	resumed := false
 	if fetchScanRunID > 0 {
@@ -983,7 +995,7 @@ func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.
 			Int64("library_id", lib.ID).
 			Int64("search_scan_run_id", searchScanRunID).
 			Int64("fetch_scan_run_id", fetchScanRunID).
-			Msg("apply_library_scan: scanner artifacts unavailable or stale; running a fresh apply scan")
+			Msg("apply_metadata: scanner artifacts unavailable or stale; running a fresh apply scan")
 	}
 	result, err := scanner.RunLibrary(ctx, lib, opts, io.Discard)
 	return libraryScanOutcome{
@@ -1031,7 +1043,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			continue
 		}
 		if err != nil {
-			log.Warn().Err(err).Int64("library_id", lib.ID).Str("path", path).Msg("apply_library_scan: post-apply file lookup failed")
+			log.Warn().Err(err).Int64("library_id", lib.ID).Str("path", path).Msg("apply_metadata: post-apply file lookup failed")
 			fanout.Failed++
 			continue
 		}
@@ -1042,7 +1054,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 
 		links, err := q.ListLibraryFileLinksByFile(ctx, file.ID)
 		if err != nil {
-			log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: file link lookup failed")
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: file link lookup failed")
 			fanout.Failed++
 			continue
 		}
@@ -1051,7 +1063,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			if link.RelationType == "extra" {
 				if link.ThumbnailPath == "" {
 					if res, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: link.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-						log.Warn().Err(err).Int64("extra_id", link.ID).Msg("apply_library_scan: enqueue extra thumbnail failed")
+						log.Warn().Err(err).Int64("extra_id", link.ID).Msg("apply_metadata: enqueue extra thumbnail failed")
 						fanout.Failed++
 					} else if res.UniqueSkippedAsDuplicate {
 						fanout.Skipped++
@@ -1068,7 +1080,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 					FilePath:      file.Path,
 					MediaType:     string(lib.MediaType),
 				}, nil); err != nil {
-					log.Warn().Err(err).Int64("media_item_id", link.MediaItemID).Msg("apply_library_scan: enqueue save nfo failed")
+					log.Warn().Err(err).Int64("media_item_id", link.MediaItemID).Msg("apply_metadata: enqueue save nfo failed")
 					fanout.Failed++
 				} else if res.UniqueSkippedAsDuplicate {
 					fanout.Skipped++
@@ -1087,7 +1099,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 				FilePath:        file.Path,
 				ScheduledTaskID: taskID,
 			}, scheduledJobInsertOpts(source)); err != nil {
-				log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: enqueue ffprobe failed")
+				log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: enqueue ffprobe failed")
 				fanout.Failed++
 			} else if res.UniqueSkippedAsDuplicate {
 				fanout.Skipped++
@@ -1098,7 +1110,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 		if probeable && !needsProbe && libraryFileHasVideo(file) {
 			if settings.EnableTrickplay && !file.HasTrickplay && !trickplayQueued[file.ID] {
 				if res, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: enqueue trickplay failed")
+					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: enqueue trickplay failed")
 					fanout.Failed++
 				} else if res.UniqueSkippedAsDuplicate {
 					fanout.Skipped++
@@ -1109,7 +1121,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			}
 			if scannerMediaTypeScansSegments(lib.MediaType) && !file.SegmentsAnalyzedAt.Valid && !segmentsQueued[file.ID] && libraryFileHasPrimaryLink(links) {
 				if res, err := rc.Insert(ctx, ScanMediaSegmentsFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: enqueue media segments failed")
+					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: enqueue media segments failed")
 					fanout.Failed++
 				} else if res.UniqueSkippedAsDuplicate {
 					fanout.Skipped++
@@ -1125,13 +1137,13 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			continue
 		}
 		if err != nil {
-			log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_library_scan: track file lookup failed")
+			log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: track file lookup failed")
 			fanout.Failed++
 			continue
 		}
 		if !trackFile.FingerprintedAt.Valid {
 			if res, err := rc.Insert(ctx, ScanTrackFingerprintArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_library_scan: enqueue chromaprint failed")
+				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_metadata: enqueue chromaprint failed")
 				fanout.Failed++
 			} else if res.UniqueSkippedAsDuplicate {
 				fanout.Skipped++
@@ -1141,7 +1153,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 		}
 		if trackFileNeedsLoudness(trackFile) {
 			if res, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_library_scan: enqueue loudness failed")
+				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_metadata: enqueue loudness failed")
 				fanout.Failed++
 			} else if res.UniqueSkippedAsDuplicate {
 				fanout.Skipped++
@@ -1151,7 +1163,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 		}
 		if w.sonicEnabled(ctx) && trackNeedsSonicAnalysis(ctx, q, trackFile.TrackID) {
 			if res, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: trackFile.TrackID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-				log.Warn().Err(err).Int64("track_id", trackFile.TrackID).Msg("apply_library_scan: enqueue sonic analysis failed")
+				log.Warn().Err(err).Int64("track_id", trackFile.TrackID).Msg("apply_metadata: enqueue sonic analysis failed")
 				fanout.Failed++
 			} else if res.UniqueSkippedAsDuplicate {
 				fanout.Skipped++
@@ -1163,7 +1175,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 	for mediaItemID := range mediaItemIDs {
 		if scannerMediaTypeFetchesRatings(lib.MediaType) {
 			if res, err := rc.Insert(ctx, RatingsFetchArgs{MediaItemID: mediaItemID, LibraryID: lib.ID}, nil); err != nil {
-				log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("apply_library_scan: enqueue ratings failed")
+				log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("apply_metadata: enqueue ratings failed")
 				fanout.Failed++
 			} else if res.UniqueSkippedAsDuplicate {
 				fanout.Skipped++
@@ -1177,12 +1189,12 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 				continue
 			}
 			if err != nil {
-				log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("apply_library_scan: artist lookup for music nfo failed")
+				log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("apply_metadata: artist lookup for music nfo failed")
 				fanout.Failed++
 				continue
 			}
 			if res, err := rc.Insert(ctx, SaveMusicNFOArgs{ArtistID: artist.ID}, nil); err != nil {
-				log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("apply_library_scan: enqueue music nfo failed")
+				log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("apply_metadata: enqueue music nfo failed")
 				fanout.Failed++
 			} else if res.UniqueSkippedAsDuplicate {
 				fanout.Skipped++
@@ -1273,7 +1285,7 @@ func trackNeedsSonicAnalysis(ctx context.Context, q *sqlc.Queries, trackID int64
 		LimitCount:         1,
 	})
 	if err != nil {
-		log.Warn().Err(err).Int64("track_id", trackID).Msg("apply_library_scan: sonic eligibility lookup failed")
+		log.Warn().Err(err).Int64("track_id", trackID).Msg("apply_metadata: sonic eligibility lookup failed")
 		return false
 	}
 	return len(ids) > 0 && ids[0] == trackID

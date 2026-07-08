@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -54,6 +55,7 @@ type Config struct {
 	TranscodeCacheMaxGB Field[int]
 	Tailscale           TailscaleConfig
 	Jellyfin            JellyfinConfig
+	Jobs                JobsConfig
 	// Podcast Index API credentials. Sign up at https://api.podcastindex.org
 	// — free tier covers personal-use traffic comfortably. When empty the
 	// /api/podcasts trending+search endpoints will surface a clear error.
@@ -70,6 +72,10 @@ type Config struct {
 // UI flips take effect without a restart.
 type JellyfinConfig struct {
 	Enabled Field[bool]
+}
+
+type JobsConfig struct {
+	Workers map[string]Field[int]
 }
 
 // TailscaleConfig holds the env-sourced tailscale knobs. Enabled/HTTPS/Funnel
@@ -114,6 +120,9 @@ func Load() *Config {
 		Jellyfin: JellyfinConfig{
 			Enabled: envBool("HEYA_JELLYFIN_API_ENABLED", false),
 		},
+		Jobs: JobsConfig{
+			Workers: loadJobWorkerFields(),
+		},
 		Tailscale: TailscaleConfig{
 			Enabled:  envBool("HEYA_TAILSCALE_ENABLED", false),
 			Hostname: envString("HEYA_TAILSCALE_HOSTNAME", "heya"),
@@ -123,6 +132,90 @@ func Load() *Config {
 			Funnel:   envBool("HEYA_TAILSCALE_FUNNEL", false),
 		},
 	}
+}
+
+var DefaultJobWorkerCounts = map[string]int{
+	"kickoff_library_scan":      1,
+	"process_scan":              4,
+	"fetch_metadata":            4,
+	"apply_metadata":            4,
+	"ffprobe":                   1,
+	"detect_local_assets":       1,
+	"enrich_media_item":         1,
+	"person_fetch":              8,
+	"ratings_fetch":             4,
+	"force_refresh_metadata":    1,
+	"fetch_artwork":             4,
+	"download_image":            4,
+	"save_images":               1,
+	"force_refresh_images":      1,
+	"save_nfo":                  1,
+	"save_music_nfo":            1,
+	"scan_track_loudness":       1,
+	"scan_album_loudness":       1,
+	"scan_track_fingerprint":    1,
+	"scan_media_segments_file":  8,
+	"scan_keyframes":            1,
+	"detect_segments_season":    1,
+	"detect_segments_movie":     1,
+	"trickplay":                 1,
+	"thumbnails":                1,
+	"sonic_analysis":            1,
+	"transcode":                 1,
+	"artist_centroid":           1,
+	"album_centroid":            1,
+	"scan_library_disk":         1,
+	"kickoff_refresh_stale":     1,
+	"kickoff_music_loudness":    1,
+	"kickoff_music_fingerprint": 1,
+	"kickoff_media_segments":    1,
+	"kickoff_detect_segments":   1,
+	"kickoff_trickplay":         1,
+	"kickoff_thumbnails":        1,
+	"kickoff_sonic_analysis":    1,
+	"soft_delete":               1,
+	"debounce_sweep":            1,
+	"default":                   1,
+}
+
+func JobWorkerKinds() []string {
+	kinds := make([]string, 0, len(DefaultJobWorkerCounts))
+	for kind := range DefaultJobWorkerCounts {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
+func JobWorkerEnvVar(kind string) string {
+	name := strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(kind))
+	return "HEYA_JOB_WORKERS_" + name
+}
+
+func loadJobWorkerFields() map[string]Field[int] {
+	out := make(map[string]Field[int], len(DefaultJobWorkerCounts))
+	for kind, def := range DefaultJobWorkerCounts {
+		field := envInt(JobWorkerEnvVar(kind), def)
+		if field.Value < 1 {
+			field.Value = def
+		}
+		out[kind] = field
+	}
+	return out
+}
+
+func (c *Config) JobWorkerCounts() map[string]int {
+	out := make(map[string]int, len(DefaultJobWorkerCounts))
+	for kind, def := range DefaultJobWorkerCounts {
+		value := def
+		if c != nil && c.Jobs.Workers != nil {
+			if field, ok := c.Jobs.Workers[kind]; ok && field.Value > 0 {
+				value = field.Value
+			}
+		}
+		out[kind] = value
+	}
+	return out
 }
 
 func loadDotEnv() {
@@ -209,9 +302,17 @@ var sourceFields = []sourceField{
 // /api/config/sources endpoint extends this with DB-backed setting groups
 // (tailscale.*, sonic_analysis.*, library.N.*).
 func (c *Config) Sources() map[string]SourceEntry {
-	out := make(map[string]SourceEntry, len(sourceFields))
+	out := make(map[string]SourceEntry, len(sourceFields)+len(DefaultJobWorkerCounts))
 	for _, field := range sourceFields {
 		out[field.key] = field.entry(c)
+	}
+	for _, kind := range JobWorkerKinds() {
+		if c.Jobs.Workers == nil {
+			continue
+		}
+		if field, ok := c.Jobs.Workers[kind]; ok {
+			out["jobs.workers."+kind] = field.Entry()
+		}
 	}
 	return out
 }
