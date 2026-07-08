@@ -73,6 +73,58 @@ func applyScheduledJobSource(opts river.InsertOpts, source string) *river.Insert
 	return &opts
 }
 
+func libraryScanProgressLabel(lib sqlc.Library, scopes []string) string {
+	if len(scopes) == 0 {
+		return lib.Name
+	}
+	first := libraryScopeDisplayName(lib, scopes[0])
+	if first == "" {
+		first = "scoped"
+	}
+	if len(scopes) == 1 {
+		return lib.Name + " · " + first
+	}
+	return fmt.Sprintf("%s · %s +%d", lib.Name, first, len(scopes)-1)
+}
+
+func libraryScopeDisplayName(lib sqlc.Library, scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return ""
+	}
+	scope = strings.TrimRight(scope, `/\`)
+
+	if strings.Contains(scope, "://") {
+		for _, root := range lib.Paths {
+			root = strings.TrimRight(strings.TrimSpace(root), `/\`)
+			if root == "" || !strings.HasPrefix(scope, root+"/") {
+				continue
+			}
+			if rel := strings.TrimPrefix(scope, root+"/"); rel != "" {
+				return rel
+			}
+		}
+		return scannerScopeBase(scope)
+	}
+
+	cleanScope := filepath.Clean(scope)
+	for _, root := range lib.Paths {
+		root = strings.TrimSpace(root)
+		if root == "" || strings.Contains(root, "://") {
+			continue
+		}
+		rel, err := filepath.Rel(filepath.Clean(root), cleanScope)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		return rel
+	}
+	if base := scannerScopeBase(scope); base != "" && base != "." {
+		return base
+	}
+	return scope
+}
+
 // ---------------------------------------------------------------------------
 // kickoff_library_scan
 // ---------------------------------------------------------------------------
@@ -243,11 +295,7 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		return nil
 	}
 
-	label := lib.Name
-	if len(job.Args.ScopePaths) > 0 {
-		label += " (scoped)"
-	}
-	w.Progress.Set("scan_libraries", "process_library_scan", label)
+	w.Progress.Set("scan_libraries", "process_library_scan", libraryScanProgressLabel(lib, job.Args.ScopePaths))
 
 	if w.Watcher != nil {
 		w.Watcher.Pause(lib.ID)
@@ -314,11 +362,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 		return nil
 	}
 
-	label := lib.Name
-	if len(job.Args.ScopePaths) > 0 {
-		label += " (scoped)"
-	}
-	w.Progress.Set("scan_libraries", "fetch_library_metadata", label)
+	w.Progress.Set("scan_libraries", "fetch_library_metadata", libraryScanProgressLabel(lib, job.Args.ScopePaths))
 
 	if w.Watcher != nil {
 		w.Watcher.Pause(lib.ID)
@@ -383,11 +427,7 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		return nil
 	}
 
-	label := lib.Name
-	if len(job.Args.ScopePaths) > 0 {
-		label += " (scoped)"
-	}
-	w.Progress.Set("scan_libraries", "apply_library_scan", label)
+	w.Progress.Set("scan_libraries", "apply_library_scan", libraryScanProgressLabel(lib, job.Args.ScopePaths))
 
 	if w.Watcher != nil {
 		w.Watcher.Pause(lib.ID)

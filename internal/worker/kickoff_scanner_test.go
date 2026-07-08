@@ -70,6 +70,18 @@ func TestScannerScopeForPathUsesOwningMediaDirectory(t *testing.T) {
 	)
 }
 
+func TestLibraryScanProgressLabelIncludesScope(t *testing.T) {
+	lib := sqlc.Library{Name: "Movies", Paths: []string{"/storage/Movies"}}
+
+	require.Equal(t, "Movies", libraryScanProgressLabel(lib, nil))
+	require.Equal(t, "Movies · The Matrix (1999)", libraryScanProgressLabel(lib, []string{"/storage/Movies/The Matrix (1999)"}))
+	require.Equal(t, "Movies · The Matrix (1999) +1", libraryScanProgressLabel(lib, []string{
+		"/storage/Movies/The Matrix (1999)",
+		"/storage/Movies/Alien (1979)",
+	}))
+	require.Equal(t, "Movies · Loose Folder", libraryScanProgressLabel(lib, []string{"Loose Folder"}))
+}
+
 func TestLibraryFileNeedsProbe(t *testing.T) {
 	require.True(t, libraryFileNeedsProbe(sqlc.LibraryFile{}))
 	require.True(t, libraryFileNeedsProbe(sqlc.LibraryFile{MediaInfo: []byte("{}")}))

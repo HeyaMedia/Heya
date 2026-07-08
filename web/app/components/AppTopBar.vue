@@ -255,11 +255,11 @@
                     <template v-if="(tp.pending ?? 0) > 0">{{ tp.pending }} pending</template>
                   </span>
                 </div>
-                <div v-if="tp.current_item" class="task-card-line task-card-item">
-                  {{ tp.current_item }}
+                <div v-if="taskItem(tp)" class="task-card-line task-card-item" :title="taskItem(tp)">
+                  {{ taskItem(tp) }}
                 </div>
-                <div v-if="tp.current_stage" class="task-card-line task-card-stage">
-                  <Icon name="chevright" :size="9" /> {{ tp.current_stage }}
+                <div v-if="taskStage(tp)" class="task-card-line task-card-stage" :title="taskStage(tp)">
+                  <Icon name="chevright" :size="9" /> {{ taskStage(tp) }}
                 </div>
               </div>
             </div>
@@ -272,6 +272,7 @@
                 </div>
                 <div class="activity-item-text">
                   <span class="activity-item-name">{{ jobLabel(grp.kind) }}</span>
+                  <span v-if="grp.detail" class="activity-item-detail activity-job-detail" :title="grp.detail">{{ grp.detail }}</span>
                 </div>
                 <span class="activity-count-badge">{{ grp.count }}</span>
               </div>
@@ -317,7 +318,7 @@
 </template>
 
 <script setup lang="ts">
-import type { ScannerEventPayload, TaskProgressPayload } from '~/composables/useEventBus'
+import type { ActiveJob, ScannerEventPayload, TaskProgressPayload } from '~/composables/useEventBus'
 
 const route = useRoute()
 const { user } = useAuth()
@@ -698,6 +699,16 @@ function taskTitle(tp: TaskProgressPayload): string {
   return TASK_LABELS[tp.task_id]?.label ?? tp.task_id
 }
 
+function taskItem(tp: TaskProgressPayload): string {
+  return tp.current_item || ''
+}
+
+function taskStage(tp: TaskProgressPayload): string {
+  if (tp.current_stage) return tp.current_stage
+  if (tp.item_kind) return jobLabel(tp.item_kind)
+  return ''
+}
+
 const hasActivity = computed(() =>
   activeScans.value.length > 0 || progressLibs.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || runningTasks.value.length > 0 || nowPlayingSessions.value.length > 0
 )
@@ -740,15 +751,69 @@ const coveredKinds = computed(() => {
 })
 
 const jobsByKind = computed(() => {
-  const counts: Record<string, number> = {}
+  const groups = new Map<string, { kind: string, count: number, sample?: ActiveJob }>()
   for (const j of activeJobs.value) {
     if (coveredKinds.value.has(j.kind)) continue
-    counts[j.kind] = (counts[j.kind] ?? 0) + 1
+    const group = groups.get(j.kind)
+    if (group) {
+      group.count++
+      if (!group.sample || (!jobDetail(group.sample) && jobDetail(j))) group.sample = j
+    } else {
+      groups.set(j.kind, { kind: j.kind, count: 1, sample: j })
+    }
   }
-  return Object.entries(counts)
-    .map(([kind, count]) => ({ kind, count }))
+  return [...groups.values()]
+    .map(grp => ({ ...grp, detail: grp.sample ? jobDetail(grp.sample) : '' }))
     .sort((a, b) => b.count - a.count)
 })
+
+function jobDetail(job: ActiveJob): string {
+  const args = parseJobArgs(job.args)
+  if (!args) return ''
+
+  const scopes = asStringArray(args.scope_paths)
+  if (scopes.length > 0) {
+    const first = pathLeaf(scopes[0] ?? '')
+    return scopes.length === 1 ? first : `${first} +${scopes.length - 1}`
+  }
+
+  for (const key of ['title', 'name', 'current_item', 'profile']) {
+    const value = args[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  for (const key of ['file_path', 'path', 'source_path', 'target_path']) {
+    const value = args[key]
+    if (typeof value === 'string' && value.trim()) return pathLeaf(value)
+  }
+  for (const key of ['media_item_id', 'library_file_id', 'track_file_id', 'track_id', 'album_id', 'artist_id', 'library_id']) {
+    const value = args[key]
+    if (typeof value === 'number' || typeof value === 'string') {
+      const label = key.replaceAll('_', ' ')
+      return `${label} ${value}`
+    }
+  }
+  return ''
+}
+
+function parseJobArgs(args?: string): Record<string, any> | null {
+  if (!args) return null
+  try {
+    const parsed = JSON.parse(args)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function asStringArray(value: any): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : []
+}
+
+function pathLeaf(path: string): string {
+  const trimmed = path.trim().replace(/[\\/]+$/, '')
+  if (!trimmed) return ''
+  return trimmed.split(/[\\/]/).pop() || trimmed
+}
 
 // Tab source + active-matching logic live in useNavTabs() — shared with
 // BottomNav.vue's phone tab strip so the two never drift apart.
@@ -1380,9 +1445,15 @@ watch(() => route.fullPath, () => { closeDropdown() })
   flex-shrink: 0;
 }
 
-.activity-item-text { min-width: 0; }
+.activity-item-text { min-width: 0; flex: 1; }
 .activity-item-name { display: block; font-size: 12px; font-weight: 500; color: var(--fg-0); }
 .activity-item-detail { display: block; font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); }
+.activity-job-detail {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .scan-event-detail {
   max-width: 280px;
   overflow: hidden;
