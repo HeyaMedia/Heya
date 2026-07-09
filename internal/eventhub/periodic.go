@@ -143,7 +143,7 @@ func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool) {
 	}
 	defer rows.Close()
 
-	var libs []LibraryScanProgress
+	libs := make([]LibraryScanProgress, 0)
 	for rows.Next() {
 		var lp LibraryScanProgress
 		if err := rows.Scan(&lp.LibraryID, &lp.Name, &lp.Total, &lp.Processed, &lp.Matched, &lp.Unmatched, &lp.Errors); err != nil {

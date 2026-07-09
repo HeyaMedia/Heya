@@ -52,3 +52,27 @@ func dotf(a, b []float32) float64 {
 	}
 	return s
 }
+
+func TestL2NormRejectsInvalidOutput(t *testing.T) {
+	for name, vector := range map[string][]float32{
+		"nan":  {1, float32(math.NaN())},
+		"inf":  {1, float32(math.Inf(1))},
+		"zero": {0, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := l2norm(vector); err == nil {
+				t.Fatal("l2norm accepted invalid model output")
+			}
+		})
+	}
+}
+
+func TestL2NormNormalizesFiniteOutput(t *testing.T) {
+	vector := []float32{3, 4}
+	if err := l2norm(vector); err != nil {
+		t.Fatalf("l2norm: %v", err)
+	}
+	if math.Abs(float64(vector[0])-0.6) > 1e-6 || math.Abs(float64(vector[1])-0.8) > 1e-6 {
+		t.Fatalf("normalized vector = %v, want [0.6 0.8]", vector)
+	}
+}

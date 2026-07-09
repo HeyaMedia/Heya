@@ -80,3 +80,33 @@ func TestBuildSessionOptionsSkipsUninstalledProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenVINOProviderOptionsPrecision(t *testing.T) {
+	t.Setenv("HEYA_SONIC_OPENVINO_CACHE_DIR", "/tmp/openvino-cache")
+
+	options, err := openVINOProviderOptions("GPU", "FP32")
+	if err != nil {
+		t.Fatalf("openVINOProviderOptions: %v", err)
+	}
+	if got := options["device_type"]; got != "GPU" {
+		t.Errorf("device_type = %q, want GPU", got)
+	}
+	if got := options["precision"]; got != "FP32" {
+		t.Errorf("precision = %q, want FP32", got)
+	}
+	if got := options["cache_dir"]; got != "/tmp/openvino-cache" {
+		t.Errorf("cache_dir = %q, want /tmp/openvino-cache", got)
+	}
+
+	defaults, err := openVINOProviderOptions("GPU", "")
+	if err != nil {
+		t.Fatalf("default openVINOProviderOptions: %v", err)
+	}
+	if _, exists := defaults["precision"]; exists {
+		t.Error("default provider options unexpectedly override precision")
+	}
+
+	if _, err := openVINOProviderOptions("GPU", "BF16"); err == nil {
+		t.Error("unsupported precision accepted")
+	}
+}

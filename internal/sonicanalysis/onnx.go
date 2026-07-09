@@ -248,6 +248,14 @@ func BuildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error)
 	return buildSessionOptions(accel)
 }
 
+// BuildSessionOptionsWithOpenVINOPrecision is the accurate-inference variant
+// for sibling ONNX subsystems whose models are not numerically stable under
+// OpenVINO GPU's default FP16 activation precision. Other execution providers
+// ignore the override.
+func BuildSessionOptionsWithOpenVINOPrecision(accel Accelerator, precision string) (*ort.SessionOptions, string, error) {
+	return buildSessionOptionsWithOpenVINOPrecision(accel, precision)
+}
+
 // Names for the Discogs specialized embedding heads. Each shares the
 // same EffNet backbone + same (64, 128, 96) mel-spec input, but is
 // trained with a contrastive loss targeting a different aggregation
@@ -281,9 +289,13 @@ type discogsSession struct {
 // SessionOptions so a failed attempt never leaves a half-configured
 // object behind — that matters for the auto path, which tries several.
 func buildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error) {
+	return buildSessionOptionsWithOpenVINOPrecision(accel, "")
+}
+
+func buildSessionOptionsWithOpenVINOPrecision(accel Accelerator, precision string) (*ort.SessionOptions, string, error) {
 	switch accel {
 	case "", AccelAuto:
-		return autoSessionOptions()
+		return autoSessionOptionsWithOpenVINOPrecision(precision)
 	case AccelCPU:
 		opts, err := ort.NewSessionOptions()
 		if err != nil {
@@ -332,16 +344,17 @@ func buildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error)
 		// choose. Defaults to GPU (the reason to use this EP) and is
 		// overridable via HEYA_SONIC_OPENVINO_DEVICE.
 		dev := openvinoDevice()
-		ovOpts := map[string]string{"device_type": dev}
+		ovOpts, err := openVINOProviderOptions(dev, precision)
+		if err != nil {
+			_ = opts.Destroy()
+			return nil, "", err
+		}
 		// cache_dir persists OpenVINO's compiled kernels (the GPU plugin JITs
 		// each model graph on first inference — tens of seconds across our ~14
 		// models). With a cache, that cost is paid once and reused across
 		// process restarts, so cold-start model load drops dramatically. Off
 		// unless HEYA_SONIC_OPENVINO_CACHE_DIR is set (the openvino image sets
 		// it to a path under the data volume).
-		if cacheDir := strings.TrimSpace(os.Getenv("HEYA_SONIC_OPENVINO_CACHE_DIR")); cacheDir != "" {
-			ovOpts["cache_dir"] = cacheDir
-		}
 		if err := opts.AppendExecutionProviderOpenVINO(ovOpts); err != nil {
 			_ = opts.Destroy()
 			return nil, "", fmt.Errorf("openvino EP not available: %w", err)
@@ -362,13 +375,28 @@ func buildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error)
 	}
 }
 
+func openVINOProviderOptions(device, precision string) (map[string]string, error) {
+	options := map[string]string{"device_type": device}
+	switch precision {
+	case "":
+	case "FP16", "FP32", "ACCURACY":
+		options["precision"] = precision
+	default:
+		return nil, fmt.Errorf("unsupported OpenVINO precision %q", precision)
+	}
+	if cacheDir := strings.TrimSpace(os.Getenv("HEYA_SONIC_OPENVINO_CACHE_DIR")); cacheDir != "" {
+		options["cache_dir"] = cacheDir
+	}
+	return options, nil
+}
+
 // autoSessionOptions resolves AccelAuto to the best EP actually present in
 // this build's onnxruntime. On macOS that's CoreML; on Linux we try the GPU
 // providers a vendor image may have compiled in (CUDA, then OpenVINO), each
 // of which errors cleanly when its provider lib is absent, before falling
 // back to CPU. This makes the per-vendor images self-configure even if
 // HEYA_SONIC_ACCELERATOR is left at the default.
-func autoSessionOptions() (*ort.SessionOptions, string, error) {
+func autoSessionOptionsWithOpenVINOPrecision(precision string) (*ort.SessionOptions, string, error) {
 	var order []Accelerator
 	switch runtime.GOOS {
 	case "darwin":
@@ -377,7 +405,7 @@ func autoSessionOptions() (*ort.SessionOptions, string, error) {
 		order = []Accelerator{AccelCUDA, AccelOpenVINO}
 	}
 	for _, c := range order {
-		if opts, desc, err := buildSessionOptions(c); err == nil {
+		if opts, desc, err := buildSessionOptionsWithOpenVINOPrecision(c, precision); err == nil {
 			return opts, desc + " (auto)", nil
 		}
 	}

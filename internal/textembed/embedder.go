@@ -46,7 +46,11 @@ func New(modelsDir string, accel sonicanalysis.Accelerator) (*Embedder, error) {
 	if err := sonicanalysis.EnsureONNX(); err != nil {
 		return nil, fmt.Errorf("onnx init: %w", err)
 	}
-	opts, ep, err := sonicanalysis.BuildSessionOptions(accel)
+	// ORT's OpenVINO provider defaults GPU inference to FP16. BGE-large's
+	// transformer activations overflow at that precision on Intel Arc, yielding
+	// non-finite embeddings. Keep the GPU provider, but compile this model in
+	// FP32; sonic-analysis models continue using their existing defaults.
+	opts, ep, err := sonicanalysis.BuildSessionOptionsWithOpenVINOPrecision(accel, "FP32")
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +145,9 @@ func (e *Embedder) Embed(text string) (vec []float32, err error) {
 	}
 	cls := make([]float32, Dim)
 	copy(cls, out.GetData()[:Dim]) // [CLS] token embedding
-	l2norm(cls)
+	if err := l2norm(cls); err != nil {
+		return nil, err
+	}
 	return cls, nil
 }
 
@@ -163,16 +169,20 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-func l2norm(v []float32) {
+func l2norm(v []float32) error {
 	var s float64
-	for _, x := range v {
+	for i, x := range v {
+		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+			return fmt.Errorf("non-finite model output at dimension %d", i)
+		}
 		s += float64(x) * float64(x)
 	}
 	if s == 0 {
-		return
+		return fmt.Errorf("zero-norm model output")
 	}
 	inv := float32(1 / math.Sqrt(s))
 	for i := range v {
 		v[i] *= inv
 	}
+	return nil
 }

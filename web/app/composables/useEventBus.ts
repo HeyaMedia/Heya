@@ -71,7 +71,7 @@ export interface LibraryScanProgress {
 }
 
 export interface ScanProgressPayload {
-  libraries: LibraryScanProgress[]
+  libraries: LibraryScanProgress[] | null
 }
 
 export interface ScannerEventPayload {
@@ -236,10 +236,11 @@ function flushProgressEvents() {
   }
   if (scanProgressRef && pendingScanProgress) {
     const next: Record<number, LibraryScanProgress> = {}
-    for (const lib of pendingScanProgress.libraries) {
+    const libraries = Array.isArray(pendingScanProgress.libraries) ? pendingScanProgress.libraries : []
+    pendingScanProgress = null
+    for (const lib of libraries) {
       next[lib.library_id] = lib
     }
-    pendingScanProgress = null
     scanProgressRef.value = next
     updateScanActivityCount()
   }
