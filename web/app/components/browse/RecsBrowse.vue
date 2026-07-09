@@ -217,7 +217,13 @@ const aiQuery = useQuery({
 
 function askAI() {
   const q = nlQuery.value.trim()
-  if (!aiReady.value || q.length < 2) return
+  if (!aiReady.value || q.length < 2 || aiPending.value) return
+  if (aiQ.value === q) {
+    // Same ask again — the ref won't change, so refetch explicitly. This is
+    // both the retry path after a failure and a deliberate re-roll.
+    aiQuery.refetch()
+    return
+  }
   aiQ.value = q
 }
 function clearSearch() {
@@ -228,8 +234,10 @@ function clearSearch() {
 // AI results own the grid while the input still says what was asked; editing
 // the text falls back to live semantic matches until the next Enter.
 const aiActive = computed(() => aiQ.value.length > 1 && nlQuery.value.trim() === aiQ.value)
-const aiPending = computed(() => aiActive.value && aiQuery.isPending.value)
-const aiFailed = computed(() => aiQuery.isError.value)
+// isFetching (not isPending) so a retry-after-error shows "Curating…" again
+// instead of the stale error note.
+const aiPending = computed(() => aiActive.value && aiQuery.isFetching.value)
+const aiFailed = computed(() => aiQuery.isError.value && !aiQuery.isFetching.value)
 const aiShowing = computed(() => aiActive.value && !!aiQuery.data.value && !aiQuery.isError.value)
 const aiErrorMsg = computed(() => {
   const e = aiQuery.error.value as any
