@@ -134,21 +134,36 @@ profile AS (
     updated_at = now()
   RETURNING media_item_id
 ),
-deleted_external_ids AS (
-  DELETE FROM media_item_external_ids WHERE media_item_id = sqlc.arg(id)
-  RETURNING 1
-),
-inserted_external_ids AS (
-  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
-  SELECT entity.id, entity.library_id, kv.key, kv.value, 'media_items.external_ids'
-  FROM entity, jsonb_each_text(
+desired_external_ids AS (
+  SELECT kv.key AS provider, kv.value AS external_id
+  FROM jsonb_each_text(
     CASE
       WHEN jsonb_typeof(sqlc.arg(external_ids)::jsonb) = 'object' THEN sqlc.arg(external_ids)::jsonb
       ELSE '{}'::jsonb
     END
   ) AS kv(key, value)
   WHERE kv.key <> '' AND kv.value <> ''
+),
+inserted_external_ids AS (
+  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
+  SELECT entity.id, entity.library_id, desired.provider, desired.external_id, 'media_items.external_ids'
+  FROM entity, desired_external_ids desired
+  ON CONFLICT (media_item_id, provider) DO UPDATE SET
+    library_id = EXCLUDED.library_id,
+    external_id = EXCLUDED.external_id,
+    source = EXCLUDED.source,
+    updated_at = now()
   RETURNING provider
+),
+deleted_external_ids AS (
+  DELETE FROM media_item_external_ids existing
+  WHERE existing.media_item_id = sqlc.arg(id)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM desired_external_ids desired
+      WHERE desired.provider = existing.provider
+    )
+  RETURNING 1
 )
 SELECT entity.id
 FROM entity

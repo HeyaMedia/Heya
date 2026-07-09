@@ -196,3 +196,102 @@ func TestIntegration(t *testing.T) {
 
 	t.Log("integration test passed: user → library → media item → movie → search → count")
 }
+
+func TestUpdateMediaItemRawExternalIDsIsIdempotent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, getTestDatabaseURL(t))
+	if err != nil {
+		t.Skipf("database not available: %v", err)
+	}
+	defer pool.Close()
+
+	q := sqlc.New(pool)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("beginning transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := q.WithTx(tx)
+
+	user, err := qtx.CreateUser(ctx, sqlc.CreateUserParams{
+		Username:     "externalidtest",
+		Email:        "externalidtest@example.com",
+		PasswordHash: "$2a$10$fakehash",
+		IsAdmin:      true,
+	})
+	if err != nil {
+		t.Fatalf("creating user: %v", err)
+	}
+	lib, err := qtx.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "Music",
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/media/music"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    user.ID,
+		Settings:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("creating library: %v", err)
+	}
+
+	itemID, err := qtx.CreateMediaItemRaw(ctx, sqlc.CreateMediaItemRawParams{
+		LibraryID:        lib.ID,
+		MediaType:        sqlc.MediaTypeMusic,
+		ProviderKind:     "artist",
+		Title:            "Axwell Λ Ingrosso",
+		SortTitle:        "axwell ingrosso",
+		Year:             "",
+		Description:      "",
+		PosterPath:       "",
+		BackdropPath:     "",
+		Tagline:          "",
+		OriginalTitle:    "",
+		OriginalLanguage: "",
+		Status:           "",
+		ExternalIds:      []byte(`{"mbid":"old-mbid","discogs":"123"}`),
+	})
+	if err != nil {
+		t.Fatalf("creating media item raw: %v", err)
+	}
+
+	params := sqlc.UpdateMediaItemRawParams{
+		ID:               itemID,
+		ProviderKind:     "artist",
+		Title:            "Axwell Λ Ingrosso",
+		SortTitle:        "axwell ingrosso",
+		Year:             "",
+		Description:      "",
+		PosterPath:       "",
+		BackdropPath:     "",
+		Tagline:          "",
+		OriginalTitle:    "",
+		OriginalLanguage: "",
+		Status:           "",
+		ExternalIds:      []byte(`{"mbid":"new-mbid"}`),
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := qtx.UpdateMediaItemRaw(ctx, params); err != nil {
+			t.Fatalf("updating media item raw pass %d: %v", i+1, err)
+		}
+	}
+
+	var count int
+	var mbid string
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*), COALESCE(max(external_id) FILTER (WHERE provider = 'mbid'), '')
+		FROM media_item_external_ids
+		WHERE media_item_id = $1
+	`, itemID).Scan(&count, &mbid); err != nil {
+		t.Fatalf("querying external ids: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one external id after replacement, got %d", count)
+	}
+	if mbid != "new-mbid" {
+		t.Fatalf("expected mbid to be updated, got %q", mbid)
+	}
+}

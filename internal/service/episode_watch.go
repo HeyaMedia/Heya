@@ -235,7 +235,7 @@ func (a *App) MarkMediaWatched(ctx context.Context, userID, mediaItemID int64, w
 		return err
 	}
 	switch item.MediaType {
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		if watched {
 			return a.MarkShowWatched(ctx, userID, mediaItemID)
 		}

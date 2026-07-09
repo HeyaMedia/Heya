@@ -4153,19 +4153,34 @@ const updateMediaItemExternalIds = `-- name: UpdateMediaItemExternalIds :exec
 WITH entity AS (
   SELECT id, library_id FROM media_items WHERE id = $1
 ),
-deleted AS (
-  DELETE FROM media_item_external_ids WHERE media_item_id = $1
-),
-inserted AS (
-  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
-  SELECT entity.id, entity.library_id, kv.key, kv.value, 'music.enrichment'
-  FROM entity, jsonb_each_text(
+desired_external_ids AS (
+  SELECT kv.key AS provider, kv.value AS external_id
+  FROM jsonb_each_text(
     CASE
       WHEN jsonb_typeof($2::jsonb) = 'object' THEN $2::jsonb
       ELSE '{}'::jsonb
     END
   ) AS kv(key, value)
   WHERE kv.key <> '' AND kv.value <> ''
+),
+inserted AS (
+  INSERT INTO media_item_external_ids (media_item_id, library_id, provider, external_id, source)
+  SELECT entity.id, entity.library_id, desired.provider, desired.external_id, 'music.enrichment'
+  FROM entity, desired_external_ids desired
+  ON CONFLICT (media_item_id, provider) DO UPDATE SET
+    library_id = EXCLUDED.library_id,
+    external_id = EXCLUDED.external_id,
+    source = EXCLUDED.source,
+    updated_at = now()
+),
+deleted AS (
+  DELETE FROM media_item_external_ids existing
+  WHERE existing.media_item_id = $1
+    AND NOT EXISTS (
+      SELECT 1
+      FROM desired_external_ids desired
+      WHERE desired.provider = existing.provider
+    )
 )
 UPDATE media_items SET updated_at = now() WHERE media_items.id = $1
 `
