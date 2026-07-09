@@ -1,6 +1,31 @@
 {
   "components": {
     "schemas": {
+      "AcquireItem": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "type": "string"
+          },
+          "score": {
+            "format": "double",
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tmdb_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tmdb_id",
+          "title",
+          "media_type",
+          "score"
+        ],
+        "type": "object"
+      },
       "ActiveSessionsBody": {
         "additionalProperties": false,
         "properties": {
@@ -3334,6 +3359,90 @@
         "required": [
           "Float32",
           "Valid"
+        ],
+        "type": "object"
+      },
+      "ForYouItem": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "rating": {
+            "format": "double",
+            "type": "number"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "score": {
+            "format": "double",
+            "type": "number"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "slug",
+          "media_type",
+          "score",
+          "available"
+        ],
+        "type": "object"
+      },
+      "ForYouResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ForYouResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "acquire": {
+            "items": {
+              "$ref": "#/components/schemas/AcquireItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "has_signal": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ForYouItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "has_signal"
         ],
         "type": "object"
       },
@@ -24267,6 +24376,115 @@
           }
         ],
         "summary": "User's recently-played tracks (deduped)",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
+    "/api/me/recommendations": {
+      "get": {
+        "operationId": "for-you-recommendations",
+        "parameters": [
+          {
+            "description": "Restrict to one media type",
+            "explode": false,
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "description": "Restrict to one media type",
+              "enum": [
+                "movie",
+                "tv",
+                "anime"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only titles in this genre",
+            "explode": false,
+            "in": "query",
+            "name": "genre",
+            "schema": {
+              "description": "Only titles in this genre",
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only titles carrying this keyword/tag",
+            "explode": false,
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "description": "Only titles carrying this keyword/tag",
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Minimum external rating",
+            "explode": false,
+            "in": "query",
+            "name": "min_rating",
+            "schema": {
+              "description": "Minimum external rating",
+              "format": "double",
+              "maximum": 10,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "Number of results",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 20,
+              "description": "Number of results",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForYouResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Personalized, steerable recommendations",
         "tags": [
           "Me"
         ]

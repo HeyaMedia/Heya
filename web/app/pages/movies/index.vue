@@ -6,7 +6,7 @@
       :active-lib="activeLib"
       :active-view="activeView"
       type-label="Movies"
-      :show-recommended="true"
+      :show-browse="true"
       :total-count="items.length"
       :loved-count="favoritedSet.size"
       :user-lists="userLists"
@@ -32,7 +32,7 @@
         :active-lib="activeLib"
         :active-view="activeView"
         type-label="Movies"
-      :show-recommended="true"
+      :show-browse="true"
         :total-count="items.length"
         :loved-count="favoritedSet.size"
         :user-lists="userLists"
@@ -47,7 +47,8 @@
     </AppSheet>
     <!-- Recommended landing (bare /movies). Its own scroll container; the flat
          grid + franchises live in the sibling main below. -->
-    <RecommendedView v-if="activeView === 'recommended'" section="movie" class="library-main" />
+    <BrowseView v-if="activeView === 'browse'" section="movie" class="library-main" />
+    <RecsBrowse v-else-if="activeView === 'recommendations'" section="movie" class="library-main" />
     <div v-else ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
       <!-- Franchises overview — a page of its own (/movies/franchises). Reuses
            the FilterBar (sort + grid/detail/list toggle, no movie filters) and
@@ -386,7 +387,7 @@ function openListSheet(item: EnrichedMediaItem) {
 
 // View mode, sort, filters, sidebar selection and scroll offset all persist —
 // navigating into a movie and back restores the page exactly as it was.
-const browse = useBrowseState('movies', { recommendedDefault: true })
+const browse = useBrowseState('movies', { browseDefault: true })
 const { view, sort, filters, activeLib, activeView, scrollTop } = browse
 const { isDirty, restoreScroll } = browse
 
@@ -401,7 +402,7 @@ async function ensureItems() {
   itemsLoaded.value = true
   loading.value = false
 }
-watch(activeView, (v) => { if (v !== 'recommended') ensureItems() })
+watch(activeView, (v) => { if (v !== 'browse' && v !== 'recommendations') ensureItems() })
 
 const favoritedSet = ref<Set<number>>(new Set())
 const watchedSet = ref<Set<number>>(new Set())
@@ -679,7 +680,7 @@ async function loadItems() {
 // it directly instead of a `keys` invalidation.
 useLiveRefresh([
   // Only refetch the grid once it's actually been loaded — on the Recommended
-  // landing the item list is deferred and RecommendedView refreshes its own rails.
+  // landing the item list is deferred and BrowseView refreshes its own rails.
   { events: ['media.added', 'media.updated'], filter: byMediaType('movie'), refetch: () => { if (itemsLoaded.value) loadItems() } },
 ])
 
@@ -700,7 +701,7 @@ onMounted(async () => {
   if (colRes.status === 'fulfilled') collections.value = colRes.value ?? []
 
   // Grid/franchises need the full item list; the Recommended landing doesn't.
-  if (activeView.value !== 'recommended') await ensureItems()
+  if (activeView.value !== 'browse' && activeView.value !== 'recommendations') await ensureItems()
   loading.value = false
 
   // Re-validate the persisted sidebar selection against fresh data — a

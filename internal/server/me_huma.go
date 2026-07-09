@@ -76,6 +76,30 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(result), nil
 		})
 
+	// Personalized "For You" — the taste-vector + TMDB-graph engine (non-ML).
+	// Facets hard-filter the candidate pool and the engine ranks by taste WITHIN
+	// it (e.g. genre="Horror" for a horror binge). Distinct from
+	// /api/me/recommended/{section} (the browse-landing rails) and the global
+	// /api/recommendations aggregate feed. Off-the-shelf ML engine plugs in later
+	// behind a config flag without changing this contract.
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/recommendations", "for-you-recommendations", "Personalized, steerable recommendations", "Me")),
+		func(ctx context.Context, in *struct {
+			Type      string  `query:"type" enum:"movie,tv,anime" doc:"Restrict to one media type"`
+			Genre     string  `query:"genre" maxLength:"64" doc:"Only titles in this genre"`
+			Keyword   string  `query:"keyword" maxLength:"128" doc:"Only titles carrying this keyword/tag"`
+			MinRating float64 `query:"min_rating" minimum:"0" maximum:"10" doc:"Minimum external rating"`
+			Limit     int32   `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Number of results"`
+		}) (*JSONOutput[service.ForYouResult], error) {
+			result, err := app.ForYou(ctx, userFrom(ctx).ID, service.ForYouFacets{
+				Type: in.Type, Genre: in.Genre, Keyword: in.Keyword,
+				MinRating: in.MinRating, Limit: in.Limit,
+			})
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(result), nil
+		})
+
 	// --- Favorites ---
 	huma.Register(api, secured(op(http.MethodPost, "/api/me/favorites", "toggle-favorite", "Toggle a favorite flag", "Me")),
 		func(ctx context.Context, in *struct {
@@ -471,7 +495,7 @@ type watchedBody struct {
 }
 
 type userListDetailBody struct {
-	List  sqlc.UserList    `json:"list"`
+	List  sqlc.UserList        `json:"list"`
 	Items []sqlc.MediaItemCard `json:"items"`
 }
 

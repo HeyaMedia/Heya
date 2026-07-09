@@ -1,0 +1,191 @@
+<!--
+  RecsBrowse — the full "Recommendations" category page for /movies/recommendations
+  and /tv/recommendations. Unlike TagBrowse (a flat tag list), this surfaces the
+  personalized engine as a STEERABLE grid: pick a genre and/or a rating floor and
+  the engine re-ranks by your taste within that constraint (the "horror binge").
+  Each tile shows why it was picked. Non-ML today; the embedding engine plugs in
+  behind a config flag without changing this surface.
+-->
+<template>
+  <div class="scroll page-pad" style="height: 100%">
+    <header class="rb-head">
+      <div class="rb-eyebrow">For You</div>
+      <h1 class="rb-title">Recommendations</h1>
+      <div class="rb-meta">{{ steerSummary }}</div>
+    </header>
+
+    <div class="rb-controls">
+      <AppMenu trigger-class="btn-ghost-sm" :width="240" align="start">
+        <template #trigger>
+          {{ genre || 'Any genre' }}
+          <Icon name="chevdown" :size="10" class="rb-caret" />
+        </template>
+        <DropdownMenuItem class="surface-item rb-item" :class="{ active: genre === '' }" @select="genre = ''">
+          Any genre
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          v-for="g in genreOptions"
+          :key="g"
+          class="surface-item rb-item"
+          :class="{ active: genre === g }"
+          @select="genre = g"
+        >
+          {{ g }}
+          <Icon v-if="genre === g" name="check" :size="12" class="rb-check" />
+        </DropdownMenuItem>
+      </AppMenu>
+
+      <div class="rb-seg">
+        <button
+          v-for="opt in ratingOptions"
+          :key="opt.value"
+          :class="{ active: minRating === opt.value }"
+          @click="minRating = opt.value"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+
+      <div class="rb-spacer" />
+      <button v-if="genre || minRating" class="btn-ghost-sm" @click="reset">Clear</button>
+    </div>
+
+    <div v-if="!loading && !hasSignal" class="rb-note">
+      Heart or watch a few titles and this personalizes to your taste — for now, showing the highest-rated picks.
+    </div>
+
+    <div v-if="loading" class="grid-posters">
+      <div v-for="i in 12" :key="i" class="grid-tile">
+        <div class="poster" style="aspect-ratio: 2/3; background: var(--bg-3); animation: pulse 1.5s infinite" />
+      </div>
+    </div>
+
+    <div v-else-if="items.length" class="grid-posters">
+      <NuxtLink v-for="(item, i) in items" :key="item.id" :to="mediaUrl(item)" class="grid-tile card-tile">
+        <MediaCard
+          :idx="i"
+          :src="usePosterUrl(item.id)"
+          aspect="2/3"
+          :title="item.title"
+          :subtitle="item.reason || item.year"
+        />
+      </NuxtLink>
+    </div>
+
+    <div v-else class="rb-empty">
+      Nothing matches this steer — try another genre or lower the rating floor.
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { DropdownMenuItem } from 'reka-ui'
+import { useQuery } from '@tanstack/vue-query'
+
+const props = defineProps<{ section: 'movie' | 'tv' }>()
+
+// Hoisted per the useNuxtApp gotcha — never resolve $heya inside async bodies.
+const { $heya } = useNuxtApp()
+
+type RecItem = { id: number; title: string; slug: string; year?: string; media_type: string; reason?: string; available: boolean }
+
+const genre = ref('')
+const minRating = ref(0)
+
+const ratingOptions = [
+  { label: 'Any', value: 0 },
+  { label: '6+', value: 6 },
+  { label: '7+', value: 7 },
+  { label: '8+', value: 8 },
+]
+
+// Available genres for the steer dropdown, most-common first.
+const genresQuery = useQuery({
+  queryKey: ['genres-all'],
+  queryFn: async () => (await $heya('/api/genres')) as { genre: string; count: number }[],
+  staleTime: 1000 * 60 * 30,
+})
+const genreOptions = computed(() =>
+  [...(genresQuery.data.value ?? [])].sort((a, b) => b.count - a.count).map(g => g.genre).slice(0, 30),
+)
+
+// Reactive key — changing genre/minRating refetches with the new steer.
+const recsQuery = useQuery({
+  queryKey: ['for-you-browse', props.section, genre, minRating],
+  queryFn: async () => (await $heya('/api/me/recommendations', {
+    query: {
+      type: props.section,
+      genre: genre.value || undefined,
+      min_rating: minRating.value || undefined,
+      limit: 60,
+    },
+  })) as { items: RecItem[]; has_signal: boolean },
+  staleTime: 1000 * 60 * 5,
+})
+
+const items = computed(() => recsQuery.data.value?.items ?? [])
+const hasSignal = computed(() => recsQuery.data.value?.has_signal ?? true)
+const loading = computed(() => recsQuery.isPending.value)
+
+const steerSummary = computed(() => {
+  const bits: string[] = []
+  if (genre.value) bits.push(genre.value)
+  if (minRating.value) bits.push(`${minRating.value}+ rating`)
+  const scope = props.section === 'movie' ? 'films' : 'shows'
+  return bits.length ? `${bits.join(' · ')} — ranked for you` : `${scope[0]!.toUpperCase()}${scope.slice(1)}, ranked for you`
+})
+
+function reset() {
+  genre.value = ''
+  minRating.value = 0
+}
+</script>
+
+<style scoped>
+.rb-head { margin-bottom: 20px; }
+.rb-eyebrow {
+  font-size: 10px; font-family: var(--font-mono); font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px;
+}
+.rb-title { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px; }
+.rb-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); }
+
+.rb-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.rb-spacer { flex: 1; }
+.rb-caret { opacity: 0.45; margin-left: 4px; }
+
+/* Rating segmented control — mirrors TagBrowse's .tb-seg / FilterBar's .fb-seg. */
+.rb-seg {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.rb-seg button {
+  padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: 500;
+  color: var(--fg-2); cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.rb-seg button:hover { color: var(--fg-0); }
+.rb-seg button.active { background: var(--gold-soft); color: var(--gold-bright); }
+
+.rb-note {
+  font-size: 13px; color: var(--fg-2); background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 10px 14px; margin-bottom: 20px;
+}
+.rb-empty { padding: 60px 0; text-align: center; color: var(--fg-3); font-size: 14px; }
+
+@media (max-width: 720px) {
+  .page-pad { padding: 20px 16px 60px; }
+  .rb-title { font-size: 26px; }
+  .rb-controls { flex-wrap: wrap; }
+}
+</style>
+
+<style>
+/* AppMenu portals items out of scoped reach (docs/ui.md). */
+.rb-item { justify-content: space-between; }
+.rb-item.active { color: var(--gold); }
+.rb-check { color: var(--gold); }
+</style>

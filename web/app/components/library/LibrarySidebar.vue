@@ -1,16 +1,27 @@
 <template>
   <aside class="lib-sidebar scroll" :class="{ 'lib-sidebar-sheet': variant === 'sheet' }">
-    <!-- Recommended landing (movies / tv only). Bare `/movies` route; the flat
-         grid moves under "All {{ typeLabel }}" below. -->
-    <div v-if="showRecommended" class="lib-section" style="margin-bottom: 20px">
+    <!-- Section landing (movies / tv only). Bare `/movies` route; leads with the
+         personalized "For You" row, then the discovery rails. The flat grid
+         moves under "All {{ typeLabel }}" below, the steerable engine under
+         "Recommendations" (its own route). -->
+    <div v-if="showBrowse" class="lib-section" style="margin-bottom: 20px">
       <div
         class="lib-item"
         role="button"
-        :class="{ active: activeView === 'recommended' }"
-        @click="$emit('view', 'recommended')"
+        :class="{ active: activeView === 'browse' }"
+        @click="$emit('view', 'browse')"
       >
         <Icon name="star" :size="16" style="color: var(--gold)" />
-        <span>Recommended</span>
+        <span>Browse</span>
+      </div>
+      <div
+        class="lib-item"
+        role="button"
+        :class="{ active: activeView === 'recommendations' }"
+        @click="$emit('view', 'recommendations')"
+      >
+        <Icon name="sparkle" :size="16" style="color: var(--gold)" />
+        <span>Recommendations</span>
       </div>
     </div>
 
@@ -125,8 +136,8 @@ const props = defineProps<{
   dragOverListId?: number | null
   /** TMDB collections with local movies. Undefined hides the Franchises section. */
   collections?: CollectionBrowse[]
-  /** Show the "Recommended" landing row at the top (movies / tv only). */
-  showRecommended?: boolean
+  /** Show the "Browse" + "Recommendations" landing rows at the top (movies / tv only). */
+  showBrowse?: boolean
   /** 'sidebar' (default) = fixed 240px aside. 'sheet' = fills an AppSheet body
    *  on phone (movies/tv/books index.vue) — same markup/behavior, just sheds
    *  the standalone-aside chrome. See the `.lib-sidebar-sheet` rule below. */

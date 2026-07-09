@@ -30,10 +30,12 @@
 
       <ContentRow
         v-if="recommendedItems.length"
-        title="Recommended For You"
-        subtitle="Based on your library"
+        title="For You"
+        subtitle="From what you've watched & loved"
         :items="recommendedItems"
+        more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
+        @more="navigateTo('/movies/recommendations')"
       />
 
       <ContentRow
@@ -192,17 +194,14 @@ const recentWatchedQuery = useQuery({
   }>,
   staleTime: 1000 * 30,
 })
-const favoritesStateQuery = useQuery({
-  queryKey: ['me', 'state', { scope: 'movies' }],
-  queryFn: async () => (await $heya('/api/me/state', {
-    method: 'POST',
-    body: { scope: 'movies' } as never,
-  })) as { favorited: number[] },
-  staleTime: 1000 * 60,
-})
-const recsQuery = useQuery({
-  queryKey: ['recommendations', { limit: 20 }],
-  queryFn: async () => (await $heya('/api/recommendations', { query: { limit: 20 } })) as { local_media_item_id: number | null }[],
+// Personalized "For You" — the taste-vector + TMDB-graph engine. Excludes
+// seeds (hearts / watched) server-side, so no client-side filtering needed.
+const forYouQuery = useQuery({
+  queryKey: ['for-you', { limit: 20 }],
+  queryFn: async () => (await $heya('/api/me/recommendations', { query: { limit: 20 } })) as {
+    items: { id: number; title: string; slug: string; year?: string; media_type: string; reason?: string; available: boolean }[]
+    has_signal: boolean
+  },
   staleTime: 1000 * 60 * 10,
 })
 
@@ -270,26 +269,16 @@ async function onPinHeroMode(mode: string) {
 // No longer rendered as its own row — kept only so Recommended For You can
 // exclude titles the user already favorited (the Loved sidebar views cover
 // browsing favorites).
-const favoriteItems = computed<MediaItem[]>(() => {
-  const favIDs = new Set(favoritesStateQuery.data.value?.favorited ?? [])
-  if (favIDs.size === 0) return []
-  return [...recentMovies.value, ...recentTVShows.value].filter(m => favIDs.has(m.id) && m.available !== false)
-})
-
-const recommendedItems = computed<MediaItem[]>(() => {
-  const recs = recsQuery.data.value ?? []
-  if (!recs.length) return []
-  const mediaMap = new Map([...recentMovies.value, ...recentTVShows.value].map(m => [m.id, m]))
-  const local = recs
-    .filter(r => r.local_media_item_id !== null)
-    .map(r => mediaMap.get(r.local_media_item_id as number))
-    .filter((m): m is MediaItem => !!m && m.available !== false)
-  const existing = new Set([
-    ...favoriteItems.value.map(m => m.id),
-    ...upNextItems.value.map(m => m.id),
-  ])
-  return local.filter(m => !existing.has(m.id)).slice(0, 20)
-})
+const recommendedItems = computed<MediaItem[]>(() =>
+  (forYouQuery.data.value?.items ?? []).map(it => ({
+    id: it.id,
+    title: it.title,
+    slug: it.slug,
+    year: it.year ?? '',
+    media_type: it.media_type,
+    available: it.available,
+  }) as unknown as MediaItem),
+)
 
 const loading = computed(() =>
   moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value || musicHomeQuery.isPending.value

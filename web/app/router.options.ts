@@ -29,9 +29,12 @@ export default <RouterConfig>{
       const component = (index as { component?: RouteRecordRaw['component'] } | undefined)?.component
       if (!component) continue
       extra.push(
-        // Bare `/movies` is the Recommended landing; the flat grid lives at
-        // `/movies/all` (see useBrowseState's recommendedDefault).
+        // Bare `/movies` is the Browse landing; the flat grid lives at
+        // `/movies/all` (see useBrowseState's browseDefault).
         { path: `/${base}/all`, component, meta: { key } },
+        // The steerable personalized engine — a view within the section (keeps
+        // the sidebar), not a standalone page.
+        { path: `/${base}/recommendations`, component, meta: { key } },
         { path: `/${base}/loved`, component, meta: { key } },
         { path: `/${base}/library/:libId(\\d+)`, component, meta: { key } },
         { path: `/${base}/list/:listId(\\d+)`, component, meta: { key } },

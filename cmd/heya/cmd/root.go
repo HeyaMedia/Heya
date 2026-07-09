@@ -72,6 +72,7 @@ func init() {
 	rootCmd.AddCommand(queueCmd)
 	rootCmd.AddCommand(mediaCmd)
 	rootCmd.AddCommand(musicCmd)
+	rootCmd.AddCommand(recommendCmd)
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(transcodeCmd)
 	rootCmd.AddCommand(studiosCmd)

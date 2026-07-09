@@ -16,6 +16,16 @@
       />
 
       <ContentRow
+        v-if="forYouItems.length"
+        title="For You"
+        subtitle="Ranked by your taste"
+        :items="forYouItems"
+        more="See all"
+        @tile="go"
+        @more="navigateTo(section === 'movie' ? '/movies/recommendations' : '/tv/recommendations')"
+      />
+
+      <ContentRow
         v-if="recentAdded.length"
         :title="section === 'tv' ? 'Recently Added TV' : 'Recently Added Films'"
         :subtitle="section === 'tv' ? 'New shows, seasons & episodes' : 'Across all libraries'"
@@ -79,6 +89,16 @@ const railsQuery = useQuery({
   staleTime: 1000 * 60 * 5,
 })
 const rails = computed<Rail[]>(() => railsQuery.data.value?.rails ?? [])
+
+// Personalized "For You" — the taste-vector + TMDB-graph engine, section-scoped.
+const forYouQuery = useQuery({
+  queryKey: ['for-you', props.section],
+  queryFn: async () => (await $heya('/api/me/recommendations', {
+    query: { type: props.section, limit: 20 },
+  })) as { items: RailItem[]; has_signal: boolean },
+  staleTime: 1000 * 60 * 5,
+})
+const forYouItems = computed<MediaItem[]>(() => toRow(forYouQuery.data.value?.items ?? []))
 
 // ── Recently Added ────────────────────────────────────────────────────────
 // The TV rail is Plex-style grouped file arrivals (new show / season / episode);
@@ -184,7 +204,7 @@ const loading = computed(() =>
 )
 const isEmpty = computed(() =>
   !continueItems.value.length && !upNextItems.value.length && !recentAdded.value.length
-  && !recentWatched.value.length && !rails.value.length,
+  && !recentWatched.value.length && !rails.value.length && !forYouItems.value.length,
 )
 
 // ── Up Next (TV) + player navigation ──────────────────────────────────────
@@ -252,7 +272,7 @@ useLiveRefresh([
       ['media', 'recent', props.section],
     ],
   },
-  { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['me', 'watch', 'recent-episodes'], ['recommended', props.section]] },
+  { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['me', 'watch', 'recent-episodes'], ['recommended', props.section], ['for-you', props.section]] },
 ])
 
 function mediaTypeInSection(mediaType: string, section: 'movie' | 'tv') {

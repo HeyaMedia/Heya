@@ -76,11 +76,11 @@ function normalizeSelection(activeLib: number | null, activeView: string | null)
   return activeView ? { activeLib: null, activeView } : { activeLib, activeView: null }
 }
 
-export function useBrowseState(page: string, opts: { recommendedDefault?: boolean } = {}) {
-  // When recommendedDefault is set (movies / tv), the bare `/movies` path is
-  // the Recommended landing (activeView='recommended') and the flat grid moves
+export function useBrowseState(page: string, opts: { browseDefault?: boolean } = {}) {
+  // When browseDefault is set (movies / tv), the bare `/movies` path is
+  // the Browse landing (activeView='browse') and the flat grid moves
   // to `/movies/all`. Books opts out, so its bare `/books` stays the grid.
-  const recommended = opts.recommendedDefault ?? false
+  const browseDefault = opts.browseDefault ?? false
 
   let store = stores.get(page)
   if (!store) {
@@ -98,8 +98,9 @@ export function useBrowseState(page: string, opts: { recommendedDefault?: boolea
   // mid-navigation) so the sync watchers below leave the store untouched
   // rather than reading it as "All" and hijacking the navigation.
   function selectionFromRoute(): Selection | null {
-    if (route.path === base) return { activeLib: null, activeView: recommended ? 'recommended' : null }
-    if (recommended && route.path === `${base}/all`) return { activeLib: null, activeView: null }
+    if (route.path === base) return { activeLib: null, activeView: browseDefault ? 'browse' : null }
+    if (browseDefault && route.path === `${base}/all`) return { activeLib: null, activeView: null }
+    if (route.path === `${base}/recommendations`) return { activeLib: null, activeView: 'recommendations' }
     if (route.path === `${base}/loved`) return { activeLib: null, activeView: 'loved' }
     if (route.path === `${base}/franchises`) return { activeLib: null, activeView: 'franchises' }
     const rest = route.path.startsWith(`${base}/`) ? route.path.slice(base.length + 1) : ''
@@ -114,14 +115,15 @@ export function useBrowseState(page: string, opts: { recommendedDefault?: boolea
   }
 
   function pathForSelection(sel: Selection): string {
-    if (sel.activeView === 'recommended') return base
+    if (sel.activeView === 'browse') return base
+    if (sel.activeView === 'recommendations') return `${base}/recommendations`
     if (sel.activeView === 'loved') return `${base}/loved`
     if (sel.activeView === 'franchises') return `${base}/franchises`
     if (sel.activeView?.startsWith('list-')) return `${base}/list/${sel.activeView.slice(5)}`
     if (sel.activeLib != null) return `${base}/library/${sel.activeLib}`
-    // {null, null} is the flat "All" grid — its own path when Recommended owns
-    // the bare route, otherwise the bare route itself (books).
-    return recommended ? `${base}/all` : base
+    // {null, null} is the flat "All" grid — its own path when the Browse landing
+    // owns the bare route, otherwise the bare route itself (books).
+    return browseDefault ? `${base}/all` : base
   }
 
   // Reconcile the store from the URL up front — synchronous and before the
