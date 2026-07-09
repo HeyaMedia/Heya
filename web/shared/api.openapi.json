@@ -11601,6 +11601,31 @@
         ],
         "type": "object"
       },
+      "RecommendationsMLSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RecommendationsMLSettings.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "accelerator": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "accelerator"
+        ],
+        "type": "object"
+      },
       "RecommendedResult": {
         "additionalProperties": false,
         "properties": {
@@ -12472,6 +12497,37 @@
           "watched",
           "total",
           "episode_ids"
+        ],
+        "type": "object"
+      },
+      "SemanticSearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SemanticSearchResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ForYouItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "ml_ready": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "ml_ready"
         ],
         "type": "object"
       },
@@ -16501,6 +16557,209 @@
           }
         ],
         "summary": "Set the global log level at runtime",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/recommendations-ml/backfill": {
+      "post": {
+        "operationId": "recommendations-ml-backfill",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Re-embed the catalog",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/recommendations-ml/fetch": {
+      "post": {
+        "operationId": "recommendations-ml-fetch",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Download the embedding model",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/recommendations-ml/settings": {
+      "get": {
+        "operationId": "get-recommendations-ml-settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationsMLSettings"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Embedding engine settings",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "put": {
+        "operationId": "set-recommendations-ml-settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendationsMLSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Update embedding engine settings",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/recommendations-ml/status": {
+      "get": {
+        "operationId": "recommendations-ml-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Embedding recommendation engine status",
         "tags": [
           "Admin"
         ]
@@ -31278,6 +31537,88 @@
         "summary": "Lightweight cross-bucket search for the omni-search popover",
         "tags": [
           "Search"
+        ]
+      }
+    },
+    "/api/search/semantic": {
+      "get": {
+        "operationId": "semantic-search",
+        "parameters": [
+          {
+            "description": "Natural-language query",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Natural-language query",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Restrict to one media type",
+            "explode": false,
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "description": "Restrict to one media type",
+              "enum": [
+                "movie",
+                "tv",
+                "anime"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 40,
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticSearchResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Natural-language 'find me something like…' search",
+        "tags": [
+          "Discover"
         ]
       }
     },

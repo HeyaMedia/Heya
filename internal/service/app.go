@@ -25,6 +25,7 @@ import (
 	"github.com/karbowiak/heya/internal/sessions"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/tailscale"
+	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/watcher"
 	"github.com/karbowiak/heya/internal/worker"
@@ -51,12 +52,20 @@ type App struct {
 	modelFetcher   *sonicanalysis.ModelFetcher
 	analyzer       *sonicanalysis.Analyzer
 	sonicHolder    *sonicanalysis.Holder
-	imageResizer   *imageserve.Resizer
-	imageFetch     singleflight.Group // coalesces concurrent on-demand image fetches by cache key
-	envLibraries   map[int64]EnvManagedLibrary
-	radioBrowser   *radiobrowser.Client
-	podcastIndex   *podcastindex.Client
-	sessions       *sessions.Store
+
+	// Optional embedding recommendation engine (HEYA_RECOMMENDATIONS_ML_ENABLED).
+	// recEmbedder is lazy-loaded on first use when enabled; recModelsDir holds the
+	// BGE model files the recFetcher downloads.
+	recFetcher    *sonicanalysis.ModelFetcher
+	recEmbedder   *textembed.Embedder
+	recEmbedderMu sync.Mutex
+	recModelsDir  string
+	imageResizer  *imageserve.Resizer
+	imageFetch    singleflight.Group // coalesces concurrent on-demand image fetches by cache key
+	envLibraries  map[int64]EnvManagedLibrary
+	radioBrowser  *radiobrowser.Client
+	podcastIndex  *podcastindex.Client
+	sessions      *sessions.Store
 
 	// Lifetime context cancelled by Close(). Used for fire-and-forget
 	// goroutines (model fetches, tailscale Enable/Logout) that must outlive
@@ -251,6 +260,11 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	modelFetcher := sonicanalysis.NewModelFetcher(modelsDir, "")
 	analyzer := sonicanalysis.NewAnalyzer(saCfg)
 
+	// Optional embedding recommendation engine — its own model dir + fetcher
+	// (BGE-large-en), lazy embedder loaded on first use when enabled.
+	recModelsDir := cfg.DataDir.Value + "/models/recommendations"
+	recFetcher := sonicanalysis.NewModelFetcherWithManifest(recModelsDir, "", recommendationsMLManifest())
+
 	resizer, err := imageserve.New(cfg.DataDir.Value + "/images/resized")
 	if err != nil {
 		db.Close()
@@ -277,6 +291,8 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		modelFetcher:   modelFetcher,
 		analyzer:       analyzer,
 		sonicHolder:    sonicHolder,
+		recFetcher:     recFetcher,
+		recModelsDir:   recModelsDir,
 		imageResizer:   resizer,
 		radioBrowser:   radiobrowser.New(),
 		podcastIndex:   podcastindex.New(cfg.PodcastIndexKey.Value, cfg.PodcastIndexSecret.Value),

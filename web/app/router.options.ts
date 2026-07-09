@@ -28,19 +28,25 @@ export default <RouterConfig>{
       // the RouteRecordRaw union just doesn't narrow that for TS here.
       const component = (index as { component?: RouteRecordRaw['component'] } | undefined)?.component
       if (!component) continue
+      // Merge the base route's Nuxt page meta (layout, middleware, name) and only
+      // OVERRIDE `key`. Setting a bare `meta: { key }` dropped the page meta, which
+      // hard-loads/refreshes need to resolve the layout — that left every synthetic
+      // sub-route stuck on the app-shell loader on a direct load (client-side nav,
+      // which reuses the already-mounted layout, worked fine).
+      const meta = { ...(index as { meta?: Record<string, unknown> }).meta, key }
       extra.push(
         // Bare `/movies` is the Browse landing; the flat grid lives at
         // `/movies/all` (see useBrowseState's browseDefault).
-        { path: `/${base}/all`, component, meta: { key } },
+        { path: `/${base}/all`, component, meta },
         // The steerable personalized engine — a view within the section (keeps
         // the sidebar), not a standalone page.
-        { path: `/${base}/recommendations`, component, meta: { key } },
-        { path: `/${base}/loved`, component, meta: { key } },
-        { path: `/${base}/library/:libId(\\d+)`, component, meta: { key } },
-        { path: `/${base}/list/:listId(\\d+)`, component, meta: { key } },
+        { path: `/${base}/recommendations`, component, meta },
+        { path: `/${base}/loved`, component, meta },
+        { path: `/${base}/library/:libId(\\d+)`, component, meta },
+        { path: `/${base}/list/:listId(\\d+)`, component, meta },
       )
       if (franchises) {
-        extra.push({ path: `/${base}/franchises`, component, meta: { key } })
+        extra.push({ path: `/${base}/franchises`, component, meta })
         // The per-franchise view is the rich standalone /collection/:id page
         // (linked from the Franchises grid + movie "part of collection"
         // badges). Keep the old browse-filter URL working as a redirect.

@@ -586,6 +586,13 @@ type MediaItemExternalID struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MediaItemFacet struct {
+	MediaItemID     int64              `json:"media_item_id"`
+	TextEmbedding   pgvector.Vector    `json:"text_embedding"`
+	EmbedderVersion int32              `json:"embedder_version"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+}
+
 type MediaItemProfile struct {
 	MediaItemID      int64              `json:"media_item_id"`
 	Title            string             `json:"title"`

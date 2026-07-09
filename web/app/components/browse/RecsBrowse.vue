@@ -14,7 +14,18 @@
       <div class="rb-meta">{{ steerSummary }}</div>
     </header>
 
-    <div class="rb-controls">
+    <div class="rb-search">
+      <Icon name="sparkle" :size="15" class="rb-search-icon" />
+      <input
+        v-model="nlQuery"
+        type="text"
+        class="rb-search-input"
+        placeholder="Describe what you're in the mood for…  e.g. “a dark psychological thriller”"
+      >
+      <button v-if="nlQuery" class="rb-search-clear" @click="nlQuery = ''">Clear</button>
+    </div>
+
+    <div v-if="!searching" class="rb-controls">
       <AppMenu trigger-class="btn-ghost-sm" :width="240" align="start">
         <template #trigger>
           {{ genre || 'Any genre' }}
@@ -50,18 +61,23 @@
       <button v-if="genre || minRating" class="btn-ghost-sm" @click="reset">Clear</button>
     </div>
 
-    <div v-if="!loading && !hasSignal" class="rb-note">
+    <div v-if="searching && !mlReady" class="rb-note">
+      Natural-language search needs the embedding engine — enable it (and let the
+      model finish downloading) in
+      <NuxtLink to="/settings/recommendations" class="rb-link">Settings → Recommendations</NuxtLink>.
+    </div>
+    <div v-else-if="!searching && !loading && !hasSignal" class="rb-note">
       Heart or watch a few titles and this personalizes to your taste — for now, showing the highest-rated picks.
     </div>
 
-    <div v-if="loading" class="grid-posters">
+    <div v-if="displayLoading" class="grid-posters">
       <div v-for="i in 12" :key="i" class="grid-tile">
         <div class="poster" style="aspect-ratio: 2/3; background: var(--bg-3); animation: pulse 1.5s infinite" />
       </div>
     </div>
 
-    <div v-else-if="items.length" class="grid-posters">
-      <NuxtLink v-for="(item, i) in items" :key="item.id" :to="mediaUrl(item)" class="grid-tile card-tile">
+    <div v-else-if="displayItems.length" class="grid-posters">
+      <NuxtLink v-for="(item, i) in displayItems" :key="item.id" :to="mediaUrl(item)" class="grid-tile card-tile">
         <MediaCard
           :idx="i"
           :src="usePosterUrl(item.id)"
@@ -72,8 +88,8 @@
       </NuxtLink>
     </div>
 
-    <div v-else class="rb-empty">
-      Nothing matches this steer — try another genre or lower the rating floor.
+    <div v-else-if="!(searching && !mlReady)" class="rb-empty">
+      {{ searching ? 'No matches for that description.' : 'Nothing matches this steer — try another genre or lower the rating floor.' }}
     </div>
   </div>
 </template>
@@ -127,6 +143,28 @@ const items = computed(() => recsQuery.data.value?.items ?? [])
 const hasSignal = computed(() => recsQuery.data.value?.has_signal ?? true)
 const loading = computed(() => recsQuery.isPending.value)
 
+// Natural-language "vibe" search (ML engine). When a query is active it replaces
+// the facet-ranked grid with semantic KNN hits.
+const nlQuery = ref('')
+const activeQ = ref('')
+let debTimer: ReturnType<typeof setTimeout> | null = null
+watch(nlQuery, (v) => {
+  if (debTimer) clearTimeout(debTimer)
+  debTimer = setTimeout(() => { activeQ.value = v.trim() }, 400)
+})
+const semanticQuery = useQuery({
+  queryKey: ['semantic', props.section, activeQ],
+  queryFn: async () => (await $heya('/api/search/semantic', {
+    query: { q: activeQ.value, type: props.section, limit: 60 },
+  })) as { items: RecItem[]; ml_ready: boolean },
+  enabled: computed(() => activeQ.value.length > 1),
+  staleTime: 1000 * 60 * 5,
+})
+const searching = computed(() => activeQ.value.length > 1)
+const mlReady = computed(() => semanticQuery.data.value?.ml_ready ?? true)
+const displayItems = computed(() => (searching.value ? (semanticQuery.data.value?.items ?? []) : items.value))
+const displayLoading = computed(() => (searching.value ? semanticQuery.isPending.value : loading.value))
+
 const steerSummary = computed(() => {
   const bits: string[] = []
   if (genre.value) bits.push(genre.value)
@@ -175,6 +213,20 @@ function reset() {
   padding: 10px 14px; margin-bottom: 20px;
 }
 .rb-empty { padding: 60px 0; text-align: center; color: var(--fg-3); font-size: 14px; }
+
+.rb-search { position: relative; display: flex; align-items: center; margin-bottom: 14px; }
+.rb-search-icon { position: absolute; left: 14px; color: var(--gold); pointer-events: none; }
+.rb-search-input {
+  width: 100%; padding: 12px 16px 12px 40px;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--fg-0); font-size: 14px; outline: none; transition: border-color 0.15s;
+}
+.rb-search-input:focus { border-color: var(--gold); }
+.rb-search-input::placeholder { color: var(--fg-4); }
+.rb-search-clear { position: absolute; right: 10px; background: transparent; border: 0; color: var(--fg-3); font-size: 12px; cursor: pointer; padding: 4px 8px; }
+.rb-search-clear:hover { color: var(--fg-0); }
+.rb-link { color: var(--gold); text-decoration: none; }
+.rb-link:hover { text-decoration: underline; }
 
 @media (max-width: 720px) {
   .page-pad { padding: 20px 16px 60px; }

@@ -85,10 +85,16 @@ type ModelFetcher struct {
 // directory. URLBase is unused right now (the manifest carries fully-
 // qualified URLs) but reserved for future mirror support.
 func NewModelFetcher(targetDir, urlBase string) *ModelFetcher {
+	return NewModelFetcherWithManifest(targetDir, urlBase, DefaultManifest())
+}
+
+// NewModelFetcherWithManifest is NewModelFetcher with a caller-supplied manifest,
+// for model sets other than sonic-analysis (e.g. the recommendation text-embedder).
+func NewModelFetcherWithManifest(targetDir, urlBase string, manifest []ModelFile) *ModelFetcher {
 	return &ModelFetcher{
 		targetDir: targetDir,
 		urlBase:   urlBase,
-		manifest:  DefaultManifest(),
+		manifest:  manifest,
 		client:    &http.Client{Timeout: 30 * time.Minute},
 	}
 }

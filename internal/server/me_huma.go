@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 )
+
+// semanticSearchResult carries the NL-search hits plus whether the ML engine was
+// actually available (false → the FE prompts the user to enable it).
+type semanticSearchResult struct {
+	Items   []service.ForYouItem `json:"items"`
+	MLReady bool                 `json:"ml_ready"`
+}
 
 // registerMeRoutes mounts the per-user state surface under /api/me/*. This
 // covers everything that used to be scattered across /api/watch, /api/favorites,
@@ -98,6 +106,26 @@ func registerMeRoutes(api huma.API, app *service.App) {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
 			return noStoreJSON(result), nil
+		})
+
+	// Natural-language semantic search — embed the query with the ML engine and
+	// KNN over media_item_facets. Returns ml_ready=false (not an error) when the
+	// engine is disabled or the model is still downloading, so the FE can prompt
+	// the user to enable it instead of showing a hard failure.
+	huma.Register(api, secured(op(http.MethodGet, "/api/search/semantic", "semantic-search", "Natural-language 'find me something like…' search", "Discover")),
+		func(ctx context.Context, in *struct {
+			Q     string `query:"q" doc:"Natural-language query"`
+			Type  string `query:"type" enum:"movie,tv,anime" doc:"Restrict to one media type"`
+			Limit int32  `query:"limit" minimum:"1" maximum:"100" default:"40"`
+		}) (*JSONOutput[semanticSearchResult], error) {
+			items, err := app.SemanticSearch(ctx, in.Q, service.ForYouFacets{Type: in.Type, Limit: in.Limit})
+			if err != nil {
+				if errors.Is(err, service.ErrMLDisabled) {
+					return noStoreJSON(semanticSearchResult{Items: []service.ForYouItem{}, MLReady: false}), nil
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(semanticSearchResult{Items: items, MLReady: true}), nil
 		})
 
 	// --- Favorites ---

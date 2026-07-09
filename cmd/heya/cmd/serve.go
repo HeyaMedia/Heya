@@ -217,6 +217,8 @@ var serveCmd = &cobra.Command{
 			// Kick off the model fetcher in the background. No-op when
 			// sonic-analysis is disabled in config.
 			app.StartSonicAnalysis(appCtx)
+			// Same for the optional embedding recommendation engine.
+			app.StartRecommendationsML(appCtx)
 		}
 
 		<-sigCtx.Done()

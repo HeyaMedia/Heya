@@ -236,6 +236,18 @@ func initOnnx() error {
 	return ortInitErr
 }
 
+// EnsureONNX initializes the shared ONNX Runtime environment (once per process).
+// Exposed so sibling subsystems — e.g. the recommendation text-embedder in
+// internal/textembed — reuse this environment instead of double-initializing it
+// (ort.InitializeEnvironment must not be called twice).
+func EnsureONNX() error { return initOnnx() }
+
+// BuildSessionOptions exposes buildSessionOptions for out-of-package session
+// construction, sharing the exact accelerator/execution-provider logic.
+func BuildSessionOptions(accel Accelerator) (*ort.SessionOptions, string, error) {
+	return buildSessionOptions(accel)
+}
+
 // Names for the Discogs specialized embedding heads. Each shares the
 // same EffNet backbone + same (64, 128, 96) mel-spec input, but is
 // trained with a contrastive loss targeting a different aggregation

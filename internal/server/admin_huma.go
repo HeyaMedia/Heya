@@ -95,6 +95,39 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 			return statusOK("started"), nil
 		})
 
+	// --- Recommendations ML (embedding) engine ---
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/recommendations-ml/status", "recommendations-ml-status", "Embedding recommendation engine status", "Admin")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[map[string]any], error) {
+			return noStoreJSON(collectRecommendationsMLStatus(ctx, app)), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/recommendations-ml/settings", "get-recommendations-ml-settings", "Embedding engine settings", "Admin")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.RecommendationsMLSettings], error) {
+			return noStoreJSON(app.RecommendationsMLSettings(ctx)), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/admin/recommendations-ml/settings", "set-recommendations-ml-settings", "Update embedding engine settings", "Admin")),
+		func(ctx context.Context, in *struct {
+			Body service.RecommendationsMLSettings
+		}) (*StatusOutput, error) {
+			if err := app.SetRecommendationsMLSettings(ctx, in.Body); err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return statusOK("saved"), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/recommendations-ml/backfill", "recommendations-ml-backfill", "Re-embed the catalog", "Admin")),
+		func(ctx context.Context, _ *struct{}) (*StatusOutput, error) {
+			go func() { _, _, _ = app.BackfillVideoEmbeddings(app.LifetimeContext(), false) }()
+			return statusOK("started"), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/recommendations-ml/fetch", "recommendations-ml-fetch", "Download the embedding model", "Admin")),
+		func(ctx context.Context, _ *struct{}) (*StatusOutput, error) {
+			app.TriggerRecommendationsMLFetch(app.LifetimeContext())
+			return statusOK("started"), nil
+		})
+
 	// --- Logs ---
 	// Always register the route so it appears in /api/docs and the typed TS
 	// client; gate on `buf` at request time instead of registration time. A

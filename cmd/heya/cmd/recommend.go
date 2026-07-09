@@ -4,12 +4,59 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
+
+var recommendEmbedCmd = &cobra.Command{
+	Use:   "embed",
+	Short: "Backfill text embeddings for the video catalog (needs the ML engine enabled)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		force, _ := cmd.Flags().GetBool("force")
+		return withApp(func(ctx context.Context, app *service.App) error {
+			n, skipped, err := app.BackfillVideoEmbeddings(ctx, force)
+			if err != nil {
+				return err
+			}
+			ui.Success("Embedded %d items (%d skipped).", n, skipped)
+			return nil
+		})
+	},
+}
+
+var recommendSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Natural-language semantic search over the library (needs the ML engine)",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		typ, _ := cmd.Flags().GetString("type")
+		limit, _ := cmd.Flags().GetInt32("limit")
+		q := strings.Join(args, " ")
+		return withApp(func(ctx context.Context, app *service.App) error {
+			items, err := app.SemanticSearch(ctx, q, service.ForYouFacets{Type: typ, Limit: limit})
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(items)
+			}
+			if len(items) == 0 {
+				ui.Warn("No matches.")
+				return nil
+			}
+			t := ui.NewTable("SIM", "TYPE", "TITLE")
+			for _, it := range items {
+				t.AddRow(fmt.Sprintf("%.3f", it.Score), it.MediaType, it.Title)
+			}
+			fmt.Println(t.Render())
+			return nil
+		})
+	},
+}
 
 var recommendCmd = &cobra.Command{
 	Use:   "recommend",
@@ -78,4 +125,11 @@ func init() {
 	recommendForYouCmd.Flags().Float64("min-rating", 0, "Minimum external rating (0-10)")
 	recommendForYouCmd.Flags().Int32("limit", 20, "Number of results")
 	recommendCmd.AddCommand(recommendForYouCmd)
+
+	recommendEmbedCmd.Flags().Bool("force", false, "Re-embed every item, not just missing ones")
+	recommendCmd.AddCommand(recommendEmbedCmd)
+
+	recommendSearchCmd.Flags().String("type", "", "Restrict to movie | tv | anime")
+	recommendSearchCmd.Flags().Int32("limit", 20, "Number of results")
+	recommendCmd.AddCommand(recommendSearchCmd)
 }

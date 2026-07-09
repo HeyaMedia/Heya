@@ -40,6 +40,7 @@ const (
 	fyAlpha = 0.60 // content engine weight
 	fyBeta  = 0.35 // graph engine weight
 	fyGamma = 0.05 // external-rating prior
+	fyDelta = 0.30 // embedding-similarity term — added only when the ML engine is on
 
 	// Broad "pseudo-genre" tags (e.g. "based on manga") appear in nearly every
 	// anime a fan likes, so their profile weight grows with seed COUNT and drowns
@@ -141,6 +142,10 @@ func (a *App) ForYou(ctx context.Context, userID int64, facets ForYouFacets) (Fo
 		return ForYouResult{}, fmt.Errorf("load graph: %w", err)
 	}
 
+	// Optional 3rd signal: embedding similarity to the taste centroid. nil when
+	// the ML engine is off — the blend then uses content + graph + quality only.
+	embedScores := a.fyEmbedScores(ctx, seedW)
+
 	// score candidates (available, unwatched, not a seed, facet-matched)
 	var cands []*fyScored
 	for id, it := range idx.items {
@@ -164,25 +169,32 @@ func (a *App) ForYou(ctx context.Context, userID int64, facets ForYouFacets) (Fo
 		if norm2 > 0 {
 			content = dot / math.Sqrt(norm2)
 		}
-		cands = append(cands, &fyScored{it: it, content: content, graph: graphScore[id], contentTopTag: bestTag})
+		cands = append(cands, &fyScored{it: it, content: content, graph: graphScore[id], embed: embedScores[id], contentTopTag: bestTag})
 	}
 
 	// normalize each engine to [0,1], then blend
-	var maxC, maxG float64
+	var maxC, maxG, maxE float64
 	for _, s := range cands {
 		maxC = math.Max(maxC, s.content)
 		maxG = math.Max(maxG, s.graph)
+		maxE = math.Max(maxE, s.embed)
 	}
 	for _, s := range cands {
-		cN, gN := 0.0, 0.0
+		cN, gN, eN := 0.0, 0.0, 0.0
 		if maxC > 0 {
 			cN = s.content / maxC
 		}
 		if maxG > 0 {
 			gN = s.graph / maxG
 		}
-		s.content, s.graph = cN, gN
+		if maxE > 0 {
+			eN = s.embed / maxE
+		}
+		s.content, s.graph, s.embed = cN, gN, eN
 		s.final = fyAlpha*cN + fyBeta*gN + fyGamma*(s.it.rating/10)
+		if embedScores != nil {
+			s.final += fyDelta * eN
+		}
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].final > cands[j].final })
 
@@ -211,10 +223,10 @@ func (a *App) ForYou(ctx context.Context, userID int64, facets ForYouFacets) (Fo
 
 // fyScored is a candidate mid-scoring; content/graph hold normalized [0,1] scores.
 type fyScored struct {
-	it             *fyItem
-	content, graph float64
-	contentTopTag  string
-	final          float64
+	it                    *fyItem
+	content, graph, embed float64
+	contentTopTag         string
+	final                 float64
 }
 
 // ---- catalog index (static, cached in-process) -----------------------------
