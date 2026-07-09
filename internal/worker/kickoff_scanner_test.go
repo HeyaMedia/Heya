@@ -87,6 +87,60 @@ func TestScannerScopeForInventoryFileKeepsTopLevelMediaFileScoped(t *testing.T) 
 	require.Equal(t, "/library/Movie (2024)", scannerScopeForInventoryFile(sqlc.MediaTypeMovie, nested))
 }
 
+func TestScannerScopeForInventoryFileUsesMusicArtistScope(t *testing.T) {
+	albumTrack := scanner.InventoryFile{
+		Root:    "/library/Music",
+		Path:    "/library/Music/ano/2022 - Chu,Tayousei./01 - Chu,Tayousei.flac",
+		RelPath: "ano/2022 - Chu,Tayousei./01 - Chu,Tayousei.flac",
+		Class:   scanner.ClassPrimaryMedia,
+	}
+	require.Equal(t, "/library/Music/ano", scannerScopeForInventoryFile(sqlc.MediaTypeMusic, albumTrack))
+
+	artistTrack := scanner.InventoryFile{
+		Root:    "/library/Music",
+		Path:    "/library/Music/ano/01 - Loose.flac",
+		RelPath: "ano/01 - Loose.flac",
+		Class:   scanner.ClassPrimaryMedia,
+	}
+	require.Equal(t, "/library/Music/ano", scannerScopeForInventoryFile(sqlc.MediaTypeMusic, artistTrack))
+
+	looseTrack := scanner.InventoryFile{
+		Root:    "/library/Music",
+		Path:    "/library/Music/loose.mp3",
+		RelPath: "loose.mp3",
+		Class:   scanner.ClassPrimaryMedia,
+	}
+	require.Equal(t, looseTrack.Path, scannerScopeForInventoryFile(sqlc.MediaTypeMusic, looseTrack))
+
+	albumNFO := scanner.InventoryFile{
+		Root:    "/library/Music",
+		Path:    "/library/Music/ano/2022 - Chu,Tayousei./album.nfo",
+		RelPath: "ano/2022 - Chu,Tayousei./album.nfo",
+		Class:   scanner.ClassNFO,
+	}
+	require.Equal(t, "/library/Music/ano", scannerScopeForInventoryFile(sqlc.MediaTypeMusic, albumNFO))
+}
+
+func TestScannerScopeForLibraryPathUsesMusicArtistScope(t *testing.T) {
+	lib := sqlc.Library{
+		MediaType: sqlc.MediaTypeMusic,
+		Paths:     []string{"/library/Music"},
+	}
+
+	require.Equal(t,
+		"/library/Music/Daft Punk",
+		ScannerScopeForLibraryPath(lib, "/library/Music/Daft Punk/1997 - Homework/01 - Daftendirekt.flac"),
+	)
+	require.Equal(t,
+		"/library/Music/Daft Punk",
+		ScannerScopeForLibraryPath(lib, "/library/Music/Daft Punk/1997 - Homework/album.nfo"),
+	)
+	require.Equal(t,
+		"/library/Music/Daft Punk",
+		ScannerScopeForLibraryPath(lib, "/library/Music/Daft Punk"),
+	)
+}
+
 func TestScannerRichMetadataTargetsAndDetail(t *testing.T) {
 	detail := &metadata.MediaDetail{Title: "Dune"}
 	result := scanner.Result{

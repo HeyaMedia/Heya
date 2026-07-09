@@ -41,18 +41,26 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 		finishKickoff(ctx, q, taskID, startedAt, int(appliedScopeArtifacts), 0, err)
 		return err
 	}
-	scanRunArtifacts, err := q.CleanupOldScanRunArtifacts(ctx, cutoff)
+	staleInFlight, err := q.CleanupStaleInFlightScannerEntitiesOlderThan(ctx, cutoff)
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, int(appliedScopeArtifacts+entityArtifacts), 0, err)
 		return err
 	}
+	scanRunArtifacts, err := q.CleanupOldScanRunArtifacts(ctx, cutoff)
+	if err != nil {
+		finishKickoff(ctx, q, taskID, startedAt, int(appliedScopeArtifacts+entityArtifacts+staleInFlight.ScanRunArtifactsDeleted), 0, err)
+		return err
+	}
 
-	total := int(appliedScopeArtifacts + entityArtifacts + scanRunArtifacts)
+	total := int(appliedScopeArtifacts + entityArtifacts + staleInFlight.EntitiesDeleted + staleInFlight.ScanRunArtifactsDeleted + staleInFlight.EntityArtifactsDeleted + scanRunArtifacts)
 	finishKickoff(ctx, q, taskID, startedAt, total, 0, nil)
 	log.Info().
 		Int("retention_days", retentionDays).
 		Int64("applied_scope_scan_run_artifacts", appliedScopeArtifacts).
 		Int64("scanner_entity_artifacts", entityArtifacts).
+		Int64("stale_in_flight_entities", staleInFlight.EntitiesDeleted).
+		Int64("stale_in_flight_entity_artifacts", staleInFlight.EntityArtifactsDeleted).
+		Int64("stale_in_flight_scan_run_artifacts", staleInFlight.ScanRunArtifactsDeleted).
 		Int64("scan_run_artifacts", scanRunArtifacts).
 		Msg("cleanup_scanner_artifacts: complete")
 	return nil

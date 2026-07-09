@@ -213,6 +213,75 @@ deleted AS (
 )
 SELECT count(*)::bigint AS deleted_count FROM deleted;
 
+-- name: CleanupStaleInFlightScannerEntitiesOlderThan :one
+WITH target AS (
+    SELECT entity.id, entity.library_id, entity.media_type, entity.scope_key, entity.search_scan_run_id, entity.fetch_scan_run_id
+    FROM scanner_entities entity
+    WHERE entity.status IN ('matched', 'fetching')
+      AND entity.updated_at < sqlc.arg(cutoff_at)
+),
+target_runs AS (
+    SELECT library_id, media_type, scope_key, search_scan_run_id AS scan_run_id
+    FROM target
+    WHERE search_scan_run_id IS NOT NULL
+    UNION
+    SELECT library_id, media_type, scope_key, fetch_scan_run_id AS scan_run_id
+    FROM target
+    WHERE fetch_scan_run_id IS NOT NULL
+    UNION
+    SELECT target.library_id, target.media_type, target.scope_key, artifact.scan_run_id
+    FROM scanner_entity_artifacts artifact
+    JOIN target ON target.id = artifact.entity_id
+    WHERE artifact.scan_run_id IS NOT NULL
+),
+scan_deleted AS (
+    DELETE FROM scan_run_artifacts artifact
+    USING target_runs, scan_runs
+    WHERE artifact.scan_run_id = target_runs.scan_run_id
+      AND artifact.scope_key = target_runs.scope_key
+      AND scan_runs.id = artifact.scan_run_id
+      AND scan_runs.finished_at IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM scanner_entities peer
+        WHERE peer.library_id = target_runs.library_id
+          AND peer.media_type = target_runs.media_type
+          AND peer.scope_key = target_runs.scope_key
+          AND NOT EXISTS (
+            SELECT 1
+            FROM target
+            WHERE target.id = peer.id
+          )
+          AND (
+            peer.search_scan_run_id = target_runs.scan_run_id
+            OR peer.fetch_scan_run_id = target_runs.scan_run_id
+            OR EXISTS (
+                SELECT 1
+                FROM scanner_entity_artifacts peer_artifact
+                WHERE peer_artifact.entity_id = peer.id
+                  AND peer_artifact.scan_run_id = target_runs.scan_run_id
+            )
+          )
+      )
+    RETURNING artifact.id
+),
+entity_artifacts_deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING target
+    WHERE artifact.entity_id = target.id
+    RETURNING artifact.id
+),
+entities_deleted AS (
+    DELETE FROM scanner_entities entity
+    USING target
+    WHERE entity.id = target.id
+    RETURNING entity.id
+)
+SELECT
+    (SELECT count(*) FROM entities_deleted)::bigint AS entities_deleted,
+    (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted,
+    (SELECT count(*) FROM scan_deleted)::bigint AS scan_run_artifacts_deleted;
+
 -- name: CleanupOldScanRunArtifacts :one
 WITH deleted AS (
     DELETE FROM scan_run_artifacts artifact

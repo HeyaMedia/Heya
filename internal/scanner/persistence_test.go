@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -496,6 +497,75 @@ func TestCleanupCompletedScanRunArtifactsForAppliedScopesKeepsReviewScopes(t *te
 	deleted, err = q.CleanupCompletedScanRunArtifactsForAppliedScopes(ctx)
 	require.NoError(t, err)
 	require.Positive(t, deleted)
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
+	require.Error(t, err)
+}
+
+func TestCleanupStaleInFlightScannerEntitiesDeletesOrphanedMatchedScope(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-artifact-stale-in-flight-cleanup-test",
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/media/music"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	scopePaths := []string{"/media/music/No Longer Queued"}
+	scopeKey := scannerScopeKey(scopePaths)
+	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
+	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
+		ScanRunID:     searchRun.ID,
+		Kind:          scanArtifactKindSearch,
+		ScopeKey:      scopeKey,
+		SchemaVersion: scanArtifactSchemaV1,
+		Data:          []byte(`{"stage":"search"}`),
+	})
+	require.NoError(t, err)
+
+	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID:        lib.ID,
+		MediaType:        lib.MediaType,
+		ScopeKey:         scopeKey,
+		ScopePaths:       scopePaths,
+		IdentityKey:      "artist:no-longer-queued",
+		Title:            "No Longer Queued",
+		ProviderID:       "heya:artist:mbid:test",
+		Status:           "matched",
+		SearchScanRunID:  pgInt8(searchRun.ID),
+		SearchArtifactID: pgtype.Int8{},
+		ErrorMessage:     "",
+		Data:             []byte("{}"),
+	})
+	require.NoError(t, err)
+	entityArtifact, err := q.CreateScannerEntityArtifact(ctx, sqlc.CreateScannerEntityArtifactParams{
+		EntityID:      entity.ID,
+		Stage:         "search",
+		SchemaVersion: scanArtifactSchemaV1,
+		ScanRunID:     pgInt8(searchRun.ID),
+		Data:          []byte(`{"stage":"search"}`),
+	})
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE scanner_entities SET search_artifact_id = $1, updated_at = now() - interval '72 hours' WHERE id = $2`, entityArtifact.ID, entity.ID)
+	require.NoError(t, err)
+
+	deleted, err := q.CleanupStaleInFlightScannerEntitiesOlderThan(ctx, pgtype.Timestamptz{Time: time.Now().Add(-48 * time.Hour), Valid: true})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, deleted.EntitiesDeleted)
+	require.EqualValues(t, 1, deleted.EntityArtifactsDeleted)
+	require.EqualValues(t, 1, deleted.ScanRunArtifactsDeleted)
+
+	_, err = q.GetScannerEntity(ctx, entity.ID)
+	require.Error(t, err)
+	_, err = q.GetScannerEntityArtifact(ctx, entityArtifact.ID)
+	require.Error(t, err)
 	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
 	require.Error(t, err)
 }

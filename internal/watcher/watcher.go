@@ -351,7 +351,7 @@ func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, tri
 	}
 	args := worker.ProcessLibraryScanArgs{
 		LibraryID:  libraryID,
-		ScopePaths: []string{worker.ScannerScopeForPath(lib.MediaType, triggerPath)},
+		ScopePaths: []string{worker.ScannerScopeForLibraryPath(lib, triggerPath)},
 	}
 	opts := args.InsertOpts()
 	opts.Priority = worker.PriorityWatcher

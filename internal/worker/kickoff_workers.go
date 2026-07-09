@@ -832,7 +832,7 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 		outcome.New += nfoChanges
 	}
 	for _, scope := range nfoScopes {
-		markChangedScope(scannerOwnerScope(lib.MediaType, scope))
+		markChangedScope(ScannerScopeForLibraryPath(lib, scope))
 	}
 
 	var missing []string
@@ -1027,6 +1027,11 @@ func scannerScopeContains(parent, child string) bool {
 var scannerSeasonDirRE = regexp.MustCompile(`(?i)^(?:Season|Series|S)[ ._-]*(?:\d{1,2}|specials?)$`)
 
 func scannerScopeForInventoryFile(mediaType sqlc.MediaType, file scanner.InventoryFile) string {
+	if mediaType == sqlc.MediaTypeMusic {
+		if scope := scannerMusicArtistScopeForRootRel(file.Root, file.RelPath, file.Path); scope != "" {
+			return scope
+		}
+	}
 	if file.Class == scanner.ClassPrimaryMedia && filepath.Dir(file.RelPath) == "." {
 		return file.Path
 	}
@@ -1035,6 +1040,95 @@ func scannerScopeForInventoryFile(mediaType sqlc.MediaType, file scanner.Invento
 
 func ScannerScopeForPath(mediaType sqlc.MediaType, path string) string {
 	return scannerOwnerScope(mediaType, scannerScopeForPath(path))
+}
+
+func ScannerScopeForLibraryPath(lib sqlc.Library, path string) string {
+	if lib.MediaType == sqlc.MediaTypeMusic {
+		if scope := scannerMusicArtistScopeForLibraryPath(lib.Paths, path); scope != "" {
+			return scope
+		}
+	}
+	return ScannerScopeForPath(lib.MediaType, path)
+}
+
+func scannerMusicArtistScopeForLibraryPath(roots []string, path string) string {
+	for _, root := range roots {
+		relPath, ok := scannerRelPath(root, path)
+		if !ok {
+			continue
+		}
+		return scannerMusicArtistScopeForRootRel(root, relPath, path)
+	}
+	return ""
+}
+
+func scannerMusicArtistScopeForRootRel(root, relPath, fallbackPath string) string {
+	parts := scannerRelPathParts(relPath)
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return fallbackPath
+	}
+	return scannerJoinScopePath(root, parts[0])
+}
+
+func scannerRelPath(root, path string) (string, bool) {
+	root = strings.TrimSpace(root)
+	path = strings.TrimSpace(path)
+	if root == "" || path == "" {
+		return "", false
+	}
+	if strings.Contains(root, "://") || strings.Contains(path, "://") {
+		root = strings.TrimRight(root, "/")
+		path = strings.TrimRight(path, "/")
+		if path == root {
+			return ".", true
+		}
+		prefix := root + "/"
+		if !strings.HasPrefix(path, prefix) {
+			return "", false
+		}
+		return strings.TrimPrefix(path, prefix), true
+	}
+	relPath, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", false
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return relPath, true
+}
+
+func scannerRelPathParts(relPath string) []string {
+	relPath = strings.ReplaceAll(strings.TrimSpace(relPath), "\\", "/")
+	relPath = strings.Trim(relPath, "/")
+	if relPath == "" || relPath == "." {
+		return nil
+	}
+	rawParts := strings.Split(relPath, "/")
+	parts := make([]string, 0, len(rawParts))
+	for _, part := range rawParts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return parts
+}
+
+func scannerJoinScopePath(root, child string) string {
+	root = strings.TrimSpace(root)
+	child = strings.Trim(child, "/\\")
+	if root == "" || child == "" {
+		return ""
+	}
+	if strings.Contains(root, "://") {
+		return strings.TrimRight(root, "/") + "/" + child
+	}
+	return filepath.Join(root, child)
 }
 
 func scannerOwnerScope(mediaType sqlc.MediaType, scope string) string {
