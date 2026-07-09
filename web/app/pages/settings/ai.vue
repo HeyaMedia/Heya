@@ -1,0 +1,496 @@
+<script setup lang="ts">
+definePageMeta({ layout: 'settings', middleware: 'admin' })
+
+const { $heya } = useNuxtApp()
+const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
+const { flash } = useFlash()
+
+type AIProvider = { id: string; label: string; base_url: string; needs_key: boolean }
+type AILocalModel = { id: string; label: string; size: number; ram_hint: string; notes?: string }
+type AISettingsView = {
+  mode: string
+  provider: string
+  api_key_set: boolean
+  api_key_hint?: string
+  model: string
+  base_url: string
+  local_model: string
+  local_backend: string
+  context_size: number
+}
+type AIDownloadProgress = { current_file?: string; bytes_done: number; bytes_total: number; started_at?: string }
+type AIStatus = {
+  mode: string
+  ready: boolean
+  detail?: string
+  provider?: string
+  model?: string
+  local_model?: string
+  context_size?: number
+  local: {
+    build: string
+    server_present: boolean
+    model_present: boolean
+    running: boolean
+    running_model?: string
+    download_state: string
+    download_progress?: AIDownloadProgress
+    download_error?: string
+  }
+}
+type AIChatResponse = {
+  content: string
+  model?: string
+  mode: string
+  prompt_tokens: number
+  completion_tokens: number
+  duration_ms: number
+}
+
+const status = ref<AIStatus | null>(null)
+const settings = ref<AISettingsView | null>(null)
+const providers = ref<AIProvider[]>([])
+const localModels = ref<AILocalModel[]>([])
+const providerModels = ref<string[]>([])
+
+const saving = ref(false)
+const downloading = ref(false)
+const loadingModels = ref(false)
+const apiKeyDraft = ref('')
+
+const isOff = computed(() => (settings.value?.mode ?? 'off') === 'off')
+const isLocal = computed(() => settings.value?.mode === 'local')
+const isExternal = computed(() => settings.value?.mode === 'external')
+const isCustomProvider = computed(() => settings.value?.provider === 'custom')
+const selectedProvider = computed(() => providers.value.find(p => p.id === settings.value?.provider))
+const selectedLocalModel = computed(() => localModels.value.find(m => m.id === settings.value?.local_model))
+
+const dl = computed(() => status.value?.local)
+const dlActive = computed(() => dl.value?.download_state === 'downloading')
+const dlPercent = computed(() => {
+  const p = dl.value?.download_progress
+  if (!p || !p.bytes_total) return 0
+  return Math.min(100, Math.round((p.bytes_done / p.bytes_total) * 100))
+})
+const artifactsReady = computed(() => !!dl.value?.server_present && !!dl.value?.model_present)
+
+// --- test console ---
+const testSystem = ref('')
+const testPrompt = ref('')
+const testing = ref(false)
+const testResult = ref<AIChatResponse | null>(null)
+const testError = ref('')
+
+async function loadStatus() {
+  try {
+    status.value = await $heya('/api/ai/status') as AIStatus
+    downloading.value = status.value?.local.download_state === 'downloading'
+  } catch { /* transient poll failure — keep last snapshot */ }
+}
+async function loadSettings() {
+  settings.value = await $heya('/api/ai/settings') as AISettingsView
+}
+async function loadCatalog() {
+  const cat = await $heya('/api/ai/catalog') as { providers: AIProvider[]; local_models: AILocalModel[] }
+  providers.value = cat.providers
+  localModels.value = cat.local_models
+}
+
+async function save() {
+  if (!settings.value || saving.value) return
+  saving.value = true
+  flash.value = null
+  try {
+    const body = {
+      mode: settings.value.mode,
+      provider: settings.value.provider,
+      api_key: apiKeyDraft.value, // empty = keep stored key
+      model: settings.value.model,
+      base_url: settings.value.base_url,
+      local_model: settings.value.local_model,
+      local_backend: settings.value.local_backend,
+      context_size: Number(settings.value.context_size) || 0,
+    }
+    settings.value = await $heya('/api/ai/settings', { method: 'PUT', body: body as any }) as AISettingsView
+    apiKeyDraft.value = ''
+    flash.value = { kind: 'ok', text: 'AI settings saved.' }
+    loadStatus()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Save failed.' }
+  } finally {
+    saving.value = false
+  }
+}
+
+async function setMode(mode: string) {
+  if (!settings.value || settings.value.mode === mode) return
+  settings.value.mode = mode
+  await save()
+}
+
+async function startDownload() {
+  downloading.value = true
+  try {
+    await $heya('/api/ai/local/download', { method: 'POST', body: {} as any })
+    flash.value = { kind: 'ok', text: 'Download started.' }
+  } catch (e: any) {
+    downloading.value = false
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Download failed to start.' }
+  }
+}
+
+async function stopRuntime() {
+  try {
+    await $heya('/api/ai/local/stop', { method: 'POST', body: {} as any })
+    flash.value = { kind: 'ok', text: 'Local runtime stopped.' }
+    loadStatus()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Stop failed.' }
+  }
+}
+
+async function fetchProviderModels() {
+  loadingModels.value = true
+  providerModels.value = []
+  try {
+    const res = await $heya('/api/ai/models') as { models: string[] }
+    providerModels.value = res.models
+    if (!res.models.length) flash.value = { kind: 'warn', text: 'Provider returned no models.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Could not list models — check key and provider.' }
+  } finally {
+    loadingModels.value = false
+  }
+}
+
+async function runTest() {
+  if (!testPrompt.value.trim() || testing.value) return
+  testing.value = true
+  testResult.value = null
+  testError.value = ''
+  try {
+    testResult.value = await $heya('/api/ai/chat', {
+      method: 'POST',
+      body: { prompt: testPrompt.value, system: testSystem.value || undefined } as any,
+    }) as AIChatResponse
+  } catch (e: any) {
+    testError.value = e?.data?.detail ?? e?.message ?? 'Request failed.'
+  } finally {
+    testing.value = false
+  }
+}
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+onMounted(async () => {
+  await Promise.all([loadSettings(), loadCatalog(), loadStatus(), ensureSources()])
+  let last = 0
+  pollTimer = setInterval(() => {
+    const interval = dlActive.value || downloading.value ? 1500 : 5000
+    const now = Date.now()
+    if (now - last >= interval) { last = now; loadStatus() }
+  }, 1000)
+})
+onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
+</script>
+
+<template>
+  <div>
+    <header class="sv2-page-head">
+      <h2 class="sv2-page-title">AI</h2>
+      <p class="sv2-page-desc">
+        Optional language-model subsystem powering smart collections, playlist
+        generation, and recommendations. Run a small model fully locally, or
+        bring an API key for any OpenAI-compatible provider. Off by default —
+        nothing runs and nothing phones home until you enable it.
+      </p>
+    </header>
+
+    <SettingsSection
+      title="Mode"
+      icon="power"
+      :lockedBy="isLocked('ai.mode') ? lockTooltip('ai.mode') : undefined"
+    >
+      <div class="mode-row">
+        <button
+          v-for="m in ['off', 'local', 'external']" :key="m"
+          class="mode-btn" :class="{ active: settings?.mode === m }"
+          :disabled="saving || isLocked('ai.mode')"
+          @click="setMode(m)"
+        >
+          <span class="mode-name">{{ m === 'off' ? 'Off' : m === 'local' ? 'Local model' : 'External provider' }}</span>
+          <span class="mode-desc">
+            {{ m === 'off' ? 'Disabled entirely' : m === 'local' ? 'Private, runs on this machine' : 'Bring your own API key' }}
+          </span>
+        </button>
+      </div>
+      <div v-if="status && !isOff" class="mode-status">
+        <StatusBadge :state="status.ready ? 'ok' : 'warn'">{{ status.ready ? 'Ready' : 'Not ready' }}</StatusBadge>
+        <span v-if="!status.ready && status.detail" class="mode-detail">{{ status.detail }}</span>
+        <span v-else-if="status.ready && isLocal" class="mode-detail">
+          {{ dl?.running ? `llama-server warm (${dl?.running_model})` : 'llama-server cold — starts on first request' }}
+        </span>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection
+      v-if="isLocal"
+      title="Local runtime"
+      icon="cpu"
+      :description="`Managed llama.cpp (${dl?.build ?? '…'}) serving a curated GGUF. Downloads once, runs on demand, unloads after 10 idle minutes.`"
+    >
+      <template #actions>
+        <button v-if="dl?.running" class="sv2-btn ghost" @click="stopRuntime">
+          <Icon name="power" :size="13" /> Stop runtime
+        </button>
+      </template>
+
+      <SettingsField label="Model" :lockedBy="isLocked('ai.local_model') ? lockTooltip('ai.local_model') : undefined">
+        <select v-model="settings!.local_model" class="sv2-select" :disabled="saving || isLocked('ai.local_model')" @change="save">
+          <option v-for="m in localModels" :key="m.id" :value="m.id">
+            {{ m.label }} — {{ (m.size / 1024 / 1024 / 1024).toFixed(1) }} GB, {{ m.ram_hint }} RAM
+          </option>
+        </select>
+        <p v-if="selectedLocalModel?.notes" class="field-note">{{ selectedLocalModel.notes }}</p>
+      </SettingsField>
+
+      <SettingsField
+        label="Context window"
+        description="Tokens of context per request. Bigger costs RAM (KV cache) — 16384 is plenty for Heya's own features."
+        :lockedBy="isLocked('ai.context_size') ? lockTooltip('ai.context_size') : undefined"
+      >
+        <select v-model.number="settings!.context_size" class="sv2-select" :disabled="saving || isLocked('ai.context_size')" @change="save">
+          <option v-for="c in [4096, 8192, 16384, 32768, 65536]" :key="c" :value="c">{{ c.toLocaleString() }}</option>
+        </select>
+      </SettingsField>
+
+      <div class="artifact-card" :class="{ ok: artifactsReady }">
+        <div class="artifact-info">
+          <StatusBadge :state="artifactsReady ? 'ok' : dlActive ? 'warn' : 'idle'">
+            {{ artifactsReady ? 'Installed' : dlActive ? 'Downloading' : 'Not downloaded' }}
+          </StatusBadge>
+          <span class="artifact-text">
+            llama-server {{ dl?.server_present ? '✓' : '✗' }} · model {{ dl?.model_present ? '✓' : '✗' }}
+          </span>
+        </div>
+        <button
+          v-if="!artifactsReady"
+          class="sv2-btn primary"
+          :disabled="dlActive || downloading"
+          @click="startDownload"
+        >
+          <Icon name="cloud" :size="13" />
+          {{ dlActive || downloading ? 'Downloading…' : `Download (~${((selectedLocalModel?.size ?? 0) / 1024 / 1024 / 1024).toFixed(1)} GB)` }}
+        </button>
+      </div>
+
+      <div v-if="dlActive && dl?.download_progress" class="fetch-progress">
+        <div class="prog-track"><div class="prog-fill" :style="{ width: dlPercent + '%' }" /></div>
+        <div class="prog-meta">
+          <span>{{ dlPercent }}%</span>
+          <span class="dim">·</span>
+          <span>{{ ((dl.download_progress.bytes_done ?? 0) / 1024 / 1024).toFixed(0) }} / {{ ((dl.download_progress.bytes_total ?? 0) / 1024 / 1024).toFixed(0) }} MB</span>
+          <span v-if="dl.download_progress.current_file" class="dim ellipsis">· {{ dl.download_progress.current_file }}</span>
+        </div>
+      </div>
+      <p v-if="dl?.download_error" class="dl-error">{{ dl.download_error }}</p>
+    </SettingsSection>
+
+    <SettingsSection
+      v-if="isExternal"
+      title="External provider"
+      icon="cloud"
+      description="Any OpenAI-compatible API. The key is stored server-side and never echoed back."
+    >
+      <SettingsField label="Provider" :lockedBy="isLocked('ai.provider') ? lockTooltip('ai.provider') : undefined">
+        <select v-model="settings!.provider" class="sv2-select" :disabled="saving || isLocked('ai.provider')" @change="providerModels = []; save()">
+          <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.label }}</option>
+        </select>
+      </SettingsField>
+
+      <SettingsField v-if="isCustomProvider" label="Base URL" description="OpenAI-compatible API root, e.g. http://my-box:8000/v1" :lockedBy="isLocked('ai.base_url') ? lockTooltip('ai.base_url') : undefined">
+        <input v-model="settings!.base_url" type="text" class="sv2-input" placeholder="https://…/v1" autocomplete="off" :disabled="saving || isLocked('ai.base_url')" @blur="save">
+      </SettingsField>
+
+      <SettingsField
+        v-if="selectedProvider?.needs_key || isCustomProvider"
+        label="API key"
+        :lockedBy="isLocked('ai.api_key') ? lockTooltip('ai.api_key') : undefined"
+      >
+        <input
+          v-model="apiKeyDraft" type="password" class="sv2-input" autocomplete="off"
+          :placeholder="settings?.api_key_set ? `key set (${settings.api_key_hint}) — enter to replace` : 'paste your API key'"
+          :disabled="saving || isLocked('ai.api_key')"
+          @blur="apiKeyDraft && save()"
+        >
+      </SettingsField>
+
+      <SettingsField label="Model" :lockedBy="isLocked('ai.model') ? lockTooltip('ai.model') : undefined">
+        <div class="model-row">
+          <input
+            v-model="settings!.model" type="text" class="sv2-input" list="ai-provider-models"
+            placeholder="e.g. anthropic/claude-sonnet-5" autocomplete="off"
+            :disabled="saving || isLocked('ai.model')"
+            @blur="save"
+          >
+          <datalist id="ai-provider-models">
+            <option v-for="m in providerModels" :key="m" :value="m" />
+          </datalist>
+          <button class="sv2-btn ghost" :disabled="loadingModels" @click="fetchProviderModels">
+            <Icon :name="loadingModels ? 'spinner' : 'refresh'" :size="13" />
+            {{ loadingModels ? 'Loading…' : providerModels.length ? `${providerModels.length} models` : 'Fetch models' }}
+          </button>
+        </div>
+      </SettingsField>
+    </SettingsSection>
+
+    <SettingsSection
+      v-if="!isOff"
+      title="Test console"
+      icon="pulse"
+      description="Round-trip a prompt through the active configuration. Optional context becomes the system prompt — use it to check the model actually honors instructions."
+    >
+      <SettingsField label="Context (optional)">
+        <textarea
+          v-model="testSystem" class="sv2-input test-textarea" rows="2"
+          placeholder="e.g. You are Heya's media assistant. The user's favorite film is Blade Runner (1982)."
+        />
+      </SettingsField>
+      <SettingsField label="Prompt">
+        <div class="model-row">
+          <input
+            v-model="testPrompt" type="text" class="sv2-input"
+            placeholder='e.g. "Say hello world" or "What is my favorite film?"'
+            @keydown.enter="runTest"
+          >
+          <button class="sv2-btn primary" :disabled="testing || !testPrompt.trim()" @click="runTest">
+            <Icon :name="testing ? 'spinner' : 'pulse'" :size="13" />
+            {{ testing ? (isLocal && !dl?.running ? 'Starting model…' : 'Thinking…') : 'Send' }}
+          </button>
+        </div>
+      </SettingsField>
+
+      <div v-if="testResult" class="test-card ok">
+        <p class="test-reply">{{ testResult.content }}</p>
+        <div class="test-meta">
+          <span>{{ testResult.mode }}</span>
+          <span class="dim">·</span>
+          <span>{{ testResult.model || 'model n/a' }}</span>
+          <span class="dim">·</span>
+          <span>{{ testResult.prompt_tokens }}+{{ testResult.completion_tokens }} tokens</span>
+          <span class="dim">·</span>
+          <span>{{ (testResult.duration_ms / 1000).toFixed(1) }}s</span>
+        </div>
+      </div>
+      <div v-else-if="testError" class="test-card err">
+        <StatusBadge state="error">Failed</StatusBadge>
+        <span class="test-err-text">{{ testError }}</span>
+      </div>
+    </SettingsSection>
+
+    <SettingsFlash :flash="flash" />
+  </div>
+</template>
+
+<style scoped>
+.mode-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.mode-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.mode-btn:hover:not(:disabled) { border-color: var(--fg-4); }
+.mode-btn.active {
+  border-color: rgba(111, 191, 124, 0.4);
+  background: rgba(111, 191, 124, 0.05);
+}
+.mode-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.mode-name { font-size: 13.5px; font-weight: 500; color: var(--fg-0); }
+.mode-desc { font-size: 11.5px; color: var(--fg-3); }
+.mode-status {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 12px;
+}
+.mode-detail { font-size: 12px; color: var(--fg-3); }
+
+.field-note { margin: 6px 0 0; font-size: 11.5px; color: var(--fg-3); }
+
+.artifact-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.artifact-card.ok { border-color: rgba(111, 191, 124, 0.3); }
+.artifact-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.artifact-text { font-size: 12px; color: var(--fg-2); font-family: var(--font-mono); }
+.dl-error { margin: 10px 0 0; font-size: 12px; color: var(--bad, #e5484d); }
+
+.fetch-progress { margin-top: 14px; }
+.prog-track { height: 6px; border-radius: 3px; background: var(--bg-0); overflow: hidden; }
+.prog-fill { height: 100%; background: var(--gold); transition: width 0.3s ease; }
+.prog-meta {
+  display: flex; gap: 6px; align-items: center;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-2);
+  margin-top: 6px;
+}
+.prog-meta .dim { color: var(--fg-4); }
+.prog-meta .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+
+.model-row { display: flex; gap: 8px; align-items: center; }
+.model-row .sv2-input { flex: 1; }
+.model-row .sv2-btn { flex-shrink: 0; white-space: nowrap; }
+
+.test-textarea { resize: vertical; min-height: 40px; width: 100%; font-family: inherit; }
+
+.test-card {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.test-card.ok { border-color: rgba(111, 191, 124, 0.3); }
+.test-card.err {
+  border-color: rgba(229, 72, 77, 0.35);
+  display: flex; align-items: center; gap: 10px;
+}
+.test-reply {
+  margin: 0;
+  font-size: 13px; line-height: 1.55; color: var(--fg-0);
+  white-space: pre-wrap;
+}
+.test-meta {
+  display: flex; gap: 6px; align-items: center;
+  margin-top: 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-2);
+}
+.test-meta .dim { color: var(--fg-4); }
+.test-err-text { font-size: 12px; color: var(--fg-1); }
+
+.sv2-select {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--fg-0);
+  font-size: 13px;
+  padding: 8px 12px;
+  min-width: 240px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.sv2-select:focus { border-color: var(--gold); }
+.sv2-select:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>

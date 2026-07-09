@@ -181,6 +181,7 @@ identity (`HEYA_TAILSCALE_HOSTNAME=heya-dev`,
 | `heya media refresh <id\|slug>`            | Re-fetch metadata for a media item                   |
 | `heya queue status` / `heya job list`      | Inspect background work                              |
 | `heya analyze status` / `heya analyze reset` | Sonic-analysis pipeline                            |
+| `heya ai status` / `heya ai chat "…"`      | AI subsystem — local llama-server or external provider |
 | `heya migrate up` / `db:wipe`              | DB migration / wipe                                  |
 | `heya config show`                         | Inspect config with per-field provenance             |
 

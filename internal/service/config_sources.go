@@ -41,6 +41,12 @@ func (a *App) ConfigSources(ctx context.Context) ConfigSources {
 	out["sonic_analysis.enabled"] = a.sonicAnalysisSource(ctx, enabledEnv)
 	out["sonic_analysis.accelerator"] = a.sonicAnalysisSource(ctx, acceleratorEnv)
 
+	// AI subsystem: same per-field env-wins contract as sonic analysis.
+	aiLocks := aiEnvLocks()
+	for _, field := range []string{"mode", "provider", "api_key", "model", "base_url", "local_model", "local_backend", "context_size"} {
+		out["ai."+field] = a.aiSource(ctx, aiLocks[field])
+	}
+
 	// Libraries: only env-managed rows appear here, with all three
 	// identity fields. DB-managed libraries return no entries — the
 	// frontend treats absence as "editable".
@@ -59,6 +65,16 @@ func (a *App) sonicAnalysisSource(ctx context.Context, envVar string) config.Sou
 		return config.SourceEntry{Source: config.SourceEnv, EnvVar: envVar}
 	}
 	if _, err := a.GetSystemSetting(ctx, sonicSettingsKey); err == nil {
+		return config.SourceEntry{Source: config.SourceDB}
+	}
+	return config.SourceEntry{Source: config.SourceDefault}
+}
+
+func (a *App) aiSource(ctx context.Context, envVar string) config.SourceEntry {
+	if envVar != "" {
+		return config.SourceEntry{Source: config.SourceEnv, EnvVar: envVar}
+	}
+	if _, err := a.GetSystemSetting(ctx, aiSettingsKey); err == nil {
 		return config.SourceEntry{Source: config.SourceDB}
 	}
 	return config.SourceEntry{Source: config.SourceDefault}

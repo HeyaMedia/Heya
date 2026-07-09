@@ -1,6 +1,273 @@
 {
   "components": {
     "schemas": {
+      "AIChatRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AIChatRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "max_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "messages": {
+            "description": "full message history; overrides prompt/system",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "system": {
+            "description": "optional system prompt / context",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AIChatResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AIChatResponse.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "completion_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "content": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content",
+          "mode",
+          "prompt_tokens",
+          "completion_tokens",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
+      "AILocalStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "build": {
+            "description": "pinned llama.cpp release",
+            "type": "string"
+          },
+          "download_error": {
+            "type": "string"
+          },
+          "download_progress": {
+            "$ref": "#/components/schemas/DownloadProgress"
+          },
+          "download_state": {
+            "type": "string"
+          },
+          "model_present": {
+            "type": "boolean"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "running_model": {
+            "type": "string"
+          },
+          "server_present": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "build",
+          "server_present",
+          "model_present",
+          "running",
+          "download_state"
+        ],
+        "type": "object"
+      },
+      "AISettings": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AISettings.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "api_key": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "context_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "local_backend": {
+            "type": "string"
+          },
+          "local_model": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "provider",
+          "api_key",
+          "model",
+          "base_url",
+          "local_model",
+          "local_backend",
+          "context_size"
+        ],
+        "type": "object"
+      },
+      "AISettingsView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AISettingsView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "api_key_hint": {
+            "description": "last 4 characters, for recognition only",
+            "type": "string"
+          },
+          "api_key_set": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "context_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "local_backend": {
+            "type": "string"
+          },
+          "local_model": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "provider",
+          "api_key_set",
+          "model",
+          "base_url",
+          "local_model",
+          "local_backend",
+          "context_size"
+        ],
+        "type": "object"
+      },
+      "AIStatusReport": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AIStatusReport.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "context_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "detail": {
+            "description": "human-readable reason when not ready",
+            "type": "string"
+          },
+          "local": {
+            "$ref": "#/components/schemas/AILocalStatus"
+          },
+          "local_model": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "ready",
+          "local"
+        ],
+        "type": "object"
+      },
       "AcquireItem": {
         "additionalProperties": false,
         "properties": {
@@ -772,6 +1039,70 @@
           "email",
           "is_admin",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "AiCatalogBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AiCatalogBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "local_models": {
+            "items": {
+              "$ref": "#/components/schemas/LocalModel"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/Provider"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "providers",
+          "local_models"
+        ],
+        "type": "object"
+      },
+      "AiModelsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AiModelsBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "models"
         ],
         "type": "object"
       },
@@ -2811,6 +3142,32 @@
         "required": [
           "url",
           "asset_type"
+        ],
+        "type": "object"
+      },
+      "DownloadProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_done": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bytes_total": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "current_file": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bytes_done",
+          "bytes_total",
+          "started_at"
         ],
         "type": "object"
       },
@@ -8143,6 +8500,47 @@
         ],
         "type": "object"
       },
+      "LocalModel": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "ram_hint": {
+            "description": "rough resident footprint at the default context size",
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "file",
+          "url",
+          "sha256",
+          "size",
+          "ram_hint"
+        ],
+        "type": "object"
+      },
       "LoginInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -8936,6 +9334,23 @@
         "required": [
           "watched",
           "favorited"
+        ],
+        "type": "object"
+      },
+      "Message": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "role": {
+            "description": "system | user | assistant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
         ],
         "type": "object"
       },
@@ -11065,6 +11480,30 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "Provider": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "needs_key": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "base_url",
+          "needs_key"
         ],
         "type": "object"
       },
@@ -17712,6 +18151,354 @@
         "summary": "Toggle a user's admin flag",
         "tags": [
           "Admin"
+        ]
+      }
+    },
+    "/api/ai/catalog": {
+      "get": {
+        "operationId": "get-ai-catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCatalogBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "AI provider presets + local model catalog",
+        "tags": [
+          "AI"
+        ]
+      }
+    },
+    "/api/ai/chat": {
+      "post": {
+        "operationId": "post-ai-chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIChatResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Run one chat completion",
+        "tags": [
+          "AI"
+        ]
+      }
+    },
+    "/api/ai/local/download": {
+      "post": {
+        "operationId": "post-ai-local-download",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Download local runtime artifacts",
+        "tags": [
+          "AI"
+        ]
+      }
+    },
+    "/api/ai/local/stop": {
+      "post": {
+        "operationId": "post-ai-local-stop",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Stop the local llama-server",
+        "tags": [
+          "AI"
+        ]
+      }
+    },
+    "/api/ai/models": {
+      "get": {
+        "operationId": "get-ai-models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModelsBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "List selectable models for the active provider",
+        "tags": [
+          "AI"
+        ]
+      }
+    },
+    "/api/ai/settings": {
+      "get": {
+        "operationId": "get-ai-settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISettingsView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "AI settings",
+        "tags": [
+          "AI"
+        ]
+      },
+      "put": {
+        "operationId": "set-ai-settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AISettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISettingsView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Update AI settings",
+        "tags": [
+          "AI"
+        ]
+      }
+    },
+    "/api/ai/status": {
+      "get": {
+        "operationId": "get-ai-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIStatusReport"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "AI subsystem status",
+        "tags": [
+          "AI"
         ]
       }
     },

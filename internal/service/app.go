@@ -16,6 +16,7 @@ import (
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/imageserve"
+	"github.com/karbowiak/heya/internal/llm"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/podcastindex"
@@ -66,6 +67,7 @@ type App struct {
 	radioBrowser  *radiobrowser.Client
 	podcastIndex  *podcastindex.Client
 	sessions      *sessions.Store
+	llmLocal      *llm.LocalRuntime
 
 	// Lifetime context cancelled by Close(). Used for fire-and-forget
 	// goroutines (model fetches, tailscale Enable/Logout) that must outlive
@@ -275,6 +277,11 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// quickly but the App lives for the whole process. Cancelled by Close().
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 
+	// Managed llama-server runtime for the AI subsystem (mode=local). Spawns
+	// nothing until first use; artifacts live under DataDir/llm.
+	llmLocal := llm.NewLocalRuntime(cfg.DataDir.Value + "/llm")
+	llmLocal.Bind(lifetimeCtx)
+
 	app := &App{
 		config:         cfg,
 		db:             db,
@@ -297,6 +304,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		radioBrowser:   radiobrowser.New(),
 		podcastIndex:   podcastindex.New(cfg.PodcastIndexKey.Value, cfg.PodcastIndexSecret.Value),
 		sessions:       sessions.New(lifetimeCtx, hub),
+		llmLocal:       llmLocal,
 		lifetimeCtx:    lifetimeCtx,
 		lifetimeCancel: lifetimeCancel,
 		startedAt:      time.Now(),
@@ -488,6 +496,11 @@ func (a *App) Close() {
 	// release resources before we tear down the pool / watcher.
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
+	}
+	if a.llmLocal != nil {
+		// lifetimeCancel above already signalled the subprocess; Stop waits
+		// for it to actually exit so we never leak a llama-server.
+		a.llmLocal.Stop()
 	}
 	if a.watcher != nil {
 		a.watcher.StopAll()

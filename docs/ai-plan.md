@@ -1,7 +1,11 @@
 # AI Subsystem + Smart Collections — Plan
 
-Status: **planned** (2026-07-09). Vulkan added to the openvino runtime image
-(a0a49b5) as groundwork.
+Status: **foundation shipped** (2026-07-09). Phases 0 and 2–4 are live:
+`internal/llm` + local llama-server runtime + `/api/ai/*` + `heya ai` CLI +
+Settings → AI page, verified end-to-end on macOS/Metal (hello-world + context
+grounding through both CLI and the web test console). Remaining: collections
+substrate (phase 1), AI consumers (phases 5–6), external-provider live test
+(needs a real key), CUDA-image llama-server bake-in.
 
 The original FUTURE.md idea was "smart playlists / collections". Working
 through it, most of the value needs **no AI at all** (filter rules + metadata
@@ -162,11 +166,11 @@ gives named, explained, seasonal picks.
 
 | # | Deliverable | Depends on |
 |---|-------------|------------|
-| 0 | Vulkan in openvino image | done (a0a49b5) |
+| 0 | Vulkan in openvino image | **done** (a0a49b5) |
 | 1 | Collections substrate: tables, DSL, eval, CLI, seed pack, UI | — (no AI) |
-| 2 | `internal/llm`: client, presets, `CompleteJSON`, config, `heya ai` CLI | — |
-| 3 | Local runtime manager: downloads, subprocess lifecycle, per-image backends | 2 |
-| 4 | Settings UI for AI | 2–3 |
+| 2 | `internal/llm`: client, presets, `CompleteJSON`, config, `heya ai` CLI | **done** |
+| 3 | Local runtime manager: downloads, subprocess lifecycle, per-image backends | **done** |
+| 4 | Settings UI for AI | **done** |
 | 5 | Collections curator job | 1 + 2 (works external-only before 3) |
 | 6 | NL playlist + tonight recommendations | 2 (+1 for saving) |
 
