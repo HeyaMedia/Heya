@@ -7,6 +7,13 @@ WITH entity AS (
     sqlc.arg(provider_kind),
     sqlc.arg(heya_slug)
   )
+  -- A scanner fanout can discover the same upstream entity from multiple
+  -- scoped paths at once. The canonical Heya slug is the library-local
+  -- identity in that race, so adopt the row which won rather than failing the
+  -- later apply job.
+  ON CONFLICT (library_id, heya_slug) WHERE heya_slug <> '' DO UPDATE SET
+    provider_kind = EXCLUDED.provider_kind,
+    updated_at = now()
   RETURNING id
 ),
 profile AS (
@@ -27,6 +34,18 @@ profile AS (
     sqlc.arg(original_language),
     sqlc.arg(status)
   FROM entity
+  ON CONFLICT (media_item_id) DO UPDATE SET
+    title = EXCLUDED.title,
+    sort_title = EXCLUDED.sort_title,
+    year = EXCLUDED.year,
+    description = EXCLUDED.description,
+    poster_path = EXCLUDED.poster_path,
+    backdrop_path = EXCLUDED.backdrop_path,
+    tagline = EXCLUDED.tagline,
+    original_title = EXCLUDED.original_title,
+    original_language = EXCLUDED.original_language,
+    status = EXCLUDED.status,
+    updated_at = now()
   RETURNING media_item_id
 ),
 external_ids AS (

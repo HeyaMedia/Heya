@@ -80,6 +80,7 @@ const ALL_GROUPS: SettingsNavGroup[] = [
       { to: '/settings/configuration', label: 'Configuration', icon: 'settings' },
       { to: '/settings/network',       label: 'Network',       icon: 'network' },
       { to: '/settings/jellyfin',      label: 'Jellyfin API',  icon: 'cast' },
+      { to: '/settings/subsonic',      label: 'Subsonic API',  icon: 'music' },
       { to: '/settings/storage',       label: 'Storage',       icon: 'hard-drives' },
       { to: '/settings/database',      label: 'Database',      icon: 'database' },
       { to: '/settings/diagnostics',   label: 'Diagnostics',   icon: 'cpu' },

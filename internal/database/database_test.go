@@ -297,6 +297,85 @@ func TestUpdateMediaItemRawExternalIDsIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCreateMediaItemRawAdoptsExistingHeyaSlug(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, getTestDatabaseURL(t))
+	if err != nil {
+		t.Skipf("database not available: %v", err)
+	}
+	defer pool.Close()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("beginning transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	q := sqlc.New(tx)
+
+	user, err := q.CreateUser(ctx, sqlc.CreateUserParams{
+		Username:     "heya-slug-test",
+		Email:        "heya-slug-test@example.com",
+		PasswordHash: "$2a$10$fakehash",
+		IsAdmin:      true,
+	})
+	if err != nil {
+		t.Fatalf("creating user: %v", err)
+	}
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "Movies",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    user.ID,
+		Settings:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("creating library: %v", err)
+	}
+
+	params := sqlc.CreateMediaItemRawParams{
+		LibraryID:    lib.ID,
+		MediaType:    sqlc.MediaTypeMovie,
+		ProviderKind: "heya",
+		HeyaSlug:     "the-clay-2024",
+		Title:        "Clay",
+		SortTitle:    "clay",
+		ExternalIds:  []byte(`{"tmdb":"123"}`),
+	}
+	firstID, err := q.CreateMediaItemRaw(ctx, params)
+	if err != nil {
+		t.Fatalf("creating first media item: %v", err)
+	}
+	params.Title = "Clay (canonical)"
+	params.ExternalIds = []byte(`{"tmdb":"123","imdb":"tt123"}`)
+	secondID, err := q.CreateMediaItemRaw(ctx, params)
+	if err != nil {
+		t.Fatalf("adopting existing heya slug: %v", err)
+	}
+	if secondID != firstID {
+		t.Fatalf("expected existing media item %d, got %d", firstID, secondID)
+	}
+
+	item, err := q.GetMediaItemByID(ctx, firstID)
+	if err != nil {
+		t.Fatalf("getting adopted item: %v", err)
+	}
+	if item.Title != "Clay (canonical)" {
+		t.Fatalf("expected profile update, got %q", item.Title)
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM media_items WHERE library_id = $1 AND heya_slug = $2`, lib.ID, params.HeyaSlug).Scan(&count); err != nil {
+		t.Fatalf("counting canonical slug rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one media row for canonical Heya slug, got %d", count)
+	}
+}
+
 func TestRecommendedTVRailsIncludeAnime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
