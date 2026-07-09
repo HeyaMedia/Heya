@@ -8,6 +8,9 @@
 *.out
 vendor/
 bin/
+# …except the embedded cliap2 sender binaries, which ship with the
+# source (go:embed input — see internal/cast/bin/SOURCES.md).
+!internal/cast/bin/
 .cache/
 /kura
 

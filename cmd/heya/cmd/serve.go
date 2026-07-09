@@ -221,6 +221,12 @@ var serveCmd = &cobra.Command{
 			app.StartRecommendationsML(appCtx)
 		}
 
+		// Cast discovery (mDNS browse + receiver sessions). Runs in
+		// passive mode too — casting streams local files and touches
+		// no scanner/worker state on the borrowed DB.
+		app.LoadCastFromDB(appCtx)
+		app.StartCast(appCtx)
+
 		<-sigCtx.Done()
 		log.Info().Msg("shutting down")
 

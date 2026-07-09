@@ -5,6 +5,40 @@
 # Heavy, app-stable dependencies live here so ordinary Heya releases only push
 # the small binary layer from .docker/Dockerfile.
 
+# --- cliap2 (AirPlay 2 sender for internal/cast) ---------------------------
+# Compiled from source against THIS distro's shared libraries: the embedded
+# CI binaries in internal/cast/bin target Debian Bookworm sonames
+# (libavformat.so.59 etc.) and will not load on trixie. The Go side prefers
+# a $PATH cliap2 over the embedded copy (ensureCliap2), so shipping
+# /usr/local/bin/cliap2 here makes the runtime image self-consistent.
+# Pinned commit matches internal/cast/bin/SOURCES.md — bump both together
+# and re-validate the stderr contract (docs/casting-research.md).
+FROM bitnami/minideb:trixie AS cliap2-build
+
+ARG CLIAIRPLAY_COMMIT=3bb9271643999696638ee5df421b69bb5112fb32
+
+RUN install_packages \
+        build-essential git ca-certificates autotools-dev autoconf automake \
+        autopoint libtool pkgconf gettext gawk gperf flex bison \
+        uuid-dev zlib1g-dev libcurl4-openssl-dev libsodium-dev \
+        libconfuse-dev libunistring-dev libxml2-dev libevent-dev \
+        libjson-c-dev libplist-dev libgcrypt20-dev libgpg-error-dev \
+        libavfilter-dev && \
+    git clone https://github.com/music-assistant/cliairplay.git /src && \
+    cd /src && \
+    git checkout "${CLIAIRPLAY_COMMIT}" && \
+    git submodule update --init && \
+    autoreconf -fi && \
+    ./configure && \
+    make -j"$(nproc)" && \
+    install -m 0755 src/cliap2 /cliap2 && \
+    # Self-computed runtime dependency list: map every shared lib the
+    # binary links to its owning package, so the runtime stage never
+    # hand-maintains trixie soname package names.
+    ldd /cliap2 | awk '/=>/ {print $3}' | xargs -r dpkg -S 2>/dev/null \
+        | cut -d: -f1 | sort -u > /cliap2-runtime-deps.txt && \
+    cat /cliap2-runtime-deps.txt
+
 FROM bitnami/minideb:trixie AS runtime
 
 # Pinned versions. Bump deliberately:
@@ -75,6 +109,14 @@ RUN DPKG_ARCH="$(dpkg --print-architecture)" && \
     apt-get purge -y curl gnupg && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* /tmp/onnxruntime*
+
+# cliap2 + its distro-matched runtime libraries (list computed in the
+# build stage). CUDA/OpenVINO images build FROM this one and inherit it.
+COPY --from=cliap2-build /cliap2 /usr/local/bin/cliap2
+COPY --from=cliap2-build /cliap2-runtime-deps.txt /tmp/cliap2-runtime-deps.txt
+RUN install_packages $(cat /tmp/cliap2-runtime-deps.txt) && \
+    rm /tmp/cliap2-runtime-deps.txt && \
+    /usr/local/bin/cliap2 --version
 
 # Data lives outside the image. Mount a host directory or named volume here.
 # Inside the container the binary defaults HEYA_DATA_DIR to /data so the

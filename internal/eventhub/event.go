@@ -25,6 +25,11 @@ const (
 	// (Playbar / QueueRow) overlay these on the "Now Playing" card while a
 	// live stream is the active track.
 	EventRadioICY EventType = "radio.icy"
+	// Cast session state — fired by internal/cast on every session
+	// transition (starting/playing/paused/stopped/failed, volume, track
+	// change). Global, not per-user: cast targets are household devices
+	// and every client mirrors the same session state.
+	EventCastState EventType = "cast.state"
 )
 
 // RadioICYPayload is the per-user event body for EventRadioICY. UserID
@@ -35,6 +40,24 @@ type RadioICYPayload struct {
 	Artist    string `json:"artist"`
 	Title     string `json:"title"`
 	StreamURL string `json:"stream_url"`
+}
+
+// CastStatePayload is the body for EventCastState. Position is a
+// point-in-time sample: the FE interpolates from (PositionSec, At,
+// State) between events instead of the server ticking every second.
+type CastStatePayload struct {
+	SessionID   string    `json:"session_id"`
+	DeviceID    string    `json:"device_id"`
+	DeviceName  string    `json:"device_name"`
+	UserID      int64     `json:"user_id"`
+	State       string    `json:"state"`
+	TrackID     int64     `json:"track_id,omitempty"`
+	Title       string    `json:"title,omitempty"`
+	Artist      string    `json:"artist,omitempty"`
+	PositionSec float64   `json:"position_sec"`
+	DurationSec int       `json:"duration_sec,omitempty"`
+	Volume      int       `json:"volume"`
+	At          time.Time `json:"at"`
 }
 
 type Event struct {

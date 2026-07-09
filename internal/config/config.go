@@ -56,6 +56,7 @@ type Config struct {
 	Tailscale           TailscaleConfig
 	Jellyfin            JellyfinConfig
 	Subsonic            SubsonicConfig
+	Cast                CastConfig
 	Jobs                JobsConfig
 	// Podcast Index API credentials. Sign up at https://api.podcastindex.org
 	// — free tier covers personal-use traffic comfortably. When empty the
@@ -81,6 +82,15 @@ type JellyfinConfig struct {
 // stream Heya's music libraries. Same provenance semantics as Jellyfin:
 // env > db > default, checked per-request so UI flips need no restart.
 type SubsonicConfig struct {
+	Enabled Field[bool]
+}
+
+// CastConfig gates server-side casting (internal/cast): mDNS discovery
+// of network receivers plus the playback sessions that stream to them.
+// Default on — discovery is a passive mDNS browse; nothing plays until
+// a user starts a session. Same env > db > default provenance as
+// Jellyfin/Subsonic, checked live so UI flips need no restart.
+type CastConfig struct {
 	Enabled Field[bool]
 }
 
@@ -132,6 +142,9 @@ func Load() *Config {
 		},
 		Subsonic: SubsonicConfig{
 			Enabled: envBool("HEYA_SUBSONIC_API_ENABLED", false),
+		},
+		Cast: CastConfig{
+			Enabled: envBool("HEYA_CAST_ENABLED", true),
 		},
 		Jobs: JobsConfig{
 			Workers: loadJobWorkerFields(),
@@ -305,6 +318,7 @@ var sourceFields = []sourceField{
 	{"transcoder.cache_max_gb", func(c *Config) SourceEntry { return c.TranscodeCacheMaxGB.Entry() }},
 	{"jellyfin.enabled", func(c *Config) SourceEntry { return c.Jellyfin.Enabled.Entry() }},
 	{"subsonic.enabled", func(c *Config) SourceEntry { return c.Subsonic.Enabled.Entry() }},
+	{"cast.enabled", func(c *Config) SourceEntry { return c.Cast.Enabled.Entry() }},
 	{"tailscale.enabled", func(c *Config) SourceEntry { return c.Tailscale.Enabled.Entry() }},
 	{"tailscale.hostname", func(c *Config) SourceEntry { return c.Tailscale.Hostname.Entry() }},
 	{"tailscale.state_dir", func(c *Config) SourceEntry { return c.Tailscale.StateDir.Entry() }},

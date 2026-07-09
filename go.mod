@@ -35,6 +35,13 @@ require (
 require github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 
 require (
+	github.com/libp2p/zeroconf/v2 v2.2.0 // indirect
+	github.com/miekg/dns v1.1.58 // indirect
+	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
+)
+
+require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/PuerkitoBio/goquery v1.8.0 // indirect

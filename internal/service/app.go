@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/auth"
+	"github.com/karbowiak/heya/internal/cast"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -68,6 +69,7 @@ type App struct {
 	podcastIndex  *podcastindex.Client
 	sessions      *sessions.Store
 	llmLocal      *llm.LocalRuntime
+	castMgr       *cast.Manager
 
 	// Lifetime context cancelled by Close(). Used for fire-and-forget
 	// goroutines (model fetches, tailscale Enable/Logout) that must outlive
@@ -282,6 +284,11 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	llmLocal := llm.NewLocalRuntime(cfg.DataDir.Value + "/llm")
 	llmLocal.Bind(lifetimeCtx)
 
+	// Server-side cast manager. Constructed always (accessors stay
+	// nil-safe); discovery only starts via StartCast when cast.enabled.
+	castMgr := cast.New(cfg.DataDir.Value)
+	castMgr.SetHub(hub)
+
 	app := &App{
 		config:         cfg,
 		db:             db,
@@ -305,6 +312,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		podcastIndex:   podcastindex.New(cfg.PodcastIndexKey.Value, cfg.PodcastIndexSecret.Value),
 		sessions:       sessions.New(lifetimeCtx, hub),
 		llmLocal:       llmLocal,
+		castMgr:        castMgr,
 		lifetimeCtx:    lifetimeCtx,
 		lifetimeCancel: lifetimeCancel,
 		startedAt:      time.Now(),
@@ -315,6 +323,10 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// at sonicEnabledFn; assigning here makes that closure live before
 	// any kickoff fires.
 	sonicEnabledFn = app.SonicAnalysisEnabled
+
+	// Cast scrobbles route through the same RecordPlayback dispatch the
+	// HTTP endpoint uses; wired post-construction like SonicEnabled.
+	castMgr.SetPlaybackSink(app.castPlaybackSink)
 
 	// Overlay persisted UI settings onto the config snapshot. Env-sourced
 	// fields are preserved; only default-sourced fields get DB values.
@@ -492,7 +504,13 @@ func (a *App) StopWorkers(ctx context.Context) error {
 }
 
 func (a *App) Close() {
-	// Cancel first so any in-flight background goroutines unblock and
+	// Cast sessions first, before lifetimeCancel SIGTERMs the child
+	// processes out from under them — receivers should see the graceful
+	// ACTION=STOP → TEARDOWN path, not a torn connection.
+	if a.castMgr != nil {
+		a.castMgr.Stop()
+	}
+	// Cancel so any in-flight background goroutines unblock and
 	// release resources before we tear down the pool / watcher.
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
