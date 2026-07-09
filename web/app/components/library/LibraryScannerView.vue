@@ -354,6 +354,19 @@ function rematchIdentity(identity: ScanIdentity) {
   runAction(identity, 'rematch', undefined, `Reset ${identity.title || identity.identity_key} for re-identify on the next scan.`)
 }
 
+// Manual "fix match": live provider search + assign an arbitrary result the
+// automated search never surfaced. The dialog posts to .../assign, which
+// rides the same approve flow as accepting a scanner-found candidate.
+const searchDialogIdentity = ref<ScanIdentity | null>(null)
+
+async function onSearchAssigned(title: string) {
+  const identity = searchDialogIdentity.value
+  searchDialogIdentity.value = null
+  await refresh({ silent: true })
+  actionError.value = ''
+  actionNote.value = `Matched ${identity?.title || identity?.identity_key || 'identity'} as “${title}” — awaiting apply.`
+}
+
 function toggleExpand(id: number) {
   const next = new Set(expanded.value)
   if (next.has(id)) next.delete(id)
@@ -737,6 +750,9 @@ function runFiles(run: ScanRun): number {
                     </div>
 
                     <div class="detail-foot">
+                      <button class="mini-btn accept" :disabled="busyId === identity.id" @click.stop="searchDialogIdentity = identity">
+                        <Icon name="search" :size="11" /> Search match…
+                      </button>
                       <button class="mini-btn" :disabled="busyId === identity.id" @click.stop="rematchIdentity(identity)">
                         <Icon :name="busyId === identity.id ? 'spinner' : 'refresh'" :size="11" /> Reset / re-identify
                       </button>
@@ -802,6 +818,14 @@ function runFiles(run: ScanRun): number {
         </div>
       </section>
     </div>
+
+    <LibraryScannerSearchDialog
+      :library-id="library.id"
+      :identity="searchDialogIdentity"
+      :show="!!searchDialogIdentity"
+      @applied="onSearchAssigned"
+      @close="searchDialogIdentity = null"
+    />
   </div>
 </template>
 

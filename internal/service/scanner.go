@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -301,6 +302,182 @@ func scannerFirstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// SearchScannerIdentity runs a live provider search on behalf of a scanner
+// identity — the "fix match" escape hatch for when the automated search never
+// surfaced the right candidate. Accepts the same inputs as the metadata
+// editor's identify search: free text + year, or a pasted provider URL /
+// shortcode (TMDB, IMDb, TVDB, heya.media).
+func (a *App) SearchScannerIdentity(ctx context.Context, libraryID, identityID int64, query, year string) (IdentifySearchResult, error) {
+	q := sqlc.New(a.db)
+	row, _, err := getScannerIdentityRowAndView(ctx, q, libraryID, identityID)
+	if err != nil {
+		return IdentifySearchResult{}, err
+	}
+	lib, err := q.GetLibraryByID(ctx, libraryID)
+	if err != nil {
+		return IdentifySearchResult{}, err
+	}
+	settings := metadata.ParseSettings(lib.Settings)
+
+	if query == "" {
+		query = row.Title
+	}
+	if year == "" {
+		year = row.Year
+	}
+	kind := scannerSearchKind(row.MediaType)
+
+	var fetchOpts *metadata.FetchOptions
+	if settings.PreferredLanguage != "" {
+		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
+	}
+
+	if providerName, providerID, ok := parseIdentifyURL(query, kind); ok {
+		if res, err := a.resolveIdentifyURL(ctx, providerName, providerID, fetchOpts); err == nil {
+			return IdentifySearchResult{Results: []metadata.SearchResult{res}}, nil
+		} else {
+			log.Debug().Err(err).Str("provider", providerName).Str("provider_id", providerID).Msg("scanner identity URL lookup failed")
+		}
+	}
+
+	results, err := a.heya.Search(ctx, kind, metadata.SearchQuery{
+		Title:    query,
+		Year:     year,
+		Language: settings.PreferredLanguage,
+		Country:  settings.PreferredCountry,
+	})
+	if err != nil {
+		log.Debug().Err(err).Msg("scanner identity search failed")
+		results = nil
+	}
+	return IdentifySearchResult{Results: results}, nil
+}
+
+type AssignScannerIdentityReq struct {
+	ProviderName string            `json:"provider_name,omitempty"`
+	ProviderID   string            `json:"provider_id"`
+	Title        string            `json:"title,omitempty"`
+	Year         string            `json:"year,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	PosterURL    string            `json:"poster_url,omitempty"`
+	HeyaSlug     string            `json:"heya_slug,omitempty"`
+	Confidence   float64           `json:"confidence,omitempty"`
+	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
+}
+
+// AssignScannerIdentityProvider pins an arbitrary provider result onto a
+// scanner identity. The result is upserted as a match candidate row (so the
+// review UI can render it like any scanner-found candidate) and then rides
+// the normal approve flow: demote other candidates, resolve findings, and
+// enqueue the scoped forced re-scan whose overlay materializes the decision.
+func (a *App) AssignScannerIdentityProvider(ctx context.Context, libraryID, identityID int64, req AssignScannerIdentityReq) (ScannerIdentityView, error) {
+	providerID := strings.TrimSpace(req.ProviderID)
+	if providerID == "" {
+		return ScannerIdentityView{}, fmt.Errorf("provider_id is required")
+	}
+	q := sqlc.New(a.db)
+	row, _, err := getScannerIdentityRowAndView(ctx, q, libraryID, identityID)
+	if err != nil {
+		return ScannerIdentityView{}, err
+	}
+
+	providerName := scannerFirstNonEmpty(strings.TrimSpace(req.ProviderName), "heya")
+	title := scannerFirstNonEmpty(strings.TrimSpace(req.Title), row.Title)
+	confidence := req.Confidence
+	if confidence <= 0 || confidence > 1 {
+		confidence = 1
+	}
+
+	// raw_data mirrors the scanner's persisted *SearchCandidate JSON — the
+	// review UI reads description/poster_url/heya_slug from it, and the music
+	// candidate shape names its title field "artist".
+	rawData := map[string]any{
+		"provider_id": providerID,
+		"provider":    providerName,
+		"title":       title,
+		"artist":      title,
+		"confidence":  confidence,
+		"manual":      true,
+	}
+	if req.Year != "" {
+		rawData["year"] = req.Year
+	}
+	if req.Description != "" {
+		rawData["description"] = req.Description
+	}
+	if req.PosterURL != "" {
+		rawData["poster_url"] = req.PosterURL
+	}
+	if req.HeyaSlug != "" {
+		rawData["heya_slug"] = req.HeyaSlug
+	}
+	if len(req.ExternalIDs) > 0 {
+		rawData["external_ids"] = req.ExternalIDs
+	}
+	rawJSON, err := json.Marshal(rawData)
+	if err != nil {
+		return ScannerIdentityView{}, err
+	}
+	externalJSON := []byte("{}")
+	if len(req.ExternalIDs) > 0 {
+		if externalJSON, err = json.Marshal(req.ExternalIDs); err != nil {
+			return ScannerIdentityView{}, err
+		}
+	}
+
+	candidate, err := q.UpsertMetadataMatchCandidate(ctx, sqlc.UpsertMetadataMatchCandidateParams{
+		IdentityID:      identityID,
+		ScanRunID:       row.LastSeenScanRunID,
+		ProviderName:    providerName,
+		ProviderID:      providerID,
+		ProviderKind:    scannerProviderKindFromID(providerID),
+		Title:           title,
+		Year:            req.Year,
+		Score:           scannerPgNumericFromFloat64(confidence),
+		Rank:            0, // sorts ahead of scanner-found candidates (rank >= 1)
+		Status:          "candidate",
+		RejectionReason: "",
+		ExternalIds:     externalJSON,
+		RawData:         rawJSON,
+	})
+	if err != nil {
+		return ScannerIdentityView{}, err
+	}
+	return a.ApproveScannerCandidate(ctx, libraryID, identityID, candidate.ID)
+}
+
+func scannerSearchKind(mediaType sqlc.MediaType) metadata.MediaKind {
+	switch mediaType {
+	case sqlc.MediaTypeMovie:
+		return metadata.KindMovie
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
+		return metadata.KindTV
+	case sqlc.MediaTypeMusic:
+		return metadata.KindMusic
+	case sqlc.MediaTypeBook:
+		return metadata.KindBook
+	}
+	return metadata.KindMovie
+}
+
+// scannerProviderKindFromID mirrors the scanner's providerKindFromID: a
+// "heya:<kind>:<provider>:<value>" id yields the source provider segment.
+func scannerProviderKindFromID(providerID string) string {
+	parts := strings.Split(providerID, ":")
+	if len(parts) >= 4 && parts[0] == "heya" {
+		return parts[2]
+	}
+	return "heya"
+}
+
+func scannerPgNumericFromFloat64(f float64) pgtype.Numeric {
+	var n pgtype.Numeric
+	if err := n.Scan(strconv.FormatFloat(f, 'f', 3, 64)); err != nil {
+		return pgtype.Numeric{Valid: true}
+	}
+	return n
 }
 
 func (a *App) RejectScannerIdentity(ctx context.Context, libraryID, identityID int64, reason string) (ScannerIdentityView, error) {

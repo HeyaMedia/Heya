@@ -3981,6 +3981,33 @@
         ],
         "type": "object"
       },
+      "IdentifySearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/IdentifySearchResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      },
       "IdsBody": {
         "additionalProperties": false,
         "properties": {
@@ -4483,6 +4510,66 @@
         },
         "required": [
           "candidate_id"
+        ],
+        "type": "object"
+      },
+      "Library-scanner-assign-identityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Library-scanner-assign-identityRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "confidence": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "description": {
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "external_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "heya_slug": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "poster_url": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "provider_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider_name": {
+            "maxLength": 32,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "year": {
+            "maxLength": 4,
+            "pattern": "^[0-9]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id"
         ],
         "type": "object"
       },
@@ -12531,6 +12618,64 @@
         ],
         "type": "object"
       },
+      "SearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "alt_titles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "confidence": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enriched": {
+            "type": "boolean"
+          },
+          "external_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "heya_slug": {
+            "type": "string"
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "provider_name",
+          "title",
+          "year",
+          "description",
+          "poster_url",
+          "confidence"
+        ],
+        "type": "object"
+      },
       "SeasonWatchInfo": {
         "additionalProperties": false,
         "properties": {
@@ -20171,6 +20316,86 @@
         ]
       }
     },
+    "/api/libraries/{id}/scanner/identities/{identity_id}/assign": {
+      "post": {
+        "operationId": "library-scanner-assign-identity",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Library-scanner-assign-identityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScannerIdentityView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Assign an arbitrary provider match to a scanner identity",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
     "/api/libraries/{id}/scanner/identities/{identity_id}/candidates/{candidate_id}/detail": {
       "get": {
         "operationId": "library-scanner-candidate-detail",
@@ -20476,6 +20701,99 @@
           }
         ],
         "summary": "Reset a scanner identity for rematch",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
+    "/api/libraries/{id}/scanner/identities/{identity_id}/search": {
+      "get": {
+        "operationId": "library-scanner-identity-search",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Title query or provider URL/shortcode",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Title query or provider URL/shortcode",
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Year hint (4-digit)",
+            "explode": false,
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "description": "Year hint (4-digit)",
+              "maxLength": 4,
+              "pattern": "^[0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentifySearchResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Provider search for a scanner identity",
         "tags": [
           "Libraries"
         ]

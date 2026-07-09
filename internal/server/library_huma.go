@@ -314,6 +314,59 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(identity), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/identities/{identity_id}/search", "library-scanner-identity-search", "Provider search for a scanner identity", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			IdentityID int64  `path:"identity_id" minimum:"1"`
+			Q          string `query:"q" maxLength:"200" doc:"Title query or provider URL/shortcode"`
+			Year       string `query:"year" maxLength:"4" pattern:"^[0-9]*$" doc:"Year hint (4-digit)"`
+		}) (*JSONOutput[service.IdentifySearchResult], error) {
+			result, err := app.SearchScannerIdentity(ctx, in.ID, in.IdentityID, in.Q, in.Year)
+			if err != nil {
+				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
+					return nil, huma.Error404NotFound("scanner identity not found")
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(result), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scanner/identities/{identity_id}/assign", "library-scanner-assign-identity", "Assign an arbitrary provider match to a scanner identity", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			IdentityID int64 `path:"identity_id" minimum:"1"`
+			Body       struct {
+				ProviderName string            `json:"provider_name,omitempty" maxLength:"32"`
+				ProviderID   string            `json:"provider_id" minLength:"1" maxLength:"256"`
+				Title        string            `json:"title,omitempty" maxLength:"512"`
+				Year         string            `json:"year,omitempty" maxLength:"4" pattern:"^[0-9]*$"`
+				Description  string            `json:"description,omitempty" maxLength:"4000"`
+				PosterURL    string            `json:"poster_url,omitempty" maxLength:"1024"`
+				HeyaSlug     string            `json:"heya_slug,omitempty" maxLength:"256"`
+				Confidence   float64           `json:"confidence,omitempty" minimum:"0" maximum:"1"`
+				ExternalIDs  map[string]string `json:"external_ids,omitempty"`
+			}
+		}) (*JSONOutput[service.ScannerIdentityView], error) {
+			identity, err := app.AssignScannerIdentityProvider(ctx, in.ID, in.IdentityID, service.AssignScannerIdentityReq{
+				ProviderName: in.Body.ProviderName,
+				ProviderID:   in.Body.ProviderID,
+				Title:        in.Body.Title,
+				Year:         in.Body.Year,
+				Description:  in.Body.Description,
+				PosterURL:    in.Body.PosterURL,
+				HeyaSlug:     in.Body.HeyaSlug,
+				Confidence:   in.Body.Confidence,
+				ExternalIDs:  in.Body.ExternalIDs,
+			})
+			if err != nil {
+				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
+					return nil, huma.Error404NotFound("scanner identity not found")
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(identity), nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/unmatched", "list-unmatched", "Unmatched files with match candidates", "Libraries")),
 		func(ctx context.Context, in *IDPath) (*JSONOutput[[]service.UnmatchedFile], error) {
 			result, err := app.ListUnmatched(ctx, in.ID)
