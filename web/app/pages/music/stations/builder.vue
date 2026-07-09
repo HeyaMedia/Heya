@@ -3,9 +3,52 @@
     <header class="ms-mb-head">
       <div>
         <h1 class="ms-mb-title">Mix Builder</h1>
-        <div class="ms-mb-sub">Stack any combination of artists, albums, tracks, and vibes. We'll blend their sonic profiles into one queue.</div>
+        <div class="ms-mb-sub">Give the AI a scene to soundtrack, or blend artists, albums, tracks, and vibes by hand.</div>
       </div>
     </header>
+
+    <!-- AI Director — narrative intent becomes several acoustic CLAP probes;
+         the LLM only sequences real tracks returned from the library. -->
+    <section class="ms-mb-ai" :class="{ unavailable: aiReadyQuery.isSuccess.value && !aiReady }">
+      <div class="ms-mb-ai-head">
+        <div>
+          <div class="ms-mb-ai-kicker"><Icon name="sparkle" :size="12" /> AI Director</div>
+          <h2>Describe the moment. Heya scores it.</h2>
+        </div>
+        <div class="ms-mb-ai-grounded">Qwen + CLAP · library-grounded</div>
+      </div>
+      <textarea
+        v-model="aiPrompt"
+        class="ms-mb-ai-input"
+        rows="5"
+        maxlength="2000"
+        placeholder="I am a captain on a Starfleet vessel, and we are about to do battle with the Borg. I need high-power motivational music that will make my crew victorious — think Doom music…"
+        @keydown.meta.enter.prevent="buildAIMix"
+        @keydown.ctrl.enter.prevent="buildAIMix"
+      />
+      <div class="ms-mb-ai-foot">
+        <div v-if="aiReady" class="ms-mb-ai-hint">The AI translates the story into sound; CLAP finds the actual music.</div>
+        <div v-else-if="aiReadyQuery.isPending.value" class="ms-mb-ai-hint">Checking the AI runtime…</div>
+        <div v-else class="ms-mb-ai-hint ms-mb-ai-off">
+          AI is unavailable — configure it in <NuxtLink to="/settings/ai">Settings → AI</NuxtLink>.
+        </div>
+        <div class="ms-mb-ai-count">
+          <span>{{ trackCount }} tracks</span>
+          <input v-model.number="trackCount" type="range" min="10" max="60" step="5" class="ms-mb-range" />
+        </div>
+        <button
+          type="button"
+          class="ms-mb-ai-btn"
+          :disabled="!aiReady || aiPrompt.trim().length < 2 || anyBuilding"
+          @click="buildAIMix"
+        >
+          <Icon name="sparkle" :size="15" />
+          {{ aiBuilding ? 'Directing…' : `Build ${trackCount}-track AI Mix` }}
+        </button>
+      </div>
+    </section>
+
+    <div class="ms-mb-or"><span>or shape it manually</span></div>
 
     <!-- Seed-kind tabs -->
     <div class="ms-mb-tabs">
@@ -114,7 +157,7 @@
       </div>
       <button
         class="ms-mb-build-btn"
-        :disabled="!canBuild || building"
+        :disabled="!canBuild || anyBuilding"
         @click="buildMix"
       >
         <Icon name="sparkle" :size="15" />
@@ -129,8 +172,10 @@
     <section v-if="builtTracks.length" class="ms-mb-results">
       <div class="ms-mb-results-head">
         <div>
-          <h2 class="section-title-lg">Your Mix</h2>
+          <h2 class="section-title-lg">{{ mixTitle }}</h2>
           <div class="ms-mb-results-sub">{{ builtTracks.length }} tracks · {{ formatTotalDuration(builtTracks) }}</div>
+          <div v-if="mixSummary" class="ms-mb-results-summary">{{ mixSummary }}</div>
+          <div v-if="mixMeta" class="ms-mb-results-meta" :title="mixProbesTitle">{{ mixMeta }}</div>
         </div>
         <div class="ms-mb-results-actions">
           <button class="ms-mb-action-btn" @click="playAll">
@@ -141,7 +186,7 @@
             <Icon name="plus" :size="14" />
             <span>Save as Playlist</span>
           </button>
-          <button class="ms-mb-action-btn" @click="buildMix">
+          <button class="ms-mb-action-btn" :disabled="anyBuilding" @click="rerollMix">
             <Icon name="refresh" :size="14" />
             <span>Re-roll</span>
           </button>
@@ -163,15 +208,16 @@
           <div class="ms-mb-track-meta">
             <div class="ms-mb-track-title">{{ t.track_title }}</div>
             <div class="ms-mb-track-sub">{{ t.artist_name }} · {{ t.album_title }}</div>
+            <div v-if="t.reason" class="ms-mb-track-reason">{{ t.reason }}</div>
           </div>
           <div class="ms-mb-track-dur">{{ formatDuration(t.duration) }}</div>
         </li>
       </ul>
     </section>
 
-    <div v-if="!builtTracks.length && !building" class="ms-mb-empty">
+    <div v-if="!builtTracks.length && !anyBuilding" class="ms-mb-empty">
       <Icon name="sparkle" :size="40" />
-      <p>Add one or more seeds above and tap <strong>Build Mix</strong>.</p>
+      <p>Give the AI a mission, or add seeds and tap <strong>Build Mix</strong>.</p>
     </div>
   </div>
 </template>
@@ -186,6 +232,14 @@ definePageMeta({ layout: 'default' })
 const { play, queue } = usePlayer()
 const { $heya } = useNuxtApp()
 const playlistsApi = usePlaylists()
+
+const aiReadyQuery = useQuery({
+  queryKey: ['ai-ready'],
+  queryFn: async () => (await $heya('/api/ai/ready')) as { ready: boolean; mode: string },
+  staleTime: 1000 * 60 * 10,
+})
+const aiReady = computed(() => aiReadyQuery.data.value?.ready === true)
+const aiPrompt = ref('')
 
 type SeedKind = 'text' | 'track' | 'artist' | 'album'
 
@@ -313,14 +367,66 @@ interface RichTrackRow {
   artist_name: string
   artist_slug: string
   distance?: number
+  reason?: string
 }
 
 const building = ref(false)
+const aiBuilding = ref(false)
+const anyBuilding = computed(() => building.value || aiBuilding.value)
 const buildError = ref<string | null>(null)
 const builtTracks = ref<RichTrackRow[]>([])
+const mixTitle = ref('Your Mix')
+const mixSummary = ref('')
+const mixMeta = ref('')
+const mixProbes = ref<string[]>([])
+const lastBuildMode = ref<'manual' | 'ai'>('manual')
+const mixProbesTitle = computed(() => mixProbes.value.length ? `CLAP probes: ${mixProbes.value.join(' · ')}` : '')
+
+interface AIMixResponse {
+  title: string
+  summary: string
+  probes: string[]
+  tracks: RichTrackRow[]
+  model?: string
+  mode: string
+  duration_ms: number
+}
+
+async function buildAIMix() {
+  const query = aiPrompt.value.trim()
+  if (!aiReady.value || query.length < 2 || anyBuilding.value) return
+  aiBuilding.value = true
+  buildError.value = null
+  try {
+    const res = await $heya('/api/ai/music-mix', {
+      method: 'POST',
+      body: { query, limit: trackCount.value },
+    }) as unknown as AIMixResponse
+    builtTracks.value = res.tracks ?? []
+    mixTitle.value = res.title || 'AI Mix'
+    mixSummary.value = res.summary || ''
+    mixProbes.value = res.probes ?? []
+    mixMeta.value = `AI-directed · ${res.model || res.mode} · ${(res.duration_ms / 1000).toFixed(1)}s`
+    lastBuildMode.value = 'ai'
+    if (!builtTracks.value.length) {
+      buildError.value = 'The AI understood the brief, but CLAP found no matching analyzed tracks.'
+    }
+  } catch (e) {
+    const err = e as { data?: { detail?: string; error?: string }; statusCode?: number; message?: string }
+    if (err.statusCode === 503) {
+      buildError.value = 'The CLAP text model is still loading. Try again in a few seconds.'
+    } else if (err.statusCode === 409) {
+      buildError.value = err.data?.detail ?? 'The AI runtime is not ready.'
+    } else {
+      buildError.value = err.data?.detail ?? err.data?.error ?? err.message ?? 'AI mix failed.'
+    }
+  } finally {
+    aiBuilding.value = false
+  }
+}
 
 async function buildMix() {
-  if (!canBuild.value || building.value) return
+  if (!canBuild.value || anyBuilding.value) return
   building.value = true
   buildError.value = null
   try {
@@ -338,6 +444,11 @@ async function buildMix() {
       body,
     }) as unknown as { seed_track_id: number; tracks: RichTrackRow[] }
     builtTracks.value = res.tracks ?? []
+    mixTitle.value = 'Your Mix'
+    mixSummary.value = `Built from ${seeds.value.map((s) => s.label).join(' + ')}`
+    mixMeta.value = 'Sonic blend'
+    mixProbes.value = []
+    lastBuildMode.value = 'manual'
     if (!builtTracks.value.length) {
       buildError.value = 'No tracks came back — try different seeds or grow your library.'
     }
@@ -354,6 +465,11 @@ async function buildMix() {
   } finally {
     building.value = false
   }
+}
+
+function rerollMix() {
+  if (lastBuildMode.value === 'ai') buildAIMix()
+  else buildMix()
 }
 
 function seedToPayload(s: Seed) {
@@ -396,10 +512,13 @@ async function playFrom(i: number) {
 async function onSaveAsPlaylist() {
   if (!builtTracks.value.length) return
   const summary = seeds.value.map((s) => s.label).slice(0, 3).join(' + ')
-  const name = prompt('Playlist name', `Mix — ${summary || 'untitled'}`)
+  const defaultName = lastBuildMode.value === 'ai' ? mixTitle.value : `Mix — ${summary || 'untitled'}`
+  const name = prompt('Playlist name', defaultName)
   if (!name) return
   try {
-    const desc = `Built from: ${seeds.value.map((s) => `${s.kind}:${s.label}`).join(', ')}`
+    const desc = lastBuildMode.value === 'ai'
+      ? `${mixSummary.value}\n\nAI brief: ${aiPrompt.value.trim()}`
+      : `Built from: ${seeds.value.map((s) => `${s.kind}:${s.label}`).join(', ')}`
     const created = await playlistsApi.create(name, desc)
     for (const t of builtTracks.value) {
       await playlistsApi.addTrack(created.id, t.track_id)
@@ -426,6 +545,101 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-head { margin-bottom: 24px; }
 .ms-mb-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
 .ms-mb-sub { color: var(--fg-3); font-size: 14px; margin-top: 4px; max-width: 640px; }
+
+/* AI Director */
+.ms-mb-ai {
+  position: relative;
+  padding: 20px;
+  margin-bottom: 22px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(227, 181, 83, 0.13), transparent 42%),
+    linear-gradient(145deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025));
+  border: 1px solid rgba(227, 181, 83, 0.24);
+  border-radius: 12px;
+}
+.ms-mb-ai.unavailable { border-color: var(--border); }
+.ms-mb-ai-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  margin-bottom: 14px;
+}
+.ms-mb-ai-kicker {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.ms-mb-ai h2 { color: var(--fg-0); font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+.ms-mb-ai-grounded {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding-top: 4px;
+}
+.ms-mb-ai-input {
+  width: 100%;
+  min-height: 116px;
+  resize: vertical;
+  padding: 13px 14px;
+  color: var(--fg-0);
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ms-mb-ai-input::placeholder { color: var(--fg-3); }
+.ms-mb-ai-input:focus { border-color: var(--gold); background: rgba(0,0,0,0.24); }
+.ms-mb-ai-foot {
+  display: flex; align-items: center; gap: 16px;
+  margin-top: 13px;
+}
+.ms-mb-ai-hint { flex: 1; color: var(--fg-3); font-size: 11px; line-height: 1.4; }
+.ms-mb-ai-off, .ms-mb-ai-off a { color: #ffb4a8; }
+.ms-mb-ai-count {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 150px;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.ms-mb-ai-count .ms-mb-range { width: 82px; }
+.ms-mb-ai-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 40px;
+  padding: 9px 15px;
+  color: var(--bg-0);
+  background: var(--gold);
+  border: 0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter 0.15s, opacity 0.15s;
+}
+.ms-mb-ai-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.ms-mb-ai-btn:disabled { opacity: 0.4; cursor: default; }
+.ms-mb-or {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 18px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.ms-mb-or::before, .ms-mb-or::after { content: ''; height: 1px; flex: 1; background: var(--border); }
 
 /* Tabs */
 .ms-mb-tabs {
@@ -671,6 +885,17 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   margin-top: 4px;
   letter-spacing: 0.04em;
 }
+.ms-mb-results-summary { max-width: 590px; margin-top: 7px; color: var(--fg-2); font-size: 13px; line-height: 1.45; }
+.ms-mb-results-meta {
+  width: fit-content;
+  margin-top: 6px;
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: help;
+}
 .ms-mb-results-actions { display: flex; gap: 6px; }
 .ms-mb-action-btn {
   display: inline-flex; align-items: center; gap: 5px;
@@ -685,6 +910,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   transition: all 0.15s;
 }
 .ms-mb-action-btn:hover { background: rgba(255,255,255,0.09); border-color: var(--fg-3); }
+.ms-mb-action-btn:disabled { opacity: 0.4; cursor: default; }
 
 .ms-mb-track-list { display: flex; flex-direction: column; gap: 2px; }
 .ms-mb-track-row {
@@ -733,6 +959,12 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.ms-mb-track-reason {
+  margin-top: 2px;
+  color: var(--gold);
+  font-size: 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .ms-mb-track-dur {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -759,6 +991,14 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
      description line right below stays, it's not duplicated elsewhere. */
   .ms-mb-title { display: none; }
   .ms-mb-head { margin-bottom: 18px; }
+
+  .ms-mb-ai { padding: 15px; }
+  .ms-mb-ai-head { flex-direction: column; gap: 4px; }
+  .ms-mb-ai-grounded { padding-top: 0; }
+  .ms-mb-ai-foot { flex-wrap: wrap; }
+  .ms-mb-ai-hint { flex-basis: 100%; }
+  .ms-mb-ai-count { flex: 1; }
+  .ms-mb-ai-btn { width: 100%; min-height: 44px; }
 
   /* 4 pill tabs at `width: fit-content` overflow a 390px viewport — scroll
      the strip horizontally instead of blowing out the page width. */

@@ -499,6 +499,24 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(resp), nil
 		})
 
+	// AI-directed Mix Builder: narrative brief → LLM acoustic plan → several
+	// CLAP searches → grounded LLM selection and sequencing. It deliberately
+	// sits beside Instant Radio because both return playable music queues, but
+	// this route is explicit/slow and therefore never used for live typing.
+	huma.Register(api, secured(op(http.MethodPost, "/api/ai/music-mix", "post-ai-music-mix", "Build an AI-directed music mix from a narrative brief", "Music")),
+		func(ctx context.Context, in *struct {
+			Body service.AIMusicMixRequest
+		}) (*JSONOutput[service.AIMusicMixResult], error) {
+			resp, err := app.AIMusicMix(ctx, in.Body)
+			if err != nil {
+				if errors.Is(err, sonicanalysis.ErrTextSearcherUnavailable) {
+					return nil, huma.Error503ServiceUnavailable("AI Mix Builder needs the CLAP text model — enable Sonic Analysis and let its models finish downloading")
+				}
+				return nil, aiError(err)
+			}
+			return noStoreJSON(resp), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/search-sonic", "search-music-sonic", "Free-text music vibe search (CLAP)", "Music")),
 		func(ctx context.Context, in *struct {
 			Q     string `query:"q" minLength:"1" doc:"Free-form audio vibe prompt"`
