@@ -12,7 +12,8 @@ HEYAMEDIA_URL ?= https://heya.media
 
 build-frontend:
 	cd web && bun install && bun run build
-	rm -rf web/dist/*
+	rm -rf web/dist
+	mkdir -p web/dist
 	cp -r web/.output/public/* web/dist/
 	touch web/dist/.gitkeep
 
