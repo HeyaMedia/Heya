@@ -76,7 +76,7 @@ var aiRecPicksSchema = []byte(`{
 				"additionalProperties": false
 			}
 		},
-		"note": { "type": "string", "minLength": 1, "maxLength": 400 }
+		"note": { "type": "string", "minLength": 1, "maxLength": 600 }
 	},
 	"required": ["picks", "note"],
 	"additionalProperties": false
@@ -209,7 +209,7 @@ func (a *App) aiRecProbes(ctx context.Context, client *llm.Client, model, query,
 		"Given a viewer's request, write 2-4 diverse probes that surface fitting titles: mood words, genres, themes, plot elements — " +
 		"each covering a different interpretation or angle of the request. Do not repeat the request verbatim; it is already searched. " +
 		"If the request describes a specific title you recognize (a plot point, a character, an oblique reference), name that title " +
-		"in a probe — descriptions in the index avoid spoilers, but the title itself is always indexed."
+		"in a probe — descriptions in the index avoid spoilers, but the title itself is always indexed. Write probes entirely in English."
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Viewer request: %s\n", query)
@@ -312,6 +312,45 @@ func (a *App) aiRecBlurbs(ctx context.Context, pool []ForYouItem) map[int64]stri
 		}
 		out[id] = strings.Join(parts, " | ")
 	}
+
+	// Items that surfaced via an episode-embedding hit get that episode's
+	// overview appended — it names the characters and plot points the
+	// spoiler-safe series blurb omits, which is often the only evidence that
+	// lets the grader connect an oblique ask to the right show.
+	epByItem := map[int64]int64{}
+	epIDs := make([]int64, 0, 4)
+	for _, it := range pool {
+		if it.matchedEpisodeID != 0 {
+			epByItem[it.ID] = it.matchedEpisodeID
+			epIDs = append(epIDs, it.matchedEpisodeID)
+		}
+	}
+	if len(epIDs) == 0 {
+		return out
+	}
+	epRows, err := a.db.Query(ctx, `SELECT id, overview FROM tv_episodes WHERE id = ANY($1) AND overview <> ''`, epIDs)
+	if err != nil {
+		log.Warn().Err(err).Msg("ai recommend: episode evidence hydration failed")
+		return out
+	}
+	defer epRows.Close()
+	epOverviews := map[int64]string{}
+	for epRows.Next() {
+		var id int64
+		var ov string
+		if err := epRows.Scan(&id, &ov); err != nil {
+			return out
+		}
+		if len(ov) > 240 {
+			ov = ov[:240] + "…"
+		}
+		epOverviews[id] = strings.ReplaceAll(ov, "\n", " ")
+	}
+	for itemID, epID := range epByItem {
+		if ov := epOverviews[epID]; ov != "" {
+			out[itemID] += " | matched episode: " + ov
+		}
+	}
 	return out
 }
 
@@ -340,7 +379,8 @@ func aiRecCurateSystem() string {
 		"reason = a short line (max 8 words) shown under the poster saying why it fits — plain human language, never mention ids, grades, or \"the viewer\"; " +
 		"note = 1-2 sentences speaking directly to the viewer as \"you\", explaining how you read the request and why the picks fit overall " +
 		"(e.g. \"I looked for … — these fit because …\"). If nothing fits, use the note to say what you looked for and why nothing matched. " +
-		"If you recognized a specific title the request was hinting at, name it in the note. Never mention ids, grades, or \"the viewer\" in the note."
+		"If you recognized a specific title the request was hinting at, name it in the note. Never mention ids, grades, or \"the viewer\" in the note. " +
+		"Write reasons and the note entirely in English."
 }
 
 func aiRecCurateUser(query, mediaType string, pool []ForYouItem, blurbs map[int64]string, watched map[int64]bool, history []string) string {
@@ -362,6 +402,11 @@ func aiRecCurateUser(query, mediaType string, pool []ForYouItem, blurbs map[int6
 		}
 		if watched[it.ID] {
 			b.WriteString(" | recently watched")
+		}
+		// Episode-driven retrieval evidence ("Matched S02E05 — …") — tells the
+		// grader WHY this candidate surfaced when the series blurb won't.
+		if it.Reason != "" {
+			fmt.Fprintf(&b, " | %s", it.Reason)
 		}
 		if extra := blurbs[it.ID]; extra != "" {
 			fmt.Fprintf(&b, " | %s", extra)

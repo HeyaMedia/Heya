@@ -48,9 +48,9 @@ var recommendSearchCmd = &cobra.Command{
 				ui.Warn("No matches.")
 				return nil
 			}
-			t := ui.NewTable("SIM", "TYPE", "TITLE")
+			t := ui.NewTable("SIM", "TYPE", "TITLE", "VIA")
 			for _, it := range items {
-				t.AddRow(fmt.Sprintf("%.3f", it.Score), it.MediaType, it.Title)
+				t.AddRow(fmt.Sprintf("%.3f", it.Score), it.MediaType, it.Title, it.Reason)
 			}
 			fmt.Println(t.Render())
 			return nil

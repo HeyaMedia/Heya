@@ -83,6 +83,10 @@ type ForYouItem struct {
 	Available bool    `json:"available"`
 
 	libraryID int64 // carried for batched title localization; never serialized
+	// matchedEpisodeID is set when the item surfaced via an episode-embedding
+	// hit (semantic search) — the AI re-ranker fetches that episode's overview
+	// as grading evidence. Never serialized.
+	matchedEpisodeID int64
 }
 
 // AcquireItem is a highly-recommended title the user does NOT own — the seed for

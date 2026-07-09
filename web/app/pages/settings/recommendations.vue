@@ -11,6 +11,8 @@ type MLStatus = {
   env_locks?: { enabled?: string; accelerator?: string }
   embedded?: number
   total?: number
+  embedded_episodes?: number
+  total_episodes?: number
   model?: string
   dimensions?: number
   accelerators?: Accel[]
@@ -30,6 +32,8 @@ const accelLocked = computed(() => !!status.value?.env_locks?.accelerator)
 const fetcher = computed(() => status.value?.fetcher)
 const embedded = computed(() => status.value?.embedded ?? 0)
 const total = computed(() => status.value?.total ?? 0)
+const epEmbedded = computed(() => status.value?.embedded_episodes ?? 0)
+const epTotal = computed(() => status.value?.total_episodes ?? 0)
 const missing = computed(() => fetcher.value?.missing_count ?? 0)
 const progress = computed(() => fetcher.value?.progress)
 const availableAccelerators = computed(() => (status.value?.accelerators ?? []).filter(a => a.available))
@@ -137,6 +141,9 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         <MetricTile label="Embedded" :value="`${embedded} / ${total}`"
           :tone="embedded >= total && total > 0 ? 'good' : 'warn'" icon="sparkle"
           :sub="`${status?.dimensions ?? 1024}-dim`" />
+        <MetricTile label="Episodes" :value="`${epEmbedded} / ${epTotal}`"
+          :tone="epEmbedded >= epTotal && epTotal > 0 ? 'good' : 'warn'" icon="film"
+          sub="overview embeddings" />
         <MetricTile label="Semantic search" :value="modelReady ? 'ready' : 'not ready'"
           :tone="modelReady ? 'good' : 'neutral'" icon="check" />
       </div>
@@ -155,6 +162,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
           { key: 'Model', value: status?.model ?? 'BGE-large-en-v1.5', mono: true },
           { key: 'Download', value: fetcherLabel },
           { key: 'Embedded', value: `${embedded} / ${total} items`, mono: true },
+          { key: 'Episodes', value: `${epEmbedded} / ${epTotal} episodes`, mono: true },
           { key: 'Last error', value: fetcher?.last_error ?? '' },
         ]" />
         <div v-if="progress && fetcher?.state === 'fetching'" class="fetch-progress">

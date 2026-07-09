@@ -13,17 +13,20 @@ import (
 func collectRecommendationsMLStatus(ctx context.Context, app *service.App) map[string]any {
 	settings := app.RecommendationsMLSettings(ctx)
 	embedded, total := app.EmbeddedVideoCount(ctx)
+	epEmbedded, epTotal := app.EmbeddedEpisodeCount(ctx)
 	enabledLock, accelLock := app.RecommendationsMLEnvLock()
 
 	out := map[string]any{
-		"accelerators": sonicanalysis.AvailableAccelerators(),
-		"enabled":      settings.Enabled,
-		"accelerator":  settings.Accelerator,
-		"env_locks":    map[string]string{"enabled": enabledLock, "accelerator": accelLock},
-		"embedded":     embedded,
-		"total":        total,
-		"model":        "BGE-large-en-v1.5",
-		"dimensions":   1024,
+		"accelerators":      sonicanalysis.AvailableAccelerators(),
+		"enabled":           settings.Enabled,
+		"accelerator":       settings.Accelerator,
+		"env_locks":         map[string]string{"enabled": enabledLock, "accelerator": accelLock},
+		"embedded":          embedded,
+		"total":             total,
+		"embedded_episodes": epEmbedded,
+		"total_episodes":    epTotal,
+		"model":             "BGE-large-en-v1.5",
+		"dimensions":        1024,
 	}
 	if f := app.RecFetcher(); f != nil {
 		fetcher := map[string]any{

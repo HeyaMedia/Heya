@@ -316,6 +316,13 @@ type DebouncedEnrich struct {
 	RequestedBy string             `json:"requested_by"`
 }
 
+type EpisodeFacet struct {
+	EpisodeID       int64              `json:"episode_id"`
+	TextEmbedding   pgvector.Vector    `json:"text_embedding"`
+	EmbedderVersion int32              `json:"embedder_version"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+}
+
 type EpisodeOverview struct {
 	ID        int64  `json:"id"`
 	EpisodeID int64  `json:"episode_id"`
