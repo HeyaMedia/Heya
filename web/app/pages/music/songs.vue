@@ -44,6 +44,7 @@
       :active-track-id="activeTrackId"
       :display-index="globalIndex"
       :on-rating-change="onRatingChange"
+      :virtualized="tlRows.length > 200"
       @row-click="playFrom"
     />
 

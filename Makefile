@@ -17,7 +17,7 @@ build-frontend:
 	touch web/dist/.gitkeep
 
 build: build-frontend
-	$(GO) build -o bin/heya ./cmd/heya
+	$(GO) build -tags embed_frontend -o bin/heya ./cmd/heya
 
 build-go:
 	$(GO) build -o bin/heya ./cmd/heya

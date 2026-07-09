@@ -70,9 +70,10 @@ export function useActiveSessions() {
   // We connect once per consumer; useEventBus.connect is idempotent.
   if (import.meta.client) {
     connect()
-    on('session.update', () => {
+    const off = on('session.update', () => {
       queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
     })
+    onScopeDispose(off)
   }
 
   const sessions = computed<ActiveSession[]>(() => query.data.value ?? [])

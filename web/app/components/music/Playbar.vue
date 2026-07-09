@@ -375,10 +375,10 @@ const sleepCountdownLabel = computed(() => {
 })
 
 let sleepTickId: ReturnType<typeof setInterval> | null = null
-watch(isCompact, (compact) => {
-  if (compact && !sleepTickId) {
+watch([isCompact, sleep.timed], ([compact, timed]) => {
+  if (compact && timed && !sleepTickId) {
     sleepTickId = setInterval(() => sleep.tick(() => pause()), 1000)
-  } else if (!compact && sleepTickId) {
+  } else if ((!compact || !timed) && sleepTickId) {
     clearInterval(sleepTickId)
     sleepTickId = null
   }

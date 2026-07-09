@@ -90,6 +90,7 @@ export interface ScannerEventPayload {
   kind?: string
   reason?: string
   message?: string
+  detail?: string
   data?: Record<string, any>
 }
 
@@ -126,19 +127,151 @@ export interface TaskProgressPayload {
 
 type EventHandler = (event: WsEvent) => void
 
+const scanProgressState = shallowRef<Record<number, LibraryScanProgress>>({})
+const scannerEventsState = shallowRef<Record<number, ScannerEventPayload>>({})
+const taskProgressState = shallowRef<Record<string, TaskProgressPayload>>({})
+const scanActivityCount = shallowRef(0)
+const taskActivityCount = shallowRef(0)
+
 const listeners = new Map<string, Set<EventHandler>>()
+const optInEventTypes = new Set(['log'])
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectDelay = 1000
+
+const VISIBLE_PROGRESS_FLUSH_MS = 250
+const HIDDEN_PROGRESS_FLUSH_MS = 1500
+let scannerEventsRef: Ref<Record<number, ScannerEventPayload>> | null = null
+let scanProgressRef: Ref<Record<number, LibraryScanProgress>> | null = null
+let taskProgressRef: Ref<Record<string, TaskProgressPayload>> | null = null
+let pendingScannerEvents: Record<number, ScannerEventPayload> = {}
+let pendingScanProgress: ScanProgressPayload | null = null
+let pendingTaskEvents: Record<string, Partial<TaskProgressPayload>> = {}
+let pendingTaskDeletes = new Set<string>()
+let progressFlushTimer: ReturnType<typeof setTimeout> | null = null
+let visibilityFlushWired = false
+
+function syncEventSubscriptions() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  const events = [...optInEventTypes].filter(type => (listeners.get(type)?.size ?? 0) > 0)
+  ws.send(JSON.stringify({ type: 'subscribe', events }))
+}
+
+function progressFlushDelay() {
+  if (typeof document === 'undefined') return VISIBLE_PROGRESS_FLUSH_MS
+  return document.visibilityState === 'visible' ? VISIBLE_PROGRESS_FLUSH_MS : HIDDEN_PROGRESS_FLUSH_MS
+}
+
+function scheduleProgressFlush() {
+  if (typeof document !== 'undefined' && !visibilityFlushWired) {
+    visibilityFlushWired = true
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') flushProgressEvents()
+    })
+  }
+  if (progressFlushTimer) return
+  progressFlushTimer = setTimeout(flushProgressEvents, progressFlushDelay())
+}
+
+function mergeTaskProgress(
+  prev: Partial<TaskProgressPayload> | undefined,
+  p: TaskProgressPayload,
+): Partial<TaskProgressPayload> {
+  const merged: Partial<TaskProgressPayload> = {
+    ...prev,
+    task_id: p.task_id,
+    state: p.state,
+  }
+  if (p.pending !== undefined) merged.pending = p.pending
+  if (p.running !== undefined) merged.running = p.running
+  if (p.current_item) {
+    if (p.current_item !== prev?.current_item && p.current_stage === undefined) merged.current_stage = undefined
+    merged.current_item = p.current_item
+    merged.item_kind = p.item_kind
+  }
+  if (p.current_stage !== undefined) merged.current_stage = p.current_stage
+  return merged
+}
+
+function queueScannerEvent(scannerEvents: Ref<Record<number, ScannerEventPayload>>, p: ScannerEventPayload) {
+  if (!p.library_id) return
+  scannerEventsRef = scannerEvents
+  pendingScannerEvents[p.library_id] = p
+  scheduleProgressFlush()
+}
+
+function queueScanProgress(scanProgress: Ref<Record<number, LibraryScanProgress>>, p: ScanProgressPayload) {
+  scanProgressRef = scanProgress
+  pendingScanProgress = p
+  scheduleProgressFlush()
+}
+
+function queueTaskEvent(taskProgress: Ref<Record<string, TaskProgressPayload>>, p: TaskProgressPayload) {
+  taskProgressRef = taskProgress
+  if (p.state === 'idle') {
+    pendingTaskDeletes.add(p.task_id)
+    delete pendingTaskEvents[p.task_id]
+  } else {
+    pendingTaskDeletes.delete(p.task_id)
+    pendingTaskEvents[p.task_id] = mergeTaskProgress(pendingTaskEvents[p.task_id], p)
+  }
+  scheduleProgressFlush()
+}
+
+function updateScanActivityCount() {
+  scanActivityCount.value = new Set([
+    ...Object.keys(scanProgressState.value),
+    ...Object.keys(scannerEventsState.value),
+  ]).size
+}
+
+function updateTaskActivityCount() {
+  taskActivityCount.value = Object.keys(taskProgressState.value).length
+}
+
+function flushProgressEvents() {
+  if (progressFlushTimer) {
+    clearTimeout(progressFlushTimer)
+    progressFlushTimer = null
+  }
+  if (scanProgressRef && pendingScanProgress) {
+    const next: Record<number, LibraryScanProgress> = {}
+    for (const lib of pendingScanProgress.libraries) {
+      next[lib.library_id] = lib
+    }
+    pendingScanProgress = null
+    scanProgressRef.value = next
+    updateScanActivityCount()
+  }
+
+  if (scannerEventsRef && Object.keys(pendingScannerEvents).length > 0) {
+    const next = { ...scannerEventsRef.value, ...pendingScannerEvents }
+    pendingScannerEvents = {}
+    scannerEventsRef.value = next
+    updateScanActivityCount()
+  }
+
+  if (taskProgressRef && (pendingTaskDeletes.size > 0 || Object.keys(pendingTaskEvents).length > 0)) {
+    const next = { ...taskProgressRef.value }
+    for (const id of pendingTaskDeletes) delete next[id]
+    pendingTaskDeletes.clear()
+    for (const [id, pending] of Object.entries(pendingTaskEvents)) {
+      next[id] = mergeTaskProgress(next[id], pending as TaskProgressPayload) as TaskProgressPayload
+    }
+    pendingTaskEvents = {}
+    taskProgressRef.value = next
+    updateTaskActivityCount()
+  }
+}
 
 export function useEventBus() {
   const connected = useState('ws_connected', () => false)
   const activeScans = useState<ScanPayload[]>('ws_active_scans', () => [])
   const activeJobs = useState<ActiveJob[]>('ws_active_jobs', () => [])
   const queueStatus = useState<QueueStatusPayload>('ws_queue_status', () => ({ pending: 0, running: 0 }))
-  const scanProgress = useState<Record<number, LibraryScanProgress>>('ws_scan_progress', () => ({}))
-  const scannerEvents = useState<Record<number, ScannerEventPayload>>('ws_scanner_events', () => ({}))
-  const taskProgress = useState<Record<string, TaskProgressPayload>>('ws_task_progress', () => ({}))
+  const scanProgress = scanProgressState
+  const scannerEvents = scannerEventsState
+  const taskProgress = taskProgressState
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
@@ -147,13 +280,14 @@ export function useEventBus() {
     if (!token.value) return
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${proto}//${location.host}/api/ws?token=${token.value}`
+    const url = `${proto}//${location.host}/api/ws?token=${token.value}&subscriptions=1`
 
     ws = new WebSocket(url)
 
     ws.onopen = () => {
       connected.value = true
       reconnectDelay = 1000
+      syncEventSubscriptions()
     }
 
     ws.onmessage = (msg) => {
@@ -195,7 +329,11 @@ export function useEventBus() {
   function on(type: string, handler: EventHandler): () => void {
     if (!listeners.has(type)) listeners.set(type, new Set())
     listeners.get(type)!.add(handler)
-    return () => { listeners.get(type)?.delete(handler) }
+    if (optInEventTypes.has(type)) syncEventSubscriptions()
+    return () => {
+      listeners.get(type)?.delete(handler)
+      if (optInEventTypes.has(type)) syncEventSubscriptions()
+    }
   }
 
   return {
@@ -206,6 +344,8 @@ export function useEventBus() {
     scanProgress: readonly(scanProgress),
     scannerEvents: readonly(scannerEvents),
     taskProgress: readonly(taskProgress),
+    scanActivityCount: readonly(scanActivityCount),
+    taskActivityCount: readonly(taskActivityCount),
     connect,
     disconnect,
     on,
@@ -232,15 +372,19 @@ function handleEvent(
       activeScans.value = activeScans.value.filter(s => s.library_id !== (event.payload as ScanPayload).library_id)
       {
         const id = (event.payload as ScanPayload).library_id
+        delete pendingScannerEvents[id]
         const next = { ...scannerEvents.value }
         delete next[id]
         scannerEvents.value = next
+        updateScanActivityCount()
       }
       break
     case 'queue.status':
       queueStatus.value = event.payload as QueueStatusPayload
       if (queueStatus.value.pending === 0 && queueStatus.value.running === 0) {
+        pendingScanProgress = null
         scanProgress.value = {}
+        updateScanActivityCount()
       }
       break
     case 'active_jobs':
@@ -248,18 +392,12 @@ function handleEvent(
       break
     case 'scan.progress': {
       const p = event.payload as ScanProgressPayload
-      const next: Record<number, LibraryScanProgress> = {}
-      for (const lib of p.libraries) {
-        next[lib.library_id] = lib
-      }
-      scanProgress.value = next
+      queueScanProgress(scanProgress, p)
       break
     }
     case 'scan.event': {
       const p = event.payload as ScannerEventPayload
-      if (p.library_id) {
-        scannerEvents.value = { ...scannerEvents.value, [p.library_id]: p }
-      }
+      queueScannerEvent(scannerEvents, p)
       break
     }
     case 'task.progress': {
@@ -268,36 +406,7 @@ function handleEvent(
       // per-worker emissions carry current_item+item_kind (no counts).
       // Merge into the existing entry so we keep the latest of both.
       const p = event.payload as TaskProgressPayload
-      if (p.state === 'idle') {
-        const next = { ...taskProgress.value }
-        delete next[p.task_id]
-        taskProgress.value = next
-      } else {
-        const prev = taskProgress.value[p.task_id] ?? { task_id: p.task_id, state: 'running' }
-        const merged: TaskProgressPayload = {
-          ...prev,
-          state: p.state,
-        }
-        // Counts come from the periodic emitter — only present on its
-        // events. If undefined here, keep the previous count.
-        if (p.pending !== undefined) merged.pending = p.pending
-        if (p.running !== undefined) merged.running = p.running
-        // current_item comes from per-worker emits — only present there.
-        if (p.current_item) {
-          merged.current_item = p.current_item
-          merged.item_kind = p.item_kind
-        }
-        // current_stage is the sub-step (Discogs heads, CLAP audio,
-        // …) from per-stage emits; only sonic_analysis fires these.
-        // Reset to undefined if the current item changed so the
-        // stage label doesn't bleed from one track to the next.
-        if (p.current_stage !== undefined) {
-          merged.current_stage = p.current_stage
-        } else if (p.current_item && p.current_item !== prev.current_item) {
-          merged.current_stage = undefined
-        }
-        taskProgress.value = { ...taskProgress.value, [p.task_id]: merged }
-      }
+      queueTaskEvent(taskProgress, p)
       break
     }
   }

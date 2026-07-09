@@ -29,7 +29,7 @@
     <div class="nps-scroll">
       <div class="nps-body nps-pane-np">
         <div class="nps-visual">
-          <div v-if="!showLyrics" class="nps-art-wrap" @click="cycleVisual">
+          <div v-if="open && !showLyrics" class="nps-art-wrap" @click="cycleVisual">
             <Poster v-if="effectiveVisualMode === 'art'" :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
             <div v-else class="nps-viz-wrap">
               <VisualizerMilkdrop v-if="effectiveVisualMode === 'milkdrop'" />
@@ -40,7 +40,7 @@
               <div v-if="visualToastVisible" class="nps-viz-toast">{{ visualModeLabel }}</div>
             </Transition>
           </div>
-          <div v-else ref="lyricsScrollEl" class="nps-lyrics scroll">
+          <div v-else-if="open" ref="lyricsScrollEl" class="nps-lyrics scroll">
             <div v-if="lyricsLoading" class="nps-lyrics-empty">Loading lyrics…</div>
             <template v-else-if="lyrics && lyrics.lines.length">
               <p

@@ -177,6 +177,7 @@ function scanEventLabel(ev: ScannerEventPayload): string {
 }
 
 function scanEventTarget(ev: ScannerEventPayload): string {
+  if (ev.detail) return ev.detail
   const data = ev.data ?? {}
   return ev.rel_path ||
     ev.root ||

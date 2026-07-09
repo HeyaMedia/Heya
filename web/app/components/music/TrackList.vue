@@ -56,135 +56,76 @@
       </div>
     </div>
 
-    <div class="tl-body">
+    <div v-if="!virtualized" class="tl-body">
       <template v-for="(t, i) in tracks" :key="t.id">
         <!-- Optional escape hatch (W2c) for content between rows — e.g. the
              album page's disc-boundary markers. Unused by every other
              consumer; renders nothing when the slot isn't provided. -->
         <slot name="row-before" :track="t" :index="i" />
-        <AppContextMenu :items="contextItems(t, i)">
-        <div
-          class="tl-row tl-track"
-          :class="{ 'tl-active': isActive(t), 'tl-missing': t.available === false, 'tl-phone-row': isPhone }"
-          :style="!isPhone ? { gridTemplateColumns } : undefined"
-          :draggable="!isCoarse"
-          @click="onRowClick(i, t)"
-          @dblclick="onRowClick(i, t)"
-          @dragstart="onDragStart($event, { kind: 'track', track: { id: t.id, title: t.title } })"
-          @dragend="onDragEnd"
+        <TrackListItem
+          :track="t"
+          :index="i"
+          :columns="columns"
+          :grid-template-columns="gridTemplateColumns"
+          :context-items="contextItems"
+          :active="isActive(t)"
+          :playing="playing"
+          :is-phone="isPhone"
+          :is-coarse="isCoarse"
+          :has-art="hasArt"
+          :vu-meter-in="vuMeterIn"
+          :display-index="displayIndex"
+          :on-rating-change="onRatingChange"
+          :art-play-icon-size="artPlayIconSize"
+          :duration-formatter="durationFormatter"
+          :on-drag-start="onDragStart"
+          :on-drag-end="onDragEnd"
+          @row-click="emit('row-click', $event)"
+          @open-sheet="openSheet"
         >
-          <template v-if="!isPhone">
-            <div
-              v-for="col in columns"
-              :key="col.key"
-              class="tl-cell"
-              :class="[`tl-c-${col.kind}`, { 'tl-title-inline-art': col.kind === 'title' && col.inlineArt }]"
-              @click="col.kind === 'rating' ? $event.stopPropagation() : undefined"
-            >
-              <!-- index -->
-              <template v-if="col.kind === 'index'">
-                {{ displayIndex(i) }}
-              </template>
-
-              <!-- art -->
-              <template v-else-if="col.kind === 'art'">
-                <VuMeter v-if="vuMeterIn === 'art' && isActive(t)" :playing="playing" />
-                <template v-else>
-                  <NuxtImg :src="t.poster ?? ''" :alt="t.album" :width="112" :quality="80" densities="1x 2x" loading="lazy" />
-                  <div v-if="t.available !== false" class="tl-art-play"><Icon name="play" :size="artPlayIconSize" /></div>
-                  <div v-else class="tl-art-missing" title="Missing on disk"><Icon name="trash" :size="artPlayIconSize" /></div>
-                </template>
-              </template>
-
-              <!-- title (+ optional inline art, + subtitle variant) -->
-              <template v-else-if="col.kind === 'title'">
-                <template v-if="col.inlineArt">
-                  <VuMeter v-if="vuMeterIn === 'title' && isActive(t)" :playing="playing" />
-                  <Poster
-                    v-else
-                    :idx="t.id"
-                    :src="t.poster ?? null"
-                    aspect="1/1"
-                    class="tl-title-thumb"
-                    :style="{ width: `${col.inlineArtSize ?? 40}px`, height: `${col.inlineArtSize ?? 40}px` }"
-                  />
-                </template>
-                <div class="tl-title-text">
-                  <div class="tl-title">{{ t.title }}</div>
-                  <NuxtLink
-                    v-if="col.subtitle === 'artist-link' && t.artist_slug"
-                    :to="`/music/artist/${t.artist_slug}`"
-                    class="tl-artist tl-artist-link"
-                    @click.stop
-                  >{{ t.artist }}</NuxtLink>
-                  <div v-else-if="col.subtitle === 'artist-plain'" class="tl-artist tl-artist-plain">{{ t.artist }}</div>
-                  <div v-else-if="col.subtitle === 'artist-album-year'" class="tl-artist tl-artist-combo">{{ subtitleFull(t) }}</div>
-                </div>
-              </template>
-
-              <!-- album -->
-              <template v-else-if="col.kind === 'album'">
-                <NuxtLink
-                  v-if="col.linkAlbum !== false && t.artist_slug && t.album_slug"
-                  :to="`/music/artist/${t.artist_slug}/${t.album_slug}`"
-                  class="tl-album-link"
-                  @click.stop
-                >{{ t.album }}</NuxtLink>
-                <span v-else class="tl-album-link tl-album-plain">{{ t.album }}</span>
-              </template>
-
-              <!-- year -->
-              <template v-else-if="col.kind === 'year'">
-                {{ t.album_year || '—' }}
-              </template>
-
-              <!-- rating -->
-              <template v-else-if="col.kind === 'rating'">
-                <StarRating
-                  :model-value="t.rating ?? 0"
-                  size="sm"
-                  @update:model-value="(v) => onRatingChange?.(t.id, v)"
-                />
-              </template>
-
-              <!-- duration -->
-              <template v-else-if="col.kind === 'duration'">
-                {{ durationFormatter(t.duration) }}
-              </template>
-
-              <!-- escape hatch for future columns (W2c) -->
-              <template v-else-if="col.kind === 'custom'">
-                <slot :name="`cell-${col.key}`" :track="t" :index="i" :active="isActive(t)" />
-              </template>
-            </div>
+          <template v-for="col in columns" :key="col.key" #[`cell-${col.key}`]="slotProps">
+            <slot :name="`cell-${col.key}`" v-bind="slotProps" />
           </template>
-
-          <template v-else>
-            <div class="tl-phone-thumb">
-              <NuxtImg v-if="hasArt" :src="t.poster ?? ''" :alt="t.album" :width="112" :quality="80" densities="1x 2x" loading="lazy" />
-              <span v-else class="tl-phone-idx">{{ displayIndex(i) }}</span>
-            </div>
-            <div class="tl-phone-main">
-              <div class="tl-title tl-phone-title">{{ t.title }}</div>
-              <div class="tl-phone-sub">{{ subtitlePhone(t) }}</div>
-            </div>
-            <div class="tl-phone-right">
-              <div class="tl-phone-dur">{{ durationFormatter(t.duration) }}</div>
-              <div v-if="t.quality" class="tl-phone-quality">{{ t.quality }}</div>
-            </div>
-            <button
-              type="button"
-              class="tl-phone-more"
-              aria-label="More actions"
-              @click.stop="openSheet(t, i)"
-            >
-              <Icon name="more" :size="18" />
-            </button>
-          </template>
-        </div>
-        </AppContextMenu>
+        </TrackListItem>
       </template>
     </div>
+
+    <RecycleScroller
+      v-else
+      class="tl-body tl-virtual"
+      :items="tracks"
+      :item-size="isPhone ? 65 : 61"
+      :buffer="610"
+      key-field="id"
+      page-mode
+      v-slot="{ item: t, index: i }"
+    >
+      <TrackListItem
+        :track="t"
+        :index="i"
+        :columns="columns"
+        :grid-template-columns="gridTemplateColumns"
+        :context-items="contextItems"
+        :active="isActive(t)"
+        :playing="playing"
+        :is-phone="isPhone"
+        :is-coarse="isCoarse"
+        :has-art="hasArt"
+        :vu-meter-in="vuMeterIn"
+        :display-index="displayIndex"
+        :on-rating-change="onRatingChange"
+        :art-play-icon-size="artPlayIconSize"
+        :duration-formatter="durationFormatter"
+        :on-drag-start="onDragStart"
+        :on-drag-end="onDragEnd"
+        @row-click="emit('row-click', $event)"
+        @open-sheet="openSheet"
+      >
+        <template v-for="col in columns" :key="col.key" #[`cell-${col.key}`]="slotProps">
+          <slot :name="`cell-${col.key}`" v-bind="slotProps" />
+        </template>
+      </TrackListItem>
+    </RecycleScroller>
 
     <ActionSheet
       v-model:open="sheetOpen"
@@ -259,6 +200,9 @@ const props = withDefaults(defineProps<{
   /** Defaults to the global m:ss formatter; pass usePlayer().formatTime for
    *  pages that used it today (adds h:mm:ss past an hour, "0:00" for 0). */
   durationFormatter?: (seconds: number) => string
+  /** Window rows against the nearest scroll container. Intended for lists
+   *  with hundreds of fixed-height rows; small/detail lists stay native. */
+  virtualized?: boolean
 }>(), {
   activeTrackId: null,
   playing: false,
@@ -271,6 +215,7 @@ const props = withDefaults(defineProps<{
   displayIndex: (i: number) => i + 1,
   artPlayIconSize: 14,
   durationFormatter: formatDuration,
+  virtualized: false,
 })
 
 const emit = defineEmits<{ 'row-click': [index: number] }>()
@@ -282,24 +227,6 @@ const hasArt = computed(() => props.columns.some((c) => c.kind === 'art' || (c.k
 
 function isActive(t: TrackListRow) {
   return props.activeTrackId != null && t.id === props.activeTrackId
-}
-
-function onRowClick(i: number, t: TrackListRow) {
-  if (t.available === false) return
-  emit('row-click', i)
-}
-
-function subtitleFull(t: TrackListRow) {
-  let s = t.artist
-  if (t.album) s += ` · ${t.album}`
-  if (t.album_year) s += ` · ${t.album_year}`
-  return s
-}
-
-// Phone subtitle is always "artist · album" plain text regardless of the
-// desktop `subtitle` mode — deliberately never a link (see file header).
-function subtitlePhone(t: TrackListRow) {
-  return t.album ? `${t.artist} · ${t.album}` : t.artist
 }
 
 // --- Phone action sheet ------------------------------------------------
@@ -314,11 +241,13 @@ function openSheet(t: TrackListRow, i: number) {
 }
 </script>
 
-<style scoped>
+<style>
 /* Baseline matches music/songs.vue exactly — it's the reference
    implementation. The other migrated pages layer a small `:deep()`
    override block on top for their numeric deltas (art size, index font
    size, hover tint, header sticky-ness, ...). */
+
+.tl {
 
 .tl-row {
   display: grid;
@@ -340,6 +269,7 @@ function openSheet(t: TrackListRow, i: number) {
 }
 
 .tl-body { display: flex; flex-direction: column; gap: 1px; }
+.tl-virtual { display: block; overflow: visible; }
 
 .tl-track {
   padding: 6px 10px;
@@ -493,4 +423,5 @@ function openSheet(t: TrackListRow, i: number) {
   cursor: pointer;
 }
 .tl-phone-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+}
 </style>

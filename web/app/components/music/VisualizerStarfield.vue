@@ -20,6 +20,7 @@ import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
 // direct-element engine (iOS) omit it — guard at use, stars just drift then.
 const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const pageVisibility = useDocumentVisibility()
 // Speed + reactivity are user settings (persisted in useVisualizer), read live
 // each frame so the popover sliders take effect instantly.
 const vis = useVisualizer()
@@ -46,6 +47,7 @@ let dpr = 1
 
 let rafId = 0
 let cancelled = false
+const shouldAnimate = computed(() => pageVisibility.value === 'visible')
 
 function fitCanvas(canvas: HTMLCanvasElement) {
   dpr = Math.max(1, window.devicePixelRatio || 1)
@@ -168,7 +170,7 @@ function draw(ctx: CanvasRenderingContext2D, W: number, H: number) {
   }
 }
 
-function frame() {
+function drawFrame() {
   if (cancelled) return
   const canvas = canvasRef.value
   if (canvas) {
@@ -176,16 +178,37 @@ function frame() {
     const ctx = canvas.getContext('2d')
     if (ctx) draw(ctx, canvas.width, canvas.height)
   }
+}
+
+function startLoop() {
+  if (cancelled || rafId || !canvasRef.value || !shouldAnimate.value) return
   rafId = requestAnimationFrame(frame)
+}
+
+function stopLoop() {
+  if (!rafId) return
+  cancelAnimationFrame(rafId)
+  rafId = 0
+}
+
+function frame() {
+  rafId = 0
+  drawFrame()
+  startLoop()
 }
 
 onMounted(() => {
   if (!canvasRef.value) return
-  rafId = requestAnimationFrame(frame)
+  drawFrame()
+  startLoop()
+})
+watch(shouldAnimate, (run) => {
+  if (run) startLoop()
+  else stopLoop()
 })
 onUnmounted(() => {
   cancelled = true
-  cancelAnimationFrame(rafId)
+  stopLoop()
 })
 </script>
 

@@ -34,8 +34,12 @@ async function load() {
 onMounted(() => {
   load()
   timer = setInterval(load, 5000)
+  tickTimer = setInterval(() => { tickKey.value++ }, 1000)
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer)
+  if (tickTimer) clearInterval(tickTimer)
+})
 
 const libraryById = computed(() => {
   const m = new Map<number, Library>()
@@ -77,7 +81,7 @@ function iconForKind(kind: string): string {
 }
 
 const tickKey = ref(0)
-setInterval(() => { tickKey.value++ }, 1000)
+let tickTimer: ReturnType<typeof setInterval> | null = null
 
 function lastFetchedText(): string {
   // Read tick to depend on the per-second tick without remounting the cell.

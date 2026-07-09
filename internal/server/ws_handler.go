@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -13,6 +14,11 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+type wsClientMessage struct {
+	Type   string   `json:"type"`
+	Events []string `json:"events"`
 }
 
 func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.HandlerFunc {
@@ -42,15 +48,58 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 		defer hub.Unsubscribe(ch)
 
 		ctx := r.Context()
+		rawEvents := r.URL.Query().Get("events") == "raw"
+		clientSubscriptions := r.URL.Query().Get("subscriptions") == "1"
+		var wantsLogs atomic.Bool
+		// Old frontend bundles never send subscription controls. Keep their
+		// behavior intact across a backend restart; only negotiated clients opt
+		// into suppressing the otherwise-global log stream.
+		wantsLogs.Store(rawEvents || !clientSubscriptions)
+		var coalescer *wsEventCoalescer
+		var flushTicker *time.Ticker
+		var flush <-chan time.Time
+		if !rawEvents {
+			coalescer = newWSEventCoalescer()
+			flushTicker = time.NewTicker(250 * time.Millisecond)
+			flush = flushTicker.C
+			defer flushTicker.Stop()
+		}
+
+		writeEvent := func(event eventhub.Event) error {
+			data, err := json.Marshal(event)
+			if err != nil {
+				return nil
+			}
+			if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				return err
+			}
+			return conn.WriteMessage(websocket.TextMessage, data)
+		}
 
 		done := make(chan struct{})
 
 		go func() {
 			defer close(done)
 			for {
-				if _, _, err := conn.ReadMessage(); err != nil {
+				_, data, err := conn.ReadMessage()
+				if err != nil {
 					return
 				}
+				if rawEvents || !clientSubscriptions {
+					continue
+				}
+				var message wsClientMessage
+				if json.Unmarshal(data, &message) != nil || message.Type != "subscribe" {
+					continue
+				}
+				wantsLogEvents := false
+				for _, eventType := range message.Events {
+					if eventType == string(eventhub.EventLog) {
+						wantsLogEvents = true
+						break
+					}
+				}
+				wantsLogs.Store(wantsLogEvents)
 			}
 		}()
 
@@ -65,16 +114,23 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 				return
 			case <-done:
 				return
+			case <-flush:
+				for _, event := range coalescer.Drain() {
+					if err := writeEvent(event); err != nil {
+						return
+					}
+				}
 			case event, ok := <-ch:
 				if !ok {
 					return
 				}
-				data, err := json.Marshal(event)
-				if err != nil {
+				if event.Type == eventhub.EventLog && !wantsLogs.Load() {
 					continue
 				}
-				conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				if coalescer != nil && coalescer.Queue(event) {
+					continue
+				}
+				if err := writeEvent(event); err != nil {
 					return
 				}
 			}

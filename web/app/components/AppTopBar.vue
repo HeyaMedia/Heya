@@ -219,7 +219,12 @@
 
             <div v-if="progressLibs.length" class="activity-section">
               <div class="activity-section-title">Libraries</div>
-              <div v-for="lp in progressLibs" :key="lp.library_id" class="activity-item">
+              <div
+                v-for="lp in progressLibs"
+                :key="lp.library_id"
+                class="activity-item"
+                v-memo="[lp.processed, lp.total, lp.matched, lp.detail]"
+              >
                 <div class="activity-item-icon scan">
                   <svg class="mini-ring" viewBox="0 0 26 26">
                     <circle class="mini-track" cx="13" cy="13" r="10" />
@@ -233,8 +238,8 @@
                 <div class="activity-item-text">
                   <span class="activity-item-name">{{ lp.name }}</span>
                   <span v-if="lp.total > 0" class="activity-item-detail">{{ lp.processed }}/{{ lp.total }} files · {{ lp.matched }} matched</span>
-                  <span v-if="lp.event" class="activity-item-detail scan-event-detail" :title="scanEventDetail(lp.event)">
-                    {{ scanEventDetail(lp.event) }}
+                  <span v-if="lp.detail" class="activity-item-detail scan-event-detail" :title="lp.detail">
+                    {{ lp.detail }}
                   </span>
                 </div>
                 <span v-if="lp.total > 0" class="activity-pct">{{ Math.round(lp.processed / lp.total * 100) }}%</span>
@@ -243,23 +248,28 @@
 
             <div v-if="runningTasks.length" class="activity-section">
               <div class="activity-section-title">Tasks</div>
-              <div v-for="tp in runningTasks" :key="tp.task_id" class="task-card">
+              <div
+                v-for="tp in runningTasks"
+                :key="tp.task_id"
+                class="task-card"
+                v-memo="[tp.running, tp.pending, tp.item, tp.stage]"
+              >
                 <div class="task-card-header">
                   <div class="task-card-icon">
-                    <Icon :name="TASK_LABELS[tp.task_id]?.icon ?? 'timer'" :size="13" />
+                    <Icon :name="tp.icon" :size="13" />
                   </div>
-                  <span class="task-card-title">{{ taskTitle(tp) }}</span>
+                  <span class="task-card-title">{{ tp.title }}</span>
                   <span class="task-card-counts mono">
                     <template v-if="(tp.running ?? 0) > 0">{{ tp.running }} running</template>
                     <template v-if="(tp.running ?? 0) > 0 && (tp.pending ?? 0) > 0"> · </template>
                     <template v-if="(tp.pending ?? 0) > 0">{{ tp.pending }} pending</template>
                   </span>
                 </div>
-                <div v-if="taskItem(tp)" class="task-card-line task-card-item" :title="taskItem(tp)">
-                  {{ taskItem(tp) }}
+                <div v-if="tp.item" class="task-card-line task-card-item" :title="tp.item">
+                  {{ tp.item }}
                 </div>
-                <div v-if="taskStage(tp)" class="task-card-line task-card-stage" :title="taskStage(tp)">
-                  <Icon name="chevright" :size="9" /> {{ taskStage(tp) }}
+                <div v-if="tp.stage" class="task-card-line task-card-stage" :title="tp.stage">
+                  <Icon name="chevright" :size="9" /> {{ tp.stage }}
                 </div>
               </div>
             </div>
@@ -309,20 +319,28 @@
       <UserDropdown />
     </div>
 
-    <!-- Fullscreen search for phone + the compact band — mounted
-         unconditionally (cheap, and avoids the overlay vanishing mid-use if
-         the viewport crosses a breakpoint while it's open); only the
-         isPhone/isCompact trigger button above can ever flip it open. -->
-    <AppSearchOverlay v-model:open="searchOverlayOpen" />
+    <!-- The overlay owns a search composable and history listeners, so defer
+         mounting the whole subtree until a compact/phone user opens it. -->
+    <AppSearchOverlay v-if="searchOverlayOpen" v-model:open="searchOverlayOpen" />
   </header>
 </template>
 
 <script setup lang="ts">
-import type { ActiveJob, ScannerEventPayload, TaskProgressPayload } from '~/composables/useEventBus'
+import type { ActiveJob } from '~/composables/useEventBus'
 
 const route = useRoute()
 const { user } = useAuth()
-const { connected: wsConnected, activeScans, activeJobs, queueStatus, scanProgress, scannerEvents, taskProgress } = useEventBus()
+const {
+  connected: wsConnected,
+  activeScans,
+  activeJobs,
+  queueStatus,
+  scanProgress,
+  scannerEvents,
+  taskProgress,
+  scanActivityCount,
+  taskActivityCount,
+} = useEventBus()
 // Compact-band (720.02-1200px) burger trigger — see useSectionSidebar.ts.
 // `kind` gates whether the current route even has a section sidebar to
 // open; the drawer itself is mounted by the section pages, not here.
@@ -339,19 +357,23 @@ type ActivityLibraryProgress = {
   total: number
   processed: number
   matched: number
-  event?: ScannerEventPayload
+  detail: string
 }
 
+const ACTIVITY_ROW_LIMIT = 8
+
 const progressLibs = computed<ActivityLibraryProgress[]>(() => {
+  if (!activityOpen.value) return []
   const rows = new Map<number, ActivityLibraryProgress>()
   for (const p of Object.values(scanProgress.value)) {
+    const ev = scannerEvents.value[p.library_id]
     rows.set(p.library_id, {
       library_id: p.library_id,
       name: p.name,
       total: p.total,
       processed: p.processed,
       matched: p.matched,
-      event: scannerEvents.value[p.library_id],
+      detail: scanEventDetail(ev),
     })
   }
   for (const ev of Object.values(scannerEvents.value)) {
@@ -362,11 +384,11 @@ const progressLibs = computed<ActivityLibraryProgress[]>(() => {
         total: 0,
         processed: 0,
         matched: 0,
-        event: ev,
+        detail: scanEventDetail(ev),
       })
     }
   }
-  return [...rows.values()]
+  return [...rows.values()].slice(0, ACTIVITY_ROW_LIMIT)
 })
 
 const KIND_LABELS: Record<string, { label: string, icon: string }> = {
@@ -634,7 +656,30 @@ function goToResult(kind: Section['key'], item: any) {
   closeDropdown()
 }
 
-const runningTasks = computed(() => Object.values(taskProgress.value))
+type ActivityTaskRow = {
+  task_id: string
+  title: string
+  icon: string
+  pending?: number
+  running?: number
+  item: string
+  stage: string
+  kinds: string[]
+}
+
+const runningTasks = computed<ActivityTaskRow[]>(() => {
+  if (!activityOpen.value) return []
+  return Object.values(taskProgress.value).slice(0, ACTIVITY_ROW_LIMIT).map(tp => ({
+    task_id: tp.task_id,
+    title: TASK_LABELS[tp.task_id]?.label ?? tp.task_id,
+    icon: TASK_LABELS[tp.task_id]?.icon ?? 'timer',
+    pending: tp.pending,
+    running: tp.running,
+    item: tp.current_item || '',
+    stage: tp.current_stage || (tp.item_kind ? jobLabel(tp.item_kind) : ''),
+    kinds: TASK_KINDS_BY_TASK[tp.task_id] ?? [],
+  }))
+})
 
 const SCANNER_EVENT_LABELS: Record<string, string> = {
   'scan.start': 'Starting',
@@ -661,6 +706,7 @@ const SCANNER_EVENT_LABELS: Record<string, string> = {
 
 function scanEventDetail(ev?: ScannerEventPayload): string {
   if (!ev) return ''
+  if (ev.detail) return ev.detail
   const data = ev.data ?? {}
   const action = SCANNER_EVENT_LABELS[ev.event] ?? ev.event.replaceAll('.', ' ')
   const target = ev.rel_path || ev.root || ev.path || String(data.title || data.artist || data.album || data.key || '')
@@ -696,22 +742,8 @@ const TASK_LABELS: Record<string, { label: string, icon: string }> = {
   cleanup:              { label: 'Cleanup',          icon: 'trash' },
 }
 
-function taskTitle(tp: TaskProgressPayload): string {
-  return TASK_LABELS[tp.task_id]?.label ?? tp.task_id
-}
-
-function taskItem(tp: TaskProgressPayload): string {
-  return tp.current_item || ''
-}
-
-function taskStage(tp: TaskProgressPayload): string {
-  if (tp.current_stage) return tp.current_stage
-  if (tp.item_kind) return jobLabel(tp.item_kind)
-  return ''
-}
-
 const hasActivity = computed(() =>
-  activeScans.value.length > 0 || progressLibs.value.length > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || runningTasks.value.length > 0 || nowPlayingSessions.value.length > 0
+  activeScans.value.length > 0 || scanActivityCount.value > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || taskActivityCount.value > 0 || nowPlayingSessions.value.length > 0
 )
 
 async function cancelAllJobs() {
@@ -744,14 +776,16 @@ const TASK_KINDS_BY_TASK: Record<string, string[]> = {
 }
 
 const coveredKinds = computed(() => {
+  if (!activityOpen.value) return new Set<string>()
   const covered = new Set<string>()
   for (const tp of runningTasks.value) {
-    for (const k of TASK_KINDS_BY_TASK[tp.task_id] ?? []) covered.add(k)
+    for (const k of tp.kinds) covered.add(k)
   }
   return covered
 })
 
 const jobsByKind = computed(() => {
+  if (!activityOpen.value) return []
   const groups = new Map<string, { kind: string, count: number, sample?: ActiveJob }>()
   for (const j of activeJobs.value) {
     if (coveredKinds.value.has(j.kind)) continue
@@ -766,6 +800,7 @@ const jobsByKind = computed(() => {
   return [...groups.values()]
     .map(grp => ({ ...grp, detail: grp.sample ? jobDetail(grp.sample) : '' }))
     .sort((a, b) => b.count - a.count)
+    .slice(0, ACTIVITY_ROW_LIMIT)
 })
 
 function jobDetail(job: ActiveJob): string {

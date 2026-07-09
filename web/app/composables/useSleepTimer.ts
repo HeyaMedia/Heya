@@ -12,6 +12,7 @@ export function useSleepTimer() {
   const remainingMs = computed(() =>
     deadline.value != null ? Math.max(0, deadline.value - (nowTick.value || Date.now())) : 0,
   )
+  const timed = computed(() => deadline.value != null)
   const active = computed(() => deadline.value != null || atTrackEnd.value)
 
   function setMinutes(min: number) {
@@ -38,5 +39,5 @@ export function useSleepTimer() {
     }
   }
 
-  return { remainingMs, active, atTrackEnd, setMinutes, setEndOfTrack, cancel, tick }
+  return { remainingMs, timed, active, atTrackEnd, setMinutes, setEndOfTrack, cancel, tick }
 }

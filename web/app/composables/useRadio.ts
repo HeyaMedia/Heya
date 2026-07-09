@@ -262,5 +262,6 @@ export function useRadioNowPlaying() {
       }
     })
   }
+  onScopeDispose(() => off?.())
   return { meta, ensureSubscribed }
 }

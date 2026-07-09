@@ -114,22 +114,26 @@ type ScanProgressPayload struct {
 // queue workers use it to report the active phase, current root/folder/file,
 // matching decisions, metadata fetches, materialization, and apply actions.
 type ScannerEventPayload struct {
-	Seq         int64          `json:"seq"`
-	Event       string         `json:"event"`
-	Severity    string         `json:"severity,omitempty"`
-	LibraryID   int64          `json:"library_id"`
-	LibraryName string         `json:"library_name,omitempty"`
-	LibraryType string         `json:"library_type,omitempty"`
-	Domain      string         `json:"domain,omitempty"`
-	Worker      string         `json:"worker,omitempty"`
-	Phase       string         `json:"phase,omitempty"`
-	Root        string         `json:"root,omitempty"`
-	Path        string         `json:"path,omitempty"`
-	RelPath     string         `json:"rel_path,omitempty"`
-	Kind        string         `json:"kind,omitempty"`
-	Reason      string         `json:"reason,omitempty"`
-	Message     string         `json:"message,omitempty"`
-	Data        map[string]any `json:"data,omitempty"`
+	Seq         int64  `json:"seq"`
+	Event       string `json:"event"`
+	Severity    string `json:"severity,omitempty"`
+	LibraryID   int64  `json:"library_id"`
+	LibraryName string `json:"library_name,omitempty"`
+	LibraryType string `json:"library_type,omitempty"`
+	Domain      string `json:"domain,omitempty"`
+	Worker      string `json:"worker,omitempty"`
+	Phase       string `json:"phase,omitempty"`
+	Root        string `json:"root,omitempty"`
+	Path        string `json:"path,omitempty"`
+	RelPath     string `json:"rel_path,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Message     string `json:"message,omitempty"`
+	// Detail is the compact, directly renderable target sent to UI clients.
+	// The WebSocket layer derives it before dropping the potentially large
+	// Data/path fields from its coalesced stream.
+	Detail string         `json:"detail,omitempty"`
+	Data   map[string]any `json:"data,omitempty"`
 }
 
 type LibraryScanProgress struct {

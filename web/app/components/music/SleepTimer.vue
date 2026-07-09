@@ -81,11 +81,21 @@ const triggerTitle = computed(() => {
 })
 
 let intervalId: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
+function startTicking() {
+  if (intervalId) return
   intervalId = setInterval(() => sleep.tick(() => player.pause()), 1000)
-})
+}
+function stopTicking() {
+  if (!intervalId) return
+  clearInterval(intervalId)
+  intervalId = null
+}
+watch(sleep.timed, (timed) => {
+  if (timed) startTicking()
+  else stopTicking()
+}, { immediate: true })
 onUnmounted(() => {
-  if (intervalId) clearInterval(intervalId)
+  stopTicking()
 })
 </script>
 

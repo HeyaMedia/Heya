@@ -62,7 +62,7 @@ COPY --from=frontend-build /app/web/.output/public/ ./web/dist/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 GOOS=linux \
-    go build -trimpath -buildvcs=false -ldflags="-s -w" -o /out/heya ./cmd/heya
+    go build -tags embed_frontend -trimpath -buildvcs=false -ldflags="-s -w" -o /out/heya ./cmd/heya
 
 # ────────────────────────────────────────────────────────────────
 # Stage 3 — binary export: CI artifact for packaging multiple runtimes

@@ -108,7 +108,9 @@ export function useNowPlayingSession() {
   // is restrictive about long-lived requests during unload), but the
   // server-side purge sweep covers the gap.
   if (import.meta.client) {
-    window.addEventListener('beforeunload', () => { end() })
+    const onBeforeUnload = () => { end() }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    onScopeDispose(() => window.removeEventListener('beforeunload', onBeforeUnload))
   }
 
   return {

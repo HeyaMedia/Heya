@@ -48,7 +48,7 @@ const workerDraft = ref<Record<string, number>>({})
 const workerSaving = ref(false)
 const workerSettingsError = ref('')
 const tick = ref(0)
-setInterval(() => { tick.value++ }, 1000)
+let tickTimer: ReturnType<typeof setInterval> | null = null
 
 const WORKER_PRESETS: WorkerPreset[] = [
   { id: 'rpi', label: 'RPI', title: 'Low-power profile: one worker per queue.' },
@@ -384,6 +384,7 @@ const unsubs = [
 onUnmounted(() => {
   unsubs.forEach(fn => fn())
   if (debounce) clearTimeout(debounce)
+  if (tickTimer) clearInterval(tickTimer)
 })
 
 // Polling fallback for WS drops + reconnect catchup. immediate=false because
@@ -393,9 +394,9 @@ const { connected: wsConnected } = useLiveFallback(refresh, {
   immediate: false,
 })
 
-onMounted(async () => {
-  await refresh()
-  loading.value = false
+onMounted(() => {
+  tickTimer = setInterval(() => { tick.value++ }, 1000)
+  refresh().finally(() => { loading.value = false })
 })
 </script>
 

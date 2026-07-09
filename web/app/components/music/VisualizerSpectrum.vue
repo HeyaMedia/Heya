@@ -29,6 +29,8 @@ import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
 // stub and the direct-element engine (iOS compatibility mode) both omit it.
 const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const pageVisibility = useDocumentVisibility()
+const shouldAnimate = computed(() => props.active && pageVisibility.value === 'visible')
 
 // Theme colors resolved from CSS vars at mount; fall back to gold-ish defaults.
 let gold = '#e6b94a'
@@ -274,7 +276,7 @@ function drawMeter(ctx: CanvasRenderingContext2D, w: number, y: number, h: numbe
   ctx.textAlign = 'left'
 }
 
-function frame() {
+function drawFrame() {
   if (cancelled) return
   const canvas = canvasRef.value
   if (canvas) {
@@ -300,18 +302,42 @@ function frame() {
       }
     }
   }
+}
+
+function startLoop() {
+  if (cancelled || rafId || !canvasRef.value || !shouldAnimate.value) return
   rafId = requestAnimationFrame(frame)
+}
+
+function stopLoop() {
+  if (!rafId) return
+  cancelAnimationFrame(rafId)
+  rafId = 0
+}
+
+function frame() {
+  rafId = 0
+  drawFrame()
+  startLoop()
 }
 
 onMounted(() => {
   const canvas = canvasRef.value
   if (!canvas) return
   resolveColors(canvas)
-  rafId = requestAnimationFrame(frame)
+  drawFrame()
+  startLoop()
+})
+watch(shouldAnimate, (run) => {
+  if (run) startLoop()
+  else {
+    stopLoop()
+    if (pageVisibility.value === 'visible') drawFrame()
+  }
 })
 onUnmounted(() => {
   cancelled = true
-  cancelAnimationFrame(rafId)
+  stopLoop()
 })
 </script>
 

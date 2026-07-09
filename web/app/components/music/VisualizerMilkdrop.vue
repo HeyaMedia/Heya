@@ -29,6 +29,8 @@ const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyse
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const error = ref('')
 const ready = ref(false)
+const pageVisibility = useDocumentVisibility()
+const shouldAnimate = computed(() => ready.value && pageVisibility.value === 'visible')
 
 let visualizer: Visualizer | null = null
 let presets: Record<string, object> = {}
@@ -86,10 +88,10 @@ defineExpose({ nextPreset, prevPreset, randomPreset, loadPreset, presetNames })
 // --- Auto-cycle ------------------------------------------------------------
 let autoTimer: ReturnType<typeof setInterval> | null = null
 watch(
-  [vis.autoCycleEnabled, vis.autoCycleIntervalSec, vis.autoCycleMode, ready] as const,
-  ([enabled, intervalSec, mode, isReady]) => {
+  [vis.autoCycleEnabled, vis.autoCycleIntervalSec, vis.autoCycleMode, shouldAnimate] as const,
+  ([enabled, intervalSec, mode, canAnimate]) => {
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null }
-    if (!enabled || !isReady) return
+    if (!enabled || !canAnimate) return
     autoTimer = setInterval(() => {
       if (mode === 'sequential') nextPreset()
       else randomPreset()
@@ -116,6 +118,24 @@ watch(vis.renderScale, () => sizeCanvas())
 let rafId = 0
 let resizeObserver: ResizeObserver | null = null
 let cancelled = false
+
+function stopRenderLoop() {
+  if (!rafId) return
+  cancelAnimationFrame(rafId)
+  rafId = 0
+}
+
+function startRenderLoop() {
+  if (cancelled || rafId || !visualizer || !shouldAnimate.value) return
+  rafId = requestAnimationFrame(render)
+}
+
+function render() {
+  rafId = 0
+  if (cancelled || !shouldAnimate.value) return
+  try { visualizer?.render() } catch { return }
+  startRenderLoop()
+}
 
 onMounted(async () => {
   const canvas = canvasRef.value
@@ -180,12 +200,7 @@ onMounted(async () => {
 
     ready.value = true
 
-    const render = () => {
-      if (cancelled) return
-      try { visualizer?.render() } catch { return }
-      rafId = requestAnimationFrame(render)
-    }
-    rafId = requestAnimationFrame(render)
+    startRenderLoop()
 
     resizeObserver = new ResizeObserver(() => sizeCanvas())
     resizeObserver.observe(canvas)
@@ -194,10 +209,15 @@ onMounted(async () => {
   }
 })
 
+watch(shouldAnimate, (run) => {
+  if (run) startRenderLoop()
+  else stopRenderLoop()
+})
+
 onUnmounted(() => {
   cancelled = true
   ready.value = false
-  cancelAnimationFrame(rafId)
+  stopRenderLoop()
   resizeObserver?.disconnect()
   if (autoTimer) clearInterval(autoTimer)
   const analyser = engine.analyserBridge?.analyserNode
