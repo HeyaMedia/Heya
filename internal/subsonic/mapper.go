@@ -92,6 +92,7 @@ type trackContext struct {
 	added     map[int64]time.Time
 	stars     starState
 	plays     map[int64]int64
+	ratings   map[int64]int16
 }
 
 // trackContextFor batches every decoration the given track rows need.
@@ -122,6 +123,9 @@ func (s *Server) trackContextFor(ctx context.Context, userID int64, rows []sqlc.
 	}
 	if plays, err := s.app.SubsonicTrackPlayCounts(ctx, userID, trackIDs); err == nil {
 		tc.plays = plays
+	}
+	if ratings, err := s.app.RatingsForTracks(ctx, userID, trackIDs); err == nil {
+		tc.ratings = ratings
 	}
 	if len(albumIDs) > 0 {
 		if albums, _, err := s.app.JFListAlbums(ctx, sqlc.JFListAlbumsParams{OnlyIds: albumIDs}); err == nil {
@@ -182,6 +186,12 @@ func childFromTrack(tr sqlc.JFListTracksRow, tc trackContext) Child {
 	c.Starred = starredAt(tc.stars.tracks, tr.ID)
 	if n := tc.plays[tr.ID]; n > 0 {
 		c.PlayCount = &n
+	}
+	// Heya ratings are 1..10; Subsonic speaks 1..5 stars (setRating writes
+	// stars*2, so this halves round-half-up for odd native ratings).
+	if r := tc.ratings[tr.ID]; r > 0 {
+		stars := int32(r+1) / 2
+		c.UserRating = &stars
 	}
 	return c
 }

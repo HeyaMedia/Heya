@@ -125,122 +125,165 @@ func serveVFS(w http.ResponseWriter, r *http.Request, smbPath string) {
 // handler answers with (never-downloaded upstream covers) are resolved
 // server-side — Subsonic clients don't reliably follow image redirects.
 func (s *Server) handleGetCoverArt(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	kind, id, err := DecodeID(param(r, "id"))
 	if err != nil {
-		http.NotFound(w, r)
+		respondError(w, r, errNotFound, "unknown cover art id")
 		return
 	}
 
-	target := ""
+	size := intParam(r, "size", 0)
+	for _, target := range s.coverTargets(r, kind, id) {
+		if size > 0 {
+			sep := "?"
+			if strings.Contains(target, "?") {
+				sep = "&"
+			}
+			target += fmt.Sprintf("%sw=%d&h=%d", sep, size, size)
+		}
+		if s.serveNativeImage(w, r, target) {
+			return
+		}
+	}
+	// Binary endpoints signal errors through the envelope (spec: a failed
+	// binary request answers with the regular error response), not a bare
+	// HTTP 404 that strict clients surface as a transport failure.
+	respondError(w, r, errNotFound, "no cover art")
+}
+
+// coverTargets resolves a typed cover id into an ordered list of native
+// image endpoints to try. Album-shaped ids fall back to the artist poster
+// when the album itself has no art anywhere, so clients get a sensible
+// image instead of a placeholder.
+func (s *Server) coverTargets(r *http.Request, kind Kind, id int64) []string {
+	ctx := r.Context()
+	albumCover := func(artistSlug, albumSlug string) string {
+		return fmt.Sprintf("/api/music/artists/%s/albums/%s/cover", url.PathEscape(artistSlug), url.PathEscape(albumSlug))
+	}
+	artistPoster := func(mediaItemID int64) string {
+		return fmt.Sprintf("/api/media/%d/image/poster", mediaItemID)
+	}
 	switch kind {
 	case KindArtist:
 		ar, err := s.app.SubsonicArtistByID(ctx, id)
 		if err != nil {
-			http.NotFound(w, r)
-			return
+			return nil
 		}
-		target = fmt.Sprintf("/api/media/%d/image/poster", ar.MediaItemID)
-	case KindAlbum, KindTrack, KindPlaylist:
-		slugA, slugB, ok := s.coverSlugs(r, kind, id)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		target = fmt.Sprintf("/api/music/artists/%s/albums/%s/cover", url.PathEscape(slugA), url.PathEscape(slugB))
-	default:
-		http.NotFound(w, r)
-		return
-	}
-
-	if size := intParam(r, "size", 0); size > 0 {
-		target += fmt.Sprintf("?w=%d&h=%d", size, size)
-	}
-	s.serveNativeImage(w, r, target)
-}
-
-// coverSlugs resolves the (artist_slug, album_slug) pair behind an album /
-// track / playlist cover id.
-func (s *Server) coverSlugs(r *http.Request, kind Kind, id int64) (string, string, bool) {
-	ctx := r.Context()
-	switch kind {
+		return []string{artistPoster(ar.MediaItemID)}
 	case KindTrack:
 		rows, _, err := s.app.JFListTracks(ctx, jfTracksByIDs(id))
-		if err != nil || len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].AlbumSlug == "" {
-			return "", "", false
+		if err != nil || len(rows) == 0 {
+			return nil
 		}
-		return rows[0].ArtistSlug, rows[0].AlbumSlug, true
+		var out []string
+		if rows[0].ArtistSlug != "" && rows[0].AlbumSlug != "" {
+			out = append(out, albumCover(rows[0].ArtistSlug, rows[0].AlbumSlug))
+		}
+		if rows[0].ArtistMediaItemID > 0 {
+			out = append(out, artistPoster(rows[0].ArtistMediaItemID))
+		}
+		return out
 	case KindAlbum:
 		rows, _, err := s.app.JFListAlbums(ctx, jfAlbumsByIDs(id))
-		if err != nil || len(rows) == 0 || rows[0].ArtistSlug == "" || rows[0].Slug == "" {
-			return "", "", false
+		if err != nil || len(rows) == 0 {
+			return nil
 		}
-		return rows[0].ArtistSlug, rows[0].Slug, true
+		var out []string
+		if rows[0].ArtistSlug != "" && rows[0].Slug != "" {
+			out = append(out, albumCover(rows[0].ArtistSlug, rows[0].Slug))
+		}
+		if rows[0].ArtistMediaItemID > 0 {
+			out = append(out, artistPoster(rows[0].ArtistMediaItemID))
+		}
+		return out
 	case KindPlaylist:
 		u, _ := userFrom(ctx)
 		detail, err := s.app.GetUserPlaylistDetail(ctx, u.ID, id)
 		if err != nil || len(detail.Tracks) == 0 {
-			return "", "", false
+			return nil
 		}
 		// First track's album cover — same synthesized cover the native
 		// sidebar uses.
-		return s.coverSlugs(r, KindTrack, detail.Tracks[0].TrackID)
+		return s.coverTargets(r, KindTrack, detail.Tracks[0].TrackID)
 	}
-	return "", "", false
+	return nil
 }
 
 // serveNativeImage dispatches target through the full server mux
 // in-process, resolving redirects to bytes (bounded depth). Mirrors the
 // Jellyfin layer; the remote-fetch branch reuses that package's SSRF-guarded
 // posture by only following redirects the native pipeline itself emitted.
-func (s *Server) serveNativeImage(w http.ResponseWriter, r *http.Request, target string) {
+// Returns true once a successful response has been written; failures are
+// swallowed (nothing committed to w) so the caller can try a fallback.
+func (s *Server) serveNativeImage(w http.ResponseWriter, r *http.Request, target string) bool {
 	if s.native == nil {
 		http.Redirect(w, r, target, http.StatusFound)
-		return
+		return true
 	}
 	for range 3 {
 		u, err := url.Parse(target)
 		if err != nil {
-			http.NotFound(w, r)
-			return
+			return false
 		}
 		if u.IsAbs() {
-			s.proxyRemoteImage(w, r, target)
-			return
+			return s.proxyRemoteImage(w, r, target)
 		}
 		r2 := r.Clone(r.Context())
+		// Clients may call the Subsonic endpoint via POST (formPost); the
+		// native image routes are GET-registered, so normalize the
+		// dispatched method and drop the consumed form body.
+		if r.Method != http.MethodHead {
+			r2.Method = http.MethodGet
+		}
+		r2.Body = http.NoBody
+		r2.ContentLength = 0
+		r2.Header.Del("Content-Length")
+		r2.Header.Del("Content-Type")
 		r2.URL.Path = u.Path
 		r2.URL.RawPath = ""
 		r2.URL.RawQuery = u.RawQuery
 		r2.RequestURI = ""
 		dw := &imageDispatchWriter{ResponseWriter: w}
 		s.native.ServeHTTP(dw, r2)
+		if dw.failed {
+			// The native handler may have stamped headers before its
+			// error status; scrub them so a fallback (or the error
+			// envelope) starts clean.
+			h := w.Header()
+			h.Del("Content-Type")
+			h.Del("Content-Length")
+			h.Del("Cache-Control")
+			return false
+		}
 		if !dw.intercepted {
-			return
+			return true
 		}
 		if dw.redirect == "" {
-			http.NotFound(w, r)
-			return
+			return false
 		}
 		target = dw.redirect
 	}
-	http.NotFound(w, r)
+	return false
 }
 
 type imageDispatchWriter struct {
 	http.ResponseWriter
 	redirect    string
 	intercepted bool
+	failed      bool
 }
 
 func (dw *imageDispatchWriter) WriteHeader(code int) {
-	if code >= 300 && code < 400 {
+	switch {
+	case code >= 300 && code < 400:
 		dw.redirect = dw.Header().Get("Location")
 		dw.Header().Del("Location")
 		dw.intercepted = true
-		return
+	case code >= 400:
+		dw.intercepted = true
+		dw.failed = true
+	default:
+		dw.ResponseWriter.WriteHeader(code)
 	}
-	dw.ResponseWriter.WriteHeader(code)
 }
 
 func (dw *imageDispatchWriter) Write(b []byte) (int, error) {
@@ -252,27 +295,24 @@ func (dw *imageDispatchWriter) Write(b []byte) (int, error) {
 
 // proxyRemoteImage fetches a native-pipeline-emitted remote URL (heya.media
 // CDN covers that were never downloaded) and streams the bytes through.
-func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL string) {
+// Returns true once bytes were committed; all failures leave w untouched.
+func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		http.NotFound(w, r)
-		return
+		return false
 	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, rawURL, nil)
 	if err != nil {
-		http.NotFound(w, r)
-		return
+		return false
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		return
+		return false
 	}
 	defer func() { _ = res.Body.Close() }()
 	ct := res.Header.Get("Content-Type")
 	if res.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "image/") {
-		http.NotFound(w, r)
-		return
+		return false
 	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -280,6 +320,7 @@ func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL
 	if r.Method != http.MethodHead {
 		_, _ = io.Copy(w, io.LimitReader(res.Body, 32<<20))
 	}
+	return true
 }
 
 // getAvatar — Heya has no user avatars; the spec answer for "no image" is

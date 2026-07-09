@@ -270,3 +270,88 @@ func TestGetNowPlayingOwnOrAdmin(t *testing.T) {
 		t.Fatalf("non-admin saw someone else's session: %v", got[0])
 	}
 }
+
+// coverNative fakes the native image pipeline: album covers 404 (no art),
+// artist posters serve bytes. Records the methods it was called with.
+type coverNative struct {
+	methods []string
+}
+
+func (n *coverNative) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	n.methods = append(n.methods, r.Method+" "+r.URL.Path)
+	switch {
+	case strings.HasPrefix(r.URL.Path, "/api/media/") && strings.HasSuffix(r.URL.Path, "/image/poster"):
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("jpegbytes"))
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func TestGetCoverArtFallbackAndPOST(t *testing.T) {
+	native := &coverNative{}
+	s := NewMiddleware(newFakeBackend(), http.NotFoundHandler())
+	s.SetNative(native)
+
+	// Album al-10 has no album art in the native pipeline → must fall back
+	// to the artist poster (artist media item 50) and serve bytes.
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/rest/getCoverArt?"+testAuth+"&id=al-10", nil))
+	if w.Code != http.StatusOK || w.Body.String() != "jpegbytes" {
+		t.Fatalf("album fallback: code=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// POST form-encoded (py-sonic / formPost extension): the native dispatch
+	// must be normalized to GET or the GET-registered image routes 404.
+	native.methods = nil
+	w = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rest/getCoverArt",
+		strings.NewReader(testAuth+"&id=ar-5"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "jpegbytes" {
+		t.Fatalf("POST cover art: code=%d body=%q", w.Code, w.Body.String())
+	}
+	for _, m := range native.methods {
+		if !strings.HasPrefix(m, "GET ") {
+			t.Fatalf("native pipeline saw non-GET dispatch: %v", native.methods)
+		}
+	}
+
+	// Nothing anywhere → Subsonic error envelope (code 70), not a bare 404.
+	s2 := NewMiddleware(newFakeBackend(), http.NotFoundHandler())
+	s2.SetNative(failingNative{})
+	w = httptest.NewRecorder()
+	s2.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/rest/getCoverArt?"+testAuth+"&id=al-10&f=json", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("missing art should answer 200 + envelope, got %d", w.Code)
+	}
+	var doc map[string]map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("envelope parse: %v — %s", err, w.Body.String())
+	}
+	env := doc["subsonic-response"]
+	errObj, _ := env["error"].(map[string]any)
+	if env["status"] != "failed" || errObj == nil || errObj["code"] != float64(70) {
+		t.Fatalf("want error code 70 envelope, got %s", w.Body.String())
+	}
+}
+
+type failingNative struct{}
+
+func (failingNative) ServeHTTP(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
+
+func TestSetRatingRoundTripOnGetSong(t *testing.T) {
+	s := newTestServer(t)
+	_ = doJSON(t, s, "setRating", "id=tr-100&rating=4")
+	env := doJSON(t, s, "getSong", "id=tr-100")
+	song := env["song"].(map[string]any)
+	if song["userRating"] != float64(4) {
+		t.Fatalf("userRating = %v, want 4", song["userRating"])
+	}
+	_ = doJSON(t, s, "setRating", "id=tr-100&rating=0")
+	env = doJSON(t, s, "getSong", "id=tr-100")
+	if _, present := env["song"].(map[string]any)["userRating"]; present {
+		t.Fatalf("rating 0 should clear userRating: %v", env["song"])
+	}
+}

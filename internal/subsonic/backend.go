@@ -52,6 +52,7 @@ type Backend interface {
 	SetUserTrackRating(ctx context.Context, userID, trackID int64, rating int16) error
 	SetUserAlbumRating(ctx context.Context, userID, albumID int64, rating int16) error
 	SetUserArtistRating(ctx context.Context, userID, artistID int64, rating int16) error
+	RatingsForTracks(ctx context.Context, userID int64, trackIDs []int64) (map[int64]int16, error)
 	RecordPlayback(ctx context.Context, userID int64, ev service.PlaybackEvent) error
 	GetSubsonicPlayQueue(ctx context.Context, userID int64) (service.SubsonicPlayQueue, bool, error)
 	SaveSubsonicPlayQueue(ctx context.Context, userID int64, q service.SubsonicPlayQueue) error

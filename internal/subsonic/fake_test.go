@@ -242,6 +242,16 @@ func (f *fakeBackend) SetEntityLoved(_ context.Context, _ int64, entityType stri
 	return loved, nil
 }
 
+func (f *fakeBackend) RatingsForTracks(_ context.Context, _ int64, ids []int64) (map[int64]int16, error) {
+	out := map[int64]int16{}
+	for _, id := range ids {
+		if r, ok := f.ratedTracks[id]; ok && r > 0 {
+			out[id] = r
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeBackend) SetUserTrackRating(_ context.Context, _, id int64, rating int16) error {
 	f.ratedTracks[id] = rating
 	return nil
