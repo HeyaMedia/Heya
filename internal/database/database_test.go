@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"context"
+	"math/big"
 	"os"
 	"testing"
 
@@ -294,4 +295,196 @@ func TestUpdateMediaItemRawExternalIDsIsIdempotent(t *testing.T) {
 	if mbid != "new-mbid" {
 		t.Fatalf("expected mbid to be updated, got %q", mbid)
 	}
+}
+
+func TestRecommendedTVRailsIncludeAnime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, getTestDatabaseURL(t))
+	if err != nil {
+		t.Skipf("database not available: %v", err)
+	}
+	defer pool.Close()
+
+	q := sqlc.New(pool)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("beginning transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := q.WithTx(tx)
+
+	user, err := qtx.CreateUser(ctx, sqlc.CreateUserParams{
+		Username:     "recommended-tv-anime",
+		Email:        "recommended-tv-anime@example.com",
+		PasswordHash: "$2a$10$fakehash",
+		IsAdmin:      true,
+	})
+	if err != nil {
+		t.Fatalf("creating user: %v", err)
+	}
+	tvLib, err := qtx.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "TV",
+		MediaType:    sqlc.MediaTypeTv,
+		Paths:        []string{"/media/tv"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    user.ID,
+		Settings:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("creating tv library: %v", err)
+	}
+	animeLib, err := qtx.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "Anime",
+		MediaType:    sqlc.MediaTypeAnime,
+		Paths:        []string{"/media/anime"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    user.ID,
+		Settings:     []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("creating anime library: %v", err)
+	}
+
+	const uniqueGenre = "RecommendedRailFixture"
+	createSeries := func(title, slug, tmdb string, libID int64, mediaType sqlc.MediaType, rating int64) int64 {
+		t.Helper()
+		itemID, err := qtx.CreateMediaItemRaw(ctx, sqlc.CreateMediaItemRawParams{
+			LibraryID:        libID,
+			MediaType:        mediaType,
+			ProviderKind:     "tv",
+			Title:            title,
+			SortTitle:        title,
+			Year:             "2024",
+			Description:      "",
+			PosterPath:       "",
+			BackdropPath:     "",
+			Tagline:          "",
+			OriginalTitle:    title,
+			OriginalLanguage: "en",
+			Status:           "",
+			ExternalIds:      []byte(`{"tmdb":"` + tmdb + `"}`),
+		})
+		if err != nil {
+			t.Fatalf("creating media item %s: %v", title, err)
+		}
+		if err := qtx.UpdateMediaItemSlug(ctx, sqlc.UpdateMediaItemSlugParams{ID: itemID, Slug: slug}); err != nil {
+			t.Fatalf("setting slug for %s: %v", title, err)
+		}
+		if _, err := qtx.CreateTVSeries(ctx, sqlc.CreateTVSeriesParams{
+			MediaItemID:      itemID,
+			Status:           "returning",
+			Genres:           []string{uniqueGenre, "Drama"},
+			Rating:           pgtype.Numeric{Int: big.NewInt(rating), Valid: true},
+			OriginalName:     title,
+			OriginalLanguage: "en",
+			NumberOfSeasons:  1,
+			NumberOfEpisodes: 1,
+			Popularity:       pgtype.Numeric{Int: big.NewInt(rating), Valid: true},
+			SpokenLanguages:  []string{"en"},
+			OriginCountry:    []string{"US"},
+		}); err != nil {
+			t.Fatalf("creating tv series %s: %v", title, err)
+		}
+		file, err := qtx.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+			LibraryID:   libID,
+			Path:        slug + "/episode.mkv",
+			Size:        1,
+			ParseResult: []byte("{}"),
+			Status:      sqlc.FileStatusMatched,
+		})
+		if err != nil {
+			t.Fatalf("creating library file for %s: %v", title, err)
+		}
+		if err := qtx.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+			ID:           file.ID,
+			Status:       sqlc.FileStatusMatched,
+			MediaItemID:  pgtype.Int8{Int64: itemID, Valid: true},
+			ErrorMessage: "",
+		}); err != nil {
+			t.Fatalf("attaching library file for %s: %v", title, err)
+		}
+		return itemID
+	}
+
+	tvID := createSeries("Ordinary Show", "ordinary-show", "900001", tvLib.ID, sqlc.MediaTypeTv, 98)
+	animeID := createSeries("Anime Show", "anime-show", "900002", animeLib.ID, sqlc.MediaTypeAnime, 99)
+
+	if err := qtx.CreateMediaRecommendation(ctx, sqlc.CreateMediaRecommendationParams{
+		MediaItemID: tvID,
+		ExternalIds: []byte(`{"tmdb":"900002"}`),
+		Title:       "Anime Show",
+		MediaType:   "tv",
+		VoteAverage: pgtype.Numeric{Int: big.NewInt(9), Valid: true},
+		ReleaseDate: "2024",
+	}); err != nil {
+		t.Fatalf("creating anime recommendation: %v", err)
+	}
+	if err := qtx.CreateMediaRecommendation(ctx, sqlc.CreateMediaRecommendationParams{
+		MediaItemID: animeID,
+		ExternalIds: []byte(`{"tmdb":"900001"}`),
+		Title:       "Ordinary Show",
+		MediaType:   "anime",
+		VoteAverage: pgtype.Numeric{Int: big.NewInt(8), Valid: true},
+		ReleaseDate: "2024",
+	}); err != nil {
+		t.Fatalf("creating tv recommendation: %v", err)
+	}
+
+	topRated, err := qtx.ListTopRatedTV(ctx, 10)
+	if err != nil {
+		t.Fatalf("listing top rated tv: %v", err)
+	}
+	topRatedTypes := make([]string, 0, len(topRated))
+	for _, row := range topRated {
+		topRatedTypes = append(topRatedTypes, row.MediaType)
+	}
+	if !mediaTypesContain(topRatedTypes, "tv", "anime") {
+		t.Fatalf("expected top rated TV rail to include tv and anime, got %#v", topRated)
+	}
+
+	genreRows, err := qtx.ListTopTVInGenre(ctx, sqlc.ListTopTVInGenreParams{Genre: uniqueGenre, Lim: 10})
+	if err != nil {
+		t.Fatalf("listing tv genre rail: %v", err)
+	}
+	genreTypes := make([]string, 0, len(genreRows))
+	for _, row := range genreRows {
+		genreTypes = append(genreTypes, row.MediaType)
+	}
+	if !mediaTypesContain(genreTypes, "tv", "anime") {
+		t.Fatalf("expected TV genre rail to include tv and anime, got %#v", genreRows)
+	}
+
+	recRows, err := qtx.ListLocalRecommendations(ctx, sqlc.ListLocalRecommendationsParams{
+		ItemType: sqlc.MediaTypeTv,
+		RecType:  "tv",
+		UserID:   user.ID,
+		Lim:      10,
+	})
+	if err != nil {
+		t.Fatalf("listing local recommendations: %v", err)
+	}
+	recTypes := make([]string, 0, len(recRows))
+	for _, row := range recRows {
+		recTypes = append(recTypes, row.MediaType)
+	}
+	if !mediaTypesContain(recTypes, "tv", "anime") {
+		t.Fatalf("expected recommended shows rail to include tv and anime, got %#v", recRows)
+	}
+}
+
+func mediaTypesContain(types []string, want ...string) bool {
+	seen := make(map[string]bool, len(types))
+	for _, typ := range types {
+		seen[typ] = true
+	}
+	for _, typ := range want {
+		if !seen[typ] {
+			return false
+		}
+	}
+	return true
 }

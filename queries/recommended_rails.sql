@@ -97,7 +97,7 @@ LIMIT sqlc.arg(lim);
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE mi.media_type = 'tv'
+WHERE mi.media_type IN ('tv', 'anime')
   AND ts.rating > 0
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
@@ -122,7 +122,7 @@ LIMIT 5;
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE mi.media_type = 'tv'
+WHERE mi.media_type IN ('tv', 'anime')
   AND sqlc.arg(genre)::text = ANY(ts.genres)
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
@@ -172,7 +172,11 @@ LIMIT $2;
 WITH agg AS (
   SELECT mr.external_ids, count(*)::int AS source_count, max(mr.vote_average) AS vote
   FROM media_recommendations mr
-  WHERE mr.media_type = sqlc.arg(rec_type)::text AND mr.external_ids <> '{}'
+  WHERE (
+      mr.media_type = sqlc.arg(rec_type)::text
+      OR (sqlc.arg(rec_type)::text = 'tv' AND mr.media_type = 'anime')
+    )
+    AND mr.external_ids <> '{}'
   GROUP BY mr.external_ids
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
@@ -189,7 +193,10 @@ JOIN LATERAL (
            local_mi.id
   LIMIT 1
 ) mi ON true
-WHERE mi.media_type = sqlc.arg(item_type)::media_type
+WHERE (
+    mi.media_type = sqlc.arg(item_type)::media_type
+    OR (sqlc.arg(item_type)::text = 'tv' AND mi.media_type = 'anime')
+  )
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
   AND NOT EXISTS (
     SELECT 1 FROM user_watch_progress wp

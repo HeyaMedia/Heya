@@ -16,7 +16,11 @@ const listLocalRecommendations = `-- name: ListLocalRecommendations :many
 WITH agg AS (
   SELECT mr.external_ids, count(*)::int AS source_count, max(mr.vote_average) AS vote
   FROM media_recommendations mr
-  WHERE mr.media_type = $4::text AND mr.external_ids <> '{}'
+  WHERE (
+      mr.media_type = $4::text
+      OR ($4::text = 'tv' AND mr.media_type = 'anime')
+    )
+    AND mr.external_ids <> '{}'
   GROUP BY mr.external_ids
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, agg.source_count
@@ -33,7 +37,10 @@ JOIN LATERAL (
            local_mi.id
   LIMIT 1
 ) mi ON true
-WHERE mi.media_type = $1::media_type
+WHERE (
+    mi.media_type = $1::media_type
+    OR ($1::text = 'tv' AND mi.media_type = 'anime')
+  )
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
   AND NOT EXISTS (
     SELECT 1 FROM user_watch_progress wp
@@ -361,7 +368,7 @@ const listTopRatedTV = `-- name: ListTopRatedTV :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE mi.media_type = 'tv'
+WHERE mi.media_type IN ('tv', 'anime')
   AND ts.rating > 0
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
@@ -412,7 +419,7 @@ const listTopTVInGenre = `-- name: ListTopTVInGenre :many
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type, ts.rating
 FROM media_item_cards mi
 JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE mi.media_type = 'tv'
+WHERE mi.media_type IN ('tv', 'anime')
   AND $1::text = ANY(ts.genres)
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
