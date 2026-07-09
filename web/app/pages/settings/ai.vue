@@ -246,11 +246,11 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 
       <SettingsField label="Model" :lockedBy="isLocked('ai.local_model') ? lockTooltip('ai.local_model') : undefined">
         <select v-model="settings!.local_model" class="sv2-select" :disabled="saving || isLocked('ai.local_model')" @change="save">
-          <option v-for="m in localModels" :key="m.id" :value="m.id">
-            {{ m.label }} — {{ (m.size / 1024 / 1024 / 1024).toFixed(1) }} GB, {{ m.ram_hint }} RAM
-          </option>
+          <option v-for="m in localModels" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
-        <p v-if="selectedLocalModel?.notes" class="field-note">{{ selectedLocalModel.notes }}</p>
+        <p v-if="selectedLocalModel" class="field-note">
+          {{ (selectedLocalModel.size / 1024 / 1024 / 1024).toFixed(1) }} GB download · {{ selectedLocalModel.ram_hint }} RAM{{ selectedLocalModel.notes ? ` · ${selectedLocalModel.notes}` : '' }}
+        </p>
       </SettingsField>
 
       <SettingsField
@@ -452,7 +452,36 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .model-row .sv2-input { flex: 1; }
 .model-row .sv2-btn { flex-shrink: 0; white-space: nowrap; }
 
-.test-textarea { resize: vertical; min-height: 40px; width: 100%; font-family: inherit; }
+/* .sv2-input is a per-page convention (defined in each settings page's scoped
+   block, only .sv2-btn is global) — without this the inputs render as square
+   browser defaults. */
+.sv2-input {
+  width: 100%;
+  max-width: 460px;
+  padding: 9px 12px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--fg-0);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.sv2-input::placeholder { color: var(--fg-4); }
+.sv2-input:focus { border-color: var(--gold); background: var(--bg-1); }
+.sv2-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.test-textarea {
+  resize: vertical;
+  min-height: 44px;
+  max-width: none;
+  width: 100%;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.model-row .sv2-input,
+.test-console-row .sv2-input { max-width: none; }
 
 .test-card {
   margin-top: 14px;
@@ -482,15 +511,17 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .sv2-select {
   background: var(--bg-0);
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   color: var(--fg-0);
   font-size: 13px;
-  padding: 8px 12px;
-  min-width: 240px;
+  padding: 9px 12px;
+  min-width: 260px;
+  max-width: 460px;
   cursor: pointer;
   outline: none;
-  transition: border-color 0.12s;
+  transition: border-color 0.12s, background 0.12s;
 }
-.sv2-select:focus { border-color: var(--gold); }
+.sv2-select:hover:not(:disabled) { border-color: var(--fg-4); }
+.sv2-select:focus { border-color: var(--gold); background: var(--bg-1); }
 .sv2-select:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
