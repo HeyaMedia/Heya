@@ -54,12 +54,12 @@ func PersistScanResult(ctx context.Context, lib sqlc.Library, result Result, eve
 	if err := persistMetadataMatchCandidates(ctx, q, run.ID, result, identityByKey); err != nil {
 		return 0, err
 	}
-	if opts.RemoteSearch {
+	if opts.RemoteSearch && !opts.OmitResultArtifacts {
 		if err := persistResultArtifactTx(ctx, q, run.ID, scanArtifactKindSearch, opts, result); err != nil {
 			return 0, err
 		}
 	}
-	if opts.FetchPreview {
+	if opts.FetchPreview && !opts.OmitResultArtifacts {
 		if err := persistResultArtifactTx(ctx, q, run.ID, scanArtifactKindFetch, opts, result); err != nil {
 			return 0, err
 		}

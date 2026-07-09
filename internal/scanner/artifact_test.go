@@ -2,7 +2,9 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,20 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOversizedResultArtifactFailsBeforePersistenceWithActionableError(t *testing.T) {
+	err := validateResultArtifactSize(scanArtifactKindSearch, []byte(strings.Repeat("x", 17)), 16)
+	require.Error(t, err)
+
+	var tooLarge *ArtifactTooLargeError
+	require.True(t, errors.As(err, &tooLarge))
+	require.Equal(t, scanArtifactKindSearch, tooLarge.Kind)
+	require.Equal(t, 17, tooLarge.Size)
+	require.Equal(t, 16, tooLarge.Limit)
+	require.ErrorContains(t, err, "split the scan into owner scopes or use per-entity artifacts")
+
+	require.NoError(t, validateResultArtifactSize(scanArtifactKindSearch, make([]byte, 16), 16))
+}
 
 func TestSearchArtifactRoundTripRestoresInventory(t *testing.T) {
 	result := Result{

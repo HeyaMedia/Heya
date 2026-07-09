@@ -1,14 +1,24 @@
 package worker
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOversizedScannerArtifactCancelsWorkerRetry(t *testing.T) {
+	err := &scanner.ArtifactTooLargeError{Kind: "search_result", Size: 17, Limit: 16}
+	got := scannerWorkerError(err)
+
+	require.ErrorIs(t, got, river.JobCancel(errors.New("permanent")))
+	require.ErrorIs(t, got, err)
+}
 
 func TestKickoffLibraryScanSupportsScannerDomains(t *testing.T) {
 	for _, mt := range []sqlc.MediaType{sqlc.MediaTypeMovie, sqlc.MediaTypeTv, sqlc.MediaTypeAnime, sqlc.MediaTypeMusic, sqlc.MediaTypeBook} {
@@ -139,6 +149,105 @@ func TestScannerScopeForLibraryPathUsesMusicArtistScope(t *testing.T) {
 		"/library/Music/Daft Punk",
 		ScannerScopeForLibraryPath(lib, "/library/Music/Daft Punk"),
 	)
+}
+
+func TestScannerScopeForLibraryDirectoryKeepsNFOOwnerScope(t *testing.T) {
+	tests := []struct {
+		name string
+		lib  sqlc.Library
+		dir  string
+		want string
+	}{
+		{
+			name: "TV show",
+			lib:  sqlc.Library{MediaType: sqlc.MediaTypeTv, Paths: []string{"/storage/TV/Foreign"}},
+			dir:  "/storage/TV/Foreign/Some Show",
+			want: "/storage/TV/Foreign/Some Show",
+		},
+		{
+			name: "TV season promotes to show",
+			lib:  sqlc.Library{MediaType: sqlc.MediaTypeTv, Paths: []string{"/storage/TV/Foreign"}},
+			dir:  "/storage/TV/Foreign/Some Show/Season 01",
+			want: "/storage/TV/Foreign/Some Show",
+		},
+		{
+			name: "movie",
+			lib:  sqlc.Library{MediaType: sqlc.MediaTypeMovie, Paths: []string{"/storage/Movies"}},
+			dir:  "/storage/Movies/Dune (2021)",
+			want: "/storage/Movies/Dune (2021)",
+		},
+		{
+			name: "SMB TV show",
+			lib:  sqlc.Library{MediaType: sqlc.MediaTypeTv, Paths: []string{"smb://nas/media/TV"}},
+			dir:  "smb://nas/media/TV/Some Show",
+			want: "smb://nas/media/TV/Some Show",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, ScannerScopeForLibraryDirectory(tt.lib, tt.dir))
+		})
+	}
+}
+
+func TestProcessLibraryScanFanoutSplitsFullAndRootScopesIntoOwners(t *testing.T) {
+	tests := []struct {
+		name      string
+		lib       sqlc.Library
+		inventory scanner.Inventory
+		want      []string
+	}{
+		{
+			name: "local TV",
+			lib: sqlc.Library{
+				ID:        3,
+				MediaType: sqlc.MediaTypeTv,
+				Paths:     []string{"/storage/TV/Foreign"},
+			},
+			inventory: scanner.Inventory{Roots: []scanner.InventoryRoot{{
+				Root: "/storage/TV/Foreign",
+				Files: []scanner.InventoryFile{
+					{Root: "/storage/TV/Foreign", Path: "/storage/TV/Foreign/Alpha/Season 01/Alpha.S01E01.mkv", RelPath: "Alpha/Season 01/Alpha.S01E01.mkv", Class: scanner.ClassPrimaryMedia},
+					{Root: "/storage/TV/Foreign", Path: "/storage/TV/Foreign/Beta/Season 02/Beta.S02E01.mkv", RelPath: "Beta/Season 02/Beta.S02E01.mkv", Class: scanner.ClassPrimaryMedia},
+				},
+			}}},
+			want: []string{"/storage/TV/Foreign/Alpha", "/storage/TV/Foreign/Beta"},
+		},
+		{
+			name: "SMB movies",
+			lib: sqlc.Library{
+				ID:        4,
+				MediaType: sqlc.MediaTypeMovie,
+				Paths:     []string{"smb://nas/media/Movies"},
+			},
+			inventory: scanner.Inventory{Roots: []scanner.InventoryRoot{{
+				Root: "smb://nas/media/Movies",
+				Files: []scanner.InventoryFile{
+					{Root: "smb://nas/media/Movies", Path: "smb://nas/media/Movies/Alien (1979)/Alien.mkv", RelPath: "Alien (1979)/Alien.mkv", Class: scanner.ClassPrimaryMedia},
+					{Root: "smb://nas/media/Movies", Path: "smb://nas/media/Movies/Dune (2021)/Dune.mkv", RelPath: "Dune (2021)/Dune.mkv", Class: scanner.ClassPrimaryMedia},
+				},
+			}}},
+			want: []string{"smb://nas/media/Movies/Alien (1979)", "smb://nas/media/Movies/Dune (2021)"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := ProcessLibraryScanArgs{LibraryID: tt.lib.ID, Force: true}
+			for _, requested := range [][]string{nil, {tt.lib.Paths[0]}} {
+				args := processLibraryScanFanoutArgs(tt.lib, base, requested, tt.inventory)
+				require.Len(t, args, len(tt.want))
+				got := make([]string, 0, len(args))
+				for _, arg := range args {
+					require.Len(t, arg.ScopePaths, 1)
+					require.NotEqual(t, tt.lib.Paths[0], arg.ScopePaths[0])
+					got = append(got, arg.ScopePaths[0])
+				}
+				require.Equal(t, tt.want, got)
+			}
+		})
+	}
 }
 
 func TestScannerRichMetadataTargetsAndDetail(t *testing.T) {

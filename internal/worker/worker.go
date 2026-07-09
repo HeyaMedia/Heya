@@ -282,8 +282,6 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	if err != nil {
 		return nil, fmt.Errorf("river client: %w", err)
 	}
-	kickoffLibraryWorker.Queue = client
-
 	return client, nil
 }
 

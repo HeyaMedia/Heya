@@ -2,16 +2,50 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPersistScanResultCanOmitRedundantWholeResultArtifacts(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-omit-result-artifact-test",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	scanRunID, err := PersistScanResult(ctx, lib, Result{}, nil, Options{
+		RemoteSearch:        true,
+		OmitResultArtifacts: true,
+	}, pool, map[string]any{"files": 0})
+	require.NoError(t, err)
+	require.NotZero(t, scanRunID)
+
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{
+		ScanRunID: scanRunID,
+		Kind:      scanArtifactKindSearch,
+		ScopeKey:  scannerScopeKey(nil),
+	})
+	require.True(t, errors.Is(err, pgx.ErrNoRows))
+}
 
 func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	pool := testutil.SetupDB(t)

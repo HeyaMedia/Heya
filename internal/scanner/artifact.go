@@ -20,7 +20,23 @@ const (
 	scanArtifactKindSearch = "search_result"
 	scanArtifactKindFetch  = "fetch_result"
 	scanArtifactSchemaV1   = int32(1)
+	// PostgreSQL jsonb has a hard 256 MiB limit for the total size of array
+	// elements. Keep every artifact comfortably below that boundary; scanner
+	// entity artifacts are the durable hand-off for the worker pipeline.
+	maxScanRunArtifactBytes = 64 << 20
 )
+
+// ArtifactTooLargeError is returned before a scanner artifact reaches
+// PostgreSQL. It is permanent for the input and should not be retried unchanged.
+type ArtifactTooLargeError struct {
+	Kind  string
+	Size  int
+	Limit int
+}
+
+func (e *ArtifactTooLargeError) Error() string {
+	return fmt.Sprintf("scanner %s artifact is %d bytes, exceeding the %d-byte safety limit; split the scan into owner scopes or use per-entity artifacts", e.Kind, e.Size, e.Limit)
+}
 
 type scanRunArtifact struct {
 	SchemaVersion int               `json:"schema_version"`
@@ -132,7 +148,17 @@ func marshalResultArtifact(kind string, opts Options, result Result) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("marshal scanner %s artifact: %w", kind, err)
 	}
+	if err := validateResultArtifactSize(kind, data, maxScanRunArtifactBytes); err != nil {
+		return nil, err
+	}
 	return data, nil
+}
+
+func validateResultArtifactSize(kind string, data []byte, limit int) error {
+	if limit > 0 && len(data) > limit {
+		return &ArtifactTooLargeError{Kind: kind, Size: len(data), Limit: limit}
+	}
+	return nil
 }
 
 func unmarshalSearchArtifact(data []byte) (Result, error) {

@@ -12,30 +12,33 @@ import (
 )
 
 type Options struct {
-	Apply              bool
-	ApplyDB            *pgxpool.Pool
-	JSONL              bool
-	PersistenceDB      *pgxpool.Pool
-	PersistScan        bool
-	Report             bool
-	FetchPreview       bool
-	MaterializePreview bool
-	RemoteSearch       bool
-	MovieFetcher       MovieDetailProvider
-	MovieMaterializer  MovieMaterializeStore
-	MovieSearcher      MovieSearchProvider
-	BookFetcher        BookDetailProvider
-	BookMaterializer   BookMaterializeStore
-	BookSearcher       BookSearchProvider
-	MusicFetcher       MusicDetailProvider
-	MusicMaterializer  MusicMaterializeStore
-	MusicProbe         MusicProbeFunc
-	MusicSearcher      MusicSearchProvider
-	EventWriters       []EventWriter
-	ScopePaths         []string
-	TVFetcher          TVDetailProvider
-	TVMaterializer     TVMaterializeStore
-	TVSearcher         TVSearchProvider
+	Apply         bool
+	ApplyDB       *pgxpool.Pool
+	JSONL         bool
+	PersistenceDB *pgxpool.Pool
+	PersistScan   bool
+	// OmitResultArtifacts keeps scan-run bookkeeping while relying on narrow
+	// scanner entity artifacts for pipeline hand-off.
+	OmitResultArtifacts bool
+	Report              bool
+	FetchPreview        bool
+	MaterializePreview  bool
+	RemoteSearch        bool
+	MovieFetcher        MovieDetailProvider
+	MovieMaterializer   MovieMaterializeStore
+	MovieSearcher       MovieSearchProvider
+	BookFetcher         BookDetailProvider
+	BookMaterializer    BookMaterializeStore
+	BookSearcher        BookSearchProvider
+	MusicFetcher        MusicDetailProvider
+	MusicMaterializer   MusicMaterializeStore
+	MusicProbe          MusicProbeFunc
+	MusicSearcher       MusicSearchProvider
+	EventWriters        []EventWriter
+	ScopePaths          []string
+	TVFetcher           TVDetailProvider
+	TVMaterializer      TVMaterializeStore
+	TVSearcher          TVSearchProvider
 }
 
 type Result struct {
