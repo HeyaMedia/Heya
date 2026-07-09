@@ -217,6 +217,9 @@ var aiRecommendCmd = &cobra.Command{
 				}
 				fmt.Println(t.Render())
 			}
+			if res.Note != "" {
+				fmt.Printf("\n%s\n", res.Note)
+			}
 			fmt.Printf("\n[%s · %s · %.1fs]\n", res.Mode, res.Model, float64(res.DurationMs)/1000)
 			return nil
 		})

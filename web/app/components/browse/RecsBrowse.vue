@@ -88,8 +88,9 @@
       Heart or watch a few titles and this personalizes to your taste — for now, showing the highest-rated picks.
     </div>
 
-    <div v-if="aiShowing" class="rb-ai-meta" :title="aiProbesTitle">
-      AI-curated · {{ aiMeta }}
+    <div v-if="aiShowing" class="rb-ai-summary">
+      <p v-if="aiNote" class="rb-ai-summary-note">{{ aiNote }}</p>
+      <div class="rb-ai-meta" :title="aiProbesTitle">AI-curated · {{ aiMeta }}</div>
     </div>
 
     <div v-if="displayLoading" class="grid-posters">
@@ -100,14 +101,15 @@
 
     <div v-else-if="displayItems.length" class="grid-posters">
       <AppContextMenu v-for="(item, i) in displayItems" :key="item.id" :items="contextItemsFor(item)">
-        <NuxtLink :to="mediaUrl(item as any)" class="grid-tile card-tile">
+        <NuxtLink :to="mediaUrl(item as any)" class="grid-tile card-tile rb-tile">
           <MediaCard
             :idx="i"
             :src="usePosterUrl(item)"
             aspect="2/3"
             :title="item.title"
-            :subtitle="item.reason || item.year"
+            :subtitle="item.year"
           />
+          <div v-if="item.reason" class="rb-reason" :title="item.reason">{{ item.reason }}</div>
         </NuxtLink>
       </AppContextMenu>
     </div>
@@ -202,7 +204,7 @@ const aiReadyQuery = useQuery({
 })
 const aiReady = computed(() => aiReadyQuery.data.value?.ready === true)
 
-type AIRecResult = { items: RecItem[]; probes?: string[]; model?: string; mode: string; duration_ms: number }
+type AIRecResult = { items: RecItem[]; note?: string; probes?: string[]; model?: string; mode: string; duration_ms: number }
 const aiQ = ref('')
 const aiQuery = useQuery({
   queryKey: ['ai-recs', props.section, aiQ],
@@ -247,6 +249,7 @@ const aiMeta = computed(() => {
   const d = aiQuery.data.value
   return d ? `${d.model || d.mode} · ${(d.duration_ms / 1000).toFixed(1)}s` : ''
 })
+const aiNote = computed(() => aiQuery.data.value?.note ?? '')
 const aiProbesTitle = computed(() => {
   const probes = aiQuery.data.value?.probes
   return probes?.length ? `Searched: ${probes.join(' · ')}` : ''
@@ -416,9 +419,42 @@ function reset() {
 .rb-ai-btn:disabled { opacity: 0.45; cursor: default; }
 
 .rb-ai-note { color: var(--gold-bright); border-color: var(--gold-soft); }
+
+/* The model's overall "I looked for… these fit because…" explanation. */
+.rb-ai-summary {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--gold-soft);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  margin-bottom: 18px;
+}
+.rb-ai-summary-note {
+  font-size: 13px; line-height: 1.55; color: var(--fg-1);
+  margin: 0 0 6px;
+}
 .rb-ai-meta {
   font-size: 11px; font-family: var(--font-mono); color: var(--fg-3);
-  margin-bottom: 12px; cursor: default;
+  cursor: default;
+}
+
+/* Reason underlay — a slab tucked under the poster so the "why" reads as
+   part of the card instead of an ellipsized line painted on the art. The
+   poster keeps its own radius and sits above (z-index), the slab peeks out
+   below with matching bottom corners. */
+.rb-tile { display: flex; flex-direction: column; }
+.rb-tile :deep(.mediac) { position: relative; z-index: 1; height: auto; }
+.rb-reason {
+  margin-top: -10px;
+  padding: 18px 12px 10px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  font-size: 11.5px; line-height: 1.45; color: var(--fg-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .rb-link { color: var(--gold); text-decoration: none; }
 .rb-link:hover { text-decoration: underline; }

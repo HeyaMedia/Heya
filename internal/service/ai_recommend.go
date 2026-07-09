@@ -30,6 +30,7 @@ type AIRecommendRequest struct {
 // where they came from (model, probe queries, latency).
 type AIRecommendResult struct {
 	Items      []ForYouItem `json:"items"`
+	Note       string       `json:"note,omitempty" doc:"the model's overall explanation of how it read the ask and why the picks fit"`
 	Probes     []string     `json:"probes,omitempty" doc:"embedding probes the model searched with"`
 	Model      string       `json:"model,omitempty"`
 	Mode       string       `json:"mode"`
@@ -74,9 +75,10 @@ var aiRecPicksSchema = []byte(`{
 				"required": ["id", "reason", "fit"],
 				"additionalProperties": false
 			}
-		}
+		},
+		"note": { "type": "string", "minLength": 1, "maxLength": 400 }
 	},
-	"required": ["picks"],
+	"required": ["picks", "note"],
 	"additionalProperties": false
 }`)
 
@@ -157,6 +159,7 @@ func (a *App) AIRecommend(ctx context.Context, userID int64, in AIRecommendReque
 	blurbs := a.aiRecBlurbs(ctx, pool)
 	var picked struct {
 		Picks []aiRecPick `json:"picks"`
+		Note  string      `json:"note"`
 	}
 	err = client.CompleteJSON(ctx, llm.Request{
 		Model:       model,
@@ -174,6 +177,7 @@ func (a *App) AIRecommend(ctx context.Context, userID int64, in AIRecommendReque
 	}
 
 	result.Items = disposePicks(pool, picked.Picks, limit)
+	result.Note = strings.TrimSpace(picked.Note)
 	result.DurationMs = time.Since(start).Milliseconds()
 	return result, nil
 }
@@ -333,7 +337,10 @@ func aiRecCurateSystem() string {
 		"Omit candidates that do not fit at all; do not pad. Typically a handful of candidates rate 4-5. Rules: " +
 		"use only ids from the list; " +
 		"rate a title the viewer recently watched one grade lower unless the request implies rewatching or continuing something; " +
-		"reason = a short line (max 8 words) shown under the poster saying why it fits — plain human language, never mention ids, grades, or \"the viewer\"."
+		"reason = a short line (max 8 words) shown under the poster saying why it fits — plain human language, never mention ids, grades, or \"the viewer\"; " +
+		"note = 1-2 sentences speaking directly to the viewer as \"you\", explaining how you read the request and why the picks fit overall " +
+		"(e.g. \"I looked for … — these fit because …\"). If nothing fits, use the note to say what you looked for and why nothing matched. " +
+		"If you recognized a specific title the request was hinting at, name it in the note. Never mention ids, grades, or \"the viewer\" in the note."
 }
 
 func aiRecCurateUser(query, mediaType string, pool []ForYouItem, blurbs map[int64]string, watched map[int64]bool, history []string) string {
