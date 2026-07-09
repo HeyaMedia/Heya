@@ -59,7 +59,7 @@ const (
 	aiMusicDefaultLimit = 30
 	aiMusicMaxLimit     = 60
 	aiMusicPerProbe     = 60
-	aiMusicMaxPool      = 120
+	aiMusicMaxPool      = 90
 )
 
 var aiMusicTemp = 0.25
@@ -151,11 +151,15 @@ func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixR
 	}
 	start := time.Now()
 
+	planStarted := time.Now()
 	plan := a.aiMusicMakePlan(ctx, client, model, query)
+	planDuration := time.Since(planStarted)
+	retrievalStarted := time.Now()
 	candidates, err := a.aiMusicCandidatePool(ctx, plan.Probes, limit)
 	if err != nil {
 		return AIMusicMixResult{}, err
 	}
+	retrievalDuration := time.Since(retrievalStarted)
 
 	result := AIMusicMixResult{
 		Title:   plan.Title,
@@ -176,9 +180,11 @@ func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixR
 	var selected struct {
 		Picks []aiMusicPick `json:"picks"`
 	}
+	curationStarted := time.Now()
 	err = client.CompleteJSON(ctx, llm.Request{
 		Model:       model,
 		Temperature: &aiMusicTemp,
+		MaxTokens:   max(700, limit*24),
 		Messages: []llm.Message{
 			{Role: "system", Content: aiMusicCuratorSystem(limit)},
 			{Role: "user", Content: aiMusicCuratorUser(query, plan, candidates, limit)},
@@ -187,15 +193,30 @@ func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixR
 	if settings.Mode == "local" {
 		a.llmLocal.Touch()
 	}
+	curationDuration := time.Since(curationStarted)
 	if err != nil {
 		// Retrieval already did the expensive semantic work. A weak JSON turn
 		// from a small local model should degrade to the ranked CLAP pool, not
 		// throw the whole mix away.
-		log.Warn().Err(err).Msg("ai music mix: curation failed — using CLAP-ranked fallback")
+		log.Warn().Err(err).
+			Int("candidates", len(candidates)).
+			Dur("plan", planDuration).
+			Dur("retrieval", retrievalDuration).
+			Dur("curation", curationDuration).
+			Msg("ai music mix: curation failed — using CLAP-ranked fallback")
 	}
 
 	result.Tracks = disposeAIMusicPicks(candidates, selected.Picks, limit)
 	result.DurationMs = time.Since(start).Milliseconds()
+	log.Info().
+		Str("mode", settings.Mode).
+		Int("candidates", len(candidates)).
+		Int("tracks", len(result.Tracks)).
+		Dur("plan", planDuration).
+		Dur("retrieval", retrievalDuration).
+		Dur("curation", curationDuration).
+		Int64("total_ms", result.DurationMs).
+		Msg("ai music mix: complete")
 	return result, nil
 }
 
@@ -204,6 +225,7 @@ func (a *App) aiMusicMakePlan(ctx context.Context, client *llm.Client, model, qu
 	err := client.CompleteJSON(ctx, llm.Request{
 		Model:       model,
 		Temperature: &aiMusicTemp,
+		MaxTokens:   320,
 		Messages: []llm.Message{
 			{Role: "system", Content: aiMusicPlannerSystem()},
 			{Role: "user", Content: "Mix brief:\n" + query},
@@ -251,10 +273,7 @@ func aiMusicCuratorUser(query string, plan aiMusicPlan, candidates []aiMusicCand
 	fmt.Fprintf(&b, "Choose and order %d tracks. Candidates:\n", min(limit, len(candidates)))
 	for _, candidate := range candidates {
 		r := candidate.Row
-		fmt.Fprintf(&b, "id=%d | %s — %s | album=%s", r.TrackID, r.ArtistName, r.TrackTitle, r.AlbumTitle)
-		if r.AlbumYear != "" {
-			fmt.Fprintf(&b, " | year=%s", r.AlbumYear)
-		}
+		fmt.Fprintf(&b, "id=%d | %s — %s", r.TrackID, r.ArtistName, r.TrackTitle)
 		if candidate.BPM != nil {
 			fmt.Fprintf(&b, " | bpm=%.0f", *candidate.BPM)
 		}
@@ -344,12 +363,18 @@ func (a *App) aiMusicCandidatePool(ctx context.Context, probes []string, limit i
 		seenRecording[key] = true
 		deduped = append(deduped, candidate)
 	}
-	poolLimit := max(80, limit*4)
-	poolLimit = min(poolLimit, aiMusicMaxPool)
+	poolLimit := aiMusicCandidatePoolLimit(limit)
 	if len(deduped) > poolLimit {
 		deduped = deduped[:poolLimit]
 	}
 	return deduped, nil
+}
+
+// A local 4B model does not benefit from reading four candidates per desired
+// track. A tighter, higher-ranked pool leaves enough room for diversity while
+// roughly halving prompt evaluation time for the default 30-track mix.
+func aiMusicCandidatePoolLimit(limit int) int {
+	return min(aiMusicMaxPool, max(48, limit*2))
 }
 
 func (a *App) aiMusicHydrateCandidates(ctx context.Context, candidates map[int64]*aiMusicCandidate) error {
@@ -388,8 +413,8 @@ func (a *App) aiMusicHydrateCandidates(ctx context.Context, candidates map[int64
 			value := bpm.Float32
 			candidate.BPM = &value
 		}
-		candidate.Genres = topMusicGenres(genresRaw, 4)
-		candidate.Moods = topMusicMoods(moodsRaw, 4)
+		candidate.Genres = topMusicGenres(genresRaw, 2)
+		candidate.Moods = topMusicMoods(moodsRaw, 2)
 		// Non-nil empty slices mark this as a playable hydrated row.
 		if candidate.Genres == nil {
 			candidate.Genres = []string{}

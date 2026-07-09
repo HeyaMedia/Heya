@@ -83,3 +83,19 @@ func TestNormalizeMusicProbes(t *testing.T) {
 		t.Fatalf("fallback missing: %#v", fallback)
 	}
 }
+
+func TestAIMusicCandidatePoolLimitKeepsPromptBounded(t *testing.T) {
+	tests := []struct {
+		limit int
+		want  int
+	}{
+		{limit: 5, want: 48},
+		{limit: 30, want: 60},
+		{limit: 60, want: 90},
+	}
+	for _, tt := range tests {
+		if got := aiMusicCandidatePoolLimit(tt.limit); got != tt.want {
+			t.Fatalf("aiMusicCandidatePoolLimit(%d) = %d, want %d", tt.limit, got, tt.want)
+		}
+	}
+}
