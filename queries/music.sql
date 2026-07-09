@@ -3,6 +3,43 @@ INSERT INTO artists (media_item_id, musicbrainz_id, name, sort_name, disambiguat
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
+-- name: CreateArtistIfNotExists :one
+-- Scanner apply can process several scoped album folders for the same artist
+-- concurrently. A plain INSERT poisons the transaction when another worker
+-- wins uq_artists_name_disambig first, so use DO NOTHING and resolve the
+-- canonical row in the same statement.
+WITH inserted AS (
+  INSERT INTO artists (media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography)
+  VALUES ($1, $2, $3, $4, $5, $6)
+  ON CONFLICT DO NOTHING
+  RETURNING 0::int AS ord, artists.*
+),
+by_media_item AS (
+  SELECT 1::int AS ord, artists.*
+  FROM artists
+  WHERE media_item_id = $1
+),
+by_name_disambig AS (
+  SELECT 2::int AS ord, artists.*
+  FROM artists
+  WHERE lower(name) = lower($3)
+    AND lower(disambiguation) = lower($5)
+    AND name <> ''
+)
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector,
+       discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation,
+       urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year,
+       end_date, ended, deathday, birthplace, tags
+FROM (
+  SELECT * FROM inserted
+  UNION ALL
+  SELECT * FROM by_media_item
+  UNION ALL
+  SELECT * FROM by_name_disambig
+) candidates
+ORDER BY ord
+LIMIT 1;
+
 -- name: GetArtistByMediaItemID :one
 SELECT * FROM artists WHERE media_item_id = $1;
 

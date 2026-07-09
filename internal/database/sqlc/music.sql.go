@@ -300,6 +300,127 @@ func (q *Queries) CreateArtist(ctx context.Context, arg CreateArtistParams) (Art
 	return i, err
 }
 
+const createArtistIfNotExists = `-- name: CreateArtistIfNotExists :one
+WITH inserted AS (
+  INSERT INTO artists (media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography)
+  VALUES ($1, $2, $3, $4, $5, $6)
+  ON CONFLICT DO NOTHING
+  RETURNING 0::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags
+),
+by_media_item AS (
+  SELECT 1::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags
+  FROM artists
+  WHERE media_item_id = $1
+),
+by_name_disambig AS (
+  SELECT 2::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags
+  FROM artists
+  WHERE lower(name) = lower($3)
+    AND lower(disambiguation) = lower($5)
+    AND name <> ''
+)
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector,
+       discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation,
+       urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year,
+       end_date, ended, deathday, birthplace, tags
+FROM (
+  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags FROM inserted
+  UNION ALL
+  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags FROM by_media_item
+  UNION ALL
+  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags FROM by_name_disambig
+) candidates
+ORDER BY ord
+LIMIT 1
+`
+
+type CreateArtistIfNotExistsParams struct {
+	MediaItemID    int64  `json:"media_item_id"`
+	MusicbrainzID  string `json:"musicbrainz_id"`
+	Name           string `json:"name"`
+	SortName       string `json:"sort_name"`
+	Disambiguation string `json:"disambiguation"`
+	Biography      string `json:"biography"`
+}
+
+type CreateArtistIfNotExistsRow struct {
+	ID                    int64              `json:"id"`
+	MediaItemID           int64              `json:"media_item_id"`
+	MusicbrainzID         string             `json:"musicbrainz_id"`
+	Name                  string             `json:"name"`
+	SortName              string             `json:"sort_name"`
+	Disambiguation        string             `json:"disambiguation"`
+	Biography             string             `json:"biography"`
+	SearchVector          interface{}        `json:"search_vector"`
+	DiscographyEnrichedAt pgtype.Timestamptz `json:"discography_enriched_at"`
+	CoverArtEnrichedAt    pgtype.Timestamptz `json:"cover_art_enriched_at"`
+	Listeners             int64              `json:"listeners"`
+	Playcount             int64              `json:"playcount"`
+	Popularity            int32              `json:"popularity"`
+	Annotation            string             `json:"annotation"`
+	Urls                  []byte             `json:"urls"`
+	WikipediaLinks        []byte             `json:"wikipedia_links"`
+	Profiles              []byte             `json:"profiles"`
+	Aliases               []string           `json:"aliases"`
+	Groups                []byte             `json:"groups"`
+	Members               []byte             `json:"members"`
+	ArtistType            string             `json:"artist_type"`
+	BeginDate             string             `json:"begin_date"`
+	BeginYear             int32              `json:"begin_year"`
+	EndDate               string             `json:"end_date"`
+	Ended                 bool               `json:"ended"`
+	Deathday              string             `json:"deathday"`
+	Birthplace            string             `json:"birthplace"`
+	Tags                  []string           `json:"tags"`
+}
+
+// Scanner apply can process several scoped album folders for the same artist
+// concurrently. A plain INSERT poisons the transaction when another worker
+// wins uq_artists_name_disambig first, so use DO NOTHING and resolve the
+// canonical row in the same statement.
+func (q *Queries) CreateArtistIfNotExists(ctx context.Context, arg CreateArtistIfNotExistsParams) (CreateArtistIfNotExistsRow, error) {
+	row := q.db.QueryRow(ctx, createArtistIfNotExists,
+		arg.MediaItemID,
+		arg.MusicbrainzID,
+		arg.Name,
+		arg.SortName,
+		arg.Disambiguation,
+		arg.Biography,
+	)
+	var i CreateArtistIfNotExistsRow
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.MusicbrainzID,
+		&i.Name,
+		&i.SortName,
+		&i.Disambiguation,
+		&i.Biography,
+		&i.SearchVector,
+		&i.DiscographyEnrichedAt,
+		&i.CoverArtEnrichedAt,
+		&i.Listeners,
+		&i.Playcount,
+		&i.Popularity,
+		&i.Annotation,
+		&i.Urls,
+		&i.WikipediaLinks,
+		&i.Profiles,
+		&i.Aliases,
+		&i.Groups,
+		&i.Members,
+		&i.ArtistType,
+		&i.BeginDate,
+		&i.BeginYear,
+		&i.EndDate,
+		&i.Ended,
+		&i.Deathday,
+		&i.Birthplace,
+		&i.Tags,
+	)
+	return i, err
+}
+
 const createArtistSimilarArtist = `-- name: CreateArtistSimilarArtist :exec
 INSERT INTO artist_similar_artists (
     artist_id, rank, name, mbid, match_score, url, local_artist_id

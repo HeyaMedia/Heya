@@ -124,6 +124,20 @@ func ApplyMusicMaterialization(ctx context.Context, lib sqlc.Library, result Res
 		}
 		applied.ArtistID = artist.ID
 		applied.ArtistRowAction = artistAction
+		if artist.MediaItemID != item.ID {
+			canonical, canonicalAction, err := applyMusicCanonicalArtistMediaItem(ctx, q, item, mediaAction, artist, detail)
+			if err != nil {
+				applied.Action = "failed"
+				applied.Error = err.Error()
+				results = append(results, applied)
+				emitMusicApplyResult(applied, emit)
+				return results, fmt.Errorf("adopt music artist media item %s: %w", preview.Key, err)
+			}
+			item = canonical
+			mediaAction = canonicalAction
+			applied.MediaItemID = item.ID
+			applied.MediaItemAction = mediaAction
+		}
 
 		counts, err := applyMusicAlbumsTracksAndFiles(ctx, q, lib.ID, item.ID, artist.ID, preview, meta, tracksByRel, filesByRel)
 		if err != nil {
@@ -321,7 +335,7 @@ func applyMusicArtist(ctx context.Context, q *sqlc.Queries, mediaItemID int64, p
 		return sqlc.Artist{}, "", err
 	}
 
-	created, err := q.CreateArtist(ctx, sqlc.CreateArtistParams{
+	createdRow, err := q.CreateArtistIfNotExists(ctx, sqlc.CreateArtistIfNotExistsParams{
 		MediaItemID:    mediaItemID,
 		MusicbrainzID:  mbid,
 		Name:           name,
@@ -332,10 +346,83 @@ func applyMusicArtist(ctx context.Context, q *sqlc.Queries, mediaItemID int64, p
 	if err != nil {
 		return sqlc.Artist{}, "", err
 	}
+	created := musicArtistFromCreateIfNotExistsRow(createdRow)
+	if created.MediaItemID != mediaItemID && musicArtistMBIDContradicts(created, mbid) {
+		disambig = musicDisambiguationWithMBIDMarker(disambig, mbid)
+		createdRow, err = q.CreateArtistIfNotExists(ctx, sqlc.CreateArtistIfNotExistsParams{
+			MediaItemID:    mediaItemID,
+			MusicbrainzID:  mbid,
+			Name:           name,
+			SortName:       sortName,
+			Disambiguation: disambig,
+			Biography:      bio,
+		})
+		if err != nil {
+			return sqlc.Artist{}, "", err
+		}
+		created = musicArtistFromCreateIfNotExistsRow(createdRow)
+	}
 	if musicDetailHasRemoteMetadata(detail) {
 		_ = applyMusicArtistExtended(ctx, q, created.ID, detail)
 	}
+	if created.MediaItemID != mediaItemID {
+		return created, "adopt_artist_row", nil
+	}
 	return created, "create_artist_row", nil
+}
+
+func musicArtistFromCreateIfNotExistsRow(row sqlc.CreateArtistIfNotExistsRow) sqlc.Artist {
+	return sqlc.Artist(row)
+}
+
+func applyMusicCanonicalArtistMediaItem(ctx context.Context, q *sqlc.Queries, current sqlc.MediaItemCard, currentAction string, artist sqlc.Artist, detail *metadata.MediaDetail) (sqlc.MediaItemCard, string, error) {
+	if currentAction == "create_media_item" {
+		if err := q.DeleteMediaItem(ctx, current.ID); err != nil {
+			return sqlc.MediaItemCard{}, "", fmt.Errorf("delete duplicate artist media item %d: %w", current.ID, err)
+		}
+	}
+	canonical, err := q.GetMediaItemByID(ctx, artist.MediaItemID)
+	if err != nil {
+		return sqlc.MediaItemCard{}, "", fmt.Errorf("get canonical artist media item %d: %w", artist.MediaItemID, err)
+	}
+	updated, err := q.UpdateMediaItem(ctx, musicUpdateMediaItemParams(canonical, detail))
+	if err != nil {
+		return sqlc.MediaItemCard{}, "", fmt.Errorf("update canonical artist media item %d: %w", canonical.ID, err)
+	}
+	if updated.Slug == "" {
+		if err := updateMusicArtistSlug(ctx, q, updated.ID, updated.Title); err != nil {
+			return sqlc.MediaItemCard{}, "", err
+		}
+	}
+	if err := q.MarkMatched(ctx, updated.ID); err != nil {
+		return sqlc.MediaItemCard{}, "", err
+	}
+	return updated, "adopt_media_item", nil
+}
+
+func musicArtistMBIDContradicts(existing sqlc.Artist, mbid string) bool {
+	mbid = strings.TrimSpace(mbid)
+	existingMBID := strings.TrimSpace(existing.MusicbrainzID)
+	return mbid != "" &&
+		existingMBID != "" &&
+		existingMBID != mbid &&
+		!musicIsSyntheticMBID(mbid) &&
+		!musicIsSyntheticMBID(existingMBID)
+}
+
+func musicIsSyntheticMBID(mbid string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(mbid)), "dddddddd-")
+}
+
+func musicDisambiguationWithMBIDMarker(disambig, mbid string) string {
+	marker := strings.TrimSpace(mbid)
+	if len(marker) > 8 {
+		marker = marker[:8]
+	}
+	if marker == "" {
+		return disambig
+	}
+	return strings.TrimSpace(disambig + " (mbid " + marker + ")")
 }
 
 func applyMusicArtistExtended(ctx context.Context, q *sqlc.Queries, artistID int64, detail *metadata.MediaDetail) error {
