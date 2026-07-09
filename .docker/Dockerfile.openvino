@@ -56,11 +56,15 @@ FROM ${BASE_RUNTIME_IMAGE} AS runtime
 # releases (built for Ubuntu 24.04; install on trixie via glibc forward-compat).
 # libigdgmm12 22.10 is mandatory: libze-intel-gpu1 needs >= 22.9, newer than
 # trixie's packaged 22.7.x.
+#
+# libvulkan1 + mesa-vulkan-drivers (ANV) serve the llama.cpp Vulkan backend for
+# local LLM inference on the same render node — trixie's mesa supports DG2/Arc.
 ARG INTEL_COMPUTE_RUNTIME=26.22.38646.4
 ARG INTEL_IGC=v2.36.3
 ARG INTEL_IGC_BUILD=2.36.3+21719
 ARG INTEL_GMM_VERSION=22.10.0
-RUN install_packages ca-certificates curl ocl-icd-libopencl1 libze1 && \
+RUN install_packages ca-certificates curl ocl-icd-libopencl1 libze1 \
+        libvulkan1 mesa-vulkan-drivers && \
     cd /tmp && \
     igc="https://github.com/intel/intel-graphics-compiler/releases/download/${INTEL_IGC}" && \
     cr="https://github.com/intel/compute-runtime/releases/download/${INTEL_COMPUTE_RUNTIME}" && \
