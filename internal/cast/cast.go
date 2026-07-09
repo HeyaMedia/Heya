@@ -98,10 +98,16 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 // Stop tears down every active session (graceful — receivers must see
-// TEARDOWN) and halts discovery.
+// TEARDOWN) and halts discovery. Fully resets the started state so a
+// later Start() rebuilds a live runCtx — the Settings toggle disables
+// and re-enables casting without a restart, and a re-enable must not
+// hand transports a canceled context.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	cancel := m.cancel
+	m.cancel = nil
+	m.runCtx = nil
+	m.started = false
 	sessions := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		sessions = append(sessions, s)
@@ -146,6 +152,18 @@ func (m *Manager) providerFor(dev Device) Provider {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.providers[dev.Provider]
+}
+
+// transportCtx snapshots the lifetime context transports bind to.
+// Errors when the manager is stopped (or was never started) so a spawn
+// racing a disable gets a clean failure instead of a canceled/nil ctx.
+func (m *Manager) transportCtx() (context.Context, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.started || m.runCtx == nil {
+		return nil, fmt.Errorf("cast: manager not started")
+	}
+	return m.runCtx, nil
 }
 
 // Play starts (or retargets) the session on a device. One session per

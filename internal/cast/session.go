@@ -112,11 +112,15 @@ func (s *Session) start() error {
 // context — never a request context, which would SIGTERM playback the
 // moment the HTTP call that started it returns.
 func (s *Session) spawnTransport(track TrackInfo, volume int) error {
+	ctx, err := s.mgr.transportCtx()
+	if err != nil {
+		return err
+	}
 	tr, err := s.mgr.providerFor(s.Device).NewTransport(s.Device)
 	if err != nil {
 		return err
 	}
-	if err := tr.Start(s.mgr.runCtx, track, volume); err != nil {
+	if err := tr.Start(ctx, track, volume); err != nil {
 		return err
 	}
 	s.mu.Lock()
