@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1.7
+#
+# Package a prebuilt Heya binary onto a selected runtime image.
+#
+# The release workflow uses this for amd64 CPU/CUDA/OpenVINO images after
+# building Nuxt + Go once into an uploaded `heya` artifact.
+
+ARG BASE_RUNTIME_IMAGE=ghcr.io/heyamedia/heya-runtime:latest
+
+FROM ${BASE_RUNTIME_IMAGE} AS runtime
+
+COPY --link --chmod=0755 heya /usr/local/bin/heya
+
+ENTRYPOINT ["/usr/local/bin/heya"]
+CMD ["serve"]

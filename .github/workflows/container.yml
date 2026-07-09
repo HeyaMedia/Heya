@@ -8,11 +8,10 @@
 #   :<ver>-cuda       NVIDIA — CUDA/TensorRT ONNX + NVENC transcode (amd64)
 #   :<ver>-openvino   Intel  — OpenVINO ONNX (Arc/iGPU) + QSV/VAAPI (amd64)
 #
-# The base is built NATIVELY per-arch — amd64 on ubuntu-latest, arm64 on the
-# GitHub-hosted ubuntu-24.04-arm runner (free for public repos), NO QEMU. Each
-# arch is pushed by digest, then a merge job assembles one multi-arch manifest
-# with the version tags. Every variant builds the same app layer on top of a
-# prebuilt runtime image from the Runtime Images workflow.
+# The amd64 app binary is built once, uploaded as an artifact, and then packaged
+# in parallel onto the CPU/CUDA/OpenVINO runtime images. Arm64 stays native on
+# the GitHub-hosted ubuntu-24.04-arm runner and builds the full app image there,
+# NO QEMU. CPU digests are merged into one multi-arch manifest.
 # Auth: GITHUB_TOKEN — no manual secrets needed.
 
 name: Container
@@ -30,23 +29,116 @@ concurrency:
   cancel-in-progress: false   # tag builds should always run to completion
 
 jobs:
-  base:
-    name: base ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
+  app-amd64:
+    name: app amd64 artifact
+    runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.img.outputs.image }}
       runtime_image: ${{ steps.img.outputs.runtime_image }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: amd64, platform: linux/amd64, runner: ubuntu-latest }
-          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v7
 
-      # GHCR refs must be lowercase, but github.repository can be mixed-case
-      # (e.g. HeyaMedia/Heya).
+      - name: Lowercase image ref
+        id: img
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "runtime_image=${image}-runtime" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Build Nuxt + Go once for amd64 and export only the final binary. The
+      # tiny package jobs below put this same artifact onto CPU/CUDA/OpenVINO
+      # runtimes without rebuilding frontend/backend three times.
+      - name: Build amd64 app binary
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: .docker/Dockerfile
+          target: binary-export
+          platforms: linux/amd64
+          outputs: type=local,dest=${{ runner.temp }}/heya-amd64
+          cache-from: type=gha,scope=app-amd64
+          cache-to: type=gha,mode=max,scope=app-amd64
+
+      - name: Upload amd64 app binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-amd64
+          path: ${{ runner.temp }}/heya-amd64/heya
+          if-no-files-found: error
+          retention-days: 1
+
+  base-amd64:
+    name: base amd64
+    needs: app-amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download amd64 app binary
+        uses: actions/download-artifact@v8
+        with:
+          name: app-amd64
+          path: ${{ runner.temp }}/package-amd64
+
+      - name: Prepare package context
+        run: |
+          cp .docker/Dockerfile.package "${{ runner.temp }}/package-amd64/Dockerfile"
+          ls -lh "${{ runner.temp }}/package-amd64/heya"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # OCI labels for the per-arch image. Tags are applied by the merge job.
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.app-amd64.outputs.image }}
+
+      - name: Build + push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ runner.temp }}/package-amd64
+          file: ${{ runner.temp }}/package-amd64/Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            BASE_RUNTIME_IMAGE=${{ needs.app-amd64.outputs.runtime_image }}:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ needs.app-amd64.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-amd64
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  base-arm64:
+    name: base arm64
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      image: ${{ steps.img.outputs.image }}
+      runtime_image: ${{ steps.img.outputs.runtime_image }}
+    steps:
+      - uses: actions/checkout@v7
+
       - name: Lowercase image ref
         id: img
         run: |
@@ -63,29 +155,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # OCI labels for the per-arch image. Tags are applied by the merge job.
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.img.outputs.image }}
 
-      # Native build for this runner's arch — no emulation. Pushed by digest
-      # only (no tag); the merge job assembles the tagged manifest list. Cache
-      # is scoped per-arch so the two runners don't clobber each other.
+      # Arm64 still builds natively on the arm runner. This keeps the arch
+      # independent from amd64 artifacts and avoids QEMU/CGO surprises.
       - name: Build + push by digest
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: .docker/Dockerfile
-          platforms: ${{ matrix.platform }}
+          platforms: linux/arm64
           build-args: |
             BASE_RUNTIME_IMAGE=${{ steps.img.outputs.runtime_image }}:latest
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=base-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=base-${{ matrix.arch }}
+          cache-from: type=gha,scope=base-arm64
+          cache-to: type=gha,mode=max,scope=base-arm64
 
       - name: Export digest
         run: |
@@ -96,18 +186,18 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v7
         with:
-          name: digest-${{ matrix.arch }}
+          name: digest-arm64
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
 
   merge:
     name: base manifest
-    needs: base
+    needs: [app-amd64, base-amd64, base-arm64]
     runs-on: ubuntu-latest
     outputs:
-      image: ${{ needs.base.outputs.image }}
-      runtime_image: ${{ needs.base.outputs.runtime_image }}
+      image: ${{ needs.app-amd64.outputs.image }}
+      runtime_image: ${{ needs.app-amd64.outputs.runtime_image }}
       version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Download digests
@@ -131,7 +221,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ needs.base.outputs.image }}
+          images: ${{ needs.app-amd64.outputs.image }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -142,16 +232,26 @@ jobs:
       - name: Create + push manifest list
         working-directory: ${{ runner.temp }}/digests
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ needs.base.outputs.image }}@sha256:%s ' *)
+          image="${{ needs.app-amd64.outputs.image }}"
+
+          tags=()
+          while IFS= read -r tag; do
+            tags+=("-t" "$tag")
+          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+
+          refs=()
+          for digest_file in *; do
+            refs+=("${image}@sha256:${digest_file}")
+          done
+
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
 
       - name: Inspect
-        run: docker buildx imagetools inspect "${{ needs.base.outputs.image }}:${{ steps.meta.outputs.version }}"
+        run: docker buildx imagetools inspect "${{ needs.app-amd64.outputs.image }}:${{ steps.meta.outputs.version }}"
 
   variants:
     name: ${{ matrix.variant }} (amd64)
-    needs: merge
+    needs: app-amd64
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -159,6 +259,17 @@ jobs:
         variant: [cuda, openvino]
     steps:
       - uses: actions/checkout@v7
+      - name: Download amd64 app binary
+        uses: actions/download-artifact@v8
+        with:
+          name: app-amd64
+          path: ${{ runner.temp }}/package-${{ matrix.variant }}
+
+      - name: Prepare package context
+        run: |
+          cp .docker/Dockerfile.package "${{ runner.temp }}/package-${{ matrix.variant }}/Dockerfile"
+          ls -lh "${{ runner.temp }}/package-${{ matrix.variant }}/heya"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
@@ -176,7 +287,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ needs.merge.outputs.image }}
+          images: ${{ needs.app-amd64.outputs.image }}
           flavor: suffix=-${{ matrix.variant }},onlatest=true
           tags: |
             type=semver,pattern={{version}}
@@ -184,18 +295,16 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      # Build the same app layer on top of the prebuilt GPU runtime — amd64
-      # only because CUDA/OpenVINO runtime images are x86_64.
+      # Package the prebuilt amd64 app binary onto the prebuilt GPU runtime —
+      # amd64 only because CUDA/OpenVINO runtime images are x86_64.
       - name: Build and push ${{ matrix.variant }}
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: .docker/Dockerfile
+          context: ${{ runner.temp }}/package-${{ matrix.variant }}
+          file: ${{ runner.temp }}/package-${{ matrix.variant }}/Dockerfile
           platforms: linux/amd64
           build-args: |
-            BASE_RUNTIME_IMAGE=${{ needs.merge.outputs.runtime_image }}:latest-${{ matrix.variant }}
+            BASE_RUNTIME_IMAGE=${{ needs.app-amd64.outputs.runtime_image }}:latest-${{ matrix.variant }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}

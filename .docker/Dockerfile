@@ -65,7 +65,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -buildvcs=false -ldflags="-s -w" -o /out/heya ./cmd/heya
 
 # ────────────────────────────────────────────────────────────────
-# Stage 3 — app runtime: small release layer on top of a runtime image
+# Stage 3 — binary export: CI artifact for packaging multiple runtimes
+# ────────────────────────────────────────────────────────────────
+FROM scratch AS binary-export
+COPY --from=backend-build /out/heya /heya
+
+# ────────────────────────────────────────────────────────────────
+# Stage 4 — app runtime: small release layer on top of a runtime image
 # ────────────────────────────────────────────────────────────────
 FROM ${BASE_RUNTIME_IMAGE} AS runtime
 
