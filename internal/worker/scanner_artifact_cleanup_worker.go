@@ -31,21 +31,27 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 
 	w.Progress.Set("cleanup_scanner_artifacts", CleanupScannerArtifactsArgs{}.Kind(), "scanner artifacts")
 
-	entityArtifacts, err := q.CleanupAppliedScannerEntityArtifactsOlderThan(ctx, cutoff)
+	appliedScopeArtifacts, err := q.CleanupCompletedScanRunArtifactsForAppliedScopes(ctx)
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
+	entityArtifacts, err := q.CleanupAppliedScannerEntityArtifactsOlderThan(ctx, cutoff)
+	if err != nil {
+		finishKickoff(ctx, q, taskID, startedAt, int(appliedScopeArtifacts), 0, err)
+		return err
+	}
 	scanRunArtifacts, err := q.CleanupOldScanRunArtifacts(ctx, cutoff)
 	if err != nil {
-		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts), 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, int(appliedScopeArtifacts+entityArtifacts), 0, err)
 		return err
 	}
 
-	total := int(entityArtifacts + scanRunArtifacts)
+	total := int(appliedScopeArtifacts + entityArtifacts + scanRunArtifacts)
 	finishKickoff(ctx, q, taskID, startedAt, total, 0, nil)
 	log.Info().
 		Int("retention_days", retentionDays).
+		Int64("applied_scope_scan_run_artifacts", appliedScopeArtifacts).
 		Int64("scanner_entity_artifacts", entityArtifacts).
 		Int64("scan_run_artifacts", scanRunArtifacts).
 		Msg("cleanup_scanner_artifacts: complete")

@@ -708,21 +708,16 @@ func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scann
 		}
 	}
 	q := sqlc.New(db)
-	entityArtifacts, err := q.CompactAppliedScannerEntityArtifacts(ctx, scannerEntityID)
+	deleted, err := q.CompactAppliedScannerArtifactsForEntity(ctx, scannerEntityID)
 	if err != nil {
-		log.Warn().Err(err).Int64("scanner_entity_id", scannerEntityID).Msg("scanner entity artifact compaction failed")
+		log.Warn().Err(err).Int64("scanner_entity_id", scannerEntityID).Msg("scanner artifact compaction failed")
 		return
 	}
-	scanRunArtifacts, err := q.CleanupFullyAppliedScanRunArtifactsForEntity(ctx, scannerEntityID)
-	if err != nil {
-		log.Warn().Err(err).Int64("scanner_entity_id", scannerEntityID).Msg("scan run artifact compaction failed")
-		return
-	}
-	if entityArtifacts > 0 || scanRunArtifacts > 0 {
+	if deleted.EntityArtifactsDeleted > 0 || deleted.ScanRunArtifactsDeleted > 0 {
 		log.Debug().
 			Int64("scanner_entity_id", scannerEntityID).
-			Int64("scanner_entity_artifacts", entityArtifacts).
-			Int64("scan_run_artifacts", scanRunArtifacts).
+			Int64("scanner_entity_artifacts", deleted.EntityArtifactsDeleted).
+			Int64("scan_run_artifacts", deleted.ScanRunArtifactsDeleted).
 			Msg("scanner artifacts compacted")
 	}
 }

@@ -32473,7 +32473,8 @@
                 "scan_music_fingerprint",
                 "scan_media_segments",
                 "detect_media_segments",
-                "analyze_music_facets"
+                "analyze_music_facets",
+                "cleanup_scanner_artifacts"
               ],
               "type": "string"
             }
@@ -32549,7 +32550,8 @@
                 "scan_music_fingerprint",
                 "scan_media_segments",
                 "detect_media_segments",
-                "analyze_music_facets"
+                "analyze_music_facets",
+                "cleanup_scanner_artifacts"
               ],
               "type": "string"
             }
@@ -32608,7 +32610,8 @@
                 "scan_music_fingerprint",
                 "scan_media_segments",
                 "detect_media_segments",
-                "analyze_music_facets"
+                "analyze_music_facets",
+                "cleanup_scanner_artifacts"
               ],
               "type": "string"
             }
@@ -32708,7 +32711,8 @@
                 "scan_music_fingerprint",
                 "scan_media_segments",
                 "detect_media_segments",
-                "analyze_music_facets"
+                "analyze_music_facets",
+                "cleanup_scanner_artifacts"
               ],
               "type": "string"
             }

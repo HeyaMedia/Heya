@@ -288,11 +288,14 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
 
+	scopePaths := []string{"/media/movies/Dune (2021)"}
+	scopeKey := scannerScopeKey(scopePaths)
+
 	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
 	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
 		ScanRunID:     searchRun.ID,
 		Kind:          scanArtifactKindSearch,
-		ScopeKey:      "",
+		ScopeKey:      scopeKey,
 		SchemaVersion: scanArtifactSchemaV1,
 		Data:          []byte(`{"stage":"search"}`),
 	})
@@ -325,7 +328,7 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 			Confidence: 1.0,
 		}},
 	}
-	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: []string{"/media/movies/Dune (2021)"}}, result, searchRun.ID)
+	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: scopePaths}, result, searchRun.ID)
 	require.NoError(t, err)
 	require.Len(t, refs, 1)
 	entityID := refs[0].Entity.ID
@@ -335,7 +338,7 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
 		ScanRunID:     fetchRun.ID,
 		Kind:          scanArtifactKindFetch,
-		ScopeKey:      "",
+		ScopeKey:      scopeKey,
 		SchemaVersion: scanArtifactSchemaV1,
 		Data:          []byte(`{"stage":"fetch"}`),
 	})
@@ -351,6 +354,22 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	require.NoError(t, err)
 
 	applyRun := createFinishedTestScanRun(t, ctx, q, lib, "apply")
+	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
+		ScanRunID:     applyRun.ID,
+		Kind:          scanArtifactKindSearch,
+		ScopeKey:      scopeKey,
+		SchemaVersion: scanArtifactSchemaV1,
+		Data:          []byte(`{"stage":"apply-search"}`),
+	})
+	require.NoError(t, err)
+	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
+		ScanRunID:     applyRun.ID,
+		Kind:          scanArtifactKindFetch,
+		ScopeKey:      scopeKey,
+		SchemaVersion: scanArtifactSchemaV1,
+		Data:          []byte(`{"stage":"apply"}`),
+	})
+	require.NoError(t, err)
 	result.MovieApply = []MovieApplyResult{{
 		Key:         "title_year:dune|2021",
 		Action:      "create",
@@ -369,12 +388,10 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	require.True(t, entity.MetadataArtifactID.Valid)
 	require.True(t, entity.ApplyArtifactID.Valid)
 
-	deletedEntityArtifacts, err := q.CompactAppliedScannerEntityArtifacts(ctx, entityID)
+	deleted, err := q.CompactAppliedScannerArtifactsForEntity(ctx, entityID)
 	require.NoError(t, err)
-	require.EqualValues(t, 3, deletedEntityArtifacts)
-	deletedScanRunArtifacts, err := q.CleanupFullyAppliedScanRunArtifactsForEntity(ctx, entityID)
-	require.NoError(t, err)
-	require.EqualValues(t, 2, deletedScanRunArtifacts)
+	require.EqualValues(t, 3, deleted.EntityArtifactsDeleted)
+	require.EqualValues(t, 4, deleted.ScanRunArtifactsDeleted)
 
 	entity, err = q.GetScannerEntity(ctx, entityID)
 	require.NoError(t, err)
@@ -390,9 +407,96 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	require.Error(t, err)
 	_, err = q.GetScannerEntityArtifact(ctx, applyArtifact.ID)
 	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: ""})
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
 	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: fetchRun.ID, Kind: scanArtifactKindFetch, ScopeKey: ""})
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: fetchRun.ID, Kind: scanArtifactKindFetch, ScopeKey: scopeKey})
+	require.Error(t, err)
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: applyRun.ID, Kind: scanArtifactKindFetch, ScopeKey: scopeKey})
+	require.Error(t, err)
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: applyRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
+	require.Error(t, err)
+}
+
+func TestCleanupCompletedScanRunArtifactsForAppliedScopesKeepsReviewScopes(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-artifact-applied-scope-cleanup-test",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	scopePaths := []string{"/media/movies/Shared Scope"}
+	scopeKey := scannerScopeKey(scopePaths)
+	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
+	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
+		ScanRunID:     searchRun.ID,
+		Kind:          scanArtifactKindSearch,
+		ScopeKey:      scopeKey,
+		SchemaVersion: scanArtifactSchemaV1,
+		Data:          []byte(`{"stage":"search"}`),
+	})
+	require.NoError(t, err)
+
+	_, err = q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID:        lib.ID,
+		MediaType:        lib.MediaType,
+		ScopeKey:         scopeKey,
+		ScopePaths:       scopePaths,
+		IdentityKey:      "title_year:applied|2024",
+		Title:            "Applied",
+		Year:             "2024",
+		ProviderID:       "heya:movie:tmdb:1",
+		Status:           "applied",
+		SearchScanRunID:  pgInt8(searchRun.ID),
+		SearchArtifactID: pgtypeZeroInt8(),
+		ErrorMessage:     "",
+		Data:             []byte("{}"),
+	})
+	require.NoError(t, err)
+	review, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID:        lib.ID,
+		MediaType:        lib.MediaType,
+		ScopeKey:         scopeKey,
+		ScopePaths:       scopePaths,
+		IdentityKey:      "title_year:review|2024",
+		Title:            "Review",
+		Year:             "2024",
+		ProviderID:       "",
+		Status:           "needs_review",
+		SearchScanRunID:  pgInt8(searchRun.ID),
+		SearchArtifactID: pgtypeZeroInt8(),
+		ErrorMessage:     "",
+		Data:             []byte("{}"),
+	})
+	require.NoError(t, err)
+
+	deleted, err := q.CleanupCompletedScanRunArtifactsForAppliedScopes(ctx)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, deleted, int64(0))
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
+	require.NoError(t, err)
+
+	_, err = q.MarkScannerEntityApplied(ctx, sqlc.MarkScannerEntityAppliedParams{
+		ID:              review.ID,
+		Status:          "applied",
+		ApplyArtifactID: pgtypeZeroInt8(),
+		ErrorMessage:    "",
+	})
+	require.NoError(t, err)
+
+	deleted, err = q.CleanupCompletedScanRunArtifactsForAppliedScopes(ctx)
+	require.NoError(t, err)
+	require.Positive(t, deleted)
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
 	require.Error(t, err)
 }
 
