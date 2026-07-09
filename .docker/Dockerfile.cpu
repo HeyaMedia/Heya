@@ -38,6 +38,9 @@ RUN DPKG_ARCH="$(dpkg --print-architecture)" && \
         ca-certificates \
         curl \
         gnupg \
+        # libgomp1: OpenMP runtime linked by the llama.cpp release builds
+        # (AI local mode's llama-server) on every arch/backend variant.
+        libgomp1 \
         tzdata && \
     \
     # Jellyfin ffmpeg apt repo (trixie). Key is published at the team URL
