@@ -84,12 +84,19 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 	})
 }
 
-// CompleteJSON asks for a reply constrained to the given JSON schema and
-// unmarshals it into out. Servers with native json_schema support (llama.cpp,
-// OpenAI, most aggregators) enforce it server-side; for the rest we fall back
-// to embedding the schema in the prompt and validating client-side, with one
-// corrective retry on a malformed reply.
+// CompleteJSON asks for a reply constrained to the given JSON schema,
+// validates it against that schema, and unmarshals it into out. Servers with
+// native json_schema support (llama.cpp, OpenAI, most aggregators) enforce it
+// server-side, but plenty of providers accept response_format and then
+// ignore it — so EVERY reply is schema-validated client-side, whichever path
+// produced it. A violating reply gets one corrective round-trip with the
+// concrete violations; a second violation is an error.
 func (c *Client) CompleteJSON(ctx context.Context, req Request, name string, schema json.RawMessage, out any) error {
+	validator, err := newSchemaValidator(schema)
+	if err != nil {
+		return err
+	}
+
 	wire := wireChatRequest{
 		Model:       req.Model,
 		Messages:    req.Messages,
@@ -115,22 +122,24 @@ func (c *Client) CompleteJSON(ctx context.Context, req Request, name string, sch
 		return err
 	}
 
-	if jsonErr := json.Unmarshal(extractJSON(resp.Content), out); jsonErr != nil {
-		// One corrective round-trip: show the model its own error.
+	raw := extractJSON(resp.Content)
+	if verr := validator.validate(raw); verr != nil {
+		// One corrective round-trip: show the model the concrete violations.
 		wire.Messages = append(wire.Messages,
 			Message{Role: "assistant", Content: resp.Content},
 			Message{Role: "user", Content: fmt.Sprintf(
-				"That was not valid JSON for the schema (%v). Reply again with ONLY the corrected JSON object.", jsonErr)},
+				"That reply violates the required JSON Schema: %v. Reply again with ONLY the corrected JSON object.", verr)},
 		)
 		resp, err = c.complete(ctx, wire)
 		if err != nil {
 			return err
 		}
-		if jsonErr := json.Unmarshal(extractJSON(resp.Content), out); jsonErr != nil {
-			return fmt.Errorf("llm: reply did not match schema after retry: %w", jsonErr)
+		raw = extractJSON(resp.Content)
+		if verr := validator.validate(raw); verr != nil {
+			return fmt.Errorf("llm: reply violates schema after retry: %w", verr)
 		}
 	}
-	return nil
+	return json.Unmarshal(raw, out)
 }
 
 // Models lists model ids from the provider's /models endpoint.
