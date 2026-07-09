@@ -15,14 +15,26 @@
     </header>
 
     <div class="rb-search">
-      <Icon name="sparkle" :size="15" class="rb-search-icon" />
-      <input
-        v-model="nlQuery"
-        type="text"
-        class="rb-search-input"
-        placeholder="Describe what you're in the mood for…  e.g. “a dark psychological thriller”"
+      <div class="rb-search-box">
+        <Icon name="sparkle" :size="15" class="rb-search-icon" />
+        <input
+          v-model="nlQuery"
+          type="text"
+          class="rb-search-input"
+          :placeholder="searchPlaceholder"
+          @keydown.enter="askAI"
+        >
+        <button v-if="nlQuery" class="rb-search-clear" @click="clearSearch">Clear</button>
+      </div>
+      <button
+        v-if="aiReady"
+        class="rb-ai-btn"
+        :disabled="nlQuery.trim().length < 2 || aiPending"
+        @click="askAI"
       >
-      <button v-if="nlQuery" class="rb-search-clear" @click="nlQuery = ''">Clear</button>
+        <Icon name="sparkle" :size="12" />
+        {{ aiPending ? 'Curating…' : 'Ask AI' }}
+      </button>
     </div>
 
     <div v-if="!searching" class="rb-controls">
@@ -61,13 +73,23 @@
       <button v-if="genre || minRating" class="btn-ghost-sm" @click="reset">Clear</button>
     </div>
 
-    <div v-if="searching && !mlReady" class="rb-note">
+    <div v-if="aiPending" class="rb-note rb-ai-note">
+      Curating picks for “{{ aiQ }}” — the AI is searching the library and choosing what fits…
+    </div>
+    <div v-else-if="aiActive && aiFailed" class="rb-note">
+      AI curation failed ({{ aiErrorMsg }}) — showing plain semantic matches instead.
+    </div>
+    <div v-else-if="searching && !mlReady" class="rb-note">
       Natural-language search needs the embedding engine — enable it (and let the
       model finish downloading) in
       <NuxtLink to="/settings/recommendations" class="rb-link">Settings → Recommendations</NuxtLink>.
     </div>
     <div v-else-if="!searching && !loading && !hasSignal" class="rb-note">
       Heart or watch a few titles and this personalizes to your taste — for now, showing the highest-rated picks.
+    </div>
+
+    <div v-if="aiShowing" class="rb-ai-meta" :title="aiProbesTitle">
+      AI-curated · {{ aiMeta }}
     </div>
 
     <div v-if="displayLoading" class="grid-posters">
@@ -91,7 +113,9 @@
     </div>
 
     <div v-else-if="!(searching && !mlReady)" class="rb-empty">
-      {{ searching ? 'No matches for that description.' : 'Nothing matches this steer — try another genre or lower the rating floor.' }}
+      {{ aiShowing ? 'The AI found nothing in the library that fits — try rewording the ask.'
+        : searching ? 'No matches for that description.'
+          : 'Nothing matches this steer — try another genre or lower the rating floor.' }}
     </div>
   </div>
 </template>
@@ -168,8 +192,70 @@ const semanticQuery = useQuery({
 })
 const searching = computed(() => activeQ.value.length > 1)
 const mlReady = computed(() => semanticQuery.data.value?.ml_ready ?? true)
-const displayItems = computed(() => (searching.value ? (semanticQuery.data.value?.items ?? []) : items.value))
-const displayLoading = computed(() => (searching.value ? semanticQuery.isPending.value : loading.value))
+
+// AI curation — explicit (Enter / button), never keystroke-triggered: it costs
+// two LLM round-trips. Availability comes from the shape-minimal /api/ai/ready.
+const aiReadyQuery = useQuery({
+  queryKey: ['ai-ready'],
+  queryFn: async () => (await $heya('/api/ai/ready')) as { ready: boolean; mode: string },
+  staleTime: 1000 * 60 * 10,
+})
+const aiReady = computed(() => aiReadyQuery.data.value?.ready === true)
+
+type AIRecResult = { items: RecItem[]; probes?: string[]; model?: string; mode: string; duration_ms: number }
+const aiQ = ref('')
+const aiQuery = useQuery({
+  queryKey: ['ai-recs', props.section, aiQ],
+  queryFn: async () => (await $heya('/api/ai/recommend', {
+    method: 'POST',
+    body: { query: aiQ.value, type: props.section } as any,
+  })) as AIRecResult,
+  enabled: computed(() => aiQ.value.length > 1),
+  staleTime: 1000 * 60 * 10,
+  retry: false, // expensive call — never auto-retry
+})
+
+function askAI() {
+  const q = nlQuery.value.trim()
+  if (!aiReady.value || q.length < 2) return
+  aiQ.value = q
+}
+function clearSearch() {
+  nlQuery.value = ''
+  aiQ.value = ''
+}
+
+// AI results own the grid while the input still says what was asked; editing
+// the text falls back to live semantic matches until the next Enter.
+const aiActive = computed(() => aiQ.value.length > 1 && nlQuery.value.trim() === aiQ.value)
+const aiPending = computed(() => aiActive.value && aiQuery.isPending.value)
+const aiFailed = computed(() => aiQuery.isError.value)
+const aiShowing = computed(() => aiActive.value && !!aiQuery.data.value && !aiQuery.isError.value)
+const aiErrorMsg = computed(() => {
+  const e = aiQuery.error.value as any
+  return e?.data?.detail || e?.message || 'request failed'
+})
+const aiMeta = computed(() => {
+  const d = aiQuery.data.value
+  return d ? `${d.model || d.mode} · ${(d.duration_ms / 1000).toFixed(1)}s` : ''
+})
+const aiProbesTitle = computed(() => {
+  const probes = aiQuery.data.value?.probes
+  return probes?.length ? `Searched: ${probes.join(' · ')}` : ''
+})
+const searchPlaceholder = computed(() => aiReady.value
+  ? 'Describe what you\'re in the mood for… press Enter and the AI curates'
+  : 'Describe what you\'re in the mood for…  e.g. “a dark psychological thriller”')
+
+const displayItems = computed(() => {
+  if (aiShowing.value) return aiQuery.data.value?.items ?? []
+  if (searching.value) return semanticQuery.data.value?.items ?? []
+  return items.value
+})
+const displayLoading = computed(() => {
+  if (aiPending.value) return true
+  return searching.value ? semanticQuery.isPending.value : loading.value
+})
 
 const userListsQuery = useQuery({
   queryKey: ['me', 'lists'],
@@ -298,7 +384,8 @@ function reset() {
 }
 .rb-empty { padding: 60px 0; text-align: center; color: var(--fg-3); font-size: 14px; }
 
-.rb-search { position: relative; display: flex; align-items: center; margin-bottom: 14px; }
+.rb-search { display: flex; align-items: stretch; gap: 10px; margin-bottom: 14px; }
+.rb-search-box { position: relative; flex: 1; display: flex; align-items: center; }
 .rb-search-icon { position: absolute; left: 14px; color: var(--gold); pointer-events: none; }
 .rb-search-input {
   width: 100%; padding: 12px 16px 12px 40px;
@@ -309,6 +396,22 @@ function reset() {
 .rb-search-input::placeholder { color: var(--fg-4); }
 .rb-search-clear { position: absolute; right: 10px; background: transparent; border: 0; color: var(--fg-3); font-size: 12px; cursor: pointer; padding: 4px 8px; }
 .rb-search-clear:hover { color: var(--fg-0); }
+
+.rb-ai-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 16px;
+  background: var(--gold-soft); color: var(--gold-bright);
+  border: 1px solid transparent; border-radius: var(--r-md);
+  font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: filter 0.12s ease, opacity 0.12s ease;
+}
+.rb-ai-btn:hover:not(:disabled) { filter: brightness(1.15); }
+.rb-ai-btn:disabled { opacity: 0.45; cursor: default; }
+
+.rb-ai-note { color: var(--gold-bright); border-color: var(--gold-soft); }
+.rb-ai-meta {
+  font-size: 11px; font-family: var(--font-mono); color: var(--fg-3);
+  margin-bottom: 12px; cursor: default;
+}
 .rb-link { color: var(--gold); text-decoration: none; }
 .rb-link:hover { text-decoration: underline; }
 

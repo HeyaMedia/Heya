@@ -1,11 +1,17 @@
 # AI Subsystem + Smart Collections — Plan
 
-Status: **foundation shipped** (2026-07-09). Phases 0 and 2–4 are live:
-`internal/llm` + local llama-server runtime + `/api/ai/*` + `heya ai` CLI +
-Settings → AI page, verified end-to-end on macOS/Metal (hello-world + context
-grounding through both CLI and the web test console). Remaining: collections
-substrate (phase 1), AI consumers (phases 5–6), external-provider live test
-(needs a real key), CUDA-image llama-server bake-in.
+Status: **foundation shipped** (2026-07-09), **first consumer shipped**
+(2026-07-10). Phases 0 and 2–4 are live: `internal/llm` + local llama-server
+runtime + `/api/ai/*` + `heya ai` CLI + Settings → AI page, verified
+end-to-end on macOS/Metal and prod Intel/Vulkan. Phase 6 has its first slice:
+AI-curated recommendations (`POST /api/ai/recommend`, `heya ai recommend`,
+"Ask AI" on `/movies|tv/recommendations`) — LLM probes → embedding-KNN pool →
+LLM fit-graded re-rank, code owns ordering ("AI proposes, code disposes").
+Remaining: collections substrate (phase 1), collections curator (phase 5),
+NL playlists, external-provider live test (needs a real key), CUDA-image
+llama-server bake-in. Known ceiling: probe/curate quality is bounded by the
+spoiler-safe overview text we embed — richer doc text (heya.media reviews) is
+the planned lift.
 
 The original FUTURE.md idea was "smart playlists / collections". Working
 through it, most of the value needs **no AI at all** (filter rules + metadata
@@ -172,7 +178,7 @@ gives named, explained, seasonal picks.
 | 3 | Local runtime manager: downloads, subprocess lifecycle, per-image backends | **done** |
 | 4 | Settings UI for AI | **done** |
 | 5 | Collections curator job | 1 + 2 (works external-only before 3) |
-| 6 | NL playlist + tonight recommendations | 2 (+1 for saving) |
+| 6 | NL playlist + tonight recommendations | 2 (+1 for saving) — **first slice done**: AI-curated recommendations (probe → KNN pool → fit-graded re-rank) |
 
 Phases 1 and 2 are independent — can interleave. Phase 5 is the proof that
 the whole stack hangs together.

@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/llm"
 	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -176,6 +178,51 @@ var aiStopCmd = &cobra.Command{
 	},
 }
 
+var aiRecommendType string
+var aiRecommendLimit int
+
+var aiRecommendCmd = &cobra.Command{
+	Use:   "recommend <username> <ask...>",
+	Short: "AI-curated recommendations from the library (needs AI + the embedding engine)",
+	Long: "The model turns the ask + the user's recent watch history into semantic-search\n" +
+		"probes, pools library candidates via the embedding KNN, then re-ranks them with\n" +
+		"a reason per pick. It only ever picks titles that exist in the library.",
+	Args: cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withApp(func(ctx context.Context, app *service.App) error {
+			user, err := sqlc.New(app.DBPool()).GetUserByUsername(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("user not found: %s", args[0])
+			}
+			res, err := app.AIRecommend(ctx, user.ID, service.AIRecommendRequest{
+				Query: strings.Join(args[1:], " "),
+				Type:  aiRecommendType,
+				Limit: aiRecommendLimit,
+			})
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(res)
+			}
+			if len(res.Probes) > 1 {
+				fmt.Printf("searched: %s\n\n", strings.Join(res.Probes, " · "))
+			}
+			if len(res.Items) == 0 {
+				ui.Warn("Nothing in the library fits that ask.")
+			} else {
+				t := ui.NewTable("SIM", "TYPE", "TITLE", "WHY")
+				for _, it := range res.Items {
+					t.AddRow(fmt.Sprintf("%.3f", it.Score), it.MediaType, it.Title, it.Reason)
+				}
+				fmt.Println(t.Render())
+			}
+			fmt.Printf("\n[%s · %s · %.1fs]\n", res.Mode, res.Model, float64(res.DurationMs)/1000)
+			return nil
+		})
+	},
+}
+
 var aiProvidersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List provider presets",
@@ -194,6 +241,8 @@ var aiProvidersCmd = &cobra.Command{
 func init() {
 	aiChatCmd.Flags().StringVar(&aiChatSystem, "system", "", "optional system prompt / context")
 	aiChatCmd.Flags().IntVar(&aiChatMaxTokens, "max-tokens", 0, "cap completion length")
-	aiCmd.AddCommand(aiStatusCmd, aiChatCmd, aiTestCmd, aiModelsCmd, aiDownloadCmd, aiStopCmd, aiProvidersCmd)
+	aiRecommendCmd.Flags().StringVar(&aiRecommendType, "type", "", "restrict to movie, tv, or anime")
+	aiRecommendCmd.Flags().IntVar(&aiRecommendLimit, "limit", 0, "max picks (default 12, cap 20)")
+	aiCmd.AddCommand(aiStatusCmd, aiChatCmd, aiTestCmd, aiModelsCmd, aiDownloadCmd, aiStopCmd, aiProvidersCmd, aiRecommendCmd)
 	rootCmd.AddCommand(aiCmd)
 }

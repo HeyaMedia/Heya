@@ -72,6 +72,38 @@ func registerAIRoutes(api huma.API, app *service.App) {
 			app.AIStopLocal()
 			return statusOK("stopped"), nil
 		})
+
+	// --- User-facing AI features (secured, not admin) ---
+
+	// Capability probe for the FE: is there any point offering AI affordances?
+	// Deliberately shape-minimal — non-admins get no provider/config detail.
+	huma.Register(api, secured(op(http.MethodGet, "/api/ai/ready", "get-ai-ready", "Whether the AI subsystem can serve requests", "AI")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[aiReadyBody], error) {
+			st := app.AIStatus(ctx)
+			return noStoreJSON(aiReadyBody{Ready: st.Ready, Mode: st.Mode}), nil
+		})
+
+	// AI-curated recommendations: LLM probes → embedding KNN pool → LLM
+	// re-rank with reasons. Slow by nature (two model round-trips), so it's a
+	// POST the FE triggers explicitly, not a keystroke-debounced search.
+	huma.Register(api, secured(op(http.MethodPost, "/api/ai/recommend", "post-ai-recommend", "AI-curated 'find me something to watch'", "Discover")),
+		func(ctx context.Context, in *struct {
+			Body service.AIRecommendRequest
+		}) (*JSONOutput[service.AIRecommendResult], error) {
+			res, err := app.AIRecommend(ctx, userFrom(ctx).ID, in.Body)
+			if err != nil {
+				if errors.Is(err, service.ErrMLDisabled) {
+					return nil, huma.Error409Conflict("AI recommendations need the embedding engine — enable it in Settings → Recommendations")
+				}
+				return nil, aiError(err)
+			}
+			return noStoreJSON(res), nil
+		})
+}
+
+type aiReadyBody struct {
+	Ready bool   `json:"ready"`
+	Mode  string `json:"mode"`
 }
 
 type aiCatalogBody struct {
