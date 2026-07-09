@@ -40,11 +40,12 @@ SELECT
     -- break the ` + "`" + `!= 0` + "`" + ` / ` + "`" + `!= ""` + "`" + ` checks at the call site). Callers
     -- treat ` + "`" + `matched_media_item_id == 0` + "`" + ` as "no library match".
     COALESCE(matched.id, 0)::BIGINT AS matched_media_item_id,
+    COALESCE(matched.public_id::text, '')::TEXT AS matched_public_id,
     COALESCE(matched.slug, '')::TEXT AS matched_slug,
     COALESCE(matched.media_type, '')::TEXT AS matched_media_type
 FROM person_external_credits ec
 LEFT JOIN LATERAL (
-    SELECT mi.id, mi.slug, mi.media_type::TEXT AS media_type
+    SELECT mi.id, mi.public_id, mi.slug, mi.media_type::TEXT AS media_type
     FROM jsonb_each_text(ec.external_ids) AS wanted(provider, external_id)
     JOIN media_item_external_ids ei
       ON ei.provider = wanted.provider
@@ -76,6 +77,7 @@ type ListPersonExternalCreditsRow struct {
 	ExternalIds        []byte `json:"external_ids"`
 	Source             string `json:"source"`
 	MatchedMediaItemID int64  `json:"matched_media_item_id"`
+	MatchedPublicID    string `json:"matched_public_id"`
 	MatchedSlug        string `json:"matched_slug"`
 	MatchedMediaType   string `json:"matched_media_type"`
 }
@@ -115,6 +117,7 @@ func (q *Queries) ListPersonExternalCredits(ctx context.Context, personID int64)
 			&i.ExternalIds,
 			&i.Source,
 			&i.MatchedMediaItemID,
+			&i.MatchedPublicID,
 			&i.MatchedSlug,
 			&i.MatchedMediaType,
 		); err != nil {

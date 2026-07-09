@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	pgvector "github.com/pgvector/pgvector-go"
 )
@@ -1009,7 +1010,7 @@ func (q *Queries) SimilarAlbums(ctx context.Context, arg SimilarAlbumsParams) ([
 }
 
 const similarArtists = `-- name: SimilarArtists :many
-SELECT ar.id, ar.name, ar.media_item_id, mi.slug AS media_slug,
+SELECT ar.id, ar.name, ar.media_item_id, mi.public_id AS media_item_public_id, mi.slug AS media_slug,
        (ac.sonic_centroid <=> $1)::real AS distance
 FROM artist_centroids ac
 JOIN artists ar ON ar.id = ac.artist_id
@@ -1027,11 +1028,12 @@ type SimilarArtistsParams struct {
 }
 
 type SimilarArtistsRow struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	MediaItemID int64   `json:"media_item_id"`
-	MediaSlug   string  `json:"media_slug"`
-	Distance    float32 `json:"distance"`
+	ID                int64     `json:"id"`
+	Name              string    `json:"name"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	MediaSlug         string    `json:"media_slug"`
+	Distance          float32   `json:"distance"`
 }
 
 func (q *Queries) SimilarArtists(ctx context.Context, arg SimilarArtistsParams) ([]SimilarArtistsRow, error) {
@@ -1047,6 +1049,7 @@ func (q *Queries) SimilarArtists(ctx context.Context, arg SimilarArtistsParams) 
 			&i.ID,
 			&i.Name,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.MediaSlug,
 			&i.Distance,
 		); err != nil {

@@ -490,7 +490,7 @@ ORDER BY tf.text_embedding <=> $1
 LIMIT sqlc.arg(track_limit);
 
 -- name: SimilarArtists :many
-SELECT ar.id, ar.name, ar.media_item_id, mi.slug AS media_slug,
+SELECT ar.id, ar.name, ar.media_item_id, mi.public_id AS media_item_public_id, mi.slug AS media_slug,
        (ac.sonic_centroid <=> $1)::real AS distance
 FROM artist_centroids ac
 JOIN artists ar ON ar.id = ac.artist_id

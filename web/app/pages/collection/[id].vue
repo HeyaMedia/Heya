@@ -132,6 +132,7 @@ interface CollectionPart {
   poster_path?: string
   vote_average?: number
   local_media_item_id?: number | null
+  local_public_id?: string | null
   local_slug?: string | null
 }
 
@@ -169,6 +170,7 @@ const films = computed<CollectionPart[]>(() => {
     title: m.title,
     year: m.year ? Number(m.year) : undefined,
     local_media_item_id: m.id,
+    local_public_id: m.public_id,
     local_slug: m.slug,
   }))
 })
@@ -194,7 +196,7 @@ function partUrl(p: CollectionPart) {
 }
 // Owned films use our local artwork; missing ones use heya.media's CDN poster.
 function partPoster(p: CollectionPart) {
-  if (p.local_media_item_id) return usePosterUrl(p.local_media_item_id) ?? ''
+  if (p.local_media_item_id || p.local_public_id) return usePosterUrl({ id: p.local_media_item_id, public_id: p.local_public_id }) ?? ''
   return p.poster_path || ''
 }
 
@@ -217,7 +219,7 @@ async function toggleWatched(p: CollectionPart) {
 // ── Backdrop carousel — cycle each owned film's backdrop ─────────────────
 const backdropUrls = computed(() => {
   const urls = ownedParts.value
-    .map(p => useBackdropUrl(p.local_media_item_id!))
+    .map(p => useBackdropUrl({ id: p.local_media_item_id, public_id: p.local_public_id }))
     .filter((u): u is string => !!u)
   if (urls.length) return urls
   return collection.value?.backdrop_path ? [collection.value.backdrop_path] : []

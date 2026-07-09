@@ -87,6 +87,7 @@ WHERE (
 -- pkey nested loops on <= LIMIT rows instead of hash joins over every artist.
 SELECT a.*,
        mi.id AS artist_media_item_id,
+       mi.public_id AS artist_media_item_public_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug
 FROM (
@@ -140,6 +141,7 @@ SELECT t.*,
        a.slug AS album_slug,
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
+       mi.public_id AS artist_media_item_public_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available

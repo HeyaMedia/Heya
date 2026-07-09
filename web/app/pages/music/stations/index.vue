@@ -27,7 +27,7 @@
         class="ms-card-link"
       >
         <MusicCard
-          :src="usePosterUrl(mix.seed_artist_media_item_id) ?? undefined"
+          :src="usePosterUrl({ id: mix.seed_artist_media_item_id, public_id: mix.seed_artist_media_item_public_id }) ?? undefined"
           :alt="mix.name"
           :title="mix.name"
           :subtitle="`${mix.tracks.length} tracks`"
@@ -129,6 +129,7 @@ interface Mix {
   seed_artist_name: string
   seed_artist_slug: string
   seed_artist_media_item_id: number
+  seed_artist_media_item_public_id?: string
   name: string
   tracks: MixTrack[]
 }

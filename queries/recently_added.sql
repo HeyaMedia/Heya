@@ -88,7 +88,7 @@ GROUP BY t.album_id;
 
 -- name: ListArtistsBriefByIDs :many
 -- Display info for the artists the rail surfaced.
-SELECT a.id, a.name, a.media_item_id, mi.slug,
+SELECT a.id, a.name, a.media_item_id, mi.public_id AS media_item_public_id, mi.slug,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
        (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
 FROM artists a

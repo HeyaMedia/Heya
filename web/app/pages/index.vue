@@ -132,6 +132,7 @@ type ArtistRowItem = MediaItem & { artist_id: number }
 // formats subtitles.
 interface RecentTVEntry {
   media_item_id: number
+  media_item_public_id?: string
   title: string
   slug: string
   kind: 'series' | 'season' | 'episodes' | 'episode'
@@ -146,6 +147,7 @@ interface RecentTVEntry {
 interface RecentArtistEntry {
   id: number
   media_item_id: number
+  media_item_public_id?: string
   name: string
   slug: string
   album_count: number
@@ -251,6 +253,7 @@ const recentTVShows = computed<MediaItem[]>(() => {
     seen.add(e.media_item_id)
     out.push({
       id: e.media_item_id,
+      public_id: e.media_item_public_id,
       title: e.title,
       slug: e.slug,
       media_type: 'tv',
@@ -381,6 +384,7 @@ function albumToRowItem(al: {
 function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
   return {
     id: e.media_item_id,
+    public_id: e.media_item_public_id,
     key: `${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
     title: e.title,
     year: '',
@@ -418,6 +422,7 @@ function artistToRowItem(ar: RecentArtistEntry): ArtistRowItem {
       : `New: ${ar.latest_album_title || 'release'}`
   return {
     id: ar.media_item_id,
+    public_id: ar.media_item_public_id,
     title: ar.name,
     year: '',
     sub,

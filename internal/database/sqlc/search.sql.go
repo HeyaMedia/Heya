@@ -8,12 +8,14 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const searchAlbums = `-- name: SearchAlbums :many
 SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector, a.catalog_no, a.explicit, a.original_title, a.secondary_types, a.styles, a.language, a.duration_seconds, a.isrcs, a.rating, a.popularity, a.listeners, a.playcount, a.external_ids, a.artist_credits,
        mi.id AS artist_media_item_id,
+       mi.public_id AS artist_media_item_public_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug
 FROM (
@@ -51,44 +53,45 @@ type SearchAlbumsParams struct {
 }
 
 type SearchAlbumsRow struct {
-	ID                 int64              `json:"id"`
-	ArtistID           int64              `json:"artist_id"`
-	Title              string             `json:"title"`
-	Slug               string             `json:"slug"`
-	Year               string             `json:"year"`
-	MusicbrainzID      string             `json:"musicbrainz_id"`
-	AlbumType          string             `json:"album_type"`
-	Genres             []string           `json:"genres"`
-	CoverPath          string             `json:"cover_path"`
-	ReleaseDate        pgtype.Date        `json:"release_date"`
-	Label              string             `json:"label"`
-	Country            string             `json:"country"`
-	Barcode            string             `json:"barcode"`
-	TotalTracks        int32              `json:"total_tracks"`
-	TotalDiscs         int32              `json:"total_discs"`
-	Tags               []string           `json:"tags"`
-	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
-	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
-	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
-	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
-	SearchVector       interface{}        `json:"search_vector"`
-	CatalogNo          string             `json:"catalog_no"`
-	Explicit           bool               `json:"explicit"`
-	OriginalTitle      string             `json:"original_title"`
-	SecondaryTypes     []string           `json:"secondary_types"`
-	Styles             []string           `json:"styles"`
-	Language           string             `json:"language"`
-	DurationSeconds    int32              `json:"duration_seconds"`
-	Isrcs              []string           `json:"isrcs"`
-	Rating             pgtype.Numeric     `json:"rating"`
-	Popularity         int32              `json:"popularity"`
-	Listeners          int64              `json:"listeners"`
-	Playcount          int64              `json:"playcount"`
-	ExternalIds        []byte             `json:"external_ids"`
-	ArtistCredits      []byte             `json:"artist_credits"`
-	ArtistMediaItemID  int64              `json:"artist_media_item_id"`
-	ArtistName         string             `json:"artist_name"`
-	ArtistSlug         string             `json:"artist_slug"`
+	ID                      int64              `json:"id"`
+	ArtistID                int64              `json:"artist_id"`
+	Title                   string             `json:"title"`
+	Slug                    string             `json:"slug"`
+	Year                    string             `json:"year"`
+	MusicbrainzID           string             `json:"musicbrainz_id"`
+	AlbumType               string             `json:"album_type"`
+	Genres                  []string           `json:"genres"`
+	CoverPath               string             `json:"cover_path"`
+	ReleaseDate             pgtype.Date        `json:"release_date"`
+	Label                   string             `json:"label"`
+	Country                 string             `json:"country"`
+	Barcode                 string             `json:"barcode"`
+	TotalTracks             int32              `json:"total_tracks"`
+	TotalDiscs              int32              `json:"total_discs"`
+	Tags                    []string           `json:"tags"`
+	IntegratedLufs          pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb              pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb         pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt      pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector            interface{}        `json:"search_vector"`
+	CatalogNo               string             `json:"catalog_no"`
+	Explicit                bool               `json:"explicit"`
+	OriginalTitle           string             `json:"original_title"`
+	SecondaryTypes          []string           `json:"secondary_types"`
+	Styles                  []string           `json:"styles"`
+	Language                string             `json:"language"`
+	DurationSeconds         int32              `json:"duration_seconds"`
+	Isrcs                   []string           `json:"isrcs"`
+	Rating                  pgtype.Numeric     `json:"rating"`
+	Popularity              int32              `json:"popularity"`
+	Listeners               int64              `json:"listeners"`
+	Playcount               int64              `json:"playcount"`
+	ExternalIds             []byte             `json:"external_ids"`
+	ArtistCredits           []byte             `json:"artist_credits"`
+	ArtistMediaItemID       int64              `json:"artist_media_item_id"`
+	ArtistMediaItemPublicID uuid.UUID          `json:"artist_media_item_public_id"`
+	ArtistName              string             `json:"artist_name"`
+	ArtistSlug              string             `json:"artist_slug"`
 }
 
 // All three match arms stay (the % arm is the only typo path — 'nevermnd'
@@ -141,6 +144,7 @@ func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]S
 			&i.ExternalIds,
 			&i.ArtistCredits,
 			&i.ArtistMediaItemID,
+			&i.ArtistMediaItemPublicID,
 			&i.ArtistName,
 			&i.ArtistSlug,
 		); err != nil {
@@ -561,6 +565,7 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.f
        a.slug AS album_slug,
        a.cover_path AS album_cover_path,
        mi.id AS artist_media_item_id,
+       mi.public_id AS artist_media_item_public_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
@@ -597,29 +602,30 @@ type SearchTracksParams struct {
 }
 
 type SearchTracksRow struct {
-	ID                int64       `json:"id"`
-	AlbumID           int64       `json:"album_id"`
-	DiscNumber        int32       `json:"disc_number"`
-	TrackNumber       int32       `json:"track_number"`
-	Title             string      `json:"title"`
-	Duration          int32       `json:"duration"`
-	FilePath          string      `json:"file_path"`
-	LyricsPath        string      `json:"lyrics_path"`
-	SearchVector      interface{} `json:"search_vector"`
-	LibraryFileID     pgtype.Int8 `json:"library_file_id"`
-	ExternalIds       []byte      `json:"external_ids"`
-	Isrc              string      `json:"isrc"`
-	RecordingMbid     string      `json:"recording_mbid"`
-	PreviewUrl        string      `json:"preview_url"`
-	Explicit          bool        `json:"explicit"`
-	ArtistCredits     []byte      `json:"artist_credits"`
-	AlbumTitle        string      `json:"album_title"`
-	AlbumSlug         string      `json:"album_slug"`
-	AlbumCoverPath    string      `json:"album_cover_path"`
-	ArtistMediaItemID int64       `json:"artist_media_item_id"`
-	ArtistName        string      `json:"artist_name"`
-	ArtistSlug        string      `json:"artist_slug"`
-	Available         bool        `json:"available"`
+	ID                      int64       `json:"id"`
+	AlbumID                 int64       `json:"album_id"`
+	DiscNumber              int32       `json:"disc_number"`
+	TrackNumber             int32       `json:"track_number"`
+	Title                   string      `json:"title"`
+	Duration                int32       `json:"duration"`
+	FilePath                string      `json:"file_path"`
+	LyricsPath              string      `json:"lyrics_path"`
+	SearchVector            interface{} `json:"search_vector"`
+	LibraryFileID           pgtype.Int8 `json:"library_file_id"`
+	ExternalIds             []byte      `json:"external_ids"`
+	Isrc                    string      `json:"isrc"`
+	RecordingMbid           string      `json:"recording_mbid"`
+	PreviewUrl              string      `json:"preview_url"`
+	Explicit                bool        `json:"explicit"`
+	ArtistCredits           []byte      `json:"artist_credits"`
+	AlbumTitle              string      `json:"album_title"`
+	AlbumSlug               string      `json:"album_slug"`
+	AlbumCoverPath          string      `json:"album_cover_path"`
+	ArtistMediaItemID       int64       `json:"artist_media_item_id"`
+	ArtistMediaItemPublicID uuid.UUID   `json:"artist_media_item_public_id"`
+	ArtistName              string      `json:"artist_name"`
+	ArtistSlug              string      `json:"artist_slug"`
+	Available               bool        `json:"available"`
 }
 
 // Two deliberate deviations from the generic search shape (measured on the
@@ -661,6 +667,7 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.AlbumSlug,
 			&i.AlbumCoverPath,
 			&i.ArtistMediaItemID,
+			&i.ArtistMediaItemPublicID,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.Available,

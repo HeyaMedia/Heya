@@ -48,6 +48,7 @@ type CollectionResult struct {
 type CollectionPartView struct {
 	metadata.CollectionPart
 	LocalMediaItemID *int64  `json:"local_media_item_id,omitempty"`
+	LocalPublicID    *string `json:"local_public_id,omitempty"`
 	LocalSlug        *string `json:"local_slug,omitempty"`
 }
 
@@ -189,7 +190,7 @@ func (a *App) resolveCollectionParts(ctx context.Context, q *sqlc.Queries, raw [
 				var ext map[string]string
 				if json.Unmarshal(r.ExternalIds, &ext) == nil {
 					if tmdb, convErr := strconv.ParseInt(ext["tmdb"], 10, 64); convErr == nil {
-						local[tmdb] = collectionLocalRef{ID: r.ID, Slug: r.Slug}
+						local[tmdb] = collectionLocalRef{ID: r.ID, PublicID: r.PublicID.String(), Slug: r.Slug}
 					}
 				}
 			}
@@ -200,8 +201,9 @@ func (a *App) resolveCollectionParts(ctx context.Context, q *sqlc.Queries, raw [
 
 // collectionLocalRef is a local movie a franchise part resolved to.
 type collectionLocalRef struct {
-	ID   int64
-	Slug string
+	ID       int64
+	PublicID string
+	Slug     string
 }
 
 // buildCollectionPartViews is the pure resolution step: given the franchise
@@ -215,8 +217,9 @@ func buildCollectionPartViews(parts []metadata.CollectionPart, localByTmdb map[i
 		v := CollectionPartView{CollectionPart: p}
 		if p.TmdbID > 0 {
 			if r, ok := localByTmdb[p.TmdbID]; ok {
-				id, slug := r.ID, r.Slug
+				id, publicID, slug := r.ID, r.PublicID, r.Slug
 				v.LocalMediaItemID = &id
+				v.LocalPublicID = &publicID
 				v.LocalSlug = &slug
 				owned++
 			}

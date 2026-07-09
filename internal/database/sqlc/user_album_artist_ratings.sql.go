@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -316,6 +317,7 @@ func (q *Queries) ListUserRatedAlbums(ctx context.Context, arg ListUserRatedAlbu
 const listUserRatedArtists = `-- name: ListUserRatedArtists :many
 SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags,
        mi.slug         AS slug,
+       mi.public_id    AS media_item_public_id,
        mi.poster_path  AS poster_path,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
        (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
@@ -367,6 +369,7 @@ type ListUserRatedArtistsRow struct {
 	Birthplace            string             `json:"birthplace"`
 	Tags                  []string           `json:"tags"`
 	Slug                  string             `json:"slug"`
+	MediaItemPublicID     uuid.UUID          `json:"media_item_public_id"`
 	PosterPath            string             `json:"poster_path"`
 	AlbumCount            int64              `json:"album_count"`
 	TrackCount            int64              `json:"track_count"`
@@ -420,6 +423,7 @@ func (q *Queries) ListUserRatedArtists(ctx context.Context, arg ListUserRatedArt
 			&i.Birthplace,
 			&i.Tags,
 			&i.Slug,
+			&i.MediaItemPublicID,
 			&i.PosterPath,
 			&i.AlbumCount,
 			&i.TrackCount,

@@ -70,7 +70,7 @@
       >
         <MusicCard
           variant="circle"
-          :src="usePosterUrl(ar.media_item_id) ?? undefined"
+          :src="usePosterUrl({ id: ar.media_item_id, public_id: ar.media_item_public_id }) ?? undefined"
           :alt="ar.name"
           :title="ar.name"
           no-play
@@ -181,6 +181,7 @@ interface LovedArtistRow {
   name: string
   slug: string
   media_item_id: number
+  media_item_public_id?: string
 }
 interface LovedAlbumRow {
   id: number

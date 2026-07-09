@@ -1753,6 +1753,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "local_public_id": {
+            "type": "string"
+          },
           "local_slug": {
             "type": "string"
           },
@@ -3800,6 +3803,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "members": {
             "contentEncoding": "base64",
             "type": "string"
@@ -3884,6 +3890,7 @@
           "birthplace",
           "tags",
           "slug",
+          "media_item_public_id",
           "poster_path",
           "album_count",
           "track_count",
@@ -5485,6 +5492,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "poster_path": {
             "type": "string"
           },
@@ -5497,6 +5507,7 @@
           "artist_id",
           "artist_name",
           "media_item_id",
+          "media_item_public_id",
           "artist_slug",
           "poster_path",
           "album_count",
@@ -5805,6 +5816,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "members": {
             "contentEncoding": "base64",
             "type": "string"
@@ -5889,6 +5903,7 @@
           "birthplace",
           "tags",
           "slug",
+          "media_item_public_id",
           "poster_path",
           "album_count",
           "track_count",
@@ -6592,6 +6607,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "poster_path": {
             "type": "string"
           },
@@ -6604,6 +6622,7 @@
           "artist_id",
           "artist_name",
           "media_item_id",
+          "media_item_public_id",
           "artist_slug",
           "poster_path",
           "last_played_at",
@@ -7782,6 +7801,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "members": {
             "contentEncoding": "base64",
             "type": "string"
@@ -7873,6 +7895,7 @@
           "birthplace",
           "tags",
           "slug",
+          "media_item_public_id",
           "poster_path",
           "album_count",
           "track_count",
@@ -9414,6 +9437,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "tracks": {
             "items": {
               "$ref": "#/components/schemas/TrackView"
@@ -9977,6 +10003,9 @@
           "seed_artist_media_item_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "seed_artist_media_item_public_id": {
+            "type": "string"
           },
           "seed_artist_name": {
             "type": "string"
@@ -11461,6 +11490,9 @@
           "media_item_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "media_item_public_id": {
+            "type": "string"
           },
           "name": {
             "type": "string"
@@ -12966,6 +12998,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "media_slug": {
             "type": "string"
           },
@@ -12977,6 +13012,7 @@
           "id",
           "name",
           "media_item_id",
+          "media_item_public_id",
           "media_slug",
           "distance"
         ],

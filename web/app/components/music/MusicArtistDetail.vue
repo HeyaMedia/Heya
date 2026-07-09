@@ -269,7 +269,7 @@
           class="similar-tile card-tile"
           :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
         >
-          <Poster :idx="row.id" :src="`/api/media/${row.media_item_id}/image/poster`" aspect="1/1" :width="200" style="border-radius: 50%" />
+          <Poster :idx="row.id" :src="usePosterUrl({ id: row.media_item_id, public_id: row.media_item_public_id })" aspect="1/1" :width="200" style="border-radius: 50%" />
           <div class="similar-tile-name">{{ row.name }}</div>
           <div class="similar-tile-source">sonic match</div>
         </NuxtLink>
@@ -433,6 +433,7 @@ interface SonicSimilarArtistRow {
   id: number
   name: string
   media_item_id: number
+  media_item_public_id?: string
   media_slug: string
   distance: number
 }

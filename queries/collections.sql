@@ -24,7 +24,7 @@ SELECT * FROM collections WHERE id = $1;
 -- Resolves a collection's franchise-part tmdb ids to local movies (owned vs
 -- missing on the collection page). external_ids->>'tmdb' is the string form the
 -- enrich mapper writes; parsing back to a part happens in the service.
-SELECT mi.id, mi.slug, mi.external_ids
+SELECT mi.id, mi.public_id, mi.slug, mi.external_ids
 FROM media_item_cards mi
 JOIN media_item_external_ids ei ON ei.media_item_id = mi.id
 WHERE mi.media_type = 'movie'

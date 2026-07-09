@@ -105,6 +105,7 @@
           <MetadataEditorImages
             v-if="activeTab === 'images'"
             :media-id="mediaId!"
+            :media-public-id="mediaPublicId"
             :detail="filteredDetailForImages"
             context="media"
             @refresh="fetchDetail"
@@ -138,6 +139,7 @@
           <MetadataEditorImages
             v-if="activeTab === 'images'"
             :media-id="mediaId!"
+            :media-public-id="mediaPublicId"
             :detail="filteredDetailForImages"
             context="season"
             @refresh="fetchDetail"
@@ -161,6 +163,7 @@
           <MetadataEditorImages
             v-if="activeTab === 'images'"
             :media-id="mediaId!"
+            :media-public-id="mediaPublicId"
             :detail="filteredDetailForImages"
             context="episode"
             @refresh="fetchDetail"
@@ -305,22 +308,27 @@ const headerYear = computed(() => {
   return detail.value?.media_item?.year || ''
 })
 
+const mediaPublicId = computed(() => detail.value?.media_item?.public_id || null)
+const mediaImageKey = computed(() => useMediaImageKey({ id: props.mediaId, public_id: mediaPublicId.value }))
+
 const headerPoster = computed(() => {
-  if (!props.mediaId) return null
+  const key = mediaImageKey.value
+  if (!key) return null
   if (mode.value === 'season' && activeSeason.value) {
-    return `/api/media/${props.mediaId}/image/poster?label=season-${activeSeason.value.season_number}`
+    return `/api/media/${key}/image/poster?label=season-${activeSeason.value.season_number}`
   }
-  return `/api/media/${props.mediaId}/image/poster`
+  return `/api/media/${key}/image/poster`
 })
 
 const headerBackdrop = computed(() => {
-  if (!props.mediaId) return null
+  const key = mediaImageKey.value
+  if (!key) return null
   if (mode.value === 'episode' && activeEpisode.value) {
     const ep = activeEpisode.value
     const label = `s${String(ep.season.season_number).padStart(2, '0')}e${String(ep.episode.episode_number).padStart(2, '0')}`
-    return `/api/media/${props.mediaId}/image/still?label=${label}`
+    return `/api/media/${key}/image/still?label=${label}`
   }
-  return `/api/media/${props.mediaId}/image/backdrop`
+  return `/api/media/${key}/image/backdrop`
 })
 
 const filteredDetailForImages = computed(() => {

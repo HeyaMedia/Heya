@@ -15,6 +15,7 @@ WITH artist_plays AS (
            a.id                 AS artist_id,
            a.name               AS artist_name,
            mi.id                AS media_item_id,
+           mi.public_id         AS media_item_public_id,
            mi.slug              AS artist_slug,
            mi.poster_path       AS poster_path,
            pe.played_at         AS last_played_at,
@@ -88,6 +89,7 @@ WITH artist_play_counts AS (
     SELECT a.id              AS artist_id,
            a.name            AS artist_name,
            mi.id             AS media_item_id,
+           mi.public_id      AS media_item_public_id,
            mi.slug           AS artist_slug,
            count(*)          AS play_count
     FROM play_events pe
@@ -97,9 +99,9 @@ WITH artist_play_counts AS (
     JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = sqlc.arg(user_id)
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.slug
+    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
 )
-SELECT artist_id, artist_name, media_item_id, artist_slug, play_count
+SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, play_count
 FROM artist_play_counts
 ORDER BY md5(artist_id::text || sqlc.arg(seed)::text) ASC
 LIMIT sqlc.arg(picks);
@@ -151,6 +153,7 @@ LIMIT $2;
 SELECT sub.artist_id,
        sub.artist_name,
        sub.media_item_id,
+       sub.media_item_public_id,
        sub.artist_slug,
        sub.poster_path,
        (SELECT count(*) FROM albums al2 WHERE al2.artist_id = sub.artist_id) AS album_count,
@@ -160,6 +163,7 @@ FROM (
     SELECT DISTINCT a.id           AS artist_id,
                     a.name         AS artist_name,
                     mi.id          AS media_item_id,
+                    mi.public_id   AS media_item_public_id,
                     mi.slug        AS artist_slug,
                     mi.poster_path AS poster_path
     FROM artists a
@@ -210,6 +214,7 @@ WITH artist_last_played AS (
     SELECT a.id                                  AS artist_id,
            a.name                                AS artist_name,
            mi.id                                 AS media_item_id,
+           mi.public_id                          AS media_item_public_id,
            mi.slug                               AS artist_slug,
            max(pe.played_at)::timestamptz        AS last_played_at,
            count(*)::bigint                      AS play_count
@@ -220,11 +225,11 @@ WITH artist_last_played AS (
     JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = sqlc.arg(user_id)
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.slug
+    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
     HAVING max(pe.played_at) < sqlc.arg(cutoff_at)
        AND count(*) >= sqlc.arg(min_plays)
 )
-SELECT artist_id, artist_name, media_item_id, artist_slug, last_played_at, play_count
+SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, last_played_at, play_count
 FROM artist_last_played
 ORDER BY md5(artist_id::text || sqlc.arg(seed)::text) ASC
 LIMIT sqlc.arg(picks);
@@ -279,6 +284,7 @@ WITH ranked AS (
     SELECT a.id                AS artist_id,
            a.name              AS artist_name,
            mi.id               AS media_item_id,
+           mi.public_id        AS media_item_public_id,
            mi.slug             AS artist_slug,
            count(*)            AS play_count,
            max(pe.played_at)   AS last_played_at
@@ -290,9 +296,9 @@ WITH ranked AS (
     WHERE pe.user_id = sqlc.arg(user_id)
       AND pe.played_at >= sqlc.arg(since_at)
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.slug
+    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
 )
-SELECT artist_id, artist_name, media_item_id, artist_slug, play_count, last_played_at
+SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, play_count, last_played_at
 FROM ranked
 ORDER BY play_count DESC, last_played_at DESC
 LIMIT sqlc.arg(picks);

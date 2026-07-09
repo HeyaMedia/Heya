@@ -17,6 +17,7 @@ export interface SearchAlbum {
   year: string
   cover_path: string
   artist_media_item_id: number
+  artist_media_item_public_id?: string
   artist_name: string
   artist_slug: string
 }
@@ -28,6 +29,7 @@ export interface SearchTrack {
   album_title: string
   album_cover_path: string
   artist_media_item_id: number
+  artist_media_item_public_id?: string
   artist_name: string
   artist_slug: string
   disc_number: number
@@ -149,11 +151,11 @@ export function personImageUrl(personId: number) {
   return `/api/person/${personId}/image`
 }
 
-export function albumCoverUrl(album: { id: number, artist_media_item_id?: number }) {
+export function albumCoverUrl(album: { id: number, artist_media_item_id?: number, artist_media_item_public_id?: string }) {
   // Albums don't have their own image endpoint yet — fall back to the artist
   // media item poster. Replace once /api/album/{id}/cover lands.
-  if (album.artist_media_item_id) {
-    return `/api/media/${album.artist_media_item_id}/image/poster`
+  if (album.artist_media_item_id || album.artist_media_item_public_id) {
+    return usePosterUrl({ id: album.artist_media_item_id, public_id: album.artist_media_item_public_id })
   }
   return null
 }

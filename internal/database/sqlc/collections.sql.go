@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -340,7 +341,7 @@ func (q *Queries) ListCollectionsWithLocalMedia(ctx context.Context) ([]ListColl
 }
 
 const listMoviesByTmdbIDs = `-- name: ListMoviesByTmdbIDs :many
-SELECT mi.id, mi.slug, mi.external_ids
+SELECT mi.id, mi.public_id, mi.slug, mi.external_ids
 FROM media_item_cards mi
 JOIN media_item_external_ids ei ON ei.media_item_id = mi.id
 WHERE mi.media_type = 'movie'
@@ -349,9 +350,10 @@ WHERE mi.media_type = 'movie'
 `
 
 type ListMoviesByTmdbIDsRow struct {
-	ID          int64  `json:"id"`
-	Slug        string `json:"slug"`
-	ExternalIds []byte `json:"external_ids"`
+	ID          int64     `json:"id"`
+	PublicID    uuid.UUID `json:"public_id"`
+	Slug        string    `json:"slug"`
+	ExternalIds []byte    `json:"external_ids"`
 }
 
 // Resolves a collection's franchise-part tmdb ids to local movies (owned vs
@@ -366,7 +368,12 @@ func (q *Queries) ListMoviesByTmdbIDs(ctx context.Context, tmdbIds []string) ([]
 	items := []ListMoviesByTmdbIDsRow{}
 	for rows.Next() {
 		var i ListMoviesByTmdbIDsRow
-		if err := rows.Scan(&i.ID, &i.Slug, &i.ExternalIds); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Slug,
+			&i.ExternalIds,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

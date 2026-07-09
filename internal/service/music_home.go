@@ -35,14 +35,15 @@ func shelfSeed(userID int64) string {
 // MusicMix is one row of the "Mixes for You" shelf — a seed artist + the
 // tracks the mix plays. The name is "Inspired by <seed>" so the FE can render
 // it without composing strings itself. SeedArtistMediaItemID lets the FE
-// fetch the artist's poster image via /api/media/{id}/image/poster.
+// fetch the artist's poster image via /api/media/{uuid}/image/poster.
 type MusicMix struct {
-	SeedArtistID          int64                               `json:"seed_artist_id"`
-	SeedArtistName        string                              `json:"seed_artist_name"`
-	SeedArtistSlug        string                              `json:"seed_artist_slug"`
-	SeedArtistMediaItemID int64                               `json:"seed_artist_media_item_id"`
-	Name                  string                              `json:"name"`
-	Tracks                []sqlc.ListArtistTopTracksForMixRow `json:"tracks"`
+	SeedArtistID                int64                               `json:"seed_artist_id"`
+	SeedArtistName              string                              `json:"seed_artist_name"`
+	SeedArtistSlug              string                              `json:"seed_artist_slug"`
+	SeedArtistMediaItemID       int64                               `json:"seed_artist_media_item_id"`
+	SeedArtistMediaItemPublicID string                              `json:"seed_artist_media_item_public_id,omitempty"`
+	Name                        string                              `json:"name"`
+	Tracks                      []sqlc.ListArtistTopTracksForMixRow `json:"tracks"`
 }
 
 // GenerateMixesForUser builds up to `maxMixes` mixes seeded on the user's
@@ -122,12 +123,13 @@ func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, 
 		tracks = diversifyMixByArtist(tracks, tracksPerMix)
 
 		mixes = append(mixes, MusicMix{
-			SeedArtistID:          seed.ArtistID,
-			SeedArtistName:        seed.ArtistName,
-			SeedArtistSlug:        seed.ArtistSlug,
-			SeedArtistMediaItemID: seed.MediaItemID,
-			Name:                  "Inspired by " + seed.ArtistName,
-			Tracks:                tracks,
+			SeedArtistID:                seed.ArtistID,
+			SeedArtistName:              seed.ArtistName,
+			SeedArtistSlug:              seed.ArtistSlug,
+			SeedArtistMediaItemID:       seed.MediaItemID,
+			SeedArtistMediaItemPublicID: seed.MediaItemPublicID.String(),
+			Name:                        "Inspired by " + seed.ArtistName,
+			Tracks:                      tracks,
 		})
 	}
 	return mixes, nil

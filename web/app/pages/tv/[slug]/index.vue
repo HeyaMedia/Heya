@@ -210,12 +210,12 @@
         </div>
         <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
           <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
-            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id ?? undefined, title: r.title ?? '', slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
               <MediaCard
                 :idx="r.id"
                 :src="recPosterUrl(r)"
                 aspect="2/3"
-                :title="r.title"
+                :title="r.title ?? 'Untitled'"
                 :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
               />
             </NuxtLink>
@@ -223,12 +223,12 @@
         </div>
         <div v-else class="rec-grid">
           <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
-            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id ?? undefined, title: r.title ?? '', slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
               <MediaCard
                 :idx="r.id"
                 :src="recPosterUrl(r)"
                 aspect="2/3"
-                :title="r.title"
+                :title="r.title ?? 'Untitled'"
                 :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
               />
             </NuxtLink>
@@ -310,7 +310,7 @@ function scrollRecs(dir: 'left' | 'right') {
 }
 
 function recPosterUrl(r: any): string {
-  if (r.local_media_item_id) return usePosterUrl(r.local_media_item_id) ?? ''
+  if (r.local_media_item_id || r.local_public_id) return usePosterUrl({ id: r.local_media_item_id, public_id: r.local_public_id }) ?? ''
   if (!r.poster_path) return ''
   if (r.poster_path.startsWith('http')) return r.poster_path
   return `/api/tmdb/image${r.poster_path}?size=w342`
@@ -601,6 +601,7 @@ function seasonContextItems(s: any): ContextMenuItem[] {
 function recToMediaItem(r: any): MediaItem {
   return {
     id: r.local_media_item_id,
+    public_id: r.local_public_id,
     title: r.title,
     slug: r.local_slug ?? undefined,
     year: r.year ?? '',

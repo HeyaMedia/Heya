@@ -254,7 +254,7 @@
             v-for="r in detail.recommendations"
             :key="r.id"
             :is="r.local_media_item_id ? 'NuxtLink' : 'div'"
-            :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type } as any) : undefined"
+            :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type } as any) : undefined"
             class="rec-tile"
             :class="{ dimmed: !r.local_media_item_id }"
           >
@@ -493,7 +493,7 @@ function ratingSourceLabel(source: string): string {
 }
 
 function recPosterUrl(r: any): string {
-  if (r.local_media_item_id) return usePosterUrl(r.local_media_item_id) ?? ''
+  if (r.local_media_item_id || r.local_public_id) return usePosterUrl({ id: r.local_media_item_id, public_id: r.local_public_id }) ?? ''
   if (r.poster_path) return `/api/tmdb/image${r.poster_path}?size=w342`
   return ''
 }

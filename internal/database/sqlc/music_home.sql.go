@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -388,6 +389,7 @@ const listArtistsByGenre = `-- name: ListArtistsByGenre :many
 SELECT sub.artist_id,
        sub.artist_name,
        sub.media_item_id,
+       sub.media_item_public_id,
        sub.artist_slug,
        sub.poster_path,
        (SELECT count(*) FROM albums al2 WHERE al2.artist_id = sub.artist_id) AS album_count,
@@ -397,6 +399,7 @@ FROM (
     SELECT DISTINCT a.id           AS artist_id,
                     a.name         AS artist_name,
                     mi.id          AS media_item_id,
+                    mi.public_id   AS media_item_public_id,
                     mi.slug        AS artist_slug,
                     mi.poster_path AS poster_path
     FROM artists a
@@ -418,13 +421,14 @@ type ListArtistsByGenreParams struct {
 }
 
 type ListArtistsByGenreRow struct {
-	ArtistID    int64  `json:"artist_id"`
-	ArtistName  string `json:"artist_name"`
-	MediaItemID int64  `json:"media_item_id"`
-	ArtistSlug  string `json:"artist_slug"`
-	PosterPath  string `json:"poster_path"`
-	AlbumCount  int64  `json:"album_count"`
-	TrackCount  int64  `json:"track_count"`
+	ArtistID          int64     `json:"artist_id"`
+	ArtistName        string    `json:"artist_name"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	ArtistSlug        string    `json:"artist_slug"`
+	PosterPath        string    `json:"poster_path"`
+	AlbumCount        int64     `json:"album_count"`
+	TrackCount        int64     `json:"track_count"`
 }
 
 // Artists whose albums include the given genre, library scoped to music.
@@ -449,6 +453,7 @@ func (q *Queries) ListArtistsByGenre(ctx context.Context, arg ListArtistsByGenre
 			&i.ArtistID,
 			&i.ArtistName,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.ArtistSlug,
 			&i.PosterPath,
 			&i.AlbumCount,
@@ -469,6 +474,7 @@ WITH artist_last_played AS (
     SELECT a.id                                  AS artist_id,
            a.name                                AS artist_name,
            mi.id                                 AS media_item_id,
+           mi.public_id                          AS media_item_public_id,
            mi.slug                               AS artist_slug,
            max(pe.played_at)::timestamptz        AS last_played_at,
            count(*)::bigint                      AS play_count
@@ -479,11 +485,11 @@ WITH artist_last_played AS (
     JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = $3
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.slug
+    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
     HAVING max(pe.played_at) < $4
        AND count(*) >= $5
 )
-SELECT artist_id, artist_name, media_item_id, artist_slug, last_played_at, play_count
+SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, last_played_at, play_count
 FROM artist_last_played
 ORDER BY md5(artist_id::text || $1::text) ASC
 LIMIT $2
@@ -498,12 +504,13 @@ type ListLapsedArtistsParams struct {
 }
 
 type ListLapsedArtistsRow struct {
-	ArtistID     int64              `json:"artist_id"`
-	ArtistName   string             `json:"artist_name"`
-	MediaItemID  int64              `json:"media_item_id"`
-	ArtistSlug   string             `json:"artist_slug"`
-	LastPlayedAt pgtype.Timestamptz `json:"last_played_at"`
-	PlayCount    int64              `json:"play_count"`
+	ArtistID          int64              `json:"artist_id"`
+	ArtistName        string             `json:"artist_name"`
+	MediaItemID       int64              `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID          `json:"media_item_public_id"`
+	ArtistSlug        string             `json:"artist_slug"`
+	LastPlayedAt      pgtype.Timestamptz `json:"last_played_at"`
+	PlayCount         int64              `json:"play_count"`
 }
 
 // Artists the user used to listen to but hasn't in `since_days`. The HAVING
@@ -529,6 +536,7 @@ func (q *Queries) ListLapsedArtists(ctx context.Context, arg ListLapsedArtistsPa
 			&i.ArtistID,
 			&i.ArtistName,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.ArtistSlug,
 			&i.LastPlayedAt,
 			&i.PlayCount,
@@ -748,6 +756,7 @@ WITH artist_plays AS (
            a.id                 AS artist_id,
            a.name               AS artist_name,
            mi.id                AS media_item_id,
+           mi.public_id         AS media_item_public_id,
            mi.slug              AS artist_slug,
            mi.poster_path       AS poster_path,
            pe.played_at         AS last_played_at,
@@ -762,7 +771,7 @@ WITH artist_plays AS (
     WHERE pe.user_id = $1
     ORDER BY a.id, pe.played_at DESC
 )
-SELECT artist_id, artist_name, media_item_id, artist_slug, poster_path, last_played_at, album_count, track_count, available FROM artist_plays
+SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, poster_path, last_played_at, album_count, track_count, available FROM artist_plays
 ORDER BY last_played_at DESC
 LIMIT $2
 `
@@ -773,15 +782,16 @@ type ListRecentlyPlayedArtistsParams struct {
 }
 
 type ListRecentlyPlayedArtistsRow struct {
-	ArtistID     int64              `json:"artist_id"`
-	ArtistName   string             `json:"artist_name"`
-	MediaItemID  int64              `json:"media_item_id"`
-	ArtistSlug   string             `json:"artist_slug"`
-	PosterPath   string             `json:"poster_path"`
-	LastPlayedAt pgtype.Timestamptz `json:"last_played_at"`
-	AlbumCount   int64              `json:"album_count"`
-	TrackCount   int64              `json:"track_count"`
-	Available    bool               `json:"available"`
+	ArtistID          int64              `json:"artist_id"`
+	ArtistName        string             `json:"artist_name"`
+	MediaItemID       int64              `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID          `json:"media_item_public_id"`
+	ArtistSlug        string             `json:"artist_slug"`
+	PosterPath        string             `json:"poster_path"`
+	LastPlayedAt      pgtype.Timestamptz `json:"last_played_at"`
+	AlbumCount        int64              `json:"album_count"`
+	TrackCount        int64              `json:"track_count"`
+	Available         bool               `json:"available"`
 }
 
 // Smart-home shelves powering the music landing page. The 10 sections each
@@ -807,6 +817,7 @@ func (q *Queries) ListRecentlyPlayedArtists(ctx context.Context, arg ListRecentl
 			&i.ArtistID,
 			&i.ArtistName,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.ArtistSlug,
 			&i.PosterPath,
 			&i.LastPlayedAt,
@@ -829,6 +840,7 @@ WITH ranked AS (
     SELECT a.id                AS artist_id,
            a.name              AS artist_name,
            mi.id               AS media_item_id,
+           mi.public_id        AS media_item_public_id,
            mi.slug             AS artist_slug,
            count(*)            AS play_count,
            max(pe.played_at)   AS last_played_at
@@ -840,9 +852,9 @@ WITH ranked AS (
     WHERE pe.user_id = $2
       AND pe.played_at >= $3
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.slug
+    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
 )
-SELECT artist_id, artist_name, media_item_id, artist_slug, play_count, last_played_at
+SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, play_count, last_played_at
 FROM ranked
 ORDER BY play_count DESC, last_played_at DESC
 LIMIT $1
@@ -855,12 +867,13 @@ type ListUserSeedArtistsForMixesParams struct {
 }
 
 type ListUserSeedArtistsForMixesRow struct {
-	ArtistID     int64       `json:"artist_id"`
-	ArtistName   string      `json:"artist_name"`
-	MediaItemID  int64       `json:"media_item_id"`
-	ArtistSlug   string      `json:"artist_slug"`
-	PlayCount    int64       `json:"play_count"`
-	LastPlayedAt interface{} `json:"last_played_at"`
+	ArtistID          int64       `json:"artist_id"`
+	ArtistName        string      `json:"artist_name"`
+	MediaItemID       int64       `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID   `json:"media_item_public_id"`
+	ArtistSlug        string      `json:"artist_slug"`
+	PlayCount         int64       `json:"play_count"`
+	LastPlayedAt      interface{} `json:"last_played_at"`
 }
 
 // "Mixes for You" seeds — top-N artists by play volume in the last `since_days`.
@@ -879,6 +892,7 @@ func (q *Queries) ListUserSeedArtistsForMixes(ctx context.Context, arg ListUserS
 			&i.ArtistID,
 			&i.ArtistName,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.ArtistSlug,
 			&i.PlayCount,
 			&i.LastPlayedAt,
@@ -1031,6 +1045,7 @@ WITH artist_play_counts AS (
     SELECT a.id              AS artist_id,
            a.name            AS artist_name,
            mi.id             AS media_item_id,
+           mi.public_id      AS media_item_public_id,
            mi.slug           AS artist_slug,
            count(*)          AS play_count
     FROM play_events pe
@@ -1040,9 +1055,9 @@ WITH artist_play_counts AS (
     JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = $3
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.slug
+    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
 )
-SELECT artist_id, artist_name, media_item_id, artist_slug, play_count
+SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, play_count
 FROM artist_play_counts
 ORDER BY md5(artist_id::text || $1::text) ASC
 LIMIT $2
@@ -1055,11 +1070,12 @@ type PickRandomPlayedArtistsParams struct {
 }
 
 type PickRandomPlayedArtistsRow struct {
-	ArtistID    int64  `json:"artist_id"`
-	ArtistName  string `json:"artist_name"`
-	MediaItemID int64  `json:"media_item_id"`
-	ArtistSlug  string `json:"artist_slug"`
-	PlayCount   int64  `json:"play_count"`
+	ArtistID          int64     `json:"artist_id"`
+	ArtistName        string    `json:"artist_name"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	ArtistSlug        string    `json:"artist_slug"`
+	PlayCount         int64     `json:"play_count"`
 }
 
 // "More By" seeds — sample N artists from the user's play history with a
@@ -1078,6 +1094,7 @@ func (q *Queries) PickRandomPlayedArtists(ctx context.Context, arg PickRandomPla
 			&i.ArtistID,
 			&i.ArtistName,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.ArtistSlug,
 			&i.PlayCount,
 		); err != nil {

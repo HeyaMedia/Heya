@@ -47,7 +47,7 @@ const rows = computed(() => myArtistsQuery.data.value?.items ?? [])
 
 // See MusicHome.vue — endpoint falls back through media_assets when
 // media_items.poster_path is empty.
-const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl(a.media_item_id)
+const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl({ id: a.media_item_id, public_id: a.media_item_public_id })
 </script>
 
 <style scoped>

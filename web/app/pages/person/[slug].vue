@@ -188,12 +188,12 @@
               <NuxtLink
                 v-for="c in sortedCast"
                 :key="`cast-${c.media_item_id}`"
-                :to="mediaUrl({ id: c.media_item_id, title: c.title, year: c.year, media_type: c.media_type })"
+                :to="mediaUrl({ id: c.media_item_id, public_id: c.media_item_public_id, title: c.title, year: c.year, media_type: c.media_type })"
                 class="credit-card card-tile"
               >
                 <MediaCard
                   :idx="c.media_item_id"
-                  :src="usePosterUrl(c.media_item_id)"
+                  :src="usePosterUrl({ id: c.media_item_id, public_id: c.media_item_public_id })"
                   aspect="2/3"
                   :title="c.title"
                   :subtitle="(c.year || '?') + (c.character ? ` · ${c.character}` : '')"
@@ -211,12 +211,12 @@
               <NuxtLink
                 v-for="c in dept.credits"
                 :key="`crew-${c.media_item_id}-${c.job}`"
-                :to="mediaUrl({ id: c.media_item_id, title: c.title, year: c.year, media_type: c.media_type })"
+                :to="mediaUrl({ id: c.media_item_id, public_id: c.media_item_public_id, title: c.title, year: c.year, media_type: c.media_type })"
                 class="credit-card card-tile"
               >
                 <MediaCard
                   :idx="c.media_item_id"
-                  :src="usePosterUrl(c.media_item_id)"
+                  :src="usePosterUrl({ id: c.media_item_id, public_id: c.media_item_public_id })"
                   aspect="2/3"
                   :title="c.title"
                   :subtitle="(c.year || '?') + (c.job ? ` · ${c.job}` : '')"

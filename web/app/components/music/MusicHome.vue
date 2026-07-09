@@ -18,7 +18,7 @@
         class="mh-card-link"
       >
         <MusicCard
-          :src="usePosterUrl(mix.seed_artist_media_item_id)"
+          :src="usePosterUrl({ id: mix.seed_artist_media_item_id, public_id: mix.seed_artist_media_item_public_id })"
           :alt="mix.name"
           :title="mix.name"
           :subtitle="`${mix.tracks.length} tracks`"
@@ -79,7 +79,7 @@
         class="mh-card-link"
       >
         <MusicCard
-          :src="usePosterUrl(a.media_item_id)"
+          :src="usePosterUrl({ id: a.media_item_id, public_id: a.media_item_public_id })"
           :alt="a.artist_name"
           :title="a.artist_name"
           :subtitle="`${a.album_count} albums · ${a.track_count} tracks`"
@@ -332,6 +332,7 @@ interface Mix {
   seed_artist_name: string
   seed_artist_slug: string
   seed_artist_media_item_id: number
+  seed_artist_media_item_public_id?: string
   name: string
   tracks: MixTrack[]
 }
@@ -353,6 +354,7 @@ interface RecentArtistRow {
   artist_name: string
   artist_slug: string
   media_item_id: number
+  media_item_public_id?: string
   album_count: number
   track_count: number
   available?: boolean

@@ -258,17 +258,18 @@ func splitBursts(files []recentTVFile) [][]recentTVFile {
 // RecentArtistEntry is one card on the "Recently Added Artists" rail: either
 // a brand-new artist or an existing artist that just gained releases.
 type RecentArtistEntry struct {
-	ID               int64     `json:"id"`
-	MediaItemID      int64     `json:"media_item_id"`
-	Name             string    `json:"name"`
-	Slug             string    `json:"slug"`
-	AlbumCount       int64     `json:"album_count"`
-	TrackCount       int64     `json:"track_count"`
-	Kind             string    `json:"kind" enum:"new,updated" doc:"new = artist first appeared with this event, updated = new releases were added to an existing artist"`
-	NewAlbumCount    int32     `json:"new_album_count"`
-	LatestAlbumTitle string    `json:"latest_album_title,omitempty"`
-	LatestAlbumSlug  string    `json:"latest_album_slug,omitempty"`
-	AddedAt          time.Time `json:"added_at"`
+	ID                int64     `json:"id"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID string    `json:"media_item_public_id,omitempty"`
+	Name              string    `json:"name"`
+	Slug              string    `json:"slug"`
+	AlbumCount        int64     `json:"album_count"`
+	TrackCount        int64     `json:"track_count"`
+	Kind              string    `json:"kind" enum:"new,updated" doc:"new = artist first appeared with this event, updated = new releases were added to an existing artist"`
+	NewAlbumCount     int32     `json:"new_album_count"`
+	LatestAlbumTitle  string    `json:"latest_album_title,omitempty"`
+	LatestAlbumSlug   string    `json:"latest_album_slug,omitempty"`
+	AddedAt           time.Time `json:"added_at"`
 }
 
 type recentMusicFile struct {
@@ -418,6 +419,7 @@ func (a *App) listRecentArtistEvents(ctx context.Context, q *sqlc.Queries, limit
 	for _, b := range briefs {
 		e := entries[b.ID]
 		e.Name = b.Name
+		e.MediaItemPublicID = b.MediaItemPublicID.String()
 		e.Slug = b.Slug
 		e.AlbumCount = b.AlbumCount
 		e.TrackCount = b.TrackCount

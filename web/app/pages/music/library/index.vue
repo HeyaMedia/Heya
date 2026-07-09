@@ -94,7 +94,7 @@
         class="ms-card-link"
       >
         <MusicCard
-          :src="usePosterUrl(ar.media_item_id) ?? undefined"
+          :src="usePosterUrl({ id: ar.media_item_id, public_id: ar.media_item_public_id }) ?? undefined"
           :alt="ar.name"
           :title="ar.name"
           :subtitle="`${ar.album_count} ${ar.album_count === 1 ? 'album' : 'albums'} · ${ar.track_count} tracks`"
@@ -143,6 +143,7 @@ interface RecentArtistRow {
   name: string
   slug: string
   media_item_id: number
+  media_item_public_id?: string
   album_count: number
   track_count: number
 }

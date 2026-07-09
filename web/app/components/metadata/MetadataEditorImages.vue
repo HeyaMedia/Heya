@@ -96,6 +96,7 @@ import type { ArtworkSearchResult } from '~~/shared/types'
 
 const props = defineProps<{
   mediaId: number
+  mediaPublicId?: string | null
   detail: any
   context?: 'media' | 'season' | 'episode'
 }>()
@@ -110,6 +111,7 @@ const findProviderFilter = ref<string>('all')
 const wideTypes = new Set(['backdrop', 'banner'])
 
 const assets = computed(() => props.detail?.assets || [])
+const mediaImageKey = computed(() => useMediaImageKey({ id: props.mediaId, public_id: props.mediaPublicId }))
 
 const typeLabels = computed<Record<string, string>>(() => {
   if (props.context === 'episode') {
@@ -184,7 +186,7 @@ const findGrouped = computed(() => {
 
 function imageUrl(asset: any) {
   if (asset.local_path && !asset.local_path.startsWith('http')) {
-    return `/api/media/${props.mediaId}/image/${asset.asset_type}?sort=${asset.sort_order}`
+    return `/api/media/${mediaImageKey.value}/image/${asset.asset_type}?sort=${asset.sort_order}`
   }
   return asset.remote_url || asset.local_path
 }

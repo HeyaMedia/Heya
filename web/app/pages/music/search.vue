@@ -306,6 +306,7 @@ interface AlbumRow {
   album_type: string
   cover_path: string
   artist_media_item_id: number
+  artist_media_item_public_id?: string
   artist_name: string
   artist_slug: string
 }
@@ -318,6 +319,7 @@ interface TrackRow {
   album_slug: string
   album_cover_path: string
   artist_media_item_id: number
+  artist_media_item_public_id?: string
   artist_name: string
   artist_slug: string
   available?: boolean

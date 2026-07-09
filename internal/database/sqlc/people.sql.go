@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -678,7 +679,7 @@ func (q *Queries) ListMediaCrewSlim(ctx context.Context, mediaItemID int64) ([]L
 }
 
 const listPersonCastCredits = `-- name: ListPersonCastCredits :many
-SELECT mc.character, mc.display_order, mi.id as media_item_id, mi.title, mi.year, mi.media_type, mi.poster_path
+SELECT mc.character, mc.display_order, mi.id as media_item_id, mi.public_id AS media_item_public_id, mi.title, mi.year, mi.media_type, mi.poster_path
 FROM media_cast mc
 JOIN media_item_cards mi ON mi.id = mc.media_item_id
 WHERE mc.person_id = $1
@@ -686,13 +687,14 @@ ORDER BY mi.year DESC, mi.title
 `
 
 type ListPersonCastCreditsRow struct {
-	Character    string    `json:"character"`
-	DisplayOrder int32     `json:"display_order"`
-	MediaItemID  int64     `json:"media_item_id"`
-	Title        string    `json:"title"`
-	Year         string    `json:"year"`
-	MediaType    MediaType `json:"media_type"`
-	PosterPath   string    `json:"poster_path"`
+	Character         string    `json:"character"`
+	DisplayOrder      int32     `json:"display_order"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	Title             string    `json:"title"`
+	Year              string    `json:"year"`
+	MediaType         MediaType `json:"media_type"`
+	PosterPath        string    `json:"poster_path"`
 }
 
 func (q *Queries) ListPersonCastCredits(ctx context.Context, personID int64) ([]ListPersonCastCreditsRow, error) {
@@ -708,6 +710,7 @@ func (q *Queries) ListPersonCastCredits(ctx context.Context, personID int64) ([]
 			&i.Character,
 			&i.DisplayOrder,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.Title,
 			&i.Year,
 			&i.MediaType,
@@ -724,7 +727,7 @@ func (q *Queries) ListPersonCastCredits(ctx context.Context, personID int64) ([]
 }
 
 const listPersonCrewCredits = `-- name: ListPersonCrewCredits :many
-SELECT mc.job, mc.department, mi.id as media_item_id, mi.title, mi.year, mi.media_type, mi.poster_path
+SELECT mc.job, mc.department, mi.id as media_item_id, mi.public_id AS media_item_public_id, mi.title, mi.year, mi.media_type, mi.poster_path
 FROM media_crew mc
 JOIN media_item_cards mi ON mi.id = mc.media_item_id
 WHERE mc.person_id = $1
@@ -732,13 +735,14 @@ ORDER BY mi.year DESC, mi.title
 `
 
 type ListPersonCrewCreditsRow struct {
-	Job         string    `json:"job"`
-	Department  string    `json:"department"`
-	MediaItemID int64     `json:"media_item_id"`
-	Title       string    `json:"title"`
-	Year        string    `json:"year"`
-	MediaType   MediaType `json:"media_type"`
-	PosterPath  string    `json:"poster_path"`
+	Job               string    `json:"job"`
+	Department        string    `json:"department"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	Title             string    `json:"title"`
+	Year              string    `json:"year"`
+	MediaType         MediaType `json:"media_type"`
+	PosterPath        string    `json:"poster_path"`
 }
 
 func (q *Queries) ListPersonCrewCredits(ctx context.Context, personID int64) ([]ListPersonCrewCreditsRow, error) {
@@ -754,6 +758,7 @@ func (q *Queries) ListPersonCrewCredits(ctx context.Context, personID int64) ([]
 			&i.Job,
 			&i.Department,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.Title,
 			&i.Year,
 			&i.MediaType,

@@ -88,11 +88,12 @@ func (q *Queries) ListMediaRecommendations(ctx context.Context, mediaItemID int6
 const listMediaRecommendationsWithLibrary = `-- name: ListMediaRecommendationsWithLibrary :many
 SELECT mr.id, mr.media_item_id, mr.external_ids, mr.title, mr.poster_path, mr.media_type, mr.vote_average, mr.release_date,
   COALESCE(mi.id, 0)::bigint as local_media_item_id,
+  COALESCE(mi.public_id::text, '')::text as local_public_id,
   COALESCE(mi.slug, '')::text as local_slug,
   COALESCE(mi.poster_path, '')::text as local_poster_path
 FROM media_recommendations mr
 LEFT JOIN LATERAL (
-  SELECT local_mi.id, local_mi.slug, local_mi.poster_path
+  SELECT local_mi.id, local_mi.public_id, local_mi.slug, local_mi.poster_path
   FROM jsonb_each_text(mr.external_ids) AS wanted(provider, external_id)
   JOIN media_item_external_ids ei
     ON ei.provider = wanted.provider
@@ -118,6 +119,7 @@ type ListMediaRecommendationsWithLibraryRow struct {
 	VoteAverage      pgtype.Numeric `json:"vote_average"`
 	ReleaseDate      string         `json:"release_date"`
 	LocalMediaItemID int64          `json:"local_media_item_id"`
+	LocalPublicID    string         `json:"local_public_id"`
 	LocalSlug        string         `json:"local_slug"`
 	LocalPosterPath  string         `json:"local_poster_path"`
 }
@@ -141,6 +143,7 @@ func (q *Queries) ListMediaRecommendationsWithLibrary(ctx context.Context, media
 			&i.VoteAverage,
 			&i.ReleaseDate,
 			&i.LocalMediaItemID,
+			&i.LocalPublicID,
 			&i.LocalSlug,
 			&i.LocalPosterPath,
 		); err != nil {
@@ -165,12 +168,13 @@ WITH agg AS (
 )
 SELECT agg.external_ids, agg.title, agg.poster_path, agg.media_type, agg.vote_average, agg.release_date,
   COALESCE(mi.id, 0)::bigint as local_media_item_id,
+  COALESCE(mi.public_id::text, '')::text as local_public_id,
   COALESCE(mi.slug, '')::text as local_slug,
   COALESCE(mi.poster_path, '')::text as local_poster_path,
   agg.source_count
 FROM agg
 LEFT JOIN LATERAL (
-  SELECT local_mi.id, local_mi.slug, local_mi.poster_path
+  SELECT local_mi.id, local_mi.public_id, local_mi.slug, local_mi.poster_path
   FROM jsonb_each_text(agg.external_ids) AS wanted(provider, external_id)
   JOIN media_item_external_ids ei
     ON ei.provider = wanted.provider
@@ -193,6 +197,7 @@ type ListTopRecommendationsRow struct {
 	VoteAverage      pgtype.Numeric `json:"vote_average"`
 	ReleaseDate      string         `json:"release_date"`
 	LocalMediaItemID int64          `json:"local_media_item_id"`
+	LocalPublicID    string         `json:"local_public_id"`
 	LocalSlug        string         `json:"local_slug"`
 	LocalPosterPath  string         `json:"local_poster_path"`
 	SourceCount      int32          `json:"source_count"`
@@ -223,6 +228,7 @@ func (q *Queries) ListTopRecommendations(ctx context.Context, limit int32) ([]Li
 			&i.VoteAverage,
 			&i.ReleaseDate,
 			&i.LocalMediaItemID,
+			&i.LocalPublicID,
 			&i.LocalSlug,
 			&i.LocalPosterPath,
 			&i.SourceCount,

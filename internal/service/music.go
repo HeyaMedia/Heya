@@ -173,11 +173,12 @@ func (a *App) ListMusicAlbums(ctx context.Context, limit, offset int32) (*MusicL
 // Carries the parent artist info so the page can render breadcrumbs and a
 // back-link without a second fetch.
 type MusicAlbumDetail struct {
-	Album       sqlc.Album  `json:"album"`
-	Tracks      []TrackView `json:"tracks"`
-	Artist      ArtistView  `json:"artist"`
-	ArtistSlug  string      `json:"artist_slug"`
-	MediaItemID int64       `json:"media_item_id"`
+	Album             sqlc.Album  `json:"album"`
+	Tracks            []TrackView `json:"tracks"`
+	Artist            ArtistView  `json:"artist"`
+	ArtistSlug        string      `json:"artist_slug"`
+	MediaItemID       int64       `json:"media_item_id"`
+	MediaItemPublicID string      `json:"media_item_public_id,omitempty"`
 }
 
 // GetAlbumDetail resolves an album by (artist_slug, album_slug) and returns
@@ -248,11 +249,12 @@ func (a *App) assembleAlbumDetail(ctx context.Context, q *sqlc.Queries, album sq
 	}
 
 	return &MusicAlbumDetail{
-		Album:       album,
-		Tracks:      views,
-		Artist:      BuildArtistView(artist),
-		ArtistSlug:  mediaItem.Slug,
-		MediaItemID: mediaItem.ID,
+		Album:             album,
+		Tracks:            views,
+		Artist:            BuildArtistView(artist),
+		ArtistSlug:        mediaItem.Slug,
+		MediaItemID:       mediaItem.ID,
+		MediaItemPublicID: mediaItem.PublicID.String(),
 	}, nil
 }
 

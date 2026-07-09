@@ -109,7 +109,7 @@ func (q *Queries) ListArtistFirstAdded(ctx context.Context, mediaItemIds []int64
 }
 
 const listArtistsBriefByIDs = `-- name: ListArtistsBriefByIDs :many
-SELECT a.id, a.name, a.media_item_id, mi.slug,
+SELECT a.id, a.name, a.media_item_id, mi.public_id AS media_item_public_id, mi.slug,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
        (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count
 FROM artists a
@@ -118,12 +118,13 @@ WHERE a.id = ANY($1::bigint[])
 `
 
 type ListArtistsBriefByIDsRow struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	MediaItemID int64  `json:"media_item_id"`
-	Slug        string `json:"slug"`
-	AlbumCount  int64  `json:"album_count"`
-	TrackCount  int64  `json:"track_count"`
+	ID                int64     `json:"id"`
+	Name              string    `json:"name"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	Slug              string    `json:"slug"`
+	AlbumCount        int64     `json:"album_count"`
+	TrackCount        int64     `json:"track_count"`
 }
 
 // Display info for the artists the rail surfaced.
@@ -140,6 +141,7 @@ func (q *Queries) ListArtistsBriefByIDs(ctx context.Context, artistIds []int64) 
 			&i.ID,
 			&i.Name,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.Slug,
 			&i.AlbumCount,
 			&i.TrackCount,

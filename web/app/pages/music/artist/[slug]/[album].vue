@@ -128,7 +128,7 @@ const albumExternalIds = computed<Record<string, string>>(() => {
 })
 const backdropStyle = computed(() => {
   if (!detail.value) return {}
-  return { backgroundImage: `url(/api/media/${detail.value.media_item_id}/image/backdrop)` }
+  return { backgroundImage: `url(/api/media/${useMediaImageKey({ id: detail.value.media_item_id, public_id: detail.value.media_item_public_id })}/image/backdrop)` }
 })
 
 function trackToPlayable(t: TrackView): Track {

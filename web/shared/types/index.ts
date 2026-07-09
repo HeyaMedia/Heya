@@ -243,6 +243,7 @@ export interface MusicAlbumDetail {
   artist: Artist
   artist_slug: string
   media_item_id: number
+  media_item_public_id?: string
 }
 
 export interface Track {
@@ -295,6 +296,7 @@ export interface MusicListPage<T> {
 
 export interface MusicArtistRow extends Artist {
   slug: string
+  media_item_public_id?: string
   poster_path: string
   album_count: number
   track_count: number
@@ -431,6 +433,7 @@ export interface MediaRecommendation {
   vote_average: number | string
   release_date: string
   local_media_item_id: number | null
+  local_public_id?: string | null
   // The local item's real slug (year-suffixed, user-editable) — use this for
   // the detail-page link, not slugify(title), which drops the disambiguating
   // year (e.g. `mr-robot` vs the actual `mr-robot-2015`).
@@ -491,6 +494,7 @@ export interface PersonCastCredit {
   character: string
   display_order: number
   media_item_id: number
+  media_item_public_id?: string
   title: string
   year: string
   media_type: string
@@ -501,6 +505,7 @@ export interface PersonCrewCredit {
   job: string
   department: string
   media_item_id: number
+  media_item_public_id?: string
   title: string
   year: string
   media_type: string
@@ -530,6 +535,7 @@ export interface PersonExternalCredit {
   external_ids: Record<string, string>
   source: string
   matched_media_item_id: number
+  matched_public_id?: string
   matched_slug: string
   matched_media_type: string
 }

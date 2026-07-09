@@ -72,6 +72,7 @@ WHERE user_id = $1 AND artist_id = ANY($2::bigint[]);
 -- shape of /api/me/loved/artists (drop-in replacement for that endpoint).
 SELECT a.*,
        mi.slug         AS slug,
+       mi.public_id    AS media_item_public_id,
        mi.poster_path  AS poster_path,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
        (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,

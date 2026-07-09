@@ -15,11 +15,12 @@ DELETE FROM media_recommendations WHERE media_item_id = $1;
 -- name: ListMediaRecommendationsWithLibrary :many
 SELECT mr.*,
   COALESCE(mi.id, 0)::bigint as local_media_item_id,
+  COALESCE(mi.public_id::text, '')::text as local_public_id,
   COALESCE(mi.slug, '')::text as local_slug,
   COALESCE(mi.poster_path, '')::text as local_poster_path
 FROM media_recommendations mr
 LEFT JOIN LATERAL (
-  SELECT local_mi.id, local_mi.slug, local_mi.poster_path
+  SELECT local_mi.id, local_mi.public_id, local_mi.slug, local_mi.poster_path
   FROM jsonb_each_text(mr.external_ids) AS wanted(provider, external_id)
   JOIN media_item_external_ids ei
     ON ei.provider = wanted.provider
@@ -53,12 +54,13 @@ WITH agg AS (
 )
 SELECT agg.external_ids, agg.title, agg.poster_path, agg.media_type, agg.vote_average, agg.release_date,
   COALESCE(mi.id, 0)::bigint as local_media_item_id,
+  COALESCE(mi.public_id::text, '')::text as local_public_id,
   COALESCE(mi.slug, '')::text as local_slug,
   COALESCE(mi.poster_path, '')::text as local_poster_path,
   agg.source_count
 FROM agg
 LEFT JOIN LATERAL (
-  SELECT local_mi.id, local_mi.slug, local_mi.poster_path
+  SELECT local_mi.id, local_mi.public_id, local_mi.slug, local_mi.poster_path
   FROM jsonb_each_text(agg.external_ids) AS wanted(provider, external_id)
   JOIN media_item_external_ids ei
     ON ei.provider = wanted.provider

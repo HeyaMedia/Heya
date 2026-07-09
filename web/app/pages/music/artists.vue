@@ -47,7 +47,7 @@ const rows = computed(() => artistsQuery.data.value?.items ?? [])
 // See MusicHome.vue — the endpoint falls back through media_assets when
 // media_items.poster_path is empty, so unconditional URL emit + Poster's
 // imgError gradient handles both populated and missing-image cases.
-const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl(a.media_item_id)
+const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl({ id: a.media_item_id, public_id: a.media_item_public_id })
 </script>
 
 <style scoped>
