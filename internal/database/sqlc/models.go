@@ -911,6 +911,23 @@ type Session struct {
 	Ip         pgtype.Text        `json:"ip"`
 }
 
+type SubsonicCredential struct {
+	UserID     int64              `json:"user_id"`
+	Secret     string             `json:"secret"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	RotatedAt  pgtype.Timestamptz `json:"rotated_at"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+}
+
+type SubsonicPlayQueue struct {
+	UserID         int64              `json:"user_id"`
+	TrackIds       []int64            `json:"track_ids"`
+	CurrentTrackID int64              `json:"current_track_id"`
+	PositionMs     int64              `json:"position_ms"`
+	ChangedAt      pgtype.Timestamptz `json:"changed_at"`
+	ChangedBy      string             `json:"changed_by"`
+}
+
 type SystemSetting struct {
 	Key       string             `json:"key"`
 	Value     []byte             `json:"value"`

@@ -55,6 +55,7 @@ type Config struct {
 	TranscodeCacheMaxGB Field[int]
 	Tailscale           TailscaleConfig
 	Jellyfin            JellyfinConfig
+	Subsonic            SubsonicConfig
 	Jobs                JobsConfig
 	// Podcast Index API credentials. Sign up at https://api.podcastindex.org
 	// — free tier covers personal-use traffic comfortably. When empty the
@@ -71,6 +72,15 @@ type Config struct {
 // present. The routes are always mounted; the flag is checked per-request, so
 // UI flips take effect without a restart.
 type JellyfinConfig struct {
+	Enabled Field[bool]
+}
+
+// SubsonicConfig gates the Subsonic/OpenSubsonic-compatible API surface
+// (internal/subsonic) mounted under /subsonic — lets stock Subsonic music
+// clients (Symfonium, DSub, play:Sub, Tempo, Supersonic...) browse and
+// stream Heya's music libraries. Same provenance semantics as Jellyfin:
+// env > db > default, checked per-request so UI flips need no restart.
+type SubsonicConfig struct {
 	Enabled Field[bool]
 }
 
@@ -119,6 +129,9 @@ func Load() *Config {
 		PodcastIndexSecret:  envString("HEYA_PODCAST_INDEX_SECRET", ""),
 		Jellyfin: JellyfinConfig{
 			Enabled: envBool("HEYA_JELLYFIN_API_ENABLED", false),
+		},
+		Subsonic: SubsonicConfig{
+			Enabled: envBool("HEYA_SUBSONIC_API_ENABLED", false),
 		},
 		Jobs: JobsConfig{
 			Workers: loadJobWorkerFields(),
@@ -291,6 +304,7 @@ var sourceFields = []sourceField{
 	{"transcoder.cache_dir", func(c *Config) SourceEntry { return c.TranscodeCacheDir.Entry() }},
 	{"transcoder.cache_max_gb", func(c *Config) SourceEntry { return c.TranscodeCacheMaxGB.Entry() }},
 	{"jellyfin.enabled", func(c *Config) SourceEntry { return c.Jellyfin.Enabled.Entry() }},
+	{"subsonic.enabled", func(c *Config) SourceEntry { return c.Subsonic.Enabled.Entry() }},
 	{"tailscale.enabled", func(c *Config) SourceEntry { return c.Tailscale.Enabled.Entry() }},
 	{"tailscale.hostname", func(c *Config) SourceEntry { return c.Tailscale.Hostname.Entry() }},
 	{"tailscale.state_dir", func(c *Config) SourceEntry { return c.Tailscale.StateDir.Entry() }},

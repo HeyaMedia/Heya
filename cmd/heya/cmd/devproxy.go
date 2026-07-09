@@ -25,6 +25,7 @@ import (
 //
 //	/api/*       ──► HEYA_DEV_BACKEND (default :3050, run by air)
 //	/jellyfin/*  ──► HEYA_DEV_BACKEND
+//	/subsonic/*  ──► HEYA_DEV_BACKEND
 //	/*           ──► HEYA_DEV_PROXY   (default :3000, Nuxt/Vite)
 //
 // Because this process never holds business logic, it doesn't restart when you
@@ -65,6 +66,8 @@ var devProxyCmd = &cobra.Command{
 		mux.Handle("/api/", apiProxy)
 		mux.Handle("/jellyfin", apiProxy)
 		mux.Handle("/jellyfin/", apiProxy)
+		mux.Handle("/subsonic", apiProxy)
+		mux.Handle("/subsonic/", apiProxy)
 		mux.Handle("/", webProxy)
 
 		// tsnet via the production wrapper, fronting the proxy handler. We

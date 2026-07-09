@@ -1,0 +1,233 @@
+package subsonic
+
+import (
+	"encoding/json"
+	"encoding/xml"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+const testAuth = "u=admin&p=sekret-app-pw&v=1.16.1&c=go-test"
+
+func doJSON(t *testing.T, s *Server, endpoint, extra string) map[string]any {
+	t.Helper()
+	url := "/rest/" + endpoint + "?" + testAuth + "&f=json"
+	if extra != "" {
+		url += "&" + extra
+	}
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("%s: http %d", endpoint, w.Code)
+	}
+	var doc map[string]map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("%s: unmarshal: %v\n%s", endpoint, err, w.Body.String())
+	}
+	env, ok := doc["subsonic-response"]
+	if !ok {
+		t.Fatalf("%s: no envelope: %s", endpoint, w.Body.String())
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("%s: status=%v error=%v", endpoint, env["status"], env["error"])
+	}
+	return env
+}
+
+func TestGetArtistsJSON(t *testing.T) {
+	s := newTestServer(t)
+	env := doJSON(t, s, "getArtists", "")
+	artists, ok := env["artists"].(map[string]any)
+	if !ok {
+		t.Fatalf("no artists payload: %v", env)
+	}
+	if artists["ignoredArticles"] != ignoredArticles {
+		t.Fatalf("ignoredArticles = %v", artists["ignoredArticles"])
+	}
+	index, ok := artists["index"].([]any)
+	if !ok || len(index) != 2 { // "A" (Aphex Twin) and "P" (Prodigy, The)
+		t.Fatalf("index buckets = %v", artists["index"])
+	}
+	first := index[0].(map[string]any)
+	if first["name"] != "A" {
+		t.Fatalf("first bucket = %v, want A", first["name"])
+	}
+	entries := first["artist"].([]any)
+	entry := entries[0].(map[string]any)
+	if entry["id"] != "ar-6" || entry["name"] != "Aphex Twin" {
+		t.Fatalf("artist entry wrong: %v", entry)
+	}
+}
+
+func TestGetArtistsXML(t *testing.T) {
+	s := newTestServer(t)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/rest/getArtists.view?"+testAuth, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("http %d", w.Code)
+	}
+	var env struct {
+		Status  string `xml:"status,attr"`
+		Artists struct {
+			IgnoredArticles string `xml:"ignoredArticles,attr"`
+			Index           []struct {
+				Name    string `xml:"name,attr"`
+				Artists []struct {
+					ID   string `xml:"id,attr"`
+					Name string `xml:"name,attr"`
+				} `xml:"artist"`
+			} `xml:"index"`
+		} `xml:"artists"`
+	}
+	if err := xml.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, w.Body.String())
+	}
+	if env.Status != "ok" || len(env.Artists.Index) != 2 {
+		t.Fatalf("xml artists wrong: %+v\n%s", env, w.Body.String())
+	}
+	if env.Artists.Index[1].Name != "P" || env.Artists.Index[1].Artists[0].ID != "ar-5" {
+		t.Fatalf("P bucket wrong: %+v", env.Artists.Index[1])
+	}
+}
+
+func TestGetAlbum(t *testing.T) {
+	s := newTestServer(t)
+	env := doJSON(t, s, "getAlbum", "id=al-10")
+	album := env["album"].(map[string]any)
+	if album["id"] != "al-10" || album["name"] != "The Fat of the Land" || album["artistId"] != "ar-5" {
+		t.Fatalf("album header wrong: %v", album)
+	}
+	if album["year"] != float64(1997) || album["coverArt"] != "al-10" {
+		t.Fatalf("album meta wrong: %v", album)
+	}
+	songs := album["song"].([]any)
+	if len(songs) != 2 {
+		t.Fatalf("song count = %d", len(songs))
+	}
+	song := songs[0].(map[string]any)
+	if song["id"] != "tr-100" || song["suffix"] != "flac" || song["contentType"] != "audio/flac" {
+		t.Fatalf("song file facts wrong: %v", song)
+	}
+	if song["albumId"] != "al-10" || song["artistId"] != "ar-5" || song["isDir"] != false {
+		t.Fatalf("song linkage wrong: %v", song)
+	}
+	if song["duration"] != float64(342) || song["track"] != float64(1) {
+		t.Fatalf("song numbers wrong: %v", song)
+	}
+}
+
+func TestGetArtistAndDirectory(t *testing.T) {
+	s := newTestServer(t)
+	env := doJSON(t, s, "getArtist", "id=ar-5")
+	artist := env["artist"].(map[string]any)
+	if artist["name"] != "The Prodigy" || artist["albumCount"] != float64(1) {
+		t.Fatalf("artist wrong: %v", artist)
+	}
+	albums := artist["album"].([]any)
+	if len(albums) != 1 || albums[0].(map[string]any)["id"] != "al-10" {
+		t.Fatalf("artist albums wrong: %v", albums)
+	}
+
+	// Directory browse of the same artist serves album rows as children.
+	env = doJSON(t, s, "getMusicDirectory", "id=ar-5")
+	dir := env["directory"].(map[string]any)
+	children := dir["child"].([]any)
+	if len(children) != 1 || children[0].(map[string]any)["isDir"] != true {
+		t.Fatalf("directory children wrong: %v", dir)
+	}
+
+	// Unknown artist → error 70.
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/rest/getArtist?"+testAuth+"&f=json&id=ar-999", nil))
+	if !strings.Contains(w.Body.String(), `"code":70`) {
+		t.Fatalf("missing artist should be 70: %s", w.Body.String())
+	}
+}
+
+func TestSearch3(t *testing.T) {
+	s := newTestServer(t)
+	env := doJSON(t, s, "search3", "query=breathe")
+	result := env["searchResult3"].(map[string]any)
+	songs, _ := result["song"].([]any)
+	if len(songs) != 1 || songs[0].(map[string]any)["title"] != "Breathe" {
+		t.Fatalf("search3 songs wrong: %v", result)
+	}
+
+	// The offline-sync "everything" spellings must not filter.
+	env = doJSON(t, s, "search3", `query=%22%22&songCount=10`)
+	result = env["searchResult3"].(map[string]any)
+	if songs, _ := result["song"].([]any); len(songs) != 2 {
+		t.Fatalf(`query="" should return everything: %v`, result)
+	}
+}
+
+func TestStarAndRating(t *testing.T) {
+	s := newTestServer(t)
+	fake := s.app.(*fakeBackend)
+
+	doJSON(t, s, "star", "id=tr-100")
+	if !fake.lovedTracks[100] {
+		t.Fatal("star did not set loved state")
+	}
+	doJSON(t, s, "unstar", "id=tr-100")
+	if fake.lovedTracks[100] {
+		t.Fatal("unstar did not clear loved state")
+	}
+
+	doJSON(t, s, "setRating", "id=tr-100&rating=4")
+	if fake.ratedTracks[100] != 8 { // 4 stars → Heya 8/10
+		t.Fatalf("rating mapped to %d, want 8", fake.ratedTracks[100])
+	}
+	doJSON(t, s, "setRating", "id=al-10&rating=0")
+	if r, ok := fake.ratedAlbums[10]; !ok || r != 0 {
+		t.Fatalf("album rating clear = (%d,%v)", r, ok)
+	}
+}
+
+func TestScrobbleAndPlayQueue(t *testing.T) {
+	s := newTestServer(t)
+	fake := s.app.(*fakeBackend)
+
+	doJSON(t, s, "scrobble", "id=tr-100")
+	if len(fake.scrobbles) != 1 || !fake.scrobbles[0].Completed || fake.scrobbles[0].EntityID != 100 {
+		t.Fatalf("scrobble wrong: %+v", fake.scrobbles)
+	}
+	doJSON(t, s, "scrobble", "id=tr-101&submission=false")
+	if len(fake.scrobbles) != 1 {
+		t.Fatalf("now-playing report must not append a play event: %+v", fake.scrobbles)
+	}
+
+	doJSON(t, s, "savePlayQueue", "id=tr-100&id=tr-101&current=tr-101&position=42000")
+	env := doJSON(t, s, "getPlayQueue", "")
+	q := env["playQueue"].(map[string]any)
+	if q["current"] != "tr-101" || q["position"] != float64(42000) {
+		t.Fatalf("play queue head wrong: %v", q)
+	}
+	if entries := q["entry"].([]any); len(entries) != 2 {
+		t.Fatalf("play queue entries wrong: %v", q)
+	}
+}
+
+func TestManifestEndpointsAnswerInProtocol(t *testing.T) {
+	// Every implemented/stubbed endpoint must produce a Subsonic envelope
+	// (or bytes) — never an HTML fallthrough or a panic. Binary endpoints
+	// are exercised for "no 500/panic" only.
+	s := newTestServer(t)
+	for name, status := range manifest {
+		if status == opUnsupported {
+			continue
+		}
+		w := httptest.NewRecorder()
+		url := "/rest/" + name + "?" + testAuth + "&f=json"
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+		if w.Code == http.StatusInternalServerError {
+			t.Errorf("%s answered 500", name)
+		}
+		ct := w.Header().Get("Content-Type")
+		if w.Code == http.StatusOK && strings.HasPrefix(ct, "text/html") {
+			t.Errorf("%s answered HTML — fell through to the SPA?", name)
+		}
+	}
+}

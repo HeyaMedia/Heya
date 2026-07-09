@@ -15,6 +15,7 @@ For deeper context, see `docs/`:
 | [docs/music-api.md](docs/music-api.md)       | `/api/music/*` route map and shape conventions    |
 | [docs/eye.md](docs/eye.md)                   | Heya Eye — headless-Chrome UI debugger            |
 | [docs/jellyfin.md](docs/jellyfin.md)         | Jellyfin-compatible API — arch, coverage, testing |
+| [docs/subsonic.md](docs/subsonic.md)         | Subsonic/OpenSubsonic-compatible API — auth story, coverage, client setup |
 | [docs/cli.md](docs/cli.md)                   | Full CLI reference                                |
 | [docs/tailscale.md](docs/tailscale.md)       | tsnet integration                                 |
 | [docs/deployment.md](docs/deployment.md)     | Container images (base + CUDA/OpenVINO GPU variants), transcode + ONNX GPU |

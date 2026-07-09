@@ -12,6 +12,7 @@ import (
 	"github.com/karbowiak/heya/internal/jellyfin"
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/service"
+	"github.com/karbowiak/heya/internal/subsonic"
 )
 
 func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
@@ -29,8 +30,16 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 	jellyfinHandler := http.StripPrefix("/jellyfin", jf)
 	mux.Handle("/jellyfin", jellyfinHandler)
 	mux.Handle("/jellyfin/", jellyfinHandler)
+	// Same treatment for the Subsonic-compatible surface: its own /subsonic
+	// namespace (clients are configured with {server}/subsonic), off by
+	// default, per-request toggle.
+	sub := subsonic.NewMiddleware(app, http.NotFoundHandler())
+	subsonicHandler := http.StripPrefix("/subsonic", sub)
+	mux.Handle("/subsonic", subsonicHandler)
+	mux.Handle("/subsonic/", subsonicHandler)
 	mux.Handle("/", spaHandler())
 	jf.SetNative(mux)
+	sub.SetNative(mux)
 
 	handler := withMiddleware(mux)
 	srv := &http.Server{
@@ -74,6 +83,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerAdminDoctorRoutes(api, app, o.logBuf)
 	registerTailscaleRoutes(api, app, cfg)
 	registerJellyfinConfigRoutes(api, app)
+	registerSubsonicRoutes(api, app)
 	registerLibraryRoutes(api, app)
 	registerJobRoutes(api, app)
 	registerTaskRoutes(api, app)
