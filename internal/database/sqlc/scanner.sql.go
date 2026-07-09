@@ -114,6 +114,121 @@ func (q *Queries) ApproveScannerCandidate(ctx context.Context, arg ApproveScanne
 	return i, err
 }
 
+const cleanupAppliedScannerEntityArtifactsOlderThan = `-- name: CleanupAppliedScannerEntityArtifactsOlderThan :one
+WITH target AS (
+    UPDATE scanner_entities
+    SET search_artifact_id = NULL,
+        metadata_artifact_id = NULL,
+        apply_artifact_id = NULL,
+        updated_at = now()
+    WHERE status = 'applied'
+      AND applied_at IS NOT NULL
+      AND applied_at < $1
+    RETURNING id
+),
+deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING target
+    WHERE artifact.entity_id = target.id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted
+`
+
+func (q *Queries) CleanupAppliedScannerEntityArtifactsOlderThan(ctx context.Context, cutoffAt pgtype.Timestamptz) (int64, error) {
+	row := q.db.QueryRow(ctx, cleanupAppliedScannerEntityArtifactsOlderThan, cutoffAt)
+	var deleted_count int64
+	err := row.Scan(&deleted_count)
+	return deleted_count, err
+}
+
+const cleanupFullyAppliedScanRunArtifactsForEntity = `-- name: CleanupFullyAppliedScanRunArtifactsForEntity :one
+WITH candidate_runs AS (
+    SELECT search_scan_run_id AS scan_run_id
+    FROM scanner_entities entity
+    WHERE entity.id = $1
+      AND entity.search_scan_run_id IS NOT NULL
+    UNION
+    SELECT fetch_scan_run_id AS scan_run_id
+    FROM scanner_entities entity
+    WHERE entity.id = $1
+      AND entity.fetch_scan_run_id IS NOT NULL
+),
+safe_runs AS (
+    SELECT candidate_runs.scan_run_id
+    FROM candidate_runs
+    JOIN scan_runs ON scan_runs.id = candidate_runs.scan_run_id
+    WHERE scan_runs.finished_at IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM scanner_entities entity
+        WHERE (entity.search_scan_run_id = candidate_runs.scan_run_id
+            OR entity.fetch_scan_run_id = candidate_runs.scan_run_id)
+          AND entity.status <> 'applied'
+      )
+),
+deleted AS (
+    DELETE FROM scan_run_artifacts artifact
+    USING safe_runs
+    WHERE artifact.scan_run_id = safe_runs.scan_run_id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted
+`
+
+func (q *Queries) CleanupFullyAppliedScanRunArtifactsForEntity(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, cleanupFullyAppliedScanRunArtifactsForEntity, id)
+	var deleted_count int64
+	err := row.Scan(&deleted_count)
+	return deleted_count, err
+}
+
+const cleanupOldScanRunArtifacts = `-- name: CleanupOldScanRunArtifacts :one
+WITH deleted AS (
+    DELETE FROM scan_run_artifacts artifact
+    USING scan_runs
+    WHERE artifact.scan_run_id = scan_runs.id
+      AND scan_runs.finished_at IS NOT NULL
+      AND artifact.created_at < $1
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted
+`
+
+func (q *Queries) CleanupOldScanRunArtifacts(ctx context.Context, cutoffAt pgtype.Timestamptz) (int64, error) {
+	row := q.db.QueryRow(ctx, cleanupOldScanRunArtifacts, cutoffAt)
+	var deleted_count int64
+	err := row.Scan(&deleted_count)
+	return deleted_count, err
+}
+
+const compactAppliedScannerEntityArtifacts = `-- name: CompactAppliedScannerEntityArtifacts :one
+WITH target AS (
+    UPDATE scanner_entities entity
+    SET search_artifact_id = NULL,
+        metadata_artifact_id = NULL,
+        apply_artifact_id = NULL,
+        updated_at = now()
+    WHERE entity.id = $1
+      AND entity.status = 'applied'
+    RETURNING id
+),
+deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING target
+    WHERE artifact.entity_id = target.id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted
+`
+
+func (q *Queries) CompactAppliedScannerEntityArtifacts(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, compactAppliedScannerEntityArtifacts, id)
+	var deleted_count int64
+	err := row.Scan(&deleted_count)
+	return deleted_count, err
+}
+
 const createLibraryFileExtraLink = `-- name: CreateLibraryFileExtraLink :one
 INSERT INTO library_file_links (
     library_file_id, media_item_id, relation_type, extra_type,

@@ -39,6 +39,89 @@ WHERE sr.library_id = $1
 ORDER BY sr.started_at DESC, sr.id DESC, sra.id DESC
 LIMIT 1;
 
+-- name: CompactAppliedScannerEntityArtifacts :one
+WITH target AS (
+    UPDATE scanner_entities entity
+    SET search_artifact_id = NULL,
+        metadata_artifact_id = NULL,
+        apply_artifact_id = NULL,
+        updated_at = now()
+    WHERE entity.id = $1
+      AND entity.status = 'applied'
+    RETURNING id
+),
+deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING target
+    WHERE artifact.entity_id = target.id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted;
+
+-- name: CleanupFullyAppliedScanRunArtifactsForEntity :one
+WITH candidate_runs AS (
+    SELECT search_scan_run_id AS scan_run_id
+    FROM scanner_entities entity
+    WHERE entity.id = $1
+      AND entity.search_scan_run_id IS NOT NULL
+    UNION
+    SELECT fetch_scan_run_id AS scan_run_id
+    FROM scanner_entities entity
+    WHERE entity.id = $1
+      AND entity.fetch_scan_run_id IS NOT NULL
+),
+safe_runs AS (
+    SELECT candidate_runs.scan_run_id
+    FROM candidate_runs
+    JOIN scan_runs ON scan_runs.id = candidate_runs.scan_run_id
+    WHERE scan_runs.finished_at IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM scanner_entities entity
+        WHERE (entity.search_scan_run_id = candidate_runs.scan_run_id
+            OR entity.fetch_scan_run_id = candidate_runs.scan_run_id)
+          AND entity.status <> 'applied'
+      )
+),
+deleted AS (
+    DELETE FROM scan_run_artifacts artifact
+    USING safe_runs
+    WHERE artifact.scan_run_id = safe_runs.scan_run_id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted;
+
+-- name: CleanupAppliedScannerEntityArtifactsOlderThan :one
+WITH target AS (
+    UPDATE scanner_entities
+    SET search_artifact_id = NULL,
+        metadata_artifact_id = NULL,
+        apply_artifact_id = NULL,
+        updated_at = now()
+    WHERE status = 'applied'
+      AND applied_at IS NOT NULL
+      AND applied_at < sqlc.arg(cutoff_at)
+    RETURNING id
+),
+deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING target
+    WHERE artifact.entity_id = target.id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted;
+
+-- name: CleanupOldScanRunArtifacts :one
+WITH deleted AS (
+    DELETE FROM scan_run_artifacts artifact
+    USING scan_runs
+    WHERE artifact.scan_run_id = scan_runs.id
+      AND scan_runs.finished_at IS NOT NULL
+      AND artifact.created_at < sqlc.arg(cutoff_at)
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint AS deleted_count FROM deleted;
+
 -- name: UpsertScannerEntity :one
 INSERT INTO scanner_entities (
     library_id, media_type, scope_key, scope_paths, identity_key,

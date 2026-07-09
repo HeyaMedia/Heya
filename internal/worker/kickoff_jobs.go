@@ -355,6 +355,23 @@ func (KickoffSonicAnalysisArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// CleanupScannerArtifactsArgs compacts scanner handoff blobs after successful
+// materialization. Immediate apply/rich-apply paths do the same for fresh work;
+// this scheduled backstop clears artifacts from older deployments and CLI runs.
+type CleanupScannerArtifactsArgs struct {
+	RetentionDays   int32  `json:"retention_days,omitempty"`
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (CleanupScannerArtifactsArgs) Kind() string { return "cleanup_scanner_artifacts" }
+func (CleanupScannerArtifactsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "cleanup_scanner_artifacts",
+		MaxAttempts: 1,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 func TaskKinds(taskID string) []string {
 	return taskdefs.TaskKinds(taskID)
 }

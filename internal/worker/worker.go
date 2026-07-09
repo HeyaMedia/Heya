@@ -152,6 +152,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &KickoffTrickplayWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffThumbnailsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffSonicAnalysisWorker{DB: cfg.DB, Enabled: cfg.SonicEnabled, Progress: cfg.Progress})
+	river.AddWorker(workers, &CleanupScannerArtifactsWorker{DB: cfg.DB, Progress: cfg.Progress})
 
 	// Debounce sweep — owns its own queue and fires every 10s via the
 	// periodic-jobs entry below.
@@ -241,6 +242,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"kickoff_trickplay":         {MaxWorkers: queueWorkers(cfg, "kickoff_trickplay", 1)},
 			"kickoff_thumbnails":        {MaxWorkers: queueWorkers(cfg, "kickoff_thumbnails", 1)},
 			"kickoff_sonic_analysis":    {MaxWorkers: queueWorkers(cfg, "kickoff_sonic_analysis", 1)},
+			"cleanup_scanner_artifacts": {MaxWorkers: queueWorkers(cfg, "cleanup_scanner_artifacts", 1)},
 
 			// Misc.
 			"soft_delete":      {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},

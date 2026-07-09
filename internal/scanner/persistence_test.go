@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -270,6 +271,131 @@ func TestPersistScannerSearchEntitiesStoresNarrowArtifacts(t *testing.T) {
 	require.Equal(t, "Dune (2021)/Dune.mkv", loaded.Inventory.Roots[0].Files[0].RelPath)
 }
 
+func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-artifact-cleanup-test",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
+	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
+		ScanRunID:     searchRun.ID,
+		Kind:          scanArtifactKindSearch,
+		ScopeKey:      "",
+		SchemaVersion: scanArtifactSchemaV1,
+		Data:          []byte(`{"stage":"search"}`),
+	})
+	require.NoError(t, err)
+
+	result := Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{
+			Root: "/media/movies",
+			Files: []InventoryFile{{
+				Root:    "/media/movies",
+				Path:    "/media/movies/Dune (2021)/Dune.mkv",
+				RelPath: "Dune (2021)/Dune.mkv",
+				Name:    "Dune.mkv",
+				Class:   ClassPrimaryMedia,
+			}},
+		}}},
+		MovieMatches: []MovieMatch{{
+			Key:   "title_year:dune|2021",
+			Title: "Dune",
+			Year:  "2021",
+			Files: []string{"Dune (2021)/Dune.mkv"},
+		}},
+		MovieSearch: []MovieSearchMatch{{
+			Key:        "title_year:dune|2021",
+			Query:      MovieSearchQuery{Title: "Dune", Year: "2021"},
+			Accepted:   true,
+			ProviderID: "heya:movie:tmdb:438631",
+			Title:      "Dune",
+			Year:       "2021",
+			Confidence: 1.0,
+		}},
+	}
+	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: []string{"/media/movies/Dune (2021)"}}, result, searchRun.ID)
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+	entityID := refs[0].Entity.ID
+	searchArtifactID := refs[0].Artifact.ID
+
+	fetchRun := createFinishedTestScanRun(t, ctx, q, lib, "fetch")
+	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
+		ScanRunID:     fetchRun.ID,
+		Kind:          scanArtifactKindFetch,
+		ScopeKey:      "",
+		SchemaVersion: scanArtifactSchemaV1,
+		Data:          []byte(`{"stage":"fetch"}`),
+	})
+	require.NoError(t, err)
+	result.MovieMetadata = []MovieFetchPreview{{
+		Key:        "title_year:dune|2021",
+		ProviderID: "heya:movie:tmdb:438631",
+		Title:      "Dune",
+		Year:       "2021",
+		Detail:     &metadata.MediaDetail{Title: "Dune", Year: "2021"},
+	}}
+	fetchArtifact, err := PersistScannerFetchEntity(ctx, pool, entityID, result, fetchRun.ID)
+	require.NoError(t, err)
+
+	applyRun := createFinishedTestScanRun(t, ctx, q, lib, "apply")
+	result.MovieApply = []MovieApplyResult{{
+		Key:         "title_year:dune|2021",
+		Action:      "create",
+		Title:       "Dune",
+		Year:        "2021",
+		ProviderID:  "heya:movie:tmdb:438631",
+		MediaItemID: 123,
+	}}
+	applyArtifact, err := PersistScannerApplyEntity(ctx, pool, entityID, result, applyRun.ID)
+	require.NoError(t, err)
+
+	entity, err := q.GetScannerEntity(ctx, entityID)
+	require.NoError(t, err)
+	require.Equal(t, "applied", entity.Status)
+	require.True(t, entity.SearchArtifactID.Valid)
+	require.True(t, entity.MetadataArtifactID.Valid)
+	require.True(t, entity.ApplyArtifactID.Valid)
+
+	deletedEntityArtifacts, err := q.CompactAppliedScannerEntityArtifacts(ctx, entityID)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, deletedEntityArtifacts)
+	deletedScanRunArtifacts, err := q.CleanupFullyAppliedScanRunArtifactsForEntity(ctx, entityID)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, deletedScanRunArtifacts)
+
+	entity, err = q.GetScannerEntity(ctx, entityID)
+	require.NoError(t, err)
+	require.Equal(t, "applied", entity.Status)
+	require.Equal(t, "heya:movie:tmdb:438631", entity.ProviderID)
+	require.False(t, entity.SearchArtifactID.Valid)
+	require.False(t, entity.MetadataArtifactID.Valid)
+	require.False(t, entity.ApplyArtifactID.Valid)
+
+	_, err = q.GetScannerEntityArtifact(ctx, searchArtifactID)
+	require.Error(t, err)
+	_, err = q.GetScannerEntityArtifact(ctx, fetchArtifact.ID)
+	require.Error(t, err)
+	_, err = q.GetScannerEntityArtifact(ctx, applyArtifact.ID)
+	require.Error(t, err)
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: ""})
+	require.Error(t, err)
+	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: fetchRun.ID, Kind: scanArtifactKindFetch, ScopeKey: ""})
+	require.Error(t, err)
+}
+
 func TestPersistScannerSearchEntitiesHonorsDottedSceneDirectoryScope(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
@@ -347,6 +473,27 @@ func TestPersistScannerSearchEntitiesHonorsDottedSceneDirectoryScope(t *testing.
 	require.Len(t, loaded.Inventory.Roots, 1)
 	require.Len(t, loaded.Inventory.Roots[0].Files, 1)
 	require.Equal(t, "Anora.2024.1080p.BluRay.x264-PiGNUS/Anora.2024.1080p.BluRay.x264-PiGNUS.mkv", loaded.Inventory.Roots[0].Files[0].RelPath)
+}
+
+func createFinishedTestScanRun(t *testing.T, ctx context.Context, q *sqlc.Queries, lib sqlc.Library, mode string) sqlc.ScanRun {
+	t.Helper()
+	run, err := q.CreateScanRun(ctx, sqlc.CreateScanRunParams{
+		LibraryID:      lib.ID,
+		MediaType:      lib.MediaType,
+		ScannerVersion: "scanner-test",
+		Mode:           mode,
+		Status:         "running",
+		Summary:        []byte("{}"),
+	})
+	require.NoError(t, err)
+	err = q.FinishScanRun(ctx, sqlc.FinishScanRunParams{
+		ID:           run.ID,
+		Status:       "complete",
+		Summary:      []byte("{}"),
+		ErrorMessage: "",
+	})
+	require.NoError(t, err)
+	return run
 }
 
 func musicCandidates(prefix string, artist string, n int) []MusicSearchCandidate {

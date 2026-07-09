@@ -492,6 +492,9 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 	}
 	richQueued, richFailed := w.enqueueRichMetadataWork(ctx, rc, lib, result, job.Args.MetadataArtifactID, job.Args.ScannerEntityID, job.Args.ScheduledTaskID, source)
 	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
+	if richQueued == 0 && richFailed == 0 {
+		compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, 0)
+	}
 
 	log.Info().
 		Int64("library_id", lib.ID).
@@ -682,7 +685,62 @@ func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[Apply
 		Int("keywords", len(detail.Keywords)).
 		Int("videos", len(detail.Videos)).
 		Msg("apply_rich_metadata: complete")
+	compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, job.ID)
 	return nil
+}
+
+func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scannerEntityID, metadataArtifactID, currentJobID int64) {
+	if db == nil || scannerEntityID == 0 {
+		return
+	}
+	if metadataArtifactID != 0 {
+		busy, err := activeRichMetadataJobsForArtifact(ctx, db, metadataArtifactID, currentJobID)
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Int64("scanner_entity_id", scannerEntityID).
+				Int64("metadata_artifact_id", metadataArtifactID).
+				Msg("scanner artifact compaction skipped: active rich job check failed")
+			return
+		}
+		if busy {
+			return
+		}
+	}
+	q := sqlc.New(db)
+	entityArtifacts, err := q.CompactAppliedScannerEntityArtifacts(ctx, scannerEntityID)
+	if err != nil {
+		log.Warn().Err(err).Int64("scanner_entity_id", scannerEntityID).Msg("scanner entity artifact compaction failed")
+		return
+	}
+	scanRunArtifacts, err := q.CleanupFullyAppliedScanRunArtifactsForEntity(ctx, scannerEntityID)
+	if err != nil {
+		log.Warn().Err(err).Int64("scanner_entity_id", scannerEntityID).Msg("scan run artifact compaction failed")
+		return
+	}
+	if entityArtifacts > 0 || scanRunArtifacts > 0 {
+		log.Debug().
+			Int64("scanner_entity_id", scannerEntityID).
+			Int64("scanner_entity_artifacts", entityArtifacts).
+			Int64("scan_run_artifacts", scanRunArtifacts).
+			Msg("scanner artifacts compacted")
+	}
+}
+
+func activeRichMetadataJobsForArtifact(ctx context.Context, db *pgxpool.Pool, metadataArtifactID, currentJobID int64) (bool, error) {
+	var count int64
+	err := db.QueryRow(ctx, `
+		SELECT count(*)
+		FROM river_job
+		WHERE kind = 'apply_rich_metadata'
+		  AND state IN ('available', 'retryable', 'running', 'scheduled')
+		  AND (args->>'metadata_artifact_id')::bigint = $1
+		  AND ($2::bigint = 0 OR id <> $2)
+	`, metadataArtifactID, currentJobID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (w *KickoffLibraryScanWorker) planLibraryScan(ctx context.Context, lib sqlc.Library, force bool, taskID string, source string) (libraryScanOutcome, []string, error) {

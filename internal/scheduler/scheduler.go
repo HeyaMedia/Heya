@@ -220,6 +220,8 @@ func (t *Trigger) TriggerNow(ctx context.Context, taskID string, manual bool) er
 		args = worker.KickoffThumbnailsArgs{ScheduledTaskID: taskID}
 	case "analyze_music_facets":
 		args = worker.KickoffSonicAnalysisArgs{ScheduledTaskID: taskID}
+	case "cleanup_scanner_artifacts":
+		args = worker.CleanupScannerArtifactsArgs{ScheduledTaskID: taskID}
 	default:
 		return fmt.Errorf("unknown task: %s", taskID)
 	}

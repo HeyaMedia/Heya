@@ -101,6 +101,7 @@ function taskIcon(id: string): string {
     case 'scan_media_segments': return 'scissors'
     case 'detect_media_segments': return 'wand'
     case 'analyze_music_facets': return 'eq'
+    case 'cleanup_scanner_artifacts': return 'database'
     default:                    return 'timer'
   }
 }
