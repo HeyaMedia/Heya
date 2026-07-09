@@ -9,9 +9,11 @@ AI-curated recommendations (`POST /api/ai/recommend`, `heya ai recommend`,
 LLM fit-graded re-rank, code owns ordering ("AI proposes, code disposes").
 Remaining: collections substrate (phase 1), collections curator (phase 5),
 NL playlists, external-provider live test (needs a real key), CUDA-image
-llama-server bake-in. Known ceiling: probe/curate quality is bounded by the
-spoiler-safe overview text we embed — richer doc text (heya.media reviews) is
-the planned lift.
+llama-server bake-in. Episode-overview
+embeddings shipped (2026-07-10): `episode_facets` + two-source SemanticSearch
+merge + matched-episode evidence in the AI re-rank — oblique "the one where…"
+asks now resolve via episode text. Remaining ceiling: thematic/reception
+depth ("it's a tearjerker") — heya.media reviews are the planned lift.
 
 The original FUTURE.md idea was "smart playlists / collections". Working
 through it, most of the value needs **no AI at all** (filter rules + metadata
