@@ -207,7 +207,7 @@ const recentWatchedQuery = useQuery({
 const forYouQuery = useQuery({
   queryKey: ['for-you', { limit: 20 }],
   queryFn: async () => (await $heya('/api/me/recommendations', { query: { limit: 20 } })) as {
-    items: { id: number; title: string; slug: string; year?: string; media_type: string; reason?: string; available: boolean }[]
+    items: { id: number; public_id?: string; title: string; slug: string; year?: string; media_type: string; reason?: string; available: boolean }[]
     has_signal: boolean
   },
   staleTime: 1000 * 60 * 10,
@@ -301,6 +301,7 @@ async function onPinHeroMode(mode: string) {
 const recommendedItems = computed<MediaItem[]>(() =>
   (forYouQuery.data.value?.items ?? []).map(it => ({
     id: it.id,
+    public_id: it.public_id,
     title: it.title,
     slug: it.slug,
     year: it.year ?? '',

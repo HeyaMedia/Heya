@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/pgvector/pgvector-go"
 )
@@ -301,7 +302,7 @@ func (a *App) SemanticSearch(ctx context.Context, query string, facets ForYouFac
 
 	// KNN over the HNSW cosine index, gated to available titles + the facets.
 	rows, err := a.db.Query(ctx, `
-		SELECT mi.id, mi.library_id, mi.title, mi.slug, coalesce(mi.year,''), mi.media_type::text,
+		SELECT mi.id, mi.public_id, mi.library_id, mi.title, mi.slug, coalesce(mi.year,''), mi.media_type::text,
 		       coalesce(m.rating, ts.rating, 0)::float8,
 		       (f.text_embedding <=> $1)::float8 AS dist
 		FROM media_item_facets f
@@ -323,9 +324,11 @@ func (a *App) SemanticSearch(ctx context.Context, query string, facets ForYouFac
 	for rows.Next() {
 		var it ForYouItem
 		var dist float64
-		if err := rows.Scan(&it.ID, &it.libraryID, &it.Title, &it.Slug, &it.Year, &it.MediaType, &it.Rating, &dist); err != nil {
+		var publicID uuid.UUID
+		if err := rows.Scan(&it.ID, &publicID, &it.libraryID, &it.Title, &it.Slug, &it.Year, &it.MediaType, &it.Rating, &dist); err != nil {
 			return nil, err
 		}
+		it.PublicID = publicID.String()
 		if facets.MinRating > 0 && it.Rating < facets.MinRating {
 			continue
 		}

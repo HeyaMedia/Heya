@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
@@ -71,6 +72,7 @@ type ForYouFacets struct {
 // human-readable reason.
 type ForYouItem struct {
 	ID        int64   `json:"id"`
+	PublicID  string  `json:"public_id,omitempty"`
 	Title     string  `json:"title"`
 	Slug      string  `json:"slug"`
 	Year      string  `json:"year,omitempty"`
@@ -206,7 +208,7 @@ func (a *App) ForYou(ctx context.Context, userID int64, facets ForYouFacets) (Fo
 	items := make([]ForYouItem, 0, len(picked))
 	for _, s := range picked {
 		items = append(items, ForYouItem{
-			ID: s.it.id, Title: s.it.title, Slug: s.it.slug, Year: s.it.year,
+			ID: s.it.id, PublicID: s.it.publicID, Title: s.it.title, Slug: s.it.slug, Year: s.it.year,
 			MediaType: s.it.mediaType, Rating: s.it.rating, Available: true,
 			Score:     round3(s.final),
 			Reason:    a.fyReason(s, idx, graphTopSeed, names, hasSignal),
@@ -233,6 +235,7 @@ type fyScored struct {
 
 type fyItem struct {
 	id        int64
+	publicID  string
 	libraryID int64
 	title     string
 	slug      string
@@ -280,7 +283,7 @@ func (a *App) fyBuildIndex(ctx context.Context) (*fyIndex, error) {
 	}
 
 	rows, err := a.db.Query(ctx, `
-		SELECT mi.id, mi.library_id, mi.title, mi.slug, coalesce(mi.year,''), mi.media_type::text,
+		SELECT mi.id, mi.public_id, mi.library_id, mi.title, mi.slug, coalesce(mi.year,''), mi.media_type::text,
 		       coalesce(m.rating, ts.rating, 0)::float8,
 		       EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL) AS available
 		FROM media_item_cards mi
@@ -292,10 +295,12 @@ func (a *App) fyBuildIndex(ctx context.Context) (*fyIndex, error) {
 	}
 	for rows.Next() {
 		it := &fyItem{}
-		if err := rows.Scan(&it.id, &it.libraryID, &it.title, &it.slug, &it.year, &it.mediaType, &it.rating, &it.available); err != nil {
+		var publicID uuid.UUID
+		if err := rows.Scan(&it.id, &publicID, &it.libraryID, &it.title, &it.slug, &it.year, &it.mediaType, &it.rating, &it.available); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		it.publicID = publicID.String()
 		idx.items[it.id] = it
 	}
 	rows.Close()

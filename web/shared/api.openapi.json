@@ -3382,6 +3382,9 @@
           "media_type": {
             "type": "string"
           },
+          "public_id": {
+            "type": "string"
+          },
           "rating": {
             "format": "double",
             "type": "number"
