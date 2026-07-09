@@ -44,3 +44,30 @@ func TestManagerStopStartCycle(t *testing.T) {
 
 	m.Stop()
 }
+
+// A transport retry (or in-flight seek) that lost the race against
+// Session.Stop must not respawn — across a disable→enable cycle the new
+// runCtx would otherwise host a ghost transport with no registry entry.
+func TestStoppedSessionCannotRespawn(t *testing.T) {
+	m := New(t.TempDir())
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer m.Stop()
+
+	s := &Session{
+		ID:     newSessionID(),
+		Device: Device{ID: "airplay:te:st", Provider: "airplay", Name: "test"},
+		mgr:    m,
+		state:  StateStarting,
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if err := s.spawnTransport(TrackInfo{Path: "/dev/null"}, 30); err == nil {
+		t.Fatal("spawnTransport succeeded on a stopped session")
+	}
+	if err := s.Resume(); err == nil {
+		t.Fatal("Resume succeeded on a stopped session")
+	}
+}

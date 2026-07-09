@@ -110,8 +110,19 @@ func (s *Session) start() error {
 
 // spawnTransport binds the sender processes to the manager's lifetime
 // context — never a request context, which would SIGTERM playback the
-// moment the HTTP call that started it returns.
+// moment the HTTP call that started it returns. Closed sessions refuse
+// to spawn: a stale retry (or an in-flight seek) racing Session.Stop
+// must not resurrect playback — especially across a casting
+// disable→enable cycle, where the fresh runCtx would happily host a
+// ghost transport no registry entry can reach.
 func (s *Session) spawnTransport(track TrackInfo, volume int) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return fmt.Errorf("cast: session is stopped")
+	}
+	s.mu.Unlock()
+
 	ctx, err := s.mgr.transportCtx()
 	if err != nil {
 		return err
@@ -124,6 +135,13 @@ func (s *Session) spawnTransport(track TrackInfo, volume int) error {
 		return err
 	}
 	s.mu.Lock()
+	if s.closed {
+		// Stop landed between the check above and the spawn — tear the
+		// fresh transport down instead of installing it.
+		s.mu.Unlock()
+		_ = tr.Stop()
+		return fmt.Errorf("cast: session is stopped")
+	}
 	s.transport = tr
 	s.track = track
 	s.state = StateStarting
@@ -131,7 +149,7 @@ func (s *Session) spawnTransport(track TrackInfo, volume int) error {
 	s.resumedAt = time.Time{}
 	s.mu.Unlock()
 	s.mgr.emitSession(s)
-	go s.consume(tr) //nolint:gosec // session outlives any request; retry path deliberately uses Background
+	go s.consume(tr)
 	return nil
 }
 
@@ -176,10 +194,18 @@ func (s *Session) consume(tr Transport) {
 					return
 				}
 			}
-			log.Error().Err(ev.Err).Str("device", s.Device.Name).Msg("cast: session failed")
 			s.mu.Lock()
-			s.state = StateFailed
+			closed := s.closed
+			if !closed {
+				s.state = StateFailed
+			}
 			s.mu.Unlock()
+			if closed {
+				// Session was stopped while we deliberated — it already
+				// emitted its final state; don't flash a stray failure.
+				return
+			}
+			log.Error().Err(ev.Err).Str("device", s.Device.Name).Msg("cast: session failed")
 			s.mgr.emitSession(s)
 			s.mgr.removeSession(s)
 			return
