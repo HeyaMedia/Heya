@@ -32,6 +32,8 @@ require (
 	tailscale.com v1.100.0
 )
 
+require github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+
 require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -68,7 +70,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect

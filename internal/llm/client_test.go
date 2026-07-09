@@ -109,6 +109,31 @@ func TestCompleteJSONSchemaViolationRetries(t *testing.T) {
 	}
 }
 
+func TestCompleteJSONCaseSensitivePropertyNames(t *testing.T) {
+	// "NAME" must NOT satisfy required "name" nor slip past
+	// additionalProperties:false — JSON Schema property names are
+	// case-sensitive even though Go's json.Unmarshal is not. The huma-based
+	// validator this replaced was case-insensitive and accepted this.
+	srv, calls := chatStub(t,
+		`{"NAME": "80s Action", "kind": "rules"}`,
+		`{"name": "80s Action", "kind": "rules"}`,
+	)
+	defer srv.Close()
+
+	var out testOut
+	err := NewClient(srv.URL, "").CompleteJSON(context.Background(),
+		Request{Messages: []Message{{Role: "user", Content: "go"}}}, "collection", testSchema, &out)
+	if err != nil {
+		t.Fatalf("CompleteJSON: %v", err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("case-mismatched key should have been rejected + retried; got %d request(s)", len(*calls))
+	}
+	if out.Name != "80s Action" {
+		t.Fatalf("unexpected out: %+v", out)
+	}
+}
+
 func TestCompleteJSONPersistentViolationFails(t *testing.T) {
 	srv, _ := chatStub(t,
 		`{"name": "x", "kind": "nonsense"}`,
