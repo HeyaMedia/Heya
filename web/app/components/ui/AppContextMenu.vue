@@ -19,7 +19,8 @@
   work, and reka only mounts the menu content lazily on right-click.
 -->
 <template>
-  <ContextMenuRoot v-model:open="open">
+  <slot v-if="disabled" />
+  <ContextMenuRoot v-else v-model:open="open">
     <ContextMenuTrigger as-child>
       <slot />
     </ContextMenuTrigger>
@@ -77,9 +78,12 @@ import {
 } from 'reka-ui'
 import type { ContextMenuItem as ContextMenuItemType } from '~~/shared/types'
 
-defineProps<{
+withDefaults(defineProps<{
   items: ContextMenuItemType[]
-}>()
+  disabled?: boolean
+}>(), {
+  disabled: false,
+})
 
 const open = defineModel<boolean>('open', { default: false })
 </script>

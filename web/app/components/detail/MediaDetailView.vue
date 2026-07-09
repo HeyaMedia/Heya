@@ -323,15 +323,20 @@ const invalidateContinueWatching = useInvalidateContinueWatching()
 async function toggleWatched() {
   if (!detail.value) return
   const { $heya } = useNuxtApp()
-  await $heya('/api/me/watched/media/{id}', {
-    method: 'POST',
-    path: { id: detail.value.media_item.id },
-    body: { watched: !isWatched.value } as any,
-  })
-  isWatched.value = !isWatched.value
-  // Marking watched removes it from Continue Watching (completed=true);
-  // unmarking deletes the progress row. Either way the home rail is stale.
-  invalidateContinueWatching()
+  const next = !isWatched.value
+  isWatched.value = next
+  try {
+    await $heya('/api/me/watched/media/{id}', {
+      method: 'POST',
+      path: { id: detail.value.media_item.id },
+      body: { watched: next } as any,
+    })
+    // Marking watched removes it from Continue Watching (completed=true);
+    // unmarking deletes the progress row. Either way the home rail is stale.
+    invalidateContinueWatching()
+  } catch {
+    isWatched.value = !next
+  }
 }
 
 // Lists — AddToListDialog owns loading/creation/toggling.

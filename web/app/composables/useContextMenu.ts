@@ -1,21 +1,21 @@
-import type { EnrichedMediaItem, ContextMenuItem, UserList } from '~~/shared/types'
+import type { MediaItem, ContextMenuItem, UserList } from '~~/shared/types'
 
 // Composes the standard "card right-click" menu shared between the Movies
 // and TV grid pages. The menu UI itself is now reka-driven (AppContextMenu);
 // this helper just builds the items array so the same set of actions stays
 // consistent across both grids.
 export interface CardContextOpts {
-  watchedSet: Set<number>
+  watchedSet?: Set<number>
   favoritedSet: Set<number>
   userLists: UserList[]
-  onToggleWatched: (id: number, watched: boolean) => void
+  onToggleWatched?: (id: number, watched: boolean, item: MediaItem) => void
   onToggleFavorite: (id: number, favorited: boolean) => void
   onAddToList: (listId: number, mediaId: number) => void
 }
 
 export function useCardContextItems() {
-  function buildItems(item: EnrichedMediaItem, opts: CardContextOpts): ContextMenuItem[] {
-    const isWatched = opts.watchedSet.has(item.id)
+  function buildItems(item: MediaItem, opts: CardContextOpts): ContextMenuItem[] {
+    const isWatched = opts.watchedSet?.has(item.id) ?? false
     const isFavorited = opts.favoritedSet.has(item.id)
 
     const listSubmenu: ContextMenuItem[] = opts.userLists
@@ -34,16 +34,19 @@ export function useCardContextItems() {
       },
       { separator: true, label: '' },
       {
-        label: isWatched ? 'Mark Unwatched' : 'Mark Watched',
-        icon: 'eye',
-        action: () => opts.onToggleWatched(item.id, !isWatched),
-      },
-      {
         label: isFavorited ? 'Remove from Loved' : 'Add to Loved',
         icon: isFavorited ? 'heartfill' : 'heart',
         action: () => opts.onToggleFavorite(item.id, !isFavorited),
       },
     ]
+
+    if (opts.watchedSet && opts.onToggleWatched) {
+      items.splice(2, 0, {
+        label: isWatched ? 'Mark Unwatched' : 'Mark Watched',
+        icon: 'eye',
+        action: () => opts.onToggleWatched?.(item.id, !isWatched, item),
+      })
+    }
 
     if (listSubmenu.length > 0) {
       items.push({ separator: true, label: '' })

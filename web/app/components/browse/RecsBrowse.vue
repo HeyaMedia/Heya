@@ -77,15 +77,17 @@
     </div>
 
     <div v-else-if="displayItems.length" class="grid-posters">
-      <NuxtLink v-for="(item, i) in displayItems" :key="item.id" :to="mediaUrl(item)" class="grid-tile card-tile">
-        <MediaCard
-          :idx="i"
-          :src="usePosterUrl(item.id)"
-          aspect="2/3"
-          :title="item.title"
-          :subtitle="item.reason || item.year"
-        />
-      </NuxtLink>
+      <AppContextMenu v-for="(item, i) in displayItems" :key="item.id" :items="contextItemsFor(item)">
+        <NuxtLink :to="mediaUrl(item as any)" class="grid-tile card-tile">
+          <MediaCard
+            :idx="i"
+            :src="usePosterUrl(item.id)"
+            aspect="2/3"
+            :title="item.title"
+            :subtitle="item.reason || item.year"
+          />
+        </NuxtLink>
+      </AppContextMenu>
     </div>
 
     <div v-else-if="!(searching && !mlReady)" class="rb-empty">
@@ -95,13 +97,17 @@
 </template>
 
 <script setup lang="ts">
+import type { MediaItem, UserList } from '~~/shared/types'
 import { DropdownMenuItem } from 'reka-ui'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
 // Hoisted per the useNuxtApp gotcha — never resolve $heya inside async bodies.
 const { $heya } = useNuxtApp()
+const queryClient = useQueryClient()
+const invalidateContinueWatching = useInvalidateContinueWatching()
+const { buildItems: buildCardCtxItems } = useCardContextItems()
 
 type RecItem = { id: number; title: string; slug: string; year?: string; media_type: string; reason?: string; available: boolean }
 
@@ -164,6 +170,84 @@ const searching = computed(() => activeQ.value.length > 1)
 const mlReady = computed(() => semanticQuery.data.value?.ml_ready ?? true)
 const displayItems = computed(() => (searching.value ? (semanticQuery.data.value?.items ?? []) : items.value))
 const displayLoading = computed(() => (searching.value ? semanticQuery.isPending.value : loading.value))
+
+const userListsQuery = useQuery({
+  queryKey: ['me', 'lists'],
+  queryFn: async () => (await $heya('/api/me/lists')) as UserList[],
+  staleTime: 1000 * 60,
+})
+const moviesStateQuery = useQuery({
+  queryKey: ['me', 'state', 'movies'],
+  queryFn: async () => fetchUserState('movies'),
+  staleTime: 1000 * 30,
+  enabled: props.section === 'movie',
+})
+const seriesStateQuery = useQuery({
+  queryKey: ['me', 'state', 'series'],
+  queryFn: async () => fetchUserState('series'),
+  staleTime: 1000 * 30,
+  enabled: props.section === 'tv',
+})
+
+const watchedSet = ref<Set<number>>(new Set())
+const favoritedSet = ref<Set<number>>(new Set())
+
+watchEffect(() => {
+  if (props.section === 'movie') {
+    watchedSet.value = new Set(moviesStateQuery.data.value?.watched ?? [])
+    favoritedSet.value = new Set(moviesStateQuery.data.value?.favorited ?? [])
+    return
+  }
+  watchedSet.value = new Set((seriesStateQuery.data.value?.shows ?? [])
+    .filter(s => s.total_episodes > 0 && s.watched_episodes >= s.total_episodes)
+    .map(s => s.media_item_id))
+  favoritedSet.value = new Set(seriesStateQuery.data.value?.favorited ?? [])
+})
+
+function contextItemsFor(item: RecItem) {
+  return buildCardCtxItems(item as unknown as MediaItem, {
+    watchedSet: watchedSet.value,
+    favoritedSet: favoritedSet.value,
+    userLists: userListsQuery.data.value ?? [],
+    onToggleWatched: async (id: number, watched: boolean) => {
+      try {
+        await $heya('/api/me/watched/media/{id}', {
+          method: 'POST',
+          path: { id },
+          body: { watched } as any,
+        })
+        const next = new Set(watchedSet.value)
+        if (watched) next.add(id)
+        else next.delete(id)
+        watchedSet.value = next
+        invalidateContinueWatching()
+        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+      } catch { /* ignore */ }
+    },
+    onToggleFavorite: async (id: number, favorited: boolean) => {
+      try {
+        await $heya('/api/me/favorites', {
+          method: 'POST',
+          body: { entity_type: 'media_item', entity_id: id } as any,
+        })
+        const next = new Set(favoritedSet.value)
+        if (favorited) next.add(id)
+        else next.delete(id)
+        favoritedSet.value = next
+        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+      } catch { /* ignore */ }
+    },
+    onAddToList: async (listId: number, mediaId: number) => {
+      try {
+        await $heya('/api/me/lists/{id}/items', {
+          method: 'POST',
+          path: { id: listId },
+          body: { media_item_id: mediaId } as any,
+        })
+      } catch { /* ignore */ }
+    },
+  })
+}
 
 const steerSummary = computed(() => {
   const bits: string[] = []

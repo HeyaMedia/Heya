@@ -307,7 +307,11 @@ watch(activeView, (v) => { if (v !== 'browse' && v !== 'recommendations') ensure
 
 const showStates = ref<Map<number, { total: number; watched: number }>>(new Map())
 const favoritedSet = ref<Set<number>>(new Set())
-const watchedSet = ref<Set<number>>(new Set())
+const fullyWatchedSet = computed(() => new Set(
+  [...showStates.value.entries()]
+    .filter(([, s]) => s.total > 0 && s.watched >= s.total)
+    .map(([id]) => id),
+))
 
 function isFullyWatched(id: number) {
   const s = showStates.value.get(id)
@@ -335,16 +339,21 @@ function isShowLibrary(library: Library) {
 
 const cardCtxOpts = computed(() => {
   return {
-    watchedSet: watchedSet.value,
+    watchedSet: fullyWatchedSet.value,
     favoritedSet: favoritedSet.value,
     userLists: userLists.value,
-    onToggleWatched: async (id: number, watched: boolean) => {
+    onToggleWatched: async (id: number, watched: boolean, item: any) => {
       try {
         await $heya('/api/me/watched/media/{id}', {
           method: 'POST',
           path: { id },
           body: { watched } as any,
         })
+        const current = showStates.value.get(id)
+        const total = current?.total ?? Math.max(0, (item as any).number_of_episodes ?? 0)
+        const next = new Map(showStates.value)
+        next.set(id, { total, watched: watched ? total : 0 })
+        showStates.value = next
         invalidateContinueWatching()
       } catch { /* ignore */ }
     },

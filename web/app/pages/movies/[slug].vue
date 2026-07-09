@@ -214,26 +214,30 @@
           </div>
         </div>
         <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
-          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
-            <MediaCard
-              :idx="r.id"
-              :src="recPosterUrl(r)"
-              aspect="2/3"
-              :title="r.title"
-              :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
-            />
-          </NuxtLink>
+          <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+              <MediaCard
+                :idx="r.id"
+                :src="recPosterUrl(r)"
+                aspect="2/3"
+                :title="r.title"
+                :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+              />
+            </NuxtLink>
+          </AppContextMenu>
         </div>
         <div v-else class="rec-grid">
-          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
-            <MediaCard
-              :idx="r.id"
-              :src="recPosterUrl(r)"
-              aspect="2/3"
-              :title="r.title"
-              :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
-            />
-          </NuxtLink>
+          <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+              <MediaCard
+                :idx="r.id"
+                :src="recPosterUrl(r)"
+                aspect="2/3"
+                :title="r.title"
+                :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+              />
+            </NuxtLink>
+          </AppContextMenu>
         </div>
       </div>
 
@@ -252,7 +256,7 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaDetail, MediaExtra, StreamInfoResponse } from '~~/shared/types'
+import type { MediaDetail, MediaExtra, MediaItem, StreamInfoResponse, UserList } from '~~/shared/types'
 import { useQuery } from '@tanstack/vue-query'
 
 const route = useRoute()
@@ -434,25 +438,108 @@ async function toggleFavorite() {
 }
 
 const invalidateContinueWatching = useInvalidateContinueWatching()
+const recUserLists = ref<UserList[]>([])
+const recWatchedSet = ref<Set<number>>(new Set())
+const recFavoritedSet = ref<Set<number>>(new Set())
+const { buildItems: buildCardCtxItems } = useCardContextItems()
 async function toggleWatched() {
   if (!detail.value) return
-  const { $heya } = useNuxtApp()
-  await $heya('/api/me/watched/media/{id}', {
-    method: 'POST',
-    path: { id: detail.value.media_item.id },
-    body: { watched: !isWatched.value } as any,
-  })
-  isWatched.value = !isWatched.value
-  invalidateContinueWatching()
+  const next = !isWatched.value
+  const id = detail.value.media_item.id
+  isWatched.value = next
+  const local = new Set(recWatchedSet.value)
+  if (next) local.add(id)
+  else local.delete(id)
+  recWatchedSet.value = local
+  try {
+    await $heya('/api/me/watched/media/{id}', {
+      method: 'POST',
+      path: { id },
+      body: { watched: next } as any,
+    })
+    invalidateContinueWatching()
+  } catch {
+    isWatched.value = !next
+    const rollback = new Set(recWatchedSet.value)
+    if (next) rollback.delete(id)
+    else rollback.add(id)
+    recWatchedSet.value = rollback
+  }
 }
 
 async function loadState() {
   if (!detail.value) return
   try {
-    const st = await fetchUserState('movies')
-    isFavorited.value = st.favorited.includes(detail.value.media_item.id)
-    isWatched.value = st.watched.includes(detail.value.media_item.id)
+    const [stateRes, listsRes] = await Promise.allSettled([
+      fetchUserState('movies'),
+      $heya('/api/me/lists') as Promise<UserList[]>,
+    ])
+    if (stateRes.status === 'fulfilled') {
+      const st = stateRes.value
+      recFavoritedSet.value = new Set(st.favorited || [])
+      recWatchedSet.value = new Set(st.watched || [])
+      isFavorited.value = recFavoritedSet.value.has(detail.value.media_item.id)
+      isWatched.value = recWatchedSet.value.has(detail.value.media_item.id)
+    }
+    if (listsRes.status === 'fulfilled') recUserLists.value = listsRes.value
   } catch { /* empty */ }
+}
+
+function recToMediaItem(r: any): MediaItem {
+  return {
+    id: r.local_media_item_id,
+    title: r.title,
+    slug: r.local_slug ?? undefined,
+    year: r.year ?? '',
+    media_type: r.media_type || 'movie',
+    available: true,
+  } as unknown as MediaItem
+}
+
+function recContextItems(r: any) {
+  if (!r.local_media_item_id) return []
+  return buildCardCtxItems(recToMediaItem(r), {
+    watchedSet: recWatchedSet.value,
+    favoritedSet: recFavoritedSet.value,
+    userLists: recUserLists.value,
+    onToggleWatched: async (id: number, watched: boolean) => {
+      try {
+        await $heya('/api/me/watched/media/{id}', {
+          method: 'POST',
+          path: { id },
+          body: { watched } as any,
+        })
+        const next = new Set(recWatchedSet.value)
+        if (watched) next.add(id)
+        else next.delete(id)
+        recWatchedSet.value = next
+        if (id === detail.value?.media_item.id) isWatched.value = watched
+        invalidateContinueWatching()
+      } catch { /* ignore */ }
+    },
+    onToggleFavorite: async (id: number, favorited: boolean) => {
+      try {
+        await $heya('/api/me/favorites', {
+          method: 'POST',
+          body: { entity_type: 'media_item', entity_id: id } as any,
+        })
+        const next = new Set(recFavoritedSet.value)
+        if (favorited) next.add(id)
+        else next.delete(id)
+        recFavoritedSet.value = next
+        if (id === detail.value?.media_item.id) isFavorited.value = favorited
+      } catch { /* ignore */ }
+    },
+    onAddToList: async (listId: number, mediaId: number) => {
+      try {
+        await $heya('/api/me/lists/{id}/items', {
+          method: 'POST',
+          path: { id: listId },
+          body: { media_item_id: mediaId } as any,
+        })
+      } catch { /* ignore */ }
+    },
+  })
 }
 
 // User lists — AddToListDialog owns loading/creation/toggling.

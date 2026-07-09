@@ -12,41 +12,49 @@
       </div>
     </div>
     <div class="row-scroll" ref="scrollEl">
-      <div
+      <AppContextMenu
         v-for="(item, i) in items"
         :key="item.key ?? item.id"
-        class="card-tile"
-        :class="{ unavailable: item.available === false }"
-        :style="{ width: `${tileWidth || 168}px`, flexShrink: 0 }"
-        @click="item.available !== false && $emit('tile', item)"
+        :items="contextMenuItems(item)"
+        :disabled="!contextItems || contextMenuItems(item).length === 0"
       >
-        <MediaCard
-          :idx="i"
-          :src="item.poster_src ?? usePosterUrl(item.id)"
-          :title="item.title"
-          :subtitle="item.year || item.sub"
-          :aspect="aspect || '2/3'"
-          :missing="item.available === false"
-        />
-      </div>
+        <div
+          class="card-tile"
+          :class="{ unavailable: item.available === false }"
+          :style="{ width: `${tileWidth || 168}px`, flexShrink: 0 }"
+          @click="item.available !== false && $emit('tile', item)"
+        >
+          <MediaCard
+            :idx="i"
+            :src="item.poster_src ?? usePosterUrl(item.id)"
+            :title="item.title"
+            :subtitle="item.year || item.sub"
+            :aspect="aspect || '2/3'"
+            :missing="item.available === false"
+          />
+        </div>
+      </AppContextMenu>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import type { MediaItem } from '~~/shared/types'
+import type { ContextMenuItem, MediaItem } from '~~/shared/types'
 
-defineProps<{
+type RowItem = MediaItem & { sub?: string; poster_src?: string; key?: string }
+
+const props = defineProps<{
   title: string
   subtitle?: string
   // `poster_src` overrides the default `/api/media/{id}/image/poster` lookup —
   // needed for album rows whose covers live under a different endpoint.
   // `key` overrides the v-for key — needed for rows where the same media
   // item can appear more than once (e.g. two episode drops of one show).
-  items: (MediaItem & { sub?: string; poster_src?: string; key?: string })[]
+  items: RowItem[]
   tileWidth?: number
   aspect?: string
   more?: string
+  contextItems?: (item: RowItem) => ContextMenuItem[]
 }>()
 
 defineEmits<{
@@ -55,6 +63,10 @@ defineEmits<{
 }>()
 
 const scrollEl = ref<HTMLElement>()
+
+function contextMenuItems(item: RowItem): ContextMenuItem[] {
+  return props.contextItems?.(item) ?? []
+}
 
 function scrollBy(dir: number) {
   if (!scrollEl.value) return

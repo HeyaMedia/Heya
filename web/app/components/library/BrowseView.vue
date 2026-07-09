@@ -20,6 +20,7 @@
         title="For You"
         subtitle="Ranked by your taste"
         :items="forYouItems"
+        :context-items="contextItemsFor"
         more="See all"
         @tile="go"
         @more="navigateTo(section === 'movie' ? '/movies/recommendations' : '/tv/recommendations')"
@@ -30,6 +31,7 @@
         :title="section === 'tv' ? 'Recently Added TV' : 'Recently Added Films'"
         :subtitle="section === 'tv' ? 'New shows, seasons & episodes' : 'Across all libraries'"
         :items="recentAdded"
+        :context-items="contextItemsFor"
         @tile="go"
       />
 
@@ -38,6 +40,7 @@
         :title="section === 'tv' ? 'Recently Watched' : 'Recently Watched Films'"
         subtitle="Pick up where you left off"
         :items="recentWatched"
+        :context-items="contextItemsFor"
         @tile="go"
       />
 
@@ -47,6 +50,7 @@
         :title="rail.title"
         :subtitle="rail.subtitle"
         :items="toRow(rail.items)"
+        :context-items="contextItemsFor"
         @tile="go"
       />
 
@@ -59,13 +63,16 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaItem } from '~~/shared/types'
+import type { MediaItem, UserList } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
 const { $heya } = useNuxtApp()
+const queryClient = useQueryClient()
+const invalidateContinueWatching = useInvalidateContinueWatching()
+const { buildItems: buildCardCtxItems } = useCardContextItems()
 
 // Server-ranked discovery rails (genre/actor affinity, top-unwatched,
 // rediscover, local TMDB recs). One typed shape mirroring service.RecRailItem.
@@ -182,6 +189,84 @@ const recentWatched = computed<MediaItem[]>(() => {
   return (recentEpisodesQuery.data.value ?? []).map(episodeToRowItem)
 })
 
+const userListsQuery = useQuery({
+  queryKey: ['me', 'lists'],
+  queryFn: async () => (await $heya('/api/me/lists')) as UserList[],
+  staleTime: 1000 * 60,
+})
+const moviesStateQuery = useQuery({
+  queryKey: ['me', 'state', 'movies'],
+  queryFn: async () => fetchUserState('movies'),
+  staleTime: 1000 * 30,
+  enabled: props.section === 'movie',
+})
+const seriesStateQuery = useQuery({
+  queryKey: ['me', 'state', 'series'],
+  queryFn: async () => fetchUserState('series'),
+  staleTime: 1000 * 30,
+  enabled: props.section === 'tv',
+})
+
+const watchedSet = ref<Set<number>>(new Set())
+const favoritedSet = ref<Set<number>>(new Set())
+
+watchEffect(() => {
+  if (props.section === 'movie') {
+    watchedSet.value = new Set(moviesStateQuery.data.value?.watched ?? [])
+    favoritedSet.value = new Set(moviesStateQuery.data.value?.favorited ?? [])
+    return
+  }
+  watchedSet.value = new Set((seriesStateQuery.data.value?.shows ?? [])
+    .filter(s => s.total_episodes > 0 && s.watched_episodes >= s.total_episodes)
+    .map(s => s.media_item_id))
+  favoritedSet.value = new Set(seriesStateQuery.data.value?.favorited ?? [])
+})
+
+function contextItemsFor(item: MediaItem) {
+  return buildCardCtxItems(item, {
+    watchedSet: watchedSet.value,
+    favoritedSet: favoritedSet.value,
+    userLists: userListsQuery.data.value ?? [],
+    onToggleWatched: async (id: number, watched: boolean) => {
+      try {
+        await $heya('/api/me/watched/media/{id}', {
+          method: 'POST',
+          path: { id },
+          body: { watched } as any,
+        })
+        const next = new Set(watchedSet.value)
+        if (watched) next.add(id)
+        else next.delete(id)
+        watchedSet.value = next
+        invalidateContinueWatching()
+        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+      } catch { /* ignore */ }
+    },
+    onToggleFavorite: async (id: number, favorited: boolean) => {
+      try {
+        await $heya('/api/me/favorites', {
+          method: 'POST',
+          body: { entity_type: 'media_item', entity_id: id } as any,
+        })
+        const next = new Set(favoritedSet.value)
+        if (favorited) next.add(id)
+        else next.delete(id)
+        favoritedSet.value = next
+        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+      } catch { /* ignore */ }
+    },
+    onAddToList: async (listId: number, mediaId: number) => {
+      try {
+        await $heya('/api/me/lists/{id}/items', {
+          method: 'POST',
+          path: { id: listId },
+          body: { media_item_id: mediaId } as any,
+        })
+      } catch { /* ignore */ }
+    },
+  })
+}
+
 // Watched episode → rail card: show poster (media_item_id) + episode subtitle;
 // `key` is the episode id so the same show can appear once per watched episode.
 function episodeToRowItem(e: RecentEpisode): MediaItem {
@@ -273,6 +358,7 @@ useLiveRefresh([
     ],
   },
   { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['me', 'watch', 'recent-episodes'], ['recommended', props.section], ['for-you', props.section]] },
+  { events: ['media.watched', 'media.favorited'], keys: [['me', 'state', props.section === 'movie' ? 'movies' : 'series']] },
 ])
 
 function mediaTypeInSection(mediaType: string, section: 'movie' | 'tv') {

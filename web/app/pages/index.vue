@@ -33,6 +33,7 @@
         title="For You"
         subtitle="From what you've watched & loved"
         :items="recommendedItems"
+        :context-items="homeMediaContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @more="navigateTo('/movies/recommendations')"
@@ -43,6 +44,7 @@
         title="Recently Added Films"
         subtitle="Across all libraries"
         :items="recentMovies"
+        :context-items="homeMediaContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @more="navigateTo('/movies')"
@@ -53,6 +55,7 @@
         title="Recently Added TV"
         subtitle="New shows, seasons & episodes"
         :items="recentTVItems"
+        :context-items="homeMediaContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @more="navigateTo('/tv')"
@@ -63,6 +66,7 @@
         title="Recently Added Albums"
         subtitle="Across all libraries"
         :items="recentAlbums"
+        :context-items="homeAlbumContextItems"
         :aspect="'1/1'"
         :tile-width="168"
         more="See all"
@@ -75,6 +79,7 @@
         title="Recently Added Artists"
         subtitle="New & updated artists"
         :items="recentArtists"
+        :context-items="homeArtistContextItems"
         :aspect="'1/1'"
         :tile-width="168"
         more="See all"
@@ -87,6 +92,7 @@
         title="Recently Added Books"
         subtitle="Across all libraries"
         :items="recentBooks"
+        :context-items="homeBookContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @more="navigateTo('/books')"
@@ -105,18 +111,20 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaItem, MediaDetail, Movie } from '~~/shared/types'
+import type { ContextMenuItem, MediaItem, MediaDetail, Movie, UserList } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 
 const { $heya } = useNuxtApp()
 const queryClient = useQueryClient()
+const invalidateContinueWatching = useInvalidateContinueWatching()
 
 // Music rows show recent ALBUMS plus recent ARTISTS. Items are normalized to
 // MediaItem-ish so ContentRow renders them, with poster_src set to the
 // album-cover endpoint and the click handler routing to album detail.
-type AlbumRowItem = MediaItem & { artist_slug: string; album_slug: string }
+type AlbumRowItem = MediaItem & { artist_slug: string; album_slug: string; artist_name?: string }
+type ArtistRowItem = MediaItem & { artist_id: number }
 
 // The TV rail is Plex-style grouped file arrivals, not bare shows: a brand-new
 // show is one "New show" card, a season drop one "New season" card, and a
@@ -205,10 +213,31 @@ const forYouQuery = useQuery({
   staleTime: 1000 * 60 * 10,
 })
 
+const userListsQuery = useQuery({
+  queryKey: ['me', 'lists'],
+  queryFn: async () => (await $heya('/api/me/lists')) as UserList[],
+  staleTime: 1000 * 60,
+})
+const movieStateQuery = useQuery({
+  queryKey: ['me', 'state', 'movies'],
+  queryFn: async () => fetchUserState('movies'),
+  staleTime: 1000 * 30,
+})
+const seriesStateQuery = useQuery({
+  queryKey: ['me', 'state', 'series'],
+  queryFn: async () => fetchUserState('series'),
+  staleTime: 1000 * 30,
+})
+const mediaStateQuery = useQuery({
+  queryKey: ['me', 'media-state'],
+  queryFn: async () => (await $heya('/api/me/media-state')) as { watched: number[]; favorited: number[] },
+  staleTime: 1000 * 30,
+})
+
 const recentMovies = computed<MediaItem[]>(() => moviesQuery.data.value ?? [])
 const recentBooks = computed<MediaItem[]>(() => booksQuery.data.value ?? [])
 const recentAlbums = computed<AlbumRowItem[]>(() => musicHomeQuery.data.value?.albums ?? [])
-const recentArtists = computed<MediaItem[]>(() => musicHomeQuery.data.value?.artists ?? [])
+const recentArtists = computed<ArtistRowItem[]>(() => musicHomeQuery.data.value?.artists ?? [])
 
 // Rail items: one card per grouped TV event (a show may appear twice).
 const recentTVItems = computed<MediaItem[]>(() => (tvQuery.data.value ?? []).map(tvEntryToRowItem))
@@ -338,6 +367,7 @@ function albumToRowItem(al: {
     slug: al.slug,
     artist_slug: al.artist_slug,
     album_slug: al.slug,
+    artist_name: al.artist_name,
     available: al.available,
     poster_src: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
   } as unknown as AlbumRowItem
@@ -379,7 +409,7 @@ function tvEntrySub(e: RecentTVEntry): string {
 
 // Artist event → rail card. id is the artist's media item id so the default
 // /api/media/{id}/image/poster lookup and mediaUrl routing both work.
-function artistToRowItem(ar: RecentArtistEntry): MediaItem {
+function artistToRowItem(ar: RecentArtistEntry): ArtistRowItem {
   const sub = ar.kind === 'new'
     ? 'New artist'
     : ar.new_album_count > 1
@@ -392,8 +422,119 @@ function artistToRowItem(ar: RecentArtistEntry): MediaItem {
     sub,
     media_type: 'music',
     slug: ar.slug,
+    artist_id: ar.id,
     available: true,
-  } as unknown as MediaItem
+  } as unknown as ArtistRowItem
+}
+
+const homeMovieWatchedSet = ref<Set<number>>(new Set())
+const homeShowWatchedSet = ref<Set<number>>(new Set())
+const homeFavoritedSet = ref<Set<number>>(new Set())
+const { buildItems: buildCardCtxItems } = useCardContextItems()
+const musicActions = useMusicActions()
+
+watchEffect(() => {
+  homeMovieWatchedSet.value = new Set(movieStateQuery.data.value?.watched ?? [])
+  homeShowWatchedSet.value = new Set((seriesStateQuery.data.value?.shows ?? [])
+    .filter(s => s.total_episodes > 0 && s.watched_episodes >= s.total_episodes)
+    .map(s => s.media_item_id))
+  homeFavoritedSet.value = new Set([
+    ...(mediaStateQuery.data.value?.favorited ?? []),
+    ...(movieStateQuery.data.value?.favorited ?? []),
+    ...(seriesStateQuery.data.value?.favorited ?? []),
+  ])
+})
+
+function watchedSetFor(item: MediaItem): Set<number> | undefined {
+  if (item.media_type === 'movie') return homeMovieWatchedSet.value
+  if (item.media_type === 'tv' || item.media_type === 'anime') return homeShowWatchedSet.value
+  return undefined
+}
+
+function homeMediaContextItems(item: MediaItem): ContextMenuItem[] {
+  const watchedSet = watchedSetFor(item)
+  return buildCardCtxItems(item, {
+    watchedSet,
+    favoritedSet: homeFavoritedSet.value,
+    userLists: userListsQuery.data.value ?? [],
+    onToggleWatched: watchedSet ? toggleHomeWatched : undefined,
+    onToggleFavorite: toggleHomeFavorite,
+    onAddToList: addHomeItemToList,
+  })
+}
+
+function homeBookContextItems(item: MediaItem): ContextMenuItem[] {
+  return buildCardCtxItems(item, {
+    favoritedSet: homeFavoritedSet.value,
+    userLists: userListsQuery.data.value ?? [],
+    onToggleFavorite: toggleHomeFavorite,
+    onAddToList: addHomeItemToList,
+  })
+}
+
+function homeAlbumContextItems(item: MediaItem & { artist_slug?: string; album_slug?: string; artist_name?: string; sub?: string }): ContextMenuItem[] {
+  if (!item.artist_slug || !item.album_slug) return []
+  return musicActions.forAlbum({
+    id: item.id,
+    title: item.title,
+    artist_slug: item.artist_slug,
+    album_slug: item.album_slug,
+    artist_name: item.artist_name ?? item.sub,
+    available: item.available,
+  })
+}
+
+function homeArtistContextItems(item: MediaItem & { artist_id?: number }): ContextMenuItem[] {
+  if (!item.artist_id) return []
+  return musicActions.forArtist({
+    id: item.artist_id,
+    name: item.title,
+    slug: item.slug,
+    media_item_id: item.id,
+    available: item.available,
+  })
+}
+
+async function toggleHomeWatched(id: number, watched: boolean, item: MediaItem) {
+  const setRef = item.media_type === 'movie' ? homeMovieWatchedSet : homeShowWatchedSet
+  try {
+    await $heya('/api/me/watched/media/{id}', {
+      method: 'POST',
+      path: { id },
+      body: { watched } as any,
+    })
+    const next = new Set(setRef.value)
+    if (watched) next.add(id)
+    else next.delete(id)
+    setRef.value = next
+    invalidateContinueWatching()
+    queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+  } catch { /* ignore */ }
+}
+
+async function toggleHomeFavorite(id: number, favorited: boolean) {
+  try {
+    await $heya('/api/me/favorites', {
+      method: 'POST',
+      body: { entity_type: 'media_item', entity_id: id } as any,
+    })
+    const next = new Set(homeFavoritedSet.value)
+    if (favorited) next.add(id)
+    else next.delete(id)
+    homeFavoritedSet.value = next
+    queryClient.invalidateQueries({ queryKey: ['me', 'media-state'] })
+    queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+  } catch { /* ignore */ }
+}
+
+async function addHomeItemToList(listId: number, mediaId: number) {
+  try {
+    await $heya('/api/me/lists/{id}/items', {
+      method: 'POST',
+      path: { id: listId },
+      body: { media_item_id: mediaId } as any,
+    })
+  } catch { /* ignore */ }
 }
 
 // Hero details — resolves movie/tv detail for each hero tile so the
@@ -468,6 +609,7 @@ useLiveRefresh([
   { events: ['media.added', 'media.updated'], filter: byMediaType('tv', 'anime'), keys: [['media', 'recent', 'tv']] },
   { events: ['media.added', 'media.updated'], filter: byMediaType('book'), keys: [['media', 'recent', 'book']] },
   { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['home', 'recent-albums']] },
+  { events: ['media.watched'], keys: [['me', 'state'], ['me', 'media-state'], ['me', 'watch', 'continue'], ['me', 'watch', 'recent']] },
 ])
 </script>
 

@@ -114,39 +114,43 @@
           <h3 class="section-title-lg">Seasons</h3>
         </div>
         <div class="seasons-grid">
-          <NuxtLink
+          <AppContextMenu
             v-for="s in displaySeasons"
             :key="s.season_number"
-            :to="seasonUrl(s)"
-            class="season-card"
+            :items="seasonContextItems(s)"
           >
-            <MediaCard
-              :idx="s.season_number"
-              :src="seasonPosterUrl(s)"
-              aspect="2/3"
-              :title="seasonLabel(s)"
-              :subtitle="seasonSubtitle(s)"
-              :progress-pct="seasonWatchInfo(s) ? seasonWatchPct(s) : 0"
+            <NuxtLink
+              :to="seasonUrl(s)"
+              class="season-card"
             >
-              <template #badges>
-                <div v-if="seasonWatchInfo(s)" class="season-badge" :class="{ complete: seasonWatchInfo(s)!.remaining === 0 }">
-                  <Icon v-if="seasonWatchInfo(s)!.remaining === 0" name="check" :size="10" />
-                  <span v-else>{{ seasonWatchInfo(s)!.remaining }}</span>
-                </div>
-                <div class="season-overlay">
-                  <button class="season-action" :class="{ loved: isSeasonFavorited(s) }" @click.stop.prevent="toggleSeasonFavorite(s)">
-                    <Icon :name="isSeasonFavorited(s) ? 'heartfill' : 'heart'" :size="14" />
-                  </button>
-                  <button class="season-action" :class="{ watched: seasonFullyWatched(s) }" @click.stop.prevent="toggleSeasonWatched(s)">
-                    <Icon name="check" :size="14" />
-                  </button>
-                  <button class="season-action" @click.stop.prevent="openSeasonLightbox(s)">
-                    <Icon name="expand" :size="14" />
-                  </button>
-                </div>
-              </template>
-            </MediaCard>
-          </NuxtLink>
+              <MediaCard
+                :idx="s.season_number"
+                :src="seasonPosterUrl(s)"
+                aspect="2/3"
+                :title="seasonLabel(s)"
+                :subtitle="seasonSubtitle(s)"
+                :progress-pct="seasonWatchInfo(s) ? seasonWatchPct(s) : 0"
+              >
+                <template #badges>
+                  <div v-if="seasonWatchInfo(s)" class="season-badge" :class="{ complete: seasonWatchInfo(s)!.remaining === 0 }">
+                    <Icon v-if="seasonWatchInfo(s)!.remaining === 0" name="check" :size="10" />
+                    <span v-else>{{ seasonWatchInfo(s)!.remaining }}</span>
+                  </div>
+                  <div class="season-overlay">
+                    <button class="season-action" :class="{ loved: isSeasonFavorited(s) }" @click.stop.prevent="toggleSeasonFavorite(s)">
+                      <Icon :name="isSeasonFavorited(s) ? 'heartfill' : 'heart'" :size="14" />
+                    </button>
+                    <button class="season-action" :class="{ watched: seasonFullyWatched(s) }" @click.stop.prevent="toggleSeasonWatched(s)">
+                      <Icon name="check" :size="14" />
+                    </button>
+                    <button class="season-action" @click.stop.prevent="openSeasonLightbox(s)">
+                      <Icon name="expand" :size="14" />
+                    </button>
+                  </div>
+                </template>
+              </MediaCard>
+            </NuxtLink>
+          </AppContextMenu>
         </div>
       </div>
 
@@ -205,26 +209,30 @@
           </div>
         </div>
         <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
-          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
-            <MediaCard
-              :idx="r.id"
-              :src="recPosterUrl(r)"
-              aspect="2/3"
-              :title="r.title"
-              :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
-            />
-          </NuxtLink>
+          <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+              <MediaCard
+                :idx="r.id"
+                :src="recPosterUrl(r)"
+                aspect="2/3"
+                :title="r.title"
+                :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+              />
+            </NuxtLink>
+          </AppContextMenu>
         </div>
         <div v-else class="rec-grid">
-          <NuxtLink v-for="r in detail.recommendations" :key="r.id" :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
-            <MediaCard
-              :idx="r.id"
-              :src="recPosterUrl(r)"
-              aspect="2/3"
-              :title="r.title"
-              :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
-            />
-          </NuxtLink>
+          <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+              <MediaCard
+                :idx="r.id"
+                :src="recPosterUrl(r)"
+                aspect="2/3"
+                :title="r.title"
+                :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+              />
+            </NuxtLink>
+          </AppContextMenu>
         </div>
       </div>
 
@@ -243,7 +251,7 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaDetail } from '~~/shared/types'
+import type { ContextMenuItem, MediaDetail, MediaItem, UserList } from '~~/shared/types'
 import { useQuery } from '@tanstack/vue-query'
 
 const route = useRoute()
@@ -481,6 +489,7 @@ async function toggleSeasonFavorite(s: any) {
   }) as { favorited: boolean }
   if (res.favorited) seasonFavorites.value.add(s.id)
   else seasonFavorites.value.delete(s.id)
+  seasonFavorites.value = new Set(seasonFavorites.value)
 }
 
 // Season watched tracking
@@ -521,6 +530,10 @@ function seasonFullyWatched(s: any): boolean {
 }
 
 const invalidateContinueWatching = useInvalidateContinueWatching()
+const recUserLists = ref<UserList[]>([])
+const recWatchedSet = ref<Set<number>>(new Set())
+const recFavoritedSet = ref<Set<number>>(new Set())
+const { buildItems: buildCardCtxItems } = useCardContextItems()
 
 async function toggleSeasonWatched(s: any) {
   const watched = seasonFullyWatched(s)
@@ -554,6 +567,107 @@ function seasonUrl(s: any) {
   return `/tv/${slug.value}/season/${num}`
 }
 
+function seasonContextItems(s: any): ContextMenuItem[] {
+  const watched = seasonFullyWatched(s)
+  const loved = isSeasonFavorited(s)
+  return [
+    {
+      label: 'View Season',
+      icon: 'info',
+      action: () => navigateTo(seasonUrl(s)),
+    },
+    { label: '', separator: true },
+    {
+      label: watched ? 'Mark Season Unwatched' : 'Mark Season Watched',
+      icon: 'eye',
+      action: () => toggleSeasonWatched(s),
+    },
+    {
+      label: loved ? 'Remove from Loved' : 'Add to Loved',
+      icon: loved ? 'heartfill' : 'heart',
+      action: () => toggleSeasonFavorite(s),
+    },
+    {
+      label: 'View Poster',
+      icon: 'expand',
+      action: () => openSeasonLightbox(s),
+    },
+  ]
+}
+
+function recToMediaItem(r: any): MediaItem {
+  return {
+    id: r.local_media_item_id,
+    title: r.title,
+    slug: r.local_slug ?? undefined,
+    year: r.year ?? '',
+    media_type: r.media_type || 'tv',
+    available: true,
+  } as unknown as MediaItem
+}
+
+function recContextItems(r: any) {
+  if (!r.local_media_item_id) return []
+  return buildCardCtxItems(recToMediaItem(r), {
+    watchedSet: recWatchedSet.value,
+    favoritedSet: recFavoritedSet.value,
+    userLists: recUserLists.value,
+    onToggleWatched: async (id: number, watched: boolean) => {
+      try {
+        await $heya('/api/me/watched/media/{id}', {
+          method: 'POST',
+          path: { id },
+          body: { watched } as any,
+        })
+        const next = new Set(recWatchedSet.value)
+        if (watched) next.add(id)
+        else next.delete(id)
+        recWatchedSet.value = next
+        if (id === detail.value?.media_item.id) await loadState()
+        invalidateContinueWatching()
+      } catch { /* ignore */ }
+    },
+    onToggleFavorite: async (id: number, favorited: boolean) => {
+      try {
+        await $heya('/api/me/favorites', {
+          method: 'POST',
+          body: { entity_type: 'media_item', entity_id: id } as any,
+        })
+        const next = new Set(recFavoritedSet.value)
+        if (favorited) next.add(id)
+        else next.delete(id)
+        recFavoritedSet.value = next
+        if (id === detail.value?.media_item.id) isFavorited.value = favorited
+      } catch { /* ignore */ }
+    },
+    onAddToList: async (listId: number, mediaId: number) => {
+      try {
+        await $heya('/api/me/lists/{id}/items', {
+          method: 'POST',
+          path: { id: listId },
+          body: { media_item_id: mediaId } as any,
+        })
+      } catch { /* ignore */ }
+    },
+  })
+}
+
+async function loadRecommendationContextState() {
+  try {
+    const [stateRes, listsRes] = await Promise.allSettled([
+      fetchUserState('series'),
+      $heya('/api/me/lists') as Promise<UserList[]>,
+    ])
+    if (stateRes.status === 'fulfilled') {
+      recWatchedSet.value = new Set((stateRes.value.shows || [])
+        .filter(s => s.total_episodes > 0 && s.watched_episodes >= s.total_episodes)
+        .map(s => s.media_item_id))
+      recFavoritedSet.value = new Set(stateRes.value.favorited || [])
+    }
+    if (listsRes.status === 'fulfilled') recUserLists.value = listsRes.value
+  } catch { /* ignore */ }
+}
+
 function seasonPosterUrl(s: any) {
   return `/api/media/${detail.value?.media_item.id}/image/poster?label=season-${s.season_number}`
 }
@@ -581,6 +695,7 @@ watch(detail, async (d) => {
   await nextTick()
   seedCarousel()
   loadState()
+  loadRecommendationContextState()
   loadUpNext()
   checkRecsOverflow()
 }, { immediate: true })

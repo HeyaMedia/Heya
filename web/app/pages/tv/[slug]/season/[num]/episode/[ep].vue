@@ -246,6 +246,7 @@ async function toggleWatched() {
     })
     watchedEpisodes.value.add(episode.value.id)
   }
+  watchedEpisodes.value = new Set(watchedEpisodes.value)
   invalidateContinueWatching()
 }
 

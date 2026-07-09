@@ -220,34 +220,38 @@
         <span class="more">{{ group.albums.length }}</span>
       </div>
       <div class="discog-grid">
-        <NuxtLink
+        <AppContextMenu
           v-for="album in group.albums"
           :key="album.id"
-          :to="`/music/artist/${route.params.slug}/${album.slug}`"
-          class="discog-tile card-tile"
-          :class="{ 'discog-missing': !albumPlayable(album), 'discog-active': isAlbumActive(album) }"
-          :draggable="!isCoarse"
-          @dragstart="onDragStart($event, discogDragPayload(album))"
-          @dragend="onDragEnd"
+          :items="discogMenuItems(album)"
         >
-          <div class="discog-art-wrap">
-            <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="discog-art" />
-            <MediaMissingBadge v-if="!albumPlayable(album)" />
-            <!-- Now-playing badge: this album has the currently-playing track. -->
-            <div v-if="isAlbumActive(album)" class="discog-nowplaying"><VuMeter :playing="playing" /></div>
-            <button v-if="albumPlayable(album)" class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
-              <Icon name="play" :size="14" />
-            </button>
-          </div>
-          <div class="discog-meta">
-            <div class="discog-title">{{ album.title }}</div>
-            <div class="discog-sub">
-              {{ album.year || '—' }}
-              <span v-if="album.tracks.length" class="dot">·</span>
-              <span v-if="album.tracks.length">{{ album.tracks.length }} tracks</span>
+          <NuxtLink
+            :to="`/music/artist/${route.params.slug}/${album.slug}`"
+            class="discog-tile card-tile"
+            :class="{ 'discog-missing': !albumPlayable(album), 'discog-active': isAlbumActive(album) }"
+            :draggable="!isCoarse"
+            @dragstart="onDragStart($event, discogDragPayload(album))"
+            @dragend="onDragEnd"
+          >
+            <div class="discog-art-wrap">
+              <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="discog-art" />
+              <MediaMissingBadge v-if="!albumPlayable(album)" />
+              <!-- Now-playing badge: this album has the currently-playing track. -->
+              <div v-if="isAlbumActive(album)" class="discog-nowplaying"><VuMeter :playing="playing" /></div>
+              <button v-if="albumPlayable(album)" class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
+                <Icon name="play" :size="14" />
+              </button>
             </div>
-          </div>
-        </NuxtLink>
+            <div class="discog-meta">
+              <div class="discog-title">{{ album.title }}</div>
+              <div class="discog-sub">
+                {{ album.year || '—' }}
+                <span v-if="album.tracks.length" class="dot">·</span>
+                <span v-if="album.tracks.length">{{ album.tracks.length }} tracks</span>
+              </div>
+            </div>
+          </NuxtLink>
+        </AppContextMenu>
       </div>
     </section>
 
@@ -702,6 +706,18 @@ function ttMenuItems(t: ArtistTopTrackRow) {
     artist_slug: artistSlugForQueries.value || undefined,
     album_slug: t.local_album_slug,
     available: isTopTrackPlayable(t),
+  })
+}
+
+function discogMenuItems(album: AlbumView) {
+  return trackMenuActions.forAlbum({
+    id: album.id,
+    title: album.title,
+    artist_id: artist.value?.id,
+    artist_name: artist.value?.name ?? '',
+    artist_slug: artistSlugForQueries.value || route.params.slug as string,
+    album_slug: album.slug,
+    available: albumPlayable(album),
   })
 }
 

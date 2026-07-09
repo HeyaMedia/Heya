@@ -63,24 +63,28 @@
             v-slot="{ item: row, index: rowIdx }"
           >
             <div class="grid-row" :style="{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }">
-              <div
+              <AppContextMenu
                 v-for="(item, colIdx) in row.items"
                 :key="item.id"
-                class="grid-tile card-tile"
-                @click="navigateTo(mediaUrl(item))"
+                :items="bookContextItems(item)"
               >
-                <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item.id)" :aspect="'2/3'" :class="{ 'poster--missing': item.available === false }">
-                  <MediaMissingBadge v-if="item.available === false" />
-                </Poster>
-                <div class="book-kind-badge" :class="`kind-${bookKind(item)}`">
-                  <Icon :name="bookKind(item) === 'audiobook' ? 'music' : 'book'" :size="10" />
-                  {{ bookKindLabel(item) }}
+                <div
+                  class="grid-tile card-tile"
+                  @click="navigateTo(mediaUrl(item))"
+                >
+                  <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item.id)" :aspect="'2/3'" :class="{ 'poster--missing': item.available === false }">
+                    <MediaMissingBadge v-if="item.available === false" />
+                  </Poster>
+                  <div class="book-kind-badge" :class="`kind-${bookKind(item)}`">
+                    <Icon :name="bookKind(item) === 'audiobook' ? 'music' : 'book'" :size="10" />
+                    {{ bookKindLabel(item) }}
+                  </div>
+                  <div class="grid-tile-meta">
+                    <div class="grid-tile-title">{{ item.title }}</div>
+                    <div class="grid-tile-sub">{{ bookMetaLine(item) }}</div>
+                  </div>
                 </div>
-                <div class="grid-tile-meta">
-                  <div class="grid-tile-title">{{ item.title }}</div>
-                  <div class="grid-tile-sub">{{ bookMetaLine(item) }}</div>
-                </div>
-              </div>
+              </AppContextMenu>
             </div>
           </RecycleScroller>
         </div>
@@ -99,42 +103,44 @@
             page-mode
             v-slot="{ item }"
           >
-            <div
-              class="list-row books-list-row"
-              :class="{ 'list-row-phone': isPhone }"
-              @click="navigateTo(mediaUrl(item))"
-            >
-              <template v-if="isPhone">
-                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
-                <div class="list-phone-main">
-                  <div class="list-title">
-                    {{ item.title }}
-                    <Icon v-if="item.available === false" name="trash" :size="11" class="list-missing-icon" />
-                  </div>
-                  <div class="list-sub">{{ bookMetaLine(item) }}</div>
-                </div>
-              </template>
-              <template v-else>
-                <div class="list-title-cell">
-                  <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
-                  <div>
+            <AppContextMenu :items="bookContextItems(item)">
+              <div
+                class="list-row books-list-row"
+                :class="{ 'list-row-phone': isPhone }"
+                @click="navigateTo(mediaUrl(item))"
+              >
+                <template v-if="isPhone">
+                  <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
+                  <div class="list-phone-main">
                     <div class="list-title">
                       {{ item.title }}
                       <Icon v-if="item.available === false" name="trash" :size="11" class="list-missing-icon" />
                     </div>
-                    <div class="list-sub">{{ item.book_author || item.year }}</div>
+                    <div class="list-sub">{{ bookMetaLine(item) }}</div>
                   </div>
-                </div>
-                <div>
-                  <span class="book-kind-pill" :class="`kind-${bookKind(item)}`">
-                    <Icon :name="bookKind(item) === 'audiobook' ? 'music' : 'book'" :size="10" />
-                    {{ bookKindLabel(item) }}
-                  </span>
-                </div>
-                <div>{{ item.year }}</div>
-                <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
-              </template>
-            </div>
+                </template>
+                <template v-else>
+                  <div class="list-title-cell">
+                    <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
+                    <div>
+                      <div class="list-title">
+                        {{ item.title }}
+                        <Icon v-if="item.available === false" name="trash" :size="11" class="list-missing-icon" />
+                      </div>
+                      <div class="list-sub">{{ item.book_author || item.year }}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <span class="book-kind-pill" :class="`kind-${bookKind(item)}`">
+                      <Icon :name="bookKind(item) === 'audiobook' ? 'music' : 'book'" :size="10" />
+                      {{ bookKindLabel(item) }}
+                    </span>
+                  </div>
+                  <div>{{ item.year }}</div>
+                  <div class="list-added">{{ formatDateShort(item.created_at) }}</div>
+                </template>
+              </div>
+            </AppContextMenu>
           </RecycleScroller>
         </div>
 
@@ -147,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaItem, Library } from '~~/shared/types'
+import type { MediaItem, Library, UserList } from '~~/shared/types'
 
 type BookKind = 'book' | 'audiobook'
 type BookKindFilter = 'all' | BookKind
@@ -161,6 +167,8 @@ const KIND_FILTERS: { key: BookKindFilter; label: string }[] = [
 const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<MediaItem[]>([])
 const libraries = ref<Library[]>([])
+const userLists = ref<UserList[]>([])
+const favoritedSet = ref<Set<number>>(new Set())
 const loading = ref(true)
 const activeLib = ref<number | null>(null)
 const kindFilter = ref<BookKindFilter>('all')
@@ -171,6 +179,7 @@ const { isPhone, isCompact } = useViewport()
 // Section-nav left drawer (phone + compact band), opened by AppTopBar's
 // burger — shared singleton state (module-level ref), see useSectionSidebar.ts.
 const sectionSidebar = useSectionSidebar()
+const { buildItems: buildCardCtxItems } = useCardContextItems()
 
 const scopedItems = computed(() => {
   let list = [...items.value]
@@ -210,14 +219,48 @@ function kindFilterCount(kind: BookKindFilter): number {
   return scopedItems.value.filter(i => bookKind(i) === kind).length
 }
 
+function bookContextItems(item: MediaItem) {
+  return buildCardCtxItems(item, {
+    favoritedSet: favoritedSet.value,
+    userLists: userLists.value,
+    onToggleFavorite: async (id: number, favorited: boolean) => {
+      try {
+        const { $heya } = useNuxtApp()
+        await $heya('/api/me/favorites', {
+          method: 'POST',
+          body: { entity_type: 'media_item', entity_id: id } as any,
+        })
+        const next = new Set(favoritedSet.value)
+        if (favorited) next.add(id)
+        else next.delete(id)
+        favoritedSet.value = next
+      } catch { /* ignore */ }
+    },
+    onAddToList: async (listId: number, mediaId: number) => {
+      try {
+        const { $heya } = useNuxtApp()
+        await $heya('/api/me/lists/{id}/items', {
+          method: 'POST',
+          path: { id: listId },
+          body: { media_item_id: mediaId } as any,
+        })
+      } catch { /* ignore */ }
+    },
+  })
+}
+
 onMounted(async () => {
   const { $heya } = useNuxtApp()
-  const [mediaRes, libRes] = await Promise.allSettled([
+  const [mediaRes, libRes, listsRes, mediaStateRes] = await Promise.allSettled([
     $heya('/api/media', { query: { type: 'book', limit: 500 } }) as Promise<MediaItem[]>,
     $heya('/api/libraries') as Promise<Library[]>,
+    $heya('/api/me/lists') as Promise<UserList[]>,
+    $heya('/api/me/media-state') as Promise<{ watched: number[]; favorited: number[] }>,
   ])
   if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
   if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'book')
+  if (listsRes.status === 'fulfilled') userLists.value = listsRes.value
+  if (mediaStateRes.status === 'fulfilled') favoritedSet.value = new Set(mediaStateRes.value.favorited || [])
   loading.value = false
 })
 </script>
@@ -299,9 +342,7 @@ onMounted(async () => {
 
 /* ── Phone (<=720px) ─────────────────────────────────────────────────
    Grid gap/padding here must track usePosterGrid.ts's phone constants
-   (MIN_CARD_PHONE/COL_GAP_PHONE/ROW_GAP_PHONE). Books has no context menu
-   / actions today (desktop tap = navigate is the only interaction), so the
-   phone list row is a plain stacked 2-line card — no "..." sheet to add. */
+   (MIN_CARD_PHONE/COL_GAP_PHONE/ROW_GAP_PHONE). */
 @media (max-width: 720px) {
   .lib-pad { padding: 0 12px 90px; }
   .lib-pad-top { padding: 0 12px; }

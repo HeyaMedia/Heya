@@ -70,22 +70,24 @@
 
     <!-- Episode cards -->
     <div class="episode-grid">
-      <NuxtLink v-for="ep in episodes" :key="ep.id" :to="episodeLink(ep)" class="ep-card-link">
-        <EpisodeCard
-          :still-url="episodeStillUrl(ep)"
-          :code="epCode(ep)"
-          :title="ep.preferred_title || ep.title || `Episode ${ep.episode_number}`"
-          :air-date="ep.air_date"
-          :runtime-minutes="ep.runtime_minutes"
-          :rating="ep.rating"
-          :overview="ep.preferred_overview || ep.overview"
-          :watched="isWatched(ep.id)"
-          :has-file="!!episodeFileId(ep)"
-          :progress-pct="episodeProgressPct(ep.id)"
-          @play="playEpisode(ep)"
-          @toggle-watched="toggleEpisodeWatched(ep)"
-        />
-      </NuxtLink>
+      <AppContextMenu v-for="ep in episodes" :key="ep.id" :items="episodeContextItems(ep)">
+        <NuxtLink :to="episodeLink(ep)" class="ep-card-link">
+          <EpisodeCard
+            :still-url="episodeStillUrl(ep)"
+            :code="epCode(ep)"
+            :title="ep.preferred_title || ep.title || `Episode ${ep.episode_number}`"
+            :air-date="ep.air_date"
+            :runtime-minutes="ep.runtime_minutes"
+            :rating="ep.rating"
+            :overview="ep.preferred_overview || ep.overview"
+            :watched="isWatched(ep.id)"
+            :has-file="!!episodeFileId(ep)"
+            :progress-pct="episodeProgressPct(ep.id)"
+            @play="playEpisode(ep)"
+            @toggle-watched="toggleEpisodeWatched(ep)"
+          />
+        </NuxtLink>
+      </AppContextMenu>
 
       <div v-if="!episodes.length" style="grid-column: 1/-1; padding: 40px 0; text-align: center; color: var(--fg-3)">
         No episodes found for this season.
@@ -103,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaDetail } from '~~/shared/types'
+import type { ContextMenuItem, MediaDetail } from '~~/shared/types'
 import { useQuery } from '@tanstack/vue-query'
 
 const route = useRoute()
@@ -218,6 +220,7 @@ async function toggleEpisodeWatched(ep: any) {
     })
     watchedEpisodes.value.add(ep.id)
   }
+  watchedEpisodes.value = new Set(watchedEpisodes.value)
   invalidateContinueWatching()
 }
 
@@ -293,6 +296,31 @@ function epCode(ep: any) {
 function episodeLink(ep: any) {
   const num = currentSeasonNum.value === 0 ? 'specials' : String(currentSeasonNum.value)
   return `/tv/${slug.value}/season/${num}/episode/${ep.episode_number}`
+}
+
+function episodeContextItems(ep: any): ContextMenuItem[] {
+  const watched = isWatched(ep.id)
+  const hasFile = !!episodeFileId(ep)
+  return [
+    {
+      label: 'View Episode',
+      icon: 'info',
+      action: () => navigateTo(episodeLink(ep)),
+    },
+    ...(hasFile
+      ? [{
+          label: 'Play',
+          icon: 'play',
+          action: () => playEpisode(ep),
+        } as ContextMenuItem]
+      : []),
+    { label: '', separator: true },
+    {
+      label: watched ? 'Mark Unwatched' : 'Mark Watched',
+      icon: 'eye',
+      action: () => toggleEpisodeWatched(ep),
+    },
+  ]
 }
 
 function playEpisode(ep: any) {
