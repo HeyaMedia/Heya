@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/karbowiak/heya/internal/jellyfin"
 	tsnetwrap "github.com/karbowiak/heya/internal/tailscale"
 
 	"github.com/rs/zerolog/log"
@@ -24,8 +23,9 @@ import (
 // (:8080) and — when the --dev-backend server tells it to — the tailnet node,
 // reverse-proxying everything to the two hot-reloading downstreams:
 //
-//	/api/*  ──► HEYA_DEV_BACKEND (default :3050, run by air)
-//	/*      ──► HEYA_DEV_PROXY   (default :3000, Nuxt/Vite)
+//	/api/*       ──► HEYA_DEV_BACKEND (default :3050, run by air)
+//	/jellyfin/*  ──► HEYA_DEV_BACKEND
+//	/*           ──► HEYA_DEV_PROXY   (default :3000, Nuxt/Vite)
 //
 // Because this process never holds business logic, it doesn't restart when you
 // edit Go or Vue — so the tailnet node and any in-flight WS/HMR socket survive
@@ -35,8 +35,8 @@ import (
 var devProxyCmd = &cobra.Command{
 	Use:   "dev-proxy",
 	Short: "Dev front door: reverse-proxy Nuxt + the API and own the tailnet node",
-	Long: "Stable dev front door used by `make dev`. Reverse-proxies /api/* to the air-run backend " +
-		"and everything else to the Nuxt dev server, while owning the LAN listener and the Tailscale " +
+	Long: "Stable dev front door used by `make dev`. Reverse-proxies /api/* and /jellyfin/* to the air-run backend " +
+		"and every other path to the Nuxt dev server, while owning the LAN listener and the Tailscale " +
 		"node so neither flaps when air rebuilds the backend.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -63,16 +63,9 @@ var devProxyCmd = &cobra.Command{
 
 		mux := http.NewServeMux()
 		mux.Handle("/api/", apiProxy)
-		// Jellyfin-compatible surface: exact route-table matches (and only
-		// those — /search etc. stay with Nuxt) go to the Go backend. See
-		// internal/jellyfin.ClaimsPath.
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if jellyfin.ClaimsPath(r.URL.Path) {
-				apiProxy.ServeHTTP(w, r)
-				return
-			}
-			webProxy.ServeHTTP(w, r)
-		}))
+		mux.Handle("/jellyfin", apiProxy)
+		mux.Handle("/jellyfin/", apiProxy)
+		mux.Handle("/", webProxy)
 
 		// tsnet via the production wrapper, fronting the proxy handler. We
 		// only construct the node here; the backend opens/closes its listeners

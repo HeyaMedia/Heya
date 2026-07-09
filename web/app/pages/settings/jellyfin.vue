@@ -10,7 +10,7 @@ const saving = ref(false)
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
 const serverAddress = computed(() =>
-  import.meta.client ? window.location.origin : '')
+  import.meta.client ? `${window.location.origin}/jellyfin` : '')
 
 async function load() {
   try {

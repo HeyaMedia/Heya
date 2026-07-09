@@ -12,22 +12,22 @@ import (
 
 // GenreResult holds a genre name, its matching media items, and a total count.
 type GenreResult struct {
-	Genre string           `json:"genre"`
+	Genre string               `json:"genre"`
 	Items []sqlc.MediaItemCard `json:"items"`
-	Total int64            `json:"total"`
+	Total int64                `json:"total"`
 }
 
 // KeywordResult holds a keyword name, its matching media items, and a total count.
 type KeywordResult struct {
-	Keyword string           `json:"keyword"`
+	Keyword string               `json:"keyword"`
 	Items   []sqlc.MediaItemCard `json:"items"`
-	Total   int64            `json:"total"`
+	Total   int64                `json:"total"`
 }
 
 // CollectionResult holds a collection, its local movies, and the full
 // franchise membership resolved to owned-vs-missing.
 type CollectionResult struct {
-	Collection sqlc.Collection  `json:"collection"`
+	Collection sqlc.Collection      `json:"collection"`
 	Movies     []sqlc.MediaItemCard `json:"movies"`
 	// Parts is every film in the franchise (from heya.media), each tagged with
 	// its local movie when owned. Empty until a member movie is enriched.

@@ -46,8 +46,8 @@ make dev-web               # bun run dev on :3000
 
 - `heya dev-proxy` — the stable front door on `:8080`. A stdlib
   `httputil.ReverseProxy` that forwards `/api/*` (HTTP + the `/api/ws`
-  WebSocket, which upgrades natively) to the backend on `:3050`, and everything
-  else to Nuxt/Vite on `:3000`.
+  WebSocket, which upgrades natively) and `/jellyfin/*` to the backend on
+  `:3050`, and everything else to Nuxt/Vite on `:3000`.
 - `heya serve --dev-backend` on `:3050` — API + WS only, hot-reloaded by air.
 - Nuxt/Vite on `:3000` — HMR.
 
@@ -105,11 +105,12 @@ via `-q key=value` (repeatable, URL-encoded). Pretty-prints JSON responses by
 default; `--raw` streams bytes verbatim. Non-2xx → status + body to stderr,
 exit 1.
 
-**Dev-mode caveat**: in dev, the dev-proxy front door routes `/api/*` to Go and
-everything else to Nuxt. A typo like `/api/nonexisten` reaches Go, which 404s
-with JSON — that's the easy case. But if you mistype the prefix (`/ap/foo`),
-the dev-proxy routes the request to Nuxt, which returns the SPA HTML shell with
-HTTP 200. If you see `<!DOCTYPE html>` instead of JSON, check your prefix.
+**Dev-mode caveat**: in dev, the dev-proxy front door routes `/api/*` and
+`/jellyfin/*` to Go; everything else goes to Nuxt. A typo like
+`/api/nonexisten` reaches Go, which 404s with JSON — that's the easy case. But
+if you mistype the prefix (`/ap/foo`), the dev-proxy routes the request to
+Nuxt, which returns the SPA HTML shell with HTTP 200. If you see
+`<!DOCTYPE html>` instead of JSON, check your prefix.
 
 ## Database
 

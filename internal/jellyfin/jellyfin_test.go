@@ -134,10 +134,10 @@ func TestClaimsPathPrecision(t *testing.T) {
 			t.Errorf("ClaimsPath(%q) = false, want true", p)
 		}
 	}
-	// ...SPA routes and near-misses are not.
+	// ...near-misses are not.
 	for _, p := range []string{"/", "/search", "/movies", "/music/artists", "/settings/network", "/login", "/genre/action", "/person/12"} {
 		if ClaimsPath(p) {
-			t.Errorf("ClaimsPath(%q) = true, want false — this would steal a SPA route", p)
+			t.Errorf("ClaimsPath(%q) = true, want false", p)
 		}
 	}
 }

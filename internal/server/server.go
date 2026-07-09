@@ -20,15 +20,16 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 
 	o := collectOptions(opts...)
 
-	// The catch-all is the Jellyfin-compatible surface wrapped around the
-	// SPA: when the jellyfin.enabled toggle is on it claims its route tree
-	// (/System/*, /Users/*, /Items/*, /socket, /emby/*...), everything else
-	// — and everything when off — falls through to the SPA exactly as
-	// before. See internal/jellyfin. SetNative hands it the finished mux so
-	// its image endpoints can dispatch to the native /api image pipeline
-	// in-process instead of 302-redirecting (Feishin ignores redirects).
-	jf := jellyfin.NewMiddleware(app, o.hub, spaHandler())
-	mux.Handle("/", jf)
+	// Keep the Jellyfin-compatible surface in its own namespace so its
+	// case-insensitive ASP.NET-style routes can never steal Heya SPA paths
+	// like /movies/recommendations. Clients should be pointed at
+	// {server}/jellyfin; the legacy /emby alias still works underneath that
+	// prefix as /jellyfin/emby/...
+	jf := jellyfin.NewMiddleware(app, o.hub, http.NotFoundHandler())
+	jellyfinHandler := http.StripPrefix("/jellyfin", jf)
+	mux.Handle("/jellyfin", jellyfinHandler)
+	mux.Handle("/jellyfin/", jellyfinHandler)
+	mux.Handle("/", spaHandler())
 	jf.SetNative(mux)
 
 	handler := withMiddleware(mux)

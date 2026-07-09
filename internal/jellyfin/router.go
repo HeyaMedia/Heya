@@ -132,10 +132,9 @@ func (rt *router) matchMethod(method string, segs []string) (handlerFunc, Params
 	return nil, nil, false
 }
 
-// claims reports whether any route (any method) matches the path. The dev
-// proxy uses this to decide backend-vs-Nuxt forwarding, so it must be exact:
-// a lazy "first segment looks Jellyfin-ish" test would steal SPA routes like
-// /search from the Vite dev server.
+// claims reports whether any route (any method) matches the path. It stays
+// exact so callers can distinguish registered protocol paths from merely
+// similar SPA paths.
 func (rt *router) claims(path string) bool {
 	segs := strings.Split(strings.Trim(path, "/"), "/")
 	for _, r := range rt.routes {

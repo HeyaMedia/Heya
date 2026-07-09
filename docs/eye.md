@@ -21,9 +21,9 @@ bun tools/eye/eye.ts goto /         # navigate (default origin http://localhost:
 
 The full dev stack must be running — `make dev` (mprocs) brings it up: the
 `heya dev-proxy` front door on `:8080`, the backend on `:3050`, and Nuxt on
-`:3000`. You hit `:8080` for everything; the front door routes `/api/*` to the
-backend and the SPA to Nuxt, so the login command and the page both work
-against `:8080` directly.
+`:3000`. You hit `:8080` for everything; the front door routes `/api/*` and
+`/jellyfin/*` to the backend and the SPA to Nuxt, so the login command and the
+page both work against `:8080` directly.
 
 **Concurrent instances**: `HEYA_EYE_PORT=9224 bun tools/eye/eye.ts …` gives
 this shell its own Chrome, state file, and profile (`/tmp/heya-eye-9224/`) —

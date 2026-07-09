@@ -5,8 +5,8 @@
 // Design constraints, in order:
 //
 //   - Everything lives in this package. The only hooks elsewhere are the
-//     one-line mount in internal/server.New, the dev-proxy path claim, and
-//     the config/settings plumbing (internal/service/jellyfin_settings.go).
+//     prefixed mount in internal/server.New and the config/settings plumbing
+//     (internal/service/jellyfin_settings.go).
 //   - No huma. The generated OpenAPI client (web/shared/api.openapi.json)
 //     must not see this surface; the contract is Jellyfin's own vendored
 //     spec (spec/, enforced by the coverage manifest in manifest.go).
@@ -53,9 +53,11 @@ type Server struct {
 // is itself part of the mux).
 func (s *Server) SetNative(h http.Handler) { s.native = h }
 
-// NewMiddleware mounts the Jellyfin surface in front of next (the SPA
-// catch-all). It also seeds the enabled-flag's DB overlay — done here, not in
-// service.App.New, to keep the feature's boot footprint inside this package.
+// NewMiddleware mounts the Jellyfin surface in front of next. The caller owns
+// namespacing; production mounts it under /jellyfin so the case-insensitive
+// Jellyfin route table cannot collide with Heya SPA paths. It also seeds the
+// enabled-flag's DB overlay — done here, not in service.App.New, to keep the
+// feature's boot footprint inside this package.
 func NewMiddleware(app *service.App, hub *eventhub.Hub, next http.Handler) *Server {
 	s := &Server{app: app, hub: hub, next: next}
 	s.rt = s.buildRouter()
@@ -316,18 +318,14 @@ func (s *Server) buildRouter() *router {
 	return rt
 }
 
-// ClaimsPath reports whether the Jellyfin surface would handle path. The dev
-// proxy uses it to route Jellyfin-shaped requests to the Go backend instead
-// of the Nuxt dev server. Method-agnostic and independent of the enabled
-// flag: when disabled, the backend middleware falls through to the (embedded)
-// SPA, which for API-shaped paths is indistinguishable from a 404 to clients.
+// ClaimsPath reports whether the Jellyfin surface would handle path after the
+// external /jellyfin mount prefix has been stripped. Method-agnostic and
+// independent of the enabled flag.
 func ClaimsPath(path string) bool {
 	p := stripEmbyPrefix(path)
 	// Claim registered routes AND any Jellyfin-shaped path (PascalCase first
-	// segment). The latter is what lets the dev proxy send unimplemented
-	// Jellyfin endpoints to the backend — which answers 404 — instead of to
-	// Nuxt, which would hand the client the SPA's HTML and break it. SPA
-	// routes are lowercase, so this never steals one.
+	// segment). The latter lets unimplemented Jellyfin endpoints return a
+	// protocol-shaped 404 instead of an HTML fallback.
 	return claimsRouter.claims(p) || jellyfinShaped(p)
 }
 

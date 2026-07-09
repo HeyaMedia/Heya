@@ -1,7 +1,7 @@
 # Dev supervisor for `make dev`. Three processes, one front door:
 #
 #   proxy  heya dev-proxy — STABLE front door on :8080. Reverse-proxies
-#          /api/* → :3050 and /* → Nuxt :3000, and owns the Tailscale node.
+#          /api/* + /jellyfin/* → :3050 and /* → Nuxt :3000, and owns the Tailscale node.
 #          Never restarts on a code save, so the tailnet node + any WS/HMR
 #          socket survive air rebuilds. Press `r` on this pane to rebuild it
 #          after editing proxy / tailscale code.

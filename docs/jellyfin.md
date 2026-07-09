@@ -13,22 +13,24 @@ Off by default. Two ways in, following the standard env-locks-UI provenance:
 - Settings → Jellyfin API (admin) — live toggle, no restart.
 - `HEYA_JELLYFIN_API_ENABLED=true` — locks the UI toggle.
 
-Then add a server in any Jellyfin app using Heya's address and sign in with
-a normal Heya account. Sessions minted by Jellyfin clients are ordinary Heya
-sessions: they appear under Settings → Sessions and can be revoked there.
+Then add a server in any Jellyfin app using Heya's `/jellyfin` address
+(for example `http://localhost:8080/jellyfin`) and sign in with a normal
+Heya account. Sessions minted by Jellyfin clients are ordinary Heya sessions:
+they appear under Settings → Sessions and can be revoked there.
 
 ## Architecture
 
 Everything lives in `internal/jellyfin/` (see the package comment in
 `jellyfin.go` for the constraints). The high-order bits:
 
-- **Mount**: wraps the SPA catch-all in `internal/server/server.go`. When
-  the toggle is off, or a path isn't claimed, requests fall through to the
-  SPA untouched. The dev proxy forwards claimed paths to the backend via
-  `jellyfin.ClaimsPath` (`cmd/heya/cmd/devproxy.go`).
+- **Mount**: lives under `/jellyfin/*` in `internal/server/server.go`, keeping
+  Jellyfin's case-insensitive API routes out of Heya's SPA namespace. When
+  the toggle is off, the prefixed surface returns 404 and the normal web app
+  remains untouched.
 - **Router**: case-insensitive (ASP.NET legacy — clients are sloppy) with
-  the `/emby` prefix alias; literal segments beat param segments regardless
-  of registration order. Patterns are byte-identical to the upstream spec.
+  the `/emby` prefix alias under `/jellyfin` (`/jellyfin/emby/...`); literal
+  segments beat param segments regardless of registration order. Patterns are
+  byte-identical to the upstream spec.
 - **Ids**: Jellyfin GUIDs are a reversible encoding of (entity kind, int64
   row id) — `ids.go`. No mapping table; foreign GUIDs decode to 404s.
 - **Auth**: `POST /Users/AuthenticateByName` mints a real Heya session.
@@ -73,7 +75,7 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
   server, so the same suite validates both sides:
 
   ```bash
-  bun tools/jellyfin-conformance.ts                       # Heya (:8080, admin/admin)
+  bun tools/jellyfin-conformance.ts                       # Heya (:8080/jellyfin, admin/admin)
   JF_URL=https://jf.example JF_USER=u JF_PASS=p \
     bun tools/jellyfin-conformance.ts                     # real Jellyfin oracle
   ```
@@ -94,10 +96,10 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
   Watching / Latest), series → season → episode browse, item detail,
   favorites, and actual `<video>` playback with progress reporting.
 
-Dev-topology note: the lowercase-path routes (`/web/*`, `/api-docs/*`,
-`/robots.txt`) are claimed via `ClaimsPath`, which the **dev-proxy** compiles
-in — after adding routes, restart the dev-proxy pane (`r` in mprocs) or run
-the suite against the backend directly (`JF_URL=http://127.0.0.1:3050`).
+Dev-topology note: in `make dev`, the front door is a pure shim:
+`/api/*` and `/jellyfin/*` go to the Go backend; everything else goes to
+Nuxt. Run Jellyfin protocol tests against `http://127.0.0.1:8080/jellyfin`
+(or the backend directly at `http://127.0.0.1:3050/jellyfin`).
 
 ## Client matrix
 
@@ -109,7 +111,7 @@ the suite against the backend directly (`JF_URL=http://127.0.0.1:3050`).
 | Infuse | ✅ verified | add server, browse, all image types, HDR direct play; episode lists need `fields=MediaSources` |
 | Streamyfin / Findroid | 🔜 untested | 10.10+ API users |
 | Finamp | 🔜 untested | universal audio + lyrics implemented |
-| Jellyfin Media Player | ❌ won't support | JMP ships no UI of its own — it loads `{server}/web/index.html` (the server-hosted jellyfin-web) in an old embedded Chromium. Supporting it means Heya hosting a second, foreign web app; deliberately declined. It gets Heya's SPA, which its engine can't run (`to.matched.at is not a function`). |
+| Jellyfin Media Player | ❌ won't support | JMP ships no UI of its own — it loads `{server}/web/index.html` (the server-hosted jellyfin-web) in an old embedded Chromium. Supporting it means Heya hosting a second, foreign web app; deliberately declined. |
 
 ## Known gaps
 
@@ -134,7 +136,7 @@ Both servers are env-configured (never hardcode credentials):
 
 ```bash
 JF_REAL_URL=https://jf.example JF_REAL_USER=u JF_REAL_PASS=p \
-JF_HEYA_URL=http://127.0.0.1:8080 bun tools/jellyfin-diff.ts
+JF_HEYA_URL=http://127.0.0.1:8080/jellyfin bun tools/jellyfin-diff.ts
 ```
 
 This harness caught the Infuse breakers: `null` where upstream emits empty

@@ -7,10 +7,10 @@
 // Config via env (never hardcode credentials here):
 //   JF_REAL_URL / JF_REAL_USER / JF_REAL_PASS   — reference Jellyfin server
 //   JF_HEYA_URL / JF_HEYA_USER / JF_HEYA_PASS   — Heya under test
-// Defaults: Heya at http://127.0.0.1:8080 with admin/admin.
+// Defaults: Heya at http://127.0.0.1:8080/jellyfin with admin/admin.
 
 const REAL = process.env.JF_REAL_URL ?? 'http://127.0.0.1:8097'
-const HEYA = process.env.JF_HEYA_URL ?? 'http://127.0.0.1:8080'
+const HEYA = process.env.JF_HEYA_URL ?? 'http://127.0.0.1:8080/jellyfin'
 const AUTH = 'MediaBrowser Client="DiffProbe", Device="bun", DeviceId="diff-1", Version="1.0.0"'
 
 type Ctx = { base: string; token: string; userId: string }
