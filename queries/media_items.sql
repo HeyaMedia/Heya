@@ -54,6 +54,9 @@ CROSS JOIN (SELECT count(*) FROM external_ids) external_write_count;
 -- name: GetMediaItemByID :one
 SELECT * FROM media_item_cards WHERE id = $1;
 
+-- name: GetMediaItemByPublicID :one
+SELECT * FROM media_item_cards WHERE public_id = $1;
+
 -- name: GetMediaItemBySlug :one
 SELECT * FROM media_item_cards WHERE slug = $1;
 

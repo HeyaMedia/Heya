@@ -30,7 +30,7 @@
               <span v-else class="mtb-chevron-spacer" />
               <NuxtImg
                 v-if="item.poster_path"
-                :src="`/api/media/${item.id}/image/poster`"
+                :src="usePosterUrl(item) ?? undefined"
                 class="mtb-thumb"
                 :width="240"
                 :quality="80"

@@ -2,7 +2,7 @@
   <div v-if="sectionKey === 'tracks'" class="track-list">
     <button v-for="item in items" :key="item.id" class="track-row" @click="go(item)">
       <div class="track-thumb">
-        <NuxtImg v-if="item.artist_media_item_id" :src="`/api/media/${item.artist_media_item_id}/image/poster`" :width="100" :quality="80" loading="lazy" />
+        <NuxtImg v-if="item.artist_media_item_id" :src="usePosterUrl({ id: item.artist_media_item_id, public_id: item.artist_media_item_public_id }) ?? undefined" :width="100" :quality="80" loading="lazy" />
         <Icon v-else name="music" :size="16" />
       </div>
       <div class="track-body">
@@ -69,9 +69,9 @@ function posterUrl(item: any): string | null {
     case 'tv':
     case 'music':
     case 'books':
-      return `/api/media/${item.id}/image/poster`
+      return usePosterUrl(item)
     case 'albums':
-      return item.artist_media_item_id ? `/api/media/${item.artist_media_item_id}/image/poster` : null
+      return item.artist_media_item_id ? usePosterUrl({ id: item.artist_media_item_id, public_id: item.artist_media_item_public_id }) : null
     case 'collections':
       return null
   }

@@ -51,9 +51,9 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     if (backdropAssets.value.length > 0) {
       const asset = backdropAssets.value[idx % backdropAssets.value.length]
       if (!asset) return null
-      return `/api/media/${detail.value?.media_item.id}/image/backdrop?sort=${asset.sort_order}`
+      return `/api/media/${useMediaImageKey(detail.value?.media_item)}/image/backdrop?sort=${asset.sort_order}`
     }
-    return detail.value ? useBackdropUrl(detail.value.media_item.id) : null
+    return detail.value ? useBackdropUrl(detail.value.media_item) : null
   }
 
   async function advanceBackdrop() {
@@ -118,7 +118,7 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     const urls = backdropAssets.value.map((_, i) => getBackdropUrl(i)!)
     if (urls.length) lightbox.open(urls, backdropIdx.value)
     else {
-      const src = useBackdropUrl(detail.value!.media_item.id)
+      const src = useBackdropUrl(detail.value!.media_item)
       if (src) lightbox.open(src)
     }
   }

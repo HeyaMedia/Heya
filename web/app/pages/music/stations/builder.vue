@@ -229,14 +229,14 @@ const autocompleteQuery = useQuery({
     if (searchQDebounced.value.length < 2) return [] as AcRow[]
     const r = await $heya('/api/search/quick', { query: { q: searchQDebounced.value } }) as unknown as {
       buckets: {
-        music?: { items: { id: number; title: string }[] }
+        music?: { items: { id: number; public_id?: string; title: string }[] }
         albums?: { items: { id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string }[] }
         tracks?: { items: { id: number; title: string; album_title: string; artist_name: string; artist_slug: string; album_slug: string }[] }
       }
     }
     if (addKind.value === 'artist') {
       return (r.buckets?.music?.items ?? []).slice(0, 8).map((a) => ({
-        id: a.id, title: a.title, sub: '', cover: usePosterUrl(a.id),
+        id: a.id, title: a.title, sub: '', cover: usePosterUrl(a),
       } as AcRow))
     }
     if (addKind.value === 'album') {

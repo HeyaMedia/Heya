@@ -72,7 +72,7 @@
                   class="grid-tile card-tile"
                   @click="navigateTo(mediaUrl(item))"
                 >
-                  <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item.id)" :aspect="'2/3'" :class="{ 'poster--missing': item.available === false }">
+                  <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item)" :aspect="'2/3'" :class="{ 'poster--missing': item.available === false }">
                     <MediaMissingBadge v-if="item.available === false" />
                   </Poster>
                   <div class="book-kind-badge" :class="`kind-${bookKind(item)}`">
@@ -110,7 +110,7 @@
                 @click="navigateTo(mediaUrl(item))"
               >
                 <template v-if="isPhone">
-                  <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
+                  <Poster :idx="0" :src="usePosterUrl(item)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
                   <div class="list-phone-main">
                     <div class="list-title">
                       {{ item.title }}
@@ -121,7 +121,7 @@
                 </template>
                 <template v-else>
                   <div class="list-title-cell">
-                    <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
+                    <Poster :idx="0" :src="usePosterUrl(item)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />
                     <div>
                       <div class="list-title">
                         {{ item.title }}

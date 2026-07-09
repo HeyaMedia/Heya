@@ -11,8 +11,8 @@ import (
 
 func handleMediaImage(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
+		id, ok := app.ResolveMediaItemID(r.Context(), r.PathValue("id"))
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}

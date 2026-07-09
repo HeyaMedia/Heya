@@ -13,7 +13,7 @@
 // authoritative but adds complexity for marginal benefit.
 
 export interface SessionHeartbeatPayload {
-  fileId: number
+  fileId: string | number
   mediaItemId: number | null
   /** "movie" | "episode" | "track" — drives server-side display formatting. */
   entityType?: string

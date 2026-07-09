@@ -5,7 +5,7 @@ import type { TranscodeStatus } from '~/composables/useTranscodeStatus'
 
 const props = defineProps<{
   streamInfo: StreamInfoResponse | null
-  fileId: number
+  fileId: string | number
   activeQuality?: string
   usingHLS?: boolean
   playerState?: HeyaPlayerState

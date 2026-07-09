@@ -8,7 +8,7 @@ export interface TrickplayEntry {
   h: number
 }
 
-export function useTrickplay(fileId: Ref<number>) {
+export function useTrickplay(fileId: Ref<string | number>) {
   const entries = ref<TrickplayEntry[]>([])
   const loaded = ref(false)
 
@@ -32,7 +32,7 @@ export function useTrickplay(fileId: Ref<number>) {
   return { entries, loaded, load, getThumbnail }
 }
 
-function parseWebVTT(text: string, fileId: number, token: string): TrickplayEntry[] {
+function parseWebVTT(text: string, fileId: string | number, token: string): TrickplayEntry[] {
   const results: TrickplayEntry[] = []
   const lines = text.split('\n')
   let i = 0

@@ -81,7 +81,7 @@
         <NuxtLink :to="mediaUrl(item as any)" class="grid-tile card-tile">
           <MediaCard
             :idx="i"
-            :src="usePosterUrl(item.id)"
+            :src="usePosterUrl(item)"
             aspect="2/3"
             :title="item.title"
             :subtitle="item.reason || item.year"

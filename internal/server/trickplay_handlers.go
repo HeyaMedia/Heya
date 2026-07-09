@@ -14,13 +14,7 @@ import (
 
 func handleTrickplayVTT(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
-			return
-		}
-
-		file, err := app.GetLibraryFile(r.Context(), fileID)
+		file, err := app.GetLibraryFileByRef(r.Context(), r.PathValue("file_id"))
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -59,12 +53,6 @@ func trickplayDuration(mediaInfo []byte) (float64, bool) {
 
 func handleTrickplaySprite(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
-			return
-		}
-
 		filename := r.PathValue("filename")
 		// Reject any path component (a %2f-decoded separator, a leading dir, or
 		// "..") so the sprite name can't traverse out of the trickplay dir. The
@@ -75,7 +63,7 @@ func handleTrickplaySprite(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		file, err := app.GetLibraryFile(r.Context(), fileID)
+		file, err := app.GetLibraryFileByRef(r.Context(), r.PathValue("file_id"))
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return

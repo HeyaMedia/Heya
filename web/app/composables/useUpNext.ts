@@ -35,7 +35,7 @@ export function useUpNext(source: () => UpNextSourceRow[] | undefined | null) {
     const resolved = await Promise.allSettled(
       Array.from(series.values()).map(async row => {
         const up = await $heya('/api/media/{id}/up-next', { path: { id: row.media_item_id as never } }) as {
-          has_next: boolean; file_id?: number; episode_id?: number
+          has_next: boolean; file_id?: number; file_public_id?: string; episode_id?: number
           season_number?: number; episode_number?: number; episode_title?: string; runtime?: number
         }
         return { row, up }
@@ -46,7 +46,7 @@ export function useUpNext(source: () => UpNextSourceRow[] | undefined | null) {
     for (const r of resolved) {
       if (r.status !== 'fulfilled') continue
       const { row, up } = r.value
-      if (!up?.has_next || !up.file_id) continue
+      if (!up?.has_next || (!up.file_public_id && !up.file_id)) continue
       const sNum = up.season_number ?? 0
       const eNum = up.episode_number ?? 0
       const s = String(sNum).padStart(2, '0')
@@ -55,7 +55,7 @@ export function useUpNext(source: () => UpNextSourceRow[] | undefined | null) {
       entries.push({
         id: row.media_item_id, title: row.title, slug: row.slug,
         season_number: sNum, episode_number: eNum, episode_label: label,
-        play_file_id: up.file_id, episode_id: up.episode_id, runtime_minutes: up.runtime,
+        play_file_id: up.file_id || 0, play_file_public_id: up.file_public_id, episode_id: up.episode_id, runtime_minutes: up.runtime,
       })
     }
     upNextItems.value = entries.slice(0, 24)

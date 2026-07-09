@@ -64,6 +64,9 @@ WHERE library_id = $1;
 -- name: GetLibraryFileByID :one
 SELECT * FROM library_files WHERE id = $1;
 
+-- name: GetLibraryFileByPublicID :one
+SELECT * FROM library_files WHERE public_id = $1;
+
 -- name: GetLibraryFileByPath :one
 SELECT * FROM library_files WHERE library_id = $1 AND path = $2;
 
@@ -158,12 +161,12 @@ SELECT * FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDE
 -- ~30MB and ~750ms for a big music artist. COLLATE "C" keeps the first row
 -- (the FE's playable file) deterministic while skipping the expensive
 -- en_US.utf8 collation on long common-prefix paths.
-SELECT id, size FROM library_files
+SELECT id, public_id, size FROM library_files
 WHERE media_item_id = $1 AND deleted_at IS NULL
 ORDER BY path COLLATE "C" ASC;
 
 -- name: ListEpisodeFiles :many
-SELECT id, size, parse_result FROM library_files
+SELECT id, public_id, size, parse_result FROM library_files
 WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'
 ORDER BY path ASC;
 

@@ -31,16 +31,17 @@ const (
 
 // RecentlyAddedTVEntry is one card on the home "Recently Added TV" rail.
 type RecentlyAddedTVEntry struct {
-	MediaItemID   int64     `json:"media_item_id"`
-	Title         string    `json:"title"`
-	Slug          string    `json:"slug"`
-	Kind          string    `json:"kind" enum:"series,season,episodes,episode" doc:"series = brand-new show, season = brand-new season, episodes = several episodes added to an existing season, episode = a single new episode"`
-	SeasonNumber  int32     `json:"season_number"`
-	EpisodeNumber int32     `json:"episode_number"`
-	EpisodeTitle  string    `json:"episode_title,omitempty"`
-	SeasonCount   int32     `json:"season_count"`
-	EpisodeCount  int32     `json:"episode_count"`
-	AddedAt       time.Time `json:"added_at"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID string    `json:"media_item_public_id,omitempty"`
+	Title             string    `json:"title"`
+	Slug              string    `json:"slug"`
+	Kind              string    `json:"kind" enum:"series,season,episodes,episode" doc:"series = brand-new show, season = brand-new season, episodes = several episodes added to an existing season, episode = a single new episode"`
+	SeasonNumber      int32     `json:"season_number"`
+	EpisodeNumber     int32     `json:"episode_number"`
+	EpisodeTitle      string    `json:"episode_title,omitempty"`
+	SeasonCount       int32     `json:"season_count"`
+	EpisodeCount      int32     `json:"episode_count"`
+	AddedAt           time.Time `json:"added_at"`
 }
 
 type seasonEpisode struct {
@@ -70,6 +71,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 
 	type showInfo struct {
 		libraryID int64
+		publicID  string
 		title     string
 		slug      string
 		files     []recentTVFile
@@ -87,7 +89,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 		id := r.MediaItemID.Int64
 		s := shows[id]
 		if s == nil {
-			s = &showInfo{libraryID: r.LibraryID, title: r.Title, slug: r.Slug}
+			s = &showInfo{libraryID: r.LibraryID, publicID: r.PublicID.String(), title: r.Title, slug: r.Slug}
 			shows[id] = s
 			showIDs = append(showIDs, id)
 		}
@@ -164,7 +166,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 					}
 				}
 				entries = append(entries, RecentlyAddedTVEntry{
-					MediaItemID: id, Title: show.title, Slug: show.slug,
+					MediaItemID: id, MediaItemPublicID: show.publicID, Title: show.title, Slug: show.slug,
 					Kind: "series", SeasonCount: int32(len(seasons)), EpisodeCount: int32(len(newEps)),
 					AddedAt: newest,
 				})
@@ -182,7 +184,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 			}
 			for season, eps := range bySeason {
 				e := RecentlyAddedTVEntry{
-					MediaItemID: id, Title: show.title, Slug: show.slug,
+					MediaItemID: id, MediaItemPublicID: show.publicID, Title: show.title, Slug: show.slug,
 					SeasonNumber: season, EpisodeCount: int32(len(eps)),
 					AddedAt: newestBySeason[season],
 				}

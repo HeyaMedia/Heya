@@ -47,6 +47,7 @@ export interface ContinueWatchingItem {
   progress_seconds: number
   total_seconds: number
   media_item_id: number
+  media_item_public_id?: string
   title: string
   poster_path: string
   slug: string
@@ -58,6 +59,7 @@ export interface ContinueWatchingItem {
   // without a second lookup. 0 when the file can't be resolved (deleted /
   // mismatched parse) — the FE should hide or disable the tile in that case.
   file_id: number
+  file_public_id?: string
 }
 
 defineProps<{ items: ContinueWatchingItem[] }>()
@@ -73,9 +75,9 @@ function scrollBy(dir: number) {
 function thumbUrl(item: ContinueWatchingItem): string {
   if (item.entity_type === 'episode' && item.season_number && item.episode_number) {
     const label = `s${String(item.season_number).padStart(2, '0')}e${String(item.episode_number).padStart(2, '0')}`
-    return `/api/media/${item.media_item_id}/image/still?label=${label}`
+    return `/api/media/${useMediaImageKey({ id: item.media_item_id, public_id: item.media_item_public_id })}/image/still?label=${label}`
   }
-  return `/api/media/${item.media_item_id}/image/backdrop`
+  return `/api/media/${useMediaImageKey({ id: item.media_item_id, public_id: item.media_item_public_id })}/image/backdrop`
 }
 
 function progressPct(item: ContinueWatchingItem): number {

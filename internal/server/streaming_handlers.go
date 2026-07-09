@@ -20,13 +20,7 @@ import (
 
 func handleDirectStream(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
-			return
-		}
-
-		file, err := app.GetLibraryFile(r.Context(), fileID)
+		file, err := app.GetLibraryFileByRef(r.Context(), r.PathValue("file_id"))
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -91,9 +85,9 @@ func handleExtraStream(app *service.App) http.HandlerFunc {
 
 func handleHLSMaster(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
+		fileID, ok := app.ResolveLibraryFileID(r.Context(), r.PathValue("file_id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "file not found")
 			return
 		}
 
@@ -146,15 +140,15 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 		} else {
 			fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", bw, res)
 		}
-		fmt.Fprintf(w, "/api/stream/%d/hls/index.m3u8%s\n", fileID, queryPassthrough(r))
+		_, _ = fmt.Fprintf(w, "/api/stream/%s/hls/index.m3u8%s\n", file.PublicID.String(), queryPassthrough(r))
 	}
 }
 
 func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
+		fileID, ok := app.ResolveLibraryFileID(r.Context(), r.PathValue("file_id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "file not found")
 			return
 		}
 
@@ -192,9 +186,9 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 
 func handleHLSSegment(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
+		fileID, ok := app.ResolveLibraryFileID(r.Context(), r.PathValue("file_id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "file not found")
 			return
 		}
 		segmentName := r.PathValue("segment")

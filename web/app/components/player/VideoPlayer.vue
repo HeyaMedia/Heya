@@ -4,7 +4,7 @@ import { DropdownMenuItem } from 'reka-ui'
 import type { StreamAudio, StreamSubtitle, QualityOption, PlaybackPreference } from '~~/shared/types'
 
 const props = defineProps<{
-  fileId: number
+  fileId: string | number
   mediaItemId: number | null
   title?: string
   startTime?: number
@@ -86,6 +86,7 @@ interface UpNextData {
   season_number?: number
   media_item_id?: number
   file_id?: number
+  file_public_id?: string
   runtime?: number
 }
 const upNext = ref<UpNextData | null>(null)
@@ -330,7 +331,7 @@ function startPlayback() {
     $heya('/api/media/{id}/up-next', { path: { id: props.mediaItemId } })
       .then(data => {
         const ud = data as UpNextData
-        if (ud?.has_next && ud.file_id) upNext.value = ud
+        if (ud?.has_next && (ud.file_public_id || ud.file_id)) upNext.value = ud
       })
       .catch(() => {})
   }
@@ -455,7 +456,8 @@ function setVolume(e: MouseEvent) {
 }
 
 function playNextEpisode() {
-  if (!upNext.value?.file_id || !upNext.value.media_item_id) return
+  const fileRef = upNext.value?.file_public_id || upNext.value?.file_id
+  if (!fileRef || !upNext.value?.media_item_id) return
   cancelUpNext()
   destroyHLS(); destroyASS()
   const label = `S${String(upNext.value.season_number).padStart(2, '0')}E${String(upNext.value.episode_number).padStart(2, '0')}`
@@ -469,7 +471,7 @@ function playNextEpisode() {
     params.set('entity_type', 'episode')
     params.set('entity_id', String(upNext.value.episode_id))
   }
-  navigateTo(`/watch/${upNext.value.file_id}?${params}`)
+  navigateTo(`/watch/${fileRef}?${params}`)
 }
 
 function startUpNextCountdown() {
@@ -492,7 +494,7 @@ watch(() => state.ended, (ended) => {
     // Emit one last progress with completed=true. After this the player
     // either rolls into Up Next (TV) or sits at the end (movies).
     emitProgress(state.currentTime, knownDuration.value, true)
-    if (upNext.value?.has_next && upNext.value.file_id) {
+    if (upNext.value?.has_next && (upNext.value.file_public_id || upNext.value.file_id)) {
       startUpNextCountdown()
     }
   }

@@ -13,7 +13,7 @@
 
       <div class="hero-content">
         <NuxtLink :to="`/tv/${slug}`" class="hero-poster-link">
-          <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" :width="600" />
+          <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
         </NuxtLink>
 
         <div class="hero-info">
@@ -151,7 +151,7 @@ const episodeProgress = ref<Map<number, { progress: number; total: number }>>(ne
 const seasonFavorited = ref(false)
 const showMetadataEditor = ref(false)
 
-const backdropUrl = computed(() => detail.value ? useBackdropUrl(detail.value.media_item.id) : null)
+const backdropUrl = computed(() => detail.value ? useBackdropUrl(detail.value.media_item) : null)
 
 const allSeasons = computed(() => {
   if (!detail.value?.seasons) return []
@@ -281,12 +281,18 @@ function seasonLink(s: any) {
 function episodeStillUrl(ep: any) {
   if (!detail.value) return ''
   const label = `s${String(currentSeasonNum.value).padStart(2, '0')}e${String(ep.episode_number).padStart(2, '0')}`
-  return `/api/media/${detail.value.media_item.id}/image/still?label=${label}`
+  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/still?label=${label}`
 }
 
 function episodeFileId(ep: any): number | null {
   const key = `s${currentSeasonNum.value}e${ep.episode_number}`
   return detail.value?.episode_files?.[key]?.file_id ?? null
+}
+
+function episodeFileRef(ep: any): string | number | null {
+  const key = `s${currentSeasonNum.value}e${ep.episode_number}`
+  const entry = detail.value?.episode_files?.[key]
+  return entry?.file_public_id || entry?.file_id || null
 }
 
 function epCode(ep: any) {
@@ -324,8 +330,8 @@ function episodeContextItems(ep: any): ContextMenuItem[] {
 }
 
 function playEpisode(ep: any) {
-  const fileId = episodeFileId(ep)
-  if (!fileId || !detail.value) return
+  const fileRef = episodeFileRef(ep)
+  if (!fileRef || !detail.value) return
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
     title: `${detail.value.media_item.title} - S${String(currentSeasonNum.value).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')} - ${ep.title}`,
@@ -335,7 +341,7 @@ function playEpisode(ep: any) {
     params.set('entity_type', 'episode')
     params.set('entity_id', String(ep.id))
   }
-  navigateTo(`/watch/${fileId}?${params}`)
+  navigateTo(`/watch/${fileRef}?${params}`)
 }
 
 function formatYear(d: string) { return d?.slice(0, 4) || '' }

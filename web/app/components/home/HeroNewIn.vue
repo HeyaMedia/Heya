@@ -3,7 +3,7 @@
     <div class="newin-bg">
       <NuxtImg
         v-if="featured"
-        :src="useBackdropUrl(featured.media_item_id) ?? undefined"
+        :src="useBackdropUrl({ id: featured.media_item_id, public_id: featured.media_item_public_id }) ?? undefined"
         :width="1920"
         :quality="75"
         class="newin-bg-img"
@@ -61,6 +61,7 @@ import type { MediaItem } from '~~/shared/types'
 
 export interface RecentTVEntry {
   media_item_id: number
+  media_item_public_id?: string
   title: string
   slug: string
   kind: 'series' | 'season' | 'episodes' | 'episode'
@@ -128,7 +129,7 @@ const feed = computed<FeedRow[]>(() => {
     rows.push({
       key: `tv-${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
       to: `/tv/${e.slug}`,
-      art: usePosterUrl(e.media_item_id) ?? '',
+      art: usePosterUrl({ id: e.media_item_id, public_id: e.media_item_public_id }) ?? '',
       title: e.title,
       sub: entrySub(e),
       kind: e.kind === 'series' ? 'SHOW' : e.kind === 'season' ? 'SEASON' : 'EPISODE',
@@ -139,7 +140,7 @@ const feed = computed<FeedRow[]>(() => {
     rows.push({
       key: `artist-${a.id}`,
       to: mediaUrl(a),
-      art: usePosterUrl(a.id) ?? '',
+      art: usePosterUrl(a) ?? '',
       title: a.title,
       sub: (a as MediaItem & { sub?: string }).sub ?? '',
       kind: 'ARTIST',

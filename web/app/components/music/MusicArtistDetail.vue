@@ -534,11 +534,11 @@ function discogDragPayload(album: AlbumView): DragAlbumPayload {
 
 const artistPosterUrl = computed(() => {
   if (!detail.value?.media_item) return null
-  return `/api/media/${detail.value.media_item.id}/image/poster`
+  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/poster`
 })
 const backdropStyle = computed(() => {
   if (!detail.value?.media_item) return {}
-  return { backgroundImage: `url(/api/media/${detail.value.media_item.id}/image/backdrop)` }
+  return { backgroundImage: `url(/api/media/${useMediaImageKey(detail.value.media_item)}/image/backdrop)` }
 })
 
 const totalAlbums = computed(() => albums.value.length)

@@ -14,8 +14,7 @@ export interface MediaSegment {
  *
  * Times are exposed in seconds to match the <video> element clock.
  */
-export function useMediaSegments(fileId: Ref<number>) {
-  const { $heya } = useNuxtApp()
+export function useMediaSegments(fileId: Ref<string | number>) {
   const segments = ref<MediaSegment[]>([])
   const loaded = ref(false)
 
@@ -23,8 +22,9 @@ export function useMediaSegments(fileId: Ref<number>) {
     loaded.value = false
     segments.value = []
     try {
-      const res = await $heya('/api/stream/{file_id}/segments', {
-        path: { file_id: fileId.value },
+      const token = useAuth().token.value
+      const res = await $fetch<{ segments?: MediaSegment[] }>(`/api/stream/${fileId.value}/segments`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       segments.value = (res?.segments ?? []) as MediaSegment[]
       loaded.value = true

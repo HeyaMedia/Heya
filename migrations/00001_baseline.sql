@@ -469,6 +469,7 @@ CREATE TABLE public.library_file_links (
 
 CREATE TABLE public.library_files (
     id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
     library_id bigint NOT NULL,
     path text NOT NULL,
     size bigint DEFAULT 0 NOT NULL,
@@ -671,6 +672,7 @@ CREATE TABLE public.media_item_external_ids (
 
 CREATE TABLE public.media_items (
     id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
     library_id bigint NOT NULL,
     media_type public.media_type NOT NULL,
     slug text DEFAULT ''::text NOT NULL,
@@ -758,7 +760,8 @@ CREATE VIEW public.media_item_cards AS
     e.last_enrich_error,
     e.field_provenance,
     e.match_confidence,
-    e.slug_locked
+    e.slug_locked,
+    e.public_id
    FROM public.media_items e
      LEFT JOIN public.media_item_profiles p ON p.media_item_id = e.id
      LEFT JOIN LATERAL (
@@ -1941,6 +1944,13 @@ CREATE INDEX idx_library_files_library_id ON public.library_files USING btree (l
 
 
 --
+-- Name: idx_library_files_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_library_files_public_id ON public.library_files USING btree (public_id);
+
+
+--
 -- Name: idx_library_files_media_item_height; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2113,6 +2123,13 @@ CREATE UNIQUE INDEX idx_media_items_imdb_unique ON public.media_item_external_id
 --
 
 CREATE INDEX idx_media_items_library_id ON public.media_items USING btree (library_id);
+
+
+--
+-- Name: idx_media_items_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_media_items_public_id ON public.media_items USING btree (public_id);
 
 
 --

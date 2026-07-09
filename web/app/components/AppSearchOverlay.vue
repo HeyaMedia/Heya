@@ -152,14 +152,14 @@ function thumbUrl(kind: Section['key'], item: any): string | null {
     case 'tv':
     case 'music':
     case 'books':
-      return `/api/media/${item.id}/image/poster`
+      return usePosterUrl(item)
     case 'people':
       return personImageUrl(item.id)
     case 'albums':
       return albumCoverUrl(item)
     case 'tracks':
       return item.artist_media_item_id
-        ? `/api/media/${item.artist_media_item_id}/image/poster`
+        ? usePosterUrl({ id: item.artist_media_item_id, public_id: item.artist_media_item_public_id })
         : null
     case 'collections':
       return null

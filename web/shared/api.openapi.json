@@ -1866,6 +1866,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "file_public_id": {
+            "type": "string"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -1877,6 +1880,9 @@
           "media_item_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "media_item_public_id": {
+            "type": "string"
           },
           "media_type": {
             "type": "string"
@@ -1914,6 +1920,7 @@
           "total_seconds",
           "updated_at",
           "media_item_id",
+          "media_item_public_id",
           "library_id",
           "title",
           "poster_path",
@@ -4586,6 +4593,9 @@
           "path": {
             "type": "string"
           },
+          "public_id": {
+            "type": "string"
+          },
           "segments_analyzed_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -4609,6 +4619,7 @@
         },
         "required": [
           "id",
+          "public_id",
           "library_id",
           "path",
           "size",
@@ -6691,6 +6702,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "season_number": {
             "format": "int32",
             "type": "integer"
@@ -6709,6 +6723,7 @@
           "episode_id",
           "updated_at",
           "media_item_id",
+          "media_item_public_id",
           "library_id",
           "series_title",
           "series_slug",
@@ -6740,6 +6755,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "media_type": {
             "type": "string"
           },
@@ -6762,6 +6780,7 @@
           "entity_id",
           "updated_at",
           "media_item_id",
+          "media_item_public_id",
           "library_id",
           "title",
           "poster_path",
@@ -8494,6 +8513,9 @@
           "provider_kind": {
             "type": "string"
           },
+          "public_id": {
+            "type": "string"
+          },
           "search_vector": {},
           "slug": {
             "type": "string"
@@ -8558,7 +8580,8 @@
           "last_enrich_error",
           "field_provenance",
           "match_confidence",
-          "slug_locked"
+          "slug_locked",
+          "public_id"
         ],
         "type": "object"
       },
@@ -8654,6 +8677,9 @@
           "provider_kind": {
             "type": "string"
           },
+          "public_id": {
+            "type": "string"
+          },
           "search_vector": {},
           "slug": {
             "type": "string"
@@ -8719,7 +8745,8 @@
           "last_enrich_error",
           "field_provenance",
           "match_confidence",
-          "slug_locked"
+          "slug_locked",
+          "public_id"
         ],
         "type": "object"
       },
@@ -11546,6 +11573,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "media_item_public_id": {
+            "type": "string"
+          },
           "season_count": {
             "format": "int32",
             "type": "integer"
@@ -12724,9 +12754,8 @@
             "type": "string"
           },
           "file_id": {
-            "format": "int64",
-            "minimum": 0,
-            "type": "integer"
+            "maxLength": 64,
+            "type": "string"
           },
           "height": {
             "format": "int32",
@@ -12772,7 +12801,6 @@
         },
         "required": [
           "session_id",
-          "file_id",
           "media_item_id",
           "position_seconds",
           "total_seconds",
@@ -15081,12 +15109,18 @@
             "format": "int64",
             "type": "integer"
           },
+          "file_public_id": {
+            "type": "string"
+          },
           "has_next": {
             "type": "boolean"
           },
           "media_item_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "media_item_public_id": {
+            "type": "string"
           },
           "runtime": {
             "format": "int32",
@@ -26556,9 +26590,8 @@
             "name": "id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           },
           {
@@ -31781,9 +31814,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           }
         ],
@@ -31825,9 +31857,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           },
           {
@@ -31878,9 +31909,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           }
         ],
@@ -31922,9 +31952,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           },
           {
@@ -31975,9 +32004,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           },
           {
@@ -32134,9 +32162,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           }
         ],
@@ -32189,9 +32216,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           }
         ],
@@ -32250,9 +32276,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           },
           {
@@ -32304,9 +32329,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           }
         ],
@@ -32359,9 +32383,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           }
         ],
@@ -32403,9 +32426,8 @@
             "name": "file_id",
             "required": true,
             "schema": {
-              "format": "int64",
-              "minimum": 1,
-              "type": "integer"
+              "maxLength": 64,
+              "type": "string"
             }
           },
           {

@@ -25,6 +25,10 @@ sql:
             go_type:
               import: "github.com/jackc/pgx/v5/pgtype"
               type: "Interval"
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
           - db_type: "vector"
             go_type:
               import: "github.com/pgvector/pgvector-go"

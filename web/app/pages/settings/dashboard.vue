@@ -411,7 +411,7 @@ onMounted(async () => {
           <div class="missing-poster">
             <NuxtImg
               v-if="item.poster_path && !item.poster_path.startsWith('http')"
-              :src="`/api/media/${item.id}/image/poster`"
+              :src="usePosterUrl(item) ?? undefined"
               :width="200"
               :quality="80"
               loading="lazy"

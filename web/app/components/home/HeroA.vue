@@ -57,7 +57,7 @@
           <NuxtImg
             v-if="logoOk[current.id]"
             class="hero-logo"
-            :src="logoUrl(current.id)"
+            :src="logoUrl(current)"
             :alt="current.title"
             :width="500"
           />
@@ -117,7 +117,7 @@ import type { MediaItem, Movie } from '~~/shared/types'
 // silently navigate to the detail page when the user explicitly asked to
 // play.
 export interface HeroPlayInfo {
-  fileId: number | null
+  fileId: string | number | null
   label?: string
   // For TV hero entries, the resolved next-unwatched episode_id. Used by
   // the watch route to set entity_type=episode so the activity panel
@@ -152,7 +152,7 @@ const bgB = ref<string | null>(null)
 // so we can safely treat this as defined inside that scope.
 const current = computed(() => (props.items[currentIdx.value] ?? props.items[0])!)
 const movie = computed(() => props.movies?.[current.value.id])
-const posterUrl = computed(() => current.value ? usePosterUrl(current.value.id) : null)
+const posterUrl = computed(() => current.value ? usePosterUrl(current.value) : null)
 
 const currentPlay = computed<HeroPlayInfo | undefined>(() => props.playInfo?.[current.value.id])
 const canPlayCurrent = computed(() => !!currentPlay.value?.fileId)
@@ -174,15 +174,15 @@ const playLabel = computed(() => {
 // Probe /image/logo per slide; on 404 the h1 text stays. Probing (vs a bare
 // <img @error>) avoids a broken-image flash on slides without logo art.
 const logoOk = ref<Record<number, boolean>>({})
-function logoUrl(id: number) {
-  return `/api/media/${id}/image/logo`
+function logoUrl(item: HeroItem) {
+  return `/api/media/${useMediaImageKey(item)}/image/logo`
 }
-function probeLogo(id: number) {
-  if (logoOk.value[id] !== undefined) return
+function probeLogo(item: HeroItem) {
+  if (logoOk.value[item.id] !== undefined) return
   const img = new Image()
-  img.onload = () => { logoOk.value[id] = true }
-  img.onerror = () => { logoOk.value[id] = false }
-  img.src = logoUrl(id)
+  img.onload = () => { logoOk.value[item.id] = true }
+  img.onerror = () => { logoOk.value[item.id] = false }
+  img.src = logoUrl(item)
 }
 
 // --- Palette tint ---------------------------------------------------------
@@ -190,7 +190,7 @@ function probeLogo(id: number) {
 // canvas) and let the gradient + primary button pick the color up. Falls
 // back to gold when extraction fails or the image is effectively grayscale.
 const tint = ref('230, 185, 74')
-function extractTint(id: number) {
+function extractTint(item: HeroItem) {
   const img = new Image()
   img.onload = () => {
     try {
@@ -219,7 +219,7 @@ function extractTint(id: number) {
       tint.value = `${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}`
     } catch { /* canvas tainted or decode issue — keep previous tint */ }
   }
-  img.src = useBackdropUrl(id) ?? ''
+  img.src = useBackdropUrl(item) ?? ''
 }
 
 // --- Trailer takeover -----------------------------------------------------
@@ -257,7 +257,7 @@ function endTrailer(advance: boolean) {
 
 function getBackdropUrl(idx: number) {
   const item = props.items[idx]
-  return item ? useBackdropUrl(item.id) : null
+  return item ? useBackdropUrl(item) : null
 }
 
 function advanceHero() {
@@ -347,11 +347,11 @@ function initBackdrops() {
 }
 
 // Per-slide side effects: probe the logo, retint, re-arm the trailer linger.
-watch(() => current.value?.id, (id) => {
-  if (!id) return
+watch(() => current.value, (item) => {
+  if (!item) return
   killTrailer()
-  probeLogo(id)
-  extractTint(id)
+  probeLogo(item)
+  extractTint(item)
   armTrailer()
 })
 
@@ -361,11 +361,13 @@ watch(
   () => props.items[0]?.id,
   (id) => {
     if (!id) return
+    const item = props.items[0]
+    if (!item) return
     if (timeout) { clearTimeout(timeout); timeout = null }
     killTrailer()
     initBackdrops()
-    probeLogo(id)
-    extractTint(id)
+    probeLogo(item)
+    extractTint(item)
     armTrailer()
     if (props.items.length > 1 && !heroPaused.value) startTimer()
   },

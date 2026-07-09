@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediatype"
@@ -33,8 +34,9 @@ type UnmatchedFile struct {
 
 // EpisodeFileEntry describes a single episode file mapping.
 type EpisodeFileEntry struct {
-	FileID int64 `json:"file_id"`
-	Size   int64 `json:"size"`
+	FileID       int64  `json:"file_id"`
+	FilePublicID string `json:"file_public_id,omitempty"`
+	Size         int64  `json:"size"`
 }
 
 // ListMedia returns media items of the given type with availability flags.
@@ -245,12 +247,26 @@ func (a *App) preferredTitleResolver(ctx context.Context, q *sqlc.Queries) func(
 	}
 }
 
-// GetMediaItem resolves a media item by numeric ID or slug string.
+// ResolveMediaItemID resolves a media item by internal numeric ID, external
+// public UUID, or slug string. It returns false instead of surfacing DB errors
+// for image handlers that only need a 404/not-found decision.
+func (a *App) ResolveMediaItemID(ctx context.Context, idOrSlug string) (int64, bool) {
+	item, err := a.GetMediaItem(ctx, idOrSlug)
+	if err != nil {
+		return 0, false
+	}
+	return item.ID, true
+}
+
+// GetMediaItem resolves a media item by numeric ID, public UUID, or slug string.
 func (a *App) GetMediaItem(ctx context.Context, idOrSlug string) (sqlc.MediaItemCard, error) {
 	q := sqlc.New(a.db)
 
 	if id, err := strconv.ParseInt(idOrSlug, 10, 64); err == nil {
 		return q.GetMediaItemByID(ctx, id)
+	}
+	if publicID, err := uuid.Parse(idOrSlug); err == nil {
+		return q.GetMediaItemByPublicID(ctx, publicID)
 	}
 	return q.GetMediaItemBySlug(ctx, idOrSlug)
 }
@@ -285,8 +301,9 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		hasFiles = true
 		for _, f := range files {
 			mediaFiles = append(mediaFiles, map[string]any{
-				"id":   f.ID,
-				"size": f.Size,
+				"id":        f.ID,
+				"public_id": f.PublicID.String(),
+				"size":      f.Size,
 			})
 		}
 	}
@@ -1200,7 +1217,7 @@ func BuildEpisodeFileMap(files []sqlc.ListEpisodeFilesRow) map[string]EpisodeFil
 		for _, s := range pr.Parsed.Release.Seasons {
 			for _, e := range pr.Parsed.Release.Episodes {
 				key := fmt.Sprintf("s%de%d", s, e)
-				result[key] = EpisodeFileEntry{FileID: f.ID, Size: f.Size}
+				result[key] = EpisodeFileEntry{FileID: f.ID, FilePublicID: f.PublicID.String(), Size: f.Size}
 			}
 		}
 	}

@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -103,6 +104,7 @@ func (q *Queries) IsEpisodeWatched(ctx context.Context, arg IsEpisodeWatchedPara
 const listContinueWatching = `-- name: ListContinueWatching :many
 SELECT wp.id, wp.entity_type, wp.entity_id, wp.progress_seconds, wp.total_seconds, wp.updated_at,
        COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
        COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
        COALESCE(mi.title, ep_mi.title) AS title,
        COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
@@ -139,21 +141,22 @@ LIMIT 20
 `
 
 type ListContinueWatchingRow struct {
-	ID              int64              `json:"id"`
-	EntityType      string             `json:"entity_type"`
-	EntityID        int64              `json:"entity_id"`
-	ProgressSeconds int32              `json:"progress_seconds"`
-	TotalSeconds    int32              `json:"total_seconds"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	MediaItemID     int64              `json:"media_item_id"`
-	LibraryID       int64              `json:"library_id"`
-	Title           string             `json:"title"`
-	PosterPath      string             `json:"poster_path"`
-	Slug            string             `json:"slug"`
-	MediaType       string             `json:"media_type"`
-	EpisodeNumber   pgtype.Int4        `json:"episode_number"`
-	EpisodeTitle    pgtype.Text        `json:"episode_title"`
-	SeasonNumber    pgtype.Int4        `json:"season_number"`
+	ID                int64              `json:"id"`
+	EntityType        string             `json:"entity_type"`
+	EntityID          int64              `json:"entity_id"`
+	ProgressSeconds   int32              `json:"progress_seconds"`
+	TotalSeconds      int32              `json:"total_seconds"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	MediaItemID       int64              `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID          `json:"media_item_public_id"`
+	LibraryID         int64              `json:"library_id"`
+	Title             string             `json:"title"`
+	PosterPath        string             `json:"poster_path"`
+	Slug              string             `json:"slug"`
+	MediaType         string             `json:"media_type"`
+	EpisodeNumber     pgtype.Int4        `json:"episode_number"`
+	EpisodeTitle      pgtype.Text        `json:"episode_title"`
+	SeasonNumber      pgtype.Int4        `json:"season_number"`
 }
 
 // Continue watching: incomplete progress across movies and episodes
@@ -174,6 +177,7 @@ func (q *Queries) ListContinueWatching(ctx context.Context, userID int64) ([]Lis
 			&i.TotalSeconds,
 			&i.UpdatedAt,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.LibraryID,
 			&i.Title,
 			&i.PosterPath,
@@ -268,6 +272,7 @@ const listRecentlyWatched = `-- name: ListRecentlyWatched :many
 SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
        wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
        COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
        COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
        COALESCE(mi.title, ep_mi.title) AS title,
        COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
@@ -285,16 +290,17 @@ LIMIT 20
 `
 
 type ListRecentlyWatchedRow struct {
-	ID          int64              `json:"id"`
-	EntityType  string             `json:"entity_type"`
-	EntityID    int64              `json:"entity_id"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	MediaItemID int64              `json:"media_item_id"`
-	LibraryID   int64              `json:"library_id"`
-	Title       string             `json:"title"`
-	PosterPath  string             `json:"poster_path"`
-	Slug        string             `json:"slug"`
-	MediaType   string             `json:"media_type"`
+	ID                int64              `json:"id"`
+	EntityType        string             `json:"entity_type"`
+	EntityID          int64              `json:"entity_id"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	MediaItemID       int64              `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID          `json:"media_item_public_id"`
+	LibraryID         int64              `json:"library_id"`
+	Title             string             `json:"title"`
+	PosterPath        string             `json:"poster_path"`
+	Slug              string             `json:"slug"`
+	MediaType         string             `json:"media_type"`
 }
 
 // Recently watched (completed items)
@@ -313,6 +319,7 @@ func (q *Queries) ListRecentlyWatched(ctx context.Context, userID int64) ([]List
 			&i.EntityID,
 			&i.UpdatedAt,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.LibraryID,
 			&i.Title,
 			&i.PosterPath,
@@ -332,6 +339,7 @@ func (q *Queries) ListRecentlyWatched(ctx context.Context, userID int64) ([]List
 const listRecentlyWatchedEpisodes = `-- name: ListRecentlyWatchedEpisodes :many
 SELECT wp.entity_id AS episode_id, wp.updated_at,
        ts.media_item_id,
+       ep_mi.public_id AS media_item_public_id,
        ep_mi.library_id,
        ep_mi.title AS series_title,
        ep_mi.slug AS series_slug,
@@ -349,15 +357,16 @@ LIMIT 24
 `
 
 type ListRecentlyWatchedEpisodesRow struct {
-	EpisodeID     int64              `json:"episode_id"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	MediaItemID   int64              `json:"media_item_id"`
-	LibraryID     int64              `json:"library_id"`
-	SeriesTitle   string             `json:"series_title"`
-	SeriesSlug    string             `json:"series_slug"`
-	SeasonNumber  int32              `json:"season_number"`
-	EpisodeNumber int32              `json:"episode_number"`
-	EpisodeTitle  string             `json:"episode_title"`
+	EpisodeID         int64              `json:"episode_id"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	MediaItemID       int64              `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID          `json:"media_item_public_id"`
+	LibraryID         int64              `json:"library_id"`
+	SeriesTitle       string             `json:"series_title"`
+	SeriesSlug        string             `json:"series_slug"`
+	SeasonNumber      int32              `json:"season_number"`
+	EpisodeNumber     int32              `json:"episode_number"`
+	EpisodeTitle      string             `json:"episode_title"`
 }
 
 // Recently watched EPISODES (not deduped to the show) — the TV "Recently
@@ -377,6 +386,7 @@ func (q *Queries) ListRecentlyWatchedEpisodes(ctx context.Context, userID int64)
 			&i.EpisodeID,
 			&i.UpdatedAt,
 			&i.MediaItemID,
+			&i.MediaItemPublicID,
 			&i.LibraryID,
 			&i.SeriesTitle,
 			&i.SeriesSlug,

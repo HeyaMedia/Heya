@@ -54,6 +54,7 @@ export type MediaType = 'movie' | 'tv' | 'anime' | 'music' | 'book'
 
 export interface MediaItem {
   id: number
+  public_id: string
   library_id: number
   media_type: MediaType
   title: string
@@ -546,6 +547,7 @@ export interface PersonResponse {
 
 export interface MediaFile {
   id: number
+  public_id?: string
   size: number
 }
 
@@ -646,6 +648,7 @@ export interface StreamSubtitle {
 
 export interface EpisodeFileEntry {
   file_id: number
+  file_public_id?: string
   size: number
 }
 

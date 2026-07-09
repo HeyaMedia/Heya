@@ -4,7 +4,7 @@ definePageMeta({ layout: false })
 const route = useRoute()
 const router = useRouter()
 
-const fileId = computed(() => Number(route.params.fileId))
+const fileId = computed(() => String(route.params.fileId || ''))
 const mediaItemId = computed(() => {
   const id = route.query.media_item_id
   return id ? Number(id) : null

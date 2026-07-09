@@ -26,7 +26,7 @@
         >
           <MediaCard
             :idx="i"
-            :src="item.poster_src ?? usePosterUrl(item.id)"
+            :src="item.poster_src ?? usePosterUrl(item)"
             :title="item.title"
             :subtitle="item.year || item.sub"
             :aspect="aspect || '2/3'"

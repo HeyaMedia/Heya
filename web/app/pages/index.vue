@@ -550,7 +550,7 @@ async function rebuildHeroDetails() {
       if (trailer) heroTrailers.value[item.id] = trailer.id
       if (detail.movie) {
         movieDetails.value[item.id] = detail.movie
-        const fileId = detail.files?.[0]?.id ?? null
+        const fileId = detail.files?.[0]?.public_id || detail.files?.[0]?.id || null
         if (fileId) heroPlayInfo.value[item.id] = { fileId }
       } else if (detail.tv_series) {
         movieDetails.value[item.id] = {
@@ -561,15 +561,16 @@ async function rebuildHeroDetails() {
         }
         try {
           const up = await $heya('/api/media/{id}/up-next', { path: { id: item.id as never } }) as {
-            has_next: boolean; file_id?: number; episode_id?: number
+            has_next: boolean; file_id?: number; file_public_id?: string; episode_id?: number
             season_number?: number; episode_number?: number; episode_title?: string
           }
-          if (up?.has_next && up.file_id) {
+          const fileId = up?.file_public_id || up?.file_id
+          if (up?.has_next && fileId) {
             const s = String(up.season_number ?? 0).padStart(2, '0')
             const e = String(up.episode_number ?? 0).padStart(2, '0')
             const base = `S${s}E${e}`
             const label = up.episode_title ? `${base} - ${up.episode_title}` : base
-            heroPlayInfo.value[item.id] = { fileId: up.file_id, label, episodeId: up.episode_id }
+            heroPlayInfo.value[item.id] = { fileId, label, episodeId: up.episode_id }
           }
         } catch { /* empty */ }
       }

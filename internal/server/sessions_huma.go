@@ -35,6 +35,14 @@ func registerSessionRoutes(api huma.API, app *service.App) {
 			if body.SessionID == "" {
 				return nil, huma.Error400BadRequest("session_id is required")
 			}
+			fileID := int64(0)
+			if body.FileID != "" {
+				var ok bool
+				fileID, ok = app.ResolveLibraryFileID(ctx, body.FileID)
+				if !ok {
+					return nil, huma.Error404NotFound("file not found")
+				}
+			}
 
 			// Resolve display title from the media item — the client could
 			// send it but we'd rather not trust client-rendered names for
@@ -47,7 +55,7 @@ func registerSessionRoutes(api huma.API, app *service.App) {
 				SessionID:       body.SessionID,
 				UserID:          user.ID,
 				Username:        user.Username,
-				FileID:          body.FileID,
+				FileID:          fileID,
 				MediaItemID:     body.MediaItemID,
 				MediaTitle:      disp.Title,
 				MediaSubtitle:   disp.Subtitle,
@@ -252,7 +260,7 @@ func resolveSessionDisplay(ctx context.Context, app *service.App, entityType str
 type sessionHeartbeatInput struct {
 	SessionID string `json:"session_id" minLength:"1" maxLength:"128"`
 
-	FileID      int64  `json:"file_id" minimum:"0"`
+	FileID      string `json:"file_id,omitempty" maxLength:"64"`
 	MediaItemID int64  `json:"media_item_id" minimum:"0"`
 	EntityType  string `json:"entity_type,omitempty" maxLength:"32"`
 	EntityID    int64  `json:"entity_id,omitempty" minimum:"0"`

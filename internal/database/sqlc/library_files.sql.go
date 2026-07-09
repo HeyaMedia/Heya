@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -79,7 +80,7 @@ func (q *Queries) DeleteLibraryFilesByPath(ctx context.Context, arg DeleteLibrar
 }
 
 const getLibraryFileByID = `-- name: GetLibraryFileByID :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files WHERE id = $1
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files WHERE id = $1
 `
 
 func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile, error) {
@@ -87,6 +88,7 @@ func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile
 	var i LibraryFile
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.LibraryID,
 		&i.Path,
 		&i.Size,
@@ -110,7 +112,7 @@ func (q *Queries) GetLibraryFileByID(ctx context.Context, id int64) (LibraryFile
 }
 
 const getLibraryFileByPath = `-- name: GetLibraryFileByPath :one
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files WHERE library_id = $1 AND path = $2
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files WHERE library_id = $1 AND path = $2
 `
 
 type GetLibraryFileByPathParams struct {
@@ -123,6 +125,39 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 	var i LibraryFile
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
+		&i.LibraryID,
+		&i.Path,
+		&i.Size,
+		&i.Mtime,
+		&i.MediaItemID,
+		&i.ParseResult,
+		&i.Status,
+		&i.ErrorMessage,
+		&i.DeletedAt,
+		&i.MediaInfo,
+		&i.Keyframes,
+		&i.HasTrickplay,
+		&i.ContentHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VideoHeight,
+		&i.SegmentsAnalyzedAt,
+		&i.SegmentsDetectedAt,
+	)
+	return i, err
+}
+
+const getLibraryFileByPublicID = `-- name: GetLibraryFileByPublicID :one
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files WHERE public_id = $1
+`
+
+func (q *Queries) GetLibraryFileByPublicID(ctx context.Context, publicID uuid.UUID) (LibraryFile, error) {
+	row := q.db.QueryRow(ctx, getLibraryFileByPublicID, publicID)
+	var i LibraryFile
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
 		&i.LibraryID,
 		&i.Path,
 		&i.Size,
@@ -146,7 +181,7 @@ func (q *Queries) GetLibraryFileByPath(ctx context.Context, arg GetLibraryFileBy
 }
 
 const getMediaItemByExternalID = `-- name: GetMediaItemByExternalID :one
-SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked
+SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked, mi.public_id
 FROM media_item_cards mi
 WHERE mi.library_id = $1
   AND $2::jsonb <> '{}'::jsonb
@@ -214,6 +249,7 @@ func (q *Queries) GetMediaItemByExternalID(ctx context.Context, arg GetMediaItem
 		&i.FieldProvenance,
 		&i.MatchConfidence,
 		&i.SlugLocked,
+		&i.PublicID,
 	)
 	return i, err
 }
@@ -243,7 +279,7 @@ func (q *Queries) ListAllLibraryFilePaths(ctx context.Context, libraryID int64) 
 }
 
 const listDeletedFilesBySize = `-- name: ListDeletedFilesBySize :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
   AND deleted_at > now() - interval '7 days'
 ORDER BY deleted_at DESC
@@ -271,6 +307,7 @@ func (q *Queries) ListDeletedFilesBySize(ctx context.Context, arg ListDeletedFil
 		var i LibraryFile
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Path,
 			&i.Size,
@@ -301,7 +338,7 @@ func (q *Queries) ListDeletedFilesBySize(ctx context.Context, arg ListDeletedFil
 }
 
 const listDeletedLibraryFiles = `-- name: ListDeletedLibraryFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1 AND deleted_at IS NOT NULL
 ORDER BY deleted_at DESC
 LIMIT $2 OFFSET $3
@@ -324,6 +361,7 @@ func (q *Queries) ListDeletedLibraryFiles(ctx context.Context, arg ListDeletedLi
 		var i LibraryFile
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Path,
 			&i.Size,
@@ -394,15 +432,16 @@ func (q *Queries) ListEpisodeFileParses(ctx context.Context, mediaItemIds []int6
 }
 
 const listEpisodeFiles = `-- name: ListEpisodeFiles :many
-SELECT id, size, parse_result FROM library_files
+SELECT id, public_id, size, parse_result FROM library_files
 WHERE media_item_id = $1 AND deleted_at IS NULL AND status = 'matched'
 ORDER BY path ASC
 `
 
 type ListEpisodeFilesRow struct {
-	ID          int64  `json:"id"`
-	Size        int64  `json:"size"`
-	ParseResult []byte `json:"parse_result"`
+	ID          int64     `json:"id"`
+	PublicID    uuid.UUID `json:"public_id"`
+	Size        int64     `json:"size"`
+	ParseResult []byte    `json:"parse_result"`
 }
 
 func (q *Queries) ListEpisodeFiles(ctx context.Context, mediaItemID pgtype.Int8) ([]ListEpisodeFilesRow, error) {
@@ -414,7 +453,12 @@ func (q *Queries) ListEpisodeFiles(ctx context.Context, mediaItemID pgtype.Int8)
 	items := []ListEpisodeFilesRow{}
 	for rows.Next() {
 		var i ListEpisodeFilesRow
-		if err := rows.Scan(&i.ID, &i.Size, &i.ParseResult); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Size,
+			&i.ParseResult,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -426,14 +470,15 @@ func (q *Queries) ListEpisodeFiles(ctx context.Context, mediaItemID pgtype.Int8)
 }
 
 const listLibraryFileSizesByMediaItem = `-- name: ListLibraryFileSizesByMediaItem :many
-SELECT id, size FROM library_files
+SELECT id, public_id, size FROM library_files
 WHERE media_item_id = $1 AND deleted_at IS NULL
 ORDER BY path COLLATE "C" ASC
 `
 
 type ListLibraryFileSizesByMediaItemRow struct {
-	ID   int64 `json:"id"`
-	Size int64 `json:"size"`
+	ID       int64     `json:"id"`
+	PublicID uuid.UUID `json:"public_id"`
+	Size     int64     `json:"size"`
 }
 
 // Narrow variant for the media-detail response, which only renders id+size:
@@ -450,7 +495,7 @@ func (q *Queries) ListLibraryFileSizesByMediaItem(ctx context.Context, mediaItem
 	items := []ListLibraryFileSizesByMediaItemRow{}
 	for rows.Next() {
 		var i ListLibraryFileSizesByMediaItemRow
-		if err := rows.Scan(&i.ID, &i.Size); err != nil {
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Size); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -462,7 +507,7 @@ func (q *Queries) ListLibraryFileSizesByMediaItem(ctx context.Context, mediaItem
 }
 
 const listLibraryFiles = `-- name: ListLibraryFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
@@ -485,6 +530,7 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 		var i LibraryFile
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Path,
 			&i.Size,
@@ -515,7 +561,7 @@ func (q *Queries) ListLibraryFiles(ctx context.Context, arg ListLibraryFilesPara
 }
 
 const listLibraryFilesByMediaItem = `-- name: ListLibraryFilesByMediaItem :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDER BY path ASC
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files WHERE media_item_id = $1 AND deleted_at IS NULL ORDER BY path ASC
 `
 
 func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID pgtype.Int8) ([]LibraryFile, error) {
@@ -529,6 +575,7 @@ func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID p
 		var i LibraryFile
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Path,
 			&i.Size,
@@ -559,7 +606,7 @@ func (q *Queries) ListLibraryFilesByMediaItem(ctx context.Context, mediaItemID p
 }
 
 const listLibraryFilesByStatus = `-- name: ListLibraryFilesByStatus :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1 AND status = $4 AND deleted_at IS NULL
 ORDER BY path ASC
 LIMIT $2 OFFSET $3
@@ -588,6 +635,7 @@ func (q *Queries) ListLibraryFilesByStatus(ctx context.Context, arg ListLibraryF
 		var i LibraryFile
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Path,
 			&i.Size,
@@ -707,7 +755,7 @@ func (q *Queries) ListMediaResolutions(ctx context.Context, mediaItemIds []int64
 }
 
 const listRetryableUnmatchedFiles = `-- name: ListRetryableUnmatchedFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1
   AND deleted_at IS NULL
   AND status = 'unmatched'
@@ -737,6 +785,7 @@ func (q *Queries) ListRetryableUnmatchedFiles(ctx context.Context, arg ListRetry
 		var i LibraryFile
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Path,
 			&i.Size,
@@ -806,7 +855,7 @@ func (q *Queries) ListSeriesWithUnresolvedAbsoluteFiles(ctx context.Context) ([]
 }
 
 const listUnprobedProbeableFiles = `-- name: ListUnprobedProbeableFiles :many
-SELECT id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
+SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1
   AND deleted_at IS NULL
   AND status <> 'pending'
@@ -836,6 +885,7 @@ func (q *Queries) ListUnprobedProbeableFiles(ctx context.Context, arg ListUnprob
 		var i LibraryFile
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Path,
 			&i.Size,
@@ -1109,7 +1159,7 @@ SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
     media_info = '{}'::jsonb, keyframes = NULL, video_height = 0,
     deleted_at = NULL, updated_at = now()
-RETURNING id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at
+RETURNING id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at
 `
 
 type UpsertLibraryFileParams struct {
@@ -1136,6 +1186,7 @@ func (q *Queries) UpsertLibraryFile(ctx context.Context, arg UpsertLibraryFilePa
 	var i LibraryFile
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.LibraryID,
 		&i.Path,
 		&i.Size,

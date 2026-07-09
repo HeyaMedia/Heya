@@ -3,7 +3,7 @@
     <div class="roulette-bg">
       <NuxtImg
         v-if="pick && settled"
-        :src="useBackdropUrl(pick.id) ?? undefined"
+        :src="useBackdropUrl(pick) ?? undefined"
         :width="1920"
         :quality="75"
         class="roulette-bg-img"
@@ -86,7 +86,7 @@
           >
             <div v-for="(m, i) in reel" :key="`${i}-${m.id}`" class="wheel-cell">
               <NuxtImg
-                :src="usePosterUrl(m.id) ?? ''"
+                :src="usePosterUrl(m) ?? ''"
                 :width="240"
                 :quality="80"
                 densities="1x 2x"
@@ -111,6 +111,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 interface EnrichedMovie {
   id: number
+  public_id?: string
   title: string
   slug: string
   year: string
@@ -173,7 +174,7 @@ const settled = ref(false)
 const pick = ref<EnrichedMovie | null>(null)
 const reel = ref<EnrichedMovie[]>([])
 const reelOffset = ref(0)
-const pickFileId = ref<number | null>(null)
+const pickFileId = ref<string | number | null>(null)
 let reducedMotion = false
 let landedGuard: ReturnType<typeof setTimeout> | null = null
 
@@ -225,8 +226,8 @@ async function settle() {
   settled.value = true
   if (!pick.value) return
   try {
-    const detail = await $heya('/api/media/{id}', { path: { id: String(pick.value.id) } }) as { files?: { id: number }[] }
-    pickFileId.value = detail.files?.[0]?.id ?? null
+    const detail = await $heya('/api/media/{id}', { path: { id: String(pick.value.id) } }) as { files?: { id: number; public_id?: string }[] }
+    pickFileId.value = detail.files?.[0]?.public_id || detail.files?.[0]?.id || null
   } catch { pickFileId.value = null }
 }
 

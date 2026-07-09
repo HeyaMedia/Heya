@@ -28,7 +28,7 @@
       >
         <MediaCard
           :idx="i"
-          :src="usePosterUrl(item.id)"
+          :src="usePosterUrl(item)"
           :title="item.title"
           :title-to="detailUrl(item)"
           :subtitle="item.episode_label"
@@ -54,12 +54,15 @@ export interface UpNextItem {
   episode_number: number
   episode_label: string
   play_file_id: number
+  play_file_public_id?: string
   // Episode primary key — let the watch route surface "S01E03 · Episode
   // title" in the activity panel via entity_type=episode + entity_id.
   episode_id?: number
   // Episode runtime — the hero "Tonight" planner sums these for its
   // session-length estimate.
   runtime_minutes?: number
+  public_id?: string
+  media_item_public_id?: string
 }
 
 defineProps<{ items: UpNextItem[] }>()

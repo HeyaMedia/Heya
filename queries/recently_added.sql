@@ -12,12 +12,12 @@
 -- idx_library_files_created_at scan with a per-row media_items probe that
 -- stops at LIMIT, instead of sorting every live file.
 SELECT r.id, r.media_item_id, r.created_at,
-       r.library_id, r.title, r.slug,
+       r.public_id, r.library_id, r.title, r.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        (COALESCE(r.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb))::jsonb AS episode_numbers
 FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
-         mi.library_id, mi.title, mi.slug
+         mi.public_id, mi.library_id, mi.title, mi.slug
   FROM library_files lf
   JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type = 'tv' AND lf.deleted_at IS NULL

@@ -518,15 +518,17 @@ func (a *App) GetWatchedEpisodes(ctx context.Context, userID, mediaItemID int64)
 
 // UpNextResult describes the next unwatched episode for a show.
 type UpNextResult struct {
-	HasNext       bool   `json:"has_next"`
-	EpisodeID     int64  `json:"episode_id,omitempty"`
-	EpisodeNumber int32  `json:"episode_number,omitempty"`
-	EpisodeTitle  string `json:"episode_title,omitempty"`
-	SeasonNumber  int32  `json:"season_number,omitempty"`
-	SeasonID      int64  `json:"season_id,omitempty"`
-	MediaItemID   int64  `json:"media_item_id,omitempty"`
-	Runtime       int32  `json:"runtime,omitempty"`
-	FileID        int64  `json:"file_id,omitempty"`
+	HasNext           bool   `json:"has_next"`
+	EpisodeID         int64  `json:"episode_id,omitempty"`
+	EpisodeNumber     int32  `json:"episode_number,omitempty"`
+	EpisodeTitle      string `json:"episode_title,omitempty"`
+	SeasonNumber      int32  `json:"season_number,omitempty"`
+	SeasonID          int64  `json:"season_id,omitempty"`
+	MediaItemID       int64  `json:"media_item_id,omitempty"`
+	MediaItemPublicID string `json:"media_item_public_id,omitempty"`
+	Runtime           int32  `json:"runtime,omitempty"`
+	FileID            int64  `json:"file_id,omitempty"`
+	FilePublicID      string `json:"file_public_id,omitempty"`
 }
 
 // GetUpNext returns the next unwatched episode for a series, including a file ID if available.
@@ -541,11 +543,13 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 	}
 
 	var fileID int64
+	var filePublicID string
 	epKey := fmt.Sprintf("s%de%d", ep.SeasonNumber, ep.EpisodeNumber)
 	if files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: mediaItemID, Valid: true}); err == nil {
 		efMap := BuildEpisodeFileMap(files)
 		if entry, ok := efMap[epKey]; ok {
 			fileID = entry.FileID
+			filePublicID = entry.FilePublicID
 		}
 	}
 
@@ -553,7 +557,9 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 	// PreferredLanguage. Without this an anime up-next stays in Japanese
 	// even when the library is set to English.
 	title := ep.Title
+	var publicID string
 	if item, err := q.GetMediaItemByID(ctx, mediaItemID); err == nil {
+		publicID = item.PublicID.String()
 		if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
 			lang := metadata.ParseSettings(lib.Settings).PreferredLanguage
 			if lang != "" {
@@ -569,14 +575,16 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 	}
 
 	return UpNextResult{
-		HasNext:       true,
-		EpisodeID:     ep.EpisodeID,
-		EpisodeNumber: ep.EpisodeNumber,
-		EpisodeTitle:  title,
-		SeasonNumber:  ep.SeasonNumber,
-		SeasonID:      ep.SeasonID,
-		MediaItemID:   ep.MediaItemID,
-		Runtime:       ep.RuntimeMinutes,
-		FileID:        fileID,
+		HasNext:           true,
+		EpisodeID:         ep.EpisodeID,
+		EpisodeNumber:     ep.EpisodeNumber,
+		EpisodeTitle:      title,
+		SeasonNumber:      ep.SeasonNumber,
+		SeasonID:          ep.SeasonID,
+		MediaItemID:       ep.MediaItemID,
+		MediaItemPublicID: publicID,
+		Runtime:           ep.RuntimeMinutes,
+		FileID:            fileID,
+		FilePublicID:      filePublicID,
 	}, nil
 }

@@ -65,6 +65,7 @@ WHERE user_id = $1 AND entity_type = 'media_item';
 -- name: ListContinueWatching :many
 SELECT wp.id, wp.entity_type, wp.entity_id, wp.progress_seconds, wp.total_seconds, wp.updated_at,
        COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
        COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
        COALESCE(mi.title, ep_mi.title) AS title,
        COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
@@ -104,6 +105,7 @@ LIMIT 20;
 SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
        wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
        COALESCE(mi.id, ep_mi.id) AS media_item_id,
+       COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
        COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
        COALESCE(mi.title, ep_mi.title) AS title,
        COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
@@ -126,6 +128,7 @@ LIMIT 20;
 -- name: ListRecentlyWatchedEpisodes :many
 SELECT wp.entity_id AS episode_id, wp.updated_at,
        ts.media_item_id,
+       ep_mi.public_id AS media_item_public_id,
        ep_mi.library_id,
        ep_mi.title AS series_title,
        ep_mi.slug AS series_slug,

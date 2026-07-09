@@ -8,6 +8,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	pgvector "github.com/pgvector/pgvector-go"
 )
@@ -368,6 +369,7 @@ type LibraryDiskUsage struct {
 
 type LibraryFile struct {
 	ID                 int64              `json:"id"`
+	PublicID           uuid.UUID          `json:"public_id"`
 	LibraryID          int64              `json:"library_id"`
 	Path               string             `json:"path"`
 	Size               int64              `json:"size"`
@@ -514,6 +516,7 @@ type MediaCrew struct {
 
 type MediaItem struct {
 	ID                  int64              `json:"id"`
+	PublicID            uuid.UUID          `json:"public_id"`
 	LibraryID           int64              `json:"library_id"`
 	MediaType           MediaType          `json:"media_type"`
 	Slug                string             `json:"slug"`
@@ -573,6 +576,7 @@ type MediaItemCard struct {
 	FieldProvenance     []byte             `json:"field_provenance"`
 	MatchConfidence     float32            `json:"match_confidence"`
 	SlugLocked          bool               `json:"slug_locked"`
+	PublicID            uuid.UUID          `json:"public_id"`
 }
 
 type MediaItemExternalID struct {

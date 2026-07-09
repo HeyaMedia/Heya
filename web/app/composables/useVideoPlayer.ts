@@ -2,7 +2,7 @@ import type { StreamInfoResponse } from '~~/shared/types'
 import type { PlaybackEntityType } from '~/composables/usePlaybackEvents'
 
 export interface PlayerState {
-  fileId: number
+  fileId: string | number
   mediaItemId: number | null
   streamInfo: StreamInfoResponse | null
   currentTime: number
@@ -19,7 +19,7 @@ export interface PlayerState {
 }
 
 export function useVideoPlayer(
-  fileId: Ref<number>,
+  fileId: Ref<string | number>,
   mediaItemId: Ref<number | null>,
   // entityType + entityId tell recordPlayback which row to update in
   // user_watch_progress: ("movie", media_item_id) for movies, ("episode",

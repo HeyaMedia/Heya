@@ -37,7 +37,7 @@ export interface TranscodeStatus {
 }
 
 export function useTranscodeStatus(
-  fileId: Ref<number | null | undefined>,
+  fileId: Ref<string | number | null | undefined>,
   enabled: Ref<boolean>,
   token: Ref<string | null | undefined>,
   intervalMs = 1500,

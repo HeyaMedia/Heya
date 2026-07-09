@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -215,12 +216,12 @@ func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, limit int32) 
 const listRecentlyAddedTVFiles = `-- name: ListRecentlyAddedTVFiles :many
 
 SELECT r.id, r.media_item_id, r.created_at,
-       r.library_id, r.title, r.slug,
+       r.public_id, r.library_id, r.title, r.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        (COALESCE(r.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb))::jsonb AS episode_numbers
 FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
-         mi.library_id, mi.title, mi.slug
+         mi.public_id, mi.library_id, mi.title, mi.slug
   FROM library_files lf
   JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type = 'tv' AND lf.deleted_at IS NULL
@@ -234,6 +235,7 @@ type ListRecentlyAddedTVFilesRow struct {
 	ID             int64              `json:"id"`
 	MediaItemID    pgtype.Int8        `json:"media_item_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	PublicID       uuid.UUID          `json:"public_id"`
 	LibraryID      int64              `json:"library_id"`
 	Title          string             `json:"title"`
 	Slug           string             `json:"slug"`
@@ -265,6 +267,7 @@ func (q *Queries) ListRecentlyAddedTVFiles(ctx context.Context, limit int32) ([]
 			&i.ID,
 			&i.MediaItemID,
 			&i.CreatedAt,
+			&i.PublicID,
 			&i.LibraryID,
 			&i.Title,
 			&i.Slug,

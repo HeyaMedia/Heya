@@ -149,7 +149,7 @@ type extraBinaryInput struct {
 }
 
 type mediaImageInput struct {
-	ID   int64  `path:"id" minimum:"1"`
+	ID   string `path:"id" maxLength:"64"`
 	Type string `path:"type" maxLength:"32"`
 }
 
@@ -163,26 +163,26 @@ type albumCoverInput struct {
 }
 
 type streamFileInput struct {
-	FileID int64 `path:"file_id" minimum:"1"`
+	FileID string `path:"file_id" maxLength:"64"`
 }
 
 type streamPlaylistInput struct {
-	FileID int64  `path:"file_id" minimum:"1"`
+	FileID string `path:"file_id" maxLength:"64"`
 	Audio  string `query:"audio" required:"false" maxLength:"16"`
 }
 
 type streamSegmentInput struct {
-	FileID  int64  `path:"file_id" minimum:"1"`
+	FileID  string `path:"file_id" maxLength:"64"`
 	Segment string `path:"segment" maxLength:"128"`
 }
 
 type streamSubtitleInput struct {
-	FileID int64 `path:"file_id" minimum:"1"`
-	Index  int   `path:"index" minimum:"0"`
+	FileID string `path:"file_id" maxLength:"64"`
+	Index  int    `path:"index" minimum:"0"`
 }
 
 type trickplaySpriteInput struct {
-	FileID int64 `path:"file_id" minimum:"1"`
+	FileID string `path:"file_id" maxLength:"64"`
 	// pattern is OpenAPI documentation only — wrapStreamAs ignores this input
 	// struct, so the actual traversal guard is the filepath.Base check in
 	// handleTrickplaySprite. Kept in sync for spec accuracy.

@@ -15,7 +15,7 @@
       <div class="hero-content">
         <div class="hero-left">
           <div class="hero-poster">
-            <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" :width="600" />
+            <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
             <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
           </div>
 
@@ -48,7 +48,7 @@
           </div>
 
           <div class="detail-actions">
-            <button v-if="playableFileId" class="btn btn-primary" @click="play">
+            <button v-if="playableFileRef" class="btn btn-primary" @click="play">
               <Icon name="play" :size="16" /> {{ resumeInProgress ? 'Resume' : 'Play' }}
             </button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No File</button>
@@ -102,9 +102,9 @@
         </div>
 
         <!-- Right column: ratings + audio/subtitle prefs -->
-        <div v-if="(detail.external_ratings && detail.external_ratings.length) || (detail.available && playableFileId)" class="hero-side">
+        <div v-if="(detail.external_ratings && detail.external_ratings.length) || (detail.available && playableFileRef)" class="hero-side">
           <MediaRatings :ratings="detail.external_ratings" />
-          <MediaPlaybackPanel v-if="detail.available && playableFileId" :media-item-id="detail.media_item.id" />
+          <MediaPlaybackPanel v-if="detail.available && playableFileRef" :media-item-id="detail.media_item.id" />
         </div>
       </div>
 
@@ -355,7 +355,7 @@ const {
 
 // Lightbox openers
 function openPosterLightbox() {
-  const src = usePosterUrl(detail.value!.media_item.id)
+  const src = usePosterUrl(detail.value!.media_item)
   if (src) lightbox.open(src)
 }
 
@@ -410,17 +410,17 @@ function formatExtraDuration(ms: number) {
 }
 
 // Play
-const playableFileId = computed(() => detail.value?.files?.[0]?.id ?? null)
+const playableFileRef = computed(() => detail.value?.files?.[0]?.public_id || detail.value?.files?.[0]?.id || null)
 
 function play() {
-  if (!playableFileId.value || !detail.value) return
+  if (!playableFileRef.value || !detail.value) return
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
     title: detail.value.preferred_title || detail.value.media_item.title,
     entity_type: 'movie',
     entity_id: String(detail.value.media_item.id),
   })
-  navigateTo(`/watch/${playableFileId.value}?${params}`)
+  navigateTo(`/watch/${playableFileRef.value}?${params}`)
 }
 
 // Favorites / watched
@@ -562,11 +562,11 @@ function formatMoney(n: number) {
 }
 
 async function loadStreamInfo() {
-  if (!playableFileId.value) return
+  if (!playableFileRef.value) return
   try {
     const caps = useClientCaps()
     const capsQuery = capsToQueryString(caps)
-    const url = `/api/stream/${playableFileId.value}/info${capsQuery ? `?${capsQuery}` : ''}`
+    const url = `/api/stream/${playableFileRef.value}/info${capsQuery ? `?${capsQuery}` : ''}`
     const token = useAuth().token.value
     streamInfo.value = await $fetch<StreamInfoResponse>(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},

@@ -187,7 +187,7 @@
                 >
                   <MediaCard
                     :idx="rowIdx * gridCols + colIdx"
-                    :src="usePosterUrl(item.id)"
+                    :src="usePosterUrl(item)"
                     aspect="2/3"
                     :title="item.title"
                     :title-to="mediaUrl(item)"
@@ -225,7 +225,7 @@
               >
                 <template v-if="isPhone">
                   <div class="bdr-top">
-                    <Poster :idx="index" :src="usePosterUrl(item.id)" style="width: 52px; height: 78px; border-radius: 4px; flex-shrink: 0" />
+                    <Poster :idx="index" :src="usePosterUrl(item)" style="width: 52px; height: 78px; border-radius: 4px; flex-shrink: 0" />
                     <div class="bdr-top-text">
                       <div class="bdr-title">
                         {{ item.title }}
@@ -247,7 +247,7 @@
                   </div>
                 </template>
                 <template v-else>
-                  <Poster :idx="index" :src="usePosterUrl(item.id)" class-name="browse-detail-poster" :width="120" />
+                  <Poster :idx="index" :src="usePosterUrl(item)" class-name="browse-detail-poster" :width="120" />
                   <div class="browse-detail-body">
                     <div class="browse-detail-title">
                       <span>{{ item.title }}</span>
@@ -293,7 +293,7 @@
               @click="navigateTo(mediaUrl(item))"
             >
               <template v-if="isPhone">
-                <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" />
+                <Poster :idx="0" :src="usePosterUrl(item)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" />
                 <div class="list-phone-main">
                   <div class="list-title">
                     {{ item.title }}
@@ -308,7 +308,7 @@
               </template>
               <template v-else>
                 <div class="list-title-cell">
-                  <Poster :idx="0" :src="usePosterUrl(item.id)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
+                  <Poster :idx="0" :src="usePosterUrl(item)" style="width: 36px; height: 54px; border-radius: 4px; flex-shrink: 0" />
                   <div>
                     <div class="list-title">
                       {{ item.title }}

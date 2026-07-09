@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
@@ -12,6 +14,29 @@ import (
 func (a *App) GetLibraryFile(ctx context.Context, fileID int64) (sqlc.LibraryFile, error) {
 	q := sqlc.New(a.db)
 	return q.GetLibraryFileByID(ctx, fileID)
+}
+
+// ResolveLibraryFileID resolves a public file reference to the internal row ID.
+func (a *App) ResolveLibraryFileID(ctx context.Context, idOrPublicID string) (int64, bool) {
+	file, err := a.GetLibraryFileByRef(ctx, idOrPublicID)
+	if err != nil {
+		return 0, false
+	}
+	return file.ID, true
+}
+
+// GetLibraryFileByRef resolves a library file by legacy numeric ID or public UUID.
+func (a *App) GetLibraryFileByRef(ctx context.Context, idOrPublicID string) (sqlc.LibraryFile, error) {
+	q := sqlc.New(a.db)
+
+	if id, err := strconv.ParseInt(idOrPublicID, 10, 64); err == nil {
+		return q.GetLibraryFileByID(ctx, id)
+	}
+	publicID, err := uuid.Parse(idOrPublicID)
+	if err != nil {
+		return sqlc.LibraryFile{}, fmt.Errorf("invalid file id")
+	}
+	return q.GetLibraryFileByPublicID(ctx, publicID)
 }
 
 type MediaExtraFile struct {

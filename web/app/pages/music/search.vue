@@ -82,7 +82,7 @@
           >
             <MusicCard
               variant="circle"
-              :src="usePosterUrl(a.id) ?? undefined"
+              :src="usePosterUrl(a) ?? undefined"
               :alt="a.title"
               :title="a.title"
               no-play

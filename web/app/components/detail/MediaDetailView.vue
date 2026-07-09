@@ -30,7 +30,7 @@
 
       <div class="hero-content">
         <div class="hero-poster">
-          <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" :width="600" />
+          <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
           <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
@@ -63,7 +63,7 @@
           </div>
 
           <div class="detail-actions">
-            <button v-if="playableFileId" class="btn btn-primary" @click="navigateToPrimaryFile"><Icon :name="primaryActionIcon" :size="16" /> {{ primaryActionLabel }}</button>
+            <button v-if="playableFileRef" class="btn btn-primary" @click="navigateToPrimaryFile"><Icon :name="primaryActionIcon" :size="16" /> {{ primaryActionLabel }}</button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon :name="primaryActionIcon" :size="16" /> No File</button>
             <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
             <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
@@ -379,11 +379,11 @@ const {
 
 // Lightbox
 function openPosterLightbox() {
-  const src = usePosterUrl(detail.value!.media_item.id)
+  const src = usePosterUrl(detail.value!.media_item)
   if (src) lightbox.open(src)
 }
 
-const playableFileId = computed(() => detail.value?.files?.[0]?.id)
+const playableFileRef = computed(() => detail.value?.files?.[0]?.public_id || detail.value?.files?.[0]?.id)
 const isBook = computed(() => detail.value?.media_item.media_type === 'book')
 const isAudiobook = computed(() => detail.value?.book?.format === 'audiobook')
 const primaryActionLabel = computed(() => (isBook.value && !isAudiobook.value ? 'Read' : 'Play'))
@@ -391,16 +391,16 @@ const primaryActionIcon = computed(() => (isBook.value && !isAudiobook.value ? '
 const showPlaybackPrefs = computed(() => detail.value?.available && (!isBook.value || isAudiobook.value))
 
 function navigateToPrimaryFile() {
-  if (!playableFileId.value || !detail.value) return
+  if (!playableFileRef.value || !detail.value) return
   if (isBook.value && !isAudiobook.value) {
-    window.open(`/api/stream/${playableFileId.value}`, '_blank', 'noopener,noreferrer')
+    window.open(`/api/stream/${playableFileRef.value}`, '_blank', 'noopener,noreferrer')
     return
   }
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
     title: detail.value.media_item.title,
   })
-  navigateTo(`/watch/${playableFileId.value}?${params}`)
+  navigateTo(`/watch/${playableFileRef.value}?${params}`)
 }
 
 const genres = computed(() => {

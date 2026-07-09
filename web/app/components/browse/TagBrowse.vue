@@ -73,7 +73,7 @@
         >
           <MediaCard
             :idx="i"
-            :src="usePosterUrl(item.id)"
+            :src="usePosterUrl(item)"
             aspect="2/3"
             :title="item.title"
             :subtitle="subtitleFor(item)"

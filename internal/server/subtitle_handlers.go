@@ -32,11 +32,6 @@ type subtitleTrack struct {
 
 func handleGetSubtitle(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fileID, err := strconv.ParseInt(r.PathValue("file_id"), 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid file id")
-			return
-		}
 		index, err := strconv.Atoi(r.PathValue("index"))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid stream index")
@@ -48,7 +43,7 @@ func handleGetSubtitle(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		file, err := app.GetLibraryFile(r.Context(), fileID)
+		file, err := app.GetLibraryFileByRef(r.Context(), r.PathValue("file_id"))
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -91,7 +86,7 @@ func handleGetSubtitle(app *service.App) http.HandlerFunc {
 			contentType = "text/x-ssa; charset=utf-8"
 		}
 
-		cacheKey := fmt.Sprintf("sub_%d_%d", fileID, index)
+		cacheKey := fmt.Sprintf("sub_%d_%d", file.ID, index)
 		subPath := filepath.Join(app.TranscoderCache().SegmentDir(cacheKey), "subtitle"+ext)
 
 		if _, err := os.Stat(subPath); err != nil {

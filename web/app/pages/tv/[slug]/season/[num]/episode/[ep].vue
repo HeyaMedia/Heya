@@ -22,7 +22,7 @@
             :runtime-minutes="episode.runtime_minutes"
             :rating="episode.rating"
             :watched="watched"
-            :has-file="!!fileId"
+            :has-file="!!fileRef"
             @play="play"
             @toggle-watched="toggleWatched"
           />
@@ -55,7 +55,7 @@
           </div>
 
           <div class="hero-actions">
-            <button v-if="fileId" class="btn btn-primary btn-sm" @click="play">
+            <button v-if="fileRef" class="btn btn-primary btn-sm" @click="play">
               <Icon name="play" :size="14" /> Play
             </button>
             <button v-else class="btn btn-primary btn-sm" disabled style="opacity: 0.35">
@@ -71,7 +71,7 @@
 
           <p v-if="episode.preferred_overview || episode.overview" class="ep-overview">{{ episode.preferred_overview || episode.overview }}</p>
 
-          <PlaybackPrefs v-if="fileId" :media-item-id="detail.media_item.id" always-open />
+          <PlaybackPrefs v-if="fileRef" :media-item-id="detail.media_item.id" always-open />
         </div>
       </div>
     </div>
@@ -202,15 +202,16 @@ const seasonLink = computed(() => {
   return `/tv/${slug.value}/season/${num}`
 })
 
-const fileId = computed(() => {
+const fileRef = computed(() => {
   const key = `s${currentSeasonNum.value}e${currentEpNum.value}`
-  return detail.value?.episode_files?.[key]?.file_id ?? null
+  const entry = detail.value?.episode_files?.[key]
+  return entry?.file_public_id || entry?.file_id || null
 })
 
 const stillUrl = computed(() => {
   if (!detail.value) return ''
   const label = `s${String(currentSeasonNum.value).padStart(2, '0')}e${String(currentEpNum.value).padStart(2, '0')}`
-  return `/api/media/${detail.value.media_item.id}/image/still?label=${label}`
+  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/still?label=${label}`
 })
 
 const epCode = computed(() => {
@@ -226,7 +227,7 @@ function epCodeFor(ep: any) {
 function episodeStillUrl(ep: any) {
   if (!detail.value) return ''
   const label = `s${String(currentSeasonNum.value).padStart(2, '0')}e${String(ep.episode_number).padStart(2, '0')}`
-  return `/api/media/${detail.value.media_item.id}/image/still?label=${label}`
+  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/still?label=${label}`
 }
 
 const invalidateContinueWatching = useInvalidateContinueWatching()
@@ -251,7 +252,7 @@ async function toggleWatched() {
 }
 
 function play() {
-  if (!fileId.value || !detail.value) return
+  if (!fileRef.value || !detail.value) return
   const title = `${detail.value.media_item.title} - ${epCode.value} - ${episode.value?.title || ''}`
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
@@ -264,7 +265,7 @@ function play() {
     params.set('entity_type', 'episode')
     params.set('entity_id', String(episode.value.id))
   }
-  navigateTo(`/watch/${fileId.value}?${params}`)
+  navigateTo(`/watch/${fileRef.value}?${params}`)
 }
 
 function episodeLink(ep: any) {
@@ -281,11 +282,11 @@ async function loadWatchState() {
 }
 
 async function loadStreamInfo() {
-  if (!fileId.value) return
+  if (!fileRef.value) return
   try {
     const caps = useClientCaps()
     const capsQuery = capsToQueryString(caps)
-    const url = `/api/stream/${fileId.value}/info${capsQuery ? `?${capsQuery}` : ''}`
+    const url = `/api/stream/${fileRef.value}/info${capsQuery ? `?${capsQuery}` : ''}`
     const token = useAuth().token.value
     streamInfo.value = await $fetch<StreamInfoResponse>(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},

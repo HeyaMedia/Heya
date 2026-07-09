@@ -24,7 +24,7 @@
             class="grid-tile card-tile"
             @click="navigateTo(mediaUrl(item))"
           >
-            <Poster :idx="i" :src="usePosterUrl(item.id)" aspect="2/3" />
+            <Poster :idx="i" :src="usePosterUrl(item)" aspect="2/3" />
             <div class="grid-tile-meta">
               <div class="grid-tile-title">{{ item.title }}</div>
               <div class="grid-tile-sub">{{ item.year }}</div>

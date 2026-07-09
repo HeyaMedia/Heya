@@ -14,7 +14,7 @@
 
       <div class="hero-content">
         <div class="hero-poster">
-          <Poster :idx="0" :src="usePosterUrl(detail.media_item.id)" :title="detail.media_item.title" aspect="2/3" :width="600" />
+          <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
           <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
@@ -42,7 +42,7 @@
           </div>
 
           <div class="detail-actions">
-            <button v-if="firstEpisodeFileId" class="btn btn-primary" @click="playFirstEpisode">
+            <button v-if="firstEpisodeFileRef" class="btn btn-primary" @click="playFirstEpisode">
               <Icon name="play" :size="16" /> {{ episodeInProgress ? 'Resume' : 'Play' }} {{ nextEpisodeFull }}
             </button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No Files</button>
@@ -328,7 +328,7 @@ const {
 
 // Lightbox openers
 function openPosterLightbox() {
-  const src = usePosterUrl(detail.value!.media_item.id)
+  const src = usePosterUrl(detail.value!.media_item)
   if (src) lightbox.open(src)
 }
 
@@ -382,6 +382,8 @@ interface UpNextData {
   episode_title?: string
   season_number?: number
   media_item_id?: number
+  file_id?: number
+  file_public_id?: string
 }
 const upNext = ref<UpNextData | null>(null)
 
@@ -394,9 +396,10 @@ const nextEpisodeKey = computed(() => {
   return keys.length > 0 ? keys[0] : null
 })
 
-const firstEpisodeFileId = computed(() => {
+const firstEpisodeFileRef = computed(() => {
   if (!nextEpisodeKey.value || !detail.value?.episode_files) return null
-  return detail.value.episode_files[nextEpisodeKey.value]?.file_id ?? null
+  const entry = detail.value.episode_files[nextEpisodeKey.value]
+  return entry?.file_public_id || entry?.file_id || null
 })
 
 const nextEpisodeLabel = computed(() => {
@@ -425,7 +428,7 @@ const nextEpisodeFull = computed(() => {
 })
 
 function playFirstEpisode() {
-  if (!firstEpisodeFileId.value || !detail.value || !nextEpisodeKey.value) return
+  if (!firstEpisodeFileRef.value || !detail.value || !nextEpisodeKey.value) return
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
     title: `${detail.value.media_item.title} - ${nextEpisodeLabel.value}`,
@@ -434,7 +437,7 @@ function playFirstEpisode() {
     params.set('entity_type', 'episode')
     params.set('entity_id', String(upNext.value.episode_id))
   }
-  navigateTo(`/watch/${firstEpisodeFileId.value}?${params}`)
+  navigateTo(`/watch/${firstEpisodeFileRef.value}?${params}`)
 }
 
 // Resume label for the Play button — driven by saved progress on the
@@ -669,7 +672,7 @@ async function loadRecommendationContextState() {
 }
 
 function seasonPosterUrl(s: any) {
-  return `/api/media/${detail.value?.media_item.id}/image/poster?label=season-${s.season_number}`
+  return `/api/media/${useMediaImageKey(detail.value?.media_item)}/image/poster?label=season-${s.season_number}`
 }
 
 function seasonLabel(s: any) {

@@ -18,7 +18,8 @@ import (
 // the FE should hide the tile rather than crash in that case.
 type ContinueWatchingEnrichedRow struct {
 	sqlc.ListContinueWatchingRow
-	FileID int64 `json:"file_id"`
+	FileID       int64  `json:"file_id"`
+	FilePublicID string `json:"file_public_id,omitempty"`
 }
 
 // PlaybackEvent is the unified emission shape for the player engines. Whether
@@ -108,11 +109,13 @@ func (a *App) ListContinueWatching(ctx context.Context, userID int64) ([]Continu
 		r.Title = resolveTitle(r.MediaItemID, r.LibraryID, r.Title)
 
 		fileID := int64(0)
+		filePublicID := ""
 		switch r.EntityType {
 		case "movie":
 			// Primary file = first non-deleted library_file for the media item.
 			if files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: r.MediaItemID, Valid: true}); err == nil && len(files) > 0 {
 				fileID = files[0].ID
+				filePublicID = files[0].PublicID.String()
 			}
 		case "episode":
 			efMap, ok := episodeFileMaps[r.MediaItemID]
@@ -126,10 +129,11 @@ func (a *App) ListContinueWatching(ctx context.Context, userID int64) ([]Continu
 				key := fmt.Sprintf("s%de%d", r.SeasonNumber.Int32, r.EpisodeNumber.Int32)
 				if entry, ok := efMap[key]; ok {
 					fileID = entry.FileID
+					filePublicID = entry.FilePublicID
 				}
 			}
 		}
-		out = append(out, ContinueWatchingEnrichedRow{ListContinueWatchingRow: r, FileID: fileID})
+		out = append(out, ContinueWatchingEnrichedRow{ListContinueWatchingRow: r, FileID: fileID, FilePublicID: filePublicID})
 	}
 	return out, nil
 }

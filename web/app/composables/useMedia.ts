@@ -1,14 +1,43 @@
-export function useImageUrl(mediaId: number | undefined, type: 'poster' | 'backdrop') {
-  if (!mediaId) return null
-  return `/api/media/${mediaId}/image/${type}`
+export type MediaImageType = 'poster' | 'backdrop' | 'still' | 'logo' | 'banner' | 'clearart' | 'thumb'
+
+export type MediaImageRef =
+  | number
+  | string
+  | null
+  | undefined
+  | {
+    id?: number | string | null
+    public_id?: string | null
+    media_item_id?: number | string | null
+    media_item_public_id?: string | null
+    local_media_item_id?: number | string | null
+    local_public_id?: string | null
+  }
+
+export function useMediaImageKey(ref: MediaImageRef) {
+  if (ref == null || ref === '') return null
+  if (typeof ref === 'number' || typeof ref === 'string') return String(ref)
+  const key = ref.public_id
+    ?? ref.media_item_public_id
+    ?? ref.local_public_id
+    ?? ref.id
+    ?? ref.media_item_id
+    ?? ref.local_media_item_id
+  return key == null || key === '' ? null : String(key)
 }
 
-export function usePosterUrl(mediaId: number | undefined) {
-  return useImageUrl(mediaId, 'poster')
+export function useImageUrl(media: MediaImageRef, type: MediaImageType) {
+  const key = useMediaImageKey(media)
+  if (!key) return null
+  return `/api/media/${key}/image/${type}`
 }
 
-export function useBackdropUrl(mediaId: number | undefined) {
-  return useImageUrl(mediaId, 'backdrop')
+export function usePosterUrl(media: MediaImageRef) {
+  return useImageUrl(media, 'poster')
+}
+
+export function useBackdropUrl(media: MediaImageRef) {
+  return useImageUrl(media, 'backdrop')
 }
 
 // useAlbumCoverUrl returns the canonical album-cover URL. Use this instead
@@ -54,7 +83,7 @@ export function slugify(title: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-export function mediaUrl(item: { id: number; title: string; year?: string; media_type: string; slug?: string }): string {
+export function mediaUrl(item: { id: number; public_id?: string; title: string; year?: string; media_type: string; slug?: string }): string {
   // Music artists live under /music/artist/{slug} (siblings of /music/albums,
   // /music/artists, etc.) — keep them out of the typeMap so the slash path
   // doesn't collide with the page-level routes.

@@ -19,7 +19,7 @@ import (
 func registerStreamRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodGet, "/api/stream/{file_id}/info", "stream-info", "Probe + transcode plan for a file", "Streaming")),
 		func(ctx context.Context, in *struct {
-			FileID int64 `path:"file_id" minimum:"1"`
+			FileID string `path:"file_id" maxLength:"64"`
 			// The full client-caps query is built by useClientCaps on the FE.
 			// Decoded with parseClientCapsFromQuery — we don't bind individual
 			// fields because Huma can't bind unknown query params.
@@ -41,7 +41,11 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 			// this endpoint on player mount and gates direct-play vs HLS on the
 			// returned plan, so it's the natural choke point — without media_info
 			// Decide() would blindly fall back to a 1080p transcode.
-			file, err := app.EnsureFileProbed(ctx, in.FileID)
+			fileID, ok := app.ResolveLibraryFileID(ctx, in.FileID)
+			if !ok {
+				return nil, huma.Error404NotFound("file not found")
+			}
+			file, err := app.EnsureFileProbed(ctx, fileID)
 			if err != nil {
 				return nil, huma.Error404NotFound("file not found")
 			}
@@ -74,13 +78,17 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/stream/{file_id}/transcode-status", "stream-transcode-status", "Live ffmpeg session telemetry", "Streaming")),
 		func(ctx context.Context, in *struct {
-			FileID int64 `path:"file_id" minimum:"1"`
+			FileID string `path:"file_id" maxLength:"64"`
 		}) (*JSONOutput[transcodeProgressResponse], error) {
+			fileID, ok := app.ResolveLibraryFileID(ctx, in.FileID)
+			if !ok {
+				return noStoreJSON(transcodeProgressResponse{Active: false, State: "idle"}), nil
+			}
 			sessions := app.TranscoderSessions()
 			if sessions == nil {
 				return noStoreJSON(transcodeProgressResponse{Active: false}), nil
 			}
-			sess := sessions.GetExisting(in.FileID)
+			sess := sessions.GetExisting(fileID)
 			if sess == nil {
 				return noStoreJSON(transcodeProgressResponse{Active: false, State: "idle"}), nil
 			}
@@ -134,9 +142,9 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/stream/{file_id}/subtitles", "list-subtitles", "Subtitle tracks for a file", "Streaming")),
 		func(ctx context.Context, in *struct {
-			FileID int64 `path:"file_id" minimum:"1"`
+			FileID string `path:"file_id" maxLength:"64"`
 		}) (*JSONOutput[[]subtitleTrack], error) {
-			file, err := app.GetLibraryFile(ctx, in.FileID)
+			file, err := app.GetLibraryFileByRef(ctx, in.FileID)
 			if err != nil {
 				return nil, huma.Error404NotFound("file not found")
 			}
@@ -168,9 +176,13 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/stream/{file_id}/segments", "stream-segments", "Skip segments (intro/recap/credits markers) for a file", "Streaming")),
 		func(ctx context.Context, in *struct {
-			FileID int64 `path:"file_id" minimum:"1"`
+			FileID string `path:"file_id" maxLength:"64"`
 		}) (*JSONOutput[fileSegmentsResponse], error) {
-			segments, err := app.ListFileSegments(ctx, in.FileID)
+			fileID, ok := app.ResolveLibraryFileID(ctx, in.FileID)
+			if !ok {
+				return nil, huma.Error404NotFound("file not found")
+			}
+			segments, err := app.ListFileSegments(ctx, fileID)
 			if err != nil {
 				return nil, huma.Error500InternalServerError("segments lookup failed")
 			}

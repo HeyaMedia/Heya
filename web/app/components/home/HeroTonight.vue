@@ -61,7 +61,7 @@ import type { UpNextItem } from '~/components/home/UpNextRow.vue'
 const props = defineProps<{ items: UpNextItem[] }>()
 defineEmits<{ play: [item: UpNextItem] }>()
 
-const bgUrl = computed(() => props.items[0] ? useBackdropUrl(props.items[0].id) : null)
+const bgUrl = computed(() => props.items[0] ? useBackdropUrl(props.items[0]) : null)
 
 const totalMinutes = computed(() =>
   props.items.slice(0, 4).reduce((sum, it) => sum + (it.runtime_minutes || 0), 0))
@@ -74,7 +74,7 @@ const fmtTotal = computed(() => {
 function stillUrl(it: UpNextItem) {
   const s = String(it.season_number).padStart(2, '0')
   const e = String(it.episode_number).padStart(2, '0')
-  return `/api/media/${it.id}/image/still?label=s${s}e${e}`
+  return `/api/media/${useMediaImageKey(it)}/image/still?label=s${s}e${e}`
 }
 </script>
 
