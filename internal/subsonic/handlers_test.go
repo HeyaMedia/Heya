@@ -1,12 +1,15 @@
 package subsonic
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/karbowiak/heya/internal/sessions"
 )
 
 const testAuth = "u=admin&p=sekret-app-pw&v=1.16.1&c=go-test"
@@ -229,5 +232,41 @@ func TestManifestEndpointsAnswerInProtocol(t *testing.T) {
 		if w.Code == http.StatusOK && strings.HasPrefix(ct, "text/html") {
 			t.Errorf("%s answered HTML — fell through to the SPA?", name)
 		}
+	}
+}
+
+func TestGetNowPlayingOwnOrAdmin(t *testing.T) {
+	f := newFakeBackend()
+	store := sessions.New(context.Background(), nil)
+	store.Upsert(sessions.Session{SessionID: "s-own", UserID: f.user.ID, Username: "admin",
+		MediaType: "music", EntityType: "track", EntityID: 100})
+	store.Upsert(sessions.Session{SessionID: "s-other", UserID: f.user.ID + 1, Username: "bob",
+		MediaType: "music", EntityType: "track", EntityID: 101})
+	f.sessions = store
+	s := NewMiddleware(f, http.NotFoundHandler())
+
+	entriesOf := func(env map[string]any) []any {
+		np, ok := env["nowPlaying"].(map[string]any)
+		if !ok {
+			t.Fatalf("no nowPlaying payload: %v", env)
+		}
+		entries, _ := np["entry"].([]any)
+		return entries
+	}
+
+	// Admin sees every user's session.
+	if got := entriesOf(doJSON(t, s, "getNowPlaying", "")); len(got) != 2 {
+		t.Fatalf("admin should see 2 sessions, got %d: %v", len(got), got)
+	}
+
+	// A non-admin caller only sees their own — other users' activity must
+	// not leak through the Subsonic surface.
+	f.user.IsAdmin = false
+	got := entriesOf(doJSON(t, s, "getNowPlaying", ""))
+	if len(got) != 1 {
+		t.Fatalf("non-admin should see only own session, got %d: %v", len(got), got)
+	}
+	if got[0].(map[string]any)["username"] != "admin" {
+		t.Fatalf("non-admin saw someone else's session: %v", got[0])
 	}
 }

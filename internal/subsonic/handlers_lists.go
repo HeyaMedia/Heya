@@ -214,7 +214,13 @@ func (s *Server) handleGetNowPlaying(w http.ResponseWriter, r *http.Request) {
 		respond(w, r, "nowPlaying", &out)
 		return
 	}
-	for i, sess := range store.List() {
+	// Own-or-admin, same cross-user policy as Heya's activity panel:
+	// non-admins only see their own sessions.
+	active := store.List()
+	if !u.IsAdmin {
+		active = store.ListForUser(u.ID)
+	}
+	for i, sess := range active {
 		if sess.MediaType != "music" || sess.EntityType != "track" {
 			continue
 		}

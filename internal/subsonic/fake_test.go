@@ -15,9 +15,10 @@ import (
 // fakeBackend is an in-memory Backend for handler tests: one admin user
 // with app password "sekret-app-pw", one artist / album / two tracks.
 type fakeBackend struct {
-	enabled bool
-	user    sqlc.User
-	secret  string
+	enabled  bool
+	user     sqlc.User
+	secret   string
+	sessions *sessions.Store
 
 	artists []service.SubsonicArtistRow
 	albums  []sqlc.JFListAlbumsRow
@@ -323,7 +324,7 @@ func (f *fakeBackend) ListUsers(_ context.Context) ([]sqlc.User, error) {
 	return []sqlc.User{f.user}, nil
 }
 
-func (f *fakeBackend) Sessions() *sessions.Store      { return nil }
+func (f *fakeBackend) Sessions() *sessions.Store      { return f.sessions }
 func (f *fakeBackend) EnqueueScanLibrary(int64, bool) {}
 
 func containsID(ids []int64, id int64) bool {
