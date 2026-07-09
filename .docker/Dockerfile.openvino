@@ -92,6 +92,12 @@ RUN ldconfig
 # cache_dir lives under /data so the GPU plugin's compiled-kernel cache (the
 # expensive first-inference JIT, tens of seconds across the model set) survives
 # container restarts and is reused — set it on the persisted data volume.
+#
+# The AI subsystem's llama-server likewise defaults to the Vulkan build here
+# (ANV drivers baked in above, same /dev/dri render node). ggml enumerates
+# Vulkan devices at startup and falls back to its CPU backend when none is
+# visible, so the image still works without a GPU.
 ENV HEYA_SONIC_ACCELERATOR=openvino \
     HEYA_SONIC_OPENVINO_DEVICE=GPU \
-    HEYA_SONIC_OPENVINO_CACHE_DIR=/data/openvino-cache
+    HEYA_SONIC_OPENVINO_CACHE_DIR=/data/openvino-cache \
+    HEYA_AI_LOCAL_BACKEND=vulkan
