@@ -290,16 +290,7 @@ onUnmounted(() => {
    the artwork continues past the hero bottom instead of ending at solid
    canvas. */
 .roulette-bg.ambient-extended .roulette-bg-img { display: none; }
-.roulette-bg.ambient-extended .roulette-bg-gradient {
-  background:
-    linear-gradient(to right,
-      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 34%, transparent) 50%,
-      color-mix(in srgb, var(--bg-1) 12%, transparent) 100%),
-    linear-gradient(to top,
-      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
-      transparent 45%);
-}
+.roulette-bg.ambient-extended .roulette-bg-gradient { display: none; }
 .roulette-inner {
   position: relative;
   z-index: 2;

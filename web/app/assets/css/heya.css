@@ -643,18 +643,13 @@ a { color: inherit; text-decoration: none; }
    its local copy — different crop would seam at the hero edges — and keeps
    only a softened fade whose bottom blends into the ambient scrim instead
    of ending at solid canvas. */
-.hero-bg.ambient-extended .hero-bg-img { display: none; }
-/* No bottom fade at all in extended mode: the hero's bottom edge must carry
-   exactly the ambient scrim's tint — any extra stop reads as a hard cutoff
-   line between hero and the content below. Text cover comes from the left
-   column gradient only. */
-.hero-bg.ambient-extended .hero-bg-fade {
-  background:
-    linear-gradient(to right,
-      color-mix(in srgb, var(--bg-1) 72%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 36%, transparent) 40%,
-      transparent 100%);
-}
+/* Extended mode = the hero paints NOTHING of its own: any local image,
+   gradient, or fade ends at the hero's box and reads as a hard line against
+   the continuing full-page artwork. The ambient layer's override scrim owns
+   all tinting/legibility. Heroes only paint their own backdrop + fades when
+   ambient is off (classic scoped-hero look). */
+.hero-bg.ambient-extended .hero-bg-img,
+.hero-bg.ambient-extended .hero-bg-fade { display: none; }
 .hero-side { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
 
 /* Backdrop carousel indicators */

@@ -153,27 +153,8 @@ function albumTo(al: MediaItem) {
    the artwork continues past the hero bottom instead of ending at solid
    canvas. */
 .music-bg.ambient-extended .music-bg-art { display: none; }
-.music-bg.ambient-extended .music-bg-gradient {
-  background:
-    linear-gradient(to right,
-      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 34%, transparent) 55%,
-      transparent 100%),
-    linear-gradient(to top,
-      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 48%, transparent) 25%,
-      transparent 55%);
-}
-.music-bg.ambient-extended .music-bg-gradient.playing {
-  background:
-    linear-gradient(to right,
-      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 24%, transparent) 60%,
-      transparent 100%),
-    linear-gradient(to top,
-      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
-      transparent 30%);
-}
+.music-bg.ambient-extended .music-bg-gradient { display: none; }
+.music-bg.ambient-extended .music-bg-gradient.playing { display: none; }
 .music-inner {
   position: relative;
   z-index: 2;

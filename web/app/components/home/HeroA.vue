@@ -442,16 +442,7 @@ onUnmounted(() => {
 /* No bottom fade in extended mode — the hero's bottom edge must match the
    ambient scrim exactly or a hard cutoff line appears against the content
    below. Left gradient covers the text column; tint stays. */
-.hero-bg.ambient-extended .hero-bg-gradient {
-  /* Left text-cover only. The radial tint is dropped here: it clips at the
-     deck's bottom edge (.hero-bg overflow:hidden) and paints a stark
-     full-width line against the continuing ambient artwork below. */
-  background:
-    linear-gradient(to right,
-      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 34%, transparent) 50%,
-      transparent 100%);
-}
+.hero-bg.ambient-extended .hero-bg-gradient { display: none; }
 .hero-inner {
   position: relative;
   z-index: 2;

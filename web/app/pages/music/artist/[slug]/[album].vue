@@ -466,10 +466,7 @@ function playFromIndex(i: number) {
    softens its transition into the page canvas so the artwork continues
    past the hero bottom instead of ending at solid var(--bg-0). */
 .hero.ambient-extended .hero-backdrop { display: none; }
-.hero.ambient-extended .hero-fade {
-  background:
-    linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.18) 60%, color-mix(in srgb, var(--bg-0) 24%, transparent) 100%);
-}
+.hero.ambient-extended .hero-fade { display: none; }
 .hero-content {
   position: relative; z-index: 2;
   display: flex; align-items: flex-end; gap: 28px;

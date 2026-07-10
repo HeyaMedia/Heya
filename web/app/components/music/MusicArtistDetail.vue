@@ -829,11 +829,7 @@ if (import.meta.client) {
    bottom instead of ending at solid var(--bg-0). The literal black scrim
    (legibility over the photo) stays put. */
 .hero.ambient-extended .hero-backdrop { display: none; }
-.hero.ambient-extended .hero-fade {
-  background:
-    linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.4) 55%, color-mix(in srgb, var(--bg-0) 24%, transparent) 100%),
-    linear-gradient(90deg, rgba(0,0,0,0.3) 0%, transparent 60%);
-}
+.hero.ambient-extended .hero-fade { display: none; }
 .hero-content {
   position: relative;
   z-index: 2;

@@ -114,16 +114,7 @@ function stillUrl(it: UpNextItem) {
    the artwork continues past the hero bottom instead of ending at solid
    canvas. */
 .tonight-bg.ambient-extended .tonight-bg-img { display: none; }
-.tonight-bg.ambient-extended .tonight-bg-gradient {
-  background:
-    linear-gradient(to right,
-      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 34%, transparent) 55%,
-      color-mix(in srgb, var(--bg-1) 14%, transparent) 100%),
-    linear-gradient(to top,
-      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
-      transparent 50%);
-}
+.tonight-bg.ambient-extended .tonight-bg-gradient { display: none; }
 .tonight-inner {
   position: relative;
   z-index: 2;

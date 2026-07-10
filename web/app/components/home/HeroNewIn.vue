@@ -189,17 +189,7 @@ const feed = computed<FeedRow[]>(() => {
    the artwork continues past the hero bottom instead of ending at solid
    canvas. */
 .newin-bg.ambient-extended .newin-bg-img { display: none; }
-.newin-bg.ambient-extended .newin-bg-gradient {
-  background:
-    linear-gradient(to right,
-      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 40%, transparent) 45%,
-      color-mix(in srgb, var(--bg-1) 16%, transparent) 100%),
-    linear-gradient(to top,
-      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 50%, transparent) 30%,
-      transparent 60%);
-}
+.newin-bg.ambient-extended .newin-bg-gradient { display: none; }
 .newin-inner {
   position: relative;
   z-index: 2;
