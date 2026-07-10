@@ -875,10 +875,14 @@ watch(() => route.fullPath, () => { closeDropdown() })
   align-items: center;
   gap: 24px;
   padding: 0 24px;
-  background: color-mix(in srgb, var(--bg-0) 85%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border);
+  /* Translucent enough that the ambient artwork reads through; the blur
+     keeps text legible. Hard border swapped for a soft drop so the split
+     against the page is a shadow, not a line. */
+  background: color-mix(in srgb, var(--bg-0) 62%, transparent);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border-bottom: 0;
+  box-shadow: 0 1px 18px rgb(var(--shade) / 0.22);
   height: var(--topbar-h);
   z-index: 50;
   position: relative;

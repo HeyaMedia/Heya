@@ -443,12 +443,14 @@ onUnmounted(() => {
    ambient scrim exactly or a hard cutoff line appears against the content
    below. Left gradient covers the text column; tint stays. */
 .hero-bg.ambient-extended .hero-bg-gradient {
+  /* Left text-cover only. The radial tint is dropped here: it clips at the
+     deck's bottom edge (.hero-bg overflow:hidden) and paints a stark
+     full-width line against the continuing ambient artwork below. */
   background:
     linear-gradient(to right,
       color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
       color-mix(in srgb, var(--bg-1) 34%, transparent) 50%,
-      transparent 100%),
-    radial-gradient(ellipse at 85% 110%, rgba(var(--hero-tint), 0.16), transparent 55%);
+      transparent 100%);
 }
 .hero-inner {
   position: relative;

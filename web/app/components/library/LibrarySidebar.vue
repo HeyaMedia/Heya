@@ -187,7 +187,7 @@ async function createList() {
   width: 240px;
   flex-shrink: 0;
   /* Translucent over the ambient-backdrop layer; solid-enough for text. */
-  background: color-mix(in srgb, var(--bg-2) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-2) 55%, transparent);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-right: 1px solid var(--border);
