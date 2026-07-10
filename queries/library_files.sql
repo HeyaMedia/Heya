@@ -253,6 +253,30 @@ WHERE media_item_id = ANY(@media_item_ids::bigint[])
   AND deleted_at IS NULL
 GROUP BY media_item_id;
 
+-- name: ParkUnmatchedLibraryFile :exec
+-- Change-detection seen-marker for a tracked file that no ACCEPTED search
+-- identity claims (unmatched / needs_review / rejected / ignored / unplanned).
+-- Without a row, the next kickoff re-detects the file as new and re-runs a
+-- live provider search every scan, forever. Parking records current
+-- size+mtime with status 'unmatched' so the file stays quiet until its bytes
+-- change or a review decision forces a scoped rescan.
+--
+-- Deliberately dumber than UpsertLibraryFile: a previously matched row keeps
+-- its status and probe artifacts (media_info/keyframes). If the bytes changed
+-- underneath a matched row, the stale probe data lives only until the user
+-- resolves the identity — that forced re-apply goes through UpsertLibraryFile,
+-- whose conflict branch clears it.
+INSERT INTO library_files (library_id, path, size, mtime, parse_result, status)
+VALUES ($1, $2, $3, $4, '{}'::jsonb, 'unmatched')
+ON CONFLICT (library_id, path) DO UPDATE
+SET size = EXCLUDED.size,
+    mtime = EXCLUDED.mtime,
+    deleted_at = NULL,
+    updated_at = now(),
+    status = CASE WHEN library_files.status = 'matched'::file_status
+                  THEN library_files.status
+                  ELSE 'unmatched'::file_status END;
+
 -- name: ListUnprobedProbeableFiles :many
 -- Files that are already known but were never successfully probed (media_info
 -- still empty). The scan re-enqueues ffprobe for these so a file whose first

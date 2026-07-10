@@ -62,7 +62,10 @@ async function submit() {
     }
     navigateTo('/')
   } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Something went wrong'
+    // Backend errors are huma ErrorModel: { title, status, detail }.
+    error.value = e?.statusCode === 401
+      ? 'Invalid username or password'
+      : e?.data?.detail || e?.message || 'Something went wrong'
   } finally {
     loading.value = false
   }

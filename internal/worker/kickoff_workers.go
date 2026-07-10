@@ -356,6 +356,14 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: persist scanner entities failed")
 		return scannerWorkerError(err)
 	}
+	// Park files no accepted identity claims so unmatched/needs-review scopes
+	// stop re-triggering a live search on every scan. Best-effort: a parking
+	// failure just means those files re-detect next scan, which was the old
+	// behavior anyway.
+	parked, parkErr := scanner.ParkUnmatchedFiles(ctx, w.DB, lib, result)
+	if parkErr != nil {
+		log.Warn().Err(parkErr).Int64("library_id", lib.ID).Int("parked", parked).Msg("process_scan: park unmatched files failed")
+	}
 	enqueued := 0
 	for _, ref := range refs {
 		if !ref.Accepted || ref.ProviderID == "" {
@@ -381,6 +389,7 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		Int("discovered", outcome.Discovered).
 		Int("selected", outcome.New).
 		Int("entities", len(refs)).
+		Int("parked", parked).
 		Int("enqueued_fetch", enqueued).
 		Msg("process_scan: library done")
 	return nil

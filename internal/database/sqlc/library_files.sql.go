@@ -915,6 +915,48 @@ func (q *Queries) ListUnprobedProbeableFiles(ctx context.Context, arg ListUnprob
 	return items, nil
 }
 
+const parkUnmatchedLibraryFile = `-- name: ParkUnmatchedLibraryFile :exec
+INSERT INTO library_files (library_id, path, size, mtime, parse_result, status)
+VALUES ($1, $2, $3, $4, '{}'::jsonb, 'unmatched')
+ON CONFLICT (library_id, path) DO UPDATE
+SET size = EXCLUDED.size,
+    mtime = EXCLUDED.mtime,
+    deleted_at = NULL,
+    updated_at = now(),
+    status = CASE WHEN library_files.status = 'matched'::file_status
+                  THEN library_files.status
+                  ELSE 'unmatched'::file_status END
+`
+
+type ParkUnmatchedLibraryFileParams struct {
+	LibraryID int64              `json:"library_id"`
+	Path      string             `json:"path"`
+	Size      int64              `json:"size"`
+	Mtime     pgtype.Timestamptz `json:"mtime"`
+}
+
+// Change-detection seen-marker for a tracked file that no ACCEPTED search
+// identity claims (unmatched / needs_review / rejected / ignored / unplanned).
+// Without a row, the next kickoff re-detects the file as new and re-runs a
+// live provider search every scan, forever. Parking records current
+// size+mtime with status 'unmatched' so the file stays quiet until its bytes
+// change or a review decision forces a scoped rescan.
+//
+// Deliberately dumber than UpsertLibraryFile: a previously matched row keeps
+// its status and probe artifacts (media_info/keyframes). If the bytes changed
+// underneath a matched row, the stale probe data lives only until the user
+// resolves the identity — that forced re-apply goes through UpsertLibraryFile,
+// whose conflict branch clears it.
+func (q *Queries) ParkUnmatchedLibraryFile(ctx context.Context, arg ParkUnmatchedLibraryFileParams) error {
+	_, err := q.db.Exec(ctx, parkUnmatchedLibraryFile,
+		arg.LibraryID,
+		arg.Path,
+		arg.Size,
+		arg.Mtime,
+	)
+	return err
+}
+
 const purgeDeletedLibraryFiles = `-- name: PurgeDeletedLibraryFiles :exec
 DELETE FROM library_files
 WHERE library_id = $1 AND deleted_at IS NOT NULL AND deleted_at < $2
