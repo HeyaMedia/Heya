@@ -142,155 +142,12 @@ func (q *Queries) CleanupAppliedScannerEntityArtifactsOlderThan(ctx context.Cont
 	return deleted_count, err
 }
 
-const cleanupCompletedScanRunArtifactsForAppliedScopes = `-- name: CleanupCompletedScanRunArtifactsForAppliedScopes :one
-WITH deletable AS (
-    SELECT artifact.id
-    FROM scan_run_artifacts artifact
-    JOIN scan_runs ON scan_runs.id = artifact.scan_run_id
-    WHERE scan_runs.finished_at IS NOT NULL
-      AND EXISTS (
-        SELECT 1
-        FROM scanner_entities entity
-        WHERE entity.library_id = scan_runs.library_id
-          AND entity.media_type = scan_runs.media_type
-          AND entity.scope_key = artifact.scope_key
-      )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM scanner_entities entity
-        WHERE entity.library_id = scan_runs.library_id
-          AND entity.media_type = scan_runs.media_type
-          AND entity.scope_key = artifact.scope_key
-          AND entity.status <> 'applied'
-      )
-),
-deleted AS (
-    DELETE FROM scan_run_artifacts artifact
-    USING deletable
-    WHERE artifact.id = deletable.id
-    RETURNING artifact.id
-)
-SELECT count(*)::bigint AS deleted_count FROM deleted
-`
-
-func (q *Queries) CleanupCompletedScanRunArtifactsForAppliedScopes(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, cleanupCompletedScanRunArtifactsForAppliedScopes)
-	var deleted_count int64
-	err := row.Scan(&deleted_count)
-	return deleted_count, err
-}
-
-const cleanupFullyAppliedScanRunArtifactsForEntity = `-- name: CleanupFullyAppliedScanRunArtifactsForEntity :one
-WITH candidate_runs AS (
-    SELECT search_scan_run_id AS scan_run_id
-    FROM scanner_entities entity
-    WHERE entity.id = $1
-      AND entity.search_scan_run_id IS NOT NULL
-    UNION
-    SELECT fetch_scan_run_id AS scan_run_id
-    FROM scanner_entities entity
-    WHERE entity.id = $1
-      AND entity.fetch_scan_run_id IS NOT NULL
-),
-safe_runs AS (
-    SELECT candidate_runs.scan_run_id
-    FROM candidate_runs
-    JOIN scan_runs ON scan_runs.id = candidate_runs.scan_run_id
-    WHERE scan_runs.finished_at IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM scanner_entities entity
-        WHERE (entity.search_scan_run_id = candidate_runs.scan_run_id
-            OR entity.fetch_scan_run_id = candidate_runs.scan_run_id)
-          AND entity.status <> 'applied'
-      )
-),
-deleted AS (
-    DELETE FROM scan_run_artifacts artifact
-    USING safe_runs
-    WHERE artifact.scan_run_id = safe_runs.scan_run_id
-    RETURNING artifact.id
-)
-SELECT count(*)::bigint AS deleted_count FROM deleted
-`
-
-func (q *Queries) CleanupFullyAppliedScanRunArtifactsForEntity(ctx context.Context, id int64) (int64, error) {
-	row := q.db.QueryRow(ctx, cleanupFullyAppliedScanRunArtifactsForEntity, id)
-	var deleted_count int64
-	err := row.Scan(&deleted_count)
-	return deleted_count, err
-}
-
-const cleanupOldScanRunArtifacts = `-- name: CleanupOldScanRunArtifacts :one
-WITH deleted AS (
-    DELETE FROM scan_run_artifacts artifact
-    USING scan_runs
-    WHERE artifact.scan_run_id = scan_runs.id
-      AND scan_runs.finished_at IS NOT NULL
-      AND artifact.created_at < $1
-    RETURNING artifact.id
-)
-SELECT count(*)::bigint AS deleted_count FROM deleted
-`
-
-func (q *Queries) CleanupOldScanRunArtifacts(ctx context.Context, cutoffAt pgtype.Timestamptz) (int64, error) {
-	row := q.db.QueryRow(ctx, cleanupOldScanRunArtifacts, cutoffAt)
-	var deleted_count int64
-	err := row.Scan(&deleted_count)
-	return deleted_count, err
-}
-
 const cleanupStaleInFlightScannerEntitiesOlderThan = `-- name: CleanupStaleInFlightScannerEntitiesOlderThan :one
 WITH target AS (
-    SELECT entity.id, entity.library_id, entity.media_type, entity.scope_key, entity.search_scan_run_id, entity.fetch_scan_run_id
+    SELECT entity.id
     FROM scanner_entities entity
     WHERE entity.status IN ('matched', 'fetching')
       AND entity.updated_at < $1
-),
-target_runs AS (
-    SELECT library_id, media_type, scope_key, search_scan_run_id AS scan_run_id
-    FROM target
-    WHERE search_scan_run_id IS NOT NULL
-    UNION
-    SELECT library_id, media_type, scope_key, fetch_scan_run_id AS scan_run_id
-    FROM target
-    WHERE fetch_scan_run_id IS NOT NULL
-    UNION
-    SELECT target.library_id, target.media_type, target.scope_key, artifact.scan_run_id
-    FROM scanner_entity_artifacts artifact
-    JOIN target ON target.id = artifact.entity_id
-    WHERE artifact.scan_run_id IS NOT NULL
-),
-scan_deleted AS (
-    DELETE FROM scan_run_artifacts artifact
-    USING target_runs, scan_runs
-    WHERE artifact.scan_run_id = target_runs.scan_run_id
-      AND artifact.scope_key = target_runs.scope_key
-      AND scan_runs.id = artifact.scan_run_id
-      AND scan_runs.finished_at IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM scanner_entities peer
-        WHERE peer.library_id = target_runs.library_id
-          AND peer.media_type = target_runs.media_type
-          AND peer.scope_key = target_runs.scope_key
-          AND NOT EXISTS (
-            SELECT 1
-            FROM target
-            WHERE target.id = peer.id
-          )
-          AND (
-            peer.search_scan_run_id = target_runs.scan_run_id
-            OR peer.fetch_scan_run_id = target_runs.scan_run_id
-            OR EXISTS (
-                SELECT 1
-                FROM scanner_entity_artifacts peer_artifact
-                WHERE peer_artifact.entity_id = peer.id
-                  AND peer_artifact.scan_run_id = target_runs.scan_run_id
-            )
-          )
-      )
-    RETURNING artifact.id
 ),
 entity_artifacts_deleted AS (
     DELETE FROM scanner_entity_artifacts artifact
@@ -306,74 +163,27 @@ entities_deleted AS (
 )
 SELECT
     (SELECT count(*) FROM entities_deleted)::bigint AS entities_deleted,
-    (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted,
-    (SELECT count(*) FROM scan_deleted)::bigint AS scan_run_artifacts_deleted
+    (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted
 `
 
 type CleanupStaleInFlightScannerEntitiesOlderThanRow struct {
-	EntitiesDeleted         int64 `json:"entities_deleted"`
-	EntityArtifactsDeleted  int64 `json:"entity_artifacts_deleted"`
-	ScanRunArtifactsDeleted int64 `json:"scan_run_artifacts_deleted"`
+	EntitiesDeleted        int64 `json:"entities_deleted"`
+	EntityArtifactsDeleted int64 `json:"entity_artifacts_deleted"`
 }
 
 func (q *Queries) CleanupStaleInFlightScannerEntitiesOlderThan(ctx context.Context, cutoffAt pgtype.Timestamptz) (CleanupStaleInFlightScannerEntitiesOlderThanRow, error) {
 	row := q.db.QueryRow(ctx, cleanupStaleInFlightScannerEntitiesOlderThan, cutoffAt)
 	var i CleanupStaleInFlightScannerEntitiesOlderThanRow
-	err := row.Scan(&i.EntitiesDeleted, &i.EntityArtifactsDeleted, &i.ScanRunArtifactsDeleted)
+	err := row.Scan(&i.EntitiesDeleted, &i.EntityArtifactsDeleted)
 	return i, err
 }
 
 const compactAppliedScannerArtifactsForEntity = `-- name: CompactAppliedScannerArtifactsForEntity :one
 WITH target AS (
-    SELECT entity.id, entity.scope_key
+    SELECT entity.id
     FROM scanner_entities entity
     WHERE entity.id = $1
       AND entity.status = 'applied'
-),
-candidate_runs AS (
-    SELECT entity.search_scan_run_id AS scan_run_id, target.scope_key
-    FROM scanner_entities entity
-    JOIN target ON target.id = entity.id
-    WHERE entity.search_scan_run_id IS NOT NULL
-    UNION
-    SELECT entity.fetch_scan_run_id AS scan_run_id, target.scope_key
-    FROM scanner_entities entity
-    JOIN target ON target.id = entity.id
-    WHERE entity.fetch_scan_run_id IS NOT NULL
-    UNION
-    SELECT artifact.scan_run_id, target.scope_key
-    FROM scanner_entity_artifacts artifact
-    JOIN target ON target.id = artifact.entity_id
-    WHERE artifact.scan_run_id IS NOT NULL
-),
-safe_runs AS (
-    SELECT DISTINCT candidate_runs.scan_run_id, candidate_runs.scope_key
-    FROM candidate_runs
-    JOIN scan_runs ON scan_runs.id = candidate_runs.scan_run_id
-    WHERE scan_runs.finished_at IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM scanner_entities peer
-        WHERE peer.scope_key = candidate_runs.scope_key
-          AND peer.status <> 'applied'
-          AND (
-            peer.search_scan_run_id = candidate_runs.scan_run_id
-            OR peer.fetch_scan_run_id = candidate_runs.scan_run_id
-            OR EXISTS (
-                SELECT 1
-                FROM scanner_entity_artifacts peer_artifact
-                WHERE peer_artifact.entity_id = peer.id
-                  AND peer_artifact.scan_run_id = candidate_runs.scan_run_id
-            )
-          )
-      )
-),
-scan_deleted AS (
-    DELETE FROM scan_run_artifacts artifact
-    USING safe_runs
-    WHERE artifact.scan_run_id = safe_runs.scan_run_id
-      AND artifact.scope_key = safe_runs.scope_key
-    RETURNING artifact.id
 ),
 entity_artifacts_deleted AS (
     DELETE FROM scanner_entity_artifacts artifact
@@ -391,48 +201,17 @@ updated AS (
     WHERE entity.id = target.id
     RETURNING entity.id
 )
-SELECT
-    (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted,
-    (SELECT count(*) FROM scan_deleted)::bigint AS scan_run_artifacts_deleted
+SELECT (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted
 `
 
-type CompactAppliedScannerArtifactsForEntityRow struct {
-	EntityArtifactsDeleted  int64 `json:"entity_artifacts_deleted"`
-	ScanRunArtifactsDeleted int64 `json:"scan_run_artifacts_deleted"`
-}
-
-func (q *Queries) CompactAppliedScannerArtifactsForEntity(ctx context.Context, id int64) (CompactAppliedScannerArtifactsForEntityRow, error) {
+// Drops the heavy per-stage JSON blobs for an applied entity, keeping the
+// lightweight scanner_entities row. The caller guards on no in-flight
+// fetch/apply/rich job for the entity (see activeScannerJobsForEntity).
+func (q *Queries) CompactAppliedScannerArtifactsForEntity(ctx context.Context, id int64) (int64, error) {
 	row := q.db.QueryRow(ctx, compactAppliedScannerArtifactsForEntity, id)
-	var i CompactAppliedScannerArtifactsForEntityRow
-	err := row.Scan(&i.EntityArtifactsDeleted, &i.ScanRunArtifactsDeleted)
-	return i, err
-}
-
-const compactAppliedScannerEntityArtifacts = `-- name: CompactAppliedScannerEntityArtifacts :one
-WITH target AS (
-    UPDATE scanner_entities entity
-    SET search_artifact_id = NULL,
-        metadata_artifact_id = NULL,
-        apply_artifact_id = NULL,
-        updated_at = now()
-    WHERE entity.id = $1
-      AND entity.status = 'applied'
-    RETURNING id
-),
-deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
-)
-SELECT count(*)::bigint AS deleted_count FROM deleted
-`
-
-func (q *Queries) CompactAppliedScannerEntityArtifacts(ctx context.Context, id int64) (int64, error) {
-	row := q.db.QueryRow(ctx, compactAppliedScannerEntityArtifacts, id)
-	var deleted_count int64
-	err := row.Scan(&deleted_count)
-	return deleted_count, err
+	var entity_artifacts_deleted int64
+	err := row.Scan(&entity_artifacts_deleted)
+	return entity_artifacts_deleted, err
 }
 
 const createLibraryFileExtraLink = `-- name: CreateLibraryFileExtraLink :one
@@ -733,46 +512,6 @@ func (q *Queries) FinishScanRun(ctx context.Context, arg FinishScanRunParams) er
 	return err
 }
 
-const getLatestScanRunArtifactByLibrary = `-- name: GetLatestScanRunArtifactByLibrary :one
-SELECT sra.id, sra.scan_run_id, sra.kind, sra.scope_key, sra.schema_version, sra.data, sra.created_at
-FROM scan_run_artifacts sra
-JOIN scan_runs sr ON sr.id = sra.scan_run_id
-WHERE sr.library_id = $1
-  AND sr.media_type = $2
-  AND sr.status = 'complete'
-  AND sra.kind = $3
-  AND sra.scope_key = $4
-ORDER BY sr.started_at DESC, sr.id DESC, sra.id DESC
-LIMIT 1
-`
-
-type GetLatestScanRunArtifactByLibraryParams struct {
-	LibraryID int64     `json:"library_id"`
-	MediaType MediaType `json:"media_type"`
-	Kind      string    `json:"kind"`
-	ScopeKey  string    `json:"scope_key"`
-}
-
-func (q *Queries) GetLatestScanRunArtifactByLibrary(ctx context.Context, arg GetLatestScanRunArtifactByLibraryParams) (ScanRunArtifact, error) {
-	row := q.db.QueryRow(ctx, getLatestScanRunArtifactByLibrary,
-		arg.LibraryID,
-		arg.MediaType,
-		arg.Kind,
-		arg.ScopeKey,
-	)
-	var i ScanRunArtifact
-	err := row.Scan(
-		&i.ID,
-		&i.ScanRunID,
-		&i.Kind,
-		&i.ScopeKey,
-		&i.SchemaVersion,
-		&i.Data,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getLatestScannerEntityArtifact = `-- name: GetLatestScannerEntityArtifact :one
 SELECT id, entity_id, stage, schema_version, scan_run_id, data, created_at FROM scanner_entity_artifacts
 WHERE entity_id = $1
@@ -934,36 +673,6 @@ func (q *Queries) GetMediaItemByNormalizedExternalID(ctx context.Context, arg Ge
 		&i.MatchConfidence,
 		&i.SlugLocked,
 		&i.PublicID,
-	)
-	return i, err
-}
-
-const getScanRunArtifact = `-- name: GetScanRunArtifact :one
-SELECT id, scan_run_id, kind, scope_key, schema_version, data, created_at FROM scan_run_artifacts
-WHERE scan_run_id = $1
-  AND kind = $2
-  AND scope_key = $3
-ORDER BY id DESC
-LIMIT 1
-`
-
-type GetScanRunArtifactParams struct {
-	ScanRunID int64  `json:"scan_run_id"`
-	Kind      string `json:"kind"`
-	ScopeKey  string `json:"scope_key"`
-}
-
-func (q *Queries) GetScanRunArtifact(ctx context.Context, arg GetScanRunArtifactParams) (ScanRunArtifact, error) {
-	row := q.db.QueryRow(ctx, getScanRunArtifact, arg.ScanRunID, arg.Kind, arg.ScopeKey)
-	var i ScanRunArtifact
-	err := row.Scan(
-		&i.ID,
-		&i.ScanRunID,
-		&i.Kind,
-		&i.ScopeKey,
-		&i.SchemaVersion,
-		&i.Data,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -2460,44 +2169,6 @@ func (q *Queries) UpsertMetadataMatchCandidate(ctx context.Context, arg UpsertMe
 		&i.RawData,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const upsertScanRunArtifact = `-- name: UpsertScanRunArtifact :one
-INSERT INTO scan_run_artifacts (scan_run_id, kind, scope_key, schema_version, data)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (scan_run_id, kind, scope_key) DO UPDATE
-SET schema_version = EXCLUDED.schema_version,
-    data = EXCLUDED.data
-RETURNING id, scan_run_id, kind, scope_key, schema_version, data, created_at
-`
-
-type UpsertScanRunArtifactParams struct {
-	ScanRunID     int64  `json:"scan_run_id"`
-	Kind          string `json:"kind"`
-	ScopeKey      string `json:"scope_key"`
-	SchemaVersion int32  `json:"schema_version"`
-	Data          []byte `json:"data"`
-}
-
-func (q *Queries) UpsertScanRunArtifact(ctx context.Context, arg UpsertScanRunArtifactParams) (ScanRunArtifact, error) {
-	row := q.db.QueryRow(ctx, upsertScanRunArtifact,
-		arg.ScanRunID,
-		arg.Kind,
-		arg.ScopeKey,
-		arg.SchemaVersion,
-		arg.Data,
-	)
-	var i ScanRunArtifact
-	err := row.Scan(
-		&i.ID,
-		&i.ScanRunID,
-		&i.Kind,
-		&i.ScopeKey,
-		&i.SchemaVersion,
-		&i.Data,
-		&i.CreatedAt,
 	)
 	return i, err
 }

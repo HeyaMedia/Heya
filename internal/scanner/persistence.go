@@ -54,16 +54,6 @@ func PersistScanResult(ctx context.Context, lib sqlc.Library, result Result, eve
 	if err := persistMetadataMatchCandidates(ctx, q, run.ID, result, identityByKey); err != nil {
 		return 0, err
 	}
-	if opts.RemoteSearch && !opts.OmitResultArtifacts {
-		if err := persistResultArtifactTx(ctx, q, run.ID, scanArtifactKindSearch, opts, result); err != nil {
-			return 0, err
-		}
-	}
-	if opts.FetchPreview && !opts.OmitResultArtifacts {
-		if err := persistResultArtifactTx(ctx, q, run.ID, scanArtifactKindFetch, opts, result); err != nil {
-			return 0, err
-		}
-	}
 
 	findings := scanFindingDrafts(result, events)
 	if err := q.ResolveOpenScanFindingsByLibrary(ctx, sqlc.ResolveOpenScanFindingsByLibraryParams{
@@ -109,23 +99,6 @@ func PersistScanResult(ctx context.Context, lib sqlc.Library, result Result, eve
 		return 0, fmt.Errorf("commit scan persistence: %w", err)
 	}
 	return run.ID, nil
-}
-
-func persistResultArtifactTx(ctx context.Context, q *sqlc.Queries, scanRunID int64, kind string, opts Options, result Result) error {
-	data, err := marshalResultArtifact(kind, opts, result)
-	if err != nil {
-		return err
-	}
-	if _, err := q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     scanRunID,
-		Kind:          kind,
-		ScopeKey:      scannerScopeKey(opts.ScopePaths),
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          data,
-	}); err != nil {
-		return fmt.Errorf("persist scanner %s artifact: %w", kind, err)
-	}
-	return nil
 }
 
 func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.Library, scanRunID int64, result Result) (map[string]sqlc.LocalMediaIdentity, error) {

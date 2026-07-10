@@ -383,20 +383,6 @@ func TestFetchArtifactCoverageRequiresDetailForApply(t *testing.T) {
 	require.True(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
 }
 
-func TestResumeSearchArtifactMissingDBIsNoop(t *testing.T) {
-	run := NewLibraryRun(sqlc.Library{MediaType: sqlc.MediaTypeMovie}, Options{}, io.Discard)
-	ok, err := run.ResumeSearchArtifact(context.Background(), 123)
-	require.NoError(t, err)
-	require.False(t, ok)
-}
-
-func TestResumeFetchArtifactMissingDBIsNoop(t *testing.T) {
-	run := NewLibraryRun(sqlc.Library{MediaType: sqlc.MediaTypeMovie}, Options{}, io.Discard)
-	ok, err := run.ResumeFetchArtifact(context.Background(), 123)
-	require.NoError(t, err)
-	require.False(t, ok)
-}
-
 func TestLoadedSearchArtifactCanFetchWithoutSearchProvider(t *testing.T) {
 	fetcher := &fakeMovieDetailProvider{details: map[string]*metadata.MediaDetail{
 		"heya:movie:tmdb:438631": {

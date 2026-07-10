@@ -2,50 +2,16 @@ package scanner
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
-
-func TestPersistScanResultCanOmitRedundantWholeResultArtifacts(t *testing.T) {
-	pool := testutil.SetupDB(t)
-	ctx := context.Background()
-	q := sqlc.New(pool)
-
-	userID := testutil.TestUserID(t, pool)
-	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
-		Name:         "scanner-omit-result-artifact-test",
-		MediaType:    sqlc.MediaTypeMovie,
-		Paths:        []string{"/media/movies"},
-		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
-		CreatedBy:    userID,
-		Settings:     []byte("{}"),
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
-
-	scanRunID, err := PersistScanResult(ctx, lib, Result{}, nil, Options{
-		RemoteSearch:        true,
-		OmitResultArtifacts: true,
-	}, pool, map[string]any{"files": 0})
-	require.NoError(t, err)
-	require.NotZero(t, scanRunID)
-
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{
-		ScanRunID: scanRunID,
-		Kind:      scanArtifactKindSearch,
-		ScopeKey:  scannerScopeKey(nil),
-	})
-	require.True(t, errors.Is(err, pgx.ErrNoRows))
-}
 
 func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	pool := testutil.SetupDB(t)
@@ -165,14 +131,6 @@ func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	}, pool, map[string]any{"music_artists": len(result.MusicArtists)})
 	require.NoError(t, err)
 	require.NotZero(t, scanRunID)
-
-	artifact, err := q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{
-		ScanRunID: scanRunID,
-		Kind:      scanArtifactKindSearch,
-		ScopeKey:  scannerScopeKey(nil),
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, artifact.Data)
 
 	identities, err := q.ListScannerIdentitiesByLibrary(ctx, lib.ID)
 	require.NoError(t, err)
@@ -324,17 +282,8 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
 
 	scopePaths := []string{"/media/movies/Dune (2021)"}
-	scopeKey := scannerScopeKey(scopePaths)
 
 	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
-	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     searchRun.ID,
-		Kind:          scanArtifactKindSearch,
-		ScopeKey:      scopeKey,
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          []byte(`{"stage":"search"}`),
-	})
-	require.NoError(t, err)
 
 	result := Result{
 		Inventory: Inventory{Roots: []InventoryRoot{{
@@ -370,14 +319,6 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	searchArtifactID := refs[0].Artifact.ID
 
 	fetchRun := createFinishedTestScanRun(t, ctx, q, lib, "fetch")
-	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     fetchRun.ID,
-		Kind:          scanArtifactKindFetch,
-		ScopeKey:      scopeKey,
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          []byte(`{"stage":"fetch"}`),
-	})
-	require.NoError(t, err)
 	result.MovieMetadata = []MovieFetchPreview{{
 		Key:        "title_year:dune|2021",
 		ProviderID: "heya:movie:tmdb:438631",
@@ -389,22 +330,6 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	require.NoError(t, err)
 
 	applyRun := createFinishedTestScanRun(t, ctx, q, lib, "apply")
-	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     applyRun.ID,
-		Kind:          scanArtifactKindSearch,
-		ScopeKey:      scopeKey,
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          []byte(`{"stage":"apply-search"}`),
-	})
-	require.NoError(t, err)
-	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     applyRun.ID,
-		Kind:          scanArtifactKindFetch,
-		ScopeKey:      scopeKey,
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          []byte(`{"stage":"apply"}`),
-	})
-	require.NoError(t, err)
 	result.MovieApply = []MovieApplyResult{{
 		Key:         "title_year:dune|2021",
 		Action:      "create",
@@ -423,10 +348,9 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	require.True(t, entity.MetadataArtifactID.Valid)
 	require.True(t, entity.ApplyArtifactID.Valid)
 
-	deleted, err := q.CompactAppliedScannerArtifactsForEntity(ctx, entityID)
+	deletedArtifacts, err := q.CompactAppliedScannerArtifactsForEntity(ctx, entityID)
 	require.NoError(t, err)
-	require.EqualValues(t, 3, deleted.EntityArtifactsDeleted)
-	require.EqualValues(t, 4, deleted.ScanRunArtifactsDeleted)
+	require.EqualValues(t, 3, deletedArtifacts, "search + fetch + apply entity artifacts are compacted")
 
 	entity, err = q.GetScannerEntity(ctx, entityID)
 	require.NoError(t, err)
@@ -441,97 +365,6 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	_, err = q.GetScannerEntityArtifact(ctx, fetchArtifact.ID)
 	require.Error(t, err)
 	_, err = q.GetScannerEntityArtifact(ctx, applyArtifact.ID)
-	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
-	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: fetchRun.ID, Kind: scanArtifactKindFetch, ScopeKey: scopeKey})
-	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: applyRun.ID, Kind: scanArtifactKindFetch, ScopeKey: scopeKey})
-	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: applyRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
-	require.Error(t, err)
-}
-
-func TestCleanupCompletedScanRunArtifactsForAppliedScopesKeepsReviewScopes(t *testing.T) {
-	pool := testutil.SetupDB(t)
-	ctx := context.Background()
-	q := sqlc.New(pool)
-
-	userID := testutil.TestUserID(t, pool)
-	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
-		Name:         "scanner-artifact-applied-scope-cleanup-test",
-		MediaType:    sqlc.MediaTypeMovie,
-		Paths:        []string{"/media/movies"},
-		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
-		CreatedBy:    userID,
-		Settings:     []byte("{}"),
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
-
-	scopePaths := []string{"/media/movies/Shared Scope"}
-	scopeKey := scannerScopeKey(scopePaths)
-	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
-	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     searchRun.ID,
-		Kind:          scanArtifactKindSearch,
-		ScopeKey:      scopeKey,
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          []byte(`{"stage":"search"}`),
-	})
-	require.NoError(t, err)
-
-	_, err = q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
-		LibraryID:        lib.ID,
-		MediaType:        lib.MediaType,
-		ScopeKey:         scopeKey,
-		ScopePaths:       scopePaths,
-		IdentityKey:      "title_year:applied|2024",
-		Title:            "Applied",
-		Year:             "2024",
-		ProviderID:       "heya:movie:tmdb:1",
-		Status:           "applied",
-		SearchScanRunID:  pgInt8(searchRun.ID),
-		SearchArtifactID: pgtypeZeroInt8(),
-		ErrorMessage:     "",
-		Data:             []byte("{}"),
-	})
-	require.NoError(t, err)
-	review, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
-		LibraryID:        lib.ID,
-		MediaType:        lib.MediaType,
-		ScopeKey:         scopeKey,
-		ScopePaths:       scopePaths,
-		IdentityKey:      "title_year:review|2024",
-		Title:            "Review",
-		Year:             "2024",
-		ProviderID:       "",
-		Status:           "needs_review",
-		SearchScanRunID:  pgInt8(searchRun.ID),
-		SearchArtifactID: pgtypeZeroInt8(),
-		ErrorMessage:     "",
-		Data:             []byte("{}"),
-	})
-	require.NoError(t, err)
-
-	deleted, err := q.CleanupCompletedScanRunArtifactsForAppliedScopes(ctx)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, deleted, int64(0))
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
-	require.NoError(t, err)
-
-	_, err = q.MarkScannerEntityApplied(ctx, sqlc.MarkScannerEntityAppliedParams{
-		ID:              review.ID,
-		Status:          "applied",
-		ApplyArtifactID: pgtypeZeroInt8(),
-		ErrorMessage:    "",
-	})
-	require.NoError(t, err)
-
-	deleted, err = q.CleanupCompletedScanRunArtifactsForAppliedScopes(ctx)
-	require.NoError(t, err)
-	require.Positive(t, deleted)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
 	require.Error(t, err)
 }
 
@@ -555,14 +388,6 @@ func TestCleanupStaleInFlightScannerEntitiesDeletesOrphanedMatchedScope(t *testi
 	scopePaths := []string{"/media/music/No Longer Queued"}
 	scopeKey := scannerScopeKey(scopePaths)
 	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
-	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     searchRun.ID,
-		Kind:          scanArtifactKindSearch,
-		ScopeKey:      scopeKey,
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          []byte(`{"stage":"search"}`),
-	})
-	require.NoError(t, err)
 
 	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
 		LibraryID:        lib.ID,
@@ -594,13 +419,10 @@ func TestCleanupStaleInFlightScannerEntitiesDeletesOrphanedMatchedScope(t *testi
 	require.NoError(t, err)
 	require.EqualValues(t, 1, deleted.EntitiesDeleted)
 	require.EqualValues(t, 1, deleted.EntityArtifactsDeleted)
-	require.EqualValues(t, 1, deleted.ScanRunArtifactsDeleted)
 
 	_, err = q.GetScannerEntity(ctx, entity.ID)
 	require.Error(t, err)
 	_, err = q.GetScannerEntityArtifact(ctx, entityArtifact.ID)
-	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: searchRun.ID, Kind: scanArtifactKindSearch, ScopeKey: scopeKey})
 	require.Error(t, err)
 }
 

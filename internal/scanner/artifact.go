@@ -1,17 +1,13 @@
 package scanner
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediatype"
 )
@@ -52,80 +48,6 @@ type inventoryArtifact struct {
 type inventoryRootArtifact struct {
 	Root  string          `json:"root"`
 	Files []InventoryFile `json:"files,omitempty"`
-}
-
-func PersistSearchArtifact(ctx context.Context, db *pgxpool.Pool, scanRunID int64, opts Options, result Result) error {
-	return persistResultArtifact(ctx, db, scanRunID, scanArtifactKindSearch, opts, result)
-}
-
-func PersistFetchArtifact(ctx context.Context, db *pgxpool.Pool, scanRunID int64, opts Options, result Result) error {
-	return persistResultArtifact(ctx, db, scanRunID, scanArtifactKindFetch, opts, result)
-}
-
-func persistResultArtifact(ctx context.Context, db *pgxpool.Pool, scanRunID int64, kind string, opts Options, result Result) error {
-	if db == nil || scanRunID == 0 {
-		return nil
-	}
-	data, err := marshalResultArtifact(kind, opts, result)
-	if err != nil {
-		return err
-	}
-	if _, err := sqlc.New(db).UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     scanRunID,
-		Kind:          kind,
-		ScopeKey:      scannerScopeKey(opts.ScopePaths),
-		SchemaVersion: scanArtifactSchemaV1,
-		Data:          data,
-	}); err != nil {
-		return fmt.Errorf("persist scanner %s artifact: %w", kind, err)
-	}
-	return nil
-}
-
-func LoadSearchArtifact(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, scanRunID int64) (Result, bool, error) {
-	return loadResultArtifact(ctx, db, lib, opts, scanRunID, scanArtifactKindSearch)
-}
-
-func LoadFetchArtifact(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, scanRunID int64) (Result, bool, error) {
-	return loadResultArtifact(ctx, db, lib, opts, scanRunID, scanArtifactKindFetch)
-}
-
-func loadResultArtifact(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, scanRunID int64, kind string) (Result, bool, error) {
-	if db == nil {
-		return Result{}, false, nil
-	}
-	q := sqlc.New(db)
-	scopeKey := scannerScopeKey(opts.ScopePaths)
-	var (
-		row sqlc.ScanRunArtifact
-		err error
-	)
-	if scanRunID > 0 {
-		row, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{
-			ScanRunID: scanRunID,
-			Kind:      kind,
-			ScopeKey:  scopeKey,
-		})
-	} else {
-		row, err = q.GetLatestScanRunArtifactByLibrary(ctx, sqlc.GetLatestScanRunArtifactByLibraryParams{
-			LibraryID: lib.ID,
-			MediaType: lib.MediaType,
-			Kind:      kind,
-			ScopeKey:  scopeKey,
-		})
-	}
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Result{}, false, nil
-		}
-		return Result{}, false, fmt.Errorf("load scanner %s artifact: %w", kind, err)
-	}
-	result, err := unmarshalResultArtifact(kind, row.Data)
-	if err != nil {
-		return Result{}, false, err
-	}
-	result = filterResultToScopes(result, opts.ScopePaths, nil)
-	return result, true, nil
 }
 
 func marshalSearchArtifact(opts Options, result Result) ([]byte, error) {

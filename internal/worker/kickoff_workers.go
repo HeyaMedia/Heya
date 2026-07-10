@@ -784,11 +784,10 @@ func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scann
 		log.Warn().Err(err).Int64("scanner_entity_id", scannerEntityID).Msg("scanner artifact compaction failed")
 		return
 	}
-	if deleted.EntityArtifactsDeleted > 0 || deleted.ScanRunArtifactsDeleted > 0 {
+	if deleted > 0 {
 		log.Debug().
 			Int64("scanner_entity_id", scannerEntityID).
-			Int64("scanner_entity_artifacts", deleted.EntityArtifactsDeleted).
-			Int64("scan_run_artifacts", deleted.ScanRunArtifactsDeleted).
+			Int64("scanner_entity_artifacts", deleted).
 			Msg("scanner artifacts compacted")
 	}
 }
@@ -1965,23 +1964,22 @@ func scannerApplyOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner
 
 func scannerBaseOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
 	return scanner.Options{
-		ApplyDB:             db,
-		BookFetcher:         heya,
-		BookMaterializer:    scanner.NewSQLBookMaterializeStore(db),
-		BookSearcher:        heya,
-		MovieFetcher:        heya,
-		MovieMaterializer:   scanner.NewSQLMovieMaterializeStore(db),
-		MovieSearcher:       heya,
-		MusicFetcher:        heya,
-		MusicMaterializer:   scanner.NewSQLMusicMaterializeStore(db),
-		MusicProbe:          ProbeFile,
-		MusicSearcher:       heya,
-		PersistenceDB:       db,
-		PersistScan:         true,
-		OmitResultArtifacts: true,
-		TVFetcher:           heya,
-		TVMaterializer:      scanner.NewSQLTVMaterializeStore(db),
-		TVSearcher:          heya,
+		ApplyDB:           db,
+		BookFetcher:       heya,
+		BookMaterializer:  scanner.NewSQLBookMaterializeStore(db),
+		BookSearcher:      heya,
+		MovieFetcher:      heya,
+		MovieMaterializer: scanner.NewSQLMovieMaterializeStore(db),
+		MovieSearcher:     heya,
+		MusicFetcher:      heya,
+		MusicMaterializer: scanner.NewSQLMusicMaterializeStore(db),
+		MusicProbe:        ProbeFile,
+		MusicSearcher:     heya,
+		PersistenceDB:     db,
+		PersistScan:       true,
+		TVFetcher:         heya,
+		TVMaterializer:    scanner.NewSQLTVMaterializeStore(db),
+		TVSearcher:        heya,
 	}
 }
 

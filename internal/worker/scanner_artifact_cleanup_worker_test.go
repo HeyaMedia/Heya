@@ -45,14 +45,6 @@ func TestCleanupOrphanedInFlightScannerEntitiesDeletesMatchedEntityWithoutActive
 		Summary:      []byte("{}"),
 		ErrorMessage: "",
 	}))
-	_, err = q.UpsertScanRunArtifact(ctx, sqlc.UpsertScanRunArtifactParams{
-		ScanRunID:     scanRun.ID,
-		Kind:          "search_result",
-		ScopeKey:      scopeKey,
-		SchemaVersion: 1,
-		Data:          []byte(`{"stage":"search"}`),
-	})
-	require.NoError(t, err)
 
 	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
 		LibraryID:        lib.ID,
@@ -91,13 +83,10 @@ func TestCleanupOrphanedInFlightScannerEntitiesDeletesMatchedEntityWithoutActive
 	require.NoError(t, err)
 	require.EqualValues(t, 1, deleted.EntitiesDeleted)
 	require.EqualValues(t, 1, deleted.EntityArtifactsDeleted)
-	require.EqualValues(t, 1, deleted.ScanRunArtifactsDeleted)
 
 	_, err = q.GetScannerEntity(ctx, entity.ID)
 	require.Error(t, err)
 	_, err = q.GetScannerEntityArtifact(ctx, entityArtifact.ID)
-	require.Error(t, err)
-	_, err = q.GetScanRunArtifact(ctx, sqlc.GetScanRunArtifactParams{ScanRunID: scanRun.ID, Kind: "search_result", ScopeKey: scopeKey})
 	require.Error(t, err)
 }
 

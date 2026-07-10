@@ -12,33 +12,30 @@ import (
 )
 
 type Options struct {
-	Apply         bool
-	ApplyDB       *pgxpool.Pool
-	JSONL         bool
-	PersistenceDB *pgxpool.Pool
-	PersistScan   bool
-	// OmitResultArtifacts keeps scan-run bookkeeping while relying on narrow
-	// scanner entity artifacts for pipeline hand-off.
-	OmitResultArtifacts bool
-	Report              bool
-	FetchPreview        bool
-	MaterializePreview  bool
-	RemoteSearch        bool
-	MovieFetcher        MovieDetailProvider
-	MovieMaterializer   MovieMaterializeStore
-	MovieSearcher       MovieSearchProvider
-	BookFetcher         BookDetailProvider
-	BookMaterializer    BookMaterializeStore
-	BookSearcher        BookSearchProvider
-	MusicFetcher        MusicDetailProvider
-	MusicMaterializer   MusicMaterializeStore
-	MusicProbe          MusicProbeFunc
-	MusicSearcher       MusicSearchProvider
-	EventWriters        []EventWriter
-	ScopePaths          []string
-	TVFetcher           TVDetailProvider
-	TVMaterializer      TVMaterializeStore
-	TVSearcher          TVSearchProvider
+	Apply              bool
+	ApplyDB            *pgxpool.Pool
+	JSONL              bool
+	PersistenceDB      *pgxpool.Pool
+	PersistScan        bool
+	Report             bool
+	FetchPreview       bool
+	MaterializePreview bool
+	RemoteSearch       bool
+	MovieFetcher       MovieDetailProvider
+	MovieMaterializer  MovieMaterializeStore
+	MovieSearcher      MovieSearchProvider
+	BookFetcher        BookDetailProvider
+	BookMaterializer   BookMaterializeStore
+	BookSearcher       BookSearchProvider
+	MusicFetcher       MusicDetailProvider
+	MusicMaterializer  MusicMaterializeStore
+	MusicProbe         MusicProbeFunc
+	MusicSearcher      MusicSearchProvider
+	EventWriters       []EventWriter
+	ScopePaths         []string
+	TVFetcher          TVDetailProvider
+	TVMaterializer     TVMaterializeStore
+	TVSearcher         TVSearchProvider
 }
 
 type Result struct {
@@ -176,23 +173,6 @@ func (r *LibraryRun) ScanRunID() int64 {
 	return r.scanRunID
 }
 
-func (r *LibraryRun) ResumeSearchArtifact(ctx context.Context, scanRunID int64) (bool, error) {
-	result, ok, err := LoadSearchArtifact(ctx, r.opts.PersistenceDB, r.lib, r.opts, scanRunID)
-	if err != nil || !ok {
-		return ok, err
-	}
-	r.result = result
-	r.analyzed = true
-	r.sink.Emit(Event{Event: "scan.artifact_loaded", Data: map[string]any{
-		"kind":        scanArtifactKindSearch,
-		"scan_run_id": scanRunID,
-	}})
-	if err := r.refreshSearchDecisions(ctx); err != nil {
-		return true, err
-	}
-	return true, nil
-}
-
 func (r *LibraryRun) ResumeSearchResult(ctx context.Context, result Result, artifactID int64) error {
 	r.result = result
 	r.analyzed = true
@@ -204,34 +184,6 @@ func (r *LibraryRun) ResumeSearchResult(ctx context.Context, result Result, arti
 		return err
 	}
 	return nil
-}
-
-func (r *LibraryRun) ResumeFetchArtifact(ctx context.Context, scanRunID int64) (bool, error) {
-	result, ok, err := LoadFetchArtifact(ctx, r.opts.PersistenceDB, r.lib, r.opts, scanRunID)
-	if err != nil || !ok {
-		return ok, err
-	}
-	if err := r.refreshSearchDecisions(ctx); err != nil {
-		return true, err
-	}
-	applySearchDecisionsToResult(&result, r.lib, r.searchDecisions, r.sink)
-	if !fetchMetadataCoversAcceptedSearch(result, r.lib) {
-		r.sink.Emit(Event{Event: "scan.artifact_stale", Severity: SeverityInfo, Data: map[string]any{
-			"kind":        scanArtifactKindFetch,
-			"scan_run_id": scanRunID,
-			"reason":      "metadata_missing_or_incomplete_for_current_search_decision",
-		}})
-		return false, nil
-	}
-	r.result = result
-	r.analyzed = true
-	r.opts.RemoteSearch = true
-	r.opts.FetchPreview = true
-	r.sink.Emit(Event{Event: "scan.artifact_loaded", Data: map[string]any{
-		"kind":        scanArtifactKindFetch,
-		"scan_run_id": scanRunID,
-	}})
-	return true, nil
 }
 
 func (r *LibraryRun) ResumeFetchResult(ctx context.Context, result Result, artifactID int64) (bool, error) {
