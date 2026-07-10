@@ -85,7 +85,31 @@ func TestBuildVideoFilterChain_ToneMapEmbedsScale(t *testing.T) {
 	// Tone-map carries its own scale step inline — ensure we don't append a
 	// second scale on top of it (would double-resize).
 	assert.Contains(t, got, "tonemap=hable")
+	assert.Contains(t, got, "tonemapx=")
 	assert.Equal(t, 1, strings.Count(got, "scale=-2:'min(1080,ih)'"), "exactly one scale step in chain: %q", got)
+}
+
+func TestBuildVideoFilterChain_VAAPIToneMapUsesSoftwareDVReshapeAndHWEncode(t *testing.T) {
+	got := buildVideoFilterChain(TranscodeOpts{
+		Profile: Profile{MaxHeight: 1080},
+		HWAccel: HwAccelConfig{Type: HwAccelVAAPI, Device: "/dev/dri/renderD129"},
+		ToneMap: true,
+	})
+	assert.Contains(t, got, "tonemapx=")
+	assert.Contains(t, got, "format=nv12,hwupload")
+	assert.NotContains(t, got, "tonemap_vaapi")
+}
+
+func TestTranscodeInputFlags_VAAPIToneMapUsesSoftwareDecode(t *testing.T) {
+	hw := HwAccelConfig{
+		Type: HwAccelVAAPI, Device: "/dev/dri/renderD129",
+		InputFlags: []string{"-hwaccel", "vaapi", "-vaapi_device", "/dev/dri/renderD129", "-hwaccel_output_format", "vaapi"},
+	}
+	assert.Equal(t,
+		[]string{"-vaapi_device", "/dev/dri/renderD129"},
+		transcodeInputFlags(TranscodeOpts{HWAccel: hw, ToneMap: true}),
+	)
+	assert.Equal(t, hw.InputFlags, transcodeInputFlags(TranscodeOpts{HWAccel: hw}))
 }
 
 func TestBuildVideoFilterChain_QSV10BitToH264(t *testing.T) {

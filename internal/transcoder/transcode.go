@@ -112,7 +112,7 @@ func TranscodeToHLSWithOpts(ctx context.Context, opts TranscodeOpts) error {
 func buildTranscodeArgs(opts TranscodeOpts) []string {
 	var args []string
 
-	args = append(args, opts.HWAccel.InputFlags...)
+	args = append(args, transcodeInputFlags(opts)...)
 
 	if opts.StartTime > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", opts.StartTime))
@@ -125,6 +125,18 @@ func buildTranscodeArgs(opts TranscodeOpts) []string {
 	args = appendOutputArgs(args, opts)
 
 	return args
+}
+
+// transcodeInputFlags selects the decoder/device setup for a transcode. AMD's
+// VAAPI drivers can decode and encode Main10 HEVC, but commonly do not expose
+// HDR tone-mapping. For that path we decode in software so Jellyfin FFmpeg's
+// DV-aware tonemapx filter can reshape/tone-map the frame, then hwupload to
+// the VAAPI encoder. Non-tone-map VAAPI and all other backends stay zero-copy.
+func transcodeInputFlags(opts TranscodeOpts) []string {
+	if opts.ToneMap && opts.HWAccel.Type == HwAccelVAAPI {
+		return []string{"-vaapi_device", opts.HWAccel.Device}
+	}
+	return opts.HWAccel.InputFlags
 }
 
 func appendVideoArgs(args []string, opts TranscodeOpts) []string {
@@ -312,10 +324,14 @@ func buildToneMapFilterChain(hw HwAccelConfig, maxHeight int) string {
 
 	switch hw.Type {
 	case HwAccelVAAPI:
+		// Ryzen/Vega VAAPI exposes HEVC decode + H.264 encode but no HDR VPP.
+		// tonemapx understands Dolby Vision RPU metadata; upload its SDR NV12
+		// output back to VAAPI for hardware encoding.
+		scale := ""
 		if maxHeight > 0 {
-			return fmt.Sprintf("tonemap_vaapi=t=bt709:p=bt709:m=bt709,scale_vaapi=w=-2:h=min(%d\\,ih)", maxHeight)
+			scale = fmt.Sprintf(",scale=-2:'min(%d,ih)'", maxHeight)
 		}
-		return "tonemap_vaapi=t=bt709:p=bt709:m=bt709"
+		return "tonemapx=tonemap=hable:transfer=bt709:matrix=bt709:primaries=bt709:range=tv:format=yuv420p" + scale + ",format=nv12,hwupload"
 	case HwAccelQSV:
 		if maxHeight > 0 {
 			return fmt.Sprintf("vpp_qsv=tonemap=1:format=nv12,scale_qsv=w=-1:h=min(%d\\,ih)", maxHeight)
@@ -323,8 +339,14 @@ func buildToneMapFilterChain(hw HwAccelConfig, maxHeight int) string {
 		return "vpp_qsv=tonemap=1:format=nv12"
 	case HwAccelNVENC:
 		return "hwdownload,format=nv12,zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" + scale + ",hwupload_cuda"
-	default:
+	case HwAccelVideoToolbox:
+		// Homebrew FFmpeg does not ship Jellyfin's tonemapx filter. Keep the
+		// portable zscale path for ordinary HDR10/HLG on macOS.
 		return "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" + scale
+	default:
+		// Heya ships Jellyfin FFmpeg, whose SIMD tonemapx filter applies Dolby
+		// Vision reshaping metadata as well as conventional HDR10/HLG mapping.
+		return "tonemapx=tonemap=hable:transfer=bt709:matrix=bt709:primaries=bt709:range=tv:format=yuv420p" + scale
 	}
 }
 
@@ -383,7 +405,7 @@ func BuildHLSArgs(opts TranscodeOpts, outputDir string) []string {
 	// cmd.ExtraFiles so this address resolves correctly. Cheap to enable
 	// unconditionally — ffmpeg silently drops if the fd doesn't exist.
 	args = append(args, "-progress", "pipe:3")
-	args = append(args, opts.HWAccel.InputFlags...)
+	args = append(args, transcodeInputFlags(opts)...)
 
 	if opts.StartTime > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.6f", opts.StartTime))
