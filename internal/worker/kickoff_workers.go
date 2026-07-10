@@ -534,7 +534,7 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 	richQueued, richFailed := w.enqueueRichMetadataWork(ctx, rc, lib, result, job.Args.MetadataArtifactID, job.Args.ScannerEntityID, job.Args.ScheduledTaskID, source)
 	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
 	if richQueued == 0 && richFailed == 0 {
-		compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, 0)
+		compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, 0)
 	}
 
 	log.Info().
@@ -676,6 +676,23 @@ func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[Apply
 	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, job.Args.MetadataArtifactID)
 	if err != nil {
 		_ = q.MarkEnrichPartial(ctx, job.Args.MediaItemID)
+		// A concurrent apply cycle for the same entity may have compacted this
+		// artifact out from under us. It's gone for good, so retrying the load
+		// can never succeed — but the applied item can still get its rich
+		// side-data straight from the provider. Queue a force-enrich to
+		// recover it and cancel this job instead of retry-storming.
+		if errors.Is(err, pgx.ErrNoRows) {
+			if eqErr := EnqueueEnrichForceTx(ctx, job.Args.MediaItemID, lib.MediaType, EnrichSourceForced); eqErr != nil {
+				log.Warn().Err(eqErr).Int64("media_item_id", job.Args.MediaItemID).Msg("apply_rich_metadata: recovery enrich enqueue failed")
+			}
+			log.Warn().
+				Int64("library_id", job.Args.LibraryID).
+				Int64("media_item_id", job.Args.MediaItemID).
+				Int64("scanner_entity_id", job.Args.ScannerEntityID).
+				Int64("metadata_artifact_id", job.Args.MetadataArtifactID).
+				Msg("apply_rich_metadata: artifact was compacted; queued force-enrich recovery")
+			return river.JobCancel(err)
+		}
 		return err
 	}
 	detail, kind, err := richMetadataDetailForJob(result, job.Args)
@@ -726,27 +743,30 @@ func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[Apply
 		Int("keywords", len(detail.Keywords)).
 		Int("videos", len(detail.Videos)).
 		Msg("apply_rich_metadata: complete")
-	compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, job.ID)
+	compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, job.ID)
 	return nil
 }
 
-func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scannerEntityID, metadataArtifactID, currentJobID int64) {
+func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scannerEntityID, currentJobID int64) {
 	if db == nil || scannerEntityID == 0 {
 		return
 	}
-	if metadataArtifactID != 0 {
-		busy, err := activeRichMetadataJobsForArtifact(ctx, db, metadataArtifactID, currentJobID)
-		if err != nil {
-			log.Warn().
-				Err(err).
-				Int64("scanner_entity_id", scannerEntityID).
-				Int64("metadata_artifact_id", metadataArtifactID).
-				Msg("scanner artifact compaction skipped: active rich job check failed")
-			return
-		}
-		if busy {
-			return
-		}
+	// Compaction deletes ALL of the entity's artifacts, so the guard must be
+	// entity-scoped: skip while ANY apply_rich_metadata job for this entity is
+	// still pending — including one from an earlier apply cycle referencing an
+	// older artifact. Guarding by a single metadata_artifact_id (the old bug)
+	// let a newer cycle's compaction delete an older cycle's still-referenced
+	// artifact, so that cycle's rich job failed with "no rows in result set".
+	busy, err := activeRichMetadataJobsForEntity(ctx, db, scannerEntityID, currentJobID)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Int64("scanner_entity_id", scannerEntityID).
+			Msg("scanner artifact compaction skipped: active rich job check failed")
+		return
+	}
+	if busy {
+		return
 	}
 	q := sqlc.New(db)
 	deleted, err := q.CompactAppliedScannerArtifactsForEntity(ctx, scannerEntityID)
@@ -763,16 +783,16 @@ func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scann
 	}
 }
 
-func activeRichMetadataJobsForArtifact(ctx context.Context, db *pgxpool.Pool, metadataArtifactID, currentJobID int64) (bool, error) {
+func activeRichMetadataJobsForEntity(ctx context.Context, db *pgxpool.Pool, scannerEntityID, currentJobID int64) (bool, error) {
 	var count int64
 	err := db.QueryRow(ctx, `
 		SELECT count(*)
 		FROM river_job
 		WHERE kind = 'apply_rich_metadata'
-		  AND state IN ('available', 'retryable', 'running', 'scheduled')
-		  AND (args->>'metadata_artifact_id')::bigint = $1
+		  AND state IN ('available', 'pending', 'retryable', 'running', 'scheduled')
+		  AND (args->>'scanner_entity_id')::bigint = $1
 		  AND ($2::bigint = 0 OR id <> $2)
-	`, metadataArtifactID, currentJobID).Scan(&count)
+	`, scannerEntityID, currentJobID).Scan(&count)
 	if err != nil {
 		return false, err
 	}

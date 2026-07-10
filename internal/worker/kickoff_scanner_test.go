@@ -152,6 +152,36 @@ func TestRelocateMovedFilesKeepsRowIDAndEscapesSoftDelete(t *testing.T) {
 	require.False(t, row.DeletedAt.Valid)
 }
 
+// Compaction deletes ALL of an entity's artifacts, so the active-rich-job
+// guard must key on the entity — not on a single metadata_artifact_id, which
+// let a newer apply cycle's compaction delete an older cycle's still-referenced
+// artifact and fail that cycle's rich job with "no rows in result set".
+func TestActiveRichMetadataJobsForEntityGuardsByEntity(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+
+	const entityWithJob, otherEntity int64 = 991001, 991002
+	var jobID int64
+	err := pool.QueryRow(ctx, `
+		INSERT INTO river_job (kind, queue, args, max_attempts, state)
+		VALUES ('apply_rich_metadata', 'apply_rich_metadata', $1, 5, 'available')
+		RETURNING id`, []byte(`{"scanner_entity_id": 991001}`)).Scan(&jobID)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = $1`, jobID) })
+
+	busy, err := activeRichMetadataJobsForEntity(ctx, pool, entityWithJob, 0)
+	require.NoError(t, err)
+	require.True(t, busy, "a pending rich job for the entity must block compaction")
+
+	busy, err = activeRichMetadataJobsForEntity(ctx, pool, entityWithJob, jobID)
+	require.NoError(t, err)
+	require.False(t, busy, "the compacting job excludes itself")
+
+	busy, err = activeRichMetadataJobsForEntity(ctx, pool, otherEntity, 0)
+	require.NoError(t, err)
+	require.False(t, busy, "an unrelated entity is not blocked")
+}
+
 func TestOversizedScannerArtifactCancelsWorkerRetry(t *testing.T) {
 	err := &scanner.ArtifactTooLargeError{Kind: "search_result", Size: 17, Limit: 16}
 	got := scannerWorkerError(err)
