@@ -12,19 +12,31 @@ cost near-zero I/O beyond the directory walk itself:
 
 - **One preload query, not one per file.** `ListLibraryFilesForScan` loads the
   whole library into a map up front; the walk's known/changed check is a map
-  lookup. A file whose size + mtime (µs-truncated) match is skipped.
-- **NFO parsing is lazy.** Canonical NFOs (`tvshow/movie/artist/album.nfo`)
-  are only opened when a new/changed file actually needs one (nearest-ancestor
-  resolution, memoized per directory). An unchanged rescan opens zero NFOs.
+  lookup. A file whose size + mtime (µs-truncated — Postgres stores µs, stat
+  returns ns; `libraryFileChanged`) match is skipped.
+- **Unmatched files are parked.** Identities that land in
+  unmatched/needs_review/rejected/ignored still get `library_files` rows
+  (status `unmatched`, current size+mtime) at `process_scan` time, so they
+  don't re-trigger a provider search every scan. Review actions (approve /
+  assign / rematch) enqueue a forced scoped `process_scan` that bypasses
+  change detection.
+- **Moves relocate, not delete+create.** A new path matching a gone row by
+  size + basename (or size + µs-mtime) keeps its `library_files` id — probe
+  data, trickplay, segments, fingerprints, and `track_files` survive. Both
+  owner scopes re-enter the pipeline, since naming carries identity.
 - **NFO edits are detected by mtime, not by re-reading.** The walk sees each
   NFO's mtime for free in the dir listing; `library_nfo_dirs` records what was
-  last applied per directory. On drift (edit/add/remove), only the files under
-  that directory get their `parse_result` rebuilt (`ReapplyLibraryFileParse`)
-  and re-enter the pipeline as `pending` — so local-metadata changes land on
+  last seen per directory. On drift (edit/add/remove) the owning scope is
+  marked changed and re-enters the pipeline — local-metadata changes land on
   the next scan without a force rescan.
-- **No redundant ffprobe on re-apply.** The walk upsert clears `media_info`
-  when bytes change. NFO-only re-apply keeps `media_info`, so probe work tracks
-  byte changes only.
+- **No redundant ffprobe on re-apply.** `UpsertLibraryFile` clears
+  `media_info`/`keyframes` only when size or µs-mtime actually changed;
+  re-applies of unchanged files (force rescans, review re-identifies,
+  relocated scopes) keep their probe artifacts.
+- **Deletions are soft, cleanup is manual — by design.** Kickoff soft-deletes
+  rows for files gone from disk so the UI can show what's missing; media
+  items themselves are only removed by the user-triggered
+  `CleanupMissingMedia` pass (dashboard missing-count), never automatically.
 
 `KickoffLibraryScanArgs.Force` bypasses the unchanged check and enqueues a full
 library processing run.

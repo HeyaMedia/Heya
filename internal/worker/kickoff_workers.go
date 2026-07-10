@@ -214,10 +214,12 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 			log.Error().Err(scanErr).Int64("library_id", lib.ID).Msg("kickoff_library_scan: scan error")
 			failed++
 			// A cancelled scan leaves the discovered set incomplete, so don't
-			// act on partial results. But a partial-root failure (e.g. one
-			// removed root) still ran discovery + deletion detection for the
-			// healthy roots — fall through so newly-found files get processed
-			// and the soft-deletes still emit their refresh event.
+			// act on partial results. On a partial-root failure (e.g. one
+			// removed root), inspectLibraryChanges returns early with the
+			// changed scopes it saw but WITHOUT running move detection or the
+			// missing-file soft-delete pass — deletions are never derived from
+			// an incomplete walk. Fall through so the files that were
+			// discovered still get processed.
 			if ctx.Err() != nil {
 				continue
 			}
@@ -225,7 +227,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 
 		n := 0
 		processQueued := false
-		if supportsScanner(lib.MediaType) && (job.Args.Force || result.New > 0) && (len(remainingScopes) > 0 || n == 0) {
+		if supportsScanner(lib.MediaType) && (job.Args.Force || result.New > 0) {
 			queued, enqueueFailed := enqueueProcessLibraryScanFanout(ctx, rc, lib, ProcessLibraryScanArgs{
 				LibraryID:       lib.ID,
 				Force:           job.Args.Force,
