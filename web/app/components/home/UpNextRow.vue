@@ -1,15 +1,11 @@
 <template>
   <section v-if="items.length" class="content-row">
-    <div class="section-row-head">
-      <div>
-        <h2 class="section-title-lg">Up Next</h2>
-        <div class="row-subtitle">Pick up where you left off</div>
-      </div>
-      <div style="display: flex; align-items: center; gap: 10px">
+    <SectionHeader title="Up Next" subtitle="Pick up where you left off">
+      <template #actions>
         <button class="scroll-btn" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
         <button class="scroll-btn" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
-      </div>
-    </div>
+      </template>
+    </SectionHeader>
     <div class="row-scroll" ref="scrollEl">
       <!-- Mouse-click plays the next episode; the title deep-links to the
            series detail page (same interaction model as Continue Watching) so
@@ -85,13 +81,6 @@ function detailUrl(item: UpNextItem): string {
 
 <style scoped>
 .content-row { margin-bottom: 40px; }
-.row-subtitle {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--fg-3);
-  margin-top: 2px;
-  letter-spacing: 0.04em;
-}
 
 .row-scroll {
   display: flex;

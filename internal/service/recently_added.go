@@ -42,6 +42,10 @@ type RecentlyAddedTVEntry struct {
 	SeasonCount       int32     `json:"season_count"`
 	EpisodeCount      int32     `json:"episode_count"`
 	AddedAt           time.Time `json:"added_at"`
+	// Description resolves per kind: series/episodes = show description,
+	// season = season overview (falling back to the show), episode = the
+	// episode's overview (falling back to the show).
+	Description string `json:"description,omitempty"`
 }
 
 type seasonEpisode struct {
@@ -70,11 +74,12 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 	}
 
 	type showInfo struct {
-		libraryID int64
-		publicID  string
-		title     string
-		slug      string
-		files     []recentTVFile
+		libraryID   int64
+		publicID    string
+		title       string
+		slug        string
+		description string
+		files       []recentTVFile
 	}
 	shows := map[int64]*showInfo{}
 	showIDs := []int64{}
@@ -89,7 +94,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 		id := r.MediaItemID.Int64
 		s := shows[id]
 		if s == nil {
-			s = &showInfo{libraryID: r.LibraryID, publicID: r.PublicID.String(), title: r.Title, slug: r.Slug}
+			s = &showInfo{libraryID: r.LibraryID, publicID: r.PublicID.String(), title: r.Title, slug: r.Slug, description: r.Description}
 			shows[id] = s
 			showIDs = append(showIDs, id)
 		}
@@ -168,7 +173,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 				entries = append(entries, RecentlyAddedTVEntry{
 					MediaItemID: id, MediaItemPublicID: show.publicID, Title: show.title, Slug: show.slug,
 					Kind: "series", SeasonCount: int32(len(seasons)), EpisodeCount: int32(len(newEps)),
-					AddedAt: newest,
+					AddedAt: newest, Description: show.description,
 				})
 				continue
 			}
@@ -187,6 +192,9 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 					MediaItemID: id, MediaItemPublicID: show.publicID, Title: show.title, Slug: show.slug,
 					SeasonNumber: season, EpisodeCount: int32(len(eps)),
 					AddedAt: newestBySeason[season],
+					// Show description as the baseline; season/episode kinds
+					// upgrade to their own overview in the post-cut loop.
+					Description: show.description,
 				}
 				switch {
 				case seasonFirst[id][season].After(threshold):
@@ -207,19 +215,31 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 		entries = entries[:limit]
 	}
 
-	// Episode titles only for the cards that survived the cut — a handful of
-	// unique-index point lookups.
+	// Episode titles/overviews + season overviews only for the cards that
+	// survived the cut — a handful of unique-index point lookups. Empty
+	// overviews keep the show-description baseline set above.
 	for i := range entries {
-		if entries[i].Kind != "episode" {
-			continue
-		}
-		brief, err := q.GetTVEpisodeBrief(ctx, sqlc.GetTVEpisodeBriefParams{
-			MediaItemID:   entries[i].MediaItemID,
-			SeasonNumber:  entries[i].SeasonNumber,
-			EpisodeNumber: entries[i].EpisodeNumber,
-		})
-		if err == nil {
-			entries[i].EpisodeTitle = brief.Title
+		switch entries[i].Kind {
+		case "episode":
+			brief, err := q.GetTVEpisodeBrief(ctx, sqlc.GetTVEpisodeBriefParams{
+				MediaItemID:   entries[i].MediaItemID,
+				SeasonNumber:  entries[i].SeasonNumber,
+				EpisodeNumber: entries[i].EpisodeNumber,
+			})
+			if err == nil {
+				entries[i].EpisodeTitle = brief.Title
+				if brief.Overview != "" {
+					entries[i].Description = brief.Overview
+				}
+			}
+		case "season":
+			overview, err := q.GetTVSeasonOverview(ctx, sqlc.GetTVSeasonOverviewParams{
+				MediaItemID:  entries[i].MediaItemID,
+				SeasonNumber: entries[i].SeasonNumber,
+			})
+			if err == nil && overview != "" {
+				entries[i].Description = overview
+			}
 		}
 	}
 

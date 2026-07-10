@@ -12,12 +12,12 @@
 -- idx_library_files_created_at scan with a per-row media_items probe that
 -- stops at LIMIT, instead of sorting every live file.
 SELECT r.id, r.media_item_id, r.created_at,
-       r.public_id, r.library_id, r.title, r.slug,
+       r.public_id, r.library_id, r.title, r.slug, r.description,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        (COALESCE(r.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb))::jsonb AS episode_numbers
 FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
-         mi.public_id, mi.library_id, mi.title, mi.slug
+         mi.public_id, mi.library_id, mi.title, mi.slug, mi.description
   FROM library_files lf
   JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type = 'tv' AND lf.deleted_at IS NULL
@@ -42,11 +42,27 @@ WHERE lf.media_item_id = ANY(@media_item_ids::bigint[])
 GROUP BY lf.media_item_id, 2, 3;
 
 -- name: GetTVEpisodeBrief :one
--- Point lookup for a single-episode rail entry's display title.
-SELECT e.id, e.title
+-- Point lookup for a single-episode rail entry's display title + overview
+-- (English preferred, else any non-empty language). Correlated subquery on
+-- purpose — sqlc mistypes LEFT JOIN LATERAL columns as non-nullable.
+SELECT e.id, e.title,
+       COALESCE((
+         SELECT eo.overview FROM episode_overviews eo
+         WHERE eo.episode_id = e.id AND eo.overview <> ''
+         ORDER BY (eo.language = 'en') DESC
+         LIMIT 1
+       ), NULLIF(e.overview, ''), '')::text AS overview
 FROM tv_series s
 JOIN tv_seasons  se ON se.series_id = s.id AND se.season_number = $2
 JOIN tv_episodes e  ON e.season_id = se.id AND e.episode_number = $3
+WHERE s.media_item_id = $1;
+
+-- name: GetTVSeasonOverview :one
+-- Season blurb for a "new season" rail entry; empty when the provider
+-- shipped none (caller falls back to the show description).
+SELECT COALESCE(se.overview, '')::text AS overview
+FROM tv_series s
+JOIN tv_seasons se ON se.series_id = s.id AND se.season_number = $2
 WHERE s.media_item_id = $1;
 
 -- name: ListRecentlyAddedMusicFiles :many

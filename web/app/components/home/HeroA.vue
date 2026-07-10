@@ -96,10 +96,19 @@
       </div>
     </div>
 
-    <!-- Slide navigator: counter + bars in one glass pill, bottom-right
-         (mirrors the detail pages' bd-indicators spot). Clicking a bar pins
-         that slide for 30s before rotation resumes. -->
+    <!-- Slide navigator: play/pause + counter + bars in one glass pill,
+         teleported into HeroDeck's top-right cluster beside the mode tabs
+         (defer: the #hero-deck-aux target renders in the same tick).
+         Clicking a bar pins that slide for 30s before rotation resumes. -->
+    <Teleport defer to="#hero-deck-aux">
     <div class="hero-nav" v-if="items.length > 1" @mouseenter="pauseHero" @mouseleave="resumeHero">
+      <button
+        class="hero-nav-toggle"
+        :aria-label="userPaused ? 'Resume slide rotation' : 'Pause slide rotation'"
+        @click="toggleUserPause"
+      >
+        <Icon :name="userPaused ? 'play' : 'pause'" :size="12" />
+      </button>
       <span class="hero-counter">{{ String(currentIdx + 1).padStart(2, '0') }} / {{ String(items.length).padStart(2, '0') }}</span>
       <div class="hero-dots">
         <button
@@ -111,6 +120,7 @@
         />
       </div>
     </div>
+    </Teleport>
   </section>
 </template>
 
@@ -147,7 +157,8 @@ const props = defineProps<{
 
 defineEmits<{ play: [item: MediaItem] }>()
 
-const INTERVAL = 7000
+// Keep in sync with the .hero-dot::after `hero-fill 30s` animation below.
+const INTERVAL = 30_000
 const TRAILER_LINGER = 4000
 const currentIdx = ref(0)
 const heroPaused = ref(false)
@@ -312,6 +323,10 @@ let startTime = 0
 let remaining = INTERVAL
 
 function startTimer() {
+  // Idempotent: overlapping resume paths (pause toggle clicked while
+  // hovering the pill, then mouseleave firing resumeHero again) must
+  // replace the pending chain, never stack a second one.
+  if (timeout) clearTimeout(timeout)
   startTime = Date.now()
   remaining = INTERVAL
   timeout = setTimeout(() => {
@@ -326,10 +341,26 @@ function pauseHero() {
   remaining -= Date.now() - startTime
 }
 
+// Sticky user pause (the ⏸ in the nav pill) — outranks hover resume and
+// pins alike; only the button itself un-pauses.
+const userPaused = ref(false)
+function toggleUserPause() {
+  userPaused.value = !userPaused.value
+  if (userPaused.value) {
+    if (pinTimer) { clearTimeout(pinTimer); pinTimer = null }
+    pauseHero()
+  } else {
+    remaining = INTERVAL
+    resumeHero()
+  }
+}
+
 function resumeHero() {
+  if (userPaused.value) return // sticky pause: only the toggle resumes
   if (pinTimer) return // a clicked slide holds until its 30s elapse
   heroPaused.value = false
   if (trailerSrc.value) return // trailer owns the clock
+  if (timeout) clearTimeout(timeout) // never stack a second chain
   startTime = Date.now()
   timeout = setTimeout(() => {
     advanceHero()
@@ -530,6 +561,27 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  position: relative;
+}
+/* Readability patch: an oversized soft blob behind the whole text cluster.
+   Derives from --bg-1, so it's a paper wash behind dark text in light mode
+   and a dark wash behind light text in dark — halos alone can't save
+   light-mode ink over busy art. Sits behind the content but above the
+   ambient artwork (hero-inner is its own stacking context). */
+.hero-info::before {
+  content: '';
+  position: absolute;
+  inset: -110px -160px -110px -140px;
+  z-index: -1;
+  pointer-events: none;
+  /* Long, gentle falloff + heavy blur: the wash should be felt, not seen —
+     no locatable edge against the surrounding artwork. */
+  background: radial-gradient(ellipse 75% 70% at 40% 50%,
+    color-mix(in srgb, var(--bg-1) 58%, transparent) 0%,
+    color-mix(in srgb, var(--bg-1) 40%, transparent) 40%,
+    color-mix(in srgb, var(--bg-1) 18%, transparent) 68%,
+    transparent 92%);
+  filter: blur(28px);
 }
 .hero-counter {
   font-family: var(--font-mono);
@@ -567,13 +619,19 @@ onUnmounted(() => {
 }
 .hero-dot {
   width: 32px;
-  height: 3px;
-  border-radius: 2px;
+  height: 7px;
+  border-radius: 999px;
   background: rgb(var(--ink) / 0.2);
   position: relative;
   overflow: hidden;
   cursor: pointer;
   transition: background 0.15s;
+}
+/* Invisible hit-area extension — mouse users deserve fat targets too. */
+.hero-dot::before {
+  content: '';
+  position: absolute;
+  inset: -7px -3px;
 }
 .hero-dot:hover { background: rgb(var(--ink) / 0.35); }
 .hero-dot.active { background: rgb(var(--ink) / 0.15); }
@@ -583,7 +641,7 @@ onUnmounted(() => {
   left: 0; top: 0; bottom: 0;
   background: var(--gold);
   border-radius: 2px;
-  animation: hero-fill 7s linear forwards;
+  animation: hero-fill 30s linear forwards;
 }
 .hero-dot.paused::after {
   animation-play-state: paused;
@@ -646,16 +704,13 @@ onUnmounted(() => {
               box-shadow 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Slide navigator pill — bottom-right, over artwork in any theme. */
+/* Slide navigator pill — lives in HeroDeck's top-right cluster (teleport),
+   over artwork in any theme. */
 .hero-nav {
-  position: absolute;
-  right: 24px;
-  bottom: 18px;
-  z-index: 3;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 7px 14px;
+  gap: 10px;
+  padding: 3px 12px 3px 5px;
   border-radius: 999px;
   background: color-mix(in oklab, var(--bg-2) 82%, transparent);
   backdrop-filter: blur(12px);
@@ -665,6 +720,17 @@ onUnmounted(() => {
 }
 .hero-nav .hero-counter { text-shadow: none; }
 .hero-nav .hero-dots { margin: 0; }
+.hero-nav-toggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-1);
+  transition: background 0.12s, color 0.12s;
+}
+.hero-nav-toggle:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
 
 /* ── Art-proof readability (the hero sits on raw artwork in ambient mode) ──
    A --bg-1 halo adapts per theme: paper glow behind dark text in light,

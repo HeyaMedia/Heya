@@ -23,6 +23,13 @@
         <Icon name="sparkle" :size="16" style="color: var(--gold)" />
         <span>Recommendations</span>
       </div>
+      <!-- Roulette is a real route (/movies/roulette), not an activeView —
+           a plain anchor keeps it working inside AppSheet too (real <a>
+           elements are exempt from the drawer's pointer-capture retarget). -->
+      <NuxtLink v-if="showRoulette" to="/movies/roulette" class="lib-item">
+        <Icon name="shuffle" :size="16" style="color: var(--gold)" />
+        <span>Roulette</span>
+      </NuxtLink>
     </div>
 
     <div class="lib-section">
@@ -138,6 +145,8 @@ const props = defineProps<{
   collections?: CollectionBrowse[]
   /** Show the "Browse" + "Recommendations" landing rows at the top (movies / tv only). */
   showBrowse?: boolean
+  /** Show the Roulette link (movies only — the page lives at /movies/roulette). */
+  showRoulette?: boolean
   /** 'sidebar' (default) = fixed 240px aside. 'sheet' = fills an AppSheet body
    *  on phone (movies/tv/books index.vue) — same markup/behavior, just sheds
    *  the standalone-aside chrome. See the `.lib-sidebar-sheet` rule below. */

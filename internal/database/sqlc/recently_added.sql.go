@@ -13,7 +13,13 @@ import (
 )
 
 const getTVEpisodeBrief = `-- name: GetTVEpisodeBrief :one
-SELECT e.id, e.title
+SELECT e.id, e.title,
+       COALESCE((
+         SELECT eo.overview FROM episode_overviews eo
+         WHERE eo.episode_id = e.id AND eo.overview <> ''
+         ORDER BY (eo.language = 'en') DESC
+         LIMIT 1
+       ), NULLIF(e.overview, ''), '')::text AS overview
 FROM tv_series s
 JOIN tv_seasons  se ON se.series_id = s.id AND se.season_number = $2
 JOIN tv_episodes e  ON e.season_id = se.id AND e.episode_number = $3
@@ -27,16 +33,40 @@ type GetTVEpisodeBriefParams struct {
 }
 
 type GetTVEpisodeBriefRow struct {
-	ID    int64  `json:"id"`
-	Title string `json:"title"`
+	ID       int64  `json:"id"`
+	Title    string `json:"title"`
+	Overview string `json:"overview"`
 }
 
-// Point lookup for a single-episode rail entry's display title.
+// Point lookup for a single-episode rail entry's display title + overview
+// (English preferred, else any non-empty language). Correlated subquery on
+// purpose — sqlc mistypes LEFT JOIN LATERAL columns as non-nullable.
 func (q *Queries) GetTVEpisodeBrief(ctx context.Context, arg GetTVEpisodeBriefParams) (GetTVEpisodeBriefRow, error) {
 	row := q.db.QueryRow(ctx, getTVEpisodeBrief, arg.MediaItemID, arg.SeasonNumber, arg.EpisodeNumber)
 	var i GetTVEpisodeBriefRow
-	err := row.Scan(&i.ID, &i.Title)
+	err := row.Scan(&i.ID, &i.Title, &i.Overview)
 	return i, err
+}
+
+const getTVSeasonOverview = `-- name: GetTVSeasonOverview :one
+SELECT COALESCE(se.overview, '')::text AS overview
+FROM tv_series s
+JOIN tv_seasons se ON se.series_id = s.id AND se.season_number = $2
+WHERE s.media_item_id = $1
+`
+
+type GetTVSeasonOverviewParams struct {
+	MediaItemID  int64 `json:"media_item_id"`
+	SeasonNumber int32 `json:"season_number"`
+}
+
+// Season blurb for a "new season" rail entry; empty when the provider
+// shipped none (caller falls back to the show description).
+func (q *Queries) GetTVSeasonOverview(ctx context.Context, arg GetTVSeasonOverviewParams) (string, error) {
+	row := q.db.QueryRow(ctx, getTVSeasonOverview, arg.MediaItemID, arg.SeasonNumber)
+	var overview string
+	err := row.Scan(&overview)
+	return overview, err
 }
 
 const listAlbumFirstAdded = `-- name: ListAlbumFirstAdded :many
@@ -218,12 +248,12 @@ func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, limit int32) 
 const listRecentlyAddedTVFiles = `-- name: ListRecentlyAddedTVFiles :many
 
 SELECT r.id, r.media_item_id, r.created_at,
-       r.public_id, r.library_id, r.title, r.slug,
+       r.public_id, r.library_id, r.title, r.slug, r.description,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        (COALESCE(r.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb))::jsonb AS episode_numbers
 FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
-         mi.public_id, mi.library_id, mi.title, mi.slug
+         mi.public_id, mi.library_id, mi.title, mi.slug, mi.description
   FROM library_files lf
   JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type = 'tv' AND lf.deleted_at IS NULL
@@ -241,6 +271,7 @@ type ListRecentlyAddedTVFilesRow struct {
 	LibraryID      int64              `json:"library_id"`
 	Title          string             `json:"title"`
 	Slug           string             `json:"slug"`
+	Description    string             `json:"description"`
 	SeasonNumber   int32              `json:"season_number"`
 	EpisodeNumbers []byte             `json:"episode_numbers"`
 }
@@ -273,6 +304,7 @@ func (q *Queries) ListRecentlyAddedTVFiles(ctx context.Context, limit int32) ([]
 			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
+			&i.Description,
 			&i.SeasonNumber,
 			&i.EpisodeNumbers,
 		); err != nil {

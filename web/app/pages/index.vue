@@ -153,6 +153,9 @@ interface RecentTVEntry {
   season_count: number
   episode_count: number
   added_at: string
+  // Kind-resolved: show desc for series/episodes, season overview for
+  // season, episode overview for episode (server falls back to show desc).
+  description?: string
 }
 
 interface RecentArtistEntry {
@@ -270,6 +273,7 @@ const recentTVShows = computed<MediaItem[]>(() => {
       media_type: 'tv',
       created_at: e.added_at,
       available: true,
+      description: e.description ?? '',
     } as unknown as MediaItem)
   }
   return out
@@ -356,7 +360,7 @@ const heroItems = computed(() => {
     ...recentTVShows.value.map(i => ({ ...i, chip: tvChipByShow.value[i.id], _sort: new Date(i.created_at).getTime() })),
   ]
   combined.sort((a, b) => b._sort - a._sort)
-  return combined.slice(0, 5)
+  return combined.slice(0, 10)
 })
 
 const hasContent = computed(() =>

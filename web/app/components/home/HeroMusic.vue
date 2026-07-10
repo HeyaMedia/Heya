@@ -1,24 +1,33 @@
 <template>
   <section class="hero-music">
     <div class="music-bg" :class="{ 'ambient-extended': ambientEnabled }">
-      <!-- Playing: the analyser owns the background. Idle: newest album art,
-           blurred into ambience. -->
-      <VisualizerSpectrum v-if="playing" variant="bars" :active="true" class="music-viz" />
-      <template v-else>
+      <!-- Real artist art: rotating backdrops of the recent artists (idle) or
+           the playing artist's backdrop. When no artist has one, the newest
+           album cover blurs into ambience instead. -->
+      <Transition name="mbg">
         <NuxtImg
-          v-if="idleArt"
-          :src="idleArt"
+          v-if="activeBg"
+          :key="activeBg"
+          :src="activeBg"
+          :width="1920"
+          :quality="80"
+          class="music-bg-img"
+          alt=""
+        />
+        <NuxtImg
+          v-else-if="fallbackArt"
+          :key="`blur:${fallbackArt}`"
+          :src="fallbackArt"
           :width="1280"
           :quality="85"
-          class="music-bg-art"
+          class="music-bg-blur"
           alt=""
-          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
         />
-      </template>
-      <div class="music-bg-gradient" :class="{ playing }" />
+      </Transition>
+      <div class="music-bg-gradient" />
     </div>
 
-    <!-- Playing: now-playing lead + big art. -->
+    <!-- Playing: now-playing lead + big art over the playing artist's backdrop. -->
     <div v-if="playing && currentTrack" class="music-inner playing">
       <div class="music-lead">
         <div class="music-eyebrow">Now playing</div>
@@ -29,6 +38,7 @@
             <Icon name="music" :size="16" />
             Open player
           </NuxtLink>
+          <NuxtLink to="/music/library" class="btn btn-ghost">Library</NuxtLink>
         </div>
       </div>
       <div class="music-now-art" v-if="currentTrack.poster">
@@ -36,13 +46,17 @@
       </div>
     </div>
 
-    <!-- Idle: lead on top, horizontal shelf of the newest albums below. -->
+    <!-- Idle: lead on top, horizontal shelf of the newest albums below. The
+         lead line names whichever artist's backdrop is currently showing. -->
     <div v-else class="music-inner idle">
       <div class="music-lead-row">
-        <div>
+        <div class="music-lead-block">
           <div class="music-eyebrow">Music</div>
           <h1 class="music-title">Pick up the needle</h1>
-          <p class="music-sub" v-if="artists[0]">{{ artistLine }}</p>
+          <p class="music-sub" v-if="shownArtist">
+            <NuxtLink :to="mediaUrl(shownArtist)" class="music-artist-link">{{ shownArtist.title }}</NuxtLink>
+            <span class="music-sub-note"> — {{ shownArtistSub }}</span>
+          </p>
         </div>
         <div class="music-actions">
           <NuxtLink to="/music" class="btn btn-primary">
@@ -73,40 +87,100 @@
 </template>
 
 <script setup lang="ts">
-// "Music" — now-playing front and center with the live spectrum as the hero
-// background; idle, a horizontal shelf of the newest albums. The visualizer
-// is the existing engine-fed VisualizerSpectrum — no extra audio nodes.
+// "Music" — big album/artist art, no gimmicks. The background is the real
+// backdrop of a relevant artist: idle it rotates through the recent artists
+// that have one (the lead line follows along), playing it pins to the
+// playing artist. Artists without backdrops are skipped via a tiny probe
+// (image URLs are unconditional; the endpoint 404s when the asset is
+// missing), and when nobody has one the newest album cover blurs in instead.
 import type { MediaItem } from '~~/shared/types'
 
 type Albumish = MediaItem & { sub?: string; poster_src?: string; artist_slug?: string; album_slug?: string }
+type Artistish = MediaItem & { sub?: string }
 
 const props = defineProps<{
   albums: MediaItem[]
-  artists: (MediaItem & { sub?: string })[]
+  artists: Artistish[]
 }>()
 
 const { playing, currentTrack } = usePlayer()
 
-const idleArt = computed(() => (props.albums[0] as Albumish | undefined)?.poster_src ?? null)
+// ---- Idle backdrop pool ----------------------------------------------------
+// Probe each recent artist's backdrop URL at thumbnail size (?w=64) and keep
+// the survivors. Probing beats @error juggling: the pool only ever holds
+// URLs known to resolve, so rotation and the artist-name lead stay in sync.
+const pool = ref<{ url: string; artist: Artistish }[]>([])
+const poolIdx = ref(0)
 
-// Ambient extension: idle mode's newest-album art becomes the full-page
-// layer. Playing mode has no static backdrop (the visualizer owns it), so
-// the watcher clears the override then and ambient falls back to the route
-// pool. Either way the local `.music-bg-art` hides and the fade softens
-// while ambientEnabled is on, matching whatever full-page image is showing.
+function probe(url: string) {
+  return new Promise<boolean>((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(true)
+    img.onerror = () => resolve(false)
+    img.src = `${url}?w=64`
+  })
+}
+
+let probeToken = 0
+watch(() => props.artists, async (list) => {
+  if (import.meta.server) return
+  const token = ++probeToken
+  const found: { url: string; artist: Artistish }[] = []
+  for (const a of list.slice(0, 8)) {
+    const url = useBackdropUrl(a)
+    if (url && await probe(url)) found.push({ url, artist: a })
+    if (token !== probeToken) return // newer artist list superseded this pass
+  }
+  pool.value = found
+  poolIdx.value = 0
+}, { immediate: true })
+
+const ROTATE_MS = 20_000
+let rotateTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  rotateTimer = setInterval(() => {
+    if (!playing.value && pool.value.length > 1) poolIdx.value = (poolIdx.value + 1) % pool.value.length
+  }, ROTATE_MS)
+})
+onUnmounted(() => {
+  if (rotateTimer) clearInterval(rotateTimer)
+})
+
+const shownEntry = computed(() => pool.value.length ? pool.value[poolIdx.value % pool.value.length] : null)
+const shownArtist = computed<Artistish | undefined>(() => shownEntry.value?.artist ?? props.artists[0])
+const shownArtistSub = computed(() => {
+  const s = shownArtist.value?.sub
+  return s === 'New artist' ? 'New in your library' : (s ?? 'Recently updated')
+})
+
+// ---- Playing backdrop -------------------------------------------------------
+// The image endpoint resolves slugs, so the track's artist_slug addresses the
+// playing artist's backdrop directly — no detail fetch needed.
+const playingBg = ref<string | null>(null)
+watch(() => (playing.value ? currentTrack.value?.artist_slug : null), async (slug) => {
+  if (!slug) { playingBg.value = null; return }
+  const url = `/api/media/${slug}/image/backdrop`
+  const ok = await probe(url)
+  // Only land the result if this is still the playing artist.
+  if (slug === (playing.value ? currentTrack.value?.artist_slug : null)) playingBg.value = ok ? url : null
+}, { immediate: true })
+
+const activeBg = computed(() => (playing.value && currentTrack.value ? playingBg.value : shownEntry.value?.url ?? null))
+
+// Blur fallback when no backdrop resolves: the playing track's cover, else
+// the newest album cover.
+const idleArt = computed(() => (props.albums[0] as Albumish | undefined)?.poster_src ?? null)
+const fallbackArt = computed(() => (playing.value && currentTrack.value ? currentTrack.value.poster ?? idleArt.value : idleArt.value))
+
+// Ambient extension: whatever the hero shows becomes the full-page layer and
+// the local copies hide (their different crop would seam at the hero edges).
 const { ambientEnabled } = useAppearance()
 const ambientArt = useAmbientArt()
-const currentBg = computed(() => (!playing.value ? idleArt.value : null))
-watch([currentBg, ambientEnabled], ([url, on]) => {
+watch([activeBg, fallbackArt, ambientEnabled], ([bg, fb, on]) => {
+  const url = bg ?? fb
   if (on && url) ambientArt.set(url)
   else ambientArt.clear()
 }, { immediate: true })
-
-const artistLine = computed(() => {
-  const a = props.artists[0] as (MediaItem & { sub?: string }) | undefined
-  if (!a) return ''
-  return a.sub === 'New artist' ? `New in your library: ${a.title}` : `${a.title} — ${a.sub ?? 'recently updated'}`
-})
 
 function albumTo(al: MediaItem) {
   const a = al as Albumish
@@ -117,44 +191,44 @@ function albumTo(al: MediaItem) {
 
 <style scoped>
 .hero-music { position: relative; height: 100%; }
-.music-bg { position: absolute; inset: 0; background: var(--bg-0); }
-.music-viz {
+.music-bg {
   position: absolute;
-  inset: auto 0 0 0;
-  height: 78%;
-  opacity: 0.5;
-  mask-image: linear-gradient(to top, rgba(0,0,0,1) 60%, transparent 100%);
+  inset: 0;
+  background: var(--bg-0);
+  overflow: hidden;
 }
-.music-bg-art {
+.music-bg-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: blur(42px) brightness(0.45) saturate(1.2);
+}
+.music-bg-blur {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(42px) brightness(0.5) saturate(1.2);
   transform: scale(1.15);
 }
+/* Crossfade between rotating backdrops (both frames stay absolute, so the
+   outgoing image fades under the incoming one). */
+.mbg-enter-active, .mbg-leave-active { transition: opacity 0.9s ease; }
+.mbg-enter-from, .mbg-leave-to { opacity: 0; }
 .music-bg-gradient {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 50%, transparent) 55%, transparent 100%),
-    linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 70%, transparent) 25%, transparent 55%);
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 55%, transparent) 52%, color-mix(in srgb, var(--bg-1) 12%, transparent) 100%),
+    linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 65%, transparent) 22%, transparent 55%);
 }
-.music-bg-gradient.playing {
-  background:
-    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 35%, transparent) 60%, transparent 100%),
-    linear-gradient(to top, var(--bg-1) 0%, transparent 30%);
-}
-/* Ambient extension: the AmbientBackdrop layer shows the idle-mode album art
-   (or, while playing, falls back to the route pool since the visualizer has
-   no static image to hand off) full-page, so the local art hides — its
-   different crop would seam at the hero edges — and the fade softens so
-   the artwork continues past the hero bottom instead of ending at solid
-   canvas. */
-.music-bg.ambient-extended .music-bg-art { display: none; }
+/* Ambient extension: the AmbientBackdrop layer owns the artwork full-page,
+   so the hero paints nothing of its own. */
+.music-bg.ambient-extended .music-bg-img,
+.music-bg.ambient-extended .music-bg-blur,
 .music-bg.ambient-extended .music-bg-gradient { display: none; }
-.music-bg.ambient-extended .music-bg-gradient.playing { display: none; }
 .music-inner {
   position: relative;
   z-index: 2;
@@ -180,6 +254,24 @@ function albumTo(al: MediaItem) {
   justify-content: space-between;
   gap: 24px;
 }
+/* Blended readability wash behind the lead text — same recipe as the hero:
+   --bg-1-derived, long falloff, heavy blur, no locatable edge. z:-1 resolves
+   against .music-inner's stacking context (z-index: 2), so the wash sits
+   between the backdrop and the text. */
+.music-lead, .music-lead-block { position: relative; }
+.music-lead::before, .music-lead-block::before {
+  content: '';
+  position: absolute;
+  inset: -90px -140px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 75% 70% at 30% 45%,
+    color-mix(in srgb, var(--bg-1) 58%, transparent) 0%,
+    color-mix(in srgb, var(--bg-1) 40%, transparent) 40%,
+    color-mix(in srgb, var(--bg-1) 18%, transparent) 68%,
+    transparent 92%);
+  filter: blur(28px);
+}
 .music-eyebrow {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -187,6 +279,7 @@ function albumTo(al: MediaItem) {
   text-transform: uppercase;
   color: var(--gold);
   margin-bottom: 8px;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
 .music-title {
   font-size: 38px;
@@ -195,21 +288,40 @@ function albumTo(al: MediaItem) {
   line-height: 1.05;
   margin: 0 0 6px;
   text-wrap: balance;
+  text-shadow:
+    0 1px 2px var(--bg-1),
+    0 0 10px var(--bg-1),
+    0 0 24px var(--bg-1);
 }
 .music-inner.playing .music-title { font-size: 44px; margin-bottom: 10px; }
 .music-sub {
   font-size: 14px;
   color: var(--fg-1);
   margin: 0;
+  text-shadow:
+    0 1px 2px var(--bg-1),
+    0 0 10px var(--bg-1),
+    0 0 24px var(--bg-1);
 }
 .music-inner.playing .music-sub { font-size: 15px; margin-bottom: 24px; }
+.music-artist-link {
+  color: var(--fg-0);
+  font-weight: 600;
+  transition: color 0.15s;
+}
+.music-artist-link:hover { color: var(--gold); }
 .music-actions { display: flex; gap: 10px; flex-shrink: 0; }
+/* Shelf scroller with shadow escape: pad the scroller so hover shadows and
+   lift survive the overflow clip, pull the box back with negative margins so
+   layout doesn't move. scroll-padding keeps snap/keyboard alignment. */
 .music-shelf {
   display: flex;
   gap: 14px;
   overflow-x: auto;
   scrollbar-width: none;
-  padding-top: 16px;
+  padding: 16px 40px 46px;
+  margin: 0 -40px -24px;
+  scroll-padding-left: 40px;
 }
 .music-shelf::-webkit-scrollbar { display: none; }
 .music-cover {
@@ -219,12 +331,15 @@ function albumTo(al: MediaItem) {
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--bg-3);
-  border: 1px solid var(--border);
   text-decoration: none;
   color: inherit;
-  transition: transform 0.15s, border-color 0.15s;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.18s, box-shadow 0.18s;
 }
-.music-cover:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+.music-cover:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+}
 .music-cover-label {
   position: absolute;
   inset: auto 0 0 0;
@@ -234,13 +349,14 @@ function albumTo(al: MediaItem) {
 .music-cover-title {
   font-size: 12.5px;
   font-weight: 600;
+  color: #fff; /* on artwork scrim — stays literal */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .music-cover-artist {
   font-size: 11px;
-  color: var(--fg-2);
+  color: rgba(255,255,255,0.72); /* on artwork scrim — stays literal */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -258,6 +374,11 @@ function albumTo(al: MediaItem) {
   .music-inner.playing { grid-template-columns: 1fr; gap: 20px; padding: 24px 20px; align-content: center; }
   .music-title { font-size: 28px; }
   .music-lead-row { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .music-shelf {
+    padding: 12px 20px 40px;
+    margin: 0 -20px -20px;
+    scroll-padding-left: 20px;
+  }
   .music-cover { width: 150px; }
   .music-now-art { display: none; }
 }

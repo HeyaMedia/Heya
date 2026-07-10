@@ -12680,6 +12680,9 @@
             "format": "date-time",
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "episode_count": {
             "format": "int32",
             "type": "integer"

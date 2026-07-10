@@ -1,5 +1,5 @@
 <template>
-  <section class="hero-roulette">
+  <div class="roulette-page">
     <div class="roulette-bg" :class="{ 'ambient-extended': ambientEnabled }">
       <NuxtImg
         v-if="pick && settled"
@@ -73,7 +73,7 @@
       </div>
 
       <div class="roulette-wheel">
-        <div class="wheel-frame" :class="{ spinning, settled }">
+        <div ref="wheelFrame" class="wheel-frame" :class="{ spinning, settled }">
           <!-- Slot reel: a vertical strip of posters translated with a long
                ease-out; the pick sits at the end of the strip. Motion-blurred
                while moving, snaps crisp on arrival. -->
@@ -87,7 +87,7 @@
             <div v-for="(m, i) in reel" :key="`${i}-${m.id}`" class="wheel-cell">
               <NuxtImg
                 :src="usePosterUrl(m) ?? ''"
-                :width="240"
+                :width="280"
                 :quality="80"
                 densities="1x 2x"
                 alt=""
@@ -100,13 +100,14 @@
         </div>
       </div>
     </div>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
-// "Roulette" — decision-paralysis killer. Filters narrow the pool, a slot
-// reel of your own posters decelerates onto the pick. The pick's detail is
-// fetched on settle so Play can start the actual file.
+// /movies/roulette — decision-paralysis killer, promoted from a home-hero
+// mode to a page of its own. Filters narrow the pool, a slot reel of your
+// own posters decelerates onto the pick. The pick's detail is fetched on
+// settle so Play can start the actual file.
 import { useQuery } from '@tanstack/vue-query'
 
 interface EnrichedMovie {
@@ -167,8 +168,9 @@ function toggleGenre(g: string) {
 // --- Slot reel -------------------------------------------------------------
 const SPIN_MS = 2600
 const REEL_LEN = 14 // posters flown past before the pick lands
-const CELL_H = 372 // 248px wide frame × 3/2
+const FALLBACK_CELL_H = 420 // 280px wide frame × 3/2
 
+const wheelFrame = ref<HTMLElement | null>(null)
 const spinning = ref(false)
 const settled = ref(false)
 const pick = ref<EnrichedMovie | null>(null)
@@ -207,18 +209,21 @@ function spin() {
 
   // Strip of random posters, current pick landing at the end. Start above
   // the frame (offset 0 shows cell 0), then let one long transition carry it
-  // to the final cell.
+  // to the final cell. Cell height is measured off the rendered frame — the
+  // page frame is responsive (280px desktop, smaller on phones), so a JS
+  // constant would drift out of sync with the CSS.
   const strip: EnrichedMovie[] = []
   for (let i = 0; i < REEL_LEN; i++) strip.push(p[Math.floor(Math.random() * p.length)]!)
   strip.push(pick.value)
   reel.value = strip
   reelOffset.value = 0
+  const cellH = wheelFrame.value?.offsetHeight || FALLBACK_CELL_H
 
   // Two frames so the reset offset paints before the transition arms.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       spinning.value = true
-      reelOffset.value = -(strip.length - 1) * CELL_H
+      reelOffset.value = -(strip.length - 1) * cellH
       // transitionend can be swallowed if the tab loses focus mid-spin —
       // a guard timeout makes sure the wheel always lands.
       if (landedGuard) clearTimeout(landedGuard)
@@ -263,8 +268,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.hero-roulette { position: relative; height: 100%; }
-.roulette-bg { position: absolute; inset: 0; background: var(--bg-0); }
+.roulette-page {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+.roulette-bg { position: absolute; inset: 0; }
 .roulette-bg-img {
   position: absolute;
   inset: 0;
@@ -285,22 +294,21 @@ onUnmounted(() => {
     linear-gradient(to top, var(--bg-1) 0%, transparent 40%);
 }
 /* Ambient extension: the AmbientBackdrop layer shows this pick's backdrop
-   full-page (see the ambientArt watcher), so the local copy hides — its
-   different crop would seam at the hero edges — and the fade softens so
-   the artwork continues past the hero bottom instead of ending at solid
-   canvas. */
+   full-page (see the ambientArt watcher), so the local copies hide — a
+   duplicate crop would seam where the page meets the chrome. */
 .roulette-bg.ambient-extended .roulette-bg-img { display: none; }
 .roulette-bg.ambient-extended .roulette-bg-gradient { display: none; }
 .roulette-inner {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 248px;
+  grid-template-columns: minmax(0, 1fr) 280px;
   align-items: center;
-  gap: 56px;
+  gap: 64px;
   height: 100%;
-  padding: 48px 40px;
-  max-width: 1200px;
+  padding: 48px clamp(24px, 5vw, 72px);
+  max-width: 1280px;
+  margin: 0 auto;
 }
 .roulette-eyebrow {
   font-family: var(--font-mono);
@@ -313,13 +321,17 @@ onUnmounted(() => {
 .roulette-title-link { color: inherit; text-decoration: none; }
 .roulette-title-link:hover .roulette-title { color: var(--gold); }
 .roulette-title {
-  font-size: 44px;
+  font-size: 52px;
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.05;
   margin: 0 0 10px;
   text-wrap: balance;
   transition: color 0.15s;
+  text-shadow:
+    0 1px 2px var(--bg-1),
+    0 0 10px var(--bg-1),
+    0 0 24px var(--bg-1);
 }
 .roulette-title.muted { color: var(--fg-1); }
 .roulette-hint { font-size: 14px; color: var(--fg-2); margin: 0; }
@@ -329,6 +341,7 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 14px;
   color: var(--fg-1);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
 .roulette-meta .dot {
   width: 3px;
@@ -371,8 +384,8 @@ onUnmounted(() => {
 .roulette-wheel { justify-self: end; }
 .wheel-frame {
   position: relative;
-  width: 248px;
-  height: 372px;
+  width: 280px;
+  aspect-ratio: 2/3;
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--bg-2);
@@ -395,8 +408,8 @@ onUnmounted(() => {
 }
 .wheel-reel.moving { filter: blur(2px) brightness(1.05); }
 .wheel-cell {
-  width: 248px;
-  height: 372px;
+  width: 100%;
+  aspect-ratio: 2/3;
 }
 .wheel-cell img {
   width: 100%;
@@ -419,9 +432,22 @@ onUnmounted(() => {
   font-size: 64px;
   color: var(--fg-4);
 }
+/* Page is full-viewport on its own — on narrow screens the wheel stacks
+   ABOVE the lead and stays visible (it's the whole point of the page),
+   unlike the old hero mode which had to hide it inside 480px. */
 @media (max-width: 900px) {
-  .roulette-inner { grid-template-columns: 1fr; gap: 20px; padding: 24px 20px; align-content: center; }
+  .roulette-inner {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    padding: 24px 20px;
+    align-content: center;
+    justify-items: center;
+    overflow-y: auto;
+  }
+  .roulette-wheel { order: -1; justify-self: center; }
+  .wheel-frame { width: min(200px, 48vw); }
+  .roulette-lead { text-align: center; width: 100%; }
   .roulette-title { font-size: 32px; }
-  .roulette-wheel { display: none; }
+  .roulette-meta, .roulette-actions, .roulette-filters { justify-content: center; }
 }
 </style>

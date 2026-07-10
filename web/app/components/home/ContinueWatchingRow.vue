@@ -1,14 +1,11 @@
 <template>
   <section v-if="items.length" class="content-row">
-    <div class="section-row-head">
-      <div>
-        <h2 class="section-title-lg">Continue Watching</h2>
-      </div>
-      <div style="display: flex; align-items: center; gap: 10px">
+    <SectionHeader title="Continue Watching">
+      <template #actions>
         <button class="scroll-btn" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
         <button class="scroll-btn" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
-      </div>
-    </div>
+      </template>
+    </SectionHeader>
     <div class="row-scroll" ref="scrollEl">
       <div
         v-for="(item, i) in items"

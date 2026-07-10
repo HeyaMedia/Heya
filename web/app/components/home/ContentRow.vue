@@ -1,16 +1,12 @@
 <template>
   <section class="content-row">
-    <div class="section-row-head">
-      <div>
-        <h2 class="section-title-lg">{{ title }}</h2>
-        <div v-if="subtitle" class="row-subtitle">{{ subtitle }}</div>
-      </div>
-      <div style="display: flex; align-items: center; gap: 10px">
+    <SectionHeader :title="title" :subtitle="subtitle">
+      <template #actions>
         <span v-if="more" class="more" @click="$emit('more')">{{ more }}</span>
         <button class="scroll-btn" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
         <button class="scroll-btn" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
-      </div>
-    </div>
+      </template>
+    </SectionHeader>
     <div class="row-scroll" ref="scrollEl">
       <AppContextMenu
         v-for="(item, i) in items"
@@ -77,13 +73,6 @@ function scrollBy(dir: number) {
 <style scoped>
 .content-row { margin-bottom: 40px; }
 
-.row-subtitle {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--fg-3);
-  margin-top: 2px;
-  letter-spacing: 0.04em;
-}
 
 .row-scroll {
   display: flex;

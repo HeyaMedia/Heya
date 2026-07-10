@@ -1,9 +1,15 @@
 <template>
-  <section class="hero-newin">
+  <section
+    class="hero-newin"
+    @mouseenter="onHover(true)"
+    @mouseleave="onHover(false)"
+    @focusin="onFocus($event, true)"
+    @focusout="onFocus($event, false)"
+  >
     <div class="newin-bg" :class="{ 'ambient-extended': ambientEnabled }">
       <NuxtImg
-        v-if="featured"
-        :src="bgUrl ?? undefined"
+        v-if="bgUrl"
+        :src="bgUrl"
         :width="1920"
         :quality="75"
         class="newin-bg-img"
@@ -13,51 +19,123 @@
     </div>
 
     <div class="newin-inner">
-      <div class="newin-lead">
-        <div>
-          <div class="newin-eyebrow">New in your library</div>
-          <template v-if="featured">
-            <NuxtLink :to="`/tv/${featured.slug}`" class="newin-title-link">
-              <h1 class="newin-title">{{ featured.title }}</h1>
+      <!-- Spotlight poster: full hero height — THE thing on stage. One
+           persistent element; on handoff it FLIP-flies from the promoted
+           queue card's rect into place (see advance()). -->
+      <NuxtLink
+        v-if="spotlight"
+        ref="posterLink"
+        :to="spotlight.to"
+        class="newin-poster"
+      >
+        <NuxtImg
+          :key="spotlight.key"
+          :src="spotlight.art"
+          :width="620"
+          :quality="85"
+          alt=""
+          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.visibility = 'hidden' }"
+        />
+      </NuxtLink>
+
+      <!-- Everything else lives right of the poster: text block on top,
+           the queue below. -->
+      <div class="newin-main">
+      <div class="newin-top">
+        <Transition name="spot" mode="out-in">
+          <div v-if="spotlight" :key="spotlight.key" class="newin-spot">
+            <div class="newin-eyebrow">New in your library</div>
+            <NuxtLink :to="spotlight.to" class="newin-title-link">
+              <h1 class="newin-title">{{ spotlight.title }}</h1>
             </NuxtLink>
-            <p class="newin-featured-sub">{{ entrySub(featured) }} · {{ relTime(featured.added_at) }}</p>
-          </template>
-        </div>
-        <p class="newin-sum">{{ summary }}</p>
+            <div class="newin-meta">
+              <span class="chip gold">{{ spotlight.kind }}</span>
+              <span class="newin-meta-sub">{{ spotlight.sub }}</span>
+              <span v-if="spotlight.time" class="newin-meta-time">{{ spotlight.time }}</span>
+            </div>
+            <p v-if="spotlight.description" class="newin-desc">
+              {{ spotlight.description.slice(0, 220) }}{{ spotlight.description.length > 220 ? '…' : '' }}
+            </p>
+            <div class="newin-actions">
+              <NuxtLink :to="spotlight.to" class="btn btn-primary newin-cta" :style="ctaStyle">
+                {{ spotlight.kindGroup === 'artist' ? 'Go to artist' : 'Go to show' }}
+                <Icon name="chevright" :size="15" />
+              </NuxtLink>
+            </div>
+          </div>
+        </Transition>
+
+        <!-- Controls ride the deck's top-right cluster beside the mode tabs
+             (same slot HeroA's navigator uses). On phones the aux slot is
+             hidden, so the teleport is disabled and they render inline —
+             touch users must always have a pause control. The ring around
+             pause IS the cycle clock: its CSS animation's end advances the
+             carousel, so ring and rotation can't drift. -->
+        <Teleport defer :disabled="isPhone" to="#hero-deck-aux">
+          <div class="newin-ctls" :class="{ inline: isPhone }">
+            <button class="newin-ctl" aria-label="Previous arrival" @click="retreat">
+              <Icon name="chevleft" :size="12" />
+            </button>
+            <button
+              class="newin-ctl newin-pause"
+              :aria-pressed="userPaused"
+              :aria-label="userPaused ? 'Resume rotation' : 'Pause rotation'"
+              @click="userPaused = !userPaused"
+            >
+              <svg class="ctl-ring" viewBox="0 0 26 26" aria-hidden="true">
+                <circle
+                  v-if="!reducedMotion"
+                  :key="cycleKey"
+                  class="ctl-ring-fill"
+                  :class="{ paused: ringPaused }"
+                  cx="13" cy="13" r="11.5"
+                  @animationend="advance"
+                />
+              </svg>
+              <Icon :name="userPaused ? 'play' : 'pause'" :size="12" />
+            </button>
+            <button class="newin-ctl" aria-label="Next arrival" @click="advance">
+              <Icon name="chevright" :size="12" />
+            </button>
+          </div>
+        </Teleport>
+        <p v-if="summary" class="newin-sum">{{ summary }}</p>
       </div>
 
-      <div class="newin-feed">
+      <!-- The queue: everything waiting for its turn. As the carousel
+           advances, the head card is promoted to the spotlight and the rest
+           FLIP-slide one slot left; the outgoing spotlight rejoins at the
+           tail. Standard MediaCards — no chrome of their own. -->
+      <TransitionGroup ref="feedGroup" name="strip" tag="div" class="newin-feed">
         <NuxtLink
-          v-for="ev in feed"
+          v-for="(ev, i) in stripRows"
           :key="ev.key"
           :to="ev.to"
-          class="newin-card"
+          class="newin-card card-tile"
         >
-          <div class="newin-card-art">
-            <NuxtImg
-              :src="ev.art"
-              :width="240"
-              :quality="80"
-              densities="1x 2x"
-              alt=""
-              @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.visibility = 'hidden' }"
-            />
-            <span class="newin-card-kind">{{ ev.kind }}</span>
-          </div>
-          <div class="newin-card-title">{{ ev.title }}</div>
-          <div class="newin-card-sub">{{ ev.sub }}</div>
-          <div class="newin-card-time">{{ ev.time }}</div>
+          <MediaCard
+            :idx="i"
+            :src="ev.art"
+            :title="ev.title"
+            :subtitle="ev.time || ev.sub"
+            :badge-tl="ev.kindShort"
+          />
         </NuxtLink>
+      </TransitionGroup>
       </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-// "New" — the library pulse. A featured drop up top, the latest arrivals as
-// a horizontal shelf of cards along the bottom, each stamped with what it is
-// and when it landed. Feeds entirely off data the page already fetched.
+// "New" — the library pulse as a carousel. The newest arrivals queue along
+// the bottom; every CYCLE_MS the head of the queue takes the spotlight (big
+// poster + blurb + tone-matched CTA, full-page backdrop) and the strip
+// slides left, the outgoing spotlight rejoining at the tail. Hovering
+// anywhere in the hero pauses the clock. Feeds entirely off data the page
+// already fetched.
 import type { MediaItem } from '~~/shared/types'
+import type { ImageTone } from '~/composables/useImageTone'
 
 export interface RecentTVEntry {
   media_item_id: number
@@ -71,6 +149,8 @@ export interface RecentTVEntry {
   season_count: number
   episode_count: number
   added_at: string
+  // Kind-resolved server-side: show desc / season overview / episode overview.
+  description?: string
 }
 
 const props = defineProps<{
@@ -79,37 +159,24 @@ const props = defineProps<{
   artists: (MediaItem & { sub?: string })[]
 }>()
 
-const featured = computed(() => {
-  // Biggest recent TV event wins the spotlight: prefer a whole new show,
-  // then a new season, else just the newest entry.
-  const tv = props.tv
-  return tv.find(e => e.kind === 'series') ?? tv.find(e => e.kind === 'season') ?? tv[0]
-})
-
-const bgUrl = computed(() => (featured.value
-  ? useBackdropUrl({ id: featured.value.media_item_id, public_id: featured.value.media_item_public_id })
-  : null) || null)
-
-// Ambient extension: with the ambient background on, the featured entry's
-// backdrop becomes the full-page layer — the local `.newin-bg-img` hides via
-// .ambient-extended and the AmbientBackdrop layer follows the feed through
-// this watcher.
-const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
-watch([bgUrl, ambientEnabled], ([url, on]) => {
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
-}, { immediate: true })
-
 function entrySub(e: RecentTVEntry): string {
   switch (e.kind) {
-    case 'series': return e.season_count > 1 ? `New show · ${e.season_count} seasons` : `New show · ${e.episode_count} episode${e.episode_count === 1 ? '' : 's'}`
-    case 'season': return `New season ${e.season_number} · ${e.episode_count} episode${e.episode_count === 1 ? '' : 's'}`
+    case 'series': return e.season_count > 1 ? `${e.season_count} seasons` : `${e.episode_count} episode${e.episode_count === 1 ? '' : 's'}`
+    case 'season': return `Season ${e.season_number} · ${e.episode_count} episode${e.episode_count === 1 ? '' : 's'}`
     case 'episodes': return `Season ${e.season_number} · ${e.episode_count} new episodes`
     case 'episode': {
       const code = `S${String(e.season_number).padStart(2, '0')}E${String(e.episode_number).padStart(2, '0')}`
       return e.episode_title ? `${code} · ${e.episode_title}` : code
     }
+  }
+}
+
+function kindLabel(e: RecentTVEntry): string {
+  switch (e.kind) {
+    case 'series': return 'New show'
+    case 'season': return `New season ${e.season_number}`
+    case 'episodes': return 'New episodes'
+    case 'episode': return 'New episode'
   }
 }
 
@@ -123,6 +190,182 @@ function relTime(iso: string): string {
   return `${Math.floor(d / 7)}w ago`
 }
 
+interface FeedRow {
+  key: string
+  to: string
+  art: string
+  backdrop: string | null
+  title: string
+  sub: string
+  kind: string
+  kindShort: string
+  kindGroup: 'tv' | 'artist'
+  time: string
+  description: string
+}
+
+const feed = computed<FeedRow[]>(() => {
+  const rows: FeedRow[] = []
+  // Biggest event leads: whole new show, then a new season, then everything
+  // else in arrival order.
+  const tv = [...props.tv].sort((a, b) => {
+    const rank = (e: RecentTVEntry) => (e.kind === 'series' ? 0 : e.kind === 'season' ? 1 : 2)
+    return rank(a) - rank(b) || new Date(b.added_at).getTime() - new Date(a.added_at).getTime()
+  })
+  for (const e of tv.slice(0, 9)) {
+    const ref = { id: e.media_item_id, public_id: e.media_item_public_id }
+    rows.push({
+      key: `tv-${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
+      to: `/tv/${e.slug}`,
+      art: usePosterUrl(ref) ?? '',
+      backdrop: useBackdropUrl(ref) || null,
+      title: e.title,
+      sub: entrySub(e),
+      kind: kindLabel(e),
+      kindShort: e.kind === 'series' ? 'SHOW' : e.kind === 'season' ? 'SEASON' : 'EPISODE',
+      kindGroup: 'tv',
+      time: relTime(e.added_at),
+      description: e.description ?? '',
+    })
+  }
+  for (const a of props.artists.slice(0, 3)) {
+    rows.push({
+      key: `artist-${a.id}`,
+      to: mediaUrl(a),
+      art: usePosterUrl(a) ?? '',
+      backdrop: useBackdropUrl(a) || null,
+      title: a.title,
+      sub: (a as MediaItem & { sub?: string }).sub ?? '',
+      kind: 'New artist',
+      kindShort: 'ARTIST',
+      kindGroup: 'artist',
+      time: '',
+      description: '',
+    })
+  }
+  return rows.slice(0, 10)
+})
+
+// ── Carousel clock ──
+// The pause button's progress ring IS the timer: a CYCLE_MS-long CSS stroke
+// animation whose `animationend` calls advance(); every advance/retreat
+// re-keys the ring, restarting the countdown. Pausing (hover, keyboard
+// focusin, or the sticky button) sets animation-play-state: paused — clock
+// and indicator are the same thing, so they can't drift. Reduced motion:
+// no ring animation, no auto-advance; prev/next still work.
+const cursor = ref(0)
+const cycleKey = ref(0)
+// Independent pause sources — composed, never overwriting each other: a
+// mouseleave must not cancel a keyboard-focus pause and vice versa.
+const hoverPaused = ref(false)
+const focusPaused = ref(false)
+const userPaused = ref(false)
+const ringPaused = computed(() => hoverPaused.value || focusPaused.value || userPaused.value)
+const reducedMotion = import.meta.client
+  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  : false
+const { isPhone } = useViewport()
+
+// Touch guards: a tap fires a synthetic mouseenter with no mouseleave, and
+// focus stays on a tapped button forever — either would wedge `paused` on.
+// Hover-pause only applies to real hover devices, and the control cluster
+// itself never focus-pauses (it IS the pause mechanism; trapping the clock
+// while its own buttons hold focus made resume impossible on phones).
+const canHover = import.meta.client
+  ? window.matchMedia('(hover: hover)').matches
+  : true
+function onHover(state: boolean) {
+  if (canHover) hoverPaused.value = state
+}
+function onFocus(e: FocusEvent, state: boolean) {
+  if ((e.target as HTMLElement | null)?.closest?.('.newin-ctls')) return
+  focusPaused.value = state
+}
+
+function retreat() {
+  const f = feed.value
+  if (f.length <= 1) return
+  cursor.value = (cursor.value - 1 + f.length) % f.length
+  cycleKey.value++
+}
+
+// ── Shared-element handoff ──
+// The promoted card doesn't fade — it BECOMES the spotlight poster: measure
+// its art rect before the swap, preload the art, advance, then fly the big
+// poster from the card's rect into place (FLIP via the Web Animations API).
+const posterLink = ref<{ $el?: HTMLElement } | HTMLElement | null>(null)
+const feedGroup = ref<{ $el?: HTMLElement } | null>(null)
+function elOf(r: { $el?: HTMLElement } | HTMLElement | null): HTMLElement | null {
+  if (!r) return null
+  return r instanceof HTMLElement ? r : (r.$el ?? null)
+}
+
+function advance() {
+  const f = feed.value
+  if (f.length <= 1) return
+  const next = f[(cursor.value + 1) % f.length]!
+  const headCard = elOf(feedGroup.value)?.querySelector('.newin-card .poster')
+    ?? elOf(feedGroup.value)?.querySelector('.newin-card')
+  const from = headCard?.getBoundingClientRect() ?? null
+
+  // Never fly a blank: swap only once the incoming art is decoded.
+  const img = new Image()
+  const go = async () => {
+    cursor.value = (cursor.value + 1) % f.length
+    cycleKey.value++
+    await nextTick()
+    const posterEl = elOf(posterLink.value)
+    const to = posterEl?.getBoundingClientRect()
+    if (!posterEl || !from || !to || reducedMotion) return
+    const sx = from.width / to.width
+    const sy = from.height / to.height
+    posterEl.animate([
+      {
+        transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${sx}, ${sy})`,
+        opacity: 0.85,
+      },
+      { transform: 'none', opacity: 1 },
+    ], { duration: 620, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
+  }
+  img.onload = go
+  img.onerror = go
+  img.src = next.art
+}
+
+const spotlight = computed<FeedRow | undefined>(() => {
+  const f = feed.value
+  return f.length ? f[cursor.value % f.length] : undefined
+})
+
+/** Everyone except the spotlight, next-up first, wrapping around. */
+const stripRows = computed<FeedRow[]>(() => {
+  const f = feed.value
+  const n = f.length
+  if (n <= 1) return []
+  const start = (cursor.value % n + 1) % n
+  return [...f.slice(start), ...f.slice(0, start)].slice(0, n - 1)
+})
+
+const bgUrl = computed(() => spotlight.value?.backdrop ?? null)
+
+// Ambient extension: the spotlight's backdrop becomes the full-page layer —
+// the local `.newin-bg-img` hides via .ambient-extended and the
+// AmbientBackdrop layer follows the carousel through this watcher.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+watch([bgUrl, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
+
+// CTA wears the spotlight backdrop's dominant tone (falls back to theme gold).
+const tone = ref<ImageTone | null>(null)
+watch(bgUrl, async (url) => {
+  tone.value = url ? await sampleImageTone(url) : null
+}, { immediate: true })
+const ctaStyle = computed(() =>
+  tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)
+
 const summary = computed(() => {
   const parts: string[] = []
   const eps = props.tv.filter(e => e.kind === 'episode' || e.kind === 'episodes').length
@@ -134,47 +377,18 @@ const summary = computed(() => {
   if (props.artists.length) parts.push(`${props.artists.length} artist${props.artists.length === 1 ? '' : 's'}`)
   return parts.length ? `Lately: ${parts.join(' · ')}` : ''
 })
-
-interface FeedRow { key: string; to: string; art: string; title: string; sub: string; kind: string; time: string }
-
-const feed = computed<FeedRow[]>(() => {
-  const rows: FeedRow[] = []
-  for (const e of props.tv.slice(0, 10)) {
-    if (featured.value && e === featured.value) continue
-    rows.push({
-      key: `tv-${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
-      to: `/tv/${e.slug}`,
-      art: usePosterUrl({ id: e.media_item_id, public_id: e.media_item_public_id }) ?? '',
-      title: e.title,
-      sub: entrySub(e),
-      kind: e.kind === 'series' ? 'SHOW' : e.kind === 'season' ? 'SEASON' : 'EPISODE',
-      time: relTime(e.added_at),
-    })
-  }
-  for (const a of props.artists.slice(0, 3)) {
-    rows.push({
-      key: `artist-${a.id}`,
-      to: mediaUrl(a),
-      art: usePosterUrl(a) ?? '',
-      title: a.title,
-      sub: (a as MediaItem & { sub?: string }).sub ?? '',
-      kind: 'ARTIST',
-      time: '',
-    })
-  }
-  return rows.slice(0, 8)
-})
 </script>
 
 <style scoped>
 .hero-newin { position: relative; height: 100%; }
-.newin-bg { position: absolute; inset: 0; }
+.newin-bg { position: absolute; inset: 0; overflow: hidden; }
 .newin-bg-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: opacity 0.6s ease;
 }
 .newin-bg-gradient {
   position: absolute;
@@ -183,27 +397,71 @@ const feed = computed<FeedRow[]>(() => {
     linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 72%, transparent) 45%, color-mix(in srgb, var(--bg-1) 30%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 75%, transparent) 30%, transparent 60%);
 }
-/* Ambient extension: the AmbientBackdrop layer shows the featured entry's
-   backdrop full-page (see the ambientArt watcher), so the local copy hides —
-   its different crop would seam at the hero edges — and the fade softens so
-   the artwork continues past the hero bottom instead of ending at solid
-   canvas. */
+/* Ambient extension: the AmbientBackdrop layer owns all art + tint. */
 .newin-bg.ambient-extended .newin-bg-img { display: none; }
 .newin-bg.ambient-extended .newin-bg-gradient { display: none; }
+
 .newin-inner {
   position: relative;
   z-index: 2;
   display: flex;
+  align-items: stretch;
+  height: 100%;
+  padding: 30px 40px 16px;
+  gap: 32px;
+}
+.newin-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 100%;
-  padding: 44px 40px 24px;
+  gap: 14px;
 }
-.newin-lead {
+
+/* ── Spotlight ── */
+.newin-top {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
+  align-items: flex-start;
+  gap: 28px;
+  flex: 1;
+  min-height: 0;
+}
+.newin-poster {
+  flex-shrink: 0;
+  align-self: stretch;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-3);
+  box-shadow: 0 24px 64px rgb(var(--shade) / 0.55), 0 0 0 1px rgb(var(--ink) / 0.06);
+  display: block;
+}
+.newin-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.newin-spot {
+  position: relative;
+  min-width: 0;
+  max-width: 620px;
+  align-self: center;
+}
+/* Same blended readability wash as the Featured hero. */
+.newin-spot::before {
+  content: '';
+  position: absolute;
+  inset: -90px -140px -70px -120px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 75% 70% at 38% 50%,
+    color-mix(in srgb, var(--bg-1) 58%, transparent) 0%,
+    color-mix(in srgb, var(--bg-1) 40%, transparent) 40%,
+    color-mix(in srgb, var(--bg-1) 18%, transparent) 68%,
+    transparent 92%);
+  filter: blur(28px);
 }
 .newin-eyebrow {
   font-family: var(--font-mono);
@@ -212,6 +470,7 @@ const feed = computed<FeedRow[]>(() => {
   text-transform: uppercase;
   color: var(--gold);
   margin-bottom: 8px;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .newin-title-link { color: inherit; text-decoration: none; }
 .newin-title-link:hover .newin-title { color: var(--gold); }
@@ -219,30 +478,135 @@ const feed = computed<FeedRow[]>(() => {
   font-size: 38px;
   font-weight: 600;
   letter-spacing: -0.025em;
-  line-height: 1.05;
-  margin: 0 0 6px;
+  line-height: 1.04;
+  margin: 0 0 10px;
   text-wrap: balance;
   transition: color 0.15s;
+  text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
-.newin-featured-sub {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  color: var(--fg-1);
-  margin: 0;
+.newin-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
-.newin-sum {
-  font-size: 12.5px;
-  color: var(--fg-2);
-  margin: 0 0 4px;
-  text-align: right;
+.newin-meta .chip {
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   flex-shrink: 0;
 }
+.newin-meta-sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-1);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.newin-meta-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  flex-shrink: 0;
+}
+.newin-desc {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fg-1);
+  max-width: 560px;
+  margin: 10px 0 0;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.newin-actions { margin-top: 16px; }
+.newin-cta {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 13px;
+  gap: 6px;
+  transition: background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+              color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.newin-sum {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-1);
+  margin: 0 0 0 auto;
+  text-align: right;
+  flex-shrink: 0;
+  align-self: flex-start;
+  /* Clear the deck-tabs cluster floating above. */
+  padding-top: 26px;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.newin-ctls { display: flex; align-items: center; gap: 6px; }
+.newin-ctls.inline { margin-left: auto; align-self: flex-start; }
+.newin-ctl {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-1);
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+  transition: background 0.12s, color 0.12s;
+}
+.newin-ctl:hover { background: var(--bg-3); color: var(--fg-0); }
+.newin-pause { position: relative; }
+/* Cycle-progress ring: full = handoff. Drawn just inside the button edge,
+   rotated so it fills from 12 o'clock. */
+.ctl-ring {
+  position: absolute;
+  inset: -1px;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.ctl-ring-fill {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 72.3; /* 2π · r(11.5) */
+  stroke-dashoffset: 72.3;
+  animation: ring-fill 15s linear forwards; /* = the carousel cycle length */
+}
+.ctl-ring-fill.paused { animation-play-state: paused; }
+@keyframes ring-fill { to { stroke-dashoffset: 0; } }
+
+/* Spotlight handoff crossfade. */
+.spot-enter-active { transition: opacity 0.35s ease, transform 0.35s ease; }
+.spot-leave-active { transition: opacity 0.18s ease; }
+.spot-enter-from { opacity: 0; transform: translateY(6px); }
+.spot-leave-to { opacity: 0; }
+
+/* ── The queue ── */
 .newin-feed {
+  position: relative; /* absolute-positioned leavers need this anchor */
   display: flex;
   gap: 14px;
   overflow-x: auto;
   scrollbar-width: none;
-  padding-top: 16px;
+  flex-shrink: 0;
+  /* Shadow-escape padding (layout-neutral) — sized for --shadow-card's
+     full reach so nothing clips at the scroller box. */
+  padding: 14px 36px 48px;
+  margin: -4px -36px -42px;
+  scroll-padding-left: 36px;
 }
 .newin-feed::-webkit-scrollbar { display: none; }
 .newin-card {
@@ -251,64 +615,25 @@ const feed = computed<FeedRow[]>(() => {
   color: inherit;
   text-decoration: none;
 }
-.newin-card-art {
-  position: relative;
-  width: 118px;
-  aspect-ratio: 2 / 3;
-  border-radius: var(--r-sm);
-  overflow: hidden;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  transition: transform 0.15s, border-color 0.15s;
-}
-.newin-card:hover .newin-card-art {
-  transform: translateY(-2px);
-  border-color: var(--border-strong);
-}
-.newin-card-art img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.newin-card-kind {
+
+/* Carousel choreography: the promoted head vanishes INSTANTLY — its visual
+   continuation is the big poster flying out of its rect (see advance()) —
+   while the rest FLIP-slide one slot left and the outgoing spotlight fades
+   in at the tail. */
+.strip-move { transition: transform 0.62s cubic-bezier(0.22, 1, 0.36, 1); }
+.strip-enter-active { transition: opacity 0.5s ease 0.25s, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.25s; }
+.strip-enter-from { opacity: 0; transform: translateX(24px); }
+.strip-leave-active {
   position: absolute;
-  top: 6px;
-  left: 6px;
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.1em;
-  color: var(--gold);
-  background: rgba(7, 7, 10, 0.8); /* on artwork — stays literal */
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 999px;
-  padding: 2px 6px;
+  transition: opacity 0.01s linear;
 }
-.newin-card-title {
-  font-size: 12px;
-  font-weight: 600;
-  margin-top: 7px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.newin-card-sub {
-  font-size: 10.5px;
-  color: var(--fg-2);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.newin-card-time {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--fg-3);
-  margin-top: 2px;
-}
+.strip-leave-to { opacity: 0; }
+
 @media (max-width: 900px) {
-  .newin-inner { padding: 20px; }
-  .newin-title { font-size: 28px; }
+  .newin-inner { padding: 18px 20px 12px; }
+  .newin-title { font-size: 26px; }
   .newin-sum { display: none; }
+  .newin-poster { display: none; }
+  .newin-card { width: 100px; }
 }
 </style>

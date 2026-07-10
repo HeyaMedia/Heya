@@ -197,18 +197,22 @@ onBeforeUnmount(() => {
   object-fit: cover;
   opacity: 0;
   transition: opacity 2.5s ease;
+  /* Soft-focus so content always wins; scale hides the blurred edge bleed. */
+  filter: blur(12px);
+  transform: scale(1.05);
 }
 .ambient-img.visible {
-  /* Intensity maps to real presence: 30% setting ≈ 0.55 image opacity.
-     The scrim handles legibility; without the boost the artwork reads
-     as "off" — especially on the light theme's paper canvas. */
-  opacity: min(calc(var(--ambient-opacity, 0.3) * 1.8), 0.92);
+  /* Intensity maps to presence: 30% setting ≈ 0.41 image opacity. */
+  opacity: min(calc(var(--ambient-opacity, 0.3) * 1.35), 0.85);
 }
 /* Owner-driven artwork (hero extended full-page) is the page's identity —
-   let it carry more presence and switch faster with its hero. */
-.override-mode .ambient-img { transition: opacity 1.2s ease; }
+   more presence, lighter blur, faster switches with its hero. */
+.override-mode .ambient-img {
+  transition: opacity 1.2s ease;
+  filter: blur(9px);
+}
 .override-mode .ambient-img.visible {
-  opacity: min(calc(var(--ambient-opacity, 0.3) * 2.4), 0.95);
+  opacity: min(calc(var(--ambient-opacity, 0.3) * 1.9), 0.9);
 }
 
 /* Slow push-in so pool artwork never reads as a static wallpaper. */
@@ -216,8 +220,9 @@ onBeforeUnmount(() => {
   animation: ambient-drift 60s ease-in-out infinite alternate;
 }
 @keyframes ambient-drift {
-  from { transform: scale(1); }
-  to { transform: scale(1.07); }
+  /* Stays ≥ the base 1.05 so the blur's edge bleed never shows. */
+  from { transform: scale(1.05); }
+  to { transform: scale(1.12); }
 }
 
 /* Pool mode: solid canvas at the top edge (topbar zone) and lower third

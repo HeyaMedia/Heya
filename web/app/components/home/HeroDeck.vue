@@ -1,7 +1,11 @@
 <template>
   <section class="hero-deck">
-    <!-- Mode tabs: quiet mono rail, gold = active, star pins the default. -->
-    <nav class="deck-tabs" v-if="visibleModes.length > 1">
+    <!-- Top-right cluster: modes can teleport their own controls (HeroA's
+         slide navigator) into #hero-deck-aux, sitting left of the tabs. -->
+    <div class="deck-topright">
+      <span id="hero-deck-aux" class="deck-aux" />
+      <!-- Mode tabs: quiet mono rail, gold = active, star pins the default. -->
+      <nav class="deck-tabs" v-if="visibleModes.length > 1">
       <button
         v-for="m in visibleModes"
         :key="m.id"
@@ -17,7 +21,8 @@
       >
         <Icon name="star" :weight="pinned === mode ? 'fill' : 'regular'" :size="13" />
       </button>
-    </nav>
+      </nav>
+    </div>
 
     <div class="deck-body">
       <HeroA
@@ -40,7 +45,6 @@
         :artists="artists"
       />
       <HeroMusic v-else-if="mode === 'music'" :albums="albums" :artists="artists" />
-      <HeroRoulette v-else-if="mode === 'roulette'" />
     </div>
   </section>
 </template>
@@ -51,7 +55,7 @@ import type { HeroItem, HeroPlayInfo } from '~/components/home/HeroA.vue'
 import type { UpNextItem } from '~/components/home/UpNextRow.vue'
 import type { RecentTVEntry } from '~/components/home/HeroNewIn.vue'
 
-export type HeroMode = 'featured' | 'tonight' | 'new' | 'music' | 'roulette'
+export type HeroMode = 'featured' | 'tonight' | 'new' | 'music'
 
 const props = defineProps<{
   items: HeroItem[]
@@ -83,7 +87,6 @@ const visibleModes = computed(() => {
   if (props.upNextItems.length) tabs.push({ id: 'tonight', label: 'Tonight' })
   if (props.tvEntries.length || props.albums.length) tabs.push({ id: 'new', label: 'New' })
   if (props.albums.length) tabs.push({ id: 'music', label: 'Music' })
-  tabs.push({ id: 'roulette', label: 'Roulette' })
   return tabs
 })
 
@@ -150,19 +153,25 @@ onMounted(() => {
   position: absolute;
   inset: 0;
 }
-.deck-tabs {
+.deck-topright {
   position: absolute;
   top: 18px;
   right: 24px;
   z-index: 10;
   display: flex;
   align-items: center;
+  gap: 10px;
+}
+.deck-aux { display: flex; align-items: center; }
+.deck-tabs {
+  display: flex;
+  align-items: center;
   gap: 2px;
   padding: 3px;
   border-radius: 999px;
   /* Theme-aware glass (same recipe as .surface): the pill sits over
-     artwork in most hero modes but over the bare canvas in Roulette —
-     a literal dark glass was unreadable on the light theme's paper. */
+     artwork, but a literal dark glass was unreadable on the light
+     theme's paper — mix from the theme's own surface color instead. */
   background: color-mix(in oklab, var(--bg-2) 88%, transparent);
   border: 1px solid var(--border);
   backdrop-filter: blur(12px);
@@ -197,7 +206,7 @@ onMounted(() => {
 .deck-pin:hover { color: var(--gold-bright); }
 .deck-pin.pinned { color: var(--gold); }
 @media (max-width: 900px) {
-  .deck-tabs { right: 12px; top: 12px; }
+  .deck-topright { right: 12px; top: 12px; }
   .deck-tab { padding: 5px 8px; }
 }
 /* Phone (W3a): the desktop 480px band is already ~57vh on a 390x844 phone,
@@ -214,10 +223,16 @@ onMounted(() => {
     min-height: 440px;
     max-height: 580px;
   }
-  .deck-tabs {
+  .deck-topright {
     left: 12px;
     right: 12px;
     max-width: none;
+  }
+  /* Phone: the aux slot (slide navigator) yields — tabs own the row. */
+  .deck-aux { display: none; }
+  .deck-tabs {
+    flex: 1;
+    min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
