@@ -35,6 +35,9 @@ interface MeSettingsBlob {
   [key: string]: unknown
 }
 
+// Module-level so every consumer of the composable shares one write queue.
+let saveChain: Promise<void> = Promise.resolve()
+
 /** Server prefs → full resolved list: server order first (unknown IDs
  *  dropped), then any sections the stored list doesn't know about yet, in
  *  default order. Nothing stored = defaults, all visible. */
@@ -74,17 +77,27 @@ export function useHomeSections() {
   }
 
   async function persist(next: HomeSectionPref[]) {
-    const current = settingsQuery.data.value ?? {}
+    // Cancel any in-flight refetch so it can't overwrite the optimistic
+    // cache with pre-PUT server state mid-sequence.
+    await queryClient.cancelQueries({ queryKey: ['me', 'settings'] })
+    const current =
+      (queryClient.getQueryData(['me', 'settings']) as MeSettingsBlob | undefined) ?? {}
     const body: MeSettingsBlob = { ...current, home: { ...current.home, sections: next } }
     // Optimistic: rapid consecutive moves must each read the previous move's
-    // result, not the stale pre-PUT cache (invalidate's refetch is async).
+    // result, not the stale pre-PUT cache.
     queryClient.setQueryData(['me', 'settings'], body)
-    try {
-      await $heya('/api/me/settings', { method: 'PUT', body: body as never })
-    } catch {
-      // Roll back to server truth.
-      queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
-    }
+    // Serialize the PUTs: concurrent whole-blob writes can arrive at the
+    // server out of order (last write wins), resurrecting a stale section
+    // order even though the local cache was right. Each link swallows its
+    // own failure (with a rollback refetch) so the chain never wedges.
+    saveChain = saveChain.then(async () => {
+      try {
+        await $heya('/api/me/settings', { method: 'PUT', body: body as never })
+      } catch {
+        queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
+      }
+    })
+    return saveChain
   }
 
   function toPrefs() {
