@@ -784,6 +784,15 @@ func applyMusicTrackFile(ctx context.Context, q *sqlc.Queries, libraryID, mediaI
 	if err != nil {
 		return counts, err
 	}
+	// The upsert resets loudness/chromaprint when the bytes changed; the
+	// sonic facets are keyed by track and need the same invalidation so the
+	// analysis pump re-measures instead of settling on data computed from
+	// the old audio.
+	if existingTF && existingTrackFile.SizeBytes != invFile.Size {
+		if err := q.ResetTrackFacetsVersionForTrack(ctx, trackID); err != nil {
+			return counts, err
+		}
+	}
 	if existingTF && existingTrackFile.TrackID == trackID {
 		counts.trackFilesUpdated++
 	} else if existingTF {

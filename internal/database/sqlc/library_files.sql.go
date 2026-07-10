@@ -1046,6 +1046,15 @@ SET media_info = CASE WHEN library_files.size = $2
     video_height = CASE WHEN library_files.size = $2
                          AND library_files.mtime IS NOT DISTINCT FROM $3
                         THEN library_files.video_height ELSE 0 END,
+    has_trickplay = CASE WHEN library_files.size = $2
+                          AND library_files.mtime IS NOT DISTINCT FROM $3
+                         THEN library_files.has_trickplay ELSE false END,
+    segments_analyzed_at = CASE WHEN library_files.size = $2
+                                 AND library_files.mtime IS NOT DISTINCT FROM $3
+                                THEN library_files.segments_analyzed_at ELSE NULL END,
+    segments_detected_at = CASE WHEN library_files.size = $2
+                                 AND library_files.mtime IS NOT DISTINCT FROM $3
+                                THEN library_files.segments_detected_at ELSE NULL END,
     size = $2,
     mtime = $3,
     deleted_at = NULL,
@@ -1183,6 +1192,15 @@ SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     video_height = CASE WHEN library_files.size = EXCLUDED.size
                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
                         THEN library_files.video_height ELSE 0 END,
+    has_trickplay = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.has_trickplay ELSE false END,
+    segments_analyzed_at = CASE WHEN library_files.size = EXCLUDED.size
+                                 AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                                THEN library_files.segments_analyzed_at ELSE NULL END,
+    segments_detected_at = CASE WHEN library_files.size = EXCLUDED.size
+                                 AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                                THEN library_files.segments_detected_at ELSE NULL END,
     deleted_at = NULL, updated_at = now()
 RETURNING id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at
 `

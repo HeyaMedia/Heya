@@ -51,15 +51,21 @@ func TestUpsertLibraryFileKeepsProbeDataForUnchangedBytes(t *testing.T) {
 		ID:        file.ID,
 		MediaInfo: []byte(`{"format":{"duration":"12.3"}}`),
 	}))
+	_, err = pool.Exec(ctx, `UPDATE library_files SET has_trickplay = true, segments_analyzed_at = now() WHERE id = $1`, file.ID)
+	require.NoError(t, err)
 
 	same := upsert(100, mtime)
 	require.Equal(t, file.ID, same.ID)
 	require.JSONEq(t, `{"format":{"duration":"12.3"}}`, string(same.MediaInfo),
 		"unchanged bytes must keep probe data through a re-apply")
+	require.True(t, same.HasTrickplay, "unchanged bytes keep trickplay")
+	require.True(t, same.SegmentsAnalyzedAt.Valid, "unchanged bytes keep segments")
 
 	changed := upsert(200, mtime)
 	require.JSONEq(t, `{}`, string(changed.MediaInfo),
 		"a size change must still clear stale probe data")
+	require.False(t, changed.HasTrickplay, "byte change invalidates trickplay")
+	require.False(t, changed.SegmentsAnalyzedAt.Valid, "byte change invalidates segments")
 
 	require.NoError(t, q.UpdateLibraryFileMediaInfo(ctx, sqlc.UpdateLibraryFileMediaInfoParams{
 		ID:        file.ID,

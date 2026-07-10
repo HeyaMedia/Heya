@@ -135,6 +135,12 @@ WHERE t.file_path != ''
 -- name: CountAnalyzedTracks :one
 SELECT count(*)::int FROM track_facets WHERE analyzer_version >= $1;
 
+-- name: ResetTrackFacetsVersionForTrack :exec
+-- A track's backing file changed in place: its facets were computed from the
+-- old bytes. Lowering analyzer_version to 0 makes the sonic pump re-analyze
+-- it on the next pass.
+UPDATE track_facets SET analyzer_version = 0 WHERE track_id = $1;
+
 -- name: ResetTrackFacetsVersion :exec
 -- Force re-analysis library-wide by lowering analyzer_version to 0. The
 -- scheduler will then re-process every track on its next pass. Used by

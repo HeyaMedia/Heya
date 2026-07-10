@@ -4602,6 +4602,17 @@ ON CONFLICT (library_file_id) DO UPDATE
         format = EXCLUDED.format,
         quality_score = EXCLUDED.quality_score,
         lyrics_path = EXCLUDED.lyrics_path,
+        -- Audio-derived data is only valid for the bytes it was computed
+        -- from: when the file changed in place, reset loudness and the
+        -- chromaprint so the pumps re-measure instead of settling stale.
+        integrated_lufs = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.integrated_lufs ELSE NULL END,
+        loudness_range_db = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.loudness_range_db ELSE NULL END,
+        loudness_analyzed_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.loudness_analyzed_at ELSE NULL END,
+        boundaries_analyzed_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.boundaries_analyzed_at ELSE NULL END,
+        fingerprinted_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.fingerprinted_at ELSE NULL END,
+        chromaprint = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint ELSE NULL END,
+        chromaprint_algorithm = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint_algorithm ELSE NULL END,
+        chromaprint_duration_secs = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint_duration_secs ELSE NULL END,
         size_bytes = EXCLUDED.size_bytes
 RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at, chromaprint, chromaprint_algorithm, chromaprint_duration_secs, fingerprinted_at
 `

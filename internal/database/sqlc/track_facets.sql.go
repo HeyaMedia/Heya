@@ -942,6 +942,18 @@ func (q *Queries) ResetTrackFacetsVersionForLibrary(ctx context.Context, library
 	return err
 }
 
+const resetTrackFacetsVersionForTrack = `-- name: ResetTrackFacetsVersionForTrack :exec
+UPDATE track_facets SET analyzer_version = 0 WHERE track_id = $1
+`
+
+// A track's backing file changed in place: its facets were computed from the
+// old bytes. Lowering analyzer_version to 0 makes the sonic pump re-analyze
+// it on the next pass.
+func (q *Queries) ResetTrackFacetsVersionForTrack(ctx context.Context, trackID int64) error {
+	_, err := q.db.Exec(ctx, resetTrackFacetsVersionForTrack, trackID)
+	return err
+}
+
 const similarAlbums = `-- name: SimilarAlbums :many
 SELECT al.id, al.title, al.artist_id, al.slug AS album_slug,
        a.name           AS artist_name,
