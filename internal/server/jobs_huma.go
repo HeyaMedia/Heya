@@ -201,6 +201,8 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 				resp, err = app.QueryFacetsItems(ctx, in.Status, in.Limit, in.Offset)
 			case "cleanup_scanner_artifacts":
 				resp = &service.TaskItemsResult{}
+			case "embed_recommendations":
+				resp, err = app.QueryEmbedItems(ctx, in.Status, in.Limit, in.Offset)
 			default:
 				return nil, huma.Error404NotFound("unknown task")
 			}

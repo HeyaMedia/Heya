@@ -13,6 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/taskdefs"
+	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/rs/zerolog/log"
 )
 
@@ -952,6 +953,81 @@ func (a *App) QueryFacetsItems(ctx context.Context, status string, limit, offset
 		})
 	}
 
+	if items == nil {
+		items = []TaskItem{}
+	}
+
+	return &TaskItemsResult{
+		Items:    items,
+		Total:    total,
+		Complete: complete,
+		Pending:  total - complete,
+	}, nil
+}
+
+// QueryEmbedItems returns the embedding coverage for embed_recommendations:
+// every video item and episode-with-overview, complete when a current-version
+// facet row exists. Hash-level staleness isn't computed here — recomposing
+// every doc per page view is the sweep's job, not the modal's; a stale row
+// still shows complete until the next sweep rewrites it.
+func (a *App) QueryEmbedItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
+	itemsEmbedded, itemsTotal := a.EmbeddedVideoCount(ctx)
+	epEmbedded, epTotal := a.EmbeddedEpisodeCount(ctx)
+	total := itemsTotal + epTotal
+	complete := itemsEmbedded + epEmbedded
+
+	statusFilter := ""
+	switch status {
+	case "complete":
+		statusFilter = "WHERE u.done"
+	case "pending":
+		statusFilter = "WHERE NOT u.done"
+	}
+
+	ver := strconv.Itoa(textembed.Version)
+	rows, err := a.db.Query(ctx, `
+		SELECT u.id, u.name, u.path, u.done FROM (
+			SELECT mi.id, mi.title AS name, mi.media_type::text AS path,
+			       (f.media_item_id IS NOT NULL) AS done
+			FROM media_item_cards mi
+			LEFT JOIN media_item_facets f ON f.media_item_id = mi.id AND f.embedder_version >= `+ver+`
+			WHERE mi.media_type IN ('movie','tv','anime')
+			UNION ALL
+			SELECT e.id,
+			       mi.title || ' S' || lpad(se.season_number::text, 2, '0') || 'E' || lpad(e.episode_number::text, 2, '0')
+			         || CASE WHEN e.title <> '' THEN ' — ' || e.title ELSE '' END AS name,
+			       'episode' AS path,
+			       (f.episode_id IS NOT NULL) AS done
+			FROM tv_episodes e
+			JOIN tv_seasons se ON se.id = e.season_id
+			JOIN tv_series ts ON ts.id = se.series_id
+			JOIN media_item_cards mi ON mi.id = ts.media_item_id
+			LEFT JOIN episode_facets f ON f.episode_id = e.id AND f.embedder_version >= `+ver+`
+			WHERE e.overview <> ''
+		) u
+		`+statusFilter+`
+		ORDER BY u.done, u.name ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TaskItem
+	for rows.Next() {
+		var id int64
+		var name, kind string
+		var done bool
+		if err := rows.Scan(&id, &name, &kind, &done); err != nil {
+			continue
+		}
+		s := "pending"
+		if done {
+			s = "complete"
+		}
+		items = append(items, TaskItem{ID: id, Name: name, Path: kind, Status: s})
+	}
 	if items == nil {
 		items = []TaskItem{}
 	}
