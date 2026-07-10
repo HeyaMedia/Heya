@@ -91,7 +91,10 @@ function scrollBy(dir: number) {
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
-  padding-bottom: 4px;
+  /* Padding/negative-margin pair: layout-neutral, but moves the clip edge
+     outward so card drop shadows (--shadow-card) aren't cut off. */
+  padding: 10px 28px 40px;
+  margin: -10px -28px -36px;
   scrollbar-width: none;
 }
 .row-scroll::-webkit-scrollbar { display: none; }

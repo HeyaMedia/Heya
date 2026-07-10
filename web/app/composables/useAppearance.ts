@@ -104,6 +104,11 @@ export function useAppearance() {
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute('content', THEME_COLOR[t])
 
+    // Cookie mirror of the *resolved* theme: the Go SPA handler reads it to
+    // stamp data-theme on the served shell, so the loading screen paints in
+    // the right palette before any JS runs.
+    document.cookie = `heya_theme=${t}; Path=/; Max-Age=31536000; SameSite=Lax`
+
     // Canvas consumers re-resolve tokens on this signal.
     window.dispatchEvent(new CustomEvent('heya:theme', { detail: { theme: t } }))
 

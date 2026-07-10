@@ -219,7 +219,10 @@ watch(() => props.section, (s) => {
 .music-sidebar {
   width: var(--music-sidebar-w);
   flex-shrink: 0;
-  background: var(--bg-1);
+  /* Translucent over the ambient-backdrop layer; solid-enough for text. */
+  background: color-mix(in srgb, var(--bg-1) 72%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border-right: 1px solid var(--border);
   padding: 16px 8px 12px;
   display: flex;

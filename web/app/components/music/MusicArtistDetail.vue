@@ -5,7 +5,7 @@
     <!-- Hero (Plexify style): full-bleed backdrop with a circular poster
          on the left, bio + tags inline beside the name, and a stats line
          with rating below. Floating round actions on the right. -->
-    <section class="hero">
+    <section class="hero" :class="{ 'ambient-extended': ambientEnabled }">
       <div class="hero-backdrop" :style="backdropStyle" />
       <div class="hero-fade" />
       <div class="hero-content">
@@ -537,10 +537,23 @@ const artistPosterUrl = computed(() => {
   if (!detail.value?.media_item) return null
   return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/poster`
 })
-const backdropStyle = computed(() => {
-  if (!detail.value?.media_item) return {}
-  return { backgroundImage: `url(/api/media/${useMediaImageKey(detail.value.media_item)}/image/backdrop)` }
+const backdropUrl = computed(() => {
+  if (!detail.value?.media_item) return null
+  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/backdrop`
 })
+const backdropStyle = computed(() => (backdropUrl.value ? { backgroundImage: `url(${backdropUrl.value})` } : {}))
+
+// Ambient extension: with the ambient background on, this artist's backdrop
+// becomes the full-page layer (the hero image "extends" down the whole
+// page) — the local `.hero-backdrop` hides via .ambient-extended and only
+// the softened fade stays for text legibility. Off = classic scoped hero,
+// untouched.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+watch([backdropUrl, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
 
 const totalAlbums = computed(() => albums.value.length)
 const totalTracks = computed(() => albums.value.reduce((sum, al) => sum + al.tracks.length, 0))
@@ -808,6 +821,18 @@ if (import.meta.client) {
     linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 55%, var(--bg-0) 100%),
     linear-gradient(90deg, rgba(0,0,0,0.45) 0%, transparent 60%);
   z-index: 1;
+}
+/* Ambient extension: the AmbientBackdrop layer shows this artist's backdrop
+   full-page (see the ambientArt watcher), so the local copy hides — its
+   different crop would seam at the hero edges — and the fade softens its
+   transition into the page canvas so the artwork continues past the hero
+   bottom instead of ending at solid var(--bg-0). The literal black scrim
+   (legibility over the photo) stays put. */
+.hero.ambient-extended .hero-backdrop { display: none; }
+.hero.ambient-extended .hero-fade {
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.4) 55%, color-mix(in srgb, var(--bg-0) 24%, transparent) 100%),
+    linear-gradient(90deg, rgba(0,0,0,0.3) 0%, transparent 60%);
 }
 .hero-content {
   position: relative;

@@ -6,7 +6,7 @@
   <div v-else-if="detail" class="scroll" style="height: 100%">
     <!-- Hero: backdrop + poster + info merged -->
     <div class="hero-section">
-      <div class="hero-bg">
+      <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
         <NuxtImg
           v-if="backdropA"
           :src="backdropA"
@@ -376,6 +376,19 @@ const {
   showA, backdropA, backdropB, backdropIdx, carouselPaused, backdropAssets,
   pauseCarousel, resumeCarousel, jumpToBackdrop, seedCarousel, openBackdropLightbox,
 } = useBackdropCarousel(detail, { preloadSecond: true })
+
+// Ambient extension: with the ambient background on, this page's current
+// hero backdrop becomes the full-page layer (the hero image "extends" down
+// the whole page) — the local hero <img> hides via .ambient-extended and
+// only the softened fade stays for text legibility. Off = classic scoped
+// hero, untouched.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
+watch([currentHeroBackdrop, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
 
 // Lightbox
 function openPosterLightbox() {

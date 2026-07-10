@@ -1,9 +1,9 @@
 <template>
   <section class="hero-newin">
-    <div class="newin-bg">
+    <div class="newin-bg" :class="{ 'ambient-extended': ambientEnabled }">
       <NuxtImg
         v-if="featured"
-        :src="useBackdropUrl({ id: featured.media_item_id, public_id: featured.media_item_public_id }) ?? undefined"
+        :src="bgUrl ?? undefined"
         :width="1920"
         :quality="75"
         class="newin-bg-img"
@@ -86,6 +86,21 @@ const featured = computed(() => {
   return tv.find(e => e.kind === 'series') ?? tv.find(e => e.kind === 'season') ?? tv[0]
 })
 
+const bgUrl = computed(() => (featured.value
+  ? useBackdropUrl({ id: featured.value.media_item_id, public_id: featured.value.media_item_public_id })
+  : null) || null)
+
+// Ambient extension: with the ambient background on, the featured entry's
+// backdrop becomes the full-page layer — the local `.newin-bg-img` hides via
+// .ambient-extended and the AmbientBackdrop layer follows the feed through
+// this watcher.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+watch([bgUrl, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
+
 function entrySub(e: RecentTVEntry): string {
   switch (e.kind) {
     case 'series': return e.season_count > 1 ? `New show · ${e.season_count} seasons` : `New show · ${e.episode_count} episode${e.episode_count === 1 ? '' : 's'}`
@@ -167,6 +182,23 @@ const feed = computed<FeedRow[]>(() => {
   background:
     linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 72%, transparent) 45%, color-mix(in srgb, var(--bg-1) 30%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 75%, transparent) 30%, transparent 60%);
+}
+/* Ambient extension: the AmbientBackdrop layer shows the featured entry's
+   backdrop full-page (see the ambientArt watcher), so the local copy hides —
+   its different crop would seam at the hero edges — and the fade softens so
+   the artwork continues past the hero bottom instead of ending at solid
+   canvas. */
+.newin-bg.ambient-extended .newin-bg-img { display: none; }
+.newin-bg.ambient-extended .newin-bg-gradient {
+  background:
+    linear-gradient(to right,
+      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 40%, transparent) 45%,
+      color-mix(in srgb, var(--bg-1) 16%, transparent) 100%),
+    linear-gradient(to top,
+      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 50%, transparent) 30%,
+      transparent 60%);
 }
 .newin-inner {
   position: relative;

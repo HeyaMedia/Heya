@@ -99,7 +99,9 @@ function detailUrl(item: UpNextItem): string {
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
-  padding-bottom: 4px;
+  /* Layout-neutral clip-edge expansion so card shadows aren't cut off. */
+  padding: 10px 28px 40px;
+  margin: -10px -28px -36px;
   scrollbar-width: none;
 }
 .row-scroll::-webkit-scrollbar { display: none; }

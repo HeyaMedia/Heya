@@ -186,7 +186,10 @@ async function createList() {
 .lib-sidebar {
   width: 240px;
   flex-shrink: 0;
-  background: var(--bg-2);
+  /* Translucent over the ambient-backdrop layer; solid-enough for text. */
+  background: color-mix(in srgb, var(--bg-2) 72%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border-right: 1px solid var(--border);
   padding: 20px 10px;
   display: flex;

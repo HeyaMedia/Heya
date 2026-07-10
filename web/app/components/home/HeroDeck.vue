@@ -141,7 +141,10 @@ onMounted(() => {
 .hero-deck {
   position: relative;
   height: 480px;
-  overflow: hidden;
+  /* No overflow clipping here — the poster's drop shadow bleeds past the
+     deck bottom by design. Image/trailer clipping is handled by the modes'
+     own .hero-bg (overflow: hidden, heya.css). */
+  overflow: visible;
 }
 .deck-body {
   position: absolute;
@@ -157,9 +160,13 @@ onMounted(() => {
   gap: 2px;
   padding: 3px;
   border-radius: 999px;
-  background: rgba(7, 7, 10, 0.55); /* on artwork — stays literal */
+  /* Theme-aware glass (same recipe as .surface): the pill sits over
+     artwork in most hero modes but over the bare canvas in Roulette —
+     a literal dark glass was unreadable on the light theme's paper. */
+  background: color-mix(in oklab, var(--bg-2) 88%, transparent);
   border: 1px solid var(--border);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .deck-tab {
   font-family: var(--font-mono);

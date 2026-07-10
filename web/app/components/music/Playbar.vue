@@ -536,7 +536,10 @@ onScopeDispose(() => {
   gap: 16px;
   padding: 0 16px;
   height: var(--playbar-h);
-  background: var(--bg-0);
+  /* Glass over the ambient-backdrop layer (same treatment as the topbar). */
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid var(--border);
   z-index: 40;
 }

@@ -131,6 +131,19 @@ const backdropStyle = computed(() => {
   return { backgroundImage: `url(/api/media/${useMediaImageKey({ id: detail.value.media_item_id, public_id: detail.value.media_item_public_id })}/image/backdrop)` }
 })
 
+// Ambient extension: with the ambient background on, this album's cover
+// becomes the full-page layer (the hero image "extends" down the whole
+// page) — the local `.hero-backdrop` hides via .ambient-extended and only
+// the softened fade stays for text legibility. Off = classic scoped hero,
+// untouched. The cover (not the blurred artist-backdrop div) is the artwork
+// this page actually owns, so it's what gets pushed to the ambient channel.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+watch([coverUrl, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
+
 function trackToPlayable(t: TrackView): Track {
   const primary = t.files[0]
   return {
@@ -283,7 +296,7 @@ function playFromIndex(i: number) {
   <div v-if="loading" class="page-pad m-loading">Loading…</div>
   <div v-else-if="!album" class="page-pad m-empty">Album not found.</div>
   <div v-else class="album-page">
-    <section class="hero">
+    <section class="hero" :class="{ 'ambient-extended': ambientEnabled }">
       <div class="hero-backdrop" :style="backdropStyle" />
       <div class="hero-fade" />
       <div class="hero-content">
@@ -446,6 +459,16 @@ function playFromIndex(i: number) {
   background:
     linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.25) 60%, var(--bg-0) 100%);
   z-index: 1;
+}
+/* Ambient extension: the AmbientBackdrop layer shows this album's cover
+   full-page (see the ambientArt watcher), so the local blurred backdrop
+   hides — its different crop would seam at the hero edges — and the fade
+   softens its transition into the page canvas so the artwork continues
+   past the hero bottom instead of ending at solid var(--bg-0). */
+.hero.ambient-extended .hero-backdrop { display: none; }
+.hero.ambient-extended .hero-fade {
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.18) 60%, color-mix(in srgb, var(--bg-0) 24%, transparent) 100%);
 }
 .hero-content {
   position: relative; z-index: 2;

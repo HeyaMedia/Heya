@@ -1,6 +1,6 @@
 <template>
   <section class="hero-music">
-    <div class="music-bg">
+    <div class="music-bg" :class="{ 'ambient-extended': ambientEnabled }">
       <!-- Playing: the analyser owns the background. Idle: newest album art,
            blurred into ambience. -->
       <VisualizerSpectrum v-if="playing" variant="bars" :active="true" class="music-viz" />
@@ -89,6 +89,19 @@ const { playing, currentTrack } = usePlayer()
 
 const idleArt = computed(() => (props.albums[0] as Albumish | undefined)?.poster_src ?? null)
 
+// Ambient extension: idle mode's newest-album art becomes the full-page
+// layer. Playing mode has no static backdrop (the visualizer owns it), so
+// the watcher clears the override then and ambient falls back to the route
+// pool. Either way the local `.music-bg-art` hides and the fade softens
+// while ambientEnabled is on, matching whatever full-page image is showing.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+const currentBg = computed(() => (!playing.value ? idleArt.value : null))
+watch([currentBg, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
+
 const artistLine = computed(() => {
   const a = props.artists[0] as (MediaItem & { sub?: string }) | undefined
   if (!a) return ''
@@ -132,6 +145,34 @@ function albumTo(al: MediaItem) {
   background:
     linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 35%, transparent) 60%, transparent 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 30%);
+}
+/* Ambient extension: the AmbientBackdrop layer shows the idle-mode album art
+   (or, while playing, falls back to the route pool since the visualizer has
+   no static image to hand off) full-page, so the local art hides — its
+   different crop would seam at the hero edges — and the fade softens so
+   the artwork continues past the hero bottom instead of ending at solid
+   canvas. */
+.music-bg.ambient-extended .music-bg-art { display: none; }
+.music-bg.ambient-extended .music-bg-gradient {
+  background:
+    linear-gradient(to right,
+      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 34%, transparent) 55%,
+      transparent 100%),
+    linear-gradient(to top,
+      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 48%, transparent) 25%,
+      transparent 55%);
+}
+.music-bg.ambient-extended .music-bg-gradient.playing {
+  background:
+    linear-gradient(to right,
+      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 24%, transparent) 60%,
+      transparent 100%),
+    linear-gradient(to top,
+      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
+      transparent 30%);
 }
 .music-inner {
   position: relative;

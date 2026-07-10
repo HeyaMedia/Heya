@@ -1,6 +1,6 @@
 <template>
   <section class="hero-roulette">
-    <div class="roulette-bg">
+    <div class="roulette-bg" :class="{ 'ambient-extended': ambientEnabled }">
       <NuxtImg
         v-if="pick && settled"
         :src="useBackdropUrl(pick) ?? undefined"
@@ -178,6 +178,18 @@ const pickFileId = ref<string | number | null>(null)
 let reducedMotion = false
 let landedGuard: ReturnType<typeof setTimeout> | null = null
 
+// Ambient extension: with the ambient background on, the settled pick's
+// backdrop becomes the full-page layer — the local `.roulette-bg-img` hides
+// via .ambient-extended and the AmbientBackdrop layer follows the reel's
+// landings through this watcher.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+const currentBg = computed(() => (pick.value && settled.value ? useBackdropUrl(pick.value) : null) || null)
+watch([currentBg, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
+
 function spin() {
   const p = pool.value
   if (!p.length || spinning.value) return
@@ -271,6 +283,22 @@ onUnmounted(() => {
   background:
     linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 65%, transparent) 50%, color-mix(in srgb, var(--bg-1) 20%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 40%);
+}
+/* Ambient extension: the AmbientBackdrop layer shows this pick's backdrop
+   full-page (see the ambientArt watcher), so the local copy hides — its
+   different crop would seam at the hero edges — and the fade softens so
+   the artwork continues past the hero bottom instead of ending at solid
+   canvas. */
+.roulette-bg.ambient-extended .roulette-bg-img { display: none; }
+.roulette-bg.ambient-extended .roulette-bg-gradient {
+  background:
+    linear-gradient(to right,
+      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 34%, transparent) 50%,
+      color-mix(in srgb, var(--bg-1) 12%, transparent) 100%),
+    linear-gradient(to top,
+      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
+      transparent 45%);
 }
 .roulette-inner {
   position: relative;

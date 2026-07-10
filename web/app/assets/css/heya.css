@@ -75,6 +75,12 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.65);
+  /* card/poster lift — --shade channel so it warms/softens per theme.
+     Offset to the bottom-right (top-left key light) for a directional feel;
+     the hover variant deepens along the same axis so the shadow follows
+     the tile's translateY lift instead of jumping to a centered look. */
+  --shadow-card: 3px 4px 7px rgb(var(--shade) / 0.32), 12px 16px 32px rgb(var(--shade) / 0.26);
+  --shadow-card-hover: 5px 8px 12px rgb(var(--shade) / 0.36), 18px 26px 52px rgb(var(--shade) / 0.32);
 
   /* density (comfortable defaults; compact overrides below) */
   --tile-min: 160px;        /* .grid-posters column floor */
@@ -253,14 +259,16 @@ button { font-family: inherit; cursor: pointer; border: 0; background: none; col
 input, textarea { font-family: inherit; }
 a { color: inherit; text-decoration: none; }
 
-/* App shell */
+/* App shell. Deliberately NO background here: body already paints
+   var(--bg-1), and the AmbientBackdrop layer (z-index:-1, first child)
+   must sit between the body canvas and the app content — .app isn't a
+   stacking context, so a background on it would paint OVER the layer. */
 .app {
   display: grid;
   grid-template-rows: var(--topbar-h) 1fr;
   height: 100vh; /* fallback for browsers without dvh support */
   height: 100dvh;
   width: 100vw;
-  background: var(--bg-1);
   position: relative;
 }
 
@@ -307,6 +315,10 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
   border-radius: var(--r-md);
   isolation: isolate;
+  /* Every poster/card floats a little — the hero poster's treatment,
+     app-wide (hover lift below upgrades it further). */
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.18s ease;
 }
 .poster .poster-gradient {
   position: absolute; inset: 0;
@@ -357,7 +369,7 @@ a { color: inherit; text-decoration: none; }
   position: relative;
 }
 .card-tile:hover { transform: translateY(-3px); }
-.card-tile:hover .poster { box-shadow: var(--shadow-2), 0 0 0 1px rgb(var(--ink) / 0.06); }
+.card-tile:hover .poster { box-shadow: var(--shadow-card-hover), 0 0 0 1px rgb(var(--ink) / 0.06); }
 
 /* Generic chips */
 .chip {
@@ -618,6 +630,24 @@ a { color: inherit; text-decoration: none; }
       color-mix(in srgb, var(--bg-1) 40%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
 }
+
+/* Ambient extension: when the ambient background layer shows this page's
+   own backdrop full-page (AmbientBackdrop override mode), the hero hides
+   its local copy — different crop would seam at the hero edges — and keeps
+   only a softened fade whose bottom blends into the ambient scrim instead
+   of ending at solid canvas. */
+.hero-bg.ambient-extended .hero-bg-img { display: none; }
+/* No bottom fade at all in extended mode: the hero's bottom edge must carry
+   exactly the ambient scrim's tint — any extra stop reads as a hard cutoff
+   line between hero and the content below. Text cover comes from the left
+   column gradient only. */
+.hero-bg.ambient-extended .hero-bg-fade {
+  background:
+    linear-gradient(to right,
+      color-mix(in srgb, var(--bg-1) 72%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 36%, transparent) 40%,
+      transparent 100%);
+}
 .hero-side { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
 
 /* Backdrop carousel indicators */
@@ -679,8 +709,10 @@ a { color: inherit; text-decoration: none; }
 .scroll-ctrl-btn:hover { background: rgb(var(--ink) / 0.08); color: var(--fg-0); border-color: var(--border-strong); }
 .scroll-ctrl-btn.expand { margin-left: 2px; }
 
-/* Horizontal card scroller */
-.hscroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+/* Horizontal card scroller. The padding/negative-margin pair is
+   layout-neutral but moves the clip edge outward so card drop shadows
+   (--shadow-card) aren't cut off at the scroller boundary. */
+.hscroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; padding: 10px 28px 40px; margin: -10px -28px -36px; }
 .hscroll::-webkit-scrollbar { display: none; }
 
 @media (max-width: 900px) {

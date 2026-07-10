@@ -76,11 +76,14 @@ export function useHomeSections() {
   async function persist(next: HomeSectionPref[]) {
     const current = settingsQuery.data.value ?? {}
     const body: MeSettingsBlob = { ...current, home: { ...current.home, sections: next } }
+    // Optimistic: rapid consecutive moves must each read the previous move's
+    // result, not the stale pre-PUT cache (invalidate's refetch is async).
+    queryClient.setQueryData(['me', 'settings'], body)
     try {
       await $heya('/api/me/settings', { method: 'PUT', body: body as never })
-      queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
     } catch {
-      // Leave the cache alone; the next successful save wins.
+      // Roll back to server truth.
+      queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
     }
   }
 

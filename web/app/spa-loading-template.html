@@ -2,6 +2,11 @@
   Shown after the browser parses index.html but before the Vue app mounts.
   Nuxt injects this inside <div id="__nuxt"> and removes it on hydration.
   Must be self-contained — no external assets, no JS, no Vue.
+
+  Theme-aware: <html data-theme> is already stamped by the time this paints —
+  server-side by the Go SPA handler (heya_theme cookie) and client-side by
+  the inline boot script in <head>. Values are literals (not var()) so the
+  screen renders correctly even if the app stylesheets are still streaming.
 -->
 <style>
   .heya-boot {
@@ -18,21 +23,24 @@
     /* Fade in so reloads don't pop */
     animation: heya-boot-in 0.18s ease-out;
   }
+  html[data-theme="oled"] .heya-boot { background: #000; }
+  html[data-theme="light"] .heya-boot { background: #f1eee7; color: #413d33; }
   .heya-boot-mark {
     width: 56px;
     height: 56px;
     border-radius: 12px;
-    background: #7C6DD8;
+    background: #e6b94a;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 34px;
     font-weight: 700;
-    color: #fff;
+    color: #1a1408;
     letter-spacing: -0.02em;
-    box-shadow: 0 12px 32px rgba(124, 109, 216, 0.32);
+    box-shadow: 0 12px 32px rgba(230, 185, 74, 0.32);
     animation: heya-boot-pulse 2.4s ease-in-out infinite;
   }
+  html[data-theme="light"] .heya-boot-mark { background: #b88e2a; color: #1a1408; }
   .heya-boot-bar {
     width: 96px;
     height: 2px;
@@ -41,6 +49,7 @@
     overflow: hidden;
     position: relative;
   }
+  html[data-theme="light"] .heya-boot-bar { background: rgba(35, 30, 20, 0.10); }
   .heya-boot-bar::after {
     content: "";
     position: absolute;
@@ -48,16 +57,19 @@
     bottom: 0;
     left: -40%;
     width: 40%;
-    background: linear-gradient(90deg, transparent, #fbbf24 50%, transparent);
+    background: linear-gradient(90deg, transparent, #e6b94a 50%, transparent);
     animation: heya-boot-slide 1.4s ease-in-out infinite;
+  }
+  html[data-theme="light"] .heya-boot-bar::after {
+    background: linear-gradient(90deg, transparent, #b88e2a 50%, transparent);
   }
   @keyframes heya-boot-in {
     from { opacity: 0; }
     to   { opacity: 1; }
   }
   @keyframes heya-boot-pulse {
-    0%, 100% { transform: scale(1);    box-shadow: 0 12px 32px rgba(124, 109, 216, 0.30); }
-    50%      { transform: scale(1.04); box-shadow: 0 16px 44px rgba(124, 109, 216, 0.50); }
+    0%, 100% { transform: scale(1);    box-shadow: 0 12px 32px rgba(230, 185, 74, 0.30); }
+    50%      { transform: scale(1.04); box-shadow: 0 16px 44px rgba(230, 185, 74, 0.50); }
   }
   @keyframes heya-boot-slide {
     0%   { transform: translateX(0); }

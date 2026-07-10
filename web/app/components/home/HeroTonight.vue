@@ -1,6 +1,6 @@
 <template>
   <section class="hero-tonight">
-    <div class="tonight-bg">
+    <div class="tonight-bg" :class="{ 'ambient-extended': ambientEnabled }">
       <NuxtImg
         v-if="bgUrl"
         :src="bgUrl"
@@ -63,6 +63,17 @@ defineEmits<{ play: [item: UpNextItem] }>()
 
 const bgUrl = computed(() => props.items[0] ? useBackdropUrl(props.items[0]) : null)
 
+// Ambient extension: with the ambient background on, the top item's backdrop
+// becomes the full-page layer — the local `.tonight-bg-img` hides via
+// .ambient-extended and the AmbientBackdrop layer follows the queue through
+// this watcher.
+const { ambientEnabled } = useAppearance()
+const ambientArt = useAmbientArt()
+watch([bgUrl, ambientEnabled], ([url, on]) => {
+  if (on && url) ambientArt.set(url)
+  else ambientArt.clear()
+}, { immediate: true })
+
 const totalMinutes = computed(() =>
   props.items.slice(0, 4).reduce((sum, it) => sum + (it.runtime_minutes || 0), 0))
 
@@ -96,6 +107,22 @@ function stillUrl(it: UpNextItem) {
   background:
     linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 55%, transparent) 55%, color-mix(in srgb, var(--bg-1) 25%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 45%);
+}
+/* Ambient extension: the AmbientBackdrop layer shows this item's backdrop
+   full-page (see the ambientArt watcher), so the local copy hides — its
+   different crop would seam at the hero edges — and the fade softens so
+   the artwork continues past the hero bottom instead of ending at solid
+   canvas. */
+.tonight-bg.ambient-extended .tonight-bg-img { display: none; }
+.tonight-bg.ambient-extended .tonight-bg-gradient {
+  background:
+    linear-gradient(to right,
+      color-mix(in srgb, var(--bg-1) 68%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 34%, transparent) 55%,
+      color-mix(in srgb, var(--bg-1) 14%, transparent) 100%),
+    linear-gradient(to top,
+      color-mix(in srgb, var(--bg-1) 24%, transparent) 0%,
+      transparent 50%);
 }
 .tonight-inner {
   position: relative;
