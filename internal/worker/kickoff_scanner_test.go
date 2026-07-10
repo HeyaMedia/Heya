@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -628,4 +629,57 @@ func TestTrackFileNeedsLoudness(t *testing.T) {
 		IntegratedLufs:       pgtype.Numeric{Valid: true},
 		BoundariesAnalyzedAt: pgtype.Timestamptz{Valid: true},
 	}))
+}
+
+// The scan-progress denominator lives in library_scan_bursts, maintained at
+// enqueue time: a unit enqueued while the library is idle RESETS the row (a
+// new burst); while other units are active it increments. The freshly
+// inserted job is excluded from the idle check so a burst's first unit
+// can't see itself.
+func TestBumpLibraryScanBurstResetsWhenIdleIncrementsWhenActive(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scan-burst-bump-test",
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/media/music"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	burstTotal := func() int64 {
+		var n int64
+		require.NoError(t, pool.QueryRow(ctx, `SELECT units_total FROM library_scan_bursts WHERE library_id = $1`, lib.ID).Scan(&n))
+		return n
+	}
+	insertJob := func() int64 {
+		var id int64
+		err := pool.QueryRow(ctx, `
+			INSERT INTO river_job (kind, queue, args, max_attempts, state)
+			VALUES ('process_scan', 'process_scan', $1, 3, 'available')
+			RETURNING id`, []byte(`{"library_id": `+fmt.Sprint(lib.ID)+`}`)).Scan(&id)
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = $1`, id) })
+		return id
+	}
+
+	// Seed a stale row from a "previous burst".
+	_, err = pool.Exec(ctx, `INSERT INTO library_scan_bursts (library_id, units_total) VALUES ($1, 9000)`, lib.ID)
+	require.NoError(t, err)
+
+	// First unit of a new burst: library idle (its own job excluded) → reset.
+	first := insertJob()
+	bumpLibraryScanBurst(ctx, pool, lib.ID, 1, first)
+	require.EqualValues(t, 1, burstTotal(), "first unit of a burst resets the stale total")
+
+	// Second unit while the first is active → increment.
+	second := insertJob()
+	bumpLibraryScanBurst(ctx, pool, lib.ID, 1, second)
+	require.EqualValues(t, 2, burstTotal(), "subsequent units increment")
 }

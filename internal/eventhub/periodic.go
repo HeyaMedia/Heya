@@ -68,35 +68,14 @@ func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
 	// wasScanning lets the scan-progress emit turn off cleanly: while scan
 	// jobs are active we emit real numbers; on the first tick after they
 	// finish we emit once more (empty) so the FE clears, then stay silent —
-	// the burst query isn't free and shouldn't run on an idle box.
+	// the progress query isn't free and shouldn't run on an idle box.
 	wasScanning := false
-	// burstMemo holds per-library high-water marks for the current burst.
-	// River job history is disposable (the job cleaner prunes completed
-	// rows — including the kickoff row a long burst is anchored on — and
-	// Cancel-all can purge mid-scan); without the memo the bar would
-	// collapse backward when counted rows vanish.
-	//
-	// The memo's lifecycle runs BEFORE the subscriber gate, every tick:
-	// marks are dropped the moment their library has no active scan jobs.
-	// That boundary is observed within one tick regardless of whether
-	// anyone is watching, so marks can never survive their burst and leak
-	// into the next one (e.g. a burst ending and a new one starting during
-	// subscriber downtime) — no matter how the SQL's burst window drifts.
-	burstMemo := map[int64]*scanBurstMemo{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			scanning := scanJobsActive(ctx, db)
-			if !scanning {
-				clear(burstMemo)
-			} else if len(burstMemo) > 0 {
-				pruneScanBurstMemo(ctx, db, burstMemo)
-			}
-
 			if !h.HasSubscribers() {
-				wasScanning = scanning
 				continue
 			}
 
@@ -139,61 +118,11 @@ func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
 			rows.Close()
 			h.Emit(EventActiveJobs, ActiveJobsPayload{Jobs: jobs})
 
+			scanning := scanJobsActive(ctx, db)
 			if scanning || wasScanning {
-				h.emitScanProgress(ctx, db, burstMemo)
+				h.emitScanProgress(ctx, db)
 			}
 			wasScanning = scanning
-		}
-	}
-}
-
-// scanBurstMemo is the emitter's in-memory high-water mark for one
-// library's current scan burst. SQL counts are trusted when they grow;
-// when River's history shrinks under us (job cleaner, Cancel-all, or the
-// burst window drifting as anchoring rows are pruned), the memo holds the
-// line and processed derives from total − active instead — active jobs
-// are the one population River never deletes mid-scan. Burst identity is
-// not tracked here: the ticker prunes entries the moment their library
-// has no active scan jobs (unconditionally, before the subscriber gate),
-// so an entry existing means its burst is still the current one. On
-// process restart the memo starts empty and progress degrades gracefully
-// to the surviving history.
-type scanBurstMemo struct {
-	total     int
-	processed int
-}
-
-// pruneScanBurstMemo drops memo entries for libraries with no active scan
-// pipeline jobs — their burst is over. One cheap DISTINCT over active jobs.
-func pruneScanBurstMemo(ctx context.Context, db *pgxpool.Pool, memo map[int64]*scanBurstMemo) {
-	rows, err := db.Query(ctx, `
-		SELECT DISTINCT NULLIF(args->>'library_id', '')::bigint
-		FROM river_job
-		WHERE state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-		  AND kind IN ('kickoff_library_scan', 'process_scan', 'fetch_metadata', 'apply_metadata')`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-	active := map[int64]bool{}
-	allLibraries := false
-	for rows.Next() {
-		var id *int64
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
-		if id == nil {
-			allLibraries = true // a scan-all kickoff keeps every library's burst alive
-			continue
-		}
-		active[*id] = true
-	}
-	if allLibraries {
-		return
-	}
-	for id := range memo {
-		if !active[id] {
-			delete(memo, id)
 		}
 	}
 }
@@ -215,67 +144,34 @@ func scanJobsActive(ctx context.Context, db *pgxpool.Pool) bool {
 // pipeline work in flight. Presence in the payload = the library is
 // scanning (it has an active kickoff/process/fetch/apply job).
 //
-// The progress bar (processed/total) counts pipeline JOBS in the current
-// burst, not entity states: queued units keep their entities' old statuses
-// until they actually run, so any entity-derived bar shows stale 100%
-// while a fresh fan-out sits queued. The burst is every pipeline job
-// created since the anchor — the earliest of (oldest still-active job,
-// last kickoff start) — which keeps the total stable through the tail and
-// across overlapping scans. A library whose kickoff is still discovering
-// has no burst jobs yet and reports 0/0 (FE renders that as 0%).
+// The progress bar is stateless and depends on nothing deletable:
+// library_scan_bursts.units_total is a durable count maintained by the
+// enqueue helpers (reset when a unit is enqueued for an idle library,
+// incremented otherwise), and processed = total − active, where active
+// jobs are the one population River never prunes mid-scan. That holds
+// across job-cleaner pruning, Cancel-all, server restarts, subscriber
+// downtime, and back-to-back bursts — the writers define burst
+// boundaries, not this reader. A discovering kickoff (no units enqueued
+// yet) reports 0/0, which the FE renders as 0%.
 //
-// matched/unmatched/errors stay identity-based (latest entity row per
-// identity — duplicate chunk-era rows would otherwise count in-flight
-// rescans as done) as informational buckets for the review UI.
-//
-// memo guards against River's disposable history: counts are clamped to
-// per-burst high-water marks, and processed additionally derives from
-// total − active so the bar keeps advancing even if completed rows are
-// pruned mid-scan.
-func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool, memo map[int64]*scanBurstMemo) {
+// matched/unmatched/errors stay identity-based as review-UI buckets, each
+// identity classified by its LATEST entity row only (chunk-era duplicate
+// rows counted in-flight rescans as done). Migration 00014 backs that
+// scan with a matching index.
+func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool) {
 	rows, err := db.Query(ctx, `
 		WITH active_units AS (
-			SELECT NULLIF(rj.args->>'library_id', '')::bigint AS library_id, rj.created_at
+			SELECT NULLIF(rj.args->>'library_id', '')::bigint AS library_id, count(*) AS cnt
 			FROM river_job rj
 			WHERE rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
 			  AND rj.kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
+			GROUP BY 1
 		),
 		active_kickoffs AS (
 			SELECT DISTINCT NULLIF(rj.args->>'library_id', '')::bigint AS library_id
 			FROM river_job rj
 			WHERE rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
 			  AND rj.kind = 'kickoff_library_scan'
-		),
-		burst_anchor AS (
-			-- The burst window opens at the kickoff that STARTED this burst:
-			-- the latest kickoff at or before the oldest still-active job.
-			-- Later kickoffs (e.g. a scan-all for another library) must not
-			-- move the window; if the anchoring kickoff row has been pruned,
-			-- fall back to the oldest active job and let the in-memory
-			-- high-water marks absorb the shrunken window.
-			SELECT au.library_id,
-				COALESCE((
-					SELECT max(k.attempted_at) FROM river_job k
-					WHERE k.kind = 'kickoff_library_scan'
-					  AND k.attempted_at > now() - interval '48 hours'
-					  AND k.attempted_at <= min(au.created_at)
-					  AND (NULLIF(k.args->>'library_id', '')::bigint = au.library_id
-					       OR k.args->>'library_id' IS NULL)
-				), min(au.created_at)) AS burst_start
-			FROM active_units au
-			WHERE au.library_id IS NOT NULL
-			GROUP BY au.library_id
-		),
-		burst AS (
-			SELECT b.library_id,
-				count(*) AS total_units,
-				count(*) FILTER (WHERE rj.state IN ('completed', 'discarded', 'cancelled')) AS done_units
-			FROM burst_anchor b
-			JOIN river_job rj ON rj.kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
-				AND rj.created_at >= b.burst_start
-				AND rj.created_at > now() - interval '48 hours'
-				AND NULLIF(rj.args->>'library_id', '')::bigint = b.library_id
-			GROUP BY b.library_id
 		),
 		latest AS (
 			SELECT DISTINCT ON (se.library_id, se.identity_key)
@@ -298,19 +194,18 @@ func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool, memo map[i
 			GROUP BY latest.library_id
 		)
 		SELECT l.id, l.name,
-			COALESCE(burst.total_units, 0) AS total,
-			COALESCE(burst.done_units, 0) AS processed,
-			(SELECT count(*) FROM active_units au WHERE au.library_id = l.id) AS active,
+			COALESCE(b.units_total, 0) AS total,
+			COALESCE(au.cnt, 0) AS active,
 			COALESCE(buckets.matched, 0) AS matched,
 			COALESCE(buckets.unmatched, 0) AS unmatched,
 			COALESCE(buckets.errors, 0) AS errors
 		FROM libraries l
-		LEFT JOIN burst ON burst.library_id = l.id
+		LEFT JOIN library_scan_bursts b ON b.library_id = l.id
+		LEFT JOIN active_units au ON au.library_id = l.id
 		LEFT JOIN buckets ON buckets.library_id = l.id
 		WHERE l.id IN (SELECT library_id FROM active_units WHERE library_id IS NOT NULL)
 		   OR l.id IN (SELECT library_id FROM active_kickoffs WHERE library_id IS NOT NULL)
 		   OR EXISTS (SELECT 1 FROM active_kickoffs WHERE library_id IS NULL)
-		GROUP BY l.id, l.name, burst.total_units, burst.done_units, buckets.matched, buckets.unmatched, buckets.errors
 	`)
 	if err != nil {
 		return
@@ -320,26 +215,21 @@ func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool, memo map[i
 	libs := make([]LibraryScanProgress, 0)
 	for rows.Next() {
 		var lp LibraryScanProgress
-		var active int
-		if err := rows.Scan(&lp.LibraryID, &lp.Name, &lp.Total, &lp.Processed, &active, &lp.Matched, &lp.Unmatched, &lp.Errors); err != nil {
+		var total, active int
+		if err := rows.Scan(&lp.LibraryID, &lp.Name, &total, &active, &lp.Matched, &lp.Unmatched, &lp.Errors); err != nil {
 			continue
 		}
-		// An existing memo entry always describes the CURRENT burst — the
-		// ticker prunes entries unconditionally the moment their library
-		// has no active scan jobs, so stale marks cannot reach this point.
-		m := memo[lp.LibraryID]
-		if m == nil {
-			m = &scanBurstMemo{}
-			memo[lp.LibraryID] = m
+		if active == 0 {
+			// Discovery (kickoff walking, nothing enqueued yet): totals are
+			// unknown; a stale burst row must not read as instantly done.
+			lp.Total, lp.Processed = 0, 0
+		} else {
+			// A missed bump (crash between insert and bump, bypassed site)
+			// can leave total < active; clamp so processed never goes
+			// negative and the bar reads low rather than lying high.
+			lp.Total = max(total, active)
+			lp.Processed = lp.Total - active
 		}
-		// Totals only grow within a burst; a shrink means counted rows were
-		// pruned (or the window drifted), so the memo holds the line.
-		// Active jobs can't be pruned, so total is at least done+active,
-		// and once total is pinned, total − active recovers the done work
-		// whose rows vanished.
-		m.total = max(m.total, lp.Total, lp.Processed+active)
-		m.processed = min(m.total, max(m.processed, lp.Processed, m.total-active))
-		lp.Total, lp.Processed = m.total, m.processed
 		libs = append(libs, lp)
 	}
 	h.Emit(EventScanProgress, ScanProgressPayload{Libraries: libs})
