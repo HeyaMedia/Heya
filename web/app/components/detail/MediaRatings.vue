@@ -144,19 +144,22 @@ const displayRatings = computed<ExternalRating[]>(() => {
 .ratings { display: flex; flex-direction: column; gap: 6px; }
 
 .rating-card {
-  /* Floats over the hero backdrop image (see movies/tv detail pages'
-     .hero-side) — stays literal glass rather than theme tokens. */
+  /* Floats over the hero backdrop (see movies/tv detail pages' .hero-side).
+     Theme-aware glass: the old literal dark glass was an unreadable black
+     slab on the light theme's paper. */
   display: flex; flex-direction: column; gap: 7px;
   padding: 10px 12px 11px;
-  background: rgba(0,0,0,0.45); backdrop-filter: blur(12px);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: color-mix(in oklab, var(--bg-2) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
-  box-shadow: var(--shadow-el);
+  box-shadow: var(--shadow-card);
   transition: border-color 0.15s, background 0.15s;
 }
 .rating-card:hover {
-  border-color: rgba(255,255,255,0.12);
-  background: rgba(0,0,0,0.55);
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--bg-2) 92%, transparent);
 }
 
 .rating-head {
@@ -168,11 +171,11 @@ const displayRatings = computed<ExternalRating[]>(() => {
   display: block; opacity: 0.95; flex-shrink: 0;
 }
 .rating-source {
-  font-size: 10px; color: rgba(255,255,255,0.7); font-family: var(--font-mono);
+  font-size: 10px; color: var(--fg-2); font-family: var(--font-mono);
   font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
 }
 .rating-value {
-  font-size: 17px; font-weight: 700; color: #fff;
+  font-size: 17px; font-weight: 700; color: var(--fg-0);
   line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
 }
 
@@ -181,7 +184,7 @@ const displayRatings = computed<ExternalRating[]>(() => {
 }
 .rating-bar {
   flex: 1; height: 4px; border-radius: 999px;
-  background: rgba(255,255,255,0.06); overflow: hidden;
+  background: rgb(var(--ink) / 0.10); overflow: hidden;
 }
 .rating-bar-fill {
   height: 100%; border-radius: 999px;
@@ -194,7 +197,7 @@ const displayRatings = computed<ExternalRating[]>(() => {
 
 .rating-pct {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
-  color: rgba(255,255,255,0.6); letter-spacing: 0.04em;
+  color: var(--fg-2); letter-spacing: 0.04em;
   min-width: 30px; text-align: right; font-variant-numeric: tabular-nums;
 }
 </style>

@@ -12,7 +12,7 @@
 // matching `@media (max-width: 720px)` override using these same phone
 // values, or the JS column math and the actual rendered gap will disagree.
 
-import type { Ref } from 'vue'
+import type { MaybeRefOrGetter, Ref } from 'vue'
 
 const MIN_CARD = 160
 const COL_GAP = 18
@@ -29,6 +29,11 @@ interface Options {
   // Reserved px below the poster for title + sub + padding-top. ~43px for
   // the 13/11px font stack used everywhere.
   metaHeight?: number
+  // Desktop minimum card width — the FilterBar poster-size slider feeds a
+  // ref here (default 160, the historical constant). Phones keep their own
+  // fixed minimum: the slider's range would leave 1 giant or 4 unreadable
+  // columns there.
+  minCard?: MaybeRefOrGetter<number>
 }
 
 export function usePosterGrid<T>(
@@ -42,7 +47,10 @@ export function usePosterGrid<T>(
   const { width } = useElementSize(containerRef)
   const { isPhone } = useViewport()
 
-  const minCard = computed(() => isPhone.value ? MIN_CARD_PHONE : MIN_CARD)
+  const minCard = computed(() => {
+    if (isPhone.value) return MIN_CARD_PHONE
+    return toValue(opts.minCard) || MIN_CARD
+  })
   const colGap = computed(() => isPhone.value ? COL_GAP_PHONE : COL_GAP)
   const rowGap = computed(() => isPhone.value ? ROW_GAP_PHONE : ROW_GAP)
 

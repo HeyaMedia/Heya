@@ -135,16 +135,18 @@
         </div>
       </div>
 
-      <!-- Backdrop indicators -->
-      <div v-if="backdropAssets.length > 1" class="bd-indicators" @mouseenter="pauseCarousel" @mouseleave="resumeCarousel">
-        <button
-          v-for="(_, i) in backdropAssets"
-          :key="`bd-${i}-${backdropIdx}`"
-          class="bd-bar"
-          :class="{ active: i === backdropIdx, paused: carouselPaused && i === backdropIdx }"
-          @click="jumpToBackdrop(i)"
-        />
-      </div>
+      <!-- Backdrop cycle cluster — the shared prev/pause/next controls,
+           top right of the hero (same spot as the home deck's). -->
+      <CycleControls
+        v-if="backdropAssets.length > 1"
+        v-model:paused="carouselPaused"
+        :cycle-key="cycleKey"
+        :duration="BACKDROP_INTERVAL"
+        item-label="backdrop"
+        class="hero-cycle"
+        @prev="retreatBackdrop"
+        @next="advanceBackdrop"
+      />
 
       <!-- Expand backdrop -->
       <button v-if="backdropAssets.length > 0" class="hero-expand" @click="openBackdropLightbox">
@@ -373,8 +375,8 @@ function scrollActiveContent(dir: number) {
 // Crossfade backdrops — shared carousel engine. This view historically
 // imposed no sort_order cap and preloaded the second backdrop.
 const {
-  showA, backdropA, backdropB, backdropIdx, carouselPaused, backdropAssets,
-  pauseCarousel, resumeCarousel, jumpToBackdrop, seedCarousel, openBackdropLightbox,
+  showA, backdropA, backdropB, carouselPaused, cycleKey, backdropAssets,
+  advanceBackdrop, retreatBackdrop, seedCarousel, openBackdropLightbox,
 } = useBackdropCarousel(detail, { preloadSecond: true })
 
 // Ambient extension: with the ambient background on, this page's current

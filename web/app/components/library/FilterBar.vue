@@ -23,14 +23,23 @@
              AppTopBar's burger on phone + the compact band — no per-page
              button here. The "Filters" popover below is the separate
              attribute-filter panel (genre/year/rating/...). -->
-        <button v-if="dirty && !hideFilters" class="btn-ghost-sm fb-reset" title="Reset filters and sorting" @click="$emit('reset')">
+        <!-- Poster-size slider (grid view only, when the page wires it up).
+             Hidden on phones via the SAME isPhone signal usePosterGrid uses:
+             the phone grid pins its own minimum card width, so the slider
+             would render but do nothing there. -->
+        <div v-if="tileSize !== undefined && view === 'grid' && !isPhone" class="fb-size" title="Poster size">
+          <Icon name="grid" :size="12" class="fb-size-icon" />
+          <AppSlider v-model="tileProxy" :min="TILE_SIZE_MIN" :max="TILE_SIZE_MAX" :step="10" aria-label="Poster size" />
+        </div>
+
+        <button v-if="dirty && !hideFilters" class="btn-ghost-sm steer-glass fb-reset" title="Reset filters and sorting" @click="$emit('reset')">
           <Icon name="undo" :size="14" />
           Reset
         </button>
 
         <PopoverRoot v-if="!hideFilters" v-model:open="panelOpen">
           <PopoverTrigger as-child>
-            <button class="btn-ghost-sm" :class="{ active: activeCount > 0 || panelOpen }">
+            <button class="btn-ghost-sm steer-glass" :class="{ active: activeCount > 0 || panelOpen }">
               <Icon name="filter" :size="14" />
               Filters
               <span v-if="activeCount > 0" class="filter-badge">{{ activeCount }}</span>
@@ -166,7 +175,7 @@
           </PopoverPortal>
         </PopoverRoot>
 
-        <AppMenu trigger-class="btn-ghost-sm" :width="210" align="end">
+        <AppMenu trigger-class="btn-ghost-sm steer-glass" :width="210" align="end">
           <template #trigger>
             <Icon name="sort" :size="14" />
             {{ sortLabel }}
@@ -237,6 +246,8 @@ const props = defineProps<{
   hideFilters?: boolean
   /** Noun shown after the count (default 'titles'). */
   countLabel?: string
+  /** Grid poster size (px). Providing it renders the size slider. */
+  tileSize?: number
 }>()
 
 const emits = defineEmits<{
@@ -245,9 +256,17 @@ const emits = defineEmits<{
   'update:filters': [filters: FilterState]
   'save-list': []
   reset: []
+  'tile-size': [value: number]
 }>()
 
+// AppSlider wants a v-model; proxy it onto the tile-size prop/emit pair.
+const tileProxy = computed({
+  get: () => props.tileSize ?? TILE_SIZE_DEFAULT,
+  set: (v: number) => emits('tile-size', v),
+})
+
 const panelOpen = ref(false)
+const { isPhone } = useViewport()
 
 const local = reactive<FilterState>({ ...props.filters })
 
@@ -448,11 +467,55 @@ function langName(code: string) {
   top: 0;
   z-index: 20;
   padding: 18px 32px 14px;
-  background: color-mix(in srgb, var(--bg-1) 86%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border);
+  /* IDENTICAL fixed-pixel ramp to the LibrarySidebar's (hold --chrome
+     14px, reach the translucent glass at 110px): both panels start at the
+     same viewport y, so matching px stops mean matching color at every
+     shared row — a %-based ramp tied to the bar's own (variable) height
+     put the two panels at different points in their fades and drew a
+     vertical seam at their join. Posters scrolling under the bar still
+     ghost through the lower glass and melt away near the top. */
+  background: linear-gradient(to bottom,
+    var(--chrome) 0,
+    var(--chrome) 14px,
+    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 10px 28px rgb(var(--shade) / 0.14);
+  /* The shadow may ONLY fall downward: its 28px blur otherwise bleeds past
+     the bar's left edge onto the sidebar, shading pixels at the join and
+     re-drawing the very seam the matched gradients erase. */
+  clip-path: inset(0 0 -48px 0);
 }
+/* Firefox draws visible seam lines at backdrop-filter region boundaries in
+   this stacked-panel arrangement (Safari/Chrome composite it cleanly) —
+   trade the blur for slightly more solid glass there. */
+@supports (-moz-appearance: none) {
+  .filter-bar {
+    backdrop-filter: none;
+    /* S-curve stops: Firefox's weaker gradient dithering shows Mach-band
+       lines at the ramp's slope discontinuities — ease in and out of the
+       fade so there is no knee to see. MUST stay identical to the
+       sidebar's Firefox ramp. */
+    background: linear-gradient(to bottom,
+      var(--chrome) 0,
+      var(--chrome) 14px,
+      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
+      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
+      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
+      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
+  }
+}
+.filter-bar-title { text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1); }
+
+/* Poster-size slider */
+.fb-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 132px;
+  padding: 0 4px;
+}
+.fb-size-icon { color: var(--fg-3); flex-shrink: 0; }
 .filter-bar-top { display: flex; align-items: center; justify-content: space-between; }
 .filter-bar-left { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .filter-bar-title {
@@ -477,13 +540,17 @@ function langName(code: string) {
   background: var(--gold); color: var(--bg-0);
 }
 
-/* Segmented grid / detail / list toggle */
+/* Segmented grid / detail / list toggle — glass so it reads over ambient
+   artwork (the bare ink wash vanished there). */
 .view-toggle {
   display: flex; align-items: center; gap: 2px;
   height: 32px; padding: 2px;
-  background: rgb(var(--ink) / 0.04);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
+  box-shadow: var(--shadow-el);
 }
 .view-toggle-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -504,6 +571,7 @@ function langName(code: string) {
   padding: 4px 10px; border-radius: 100px; font-size: 12px; font-weight: 500;
   background: var(--bg-3); border: 1px solid var(--border);
   color: var(--fg-1); cursor: pointer; transition: all 0.15s;
+  box-shadow: var(--shadow-el);
 }
 .filter-pill:hover { border-color: var(--gold); color: var(--gold); }
 .filter-pill-clear { color: var(--fg-3); border-color: transparent; background: none; }

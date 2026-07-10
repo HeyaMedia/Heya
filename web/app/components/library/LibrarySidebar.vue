@@ -23,13 +23,19 @@
         <Icon name="sparkle" :size="16" style="color: var(--gold)" />
         <span>Recommendations</span>
       </div>
-      <!-- Roulette is a real route (/movies/roulette), not an activeView —
-           a plain anchor keeps it working inside AppSheet too (real <a>
-           elements are exempt from the drawer's pointer-capture retarget). -->
-      <NuxtLink v-if="showRoulette" to="/movies/roulette" class="lib-item">
+      <!-- Roulette — a view within the section like Browse/Recommendations
+           (its /movies/roulette path is registered in router.options.ts and
+           synced by useBrowseState). -->
+      <div
+        v-if="showRoulette"
+        class="lib-item"
+        role="button"
+        :class="{ active: activeView === 'roulette' }"
+        @click="$emit('view', 'roulette')"
+      >
         <Icon name="shuffle" :size="16" style="color: var(--gold)" />
         <span>Roulette</span>
-      </NuxtLink>
+      </div>
     </div>
 
     <div class="lib-section">
@@ -123,9 +129,6 @@
       </div>
     </div>
 
-    <div v-if="totalCount > 0 && !hideFooter" class="lib-footer">
-      <div class="lib-footer-text">{{ totalCount }} titles</div>
-    </div>
   </aside>
 </template>
 
@@ -147,8 +150,6 @@ const props = defineProps<{
   showBrowse?: boolean
   /** Show the Roulette link (movies only — the page lives at /movies/roulette). */
   showRoulette?: boolean
-  /** Drop the "N titles" footer (books — the ambient corner cluster sits there). */
-  hideFooter?: boolean
   /** 'sidebar' (default) = fixed 240px aside. 'sheet' = fills an AppSheet body
    *  on phone (movies/tv/books index.vue) — same markup/behavior, just sheds
    *  the standalone-aside chrome. See the `.lib-sidebar-sheet` rule below. */
@@ -197,27 +198,42 @@ async function createList() {
 .lib-sidebar {
   width: 240px;
   flex-shrink: 0;
-  /* Translucent over the ambient-backdrop layer; solid-enough for text. */
-  background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+  /* Translucent over the ambient-backdrop layer; solid-enough for text.
+     No border-right (and deliberately no edge shadow either): the FilterBar
+     wears this exact glass, and any divider — hard line or soft smudge —
+     breaks the two back into separate panels. Below the bar, the glass-vs-
+     content contrast defines the edge on its own.
+     The TOP HOLDS the navbar's exact opaque --chrome for a beat before
+     fading into this panel's own glass — fading from the very first pixel
+     still read as a boundary; the hold makes topbar → sidebar one
+     continuous surface. */
+  background: linear-gradient(to bottom,
+    var(--chrome) 0,
+    var(--chrome) 14px,
+    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  border-right: 1px solid var(--border);
   padding: 20px 10px;
   display: flex;
   flex-direction: column;
   height: 100%;
 }
+/* Firefox: same seam-line workaround as FilterBar — no blur, more solid
+   glass (the two MUST stay identical or the join seam returns). */
+@supports (-moz-appearance: none) {
+  .lib-sidebar {
+    backdrop-filter: none;
+    /* S-curve stops — see FilterBar's Firefox block; MUST stay identical. */
+    background: linear-gradient(to bottom,
+      var(--chrome) 0,
+      var(--chrome) 14px,
+      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
+      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
+      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
+      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
+  }
+}
 .lib-section { display: flex; flex-direction: column; }
-.lib-footer {
-  margin-top: auto;
-  padding: 16px 14px 0;
-  border-top: 1px solid var(--border);
-}
-.lib-footer-text {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-3);
-}
 .lists-toggle { cursor: pointer; }
 .expand-icon { margin-left: auto; opacity: 0.4; }
 .lib-item-nested { padding-left: 38px; }
@@ -255,7 +271,6 @@ async function createList() {
   border-right: 0;
   padding: 0;
 }
-.lib-sidebar-sheet .lib-footer { margin-top: 24px; }
 
 /* Sheet instance only ever renders at phone width, but scope the bump to
    the breakpoint anyway so it can't leak into the desktop aside if variant

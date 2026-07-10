@@ -876,12 +876,12 @@ watch(() => route.fullPath, () => { closeDropdown() })
   align-items: center;
   gap: 24px;
   padding: 0 24px;
-  /* Translucent enough that the ambient artwork reads through; the blur
-     keeps text legible. Hard border swapped for a soft drop so the split
-     against the page is a shadow, not a line. */
-  background: color-mix(in srgb, var(--bg-0) 62%, transparent);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  /* Opaque (--chrome): nothing scrolls behind the navbar, and a known
+     solid target lets the library sidebar/FilterBar tops match it EXACTLY
+     instead of approximating glass-over-backdrop. Hard border stays
+     swapped for a soft drop so the split against the page is a shadow,
+     not a line. */
+  background: var(--chrome);
   border-bottom: 0;
   box-shadow: 0 1px 18px rgb(var(--shade) / 0.22);
   height: var(--topbar-h);

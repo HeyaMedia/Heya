@@ -15,14 +15,23 @@ export interface BackdropCarouselOptions {
   preloadSecond?: boolean
 }
 
+/** One rotation window — CycleControls' ring animates at exactly this.
+ *  Matches the home hero's 30s cadence: backdrops are scenery, not a
+ *  slideshow demanding attention. */
+export const BACKDROP_INTERVAL = 30_000
+
 /**
  * Crossfade backdrop carousel for detail-page heroes.
  *
- * Owns the A/B image pair, the 8s advance timer with pause/resume (used by
- * the `.bd-indicators` hover), indicator jumps, and the backdrop lightbox.
+ * Owns the A/B image pair, indicator state, and the backdrop lightbox. The
+ * CLOCK is not here: the CycleControls ring drives rotation — its
+ * animationend calls advanceBackdrop(), and every advance/retreat/jump bumps
+ * `cycleKey`, which re-keys the ring for a fresh window. `carouselPaused` is
+ * the sticky user pause (bind it to the cluster's v-model:paused); pausing
+ * freezes the ring, so no animationend ever fires while paused.
+ *
  * Call `seedCarousel()` whenever the detail payload arrives/changes — the
  * caller decides when (typically inside its `watch(detail)` / `onMounted`).
- * Timer cleanup is registered on the calling component's `onUnmounted`.
  */
 export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: BackdropCarouselOptions = {}) {
   const lightbox = useLightbox()
@@ -32,11 +41,7 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
   const backdropB = ref<string | null>(null)
   const backdropIdx = ref(0)
   const carouselPaused = ref(false)
-
-  const BACKDROP_INTERVAL = 8000
-  let bdTimeout: ReturnType<typeof setTimeout> | null = null
-  let bdStart = 0
-  let bdRemaining = BACKDROP_INTERVAL
+  const cycleKey = ref(0)
 
   const backdropAssets = computed(() => {
     if (!detail.value?.assets) return []
@@ -56,62 +61,40 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     return detail.value ? useBackdropUrl(detail.value.media_item) : null
   }
 
-  async function advanceBackdrop() {
-    if (backdropAssets.value.length <= 1) return
-    backdropIdx.value = (backdropIdx.value + 1) % backdropAssets.value.length
-    const url = getBackdropUrl(backdropIdx.value)
-    if (showA.value) { backdropB.value = url } else { backdropA.value = url }
-    await nextTick()
-    showA.value = !showA.value
-  }
-
-  function startCarouselTimer() {
-    bdStart = Date.now()
-    bdRemaining = BACKDROP_INTERVAL
-    bdTimeout = setTimeout(() => {
-      advanceBackdrop()
-      startCarouselTimer()
-    }, BACKDROP_INTERVAL)
-  }
-
-  function pauseCarousel() {
-    carouselPaused.value = true
-    if (bdTimeout) clearTimeout(bdTimeout)
-    bdRemaining -= Date.now() - bdStart
-  }
-
-  function resumeCarousel() {
-    carouselPaused.value = false
-    bdStart = Date.now()
-    bdTimeout = setTimeout(() => {
-      advanceBackdrop()
-      startCarouselTimer()
-    }, bdRemaining)
-  }
-
-  function jumpToBackdrop(idx: number) {
-    if (idx === backdropIdx.value) return
-    if (bdTimeout) clearTimeout(bdTimeout)
+  function showIdx(idx: number) {
     backdropIdx.value = idx
     const url = getBackdropUrl(idx)
     if (showA.value) { backdropB.value = url } else { backdropA.value = url }
     showA.value = !showA.value
-    if (!carouselPaused.value) startCarouselTimer()
+    cycleKey.value++
   }
 
-  /** (Re)seed the A/B pair from the current detail and (re)start the timer. */
+  function advanceBackdrop() {
+    const n = backdropAssets.value.length
+    if (n <= 1) return
+    showIdx((backdropIdx.value + 1) % n)
+  }
+
+  function retreatBackdrop() {
+    const n = backdropAssets.value.length
+    if (n <= 1) return
+    showIdx((backdropIdx.value - 1 + n) % n)
+  }
+
+  function jumpToBackdrop(idx: number) {
+    if (idx === backdropIdx.value) return
+    showIdx(idx)
+  }
+
+  /** (Re)seed the A/B pair from the current detail and start a fresh window. */
   function seedCarousel() {
-    if (bdTimeout) clearTimeout(bdTimeout)
     backdropA.value = getBackdropUrl(0)
-    if (opts.preloadSecond) {
-      if (backdropAssets.value.length > 1) {
-        backdropB.value = getBackdropUrl(1)
-        startCarouselTimer()
-      }
-    } else {
+    if (opts.preloadSecond && backdropAssets.value.length > 1) {
+      backdropB.value = getBackdropUrl(1)
+    } else if (!opts.preloadSecond) {
       backdropB.value = getBackdropUrl(0)
-      if (backdropAssets.value.length > 1) startCarouselTimer()
     }
+    cycleKey.value++
   }
 
   function openBackdropLightbox() {
@@ -123,18 +106,17 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     }
   }
 
-  onUnmounted(() => { if (bdTimeout) clearTimeout(bdTimeout) })
-
   return {
     showA,
     backdropA,
     backdropB,
     backdropIdx,
     carouselPaused,
+    cycleKey,
     backdropAssets,
     getBackdropUrl,
-    pauseCarousel,
-    resumeCarousel,
+    advanceBackdrop,
+    retreatBackdrop,
     jumpToBackdrop,
     seedCarousel,
     openBackdropLightbox,

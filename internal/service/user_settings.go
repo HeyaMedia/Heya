@@ -41,6 +41,13 @@ type AppearanceSettings struct {
 	// AmbientIntensity is the backdrop visibility percentage (5-60).
 	// 0 = app default.
 	AmbientIntensity int `json:"ambient_intensity,omitempty"`
+	// ShowUnavailableRecs includes non-library titles in detail-page
+	// "More Like This" rails (they link out to heya.media). Default off.
+	// Deliberately NOT omitempty: with it, an explicit "off" marshals to an
+	// absent key, and clients that keep local state when a key is missing
+	// (the FE appearance hydrate) could never learn about the off cross-
+	// device. Always speaking true/false makes the server authoritative.
+	ShowUnavailableRecs bool `json:"show_unavailable_recs"`
 }
 
 // HomeSettings controls the composition of the home page.

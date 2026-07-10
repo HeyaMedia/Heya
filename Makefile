@@ -80,6 +80,7 @@ dead-components:
 
 clean:
 	rm -rf bin/
+	rm -rf .cache/go-build .cache/go-build-air
 	rm -rf web/.output web/.nuxt web/node_modules
 
 db-up:

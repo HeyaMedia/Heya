@@ -35,6 +35,10 @@ const ambientOn = computed({
   get: () => prefs.value.ambientMode !== 'off',
   set: (v: boolean) => set('ambientMode', v ? 'on' : 'off'),
 })
+const showUnavailableRecs = computed({
+  get: () => prefs.value.showUnavailableRecs,
+  set: (v: boolean) => set('showUnavailableRecs', v),
+})
 const ambientIntensity = computed({
   get: () => prefs.value.ambientIntensity || AMBIENT_INTENSITY_DEFAULT,
   set: (v: number) => set('ambientIntensity', v),
@@ -173,6 +177,22 @@ const isDefaultSections = computed(
             <AppSlider v-model="ambientIntensity" :min="5" :max="60" :step="5" :disabled="!ambientOn" aria-label="Ambient intensity" />
             <span class="ambient-pct">{{ ambientIntensity }}%</span>
           </div>
+        </div>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection title="Detail pages" icon="film"
+      description="Movie and TV detail page behavior.">
+      <div class="ambient-controls">
+        <div class="ambient-row">
+          <div class="ambient-row-text">
+            <div class="ambient-row-title">Show unavailable recommendations</div>
+            <div class="ambient-row-desc">
+              "More Like This" normally lists only titles in your library. On,
+              it also shows the rest — they open on heya.media in a new tab.
+            </div>
+          </div>
+          <AppSwitch v-model="showUnavailableRecs" size="md" aria-label="Show unavailable recommendations" />
         </div>
       </div>
     </SettingsSection>

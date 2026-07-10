@@ -1760,10 +1760,16 @@
           "density": {
             "type": "string"
           },
+          "show_unavailable_recs": {
+            "type": "boolean"
+          },
           "theme": {
             "type": "string"
           }
         },
+        "required": [
+          "show_unavailable_recs"
+        ],
         "type": "object"
       },
       "Apply-album-identifyRequest": {

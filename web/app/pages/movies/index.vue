@@ -51,7 +51,8 @@
          grid + franchises live in the sibling main below. -->
     <BrowseView v-if="activeView === 'browse'" section="movie" class="library-main" />
     <RecsBrowse v-else-if="activeView === 'recommendations'" section="movie" class="library-main" />
-    <div v-else ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
+    <RouletteView v-else-if="activeView === 'roulette'" class="library-main" />
+    <div v-else ref="mainEl" class="library-main scroll" :class="{ 'has-alpha-rail': showAlphaRail }" @scroll.passive="onMainScroll">
       <!-- Franchises overview — a page of its own (/movies/franchises). Reuses
            the FilterBar (sort + grid/detail/list toggle, no movie filters) and
            the same view chrome as the library; cards/rows deep-link into the
@@ -68,8 +69,10 @@
           :available-languages="[]"
           :sort-options="FRANCHISE_SORTS"
           hide-filters
+          :tile-size="tileSize"
           @sort="franchiseSort = $event"
           @view="view = $event"
+          @tile-size="tileSize = $event"
         />
 
         <div class="lib-content">
@@ -78,7 +81,9 @@
             <p>No franchises with more than one film yet.</p>
           </div>
 
-          <div v-else-if="view === 'grid'" class="grid-posters fr-grid">
+          <!-- Non-virtualized grid: the slider drives it through the same
+               --tile-min var the .grid-posters CSS sizes columns from. -->
+          <div v-else-if="view === 'grid'" class="grid-posters fr-grid" :style="{ '--tile-min': `${tileSize}px` }">
             <NuxtLink
               v-for="(c, i) in sortedFranchises"
               :key="c.id"
@@ -141,6 +146,13 @@
       </template>
 
       <template v-else>
+      <!-- A–Z rail dock: FIRST child so its sticky anchor is the container's
+           very top in every scroll state; the rail itself measures the
+           FilterBar and hangs below it (see AlphabetRail). -->
+      <div v-if="showAlphaRail" class="alpha-dock">
+        <AlphabetRail :available="alphaAvailable" @jump="jumpToLetter" />
+      </div>
+
       <FilterBar
         :title="viewTitle"
         :count="sorted.length"
@@ -151,11 +163,13 @@
         :available-languages="availableLanguages"
         :genre-counts="genreCounts"
         :dirty="isDirty"
+        :tile-size="tileSize"
         @sort="sort = $event"
         @view="view = $event"
         @update:filters="onFiltersChange"
         @save-list="saveSmartList"
         @reset="resetBrowse"
+        @tile-size="tileSize = $event"
       />
 
       <div class="lib-content">
@@ -395,7 +409,7 @@ function openListSheet(item: EnrichedMediaItem) {
 // View mode, sort, filters, sidebar selection and scroll offset all persist —
 // navigating into a movie and back restores the page exactly as it was.
 const browse = useBrowseState('movies', { browseDefault: true })
-const { view, sort, filters, activeLib, activeView, scrollTop } = browse
+const { view, sort, filters, activeLib, activeView, scrollTop, tileSize } = browse
 const { isDirty, restoreScroll } = browse
 
 // The Recommended landing (bare /movies) renders rails from their own queries
@@ -409,7 +423,7 @@ async function ensureItems() {
   itemsLoaded.value = true
   loading.value = false
 }
-watch(activeView, (v) => { if (v !== 'browse' && v !== 'recommendations') ensureItems() })
+watch(activeView, (v) => { if (v !== 'browse' && v !== 'recommendations' && v !== 'roulette') ensureItems() })
 
 const favoritedSet = ref<Set<number>>(new Set())
 const watchedSet = ref<Set<number>>(new Set())
@@ -592,7 +606,34 @@ const sorted = computed(() => {
   return list
 })
 
-const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted)
+const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted, { minCard: () => tileSize.value })
+
+// ── Alphabet rail ──────────────────────────────────────────────────────
+// First-character buckets over the title-sorted list; digits/symbols pool
+// under '#'. Jumping forces title sort (the rail is meaningless against
+// other orders), then scrolls the virtualized grid to the letter's first
+// row, clearing the sticky FilterBar.
+function alphaKey(item: { sort_title?: string; title: string }): string {
+  const c = (item.sort_title || item.title || '').trim().charAt(0).toUpperCase()
+  return c >= 'A' && c <= 'Z' ? c : '#'
+}
+const alphaAvailable = computed(() => [...new Set(sorted.value.map(alphaKey))])
+const showAlphaRail = computed(() => view.value === 'grid' && sorted.value.length > 30)
+
+function jumpToLetter(letter: string) {
+  if (sort.value !== 'title') sort.value = 'title'
+  nextTick(() => {
+    const idx = sorted.value.findIndex(i => alphaKey(i) === letter)
+    const main = mainEl.value
+    const wrap = gridWrap.value
+    if (idx < 0 || !main || !wrap) return
+    const row = Math.floor(idx / gridCols.value)
+    const barH = main.querySelector('.filter-bar')?.getBoundingClientRect().height ?? 0
+    const top = wrap.getBoundingClientRect().top - main.getBoundingClientRect().top
+      + main.scrollTop + row * rowHeight.value - barH - 10
+    main.scrollTo({ top: Math.max(0, top) })
+  })
+}
 
 function onMainScroll() {
   if (mainEl.value) scrollTop.value = mainEl.value.scrollTop
@@ -708,7 +749,7 @@ onMounted(async () => {
   if (colRes.status === 'fulfilled') collections.value = colRes.value ?? []
 
   // Grid/franchises need the full item list; the Recommended landing doesn't.
-  if (activeView.value !== 'browse' && activeView.value !== 'recommendations') await ensureItems()
+  if (activeView.value !== 'browse' && activeView.value !== 'recommendations' && activeView.value !== 'roulette') await ensureItems()
   loading.value = false
 
   // Re-validate the persisted sidebar selection against fresh data — a

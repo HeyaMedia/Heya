@@ -33,7 +33,13 @@ interface BrowseStore {
   activeLib: number | null
   activeView: string | null
   scrollTop: number
+  /** Grid poster size (desktop min card width, px) — the FilterBar slider. */
+  tileSize: number
 }
+
+export const TILE_SIZE_MIN = 120
+export const TILE_SIZE_MAX = 240
+export const TILE_SIZE_DEFAULT = 160
 
 const stores = new Map<string, BrowseStore>()
 
@@ -49,6 +55,7 @@ function initialStore(page: string): BrowseStore {
     activeLib: null,
     activeView: null,
     scrollTop: 0,
+    tileSize: TILE_SIZE_DEFAULT,
   }
   try {
     const raw = localStorage.getItem(storageKey(page))
@@ -57,6 +64,7 @@ function initialStore(page: string): BrowseStore {
       if (BROWSE_VIEWS.has(p.view)) base.view = p.view
       if (BROWSE_SORTS.has(p.sort)) base.sort = p.sort
       if (p.filters && typeof p.filters === 'object') base.filters = { ...defaultFilters(), ...p.filters }
+      if (typeof p.tileSize === 'number' && p.tileSize >= TILE_SIZE_MIN && p.tileSize <= TILE_SIZE_MAX) base.tileSize = p.tileSize
       // activeLib / activeView are intentionally NOT restored — they come
       // from the URL query (see useBrowseState below).
     }
@@ -103,6 +111,7 @@ export function useBrowseState(page: string, opts: { browseDefault?: boolean } =
     if (route.path === `${base}/recommendations`) return { activeLib: null, activeView: 'recommendations' }
     if (route.path === `${base}/loved`) return { activeLib: null, activeView: 'loved' }
     if (route.path === `${base}/franchises`) return { activeLib: null, activeView: 'franchises' }
+    if (route.path === `${base}/roulette`) return { activeLib: null, activeView: 'roulette' }
     const rest = route.path.startsWith(`${base}/`) ? route.path.slice(base.length + 1) : ''
     const m = /^(library|list)\/(\d+)$/.exec(rest)
     if (!m) return null
@@ -119,6 +128,7 @@ export function useBrowseState(page: string, opts: { browseDefault?: boolean } =
     if (sel.activeView === 'recommendations') return `${base}/recommendations`
     if (sel.activeView === 'loved') return `${base}/loved`
     if (sel.activeView === 'franchises') return `${base}/franchises`
+    if (sel.activeView === 'roulette') return `${base}/roulette`
     if (sel.activeView?.startsWith('list-')) return `${base}/list/${sel.activeView.slice(5)}`
     if (sel.activeLib != null) return `${base}/library/${sel.activeLib}`
     // {null, null} is the flat "All" grid — its own path when the Browse landing
@@ -166,7 +176,7 @@ export function useBrowseState(page: string, opts: { browseDefault?: boolean } =
 
   // Display preferences only — the selection is URL-driven (above).
   watch(
-    () => ({ view: s.view, sort: s.sort, filters: s.filters }),
+    () => ({ view: s.view, sort: s.sort, filters: s.filters, tileSize: s.tileSize }),
     (snap) => {
       try { localStorage.setItem(storageKey(page), JSON.stringify(snap)) } catch { /* private mode / quota — prefs just won't stick */ }
     },

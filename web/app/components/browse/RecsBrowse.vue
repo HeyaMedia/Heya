@@ -39,7 +39,7 @@
     </div>
 
     <div v-if="!searching" class="rb-controls">
-      <AppMenu trigger-class="btn-ghost-sm rb-steer-btn" :width="240" align="start">
+      <AppMenu trigger-class="btn-ghost-sm steer-glass" :width="240" align="start">
         <template #trigger>
           {{ genre || 'Any genre' }}
           <Icon name="chevdown" :size="10" class="rb-caret" />
@@ -71,7 +71,7 @@
       </div>
 
       <div class="rb-spacer" />
-      <button v-if="genre || minRating" class="btn-ghost-sm rb-steer-btn" @click="reset">Clear</button>
+      <button v-if="genre || minRating" class="btn-ghost-sm steer-glass" @click="reset">Clear</button>
     </div>
 
     <div v-if="aiPending" class="rb-note rb-ai-note">
@@ -569,22 +569,4 @@ function reset() {
 .rb-item { justify-content: space-between; }
 .rb-item.active { color: var(--gold); }
 .rb-check { color: var(--gold); }
-
-/* Steer controls (genre trigger + Clear) — glass over artwork. Unscoped
-   because AppMenu renders the trigger button itself (scoped classes never
-   land on it); the .app-menu-trigger pairing out-specifies the trigger
-   reset's own re-assert rule in heya.css. */
-.rb-steer-btn,
-.app-menu-trigger.rb-steer-btn {
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-}
-.rb-steer-btn:hover,
-.app-menu-trigger.rb-steer-btn:hover {
-  background: var(--bg-3);
-  color: var(--fg-0);
-}
 </style>

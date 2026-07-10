@@ -46,8 +46,14 @@ const hasExtra = useSlots().extra != null
   display: grid; grid-template-columns: auto 1fr; gap: 6px 20px;
   font-size: 12px; margin-top: 16px; max-width: 560px;
   padding: 12px 16px;
-  background: rgb(var(--ink) / 0.03); border-radius: var(--r-md);
-  border: 1px solid rgb(var(--ink) / 0.04);
+  /* Theme glass — the old 3% ink wash vanished over ambient artwork and
+     left the labels unreadable in light mode. */
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
 }
 .info-grid :deep(.info-label) {
   color: var(--fg-3); font-family: var(--font-mono);

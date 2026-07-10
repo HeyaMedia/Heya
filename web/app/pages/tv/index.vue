@@ -44,7 +44,14 @@
          lives in the sibling main below. -->
     <BrowseView v-if="activeView === 'browse'" section="tv" class="library-main" />
     <RecsBrowse v-else-if="activeView === 'recommendations'" section="tv" class="library-main" />
-    <div v-else ref="mainEl" class="library-main scroll" @scroll.passive="onMainScroll">
+    <div v-else ref="mainEl" class="library-main scroll" :class="{ 'has-alpha-rail': showAlphaRail }" @scroll.passive="onMainScroll">
+      <!-- A–Z rail dock: FIRST child so its sticky anchor is the container's
+           very top in every scroll state; the rail itself measures the
+           FilterBar and hangs below it (see AlphabetRail). -->
+      <div v-if="showAlphaRail" class="alpha-dock">
+        <AlphabetRail :available="alphaAvailable" @jump="jumpToLetter" />
+      </div>
+
       <FilterBar
         :title="viewTitle"
         :count="sorted.length"
@@ -55,11 +62,13 @@
         :available-languages="availableLanguages"
         :genre-counts="genreCounts"
         :dirty="isDirty"
+        :tile-size="tileSize"
         @sort="sort = $event"
         @view="view = $event"
         @update:filters="onFiltersChange"
         @save-list="saveSmartList"
         @reset="resetBrowse"
+        @tile-size="tileSize = $event"
       />
 
       <div class="lib-content">
@@ -292,7 +301,7 @@ function openListSheet(item: EnrichedMediaItem) {
 // View mode, sort, filters, sidebar selection and scroll offset all persist —
 // navigating into a show and back restores the page exactly as it was.
 const browse = useBrowseState('tv', { browseDefault: true })
-const { view, sort, filters, activeLib, activeView, scrollTop } = browse
+const { view, sort, filters, activeLib, activeView, scrollTop, tileSize } = browse
 const { isDirty, restoreScroll } = browse
 
 // The Recommended landing (bare /tv) renders rails from their own queries and
@@ -463,7 +472,34 @@ const sorted = computed(() => {
   return list
 })
 
-const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted)
+const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted, { minCard: () => tileSize.value })
+
+// ── Alphabet rail ──────────────────────────────────────────────────────
+// First-character buckets over the title-sorted list; digits/symbols pool
+// under '#'. Jumping forces title sort (the rail is meaningless against
+// other orders), then scrolls the virtualized grid to the letter's first
+// row, clearing the sticky FilterBar.
+function alphaKey(item: { sort_title?: string; title: string }): string {
+  const c = (item.sort_title || item.title || '').trim().charAt(0).toUpperCase()
+  return c >= 'A' && c <= 'Z' ? c : '#'
+}
+const alphaAvailable = computed(() => [...new Set(sorted.value.map(alphaKey))])
+const showAlphaRail = computed(() => view.value === 'grid' && sorted.value.length > 30)
+
+function jumpToLetter(letter: string) {
+  if (sort.value !== 'title') sort.value = 'title'
+  nextTick(() => {
+    const idx = sorted.value.findIndex(i => alphaKey(i) === letter)
+    const main = mainEl.value
+    const wrap = gridWrap.value
+    if (idx < 0 || !main || !wrap) return
+    const row = Math.floor(idx / gridCols.value)
+    const barH = main.querySelector('.filter-bar')?.getBoundingClientRect().height ?? 0
+    const top = wrap.getBoundingClientRect().top - main.getBoundingClientRect().top
+      + main.scrollTop + row * rowHeight.value - barH - 10
+    main.scrollTo({ top: Math.max(0, top) })
+  })
+}
 
 function onMainScroll() {
   if (mainEl.value) scrollTop.value = mainEl.value.scrollTop

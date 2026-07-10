@@ -79,35 +79,19 @@
           <!-- Controls ride the deck's top-right cluster beside the mode tabs
                (same slot the other heroes use). On phones the aux slot is
                hidden, so the teleport is disabled and they render inline.
-               The ring around pause IS the cycle clock: its CSS animation's
-               end advances the carousel, so ring and rotation can't drift. -->
+               CycleControls' ring IS the cycle clock: its animationend
+               advances the carousel, so ring and rotation can't drift. -->
           <Teleport defer :disabled="isPhone" to="#hero-deck-aux">
-            <div class="music-ctls" :class="{ inline: isPhone }">
-              <button class="music-ctl" aria-label="Previous release" @click="retreat">
-                <Icon name="chevleft" :size="12" />
-              </button>
-              <button
-                class="music-ctl music-pause"
-                :aria-pressed="userPaused"
-                :aria-label="userPaused ? 'Resume rotation' : 'Pause rotation'"
-                @click="userPaused = !userPaused"
-              >
-                <svg class="ctl-ring" viewBox="0 0 26 26" aria-hidden="true">
-                  <circle
-                    v-if="!reducedMotion"
-                    :key="cycleKey"
-                    class="ctl-ring-fill"
-                    :class="{ paused: ringPaused }"
-                    cx="13" cy="13" r="11.5"
-                    @animationend="advance"
-                  />
-                </svg>
-                <Icon :name="userPaused ? 'play' : 'pause'" :size="12" />
-              </button>
-              <button class="music-ctl" aria-label="Next release" @click="advance">
-                <Icon name="chevright" :size="12" />
-              </button>
-            </div>
+            <CycleControls
+              v-model:paused="userPaused"
+              :ring-paused="hoverPaused || focusPaused"
+              :cycle-key="cycleKey"
+              :duration="CYCLE_MS"
+              item-label="release"
+              :inline="isPhone"
+              @prev="retreat"
+              @next="advance"
+            />
           </Teleport>
           <p v-if="summary" class="music-sum">{{ summary }}</p>
         </div>
@@ -223,15 +207,16 @@ function ensureProbe(url: string | null) {
 watch(feed, (rows) => { for (const r of rows) ensureProbe(r.backdrop) }, { immediate: true })
 
 // ── Carousel clock ──
-// Identical mechanics to HeroNewIn: the pause button's progress ring IS the
-// timer; advance/retreat re-key it. Hover, keyboard focus, and the sticky
-// button pause independently and compose.
+// Identical mechanics to HeroNewIn: CycleControls' ring IS the timer;
+// advance/retreat re-key it. Hover, keyboard focus (ring-paused), and the
+// sticky button (v-model) pause independently and compose.
+const CYCLE_MS = 15_000
 const cursor = ref(0)
 const cycleKey = ref(0)
 const hoverPaused = ref(false)
 const focusPaused = ref(false)
 const userPaused = ref(false)
-const ringPaused = computed(() => hoverPaused.value || focusPaused.value || userPaused.value)
+// Still needed locally: skips the shared-element FLIP flight in advance().
 const reducedMotion = import.meta.client
   ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
   : false
@@ -244,7 +229,7 @@ function onHover(state: boolean) {
   if (canHover) hoverPaused.value = state
 }
 function onFocus(e: FocusEvent, state: boolean) {
-  if ((e.target as HTMLElement | null)?.closest?.('.music-ctls')) return
+  if ((e.target as HTMLElement | null)?.closest?.('.cyc-ctls')) return
   focusPaused.value = state
 }
 
@@ -520,45 +505,6 @@ const summary = computed(() => {
   padding-top: 26px;
   text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
-.music-ctls { display: flex; align-items: center; gap: 6px; }
-.music-ctls.inline { margin-left: auto; align-self: flex-start; }
-.music-ctl {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-1);
-  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-  transition: background 0.12s, color 0.12s;
-}
-.music-ctl:hover { background: var(--bg-3); color: var(--fg-0); }
-.music-pause { position: relative; }
-/* Cycle-progress ring: full = handoff. Drawn just inside the button edge,
-   rotated so it fills from 12 o'clock. */
-.ctl-ring {
-  position: absolute;
-  inset: -1px;
-  transform: rotate(-90deg);
-  pointer-events: none;
-}
-.ctl-ring-fill {
-  fill: none;
-  stroke: var(--gold);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 72.3; /* 2π · r(11.5) */
-  stroke-dashoffset: 72.3;
-  animation: ring-fill 15s linear forwards; /* = the carousel cycle length */
-}
-.ctl-ring-fill.paused { animation-play-state: paused; }
-@keyframes ring-fill { to { stroke-dashoffset: 0; } }
-
 /* Spotlight handoff crossfade. */
 .spot-enter-active { transition: opacity 0.35s ease, transform 0.35s ease; }
 .spot-leave-active { transition: opacity 0.18s ease; }

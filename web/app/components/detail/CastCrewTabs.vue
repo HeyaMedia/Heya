@@ -135,9 +135,19 @@ const crewByDepartment = computed(() => {
 /* ── Pill variant (movies / tv) ─────────────────────────────────────── */
 .cct-pill .section-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .cct-pill .tab-bar { display: flex; gap: 4px; }
-.cct-pill .tab-btn { padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; color: var(--fg-2); background: none; border: none; cursor: pointer; transition: all 0.15s; }
-.cct-pill .tab-btn:hover { background: rgb(var(--ink) / 0.04); }
-.cct-pill .tab-btn[data-state="active"] { background: var(--bg-3); color: var(--fg-0); font-weight: 600; }
+/* Glass pills with a float shadow — bare ink washes vanished over the
+   ambient artwork behind the page. */
+.cct-pill .tab-btn {
+  padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500;
+  color: var(--fg-2); cursor: pointer; transition: all 0.15s;
+  background: color-mix(in oklab, var(--bg-2) 70%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+}
+.cct-pill .tab-btn:hover { background: color-mix(in oklab, var(--bg-2) 88%, transparent); color: var(--fg-0); }
+.cct-pill .tab-btn[data-state="active"] { background: var(--bg-3); color: var(--fg-0); font-weight: 600; border-color: var(--border-strong); }
 .cct-pill .tab-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); margin-left: 4px; }
 .cct-pill .cast-card { width: 120px; }
 .cct-pill .crew-dept { margin-bottom: 20px; }

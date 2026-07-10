@@ -8,11 +8,24 @@
          landscape backdrops, so we use the same profile gallery photos —
          blurred + darkened so the headshot still reads as the focal point. -->
     <div class="hero-section">
-      <div class="hero-bg">
-        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: showA }" />
-        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: !showA }" />
+      <div class="hero-bg" :class="{ 'ambient-extended': heroExtended }">
+        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: showA, 'bg-photo': usingPhotos }" />
+        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: !showA, 'bg-photo': usingPhotos }" />
         <div class="hero-bg-fade" />
       </div>
+
+      <!-- Backdrop cycle cluster — switches between the backdrops of the
+           titles this person is credited in (photos fallback included). -->
+      <CycleControls
+        v-if="backdropPool.length > 1"
+        v-model:paused="carouselPaused"
+        :cycle-key="cycleKey"
+        :duration="BACKDROP_INTERVAL"
+        item-label="backdrop"
+        class="hero-cycle"
+        @prev="retreatBackdrop"
+        @next="advanceBackdrop"
+      />
 
       <div class="hero-content">
         <!-- Left column: portrait + thumbnail strip -->
@@ -328,38 +341,109 @@ function openGallery(idx: number) {
 }
 
 // -- Backdrop crossfade --------------------------------------------------
-// Person pages don't have proper landscape backdrops, but the profile
-// gallery often contains a few stylized portraits. We re-use them as the
-// hero background — heavily blurred + darkened via CSS so the focal-point
-// portrait still reads as the subject. Pool = profiles minus the first
-// (hero) image so the backdrop never just mirrors the foreground.
+// The hero cycles the BACKDROPS of the person's local credited titles —
+// the movies/shows (and artist pages) they appear in. Each candidate is
+// probed at thumbnail size first (not every credit has a backdrop; the
+// endpoint 404s). When none resolve, fall back to the profile gallery
+// portraits, heavily blurred (see .hero-bg-img.bg-photo). The clock is
+// CycleControls' ring (shared BACKDROP_INTERVAL); every move re-keys it.
+const creditBackdropCandidates = computed<string[]>(() => {
+  const seen = new Set<number>()
+  const urls: string[] = []
+  for (const c of [...(data.value?.cast_credits || []), ...(data.value?.crew_credits || [])]) {
+    if (seen.has(c.media_item_id)) continue
+    seen.add(c.media_item_id)
+    const u = useBackdropUrl({ id: c.media_item_id, public_id: c.media_item_public_id })
+    if (u) urls.push(u)
+  }
+  return urls.slice(0, 14)
+})
+
+function probeImage(url: string) {
+  return new Promise<boolean>((resolve) => {
+    if (import.meta.server) return resolve(false)
+    const img = new Image()
+    img.onload = () => resolve(true)
+    img.onerror = () => resolve(false)
+    img.src = `${url}?w=64`
+  })
+}
+
+const creditBackdrops = ref<string[]>([])
+let probeToken = 0
+watch(creditBackdropCandidates, async (cands) => {
+  const token = ++probeToken
+  const ok: string[] = []
+  for (const u of cands) {
+    if (await probeImage(u)) ok.push(u)
+    if (token !== probeToken) return // newer credit list superseded this pass
+    if (ok.length >= 8) break
+  }
+  creditBackdrops.value = ok
+}, { immediate: true })
+
+const usingPhotos = computed(() => creditBackdrops.value.length === 0)
 const backdropPool = computed<string[]>(() => {
+  if (!usingPhotos.value) return creditBackdrops.value
   const profs = data.value?.profiles || []
   if (profs.length <= 1) return profs.map(p => p.url)
   return profs.slice(1).map(p => p.url)
 })
+
 const showA = ref(true)
 const backdropA = ref<string | null>(null)
 const backdropB = ref<string | null>(null)
 const bdIdx = ref(0)
-const BACKDROP_INTERVAL = 8000
-let bdTimer: ReturnType<typeof setTimeout> | null = null
+const cycleKey = ref(0)
+const carouselPaused = ref(false)
 
-function advanceBackdrop() {
-  if (backdropPool.value.length <= 1) return
-  bdIdx.value = (bdIdx.value + 1) % backdropPool.value.length
-  const url = backdropPool.value[bdIdx.value] || null
+function showBdIdx(idx: number) {
+  bdIdx.value = idx
+  const url = backdropPool.value[idx] || null
   if (showA.value) backdropB.value = url
   else backdropA.value = url
   showA.value = !showA.value
+  cycleKey.value++
 }
 
-function startBackdropTimer() {
-  if (backdropPool.value.length <= 1) return
-  bdTimer = setTimeout(() => { advanceBackdrop(); startBackdropTimer() }, BACKDROP_INTERVAL)
+function advanceBackdrop() {
+  const n = backdropPool.value.length
+  if (n <= 1) return
+  showBdIdx((bdIdx.value + 1) % n)
 }
 
-onUnmounted(() => { if (bdTimer) clearTimeout(bdTimer) })
+function retreatBackdrop() {
+  const n = backdropPool.value.length
+  if (n <= 1) return
+  showBdIdx((bdIdx.value - 1 + n) % n)
+}
+
+// (Re)seed whenever the pool changes — photos on first paint, swapping to
+// credit backdrops when the probe pass lands. Second image preloads into
+// the hidden slot so the first crossfade is instant rather than blank.
+watch(backdropPool, (pool) => {
+  bdIdx.value = 0
+  backdropA.value = pool[0] || null
+  backdropB.value = pool[1] || pool[0] || null
+  showA.value = true
+  cycleKey.value++
+}, { immediate: true })
+
+// Ambient extension — CREDIT BACKDROPS ONLY: the current title backdrop
+// becomes the full-page layer (local copies hide via .ambient-extended).
+// The profile-PHOTO fallback never claims: the ambient layer's light 9px
+// blur would put a giant near-crisp face behind the whole page, defeating
+// the heavy-blur scenery treatment those portraits get locally — in photos
+// mode the hero keeps its own blurred art and the layer rides its route
+// pool instead.
+const { ambientEnabled } = useAppearance()
+const background = useBackground()
+const heroExtended = computed(() => ambientEnabled.value && !usingPhotos.value)
+const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
+watch([currentHeroBackdrop, heroExtended], ([url, extended]) => {
+  if (extended && url) background.set(url)
+  else background.clear()
+}, { immediate: true })
 
 // Age & years active — small derived facts that surface as chips on the
 // hero. Age compares birthday to deathday (if dead) or today.
@@ -629,17 +713,8 @@ onMounted(async () => {
     data.value = await $heya('/api/person/{id}', { path: { id: slug.value } }) as PersonResponse
   } catch { /* empty */ }
   loading.value = false
-
-  // Seed the backdrop crossfade once the gallery is known. The first
-  // backdrop is visible on mount; the second is preloaded into the
-  // hidden img so the first transition is instant rather than blank.
-  if (backdropPool.value.length > 0) {
-    backdropA.value = backdropPool.value[0] || null
-    if (backdropPool.value.length > 1) {
-      backdropB.value = backdropPool.value[1] || null
-      startBackdropTimer()
-    }
-  }
+  // Backdrop seeding is reactive (the backdropPool watcher above) — photos
+  // first, upgrading to credit backdrops when the probe pass resolves.
 })
 </script>
 
@@ -651,9 +726,11 @@ onMounted(async () => {
    the portrait and the filmography section when the bio is short.
    Person pages don't have proper backdrops so we recycle the profile
    gallery photos with heavy blur via the `.hero-bg-img` filter below. */
-.hero-bg-img {
-  /* Heavy blur + darkening — the foreground portrait remains the focal
-     point. Scale slightly so the blur doesn't expose the photo edge. */
+/* Credit backdrops (movies/shows the person is in) render crisp like every
+   other detail hero; only the profile-PHOTO fallback keeps the heavy blur —
+   portraits are scenery there, and the foreground headshot must stay the
+   focal point. Scale hides the blur's edge bleed. */
+.hero-bg-img.bg-photo {
   filter: blur(30px) brightness(0.45) saturate(0.85);
   transform: scale(1.08);
 }
@@ -671,7 +748,9 @@ onMounted(async () => {
 .hero-portrait {
   position: relative; aspect-ratio: 2/3;
   border-radius: var(--r-md); overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgb(var(--ink) / 0.06);
+  /* Shade token, not literal black — a 0.6 pitch shadow read as a hole on
+     the light theme's paper. */
+  box-shadow: 0 24px 60px rgb(var(--shade) / 0.5), 0 0 0 1px rgb(var(--ink) / 0.06);
   background: var(--bg-3);
 }
 .hero-portrait-img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -725,9 +804,13 @@ onMounted(async () => {
   display: inline-flex; align-items: center; gap: 6px;
   height: 30px; padding: 0 12px;
   border-radius: 100px;
-  background: rgba(255,255,255,0.05); /* on artwork — stays literal, see comment above */
+  /* Theme glass — the old literal white wash vanished on light paper. */
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
-  color: var(--fg-2); text-decoration: none;
+  box-shadow: var(--shadow-el);
+  color: var(--fg-1); text-decoration: none;
   font-size: 12px; font-weight: 500;
   transition: all 0.15s;
 }
@@ -743,14 +826,22 @@ onMounted(async () => {
 .bio-lang-pill {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   padding: 3px 9px; border-radius: 100px;
-  color: var(--fg-3); background: transparent;
+  color: var(--fg-2);
+  background: color-mix(in oklab, var(--bg-2) 72%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   text-transform: uppercase; letter-spacing: 0.06em;
   cursor: pointer; transition: all 0.15s;
 }
 .bio-lang-pill:hover { color: var(--fg-0); border-color: var(--fg-3); }
 .bio-lang-pill.active { color: var(--gold); background: var(--gold-soft); border-color: transparent; }
-.bio-para { font-size: 14.5px; line-height: 1.7; color: var(--fg-1); margin: 0 0 14px; }
+.bio-para {
+  font-size: 14.5px; line-height: 1.7; color: var(--fg-1); margin: 0 0 14px;
+  /* Art-proof halo — the hero sits on raw artwork in ambient mode. */
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
 .bio-toggle {
   font-size: 11px; font-weight: 700; color: var(--gold);
   font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em;
@@ -759,25 +850,30 @@ onMounted(async () => {
 }
 .bio-toggle:hover { opacity: 0.8; }
 
+/* fg-1/fg-2 + halos, not the muted tiers — this sits over hero artwork. */
 .person-aka {
   margin-top: 18px; padding-top: 14px;
   border-top: 1px solid var(--border);
-  font-size: 12px; color: var(--fg-3);
+  font-size: 12px; color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .aka-label {
   font-family: var(--font-mono); text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--fg-3); margin-right: 8px;
+  letter-spacing: 0.06em; color: var(--fg-2); margin-right: 8px;
 }
-.aka-names { color: var(--fg-2); }
+.aka-names { color: var(--fg-1); }
 
 /* Sidebar stat card — same surface chrome as the rest of the app. The
    bar chart is a tiny inline visualization rather than a separate chart
    library; matches how settings panels render usage bars. */
 .stat-card {
-  background: var(--bg-2);
+  background: color-mix(in oklab, var(--bg-2) 85%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 16px 18px;
+  box-shadow: var(--shadow-card);
 }
 .stat-card-head {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
@@ -821,6 +917,7 @@ onMounted(async () => {
   background: var(--bg-3);
   border-radius: 100px;
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
 }
 .scope-btn {
   display: inline-flex; align-items: center; gap: 8px;
@@ -830,7 +927,7 @@ onMounted(async () => {
   cursor: pointer; transition: all 0.15s;
 }
 .scope-btn:hover { color: var(--fg-0); }
-.scope-btn.active { background: var(--bg-1); color: var(--fg-0); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+.scope-btn.active { background: var(--bg-1); color: var(--fg-0); box-shadow: 0 1px 3px rgb(var(--shade) / 0.3); }
 .scope-count {
   font-size: 11px; font-family: var(--font-mono);
   color: var(--fg-3); padding: 1px 7px; border-radius: 999px;
@@ -852,8 +949,10 @@ onMounted(async () => {
 .filter-tab {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 600;
-  color: var(--fg-2); background: transparent;
+  color: var(--fg-2);
+  background: color-mix(in oklab, var(--bg-2) 72%, transparent);
   border: 1px solid var(--border); white-space: nowrap;
+  box-shadow: var(--shadow-el);
   transition: all 0.15s;
 }
 .filter-tab:hover { border-color: var(--fg-3); color: var(--fg-0); }

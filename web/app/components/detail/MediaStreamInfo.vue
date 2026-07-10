@@ -109,9 +109,14 @@ function playbackLabel(action: string) {
 <style scoped>
 .stream-details {
   padding: 12px;
-  background: rgb(var(--shade) / 0.45); backdrop-filter: blur(12px);
-  border: 1px solid rgb(var(--ink) / 0.06);
+  /* Theme-aware glass: the old shade-derived fill was a dark slab under
+     dark text on the light theme. */
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-el);
 }
 .stream-header {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;

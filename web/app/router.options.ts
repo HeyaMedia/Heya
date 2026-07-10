@@ -47,6 +47,9 @@ export default <RouterConfig>{
       )
       if (franchises) {
         extra.push({ path: `/${base}/franchises`, component, meta })
+        // Roulette — movies-only decision-paralysis killer, a view within
+        // the section (keeps the sidebar) like recommendations above.
+        extra.push({ path: `/${base}/roulette`, component, meta })
         // The per-franchise view is the rich standalone /collection/:id page
         // (linked from the Franchises grid + movie "part of collection"
         // badges). Keep the old browse-filter URL working as a redirect.

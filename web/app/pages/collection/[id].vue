@@ -7,10 +7,24 @@
            franchise (falls back to the collection's own backdrop). Poster +
            franchise name + aggregated genres + watch progress + "up next" CTA
            sit over the gradient. -->
-      <div class="ch-hero" @mouseenter="pauseCarousel" @mouseleave="resumeCarousel">
-        <div class="ch-bd" :class="{ 'ch-bd-on': showA }" :style="bdStyle(bdA)" />
-        <div class="ch-bd" :class="{ 'ch-bd-on': !showA }" :style="bdStyle(bdB)" />
-        <div class="ch-hero-fade" />
+      <div class="ch-hero">
+        <div class="ch-bd-wrap" :class="{ 'ambient-extended': ambientEnabled }">
+          <div class="ch-bd" :class="{ 'ch-bd-on': showA }" :style="bdStyle(bdA)" />
+          <div class="ch-bd" :class="{ 'ch-bd-on': !showA }" :style="bdStyle(bdB)" />
+          <div class="ch-hero-fade" />
+        </div>
+
+        <!-- Backdrop cycle cluster — the shared prev/pause/next controls. -->
+        <CycleControls
+          v-if="backdropUrls.length > 1"
+          v-model:paused="carouselPaused"
+          :cycle-key="cycleKey"
+          :duration="BACKDROP_INTERVAL"
+          item-label="backdrop"
+          class="hero-cycle"
+          @prev="retreat"
+          @next="advance"
+        />
 
         <div class="ch-hero-body page-pad">
           <div v-if="collection.poster_path" class="ch-poster">
@@ -46,7 +60,7 @@
             <p v-if="collection.overview" class="ch-overview">{{ collection.overview }}</p>
 
             <div class="ch-cta">
-              <NuxtLink v-if="nextUp" :to="partUrl(nextUp)" class="ch-cta-btn">
+              <NuxtLink v-if="nextUp" :to="partUrl(nextUp)" class="ch-cta-btn" :style="ctaStyle">
                 <Icon name="play" :size="15" />
                 <span>{{ ctaVerb }}: {{ nextUp.title }}</span>
               </NuxtLink>
@@ -115,6 +129,7 @@
 
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
+import type { ImageTone } from '~/composables/useImageTone'
 
 interface CollectionDetail {
   id: number
@@ -229,35 +244,60 @@ const showA = ref(true)
 const bdA = ref<string | null>(null)
 const bdB = ref<string | null>(null)
 const bdIdx = ref(0)
-const paused = ref(false)
-let timer: ReturnType<typeof setInterval> | null = null
+const cycleKey = ref(0)
+const carouselPaused = ref(false)
 
 function bdStyle(url: string | null) {
   return url ? { backgroundImage: `url("${url}")` } : {}
 }
-function advance() {
-  const urls = backdropUrls.value
-  if (urls.length <= 1) return
-  bdIdx.value = (bdIdx.value + 1) % urls.length
-  const url = urls[bdIdx.value] ?? null
+// The clock is CycleControls' ring (BACKDROP_INTERVAL): its animationend
+// calls advance(); every move re-keys the ring for a fresh window. Pausing
+// freezes the ring, so nothing fires while paused — no timer bookkeeping.
+function showIdx(idx: number) {
+  const url = backdropUrls.value[idx] ?? null
+  bdIdx.value = idx
   if (showA.value) bdB.value = url; else bdA.value = url
   showA.value = !showA.value
+  cycleKey.value++
 }
-function stopTimer() { if (timer) { clearInterval(timer); timer = null } }
-function startTimer() {
-  stopTimer()
-  if (!paused.value && backdropUrls.value.length > 1) timer = setInterval(advance, 6500)
+function advance() {
+  const n = backdropUrls.value.length
+  if (n <= 1) return
+  showIdx((bdIdx.value + 1) % n)
 }
-function pauseCarousel() { paused.value = true; stopTimer() }
-function resumeCarousel() { paused.value = false; startTimer() }
+function retreat() {
+  const n = backdropUrls.value.length
+  if (n <= 1) return
+  showIdx((bdIdx.value - 1 + n) % n)
+}
 function seedCarousel() {
   const urls = backdropUrls.value
   bdIdx.value = 0
   bdA.value = urls[0] ?? null
   bdB.value = urls[0] ?? null
   showA.value = true
-  startTimer()
+  cycleKey.value++
 }
+
+// Ambient extension + artwork-adaptive CTA, same recipe as the detail
+// heroes: the current backdrop becomes the full-page layer (the local copy
+// hides via .ambient-extended), and the Start/Continue button wears its
+// dominant tone. External CDN backdrops that block canvas readback simply
+// fall back to the gold coat.
+const { ambientEnabled } = useAppearance()
+const background = useBackground()
+const currentBd = computed(() => (showA.value ? bdA.value : bdB.value) || null)
+watch([currentBd, ambientEnabled], ([url, on]) => {
+  if (on && url) background.set(url)
+  else background.clear()
+}, { immediate: true })
+
+const heroTone = ref<ImageTone | null>(null)
+watch(currentBd, async (url) => {
+  heroTone.value = url ? await sampleImageTone(url) : null
+}, { immediate: true })
+const ctaStyle = computed(() =>
+  heroTone.value ? { background: heroTone.value.main, color: heroTone.value.ink } : undefined)
 
 onMounted(async () => {
   const [res, state] = await Promise.allSettled([
@@ -279,8 +319,6 @@ onMounted(async () => {
   await nextTick()
   seedCarousel()
 })
-
-onUnmounted(stopTimer)
 </script>
 
 <style scoped>
@@ -292,9 +330,12 @@ onUnmounted(stopTimer)
   min-height: 480px;
   display: flex;
   align-items: flex-end;
-  overflow: hidden;
+  /* NO overflow clipping here — the poster's drop shadow bleeds past the
+     hero bottom by design (a clip renders it as a hard line). The scaled
+     backdrop images are clipped by .ch-bd-wrap instead. */
 }
 .ch-hero-skeleton { height: 480px; background: var(--bg-2); }
+.ch-bd-wrap { position: absolute; inset: 0; overflow: hidden; }
 .ch-bd {
   position: absolute; inset: 0;
   background-size: cover; background-position: center 22%;
@@ -308,6 +349,11 @@ onUnmounted(stopTimer)
     linear-gradient(to top, var(--bg-1) 3%, color-mix(in srgb, var(--bg-1) 55%, transparent) 34%, transparent 72%),
     linear-gradient(to right, var(--bg-1) 2%, color-mix(in srgb, var(--bg-1) 40%, transparent) 42%, transparent 68%);
 }
+/* Ambient extension: the AmbientBackdrop layer owns the artwork full-page —
+   the hero paints nothing of its own (a local copy would seam at the hero's
+   edges against the continuing full-page art). */
+.ch-bd-wrap.ambient-extended .ch-bd,
+.ch-bd-wrap.ambient-extended .ch-hero-fade { display: none; }
 .ch-hero-body {
   position: relative; z-index: 2;
   display: flex; gap: 34px; align-items: flex-end;
@@ -316,7 +362,9 @@ onUnmounted(stopTimer)
 .ch-poster {
   width: 184px; flex-shrink: 0;
   border-radius: var(--r-md); overflow: hidden;
-  box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+  /* Shade-token shadow (theme-aware) instead of literal black — it bleeds
+     past the hero bottom now, over whatever canvas/artwork sits there. */
+  box-shadow: 0 18px 50px rgb(var(--shade) / 0.45), 0 0 0 1px rgb(var(--ink) / 0.06);
   aspect-ratio: 2/3; background: var(--bg-3);
 }
 .ch-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -324,37 +372,44 @@ onUnmounted(stopTimer)
 .ch-eyebrow {
   font-size: 10px; font-family: var(--font-mono); font-weight: 700;
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
-.ch-title { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 0; line-height: 1.05; }
+.ch-title {
+  font-size: 40px; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 0; line-height: 1.05;
+  text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1);
+}
 
 /* One integrated cluster: genres read brighter/heavier, keyword tags dimmer
-   and lowercase (and link to their keyword page). Blur keeps them legible over
-   the backdrop. */
+   and lowercase (and link to their keyword page). Theme glass — the old
+   literal white washes were invisible chips on the light theme's paper. */
 .ch-tagrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; max-width: 660px; }
 .ch-chip {
   padding: 3px 11px; border-radius: 100px; font-size: 11.5px; line-height: 1.55;
   border: 1px solid var(--border);
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-el);
   text-decoration: none; white-space: nowrap;
 }
-.ch-chip-genre { background: rgba(255,255,255,0.11); color: var(--fg-0); font-weight: 500; }
-.ch-chip-tag { background: rgba(255,255,255,0.05); color: var(--fg-2); transition: color 0.13s ease, border-color 0.13s ease; }
+.ch-chip-genre { background: color-mix(in oklab, var(--bg-2) 85%, transparent); color: var(--fg-0); font-weight: 500; }
+.ch-chip-tag { background: color-mix(in oklab, var(--bg-2) 62%, transparent); color: var(--fg-1); transition: color 0.13s ease, border-color 0.13s ease; }
 .ch-chip-tag:hover { color: var(--gold); border-color: var(--gold); }
 
 .ch-stats {
   display: flex; align-items: center; gap: 8px; margin-top: 16px;
-  font-size: 12.5px; font-family: var(--font-mono); color: var(--fg-2);
+  font-size: 12.5px; font-family: var(--font-mono); color: var(--fg-1);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .ch-dot { opacity: 0.5; }
 .ch-progress {
-  /* Sits over the hero backdrop like .ch-chip-* above — stays literal. */
   margin-top: 8px; width: 260px; max-width: 100%; height: 4px;
-  background: rgba(255,255,255,0.14); border-radius: 100px; overflow: hidden;
+  background: rgb(var(--ink) / 0.15); border-radius: 100px; overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(var(--shade) / 0.18);
 }
 .ch-progress-fill { height: 100%; background: var(--gold); border-radius: 100px; transition: width 0.3s ease; }
 
 .ch-overview {
   margin: 16px 0 0; font-size: 14px; line-height: 1.65; color: var(--fg-1);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
   display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 
@@ -364,7 +419,12 @@ onUnmounted(stopTimer)
   padding: 11px 20px; border-radius: var(--r-md);
   background: var(--gold); color: var(--bg-0);
   font-size: 14px; font-weight: 600; text-decoration: none;
-  max-width: 100%; transition: filter 0.15s ease, transform 0.1s ease;
+  max-width: 100%;
+  box-shadow: var(--shadow-el);
+  /* Slow glide as the backdrop tone (inline style) rotates. */
+  transition: filter 0.15s ease, transform 0.1s ease,
+              background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+              color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .ch-cta-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ch-cta-btn:hover { filter: brightness(1.08); }

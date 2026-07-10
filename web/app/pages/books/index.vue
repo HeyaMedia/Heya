@@ -7,7 +7,6 @@
       :active-view="null"
       type-label="Books"
       :total-count="items.length"
-      :hide-footer="true"
       @select="activeLib = $event"
     />
     <!-- Section-sidebar left drawer — phone (<=720px) and the compact band

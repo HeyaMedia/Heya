@@ -26,6 +26,9 @@ export interface AppearancePrefs {
   density: Density
   ambientMode: 'on' | 'off'
   ambientIntensity: number // scrim-relative backdrop visibility, 5–60 (%)
+  /** "More Like This" on detail pages: also show titles NOT in the library
+   *  (they link out to heya.media, which fetches on demand). */
+  showUnavailableRecs: boolean
 }
 
 export const ACCENTS: { name: AccentName; label: string; hex: string }[] = [
@@ -49,6 +52,7 @@ const DEFAULTS: AppearancePrefs = {
   density: 'comfortable',
   ambientMode: 'on',
   ambientIntensity: AMBIENT_INTENSITY_DEFAULT,
+  showUnavailableRecs: false,
 }
 
 // Boot-inline-style backgrounds must match --bg-1 per theme (heya.css).
@@ -144,6 +148,7 @@ export function useAppearance() {
           density: prefs.value.density,
           ambient_mode: prefs.value.ambientMode,
           ambient_intensity: prefs.value.ambientIntensity,
+          show_unavailable_recs: prefs.value.showUnavailableRecs,
         }
         await $fetch('/api/me/settings', { method: 'PUT', body: settings, headers })
       } catch {
@@ -168,6 +173,7 @@ export function useAppearance() {
     density?: string
     ambient_mode?: string
     ambient_intensity?: number
+    show_unavailable_recs?: boolean
   }) {
     if (!server) return
     const next = { ...prefs.value }
@@ -177,6 +183,7 @@ export function useAppearance() {
     if (server.ambient_mode === 'on' || server.ambient_mode === 'off')
       next.ambientMode = server.ambient_mode
     if (server.ambient_intensity) next.ambientIntensity = server.ambient_intensity
+    if (typeof server.show_unavailable_recs === 'boolean') next.showUnavailableRecs = server.show_unavailable_recs
     prefs.value = next
     apply()
     mirror()

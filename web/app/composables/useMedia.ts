@@ -99,6 +99,20 @@ export function mediaUrl(item: { id: number; public_id?: string; title: string; 
   return `/${prefix}/${s}`
 }
 
+// External heya.media page for a title we don't have locally. The aggregator
+// fetches on demand from /heya_{kind}:{provider}:{value} paths (same
+// construction as the scanner review's upstream link) — so a recommendation
+// with any strong provider id can open there in a new tab. Empty string when
+// no usable id exists (caller renders an inert card).
+export function heyaMediaExternalUrl(mediaType: string, externalIds?: Record<string, string> | null): string {
+  const kind = mediaType === 'tv' || mediaType === 'anime' ? 'tv' : mediaType
+  for (const provider of ['tmdb', 'imdb', 'tvdb'] as const) {
+    const value = externalIds?.[provider]
+    if (value) return `https://heya.media/heya_${kind}:${provider}:${value}`
+  }
+  return ''
+}
+
 export function personUrl(person: { id: number; name: string; slug?: string }): string {
   // A person's stable `slug` is only minted by the deep-fetch worker, which is
   // now lazy (runs on first person-page view). Before that lands the slug is

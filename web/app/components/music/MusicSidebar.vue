@@ -219,17 +219,37 @@ watch(() => props.section, (s) => {
 .music-sidebar {
   width: var(--music-sidebar-w);
   flex-shrink: 0;
-  /* Translucent over the ambient-backdrop layer; solid-enough for text. */
-  background: color-mix(in srgb, var(--bg-1) 55%, transparent);
+  /* Same treatment as the library sidebar: the TOP holds the navbar's
+     opaque --chrome for a beat, then fades into the panel glass — one
+     continuous surface from the topbar down. No border-right: any divider
+     re-splits the frame into stacked panels; the glass-vs-content contrast
+     defines the edge on its own. */
+  background: linear-gradient(to bottom,
+    var(--chrome) 0,
+    var(--chrome) 14px,
+    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  border-right: 1px solid var(--border);
   padding: 16px 8px 12px;
   display: flex;
   flex-direction: column;
   height: 100%;
   gap: 4px;
   transition: height 0.28s ease;
+}
+/* Firefox: seam-line workaround — no blur, more solid glass, S-curve stops
+   so the ramp has no visible knees (see FilterBar's Firefox block). */
+@supports (-moz-appearance: none) {
+  .music-sidebar {
+    backdrop-filter: none;
+    background: linear-gradient(to bottom,
+      var(--chrome) 0,
+      var(--chrome) 14px,
+      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
+      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
+      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
+      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
+  }
 }
 /* The fold-out cover (bottom:8px, height: sidebar-w − 16px → top at sidebar-w −
    8px from the shell bottom) rises into the sidebar's lower area. Shrink the

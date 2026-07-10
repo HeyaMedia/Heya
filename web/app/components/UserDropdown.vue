@@ -2,6 +2,19 @@
 import { DropdownMenuItem } from 'reka-ui'
 
 const { user, logout } = useAuth()
+const { prefs, set } = useAppearance()
+
+// The user-scoped settings links, straight from the settings nav's "You"
+// group — one source of truth, so this menu stays in sync with the
+// settings sidebar automatically.
+const { groups } = useSettingsNav()
+const youItems = computed(() => groups.value.find(g => g.id === 'you')?.items ?? [])
+
+const THEMES = [
+  { value: 'dark' as const, label: 'Dark' },
+  { value: 'light' as const, label: 'Light' },
+  { value: 'oled' as const, label: 'OLED' },
+]
 </script>
 
 <template>
@@ -24,6 +37,33 @@ const { user, logout } = useAuth()
 
     <div class="surface-divider" />
 
+    <!-- Theme quick-switch. Real DropdownMenuItems so arrow-key navigation
+         reaches them (plain buttons are invisible to the menu's roving
+         focus); `select` is prevented so picking a theme applies instantly
+         WITHOUT closing the menu. Full appearance controls live in
+         Settings → Appearance. -->
+    <div class="ud-theme-row" role="group" aria-label="Theme">
+      <DropdownMenuItem
+        v-for="t in THEMES"
+        :key="t.value"
+        class="ud-theme-btn"
+        :class="{ active: prefs.theme === t.value }"
+        :aria-checked="prefs.theme === t.value"
+        @select="(e: Event) => { e.preventDefault(); set('theme', t.value) }"
+      >{{ t.label }}</DropdownMenuItem>
+    </div>
+
+    <div class="surface-divider" />
+
+    <DropdownMenuItem v-for="item in youItems" :key="item.to" class="surface-item" as-child>
+      <NuxtLink :to="item.to">
+        <Icon :name="item.icon" :size="15" class="surface-item-icon" />
+        <span>{{ item.label }}</span>
+      </NuxtLink>
+    </DropdownMenuItem>
+
+    <div class="surface-divider" />
+
     <DropdownMenuItem class="surface-item" as-child>
       <NuxtLink to="/settings">
         <Icon name="settings" :size="15" class="surface-item-icon" />
@@ -31,10 +71,8 @@ const { user, logout } = useAuth()
       </NuxtLink>
     </DropdownMenuItem>
 
-    <div class="surface-divider" />
-
     <DropdownMenuItem class="surface-item surface-item-destructive" @select="logout()">
-      <Icon name="close" :size="15" class="surface-item-icon" />
+      <Icon name="sign-out" :size="15" class="surface-item-icon" />
       <span>Sign Out</span>
     </DropdownMenuItem>
   </AppMenu>
@@ -79,4 +117,39 @@ const { user, logout } = useAuth()
   text-overflow: ellipsis;
 }
 
+/* Theme quick-switch row */
+.ud-theme-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+}
+.ud-theme-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 0;
+  border-radius: var(--r-sm);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ud-theme-btn:hover,
+.ud-theme-btn[data-highlighted] {
+  color: var(--fg-0);
+  background: rgb(var(--ink) / 0.09);
+  outline: none;
+}
+.ud-theme-btn.active {
+  color: var(--gold-bright);
+  background: var(--gold-soft);
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+}
 </style>

@@ -96,30 +96,23 @@
       </div>
     </div>
 
-    <!-- Slide navigator: play/pause + counter + bars in one glass pill,
-         teleported into HeroDeck's top-right cluster beside the mode tabs
-         (defer: the #hero-deck-aux target renders in the same tick).
-         Clicking a bar pins that slide for 30s before rotation resumes. -->
+    <!-- Slide controls: the shared prev/pause/next cluster, teleported into
+         HeroDeck's top-right slot beside the mode tabs (defer: the
+         #hero-deck-aux target renders in the same tick). The ring is the
+         30s rotation clock; a trailer takeover freezes it, and any manual
+         move re-keys it — a fresh full window, which is what the old
+         click-to-pin promised. -->
     <Teleport defer to="#hero-deck-aux">
-    <div class="hero-nav" v-if="items.length > 1" @mouseenter="pauseHero" @mouseleave="resumeHero">
-      <button
-        class="hero-nav-toggle"
-        :aria-label="userPaused ? 'Resume slide rotation' : 'Pause slide rotation'"
-        @click="toggleUserPause"
-      >
-        <Icon :name="userPaused ? 'play' : 'pause'" :size="12" />
-      </button>
-      <span class="hero-counter">{{ String(currentIdx + 1).padStart(2, '0') }} / {{ String(items.length).padStart(2, '0') }}</span>
-      <div class="hero-dots">
-        <button
-          v-for="(_, i) in items"
-          :key="`hero-${i}-${currentIdx}`"
-          class="hero-dot"
-          :class="{ active: i === currentIdx, paused: (heroPaused || !!trailerSrc) && i === currentIdx }"
-          @click="pinHero(i)"
-        />
-      </div>
-    </div>
+      <CycleControls
+        v-if="items.length > 1"
+        v-model:paused="userPaused"
+        :ring-paused="!!trailerSrc"
+        :cycle-key="cycleKey"
+        :duration="INTERVAL"
+        item-label="slide"
+        @prev="retreat"
+        @next="advance"
+      />
     </Teleport>
   </section>
 </template>
@@ -157,11 +150,11 @@ const props = defineProps<{
 
 defineEmits<{ play: [item: MediaItem] }>()
 
-// Keep in sync with the .hero-dot::after `hero-fill 30s` animation below.
+// One rotation window — CycleControls' ring animates at exactly this.
 const INTERVAL = 30_000
 const TRAILER_LINGER = 4000
 const currentIdx = ref(0)
-const heroPaused = ref(false)
+const cycleKey = ref(0)
 const showA = ref(true)
 const bgA = ref<string | null>(null)
 const bgB = ref<string | null>(null)
@@ -280,9 +273,9 @@ function armTrailer() {
   const extraID = props.trailers?.[current.value.id]
   if (!extraID || reducedMotion || props.items.length === 0) return
   trailerDelay = setTimeout(() => {
-    // Takeover: the rotation timer stops; the trailer owns the slide until
-    // it ends (advance) or errors (resume rotation in place).
-    if (timeout) { clearTimeout(timeout); timeout = null }
+    // Takeover: setting trailerSrc freezes the cycle ring (ring-paused);
+    // the trailer owns the slide until it ends (advance) or errors
+    // (rotation resumes in place).
     // Native <video> requests can't carry the Authorization header — pass
     // the session token in the query, same as the player's stream URLs.
     const { token } = useAuth()
@@ -296,13 +289,11 @@ function killTrailer() {
   trailerVisible.value = false
 }
 
-function endTrailer(advance: boolean) {
+function endTrailer(advanceSlide: boolean) {
   killTrailer()
-  // A pinned slide holds regardless of the trailer's outcome — advancing
-  // here would break the 30s pin promise. The pin callback resumes rotation.
-  if (pinTimer) return
-  if (advance && props.items.length > 1) advanceHero()
-  if (!heroPaused.value && props.items.length > 1) startTimer()
+  // Fresh full window either way; only move on if the user hasn't paused.
+  if (advanceSlide && !userPaused.value && props.items.length > 1) advanceHero()
+  cycleKey.value++
 }
 
 function getBackdropUrl(idx: number) {
@@ -318,82 +309,34 @@ function advanceHero() {
   currentIdx.value = nextIdx
 }
 
-let timeout: ReturnType<typeof setTimeout> | null = null
-let startTime = 0
-let remaining = INTERVAL
-
-function startTimer() {
-  // Idempotent: overlapping resume paths (pause toggle clicked while
-  // hovering the pill, then mouseleave firing resumeHero again) must
-  // replace the pending chain, never stack a second one.
-  if (timeout) clearTimeout(timeout)
-  startTime = Date.now()
-  remaining = INTERVAL
-  timeout = setTimeout(() => {
-    advanceHero()
-    startTimer()
-  }, INTERVAL)
-}
-
-function pauseHero() {
-  heroPaused.value = true
-  if (timeout) clearTimeout(timeout)
-  remaining -= Date.now() - startTime
-}
-
-// Sticky user pause (the ⏸ in the nav pill) — outranks hover resume and
-// pins alike; only the button itself un-pauses.
+// ── Ring clock (CycleControls) ──
+// The cluster's progress ring IS the 30s timer: its animationend calls
+// advance(); every slide change re-keys it via cycleKey for a fresh full
+// window — which is exactly what the old click-to-pin machinery promised,
+// with none of the timer bookkeeping. The trailer takeover freezes the
+// ring through the ring-paused prop; the sticky pause is the v-model.
 const userPaused = ref(false)
-function toggleUserPause() {
-  userPaused.value = !userPaused.value
-  if (userPaused.value) {
-    if (pinTimer) { clearTimeout(pinTimer); pinTimer = null }
-    pauseHero()
-  } else {
-    remaining = INTERVAL
-    resumeHero()
-  }
+
+function advance() {
+  if (props.items.length <= 1) return
+  killTrailer()
+  advanceHero()
+  cycleKey.value++
 }
 
-function resumeHero() {
-  if (userPaused.value) return // sticky pause: only the toggle resumes
-  if (pinTimer) return // a clicked slide holds until its 30s elapse
-  heroPaused.value = false
-  if (trailerSrc.value) return // trailer owns the clock
-  if (timeout) clearTimeout(timeout) // never stack a second chain
-  startTime = Date.now()
-  timeout = setTimeout(() => {
-    advanceHero()
-    startTimer()
-  }, remaining)
-}
-
-// Click-to-pin: jump to the slide and hold it for 30s before rotation
-// resumes. Clicking another bar re-pins; hover pause/resume is bypassed
-// while pinned (see the guard in resumeHero).
-const PIN_MS = 30_000
-let pinTimer: ReturnType<typeof setTimeout> | null = null
-function pinHero(idx: number) {
-  jumpHero(idx)
-  heroPaused.value = true
-  if (timeout) clearTimeout(timeout)
-  if (pinTimer) clearTimeout(pinTimer)
-  pinTimer = setTimeout(() => {
-    pinTimer = null
-    remaining = INTERVAL
-    resumeHero()
-  }, PIN_MS)
+function retreat() {
+  if (props.items.length <= 1) return
+  jumpHero((currentIdx.value - 1 + props.items.length) % props.items.length)
 }
 
 function jumpHero(idx: number) {
   if (idx === currentIdx.value) return
   killTrailer()
-  if (timeout) clearTimeout(timeout)
   const url = getBackdropUrl(idx)
   if (showA.value) { bgB.value = url } else { bgA.value = url }
   showA.value = !showA.value
   currentIdx.value = idx
-  if (!heroPaused.value) startTimer()
+  cycleKey.value++
 }
 
 // --- Touch swipe between slides (phone) ------------------------------------
@@ -451,13 +394,12 @@ watch(
     if (!id) return
     const item = props.items[0]
     if (!item) return
-    if (timeout) { clearTimeout(timeout); timeout = null }
     killTrailer()
     initBackdrops()
     probeLogo(item)
     extractTint(item)
     armTrailer()
-    if (props.items.length > 1 && !heroPaused.value) startTimer()
+    cycleKey.value++ // fresh rotation window for the fresh deck
   },
   { immediate: true },
 )
@@ -467,10 +409,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (timeout) clearTimeout(timeout)
-  // A live pin outliving the component would fire resumeHero() detached
-  // and restart the rotation chain against a dead instance.
-  if (pinTimer) { clearTimeout(pinTimer); pinTimer = null }
   killTrailer()
 })
 </script>
@@ -583,12 +521,6 @@ onUnmounted(() => {
     transparent 92%);
   filter: blur(28px);
 }
-.hero-counter {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--fg-3);
-  letter-spacing: 0.06em;
-}
 .hero-title {
   font-size: 48px;
   font-weight: 600;
@@ -611,44 +543,6 @@ onUnmounted(() => {
 }
 .hero-actions .btn-primary {
   box-shadow: 0 0 24px rgba(var(--hero-tint), 0.25);
-}
-.hero-dots {
-  display: flex;
-  gap: 6px;
-  margin-top: 24px;
-}
-.hero-dot {
-  width: 32px;
-  height: 7px;
-  border-radius: 999px;
-  background: rgb(var(--ink) / 0.2);
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-/* Invisible hit-area extension — mouse users deserve fat targets too. */
-.hero-dot::before {
-  content: '';
-  position: absolute;
-  inset: -7px -3px;
-}
-.hero-dot:hover { background: rgb(var(--ink) / 0.35); }
-.hero-dot.active { background: rgb(var(--ink) / 0.15); }
-.hero-dot.active::after {
-  content: '';
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  background: var(--gold);
-  border-radius: 2px;
-  animation: hero-fill 30s linear forwards;
-}
-.hero-dot.paused::after {
-  animation-play-state: paused;
-}
-@keyframes hero-fill {
-  from { width: 0; }
-  to { width: 100%; }
 }
 @media (max-width: 900px) {
   .hero-inner { grid-template-columns: 1fr; gap: 24px; }
@@ -684,17 +578,6 @@ onUnmounted(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .hero-dots { margin-top: 14px; gap: 10px; }
-  /* Dots stay visually 32x3 but grow their hit area to ~44px tall via an
-     invisible ::before — overflow must switch to visible for it to render
-     (the ::after progress-fill is still clipped to the dot's own box because
-     it's positioned by inset:0, not by this rule). */
-  .hero-dot { overflow: visible; }
-  .hero-dot::before {
-    content: '';
-    position: absolute;
-    inset: -21px -6px;
-  }
 }
 
 /* Dominant-tone shifts blend instead of snapping as the deck cycles. */
@@ -704,38 +587,9 @@ onUnmounted(() => {
               box-shadow 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Slide navigator pill — lives in HeroDeck's top-right cluster (teleport),
-   over artwork in any theme. */
-.hero-nav {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 3px 12px 3px 5px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-}
-.hero-nav .hero-counter { text-shadow: none; }
-.hero-nav .hero-dots { margin: 0; }
-.hero-nav-toggle {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-1);
-  transition: background 0.12s, color 0.12s;
-}
-.hero-nav-toggle:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
-
 /* ── Art-proof readability (the hero sits on raw artwork in ambient mode) ──
    A --bg-1 halo adapts per theme: paper glow behind dark text in light,
    dark glow behind light text in dark. */
-.hero-counter,
 .hero-meta-row,
 .hero-synopsis {
   text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
@@ -746,10 +600,5 @@ onUnmounted(() => {
   background: color-mix(in oklab, var(--bg-2) 82%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-}
-/* Carousel bars: stronger base + a shade outline so they survive bright art. */
-.hero-dot {
-  background: rgb(var(--ink) / 0.38) !important;
-  box-shadow: 0 0 0 1px rgb(var(--shade) / 0.22), 0 1px 4px rgb(var(--shade) / 0.30);
 }
 </style>

@@ -6,7 +6,7 @@
   <div v-else-if="detail" class="scroll" style="height: 100%">
     <!-- Hero with crossfade backdrops -->
     <div class="hero-section">
-      <div class="hero-bg">
+      <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
         <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: showA }" />
         <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: !showA }" />
         <div class="hero-bg-fade" />
@@ -24,6 +24,9 @@
         </div>
 
         <div class="hero-info">
+          <!-- Provenance rail: collection + IMDb/TMDB/heya.media links. -->
+          <DetailLinksRow :media-item="detail.media_item" :collection="detail.collection" />
+
           <div class="detail-badges">
             <Chip gold>Movie</Chip>
             <Chip v-if="certification">{{ certification }}</Chip>
@@ -48,11 +51,11 @@
           </div>
 
           <div class="detail-actions">
-            <button v-if="playableFileRef" class="btn btn-primary" @click="play">
+            <button v-if="playableFileRef" class="btn btn-primary" :style="playStyle" @click="play">
               <Icon name="play" :size="16" /> {{ resumeInProgress ? 'Resume' : 'Play' }}
             </button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No File</button>
-            <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
+            <button class="btn btn-secondary" :style="listStyle" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
             <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
               <Icon :name="isFavorited ? 'heartfill' : 'heart'" :size="20" />
             </button>
@@ -108,16 +111,18 @@
         </div>
       </div>
 
-      <!-- Backdrop indicators -->
-      <div v-if="backdropAssets.length > 1" class="bd-indicators" @mouseenter="pauseCarousel" @mouseleave="resumeCarousel">
-        <button
-          v-for="(_, i) in backdropAssets"
-          :key="`bd-${i}-${backdropIdx}`"
-          class="bd-bar"
-          :class="{ active: i === backdropIdx, paused: carouselPaused && i === backdropIdx }"
-          @click="jumpToBackdrop(i)"
-        />
-      </div>
+      <!-- Backdrop cycle cluster — the shared prev/pause/next controls,
+           top right of the hero (same spot as the home deck's). -->
+      <CycleControls
+        v-if="backdropAssets.length > 1"
+        v-model:paused="carouselPaused"
+        :cycle-key="cycleKey"
+        :duration="BACKDROP_INTERVAL"
+        item-label="backdrop"
+        class="hero-cycle"
+        @prev="retreatBackdrop"
+        @next="advanceBackdrop"
+      />
 
       <!-- Expand backdrop -->
       <button v-if="backdropAssets.length > 0" class="hero-expand" @click="openBackdropLightbox">
@@ -201,8 +206,22 @@
         />
       </AppDialog>
 
-      <!-- Recommendations -->
-      <div v-if="detail.recommendations?.length" class="detail-section">
+      <!-- Part of a collection: the full set as its own row, echoing the
+           prominent link up in the hero rail. -->
+      <div v-if="detail.collection && collectionMovies.length" class="detail-section">
+        <ContentRow
+          :title="detail.collection.name"
+          subtitle="Part of this collection"
+          :items="collectionMovies"
+          more="View collection"
+          @tile="(item) => navigateTo(mediaUrl(item as MediaItem))"
+          @more="navigateTo(`/collection/${detail!.collection!.id}`)"
+        />
+      </div>
+
+      <!-- Recommendations: library titles by default; the appearance toggle
+           adds the rest as heya.media links (new tab, fetch-on-demand). -->
+      <div v-if="visibleRecs.length" class="detail-section">
         <div class="section-row-head">
           <h3 class="section-title-lg">More Like This</h3>
           <div v-if="recsOverflows" class="scroll-controls">
@@ -214,26 +233,28 @@
           </div>
         </div>
         <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
-          <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
-            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id ?? undefined, title: r.title ?? '', slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+          <AppContextMenu v-for="r in visibleRecs" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+            <NuxtLink :to="recTo(r)" :target="r.local_media_item_id ? undefined : '_blank'" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
               <MediaCard
                 :idx="r.id"
                 :src="recPosterUrl(r)"
                 aspect="2/3"
                 :title="r.title ?? 'Untitled'"
+                :badge-tl="r.local_media_item_id ? '' : 'heya.media ↗'"
                 :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
               />
             </NuxtLink>
           </AppContextMenu>
         </div>
         <div v-else class="rec-grid">
-          <AppContextMenu v-for="r in detail.recommendations" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
-            <NuxtLink :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id ?? undefined, title: r.title ?? '', slug: r.local_slug ?? undefined, media_type: r.media_type }) : ''" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+          <AppContextMenu v-for="r in visibleRecs" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+            <NuxtLink :to="recTo(r)" :target="r.local_media_item_id ? undefined : '_blank'" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
               <MediaCard
                 :idx="r.id"
                 :src="recPosterUrl(r)"
                 aspect="2/3"
                 :title="r.title ?? 'Untitled'"
+                :badge-tl="r.local_media_item_id ? '' : 'heya.media ↗'"
                 :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
               />
             </NuxtLink>
@@ -256,7 +277,8 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaDetail, MediaExtra, MediaItem, StreamInfoResponse, UserList } from '~~/shared/types'
+import type { MediaDetail, MediaExtra, MediaItem, MediaRecommendation, StreamInfoResponse, UserList } from '~~/shared/types'
+import type { ImageTone } from '~/composables/useImageTone'
 import { useQuery } from '@tanstack/vue-query'
 
 const route = useRoute()
@@ -314,7 +336,7 @@ function checkRecsOverflow() {
     if (recsScrollEl.value) {
       recsOverflows.value = recsScrollEl.value.scrollWidth > recsScrollEl.value.clientWidth
     } else {
-      recsOverflows.value = (detail.value?.recommendations?.length || 0) > 6
+      recsOverflows.value = visibleRecs.value.length > 6
     }
   })
 }
@@ -349,9 +371,67 @@ function openVideo(key: string, title: string) {
 
 // Crossfade backdrops — shared carousel engine.
 const {
-  showA, backdropA, backdropB, backdropIdx, carouselPaused, backdropAssets,
-  pauseCarousel, resumeCarousel, jumpToBackdrop, seedCarousel, openBackdropLightbox,
+  showA, backdropA, backdropB, carouselPaused, cycleKey, backdropAssets,
+  advanceBackdrop, retreatBackdrop, seedCarousel, openBackdropLightbox,
 } = useBackdropCarousel(detail, { maxSortOrder: 1000 })
+
+// Ambient extension: with the ambient background on, this page's current
+// hero backdrop becomes the full-page layer (the hero image "extends" down
+// the whole page) — the local hero <img> hides via .ambient-extended and
+// the AmbientBackdrop layer follows the carousel. Off = classic scoped hero.
+const { ambientEnabled, prefs } = useAppearance()
+const background = useBackground()
+const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
+watch([currentHeroBackdrop, ambientEnabled], ([url, on]) => {
+  if (on && url) background.set(url)
+  else background.clear()
+}, { immediate: true })
+
+// Artwork-adaptive actions, same recipe as the home hero: Play wears the
+// backdrop's dominant tone, My List a soft tint of its complement. Theme
+// coats stay as the fallback when sampling fails.
+const heroTone = ref<ImageTone | null>(null)
+watch(currentHeroBackdrop, async (url) => {
+  heroTone.value = url ? await sampleImageTone(url) : null
+}, { immediate: true })
+const playStyle = computed(() =>
+  heroTone.value ? { background: heroTone.value.main, color: heroTone.value.ink } : undefined)
+const listStyle = computed(() =>
+  heroTone.value
+    ? {
+        background: `rgb(${heroTone.value.complementTriplet} / 0.16)`,
+        boxShadow: `inset 0 0 0 1px rgb(${heroTone.value.complementTriplet} / 0.35)`,
+      }
+    : undefined)
+
+// Part of a collection → the full set as a bottom row (View collection
+// covers the parts not in the library yet).
+const collectionQuery = useQuery({
+  queryKey: computed(() => ['collection', detail.value?.collection?.id ?? 0]),
+  queryFn: async () => (await $heya('/api/collections/{id}', {
+    path: { id: detail.value!.collection!.id },
+  })) as { movies?: MediaItem[] },
+  enabled: computed(() => !!detail.value?.collection?.id),
+  staleTime: 1000 * 60 * 10,
+})
+const collectionMovies = computed<MediaItem[]>(() => collectionQuery.data.value?.movies ?? [])
+
+// "More Like This": library titles only by default; the appearance toggle
+// adds the rest as heya.media links (fetch-on-demand upstream pages).
+// Externals without a usable provider id are dropped rather than rendered —
+// a card whose link resolves nowhere would open a junk tab.
+const visibleRecs = computed(() => {
+  const recs = detail.value?.recommendations ?? []
+  if (!prefs.value.showUnavailableRecs) return recs.filter(r => r.local_media_item_id)
+  return recs.filter(r => r.local_media_item_id || heyaMediaExternalUrl(r.media_type, r.external_ids))
+})
+
+function recTo(r: MediaRecommendation): string {
+  if (r.local_media_item_id) {
+    return mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id ?? undefined, title: r.title ?? '', slug: r.local_slug ?? undefined, media_type: r.media_type })
+  }
+  return heyaMediaExternalUrl(r.media_type, r.external_ids)
+}
 
 // Lightbox openers
 function openPosterLightbox() {
@@ -673,7 +753,9 @@ watch(detail, async (d) => {
 
 /* Recs */
 .rec-card { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
-.rec-card.rec-external { cursor: default; opacity: 0.65; }
+/* External (not in library): dimmed but clickable — opens on heya.media. */
+.rec-card.rec-external { opacity: 0.65; transition: opacity 0.15s; }
+.rec-card.rec-external:hover { opacity: 1; }
 .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 18px; }
 .rec-grid .rec-card { width: auto; }
 

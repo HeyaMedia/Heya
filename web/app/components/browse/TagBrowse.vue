@@ -45,7 +45,7 @@
           </button>
         </div>
         <div class="tb-controls-spacer" />
-        <AppMenu trigger-class="btn-ghost-sm" :width="200" align="end">
+        <AppMenu trigger-class="btn-ghost-sm steer-glass" :width="200" align="end">
           <template #trigger>
             <Icon name="sort" :size="14" />
             {{ sortLabel }}
@@ -107,6 +107,11 @@ const props = defineProps<{
 
 // Hoisted per the useNuxtApp gotcha — never resolve $heya inside async bodies.
 const { $heya } = useNuxtApp()
+
+// Ambient background: genres/keywords span movies + TV — claim a mixed pool
+// so the layer shows relevant art under the content veil (list pages have
+// text at the very top; the open home scrim is too raw there).
+useBackground().pool('movie', 'tv')
 
 const PAGE = 200        // API caps `limit` at 200
 const BATCH = 1500      // items pulled per initial load and per "Show more" —
@@ -220,23 +225,62 @@ watch(() => [props.kind, props.rawName], () => loadMore(true))
 </script>
 
 <style scoped>
-.tb-head { margin-bottom: 20px; }
+/* Art-proof header — same recipe as SectionHeader/RecsBrowse: a blended
+   --bg-1 wash behind the text (no locatable edge) plus halo text-shadows,
+   so the title holds up over whatever the ambient pool is showing. */
+.tb-head {
+  position: relative;
+  isolation: isolate;
+  margin-bottom: 20px;
+}
+.tb-head::before {
+  content: '';
+  position: absolute;
+  top: -44px;
+  bottom: -36px;
+  left: -70px;
+  width: min(56%, 560px);
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 90% 75% at 30% 50%,
+    color-mix(in srgb, var(--bg-1) 55%, transparent) 0%,
+    color-mix(in srgb, var(--bg-1) 38%, transparent) 40%,
+    color-mix(in srgb, var(--bg-1) 16%, transparent) 68%,
+    transparent 92%);
+  filter: blur(24px);
+}
 .tb-eyebrow {
   font-size: 10px; font-family: var(--font-mono); font-weight: 700;
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
-.tb-title { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px; }
-.tb-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); }
+.tb-title {
+  font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px;
+  text-shadow:
+    0 1px 2px var(--bg-1),
+    0 0 10px var(--bg-1),
+    0 0 24px var(--bg-1);
+}
+.tb-meta {
+  font-size: 12px; font-family: var(--font-mono);
+  /* fg-1, not the muted tiers — those wash out over bright art. */
+  color: var(--fg-1);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
 
 .tb-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
 .tb-controls-spacer { flex: 1; }
 
-/* Media-type segmented control — mirrors FilterBar's .fb-seg / .view-toggle. */
+/* Media-type segmented control — glassed so it reads over ambient art
+   (the ink-wash recipe it mirrored from FilterBar vanishes on artwork). */
 .tb-seg {
   display: inline-flex; gap: 2px; padding: 2px;
-  background: rgb(var(--ink) / 0.04);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
+  box-shadow: var(--shadow-el);
 }
 .tb-seg button {
   display: inline-flex; align-items: center; gap: 6px;
