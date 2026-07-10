@@ -1139,7 +1139,15 @@ VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (library_id, path) DO UPDATE
 SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     parse_result = EXCLUDED.parse_result, status = EXCLUDED.status,
-    media_info = '{}'::jsonb, keyframes = NULL, video_height = 0,
+    media_info = CASE WHEN library_files.size = EXCLUDED.size
+                       AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                      THEN library_files.media_info ELSE '{}'::jsonb END,
+    keyframes = CASE WHEN library_files.size = EXCLUDED.size
+                      AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                     THEN library_files.keyframes ELSE NULL END,
+    video_height = CASE WHEN library_files.size = EXCLUDED.size
+                         AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                        THEN library_files.video_height ELSE 0 END,
     deleted_at = NULL, updated_at = now()
 RETURNING id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at
 `
@@ -1153,9 +1161,13 @@ type UpsertLibraryFileParams struct {
 	Status      FileStatus         `json:"status"`
 }
 
-// The conflict branch means the bytes changed (or a force rescan), so stale
-// probe artifacts are cleared. NFO-only re-applies must NOT come through here
-// (they'd wipe good probe data); they use ReapplyLibraryFileParse instead.
+// Probe artifacts (media_info/keyframes/video_height) are cleared ONLY when
+// the bytes actually changed (size or µs-mtime differ). Re-applies of
+// unchanged files also come through this conflict branch — force rescans,
+// relocated-file scope re-pipelines, review-triggered re-identifies — and
+// wiping probe data there caused a full ffprobe sweep after every one.
+// NFO-only re-applies must still NOT come through here (parse_result would
+// stomp probe-relevant state); they use ReapplyLibraryFileParse instead.
 func (q *Queries) UpsertLibraryFile(ctx context.Context, arg UpsertLibraryFileParams) (LibraryFile, error) {
 	row := q.db.QueryRow(ctx, upsertLibraryFile,
 		arg.LibraryID,
