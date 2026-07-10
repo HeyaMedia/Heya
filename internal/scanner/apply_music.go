@@ -748,6 +748,15 @@ func applyMusicTrackFile(ctx context.Context, q *sqlc.Queries, libraryID, mediaI
 	if fileID == 0 {
 		return counts, fmt.Errorf("%s has no library file id", local.RelPath)
 	}
+	if action.Action != "create_library_file_and_attach" {
+		if err := q.TouchLibraryFileSeen(ctx, sqlc.TouchLibraryFileSeenParams{
+			ID:    fileID,
+			Size:  invFile.Size,
+			Mtime: pgtype.Timestamptz{Time: invFile.MTime, Valid: !invFile.MTime.IsZero()},
+		}); err != nil {
+			return counts, err
+		}
+	}
 
 	existingTrackFile, err := q.GetTrackFileByLibraryFileID(ctx, fileID)
 	existingTF := err == nil

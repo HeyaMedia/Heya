@@ -390,6 +390,11 @@ func applyMovieFiles(ctx context.Context, q *sqlc.Queries, libraryID, mediaItemI
 		if fileID == 0 {
 			return counts, fmt.Errorf("%s has no library file id", action.RelPath)
 		}
+		if action.Action != "create_library_file_and_attach" {
+			if err := touchLibraryFileSeen(ctx, q, fileID, filesByRel, action.RelPath); err != nil {
+				return counts, err
+			}
+		}
 		if err := q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:          fileID,
 			Status:      sqlc.FileStatusMatched,
@@ -595,6 +600,23 @@ func singleInventoryFile(filesByRel map[string][]InventoryFile, relPath string) 
 		return InventoryFile{}, false
 	}
 	return files[0], true
+}
+
+// touchLibraryFileSeen refreshes the change-detection seen-marker for a file
+// the apply phase re-attached rather than created. The create path writes
+// fresh size+mtime via UpsertLibraryFile; without this, the re-attach paths
+// left the marker stale, so a file whose bytes changed while staying
+// attached was re-detected as changed on every scan forever.
+func touchLibraryFileSeen(ctx context.Context, q *sqlc.Queries, fileID int64, filesByRel map[string][]InventoryFile, relPath string) error {
+	invFile, ok := singleInventoryFile(filesByRel, relPath)
+	if !ok {
+		return nil
+	}
+	return q.TouchLibraryFileSeen(ctx, sqlc.TouchLibraryFileSeenParams{
+		ID:    fileID,
+		Size:  invFile.Size,
+		Mtime: pgtype.Timestamptz{Time: invFile.MTime, Valid: !invFile.MTime.IsZero()},
+	})
 }
 
 func movieLocalAssetType(raw string) (sqlc.AssetType, bool) {

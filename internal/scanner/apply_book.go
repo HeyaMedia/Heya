@@ -440,6 +440,11 @@ func applyBookFiles(ctx context.Context, q *sqlc.Queries, libraryID, mediaItemID
 		if fileID == 0 {
 			return counts, fmt.Errorf("%s has no library file id", action.RelPath)
 		}
+		if action.Action != "create_library_file_and_attach" {
+			if err := touchLibraryFileSeen(ctx, q, fileID, filesByRel, action.RelPath); err != nil {
+				return counts, err
+			}
+		}
 		if err := q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:          fileID,
 			Status:      sqlc.FileStatusMatched,

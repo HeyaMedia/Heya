@@ -310,24 +310,30 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		return nil
 	}
 	if processLibraryScanNeedsOwnerFanout(lib, job.Args.ScopePaths) {
-		sink := scanner.NewEventSink(scanner.Event{
-			LibraryID:   lib.ID,
-			LibraryName: lib.Name,
-			LibraryType: string(lib.MediaType),
-			Domain:      string(lib.MediaType),
-		})
-		inventoryCtx, cancelInventory := context.WithTimeout(ctx, scannerProcessTimeout)
-		inv, walkErr := scanner.WalkInventory(inventoryCtx, lib.Paths, sink)
-		cancelInventory()
-		if walkErr != nil {
-			return fmt.Errorf("process_scan: inventory root scope for owner fanout: %w", walkErr)
+		// Whole-library and root scopes need the inventory to enumerate the
+		// owner units; a plain multi-scope split does not, so skip the walk.
+		var inv scanner.Inventory
+		if scannerScopesNeedInventoryExpansion(lib, job.Args.ScopePaths) {
+			sink := scanner.NewEventSink(scanner.Event{
+				LibraryID:   lib.ID,
+				LibraryName: lib.Name,
+				LibraryType: string(lib.MediaType),
+				Domain:      string(lib.MediaType),
+			})
+			inventoryCtx, cancelInventory := context.WithTimeout(ctx, scannerProcessTimeout)
+			walked, walkErr := scanner.WalkInventory(inventoryCtx, lib.Paths, sink)
+			cancelInventory()
+			if walkErr != nil {
+				return fmt.Errorf("process_scan: inventory root scope for owner fanout: %w", walkErr)
+			}
+			inv = walked
 		}
 		queued, failed := enqueueProcessLibraryScanFanout(ctx, rc, lib, job.Args, job.Args.ScopePaths, inv, PriorityScan, source)
 		log.Info().
 			Int64("library_id", lib.ID).
 			Int("owner_scopes", queued).
 			Int("enqueue_failed", failed).
-			Msg("process_scan: replaced library-root scope with owner fanout")
+			Msg("process_scan: re-fanned scan into per-owner-unit jobs")
 		if failed > 0 {
 			return fmt.Errorf("process_scan: enqueue owner fanout: %d of %d jobs failed", failed, queued+failed)
 		}
@@ -530,6 +536,14 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "apply_error", err)
 		log.Error().Err(err).Int64("library_id", lib.ID).Msg("apply_metadata: scan error")
 		return scannerWorkerError(err)
+	}
+	// Identities the apply deliberately refused (skipped/blocked, e.g.
+	// metadata_mismatch) park their files so the unit stops re-detecting as
+	// changed and looping fetch→refuse every scan. Best-effort, like the
+	// process_scan parking.
+	parked, parkErr := scanner.ParkUnappliedFiles(ctx, w.DB, lib, result)
+	if parkErr != nil {
+		log.Warn().Err(parkErr).Int64("library_id", lib.ID).Int("parked", parked).Msg("apply_metadata: park unapplied files failed")
 	}
 	richQueued, richFailed := w.enqueueRichMetadataWork(ctx, rc, lib, result, job.Args.MetadataArtifactID, job.Args.ScannerEntityID, job.Args.ScheduledTaskID, source)
 	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
@@ -1188,9 +1202,17 @@ func scannerScopeContains(parent, child string) bool {
 
 var scannerSeasonDirRE = regexp.MustCompile(`(?i)^(?:Season|Series|S)[ ._-]*(?:\d{1,2}|specials?)$`)
 
+// scannerMediaTypeUsesTopLevelOwner reports whether a media type's owner
+// unit is the first directory level under the library root: the artist dir
+// for music, the author dir for books/audiobooks. Movies and TV resolve
+// their owner by walking up from the file (season/extras promotion) instead.
+func scannerMediaTypeUsesTopLevelOwner(mediaType sqlc.MediaType) bool {
+	return mediaType == sqlc.MediaTypeMusic || mediaType == sqlc.MediaTypeBook
+}
+
 func scannerScopeForInventoryFile(mediaType sqlc.MediaType, file scanner.InventoryFile) string {
-	if mediaType == sqlc.MediaTypeMusic {
-		if scope := scannerMusicArtistScopeForRootRel(file.Root, file.RelPath, file.Path); scope != "" {
+	if scannerMediaTypeUsesTopLevelOwner(mediaType) {
+		if scope := scannerTopLevelScopeForRootRel(file.Root, file.RelPath, file.Path); scope != "" {
 			return scope
 		}
 	}
@@ -1205,8 +1227,8 @@ func ScannerScopeForPath(mediaType sqlc.MediaType, path string) string {
 }
 
 func ScannerScopeForLibraryPath(lib sqlc.Library, path string) string {
-	if lib.MediaType == sqlc.MediaTypeMusic {
-		if scope := scannerMusicArtistScopeForLibraryPath(lib.Paths, path); scope != "" {
+	if scannerMediaTypeUsesTopLevelOwner(lib.MediaType) {
+		if scope := scannerTopLevelScopeForLibraryPath(lib.Paths, path); scope != "" {
 			return scope
 		}
 	}
@@ -1218,26 +1240,30 @@ func ScannerScopeForLibraryPath(lib sqlc.Library, path string) string {
 // strip another path component before promoting season/extras directories to
 // their movie or show owner.
 func ScannerScopeForLibraryDirectory(lib sqlc.Library, path string) string {
-	if lib.MediaType == sqlc.MediaTypeMusic {
-		if scope := scannerMusicArtistScopeForLibraryPath(lib.Paths, path); scope != "" {
+	if scannerMediaTypeUsesTopLevelOwner(lib.MediaType) {
+		if scope := scannerTopLevelScopeForLibraryPath(lib.Paths, path); scope != "" {
 			return scope
 		}
 	}
 	return scannerOwnerScope(lib.MediaType, strings.TrimRight(strings.TrimSpace(path), `/\`))
 }
 
-func scannerMusicArtistScopeForLibraryPath(roots []string, path string) string {
+func scannerTopLevelScopeForLibraryPath(roots []string, path string) string {
 	for _, root := range roots {
 		relPath, ok := scannerRelPath(root, path)
 		if !ok {
 			continue
 		}
-		return scannerMusicArtistScopeForRootRel(root, relPath, path)
+		return scannerTopLevelScopeForRootRel(root, relPath, path)
 	}
 	return ""
 }
 
-func scannerMusicArtistScopeForRootRel(root, relPath, fallbackPath string) string {
+// scannerTopLevelScopeForRootRel maps a file to its top-level owner dir
+// (Artist/… or Author/…). A file sitting directly in the library root is its
+// own unit — there is no owner dir to group it under; the downstream
+// identify job reads its name/tags instead.
+func scannerTopLevelScopeForRootRel(root, relPath, fallbackPath string) string {
 	parts := scannerRelPathParts(relPath)
 	if len(parts) == 0 {
 		return ""
@@ -1396,54 +1422,15 @@ func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.T
 	return queued, failed
 }
 
-// musicScanScopeChunk caps how many artist directories one music
-// process_scan job analyzes. The analyze phase ffprobes every audio file
-// under its scopes serially, so an unbounded batch (a whole-library pass)
-// cannot finish inside scannerProcessTimeout on a real library — it times
-// out, each retry restarts the probe sweep from scratch, and while the job
-// sits running/retryable its unique args block every subsequent scan's
-// insert. Chunks keep per-job work bounded and retryable, and let the
-// process_scan workers run chunks in parallel.
-const musicScanScopeChunk = 24
-
+// processLibraryScanFanoutArgs emits exactly one process_scan job per owner
+// unit: the artist / movie / show / author directory, or a loose file that is
+// its own unit. The scanner stays dumb — it enqueues what changed and each
+// unit flows the identify → fetch → apply chain independently. Units the
+// library already matched skip the live provider search downstream via the
+// persisted decisions overlay, so re-enqueueing a known unit costs no
+// provider traffic. A library-root scope expands to the owner units the
+// inventory actually contains; multi-scope requests split per scope.
 func processLibraryScanFanoutArgs(lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory) []ProcessLibraryScanArgs {
-	// Music is deliberately batched at the local scan boundary, in bounded
-	// chunks of artist directories. One analysis pass per chunk discovers its
-	// changed artists, after which PersistScannerSearchEntities creates one
-	// narrow artifact per artist and fetch_metadata/apply_metadata provide
-	// the remote-work fanout. Per-artist splitting here would repeatedly
-	// open the same library before reaching the artist-sized metadata work.
-	if lib.MediaType == sqlc.MediaTypeMusic {
-		requested := compactScannerScopes(scopes)
-		if len(requested) == 0 || scannerScopesCoverInventoryOwners(lib, requested, inv) {
-			// Full/forced scan (or changed scopes that already span every
-			// owner): chunk the actual owner list from the inventory instead
-			// of one unbounded whole-library pass.
-			requested = scannerOwnerScopesFromInventory(lib, inv)
-		}
-		sort.Strings(requested)
-		out := make([]ProcessLibraryScanArgs, 0, (len(requested)+musicScanScopeChunk-1)/musicScanScopeChunk)
-		for start := 0; start < len(requested); start += musicScanScopeChunk {
-			args := base
-			args.ScopePaths = requested[start:min(start+musicScanScopeChunk, len(requested))]
-			out = append(out, args)
-		}
-		return out
-	}
-
-	if !scannerMediaTypeRequiresOwnerFanout(lib.MediaType) {
-		if len(scopes) == 0 {
-			return []ProcessLibraryScanArgs{base}
-		}
-		out := make([]ProcessLibraryScanArgs, 0, len(scopes))
-		for _, scope := range compactScannerScopes(scopes) {
-			args := base
-			args.ScopePaths = []string{scope}
-			out = append(out, args)
-		}
-		return out
-	}
-
 	ownerScopes := scannerOwnerScopesFromInventory(lib, inv)
 	requested := compactScannerScopes(scopes)
 	if len(requested) == 0 {
@@ -1474,50 +1461,33 @@ func processLibraryScanFanoutArgs(lib sqlc.Library, base ProcessLibraryScanArgs,
 	return out
 }
 
-func scannerScopesCoverInventoryOwners(lib sqlc.Library, scopes []string, inv scanner.Inventory) bool {
-	owners := scannerOwnerScopesFromInventory(lib, inv)
-	if len(owners) == 0 {
-		return false
+// processLibraryScanNeedsOwnerFanout reports whether a process_scan job must
+// be re-fanned into per-owner-unit jobs instead of running as-is: empty or
+// library-root scopes mean a whole-library pass, and multi-scope jobs (from
+// deploys that batched owners together, or pruner requeues of legacy
+// entities) split so one slow unit can't hold up its batchmates.
+func processLibraryScanNeedsOwnerFanout(lib sqlc.Library, scopes []string) bool {
+	if len(scopes) != 1 {
+		return true
 	}
-	for _, owner := range owners {
-		covered := false
-		for _, scope := range scopes {
-			if scannerScopeContains(scope, owner) {
-				covered = true
-				break
-			}
-		}
-		if !covered {
-			return false
-		}
-	}
-	return true
+	scope := strings.TrimSpace(scopes[0])
+	return scope == "" || scannerScopeIsLibraryRoot(lib, scope)
 }
 
-func processLibraryScanNeedsOwnerFanout(lib sqlc.Library, scopes []string) bool {
-	// Music re-fans out too: an empty or library-root scope would otherwise
-	// run one unbounded whole-library analysis (see musicScanScopeChunk).
-	// This also converts stale nil-scope music jobs from older deploys into
-	// bounded chunks instead of letting them wedge on the timeout.
-	if !scannerMediaTypeRequiresOwnerFanout(lib.MediaType) && lib.MediaType != sqlc.MediaTypeMusic {
-		return false
-	}
+// scannerScopesNeedInventoryExpansion reports whether re-fanning the given
+// scopes requires walking the library inventory: only whole-library passes
+// (empty scopes) and library-root scopes need the owner list; a plain
+// multi-scope split does not.
+func scannerScopesNeedInventoryExpansion(lib sqlc.Library, scopes []string) bool {
 	if len(scopes) == 0 {
 		return true
 	}
 	for _, scope := range scopes {
-		if strings.TrimSpace(scope) == "" {
-			return true
-		}
-		if scannerScopeIsLibraryRoot(lib, scope) {
+		if strings.TrimSpace(scope) == "" || scannerScopeIsLibraryRoot(lib, scope) {
 			return true
 		}
 	}
 	return false
-}
-
-func scannerMediaTypeRequiresOwnerFanout(mediaType sqlc.MediaType) bool {
-	return mediaType == sqlc.MediaTypeMovie || mediatype.IsTVLike(mediaType)
 }
 
 func scannerOwnerScopesFromInventory(lib sqlc.Library, inv scanner.Inventory) []string {

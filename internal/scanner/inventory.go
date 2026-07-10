@@ -134,7 +134,7 @@ func walkInventory(ctx context.Context, roots []string, scopes []string, emit Em
 					}
 				}
 
-				file := classifyFile(root, relPath, d, isSMB)
+				file := classifyFile(source.FS, root, relPath, d, isSMB)
 				if seen[file.Path] {
 					return nil
 				}
@@ -347,7 +347,7 @@ func inventoryPathInScope(filePath, scope string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-func classifyFile(root, relPath string, d fs.DirEntry, isSMB bool) InventoryFile {
+func classifyFile(fsys fs.FS, root, relPath string, d fs.DirEntry, isSMB bool) InventoryFile {
 	name := d.Name()
 	ext := strings.ToLower(filepath.Ext(name))
 	class := ClassUnknown
@@ -385,6 +385,16 @@ func classifyFile(root, relPath string, d fs.DirEntry, isSMB bool) InventoryFile
 		fullPath = filepath.Join(root, relPath)
 	}
 	info, _ := d.Info()
+	// Symlinked media must stat the TARGET, not the link: d.Info() is an
+	// lstat, but a loose-file scope's scoped walk stats its root with fs.Stat
+	// (which follows links), and it's the content's size/mtime that the
+	// change detector should track. Mixing the two made symlinked files read
+	// as "changed" on every scan, forever.
+	if d.Type()&fs.ModeSymlink != 0 {
+		if followed, err := fs.Stat(fsys, relPath); err == nil {
+			info = followed
+		}
+	}
 	var size int64
 	var mtime time.Time
 	if info != nil {

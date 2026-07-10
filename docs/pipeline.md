@@ -57,19 +57,29 @@ hold the whole library scan hostage:
   `library_file_links`, and fans out post-apply jobs such as ffprobe, ratings,
   NFO saves, thumbnails, chromaprint, loudness, and sonic analysis.
 
-Each stage can process a full library or a directory scope from the watcher.
 The scanner emits structured events and records local
 identities/candidates/findings for the admin review UI.
 
-Music batches changed artist directories into `process_scan` passes of at
-most 24 artists each (`musicScanScopeChunk`). Each pass discovers and
-searches its artists together, then persists one narrow handoff artifact per
-artist. `fetch_metadata` and `apply_metadata` fan out from there at artist
-granularity, so a discography is fetched once and its local albums are
-matched and applied together. Chunking (rather than one whole-library job)
-matters because the analyze phase ffprobes every audio file under its scopes:
-an unbounded job blows `scannerProcessTimeout` on a real library, retries
-from scratch, and its unique args block subsequent scans while it wedges.
+**The scan unit is the owner directory.** Kickoff is deliberately dumb: it
+walks, diffs, and enqueues exactly one `process_scan` job per changed owner
+unit — the artist dir for music, the author dir for books/audiobooks, the
+movie dir or show dir for video (season/extras dirs promote up to their
+owner), or a loose file that is its own unit. Everything smarter than the
+directory structure happens downstream in that unit's own job: filename/NFO
+parsing, the tag probe (music, inside the unit's job — never gating the
+walk), identity grouping, and the provider search. Mixed directories
+("Loose Tracks", loose fansubs) stay one scan unit; identify re-fans them
+into per-identity work.
+
+**Known units skip the search.** Every auto- or manually-accepted identity
+persists in `local_media_identities` with its provider id; the decisions
+overlay is loaded before each search pass and short-circuits *before* the
+HeyaMedia call. Re-scanning an artist to pick up a new album costs zero
+provider searches — the unit goes straight to `fetch_metadata` /
+`apply_metadata`, which always fan out per identity. Root or multi-owner
+scoped jobs (legacy batches, pruner requeues) re-fan into per-owner jobs
+before running, so one slow unit can never hold up others and unique args
+stay stable per unit across scans.
 
 - **Scoring**: scanner search modules call HeyaMedia search, score candidates
   locally, auto-accept strong matches, and persist ambiguous/rejected cases for

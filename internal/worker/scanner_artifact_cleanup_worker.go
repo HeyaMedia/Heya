@@ -124,28 +124,50 @@ func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, 
 // Force bypasses change detection; the jobs dedupe by (library, scopes)
 // while active, so shared scopes re-enqueue once.
 func reenqueueOrphanedScannerScopes(ctx context.Context, rc *river.Client[pgx.Tx], orphaned []orphanedScannerEntity) int {
-	if rc == nil || len(orphaned) == 0 {
+	if rc == nil {
 		return 0
 	}
-	seen := map[string]bool{}
 	requeued := 0
-	for _, entity := range orphaned {
-		key := fmt.Sprintf("%d\x00%s", entity.LibraryID, strings.Join(entity.ScopePaths, "\x00"))
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		if err := enqueueProcessLibraryScan(ctx, rc, ProcessLibraryScanArgs{
-			LibraryID:  entity.LibraryID,
-			ScopePaths: entity.ScopePaths,
-			Force:      true,
-		}, PriorityScan, "cleanup_scanner_artifacts"); err != nil {
-			log.Warn().Err(err).Int64("library_id", entity.LibraryID).Strs("scopes", entity.ScopePaths).Msg("cleanup_scanner_artifacts: requeue orphaned scope failed")
+	for _, args := range orphanedScannerRequeueArgs(orphaned) {
+		if err := enqueueProcessLibraryScan(ctx, rc, args, PriorityScan, "cleanup_scanner_artifacts"); err != nil {
+			log.Warn().Err(err).Int64("library_id", args.LibraryID).Strs("scopes", args.ScopePaths).Msg("cleanup_scanner_artifacts: requeue orphaned scope failed")
 			continue
 		}
 		requeued++
 	}
 	return requeued
+}
+
+// orphanedScannerRequeueArgs splits each orphaned entity's scopes into one
+// forced per-scope process_scan (per owner unit) — a legacy multi-owner
+// entity requeues per owner instead of resurrecting the batch. An entity
+// with no scope paths (a legacy whole-library pass) requeues as a nil-scope
+// job, which the process_scan worker re-fans into owner units itself.
+func orphanedScannerRequeueArgs(orphaned []orphanedScannerEntity) []ProcessLibraryScanArgs {
+	seen := map[string]bool{}
+	var out []ProcessLibraryScanArgs
+	add := func(libraryID int64, scopes []string) {
+		key := fmt.Sprintf("%d\x00%s", libraryID, strings.Join(scopes, "\x00"))
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, ProcessLibraryScanArgs{
+			LibraryID:  libraryID,
+			ScopePaths: scopes,
+			Force:      true,
+		})
+	}
+	for _, entity := range orphaned {
+		if len(entity.ScopePaths) == 0 {
+			add(entity.LibraryID, nil)
+			continue
+		}
+		for _, scope := range entity.ScopePaths {
+			add(entity.LibraryID, []string{scope})
+		}
+	}
+	return out
 }
 
 type scannerInFlightCleanupCounts struct {

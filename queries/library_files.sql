@@ -258,6 +258,29 @@ WHERE media_item_id = ANY(@media_item_ids::bigint[])
   AND deleted_at IS NULL
 GROUP BY media_item_id;
 
+-- name: TouchLibraryFileSeen :exec
+-- Refreshes the change-detection seen-marker (size+mtime) for a file the
+-- apply phase re-attached rather than created. Without this, a file whose
+-- bytes changed while staying attached (retagged track, replaced episode,
+-- symlink target swap) is re-detected as changed on every scan forever —
+-- apply runs but never updates the marker. Probe artifacts clear only when
+-- the bytes actually changed, mirroring UpsertLibraryFile's conflict branch.
+UPDATE library_files
+SET media_info = CASE WHEN library_files.size = $2
+                       AND library_files.mtime IS NOT DISTINCT FROM $3
+                      THEN library_files.media_info ELSE '{}'::jsonb END,
+    keyframes = CASE WHEN library_files.size = $2
+                      AND library_files.mtime IS NOT DISTINCT FROM $3
+                     THEN library_files.keyframes ELSE NULL END,
+    video_height = CASE WHEN library_files.size = $2
+                         AND library_files.mtime IS NOT DISTINCT FROM $3
+                        THEN library_files.video_height ELSE 0 END,
+    size = $2,
+    mtime = $3,
+    deleted_at = NULL,
+    updated_at = now()
+WHERE id = $1;
+
 -- name: ParkUnmatchedLibraryFile :exec
 -- Change-detection seen-marker for a tracked file that no ACCEPTED search
 -- identity claims (unmatched / needs_review / rejected / ignored / unplanned).

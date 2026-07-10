@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -434,13 +433,14 @@ func TestProcessLibraryScanFanoutSplitsFullAndRootScopesIntoOwners(t *testing.T)
 	}
 }
 
-func TestProcessLibraryScanFanoutBatchesMusicBeforeArtistMetadata(t *testing.T) {
-	lib := sqlc.Library{
-		ID:        7,
-		MediaType: sqlc.MediaTypeMusic,
-		Paths:     []string{"/storage/Music"},
-	}
-	inv := scanner.Inventory{Roots: []scanner.InventoryRoot{{
+// The scanner is a dumb per-owner-unit enqueuer: one process_scan job per
+// artist / author / movie / show directory (or loose file). Grouping smarter
+// than the directory structure — and all searching — happens downstream in
+// the identify job, which skips the live search for already-known units via
+// the persisted decisions overlay.
+func TestProcessLibraryScanFanoutIsPerOwnerUnit(t *testing.T) {
+	music := sqlc.Library{ID: 7, MediaType: sqlc.MediaTypeMusic, Paths: []string{"/storage/Music"}}
+	musicInv := scanner.Inventory{Roots: []scanner.InventoryRoot{{
 		Root: "/storage/Music",
 		Files: []scanner.InventoryFile{
 			{Root: "/storage/Music", Path: "/storage/Music/Alpha/First/01.flac", RelPath: "Alpha/First/01.flac", Class: scanner.ClassPrimaryMedia},
@@ -448,77 +448,77 @@ func TestProcessLibraryScanFanoutBatchesMusicBeforeArtistMetadata(t *testing.T) 
 			{Root: "/storage/Music", Path: "/storage/Music/Gamma/Third/01.flac", RelPath: "Gamma/Third/01.flac", Class: scanner.ClassPrimaryMedia},
 		},
 	}}}
-	base := ProcessLibraryScanArgs{LibraryID: lib.ID, Force: true}
+	base := ProcessLibraryScanArgs{LibraryID: music.ID, Force: true}
 
-	t.Run("full scan chunks explicit owner scopes", func(t *testing.T) {
-		args := processLibraryScanFanoutArgs(lib, base, []string{
-			"/storage/Music/Alpha",
-			"/storage/Music/Beta",
-			"/storage/Music/Gamma",
-		}, inv)
-
-		require.Len(t, args, 1)
-		require.Equal(t, []string{
-			"/storage/Music/Alpha",
-			"/storage/Music/Beta",
-			"/storage/Music/Gamma",
-		}, args[0].ScopePaths, "covering scopes expand to the owner list, never a nil whole-library scope")
+	t.Run("music fans out one job per artist", func(t *testing.T) {
+		for _, requested := range [][]string{nil, {"/storage/Music"}, {"/storage/Music/Alpha", "/storage/Music/Beta", "/storage/Music/Gamma"}} {
+			args := processLibraryScanFanoutArgs(music, base, requested, musicInv)
+			require.Len(t, args, 3)
+			for i, want := range []string{"/storage/Music/Alpha", "/storage/Music/Beta", "/storage/Music/Gamma"} {
+				require.Equal(t, []string{want}, args[i].ScopePaths)
+			}
+		}
 	})
 
-	t.Run("empty scopes expand to chunked owners", func(t *testing.T) {
-		args := processLibraryScanFanoutArgs(lib, base, nil, inv)
-
-		require.Len(t, args, 1)
-		require.Equal(t, []string{
-			"/storage/Music/Alpha",
-			"/storage/Music/Beta",
-			"/storage/Music/Gamma",
-		}, args[0].ScopePaths)
-	})
-
-	t.Run("changed artists share one scoped job", func(t *testing.T) {
-		args := processLibraryScanFanoutArgs(lib, base, []string{
-			"/storage/Music/Beta",
+	t.Run("changed artist album collapses into its artist unit", func(t *testing.T) {
+		args := processLibraryScanFanoutArgs(music, base, []string{
 			"/storage/Music/Alpha",
 			"/storage/Music/Alpha/First",
-		}, inv)
-
+		}, musicInv)
 		require.Len(t, args, 1)
-		require.Equal(t, []string{
-			"/storage/Music/Alpha",
-			"/storage/Music/Beta",
-		}, args[0].ScopePaths)
+		require.Equal(t, []string{"/storage/Music/Alpha"}, args[0].ScopePaths)
 	})
 
-	t.Run("owner lists split into bounded chunks", func(t *testing.T) {
-		var files []scanner.InventoryFile
-		for i := 0; i < musicScanScopeChunk+3; i++ {
-			rel := fmt.Sprintf("Artist%03d/Album/01.flac", i)
-			files = append(files, scanner.InventoryFile{
-				Root: "/storage/Music", Path: "/storage/Music/" + rel, RelPath: rel, Class: scanner.ClassPrimaryMedia,
-			})
-		}
-		bigInv := scanner.Inventory{Roots: []scanner.InventoryRoot{{Root: "/storage/Music", Files: files}}}
-
-		args := processLibraryScanFanoutArgs(lib, base, nil, bigInv)
-
+	t.Run("books fan out per author directory", func(t *testing.T) {
+		books := sqlc.Library{ID: 8, MediaType: sqlc.MediaTypeBook, Paths: []string{"/storage/Books"}}
+		bookInv := scanner.Inventory{Roots: []scanner.InventoryRoot{{
+			Root: "/storage/Books",
+			Files: []scanner.InventoryFile{
+				{Root: "/storage/Books", Path: "/storage/Books/Frank Herbert/Dune (1965)/Dune.epub", RelPath: "Frank Herbert/Dune (1965)/Dune.epub", Class: scanner.ClassPrimaryMedia},
+				{Root: "/storage/Books", Path: "/storage/Books/Frank Herbert/Dune Messiah (1969)/Dune Messiah.epub", RelPath: "Frank Herbert/Dune Messiah (1969)/Dune Messiah.epub", Class: scanner.ClassPrimaryMedia},
+				{Root: "/storage/Books", Path: "/storage/Books/Andy Weir - Project Hail Mary (2021).epub", RelPath: "Andy Weir - Project Hail Mary (2021).epub", Class: scanner.ClassPrimaryMedia},
+			},
+		}}}
+		args := processLibraryScanFanoutArgs(books, ProcessLibraryScanArgs{LibraryID: books.ID}, nil, bookInv)
 		require.Len(t, args, 2)
-		require.Len(t, args[0].ScopePaths, musicScanScopeChunk)
-		require.Len(t, args[1].ScopePaths, 3)
+		require.Equal(t, []string{"/storage/Books/Andy Weir - Project Hail Mary (2021).epub"}, args[0].ScopePaths, "a loose file at the root is its own unit")
+		require.Equal(t, []string{"/storage/Books/Frank Herbert"}, args[1].ScopePaths, "both Dune books share the author unit")
 	})
 
 	t.Run("empty library produces no jobs", func(t *testing.T) {
-		args := processLibraryScanFanoutArgs(lib, base, nil, scanner.Inventory{})
+		args := processLibraryScanFanoutArgs(music, base, nil, scanner.Inventory{})
 		require.Empty(t, args)
 	})
 }
 
-func TestProcessLibraryScanNeedsOwnerFanoutIncludesMusicRootScopes(t *testing.T) {
+func TestProcessLibraryScanNeedsOwnerFanout(t *testing.T) {
 	lib := sqlc.Library{ID: 7, MediaType: sqlc.MediaTypeMusic, Paths: []string{"/storage/Music"}}
 
-	require.True(t, processLibraryScanNeedsOwnerFanout(lib, nil), "nil-scope music jobs must re-fan out into chunks")
-	require.True(t, processLibraryScanNeedsOwnerFanout(lib, []string{"/storage/Music"}), "library-root music scopes must re-fan out")
-	require.False(t, processLibraryScanNeedsOwnerFanout(lib, []string{"/storage/Music/Alpha"}), "artist-scoped music jobs run as-is")
+	require.True(t, processLibraryScanNeedsOwnerFanout(lib, nil), "nil-scope jobs re-fan into owner units")
+	require.True(t, processLibraryScanNeedsOwnerFanout(lib, []string{"/storage/Music"}), "library-root scopes re-fan into owner units")
+	require.True(t, processLibraryScanNeedsOwnerFanout(lib, []string{"/storage/Music/Alpha", "/storage/Music/Beta"}), "legacy multi-owner batches split")
+	require.False(t, processLibraryScanNeedsOwnerFanout(lib, []string{"/storage/Music/Alpha"}), "a single owner unit runs as-is")
+
+	require.True(t, scannerScopesNeedInventoryExpansion(lib, nil), "whole-library re-fanout needs the inventory")
+	require.True(t, scannerScopesNeedInventoryExpansion(lib, []string{"/storage/Music"}), "root expansion needs the inventory")
+	require.False(t, scannerScopesNeedInventoryExpansion(lib, []string{"/storage/Music/Alpha", "/storage/Music/Beta"}), "plain splits skip the walk")
+}
+
+func TestOrphanedScannerRequeueArgsSplitPerOwnerScope(t *testing.T) {
+	args := orphanedScannerRequeueArgs([]orphanedScannerEntity{
+		{ID: 1, LibraryID: 5, ScopePaths: []string{"/storage/Music/Alpha", "/storage/Music/Beta"}},
+		{ID: 2, LibraryID: 5, ScopePaths: []string{"/storage/Music/Beta"}},
+		{ID: 3, LibraryID: 5, ScopePaths: nil},
+	})
+
+	require.Len(t, args, 3, "per-scope splits dedupe across entities; nil-scope requeues once")
+	require.Equal(t, []string{"/storage/Music/Alpha"}, args[0].ScopePaths)
+	require.Equal(t, []string{"/storage/Music/Beta"}, args[1].ScopePaths)
+	require.Nil(t, args[2].ScopePaths, "legacy whole-library entities requeue as nil-scope for worker re-fanout")
+	for _, a := range args {
+		require.True(t, a.Force, "requeues bypass change detection")
+		require.EqualValues(t, 5, a.LibraryID)
+	}
 }
 
 func TestScannerRichMetadataTargetsAndDetail(t *testing.T) {
