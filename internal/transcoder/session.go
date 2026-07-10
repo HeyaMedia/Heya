@@ -402,7 +402,9 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 	os.WriteFile(filepath.Join(s.OutputDir, label+"_cmd.txt"),
 		[]byte(s.builder.FormatCommand(cmd)+"\n"), 0644)
 
-	logFile, _ := os.Create(filepath.Join(s.OutputDir, label+"_ffmpeg.log"))
+	logFilePath := filepath.Join(s.OutputDir, label+"_ffmpeg.log")
+	logFile, _ := os.Create(logFilePath) //nolint:gosec // path is inside Heya's generated transcode cache directory
+	stderr := newStderrTail(maxFFmpegStderrTail)
 
 	var smbCloser io.Closer
 	if vfs.IsSMBPath(s.FilePath) {
@@ -419,7 +421,9 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 	}
 
 	if logFile != nil {
-		cmd.Stderr = logFile
+		cmd.Stderr = io.MultiWriter(logFile, stderr)
+	} else {
+		cmd.Stderr = stderr
 	}
 
 	// Capture -progress output on FD 3. ffmpeg writes structured key=value
@@ -459,6 +463,7 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 		Str("video_codec", opts.Profile.VideoCodec).
 		Str("audio_codec", opts.Profile.AudioCodec).
 		Bool("fmp4", s.IsFMP4()).
+		Str("debug_dir", s.OutputDir).
 		Msg(label + " starting")
 
 	cleanup := func() {
@@ -486,7 +491,12 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 			if exitErr, ok := cmdErr.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
 			}
-			log.Warn().Err(cmdErr).Str("key", s.Key).Int("exit_code", exitCode).Msg(label + " failed")
+			log.Warn().Err(cmdErr).
+				Str("key", s.Key).
+				Int("exit_code", exitCode).
+				Str("stderr", strings.TrimSpace(stderr.String())).
+				Str("ffmpeg_log", logFilePath).
+				Msg(label + " failed")
 		} else {
 			log.Info().Str("key", s.Key).Int("last_seg", s.headCurrent(head)).Msg(label + " finished")
 		}

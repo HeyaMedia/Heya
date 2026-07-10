@@ -88,6 +88,23 @@ func TestBuildVideoFilterChain_ToneMapEmbedsScale(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(got, "scale=-2:'min(1080,ih)'"), "exactly one scale step in chain: %q", got)
 }
 
+func TestBuildVideoFilterChain_QSV10BitToH264(t *testing.T) {
+	got := buildVideoFilterChain(TranscodeOpts{
+		Profile: Profile{MaxHeight: 2160},
+		HWAccel: HwAccelConfig{Type: HwAccelQSV},
+	})
+	assert.Equal(t, "scale_qsv=w=-1:h=min(2160\\,ih):format=nv12", got)
+}
+
+func TestBuildVideoFilterChain_QSVToneMap(t *testing.T) {
+	got := buildVideoFilterChain(TranscodeOpts{
+		Profile: Profile{MaxHeight: 2160},
+		HWAccel: HwAccelConfig{Type: HwAccelQSV},
+		ToneMap: true,
+	})
+	assert.Equal(t, "vpp_qsv=tonemap=1:format=nv12,scale_qsv=w=-1:h=min(2160\\,ih)", got)
+}
+
 func TestBuildVideoFilterChain_DeinterlaceBeforeToneMap(t *testing.T) {
 	got := buildVideoFilterChain(TranscodeOpts{
 		Profile: Profile{MaxHeight: 1080},
@@ -118,6 +135,14 @@ func TestAppendVideoArgs_DVStrip(t *testing.T) {
 	})
 	assert.Contains(t, args, "-bsf:v")
 	assert.Contains(t, args, "hevc_metadata=remove_dovi=1")
+}
+
+func TestAppendVideoArgs_DoViRetagPreservesConfig(t *testing.T) {
+	args := appendVideoArgs(nil, TranscodeOpts{
+		Profile: Profile{VideoCodec: "copy"},
+		Plan:    &PlaybackPlan{RetagDoVi: "dvh1"},
+	})
+	assert.Equal(t, []string{"-c:v", "copy", "-tag:v", "dvh1", "-strict", "unofficial"}, args)
 }
 
 func TestAppendVideoArgs_BothSurgicalFlags(t *testing.T) {

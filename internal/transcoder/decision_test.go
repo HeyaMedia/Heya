@@ -158,10 +158,49 @@ func TestVideoCanCopyToTS(t *testing.T) {
 }
 
 func TestVideoNeedsFMP4(t *testing.T) {
+	assert.True(t, VideoNeedsFMP4("hevc"))
+	assert.True(t, VideoNeedsFMP4("h265"))
 	assert.True(t, VideoNeedsFMP4("av1"))
 	assert.True(t, VideoNeedsFMP4("av01"))
 	assert.True(t, VideoNeedsFMP4("vp9"))
 	assert.True(t, VideoNeedsFMP4("vp09"))
 	assert.False(t, VideoNeedsFMP4("h264"))
-	assert.False(t, VideoNeedsFMP4("hevc"))
+	assert.False(t, VideoNeedsFMP4("mpeg2video"))
+}
+
+func TestDecideRealWorldDoViP5WithGenericHEVCTag(t *testing.T) {
+	info := MediaInfo{
+		Container: "mov,mp4,m4a,3gp,3g2,mj2",
+		Streams: []StreamInfo{
+			{
+				CodecName: "hevc", CodecType: "video", CodecTag: "hev1",
+				Profile: "Main 10", PixFmt: "yuv420p10le", Width: 3840, Height: 2160,
+				DvProfile: 5, DvBlCompatID: 0,
+			},
+			{CodecName: "eac3", CodecType: "audio", Channels: 6},
+		},
+	}
+
+	t.Run("Dolby Vision client remuxes to dvh1 fMP4", func(t *testing.T) {
+		caps := ClientCapabilities{
+			SupportsMP4: true, SupportsHEVC: true, SupportsHEVCHev1: true,
+			SupportsDoVi: true, SupportsEAC3: true,
+		}
+		plan := Decide(&info, caps)
+		assert.Equal(t, ActionRemux, plan.Action)
+		assert.True(t, plan.CopyVideo)
+		assert.True(t, plan.CopyAudio)
+		assert.True(t, plan.NeedsFMP4)
+		assert.Equal(t, "dvh1", plan.RetagDoVi)
+		assert.True(t, plan.Reasons.Has(ReasonVideoCodecTagNotSupported))
+	})
+
+	t.Run("non-Dolby-Vision client transcodes and tone maps", func(t *testing.T) {
+		plan := Decide(&info, ClientCapabilities{SupportsMP4: true})
+		assert.Equal(t, ActionTranscode, plan.Action)
+		assert.False(t, plan.CopyVideo)
+		assert.False(t, plan.CopyAudio)
+		assert.True(t, plan.NeedsToneMap, "DV5 is HDR even when ffprobe reports no standard transfer metadata")
+		assert.True(t, plan.Reasons.Has(ReasonDolbyVisionNotSupported))
+	})
 }

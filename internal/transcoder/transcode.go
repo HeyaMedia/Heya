@@ -134,7 +134,12 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 	if p.VideoCodec == "" || p.VideoCodec == "copy" {
 		args = append(args, "-c:v", "copy")
 		if opts.Plan != nil {
-			if opts.Plan.RetagHEVC {
+			if opts.Plan.RetagDoVi != "" {
+				// FFmpeg only writes the Dolby Vision dvcC/dvvC configuration
+				// box in MP4/fMP4 under unofficial strictness. Without it Safari
+				// accepts the audio track but renders no video.
+				args = append(args, "-tag:v", opts.Plan.RetagDoVi, "-strict", "unofficial")
+			} else if opts.Plan.RetagHEVC {
 				// Safari (and a few other clients) only play HEVC tagged as
 				// hvc1. ffmpeg's MP4 muxer defaults to hev1 for HEVC copies,
 				// so we explicitly retag.
@@ -250,7 +255,11 @@ func buildVideoFilterChain(opts TranscodeOpts) string {
 		case HwAccelVAAPI:
 			scale = fmt.Sprintf("scale_vaapi=w=-2:h=min(%d\\,ih)", h)
 		case HwAccelQSV:
-			scale = fmt.Sprintf("scale_qsv=w=-2:h=min(%d\\,ih)", h)
+			// scale_qsv rejects -2 (unlike the software scaler), and H.264
+			// QSV cannot accept the P010 surface produced by a 10-bit HEVC
+			// decoder. -1 preserves aspect ratio; format=nv12 performs the
+			// required 10-bit to 8-bit conversion.
+			scale = fmt.Sprintf("scale_qsv=w=-1:h=min(%d\\,ih):format=nv12", h)
 		case HwAccelVideoToolbox:
 			scale = fmt.Sprintf("scale=-2:min(%d\\,ih),format=nv12", h)
 		default:
@@ -309,7 +318,7 @@ func buildToneMapFilterChain(hw HwAccelConfig, maxHeight int) string {
 		return "tonemap_vaapi=t=bt709:p=bt709:m=bt709"
 	case HwAccelQSV:
 		if maxHeight > 0 {
-			return fmt.Sprintf("vpp_qsv=tonemap=1:format=nv12,scale_qsv=w=-2:h=min(%d\\,ih)", maxHeight)
+			return fmt.Sprintf("vpp_qsv=tonemap=1:format=nv12,scale_qsv=w=-1:h=min(%d\\,ih)", maxHeight)
 		}
 		return "vpp_qsv=tonemap=1:format=nv12"
 	case HwAccelNVENC:

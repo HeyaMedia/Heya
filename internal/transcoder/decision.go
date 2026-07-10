@@ -131,12 +131,13 @@ type PlaybackPlan struct {
 	// Surgical flags used by the ffmpeg arg builder. None of these change the
 	// Action by themselves — they describe the side effects applied on top of
 	// remux/transcode that the standard codec/container decision picks.
-	StripDoViEL     bool // remove DV enhancement layer + RPU to play as HDR10 base layer
-	RetagHEVC       bool // -tag:v hvc1 for Safari (when copying HEVC)
-	Deinterlace     bool // apply yadif (or hw equivalent)
-	Rotate          int  // 0/90/180/270 — transpose filter degrees CW
-	FixAnamorphic   bool // setsar=1:1 + correct scale
-	DownmixToStereo bool // multi-channel AAC transcode → stereo
+	StripDoViEL     bool   // remove DV enhancement layer + RPU to play as HDR10 base layer
+	RetagHEVC       bool   // -tag:v hvc1 for Safari (when copying HEVC)
+	RetagDoVi       string // profile-correct Dolby Vision tag (dvh1 for P5, hvc1 for P7/P8)
+	Deinterlace     bool   // apply yadif (or hw equivalent)
+	Rotate          int    // 0/90/180/270 — transpose filter degrees CW
+	FixAnamorphic   bool   // setsar=1:1 + correct scale
+	DownmixToStereo bool   // multi-channel AAC transcode → stereo
 }
 
 type StreamInfo struct {
@@ -341,6 +342,7 @@ func Decide(info *MediaInfo, caps ClientCapabilities) PlaybackPlan {
 	// level, which is better than a black screen from DV-decode failure.
 	canStripDVtoHDR10 := dvNeedsHandling && dvHDR10Compat
 	hevcRetagNeeded := caps.SupportsHEVC && !caps.SupportsHEVCHev1 && IsHEVCHev1Tag(video)
+	doviRetag := requiredDoViTag(video, caps)
 
 	baseVideoCompat := (isH264) ||
 		(isHEVC && caps.SupportsHEVC) ||
@@ -405,13 +407,19 @@ func Decide(info *MediaInfo, caps ClientCapabilities) PlaybackPlan {
 		if hevcRetagNeeded {
 			reasons |= ReasonVideoCodecTagNotSupported
 		}
+		if doviRetag != "" {
+			reasons |= ReasonVideoCodecTagNotSupported
+		}
 		if canStripDVtoHDR10 {
 			reasons |= ReasonDolbyVisionNotSupported
 		}
 	}
 
-	needsSurgicalRemux := videoCompatible && (hevcRetagNeeded || canStripDVtoHDR10)
-	fmp4 := isAV1 || isVP9
+	needsSurgicalRemux := videoCompatible && (hevcRetagNeeded || doviRetag != "" || canStripDVtoHDR10)
+	// HEVC browser playback is carried in fragmented MP4. MPEG-TS support is
+	// not implied by MediaSource accepting HEVC in MP4, and TS cannot preserve
+	// the Dolby Vision configuration record needed by Apple clients.
+	fmp4 := isHEVC || isAV1 || isVP9
 
 	// Build the surgical-flag bundle that flows into ffmpeg arg construction.
 	plan := PlaybackPlan{
@@ -425,6 +433,7 @@ func Decide(info *MediaInfo, caps ClientCapabilities) PlaybackPlan {
 	}
 	if needsSurgicalRemux {
 		plan.RetagHEVC = hevcRetagNeeded
+		plan.RetagDoVi = doviRetag
 		plan.StripDoViEL = canStripDVtoHDR10
 	}
 
@@ -468,7 +477,7 @@ func Decide(info *MediaInfo, caps ClientCapabilities) PlaybackPlan {
 	// the source is HDR, the tone-map filter is required regardless of whether
 	// the *client* could have rendered HDR — our transcode profiles target SDR
 	// h264, so the colors have to come down.
-	sourceIsHDR := video != nil && IsHDRStream(video)
+	sourceIsHDR := video != nil && (IsHDRStream(video) || IsDolbyVision(video))
 	reason := "transcode video (" + videoCodec + " → h264)"
 	if sourceIsHDR {
 		reason += " + HDR→SDR tone map"
@@ -489,6 +498,23 @@ func Decide(info *MediaInfo, caps ClientCapabilities) PlaybackPlan {
 	plan.CopyAudio = false
 	plan.DownmixToStereo = true
 	return plan
+}
+
+// requiredDoViTag returns the MP4 sample-entry tag required for direct Dolby
+// Vision playback, or "" when the source is already correctly tagged (or the
+// client cannot play Dolby Vision). Profile 5 uses dvh1; profiles 7/8 use hvc1.
+func requiredDoViTag(s *StreamInfo, caps ClientCapabilities) string {
+	if s == nil || !IsDolbyVision(s) || !clientSupportsDoVi(caps) {
+		return ""
+	}
+	want := "hvc1"
+	if s.DvProfile == 5 {
+		want = "dvh1"
+	}
+	if strings.EqualFold(s.CodecTag, want) {
+		return ""
+	}
+	return want
 }
 
 // needsToneMapFor reports whether an HDR source needs to be tone-mapped to
@@ -551,6 +577,7 @@ func DecideForHLS(info *MediaInfo, audioStreamIdx int, caps ClientCapabilities) 
 	dvNeedsHandling := isDoVi && !clientSupportsDoVi(caps)
 	canStripDVtoHDR10 := dvNeedsHandling && dvHDR10Compat
 	hevcRetagNeeded := caps.SupportsHEVC && !caps.SupportsHEVCHev1 && IsHEVCHev1Tag(video)
+	doviRetag := requiredDoViTag(video, caps)
 
 	if video != nil {
 		videoHeight = video.Height
@@ -570,6 +597,7 @@ func DecideForHLS(info *MediaInfo, audioStreamIdx int, caps ClientCapabilities) 
 				copyVideo = true
 			} else if isHEVC && caps.SupportsHEVC {
 				copyVideo = true
+				needsFMP4 = true
 			} else if isAV1 && caps.SupportsAV1 {
 				copyVideo = true
 				needsFMP4 = true
@@ -650,6 +678,9 @@ func DecideForHLS(info *MediaInfo, audioStreamIdx int, caps ClientCapabilities) 
 		if hevcRetagNeeded {
 			reasonBits |= ReasonVideoCodecTagNotSupported
 		}
+		if doviRetag != "" {
+			reasonBits |= ReasonVideoCodecTagNotSupported
+		}
 		if canStripDVtoHDR10 {
 			reasonBits |= ReasonDolbyVisionNotSupported
 		}
@@ -662,7 +693,7 @@ func DecideForHLS(info *MediaInfo, audioStreamIdx int, caps ClientCapabilities) 
 		}
 	}
 
-	sourceIsHDR := video != nil && IsHDRStream(video)
+	sourceIsHDR := video != nil && (IsHDRStream(video) || IsDolbyVision(video))
 	plan := PlaybackPlan{
 		Action:    action,
 		Profile:   profileForHeight(videoHeight),
@@ -682,6 +713,7 @@ func DecideForHLS(info *MediaInfo, audioStreamIdx int, caps ClientCapabilities) 
 	}
 	if copyVideo {
 		plan.RetagHEVC = hevcRetagNeeded
+		plan.RetagDoVi = doviRetag
 		plan.StripDoViEL = canStripDVtoHDR10
 	}
 	if !copyAudio {
@@ -750,7 +782,7 @@ func AudioCanCopyToFMP4(codec string, caps ClientCapabilities) bool {
 
 func VideoNeedsFMP4(codec string) bool {
 	c := strings.ToLower(codec)
-	return containsAny(c, "av1", "av01", "vp9", "vp09")
+	return containsAny(c, "hevc", "h265", "av1", "av01", "vp9", "vp09")
 }
 
 func profileForHeight(height int) string {

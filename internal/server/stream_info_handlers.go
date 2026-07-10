@@ -22,12 +22,13 @@ type playbackDecision struct {
 	// Surgical fixes applied on top of the action. Useful in the UI to
 	// explain WHY a "remux" or "transcode" is happening beyond the codec
 	// summary in Reason.
-	StripDoViEL     bool `json:"strip_dovi_el,omitempty"`
-	RetagHEVC       bool `json:"retag_hevc,omitempty"`
-	Deinterlace     bool `json:"deinterlace,omitempty"`
-	Rotate          int  `json:"rotate,omitempty"`
-	FixAnamorphic   bool `json:"fix_anamorphic,omitempty"`
-	DownmixToStereo bool `json:"downmix_stereo,omitempty"`
+	StripDoViEL     bool   `json:"strip_dovi_el,omitempty"`
+	RetagHEVC       bool   `json:"retag_hevc,omitempty"`
+	RetagDoVi       string `json:"retag_dovi,omitempty"`
+	Deinterlace     bool   `json:"deinterlace,omitempty"`
+	Rotate          int    `json:"rotate,omitempty"`
+	FixAnamorphic   bool   `json:"fix_anamorphic,omitempty"`
+	DownmixToStereo bool   `json:"downmix_stereo,omitempty"`
 }
 
 type qualityOption struct {
@@ -181,6 +182,7 @@ func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabi
 			NeedsFMP4:       plan.NeedsFMP4,
 			StripDoViEL:     plan.StripDoViEL,
 			RetagHEVC:       plan.RetagHEVC,
+			RetagDoVi:       plan.RetagDoVi,
 			Deinterlace:     plan.Deinterlace,
 			Rotate:          plan.Rotate,
 			FixAnamorphic:   plan.FixAnamorphic,

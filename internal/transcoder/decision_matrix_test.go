@@ -49,8 +49,8 @@ func TestDecideMatrix(t *testing.T) {
 		{"firefox", "mp4-hevc-aac-15200k", ActionTranscode, ReasonVideoCodecNotSupported, false, true, false, false},
 
 		// MKV HEVC: container + maybe codec issue
-		{"safari", "mkv-hevc-aac-2600k", ActionRemux, ReasonContainerNotSupported, true, true, false, false},
-		{"firefox-mac", "mkv-hevc-aac-2600k", ActionRemux, ReasonContainerNotSupported, true, true, false, false},
+		{"safari", "mkv-hevc-aac-2600k", ActionRemux, ReasonContainerNotSupported, true, true, true, false},
+		{"firefox-mac", "mkv-hevc-aac-2600k", ActionRemux, ReasonContainerNotSupported, true, true, true, false},
 		{"chrome", "mkv-hevc-aac-2600k", ActionTranscode, ReasonContainerNotSupported | ReasonVideoCodecNotSupported, false, true, false, false},
 		{"firefox", "mkv-hevc-aac-2600k", ActionTranscode, ReasonContainerNotSupported | ReasonVideoCodecNotSupported, false, true, false, false},
 
@@ -85,7 +85,7 @@ func TestDecideMatrix(t *testing.T) {
 		{"firefox-mac", "mp4-hevc-hdr10", ActionTranscode, ReasonHDRNotSupported, false, true, false, true},
 
 		// HDR HEVC + EAC3 in MKV: container + HDR + (maybe) audio
-		{"safari", "mkv-hevc-eac3-15200k-hdr", ActionRemux, ReasonContainerNotSupported, true, true, false, false},
+		{"safari", "mkv-hevc-eac3-15200k-hdr", ActionRemux, ReasonContainerNotSupported, true, true, true, false},
 		{"firefox", "mkv-hevc-eac3-15200k-hdr", ActionTranscode, ReasonContainerNotSupported | ReasonHDRNotSupported | ReasonAudioCodecNotSupported, false, false, false, true},
 
 		// --- FLAC audio: Firefox/Chrome OK, Safari has it too --------------
@@ -105,7 +105,7 @@ func TestDecideMatrix(t *testing.T) {
 		// HEVC support can remux + strip the RPU/EL to deliver plain HDR10.
 		{"safari-tv", "mp4-hevc-dvh1.08-hdr10bl", ActionDirectPlay, 0, true, true, false, false},
 		{"nvidia-shield", "mp4-hevc-dvh1.08-hdr10bl", ActionDirectPlay, 0, true, true, false, false},
-		{"chromecast-ultra", "mp4-hevc-dvh1.08-hdr10bl", ActionRemux, ReasonDolbyVisionNotSupported, true, true, false, false},
+		{"chromecast-ultra", "mp4-hevc-dvh1.08-hdr10bl", ActionRemux, ReasonDolbyVisionNotSupported, true, true, true, false},
 
 		// --- Dolby Vision profile 5 (DV-only, no HDR10 fallback) ----------
 		// DoVi-capable clients direct-play. Anyone else must transcode +
@@ -118,15 +118,15 @@ func TestDecideMatrix(t *testing.T) {
 		// Lossless audio always transcodes. DV7 has a separate EL track that
 		// we can't strip via bitstream filter alone, so non-DoVi clients
 		// transcode the video.
-		{"nvidia-shield", "mp4-hevc-dvh1.07-truehd", ActionRemux, ReasonAudioLosslessNotSupported, true, false, false, false},
+		{"nvidia-shield", "mp4-hevc-dvh1.07-truehd", ActionRemux, ReasonVideoCodecTagNotSupported | ReasonAudioLosslessNotSupported, true, false, true, false},
 		{"chromecast-ultra", "mp4-hevc-dvh1.07-truehd", ActionTranscode, ReasonDolbyVisionNotSupported | ReasonAudioLosslessNotSupported, false, false, false, true},
-		{"safari-tv", "mp4-hevc-dvh1.07-truehd", ActionRemux, ReasonAudioLosslessNotSupported, true, false, false, false},
+		{"safari-tv", "mp4-hevc-dvh1.07-truehd", ActionRemux, ReasonVideoCodecTagNotSupported | ReasonAudioLosslessNotSupported, true, false, true, false},
 
 		// --- HEVC `hev1` codec tag -----------------------------------------
 		// Safari needs `hvc1`; we remux with -tag:v hvc1. Clients that accept
 		// either tag (chromecast-ultra, nvidia-shield) direct-play.
-		{"safari", "mp4-hevc-hev1-aac", ActionRemux, ReasonVideoCodecTagNotSupported, true, true, false, false},
-		{"safari-tv", "mp4-hevc-hev1-aac", ActionRemux, ReasonVideoCodecTagNotSupported, true, true, false, false},
+		{"safari", "mp4-hevc-hev1-aac", ActionRemux, ReasonVideoCodecTagNotSupported, true, true, true, false},
+		{"safari-tv", "mp4-hevc-hev1-aac", ActionRemux, ReasonVideoCodecTagNotSupported, true, true, true, false},
 		{"chromecast-ultra", "mp4-hevc-hev1-aac", ActionDirectPlay, 0, true, true, false, false},
 		{"nvidia-shield", "mp4-hevc-hev1-aac", ActionDirectPlay, 0, true, true, false, false},
 
@@ -203,8 +203,8 @@ func TestDecideForHLSMatrix(t *testing.T) {
 		// H.264 Hi10P: cannot copy to MPEG-TS — transcode video
 		{"chrome", "mp4-h264-hi10p-aac", 0, ActionTranscode, false, true, false},
 
-		// HEVC: copy if client supports, MPEG-TS
-		{"safari", "mkv-hevc-aac-2600k", 0, ActionRemux, true, true, false},
+		// HEVC: copy if client supports, using fragmented MP4
+		{"safari", "mkv-hevc-aac-2600k", 0, ActionRemux, true, true, true},
 		{"firefox", "mkv-hevc-aac-2600k", 0, ActionTranscode, false, true, false},
 
 		// AV1: needs fMP4
@@ -221,7 +221,7 @@ func TestDecideForHLSMatrix(t *testing.T) {
 		{"chrome", "mkv-av1-eac3-5_1", 0, ActionRemux, true, true, true},
 
 		// HDR HEVC: forced transcode (tone-map) regardless of codec support
-		{"safari", "mkv-hevc-eac3-15200k-hdr", 0, ActionRemux, true, true, false},
+		{"safari", "mkv-hevc-eac3-15200k-hdr", 0, ActionRemux, true, true, true},
 		{"firefox", "mkv-hevc-eac3-15200k-hdr", 0, ActionTranscode, false, false, false},
 
 		// Lossless audio: video can still copy, audio re-encodes
@@ -234,13 +234,13 @@ func TestDecideForHLSMatrix(t *testing.T) {
 		{"chrome", "mp4-h264-anamorphic", 0, ActionTranscode, false, true, false},
 
 		// HEVC hev1 codec tag: safari can copy the HEVC stream into fMP4 and
-		// retag to hvc1. (HEVC stays in MPEG-TS — no fmp4 forced.)
-		{"safari", "mp4-hevc-hev1-aac", 0, ActionRemux, true, true, false},
+		// retag to hvc1 in fragmented MP4.
+		{"safari", "mp4-hevc-hev1-aac", 0, ActionRemux, true, true, true},
 
 		// Dolby Vision profile 8 + HDR10 BL: HEVC-capable non-DoVi client
 		// can copy (strip EL via bsf). DoVi-capable client direct-plays
 		// (not visible in this matrix — that's the Decide() path).
-		{"chromecast-ultra", "mp4-hevc-dvh1.08-hdr10bl", 0, ActionRemux, true, true, false},
+		{"chromecast-ultra", "mp4-hevc-dvh1.08-hdr10bl", 0, ActionRemux, true, true, true},
 		// DV5 forces transcode (no HDR10 base layer to strip).
 		{"chromecast-ultra", "mp4-hevc-dvh1.05-15200k", 0, ActionTranscode, false, true, false},
 	}
