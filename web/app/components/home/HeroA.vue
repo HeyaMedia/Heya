@@ -287,6 +287,9 @@ function killTrailer() {
 
 function endTrailer(advance: boolean) {
   killTrailer()
+  // A pinned slide holds regardless of the trailer's outcome — advancing
+  // here would break the 30s pin promise. The pin callback resumes rotation.
+  if (pinTimer) return
   if (advance && props.items.length > 1) advanceHero()
   if (!heroPaused.value && props.items.length > 1) startTimer()
 }
@@ -434,6 +437,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (timeout) clearTimeout(timeout)
+  // A live pin outliving the component would fire resumeHero() detached
+  // and restart the rotation chain against a dead instance.
+  if (pinTimer) { clearTimeout(pinTimer); pinTimer = null }
   killTrailer()
 })
 </script>
