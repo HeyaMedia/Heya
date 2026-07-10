@@ -3,10 +3,13 @@
 # Triggers only on `vX.Y.Z` tag push — main-branch pushes go through the
 # regular CI (ci.yml); tagging is what releases an image.
 #
-# Three images per release, all from ghcr.io/<owner>/<repo>:
+# Six image tags per release, all from ghcr.io/<owner>/<repo>:
 #   :<ver>            base — CPU ONNX + Intel/AMD VAAPI/QSV transcode (amd64+arm64)
 #   :<ver>-cuda       NVIDIA — CUDA/TensorRT ONNX + NVENC transcode (amd64)
 #   :<ver>-openvino   Intel  — OpenVINO ONNX (Arc/iGPU) + QSV/VAAPI (amd64)
+#   :<ver>-aio        base + private PostgreSQL/pgvector (amd64+arm64)
+#   :<ver>-cuda-aio   NVIDIA + private PostgreSQL/pgvector (amd64)
+#   :<ver>-openvino-aio Intel + private PostgreSQL/pgvector (amd64)
 #
 # The amd64 app bundle (Heya + pinned agent CLIs) is built once, uploaded as an
 # artifact, and then packaged in parallel onto the CPU/CUDA/OpenVINO runtime
@@ -315,3 +318,119 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  aio-build:
+    name: ${{ matrix.variant }} aio (${{ matrix.arch }})
+    needs: [merge, variants]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: cpu, arch: amd64, platform: linux/amd64, runner: ubuntu-latest, base_suffix: '' }
+          - { variant: cpu, arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm, base_suffix: '' }
+          - { variant: cuda, arch: amd64, platform: linux/amd64, runner: ubuntu-latest, base_suffix: '-cuda' }
+          - { variant: openvino, arch: amd64, platform: linux/amd64, runner: ubuntu-latest, base_suffix: '-openvino' }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # This is deliberately an overlay on the completed release image. It
+      # installs only PostgreSQL, pgvector, supervisor, and the init scripts;
+      # neither Heya nor any CPU/GPU runtime is rebuilt.
+      - name: Build + push aio by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: .docker/Dockerfile.aio
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BASE_IMAGE=${{ needs.merge.outputs.image }}:${{ needs.merge.outputs.version }}${{ matrix.base_suffix }}
+          outputs: type=image,name=${{ needs.merge.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=aio-${{ matrix.variant }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=aio-${{ matrix.variant }}-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: aio-digest-${{ matrix.variant }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  aio-publish:
+    name: ${{ matrix.variant }} aio manifest
+    needs: [merge, aio-build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: cpu, tag_suffix: '-aio' }
+          - { variant: cuda, tag_suffix: '-cuda-aio' }
+          - { variant: openvino, tag_suffix: '-openvino-aio' }
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: aio-digest-${{ matrix.variant }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.merge.outputs.image }}
+          flavor: suffix=${{ matrix.tag_suffix }},onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Create + push manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          image="${{ needs.merge.outputs.image }}"
+
+          tags=()
+          while IFS= read -r tag; do
+            tags+=("-t" "$tag")
+          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+
+          refs=()
+          for digest_file in *; do
+            refs+=("${image}@sha256:${digest_file}")
+          done
+
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "${{ needs.merge.outputs.image }}:${{ needs.merge.outputs.version }}${{ matrix.tag_suffix }}"

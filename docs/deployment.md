@@ -1,23 +1,61 @@
 # Deployment — container images
 
 Heya ships as a single self-contained binary (embedded Nuxt SPA + API + WS).
-Production runs it from a container. There are **three image flavours**, all
-published to `ghcr.io/heyamedia/heya` on every `vX.Y.Z` tag:
+Production runs it from a container. There are three application flavours,
+plus an opt-in all-in-one (`-aio`) form of each, published to
+`ghcr.io/heyamedia/heya` on every `vX.Y.Z` tag:
 
-| Tag | Arch | ONNX (sonic-analysis) | Video transcode | Run flag |
+| Tags | Arch | ONNX (sonic-analysis) | Video transcode | Database |
 | --- | --- | --- | --- | --- |
-| `:<ver>` (+ `latest`) | amd64 **+ arm64** | CPU | Intel/AMD **VAAPI + QSV** | `--device /dev/dri` |
-| `:<ver>-cuda` | amd64 | **CUDA + TensorRT** | **NVENC/NVDEC** | `--gpus all` |
-| `:<ver>-openvino` | amd64 | **OpenVINO** (Intel iGPU/Arc) | VAAPI + QSV | `--device /dev/dri` |
+| `:<ver>` / `:<ver>-aio` | amd64 **+ arm64** | CPU | Intel/AMD **VAAPI + QSV** | external / bundled |
+| `:<ver>-cuda` / `:<ver>-cuda-aio` | amd64 | **CUDA + TensorRT** | **NVENC/NVDEC** | external / bundled |
+| `:<ver>-openvino` / `:<ver>-openvino-aio` | amd64 | **OpenVINO** (Intel iGPU/Arc) | VAAPI + QSV | external / bundled |
 
 The GPU variants are thin layers built **FROM the base image** (same heya
 binary + jellyfin-ffmpeg), adding only the vendor GPU runtime + a GPU-enabled
 ONNX Runtime. Pick the one image that matches your GPU; the base covers
 everyone for transcode and CPU inference.
 
-Postgres is always external — point at it with `HEYA_DATABASE_URL`. Data
-(Tailscale state, transcode cache, sonic-analysis models, OpenVINO kernel
-cache) lives under `/data`; mount a volume there.
+Regular images use an external Postgres selected by `HEYA_DATABASE_URL`.
+All-in-one images add PostgreSQL 17, pgvector, and supervisord directly on top
+of the corresponding completed regular image. All persistent state lives below
+`/data`; always mount a volume there.
+
+## One-command all-in-one
+
+```bash
+docker run -d --name heya \
+  -p 8080:8080 \
+  -v heya-data:/data \
+  --restart unless-stopped \
+  ghcr.io/heyamedia/heya:latest-aio
+```
+
+This initializes PostgreSQL on first boot, waits for it to become ready, then
+runs PostgreSQL and Heya under supervisord. Heya applies its own migrations,
+including pgvector, as usual. PostgreSQL listens only on container loopback and
+port 5432 is not exposed; this image is intentionally a single-container unit.
+Use the regular image and external Postgres when the database must be shared,
+backed up independently, or managed separately.
+
+The zero-configuration database credentials are internal-only `heya` / `heya`.
+They can be changed on first boot with `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
+`POSTGRES_DB`, but a matching `HEYA_DATABASE_URL` must then also be provided.
+Changing those variables does not rewrite an existing cluster in `/data`.
+
+GPU forms use the same host flags as their regular counterparts:
+
+```bash
+# NVIDIA
+docker run -d --name heya --gpus all -p 8080:8080 -v heya-data:/data \
+  ghcr.io/heyamedia/heya:latest-cuda-aio
+
+# Intel OpenVINO
+docker run -d --name heya -p 8080:8080 -v heya-data:/data \
+  --device /dev/dri:/dev/dri \
+  --group-add "$(getent group render | cut -d: -f3)" \
+  ghcr.io/heyamedia/heya:latest-openvino-aio
+```
 
 ## Docker Compose
 
@@ -110,6 +148,8 @@ Validated end-to-end on an Intel Arc A380 (DG2): sonic-analysis runs on the GPU.
 make docker                 # base, host arch (override: make docker PLATFORM=linux/amd64)
 make docker-cuda            # heya:cuda      (amd64, app image on CUDA runtime)
 make docker-openvino        # heya:openvino  (amd64, app image on OpenVINO runtime)
+# Overlay a completed local or published image:
+docker build -f .docker/Dockerfile.aio --build-arg BASE_IMAGE=heya:base -t heya:aio .
 make docker-run             # run base against the compose Postgres
 make docker-run-gpu         # run base with /dev/dri for hw transcode
 make docker-multiarch IMAGE=ghcr.io/...  # push base as one amd64+arm64 manifest

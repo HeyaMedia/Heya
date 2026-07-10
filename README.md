@@ -17,10 +17,12 @@ stays focused on libraries, playback, and the UI.
 ## Quick start (Docker)
 
 ```bash
-docker compose up -d        # Postgres + ghcr.io/heyamedia/heya:latest on :8080
+docker run -d --name heya -p 8080:8080 -v heya-data:/data \
+  ghcr.io/heyamedia/heya:latest-aio
 ```
 
-Or standalone against your own Postgres:
+That all-in-one image runs private PostgreSQL + pgvector alongside Heya. Or use
+the regular image against your own Postgres:
 
 ```bash
 docker run -p 8080:8080 -v $PWD/data:/data \

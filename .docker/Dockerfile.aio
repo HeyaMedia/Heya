@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+#
+# Heya all-in-one image: layer PostgreSQL + pgvector + supervisord onto an
+# already-built Heya image. The release workflow points BASE_IMAGE at the CPU,
+# CUDA, or OpenVINO image for the same release, so the application and GPU
+# runtime are never rebuilt here.
+
+ARG BASE_IMAGE=ghcr.io/heyamedia/heya:latest
+
+FROM ${BASE_IMAGE}
+
+USER root
+
+# postgresql-common normally creates a distro-owned "main" cluster during
+# package installation. Disable that: the entrypoint initializes the persisted
+# /data/postgres cluster on first boot instead.
+RUN mkdir -p /etc/postgresql-common && \
+    echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf && \
+    install_packages \
+        postgresql-17 \
+        postgresql-17-pgvector \
+        supervisor && \
+    rm -rf /var/lib/apt/lists/* /var/lib/postgresql/17
+
+COPY --chmod=0755 .docker/aio/entrypoint.sh /usr/local/bin/heya-aio-entrypoint
+COPY --chmod=0755 .docker/aio/start-heya.sh /usr/local/bin/heya-aio-start-heya
+COPY .docker/aio/supervisord.conf /etc/supervisor/conf.d/heya-aio.conf
+
+# Both Heya and PostgreSQL persist below the existing /data volume. PostgreSQL
+# binds only to loopback; publishing port 5432 is intentionally unsupported for
+# this convenience image. Use the regular image + external PostgreSQL when the
+# database needs to be reachable by anything else.
+ENV PGDATA=/data/postgres \
+    POSTGRES_USER=heya \
+    POSTGRES_PASSWORD=heya \
+    POSTGRES_DB=heya
+
+ENTRYPOINT ["/usr/local/bin/heya-aio-entrypoint"]
+CMD ["all-in-one"]
