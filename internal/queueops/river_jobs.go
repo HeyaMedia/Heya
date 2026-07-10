@@ -425,29 +425,41 @@ func ClearByKind(ctx context.Context, db DB, kind, state string) (int64, error) 
 	return tag.RowsAffected(), nil
 }
 
-func CancelPendingByLibrary(ctx context.Context, db DB, libraryID int64) (int64, error) {
+// CancelPendingByKinds cancels every not-yet-running job of the given
+// kinds, optionally scoped to one library (libraryID > 0 matches the
+// args->>'library_id' the scan pipeline kinds carry; derived kinds like
+// ffprobe carry library_file_id instead and are only reachable with
+// libraryID == 0). Running jobs are NOT touched here — flipping a running
+// row's state under River corrupts its bookkeeping; cancel those through
+// the client's JobCancel so the worker's context aborts cleanly.
+func CancelPendingByKinds(ctx context.Context, db DB, kinds []string, libraryID int64) (int64, error) {
 	tag, err := db.Exec(ctx, `
 		UPDATE river_job
 		   SET state = 'cancelled', finalized_at = now()
-		 WHERE state IN ('available', 'retryable', 'scheduled')
-		   AND (args->>'library_id')::bigint = $1
-	`, libraryID)
+		 WHERE state IN ('available', 'pending', 'retryable', 'scheduled')
+		   AND kind = ANY($1)
+		   AND ($2::bigint = 0 OR NULLIF(args->>'library_id', '')::bigint = $2)
+	`, kinds, libraryID)
 	if err != nil {
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
 }
 
-func CancelAllPending(ctx context.Context, db DB) (int64, error) {
-	tag, err := db.Exec(ctx, `
-		UPDATE river_job
-		   SET state = 'cancelled', finalized_at = now()
-		 WHERE state IN ('available', 'retryable', 'scheduled')
-	`)
+// ListRunningJobIDsByKinds returns the ids of currently running jobs of the
+// given kinds (optionally per-library), for cancellation via river's
+// JobCancel.
+func ListRunningJobIDsByKinds(ctx context.Context, db DB, kinds []string, libraryID int64) ([]int64, error) {
+	rows, err := db.Query(ctx, `
+		SELECT id FROM river_job
+		 WHERE state = 'running'
+		   AND kind = ANY($1)
+		   AND ($2::bigint = 0 OR NULLIF(args->>'library_id', '')::bigint = $2)
+	`, kinds, libraryID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return tag.RowsAffected(), nil
+	return scanJobIDs(rows)
 }
 
 func scanJobIDs(rows pgx.Rows) ([]int64, error) {

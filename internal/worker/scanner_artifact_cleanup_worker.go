@@ -45,7 +45,7 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts), 0, err)
 		return err
 	}
-	orphaned, err := listOrphanedInFlightScannerEntities(ctx, w.DB, time.Now().Add(-orphanedScannerEntityRetention))
+	orphaned, err := listOrphanedInFlightScannerEntities(ctx, w.DB, time.Now().Add(-orphanedScannerEntityRetention), 0)
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts+staleInFlight.EntitiesDeleted+staleInFlight.EntityArtifactsDeleted), 0, err)
 		return err
@@ -78,6 +78,10 @@ type orphanedScannerEntity struct {
 	ID         int64
 	LibraryID  int64
 	ScopePaths []string
+	// Cancelled marks entities whose most recent pipeline job was cancelled
+	// by the user: they are cleaned up but NOT requeued — cancel means stop,
+	// and the next scan re-discovers the work through change detection.
+	Cancelled bool
 }
 
 // listOrphanedInFlightScannerEntities finds entities stuck in any in-flight
@@ -85,12 +89,21 @@ type orphanedScannerEntity struct {
 // 'fetched' and 'applying' as well as 'matched'/'fetching': an apply job that
 // died after fetch persisted leaves those states orphaned exactly the same
 // way.
-func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, cutoff time.Time) ([]orphanedScannerEntity, error) {
+func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, cutoff time.Time, libraryID int64) ([]orphanedScannerEntity, error) {
 	rows, err := db.Query(ctx, `
-		SELECT entity.id, entity.library_id, entity.scope_paths
+		SELECT entity.id, entity.library_id, entity.scope_paths,
+		  EXISTS (
+		    SELECT 1
+		    FROM river_job job
+		    WHERE job.kind IN ('fetch_metadata', 'apply_metadata')
+		      AND job.state = 'cancelled'
+		      AND job.args ? 'scanner_entity_id'
+		      AND (job.args->>'scanner_entity_id')::bigint = entity.id
+		  ) AS cancelled
 		FROM scanner_entities entity
 		WHERE entity.status IN ('matched', 'fetching', 'fetched', 'applying')
 		  AND entity.updated_at < $1
+		  AND ($2::bigint = 0 OR entity.library_id = $2)
 		  AND NOT EXISTS (
 		    SELECT 1
 		    FROM river_job job
@@ -98,7 +111,7 @@ func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, 
 		      AND job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
 		      AND job.args ? 'scanner_entity_id'
 		      AND (job.args->>'scanner_entity_id')::bigint = entity.id
-		  )`, cutoff)
+		  )`, cutoff, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -106,12 +119,30 @@ func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, 
 	var out []orphanedScannerEntity
 	for rows.Next() {
 		var e orphanedScannerEntity
-		if err := rows.Scan(&e.ID, &e.LibraryID, &e.ScopePaths); err != nil {
+		if err := rows.Scan(&e.ID, &e.LibraryID, &e.ScopePaths, &e.Cancelled); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// SweepCancelledScannerEntities removes in-flight scanner entities left
+// behind by a user cancellation — WITHOUT requeueing them. Run right after
+// cancelling scan jobs so the orphan pruner (which requeues by design)
+// doesn't resurrect work the user explicitly stopped. libraryID 0 sweeps
+// every library. The next scan re-discovers the cancelled units through
+// normal change detection.
+func SweepCancelledScannerEntities(ctx context.Context, db *pgxpool.Pool, libraryID int64) (int64, error) {
+	orphaned, err := listOrphanedInFlightScannerEntities(ctx, db, time.Now(), libraryID)
+	if err != nil {
+		return 0, err
+	}
+	counts, err := cleanupOrphanedInFlightScannerEntities(ctx, db, orphaned)
+	if err != nil {
+		return 0, err
+	}
+	return counts.EntitiesDeleted, nil
 }
 
 // reenqueueOrphanedScannerScopes puts the deleted entities' scopes back into
@@ -159,6 +190,9 @@ func orphanedScannerRequeueArgs(orphaned []orphanedScannerEntity) []ProcessLibra
 		})
 	}
 	for _, entity := range orphaned {
+		if entity.Cancelled {
+			continue // user said stop; don't resurrect their cancellation
+		}
 		if len(entity.ScopePaths) == 0 {
 			add(entity.LibraryID, nil)
 			continue

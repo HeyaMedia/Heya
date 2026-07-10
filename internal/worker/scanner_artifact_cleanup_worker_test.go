@@ -72,7 +72,7 @@ func TestCleanupOrphanedInFlightScannerEntitiesDeletesMatchedEntityWithoutActive
 	_, err = pool.Exec(ctx, `UPDATE scanner_entities SET search_artifact_id = $1, updated_at = now() - interval '30 minutes' WHERE id = $2`, entityArtifact.ID, entity.ID)
 	require.NoError(t, err)
 
-	orphaned, err := listOrphanedInFlightScannerEntities(ctx, pool, time.Now().Add(-15*time.Minute))
+	orphaned, err := listOrphanedInFlightScannerEntities(ctx, pool, time.Now().Add(-15*time.Minute), 0)
 	require.NoError(t, err)
 	require.Len(t, orphaned, 1)
 	require.Equal(t, entity.ID, orphaned[0].ID)
@@ -123,7 +123,7 @@ func TestListOrphanedInFlightScannerEntitiesCoversApplyStates(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	orphaned, err := listOrphanedInFlightScannerEntities(ctx, pool, time.Now().Add(-15*time.Minute))
+	orphaned, err := listOrphanedInFlightScannerEntities(ctx, pool, time.Now().Add(-15*time.Minute), 0)
 	require.NoError(t, err)
 
 	statuses := 0
@@ -133,4 +133,13 @@ func TestListOrphanedInFlightScannerEntitiesCoversApplyStates(t *testing.T) {
 		}
 	}
 	require.Equal(t, 2, statuses, "entities stuck in fetched/applying with no live job are orphans too")
+}
+
+func TestOrphanedScannerRequeueArgsSkipCancelledEntities(t *testing.T) {
+	args := orphanedScannerRequeueArgs([]orphanedScannerEntity{
+		{ID: 1, LibraryID: 5, ScopePaths: []string{"/m/A"}, Cancelled: true},
+		{ID: 2, LibraryID: 5, ScopePaths: []string{"/m/B"}},
+	})
+	require.Len(t, args, 1, "user-cancelled entities are cleaned up but never resurrected")
+	require.Equal(t, []string{"/m/B"}, args[0].ScopePaths)
 }

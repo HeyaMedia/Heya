@@ -9,7 +9,10 @@ import (
 
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/taskdefs"
 	"github.com/karbowiak/heya/internal/vfs"
+	"github.com/karbowiak/heya/internal/worker"
+	"github.com/rs/zerolog/log"
 )
 
 // jsonUnmarshalQuiet is a tiny helper for argsJSON decoding — errors are
@@ -392,16 +395,57 @@ func (a *App) CancelScheduledTaskJobs(ctx context.Context, taskID string, kinds 
 	return cancelled, nil
 }
 
-// CancelLibraryJobs cancels all pending jobs whose args contain the given library ID.
-// It returns the number of cancelled jobs.
-func (a *App) CancelLibraryJobs(ctx context.Context, libraryID int64) (int64, error) {
-	return queueops.CancelPendingByLibrary(ctx, a.db, libraryID)
+// cancelScanJobs actually stops a scan instead of pretending to:
+//  1. cancels every not-yet-running job of the scan task's kinds — the old
+//     pending-only, all-kinds cancel left running stage jobs alive, and
+//     each of those kept spawning its next stage (a running kickoff would
+//     re-fan thousands of units seconds after the "cancel");
+//  2. cancels RUNNING scan jobs through river's JobCancel, which aborts the
+//     worker's context — the walk, search, fetch, and apply loops are all
+//     context-aware, so a mid-walk kickoff stops instead of fanning out;
+//  3. sweeps the in-flight scanner entities WITHOUT requeueing them, so the
+//     orphan pruner (which requeues by design) doesn't resurrect work the
+//     user explicitly stopped. The next scan re-discovers cancelled units
+//     through normal change detection.
+//
+// A handful of units can still slip through: a running job that finalizes
+// between the sweep and its cancel signal leaves an entity the pruner
+// requeues 15 minutes later — bounded by the worker counts (≤12 units).
+func (a *App) cancelScanJobs(ctx context.Context, kinds []string, libraryID int64) (int64, error) {
+	cancelled, err := queueops.CancelPendingByKinds(ctx, a.db, kinds, libraryID)
+	if err != nil {
+		return 0, err
+	}
+	if a.river != nil {
+		ids, err := queueops.ListRunningJobIDsByKinds(ctx, a.db, kinds, libraryID)
+		if err != nil {
+			log.Warn().Err(err).Msg("cancel scans: listing running jobs failed; pending jobs were cancelled")
+		}
+		for _, id := range ids {
+			if _, err := a.river.JobCancel(ctx, id); err == nil {
+				cancelled++
+			}
+		}
+	}
+	if swept, err := worker.SweepCancelledScannerEntities(ctx, a.db, libraryID); err != nil {
+		log.Warn().Err(err).Int64("swept", swept).Msg("cancel scans: entity sweep failed; pruner may requeue leftovers")
+	}
+	return cancelled, nil
 }
 
-// CancelAllPendingJobs cancels every available, retryable, or scheduled job.
-// It returns the number of cancelled jobs.
+// CancelLibraryJobs stops one library's scan: the pipeline kinds carrying
+// library_id in their args (kickoff/process/fetch/apply). Derived per-file
+// work (ffprobe, fingerprints, …) has no library_id and is only reachable
+// via CancelAllPendingJobs.
+func (a *App) CancelLibraryJobs(ctx context.Context, libraryID int64) (int64, error) {
+	kinds := []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata"}
+	return a.cancelScanJobs(ctx, kinds, libraryID)
+}
+
+// CancelAllPendingJobs stops every library scan and the scan task's derived
+// work (probes, keyframes, fingerprints, loudness, facets, enrichment).
 func (a *App) CancelAllPendingJobs(ctx context.Context) (int64, error) {
-	return queueops.CancelAllPending(ctx, a.db)
+	return a.cancelScanJobs(ctx, taskdefs.TaskKinds("scan_libraries"), 0)
 }
 
 // ScheduleEntry describes a periodic schedule derived from library settings.
