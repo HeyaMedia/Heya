@@ -446,8 +446,18 @@ func (a *App) cancelScanJobs(ctx context.Context, kinds []string, libraryID int6
 			}
 		}
 
-		if n == 0 && len(running) == 0 {
-			break // quiescent: nothing pending, nothing running, nothing left to spawn
+		// Quiescence must be observed in ONE snapshot: this round's cancel
+		// count and running list are separate statements, and a job can
+		// finalize and spawn a successor in the gap between them. A single
+		// query showing zero pending AND zero running simultaneously proves
+		// no spawner existed at that instant.
+		pending, active, err := queueops.CountActiveScanJobs(ctx, a.db, kinds, libraryID)
+		if err != nil {
+			log.Warn().Err(err).Msg("cancel scans: quiescence check failed; pruner will mop up without requeueing")
+			break
+		}
+		if pending == 0 && active == 0 {
+			break
 		}
 		if time.Now().After(deadline) {
 			log.Warn().Int("still_running", len(running)).Msg("cancel scans: not quiescent at deadline; pruner will mop up without requeueing")

@@ -446,6 +446,25 @@ func CancelPendingByKinds(ctx context.Context, db DB, kinds []string, libraryID 
 	return tag.RowsAffected(), nil
 }
 
+// CountActiveScanJobs returns pending (not yet running) and running counts
+// of the given kinds in ONE statement — a single MVCC snapshot. If both are
+// zero simultaneously, nothing exists that could spawn a successor: any job
+// appearing afterwards belongs to a new, externally triggered burst. Two
+// separate queries cannot make that claim (a job can finalize and spawn
+// between them).
+func CountActiveScanJobs(ctx context.Context, db DB, kinds []string, libraryID int64) (pending, running int64, err error) {
+	err = db.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE state IN ('available', 'pending', 'retryable', 'scheduled')),
+			count(*) FILTER (WHERE state = 'running')
+		FROM river_job
+		WHERE state IN ('available', 'pending', 'retryable', 'scheduled', 'running')
+		  AND kind = ANY($1)
+		  AND ($2::bigint = 0 OR NULLIF(args->>'library_id', '')::bigint = $2)
+	`, kinds, libraryID).Scan(&pending, &running)
+	return pending, running, err
+}
+
 // ListRunningJobIDsByKinds returns the ids of currently running jobs of the
 // given kinds (optionally per-library), for cancellation via river's
 // JobCancel.
