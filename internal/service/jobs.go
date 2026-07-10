@@ -408,25 +408,58 @@ func (a *App) CancelScheduledTaskJobs(ctx context.Context, taskID string, kinds 
 //     user explicitly stopped. The next scan re-discovers cancelled units
 //     through normal change detection.
 //
-// A handful of units can still slip through: a running job that finalizes
-// between the sweep and its cancel signal leaves an entity the pruner
-// requeues 15 minutes later — bounded by the worker counts (≤12 units).
+// The cancel runs as a LOOP until quiescent, because a single pass races
+// the pipeline: a running stage job (or a mid-fan-out kickoff) can insert
+// fresh 'available' successors after the pending sweep, and JobCancel
+// signals land asynchronously — a signalled job may still finalize and
+// spawn. Each round re-sweeps pending and re-signals running; the loop
+// exits when a round finds nothing (nothing left to spawn from), or at a
+// deadline, after which the pruner's cancelled-flag mops up any straggler
+// without resurrecting it. Entities are swept only after quiescence so
+// nothing in flight can recreate them.
 func (a *App) cancelScanJobs(ctx context.Context, kinds []string, libraryID int64) (int64, error) {
-	cancelled, err := queueops.CancelPendingByKinds(ctx, a.db, kinds, libraryID)
-	if err != nil {
-		return 0, err
-	}
-	if a.river != nil {
-		ids, err := queueops.ListRunningJobIDsByKinds(ctx, a.db, kinds, libraryID)
+	var cancelled int64
+	signalled := map[int64]bool{}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		n, err := queueops.CancelPendingByKinds(ctx, a.db, kinds, libraryID)
 		if err != nil {
-			log.Warn().Err(err).Msg("cancel scans: listing running jobs failed; pending jobs were cancelled")
+			return cancelled, err
 		}
-		for _, id := range ids {
-			if _, err := a.river.JobCancel(ctx, id); err == nil {
-				cancelled++
+		cancelled += n
+
+		var running []int64
+		if a.river != nil {
+			running, err = queueops.ListRunningJobIDsByKinds(ctx, a.db, kinds, libraryID)
+			if err != nil {
+				log.Warn().Err(err).Msg("cancel scans: listing running jobs failed; pending jobs were cancelled")
+				break
+			}
+			for _, id := range running {
+				if signalled[id] {
+					continue
+				}
+				signalled[id] = true
+				if _, err := a.river.JobCancel(ctx, id); err == nil {
+					cancelled++
+				}
 			}
 		}
+
+		if n == 0 && len(running) == 0 {
+			break // quiescent: nothing pending, nothing running, nothing left to spawn
+		}
+		if time.Now().After(deadline) {
+			log.Warn().Int("still_running", len(running)).Msg("cancel scans: not quiescent at deadline; pruner will mop up without requeueing")
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return cancelled, ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
 	}
+
 	if swept, err := worker.SweepCancelledScannerEntities(ctx, a.db, libraryID); err != nil {
 		log.Warn().Err(err).Int64("swept", swept).Msg("cancel scans: entity sweep failed; pruner may requeue leftovers")
 	}
