@@ -228,7 +228,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 		n := 0
 		processQueued := false
 		if supportsScanner(lib.MediaType) && (job.Args.Force || result.New > 0) {
-			queued, enqueueFailed := enqueueProcessLibraryScanFanout(ctx, rc, lib, ProcessLibraryScanArgs{
+			queued, enqueueFailed := enqueueProcessLibraryScanFanout(ctx, rc, w.DB, lib, ProcessLibraryScanArgs{
 				LibraryID:       lib.ID,
 				Force:           job.Args.Force,
 				ScheduledTaskID: taskID,
@@ -328,7 +328,7 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 			}
 			inv = walked
 		}
-		queued, failed := enqueueProcessLibraryScanFanout(ctx, rc, lib, job.Args, job.Args.ScopePaths, inv, PriorityScan, source)
+		queued, failed := enqueueProcessLibraryScanFanout(ctx, rc, w.DB, lib, job.Args, job.Args.ScopePaths, inv, PriorityScan, source)
 		log.Info().
 			Int64("library_id", lib.ID).
 			Int("owner_scopes", queued).
@@ -379,7 +379,7 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		if !ref.Accepted || ref.ProviderID == "" {
 			continue
 		}
-		if err := enqueueFetchLibraryMetadata(ctx, rc, FetchLibraryMetadataArgs{
+		if err := enqueueFetchLibraryMetadata(ctx, rc, w.DB, FetchLibraryMetadataArgs{
 			LibraryID:        lib.ID,
 			ScopePaths:       job.Args.ScopePaths,
 			ScannerEntityID:  ref.Entity.ID,
@@ -459,7 +459,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 		return nil
 	}
 
-	if err := enqueueApplyLibraryScan(ctx, rc, ApplyLibraryScanArgs{
+	if err := enqueueApplyLibraryScan(ctx, rc, w.DB, ApplyLibraryScanArgs{
 		LibraryID:          lib.ID,
 		ScopePaths:         job.Args.ScopePaths,
 		ScannerEntityID:    job.Args.ScannerEntityID,
@@ -1395,24 +1395,76 @@ func scannerScopeForPath(path string) string {
 	return filepath.Dir(path)
 }
 
-func enqueueProcessLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], args ProcessLibraryScanArgs, priority int, source string) error {
+// bumpLibraryScanBurst maintains the durable per-library scan-burst total
+// that scan progress reads (done = units_total − active jobs). Called right
+// after each pipeline-unit insert; excludeJobID is the job just inserted,
+// so a burst's FIRST unit sees an idle library and resets the row instead
+// of incrementing a finished burst's stale total. Raw SQL because sqlc
+// can't see River's tables. Best-effort: a failed bump only skews the
+// progress bar, never the scan.
+//
+// Known micro-race: two simultaneous first-inserts can each see the other
+// as "already active" and both skip the reset, letting a stale total
+// inflate one burst's bar until it drains. Accepted — enqueue sites are
+// effectively serialized (kickoff fan-out loops, debounced watcher).
+func bumpLibraryScanBurst(ctx context.Context, db *pgxpool.Pool, libraryID int64, units int, excludeJobID int64) {
+	if db == nil || libraryID == 0 || units <= 0 {
+		return
+	}
+	_, err := db.Exec(ctx, `
+		INSERT INTO library_scan_bursts (library_id, started_at, units_total)
+		VALUES ($1, now(), $2)
+		ON CONFLICT (library_id) DO UPDATE SET
+			units_total = CASE WHEN EXISTS (
+					SELECT 1 FROM river_job rj
+					WHERE rj.kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
+					  AND rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+					  AND NULLIF(rj.args->>'library_id', '')::bigint = $1
+					  AND rj.id <> $3
+				) THEN library_scan_bursts.units_total + $2
+				ELSE $2 END,
+			started_at = CASE WHEN EXISTS (
+					SELECT 1 FROM river_job rj
+					WHERE rj.kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
+					  AND rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+					  AND NULLIF(rj.args->>'library_id', '')::bigint = $1
+					  AND rj.id <> $3
+				) THEN library_scan_bursts.started_at
+				ELSE now() END
+	`, libraryID, units, excludeJobID)
+	if err != nil {
+		log.Warn().Err(err).Int64("library_id", libraryID).Msg("scan burst bump failed")
+	}
+}
+
+// EnqueueProcessLibraryScan inserts one process_scan unit and maintains the
+// library's scan-burst total. Every process_scan insert site must come
+// through here (watcher, review actions, pruner requeues, kickoff fan-out)
+// or the progress bar loses its denominator.
+func EnqueueProcessLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args ProcessLibraryScanArgs, priority int, source string) error {
 	if rc == nil {
 		return fmt.Errorf("river client unavailable")
 	}
 	opts := args.InsertOpts()
 	opts.Priority = priority
-	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	return err
+	res, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	if err != nil {
+		return err
+	}
+	if res != nil && res.Job != nil && !res.UniqueSkippedAsDuplicate {
+		bumpLibraryScanBurst(ctx, db, args.LibraryID, 1, res.Job.ID)
+	}
+	return nil
 }
 
-func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.Tx], lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory, priority int, source string) (queued, failed int) {
+func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory, priority int, source string) (queued, failed int) {
 	argsList := processLibraryScanFanoutArgs(lib, base, scopes, inv)
 	for _, args := range argsList {
 		if err := ctx.Err(); err != nil {
 			log.Warn().Err(err).Int64("library_id", base.LibraryID).Msg("kickoff_library_scan: enqueue scanner processing canceled")
 			return queued, failed + 1
 		}
-		if err := enqueueProcessLibraryScan(ctx, rc, args, priority, source); err != nil {
+		if err := EnqueueProcessLibraryScan(ctx, rc, db, args, priority, source); err != nil {
 			log.Warn().Err(err).Int64("library_id", base.LibraryID).Strs("scopes", args.ScopePaths).Msg("kickoff_library_scan: enqueue scanner processing failed")
 			failed++
 			continue
@@ -1516,24 +1568,36 @@ func scannerScopeIsLibraryRoot(lib sqlc.Library, scope string) bool {
 	return false
 }
 
-func enqueueApplyLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], args ApplyLibraryScanArgs, priority int, source string) error {
+func enqueueApplyLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args ApplyLibraryScanArgs, priority int, source string) error {
 	if rc == nil {
 		return fmt.Errorf("river client unavailable")
 	}
 	opts := args.InsertOpts()
 	opts.Priority = priority
-	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	return err
+	res, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	if err != nil {
+		return err
+	}
+	if res != nil && res.Job != nil && !res.UniqueSkippedAsDuplicate {
+		bumpLibraryScanBurst(ctx, db, args.LibraryID, 1, res.Job.ID)
+	}
+	return nil
 }
 
-func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], args FetchLibraryMetadataArgs, priority int, source string) error {
+func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args FetchLibraryMetadataArgs, priority int, source string) error {
 	if rc == nil {
 		return fmt.Errorf("river client unavailable")
 	}
 	opts := args.InsertOpts()
 	opts.Priority = priority
-	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	return err
+	res, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	if err != nil {
+		return err
+	}
+	if res != nil && res.Job != nil && !res.UniqueSkippedAsDuplicate {
+		bumpLibraryScanBurst(ctx, db, args.LibraryID, 1, res.Job.ID)
+	}
+	return nil
 }
 
 func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, scanner.Result, int64, error) {

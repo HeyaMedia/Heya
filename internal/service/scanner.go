@@ -673,10 +673,7 @@ func (a *App) enqueueScannerReviewApply(ctx context.Context, q *sqlc.Queries, id
 		ScopePaths: scannerReviewScopePaths(lib.Paths, identity.RawIdentity),
 		Force:      true,
 	}
-	opts := args.InsertOpts()
-	opts.Priority = worker.PriorityMatch
-	_, err = a.river.Insert(ctx, args, &opts)
-	return err
+	return worker.EnqueueProcessLibraryScan(ctx, a.river, a.db, args, worker.PriorityMatch, "")
 }
 
 func (a *App) enqueueScannerReviewReidentify(ctx context.Context, q *sqlc.Queries, identity sqlc.GetScannerIdentityForViewRow) error {
@@ -692,10 +689,7 @@ func (a *App) enqueueScannerReviewReidentify(ctx context.Context, q *sqlc.Querie
 		ScopePaths: scannerReviewScopePaths(lib.Paths, identity.RawIdentity),
 		Force:      true,
 	}
-	opts := args.InsertOpts()
-	opts.Priority = worker.PriorityMatch
-	_, err = a.river.Insert(ctx, args, &opts)
-	return err
+	return worker.EnqueueProcessLibraryScan(ctx, a.river, a.db, args, worker.PriorityMatch, "")
 }
 
 func scannerReviewScopePaths(libraryRoots []string, rawIdentity []byte) []string {

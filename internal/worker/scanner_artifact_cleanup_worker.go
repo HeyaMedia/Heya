@@ -55,7 +55,7 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts+staleInFlight.EntitiesDeleted+staleInFlight.EntityArtifactsDeleted), 0, err)
 		return err
 	}
-	requeued := reenqueueOrphanedScannerScopes(ctx, river.ClientFromContext[pgx.Tx](ctx), orphaned)
+	requeued := reenqueueOrphanedScannerScopes(ctx, river.ClientFromContext[pgx.Tx](ctx), w.DB, orphaned)
 
 	total := int(entityArtifacts + staleInFlight.EntitiesDeleted + staleInFlight.EntityArtifactsDeleted + orphanedInFlight.EntitiesDeleted + orphanedInFlight.EntityArtifactsDeleted)
 	finishKickoff(ctx, q, taskID, startedAt, total, 0, nil)
@@ -123,13 +123,13 @@ func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, 
 // seen-marker was consumed at kickoff and its files read as unchanged.
 // Force bypasses change detection; the jobs dedupe by (library, scopes)
 // while active, so shared scopes re-enqueue once.
-func reenqueueOrphanedScannerScopes(ctx context.Context, rc *river.Client[pgx.Tx], orphaned []orphanedScannerEntity) int {
+func reenqueueOrphanedScannerScopes(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, orphaned []orphanedScannerEntity) int {
 	if rc == nil {
 		return 0
 	}
 	requeued := 0
 	for _, args := range orphanedScannerRequeueArgs(orphaned) {
-		if err := enqueueProcessLibraryScan(ctx, rc, args, PriorityScan, "cleanup_scanner_artifacts"); err != nil {
+		if err := EnqueueProcessLibraryScan(ctx, rc, db, args, PriorityScan, "cleanup_scanner_artifacts"); err != nil {
 			log.Warn().Err(err).Int64("library_id", args.LibraryID).Strs("scopes", args.ScopePaths).Msg("cleanup_scanner_artifacts: requeue orphaned scope failed")
 			continue
 		}

@@ -429,6 +429,12 @@ type LibraryNfoDir struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type LibraryScanBurst struct {
+	LibraryID  int64              `json:"library_id"`
+	StartedAt  pgtype.Timestamptz `json:"started_at"`
+	UnitsTotal int64              `json:"units_total"`
+}
+
 type LocalMediaIdentity struct {
 	ID                 int64              `json:"id"`
 	LibraryID          int64              `json:"library_id"`

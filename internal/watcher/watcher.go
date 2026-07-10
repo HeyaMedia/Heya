@@ -353,9 +353,7 @@ func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, tri
 		LibraryID:  libraryID,
 		ScopePaths: []string{worker.ScannerScopeForLibraryPath(lib, triggerPath)},
 	}
-	opts := args.InsertOpts()
-	opts.Priority = worker.PriorityWatcher
-	if _, err := m.river.Insert(ctx, args, &opts); err != nil {
+	if err := worker.EnqueueProcessLibraryScan(ctx, m.river, m.db, args, worker.PriorityWatcher, ""); err != nil {
 		log.Warn().Err(err).Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("enqueue scanner run failed")
 		return
 	}
