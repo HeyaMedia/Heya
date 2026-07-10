@@ -534,7 +534,10 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 	richQueued, richFailed := w.enqueueRichMetadataWork(ctx, rc, lib, result, job.Args.MetadataArtifactID, job.Args.ScannerEntityID, job.Args.ScheduledTaskID, source)
 	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
 	if richQueued == 0 && richFailed == 0 {
-		compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, 0)
+		// Exclude this apply job from the guard — it's still running, and with
+		// no rich work queued nothing else will reference the entity's
+		// artifacts from this cycle.
+		compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, job.ID)
 	}
 
 	log.Info().
@@ -752,17 +755,24 @@ func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scann
 		return
 	}
 	// Compaction deletes ALL of the entity's artifacts, so the guard must be
-	// entity-scoped: skip while ANY apply_rich_metadata job for this entity is
-	// still pending — including one from an earlier apply cycle referencing an
-	// older artifact. Guarding by a single metadata_artifact_id (the old bug)
-	// let a newer cycle's compaction delete an older cycle's still-referenced
-	// artifact, so that cycle's rich job failed with "no rows in result set".
-	busy, err := activeRichMetadataJobsForEntity(ctx, db, scannerEntityID, currentJobID)
+	// entity-scoped AND cover any pipeline job that could still produce or
+	// consume an artifact for this entity: a live fetch_metadata/apply_metadata
+	// cycle will enqueue a rich job we haven't seen yet, and an already-queued
+	// apply_rich_metadata will load one. Guarding on apply_rich_metadata alone
+	// left a window — a concurrent apply cycle mid-flight (before it reached
+	// the line that enqueues its rich job) would be missed, and the rich job it
+	// was about to queue would later fail with "no rows in result set".
+	//
+	// This is race-free because apply_metadata inserts its rich jobs (immediate
+	// commit) before its Work returns, so it stays in a live state until its
+	// rich job is visible — there is no instant where neither the apply job nor
+	// its rich job is countable.
+	busy, err := activeScannerJobsForEntity(ctx, db, scannerEntityID, currentJobID)
 	if err != nil {
 		log.Warn().
 			Err(err).
 			Int64("scanner_entity_id", scannerEntityID).
-			Msg("scanner artifact compaction skipped: active rich job check failed")
+			Msg("scanner artifact compaction skipped: active pipeline job check failed")
 		return
 	}
 	if busy {
@@ -783,12 +793,12 @@ func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scann
 	}
 }
 
-func activeRichMetadataJobsForEntity(ctx context.Context, db *pgxpool.Pool, scannerEntityID, currentJobID int64) (bool, error) {
+func activeScannerJobsForEntity(ctx context.Context, db *pgxpool.Pool, scannerEntityID, currentJobID int64) (bool, error) {
 	var count int64
 	err := db.QueryRow(ctx, `
 		SELECT count(*)
 		FROM river_job
-		WHERE kind = 'apply_rich_metadata'
+		WHERE kind IN ('fetch_metadata', 'apply_metadata', 'apply_rich_metadata')
 		  AND state IN ('available', 'pending', 'retryable', 'running', 'scheduled')
 		  AND (args->>'scanner_entity_id')::bigint = $1
 		  AND ($2::bigint = 0 OR id <> $2)
