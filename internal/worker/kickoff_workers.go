@@ -1234,6 +1234,27 @@ func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.T
 }
 
 func processLibraryScanFanoutArgs(lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory) []ProcessLibraryScanArgs {
+	// Music is deliberately batched at the local scan boundary. One analysis
+	// pass discovers every changed artist, after which PersistScannerSearchEntities
+	// creates one narrow artifact per artist and fetch_metadata/apply_metadata
+	// provide the remote-work fanout. Splitting here would repeatedly open the
+	// same library and rebuild overlapping artist/album plans before reaching
+	// the artist-sized metadata work.
+	if lib.MediaType == sqlc.MediaTypeMusic {
+		args := base
+		requested := compactScannerScopes(scopes)
+		sort.Strings(requested)
+		if len(requested) > 0 && !scannerScopesCoverInventoryOwners(lib, requested, inv) {
+			args.ScopePaths = requested
+		} else {
+			// A full/forced scan already covers every owner in the inventory. Avoid
+			// serializing the complete artist directory list into the River job and
+			// every scanner entity; an empty scope means one whole-library pass.
+			args.ScopePaths = nil
+		}
+		return []ProcessLibraryScanArgs{args}
+	}
+
 	if !scannerMediaTypeRequiresOwnerFanout(lib.MediaType) {
 		if len(scopes) == 0 {
 			return []ProcessLibraryScanArgs{base}
@@ -1275,6 +1296,26 @@ func processLibraryScanFanoutArgs(lib sqlc.Library, base ProcessLibraryScanArgs,
 		out = append(out, args)
 	}
 	return out
+}
+
+func scannerScopesCoverInventoryOwners(lib sqlc.Library, scopes []string, inv scanner.Inventory) bool {
+	owners := scannerOwnerScopesFromInventory(lib, inv)
+	if len(owners) == 0 {
+		return false
+	}
+	for _, owner := range owners {
+		covered := false
+		for _, scope := range scopes {
+			if scannerScopeContains(scope, owner) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
 }
 
 func processLibraryScanNeedsOwnerFanout(lib sqlc.Library, scopes []string) bool {

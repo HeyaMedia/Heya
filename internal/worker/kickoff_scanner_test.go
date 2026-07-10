@@ -250,6 +250,47 @@ func TestProcessLibraryScanFanoutSplitsFullAndRootScopesIntoOwners(t *testing.T)
 	}
 }
 
+func TestProcessLibraryScanFanoutBatchesMusicBeforeArtistMetadata(t *testing.T) {
+	lib := sqlc.Library{
+		ID:        7,
+		MediaType: sqlc.MediaTypeMusic,
+		Paths:     []string{"/storage/Music"},
+	}
+	inv := scanner.Inventory{Roots: []scanner.InventoryRoot{{
+		Root: "/storage/Music",
+		Files: []scanner.InventoryFile{
+			{Root: "/storage/Music", Path: "/storage/Music/Alpha/First/01.flac", RelPath: "Alpha/First/01.flac", Class: scanner.ClassPrimaryMedia},
+			{Root: "/storage/Music", Path: "/storage/Music/Beta/Second/01.flac", RelPath: "Beta/Second/01.flac", Class: scanner.ClassPrimaryMedia},
+			{Root: "/storage/Music", Path: "/storage/Music/Gamma/Third/01.flac", RelPath: "Gamma/Third/01.flac", Class: scanner.ClassPrimaryMedia},
+		},
+	}}}
+	base := ProcessLibraryScanArgs{LibraryID: lib.ID, Force: true}
+
+	t.Run("full scan uses one whole-library job", func(t *testing.T) {
+		args := processLibraryScanFanoutArgs(lib, base, []string{
+			"/storage/Music/Alpha",
+			"/storage/Music/Beta",
+			"/storage/Music/Gamma",
+		}, inv)
+
+		require.Equal(t, []ProcessLibraryScanArgs{base}, args)
+	})
+
+	t.Run("changed artists share one scoped job", func(t *testing.T) {
+		args := processLibraryScanFanoutArgs(lib, base, []string{
+			"/storage/Music/Beta",
+			"/storage/Music/Alpha",
+			"/storage/Music/Alpha/First",
+		}, inv)
+
+		require.Len(t, args, 1)
+		require.Equal(t, []string{
+			"/storage/Music/Alpha",
+			"/storage/Music/Beta",
+		}, args[0].ScopePaths)
+	})
+}
+
 func TestScannerRichMetadataTargetsAndDetail(t *testing.T) {
 	detail := &metadata.MediaDetail{Title: "Dune"}
 	result := scanner.Result{

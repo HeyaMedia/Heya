@@ -49,6 +49,13 @@ Each stage can process a full library or a directory scope from the watcher.
 The scanner emits structured events and records local
 identities/candidates/findings for the admin review UI.
 
+Music batches all changed artist directories into one `process_scan` pass.
+That pass discovers and searches the artists together, then persists one
+narrow handoff artifact per artist. `fetch_metadata` and `apply_metadata` fan
+out from there at artist granularity, so a discography is fetched once and its
+local albums are matched and applied together. Full scans use a single
+whole-library job rather than putting every artist directory in the job args.
+
 - **Scoring**: scanner search modules call HeyaMedia search, score candidates
   locally, auto-accept strong matches, and persist ambiguous/rejected cases for
   manual review.
