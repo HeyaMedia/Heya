@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/karbowiak/heya/internal/llm"
 	"github.com/rs/zerolog/log"
@@ -16,7 +17,8 @@ import (
 // code disposes"). Flow: (1) the model turns the viewer's ask + recent watch
 // history into a few doc-styled search probes, (2) each probe runs through the
 // existing SemanticSearch KNN and the hits merge into one candidate pool,
-// (3) the model re-ranks the pool by id with a short reason each, dropping
+// (3) the model re-ranks the pool by small candidate key with a short reason
+// each, dropping
 // retrieval noise — the junk tail a raw KNN leaves behind.
 
 // AIRecommendRequest is one "find me something to watch" ask.
@@ -68,11 +70,12 @@ var aiRecPicksSchema = []byte(`{
 			"items": {
 				"type": "object",
 				"properties": {
-					"id": { "type": "integer" },
+					"key": { "type": "integer", "minimum": 1, "maximum": 48 },
+					"title": { "type": "string", "minLength": 1, "maxLength": 200 },
 					"reason": { "type": "string", "maxLength": 90 },
 					"fit": { "type": "integer", "minimum": 1, "maximum": 5 }
 				},
-				"required": ["id", "reason", "fit"],
+				"required": ["key", "title", "reason", "fit"],
 				"additionalProperties": false
 			}
 		},
@@ -83,7 +86,8 @@ var aiRecPicksSchema = []byte(`{
 }`)
 
 type aiRecPick struct {
-	ID     int64  `json:"id"`
+	Key    int    `json:"key"`
+	Title  string `json:"title"`
 	Reason string `json:"reason"`
 	Fit    int    `json:"fit"`
 }
@@ -154,7 +158,7 @@ func (a *App) AIRecommend(ctx context.Context, userID int64, in AIRecommendReque
 		return result, nil
 	}
 
-	// Stage 3: re-rank. The model only picks ids from the pool; anything else
+	// Stage 3: re-rank. The model only picks keys from the pool; anything else
 	// is dropped in disposePicks.
 	blurbs := a.aiRecBlurbs(ctx, pool)
 	var picked struct {
@@ -202,7 +206,7 @@ func (a *App) aiRecHistory(ctx context.Context, userID int64) (lines []string, w
 
 // aiRecProbes turns the ask into 1–4 embedding probes. The raw ask is always
 // probe zero; the model's paraphrases diversify the candidate pool.
-func (a *App) aiRecProbes(ctx context.Context, client *llm.Client, model, query, mediaType string, history []string) []string {
+func (a *App) aiRecProbes(ctx context.Context, client llm.Completer, model, query, mediaType string, history []string) []string {
 	sys := "You write search probes for a media library's semantic search engine. " +
 		"Each library item is embedded as text shaped like: \"Title. Genres: <genres>. Themes: <keywords>. Starring: <cast>. <plot summary>\" " +
 		"and a probe retrieves its nearest neighbors by embedding similarity. " +
@@ -359,11 +363,11 @@ func aiRecScope(mediaType string) string {
 	case "movie":
 		return "movies only"
 	case "tv":
-		return "TV shows only"
+		return "TV series only"
 	case "anime":
-		return "anime only"
+		return "anime series only"
 	default:
-		return "movies and TV shows"
+		return "movies and TV series"
 	}
 }
 
@@ -374,7 +378,7 @@ func aiRecCurateSystem() string {
 		"Emit a pick for every candidate that plausibly fits the request, grading fit: " +
 		"5 = exactly what was asked, 4 = strong match, 3 = decent match, 2 = tangential, 1 = poor. " +
 		"Omit candidates that do not fit at all; do not pad. Typically a handful of candidates rate 4-5. Rules: " +
-		"use only ids from the list; " +
+		"use only candidate keys from the list and copy that candidate's title exactly; " +
 		"rate a title the viewer recently watched one grade lower unless the request implies rewatching or continuing something; " +
 		"reason = a short line (max 8 words) shown under the poster saying why it fits — plain human language, never mention ids, grades, or \"the viewer\"; " +
 		"note = 1-2 sentences speaking directly to the viewer as \"you\", explaining how you read the request and why the picks fit overall " +
@@ -391,12 +395,19 @@ func aiRecCurateUser(query, mediaType string, pool []ForYouItem, blurbs map[int6
 		fmt.Fprintf(&b, "Recently watched (newest first): %s\n", strings.Join(history, "; "))
 	}
 	b.WriteString("\nCandidates:\n")
-	for _, it := range pool {
-		fmt.Fprintf(&b, "id=%d | %s", it.ID, it.Title)
+	for i, it := range pool {
+		fmt.Fprintf(&b, "key=%d | title=%q", i+1, it.Title)
 		if it.Year != "" {
 			fmt.Fprintf(&b, " (%s)", it.Year)
 		}
-		fmt.Fprintf(&b, " | %s", it.MediaType)
+		candidateType := it.MediaType
+		if mediaType != "anime" && candidateType == "anime" {
+			// `anime` is a storage/search subtype, not a separate kind of media
+			// on the TV surface. Do not expose that implementation detail to the
+			// curator or it may treat the scope as an exclusion rule.
+			candidateType = "tv"
+		}
+		fmt.Fprintf(&b, " | %s", candidateType)
 		if it.Rating > 0 {
 			fmt.Fprintf(&b, " | rated %.1f", it.Rating)
 		}
@@ -417,13 +428,15 @@ func aiRecCurateUser(query, mediaType string, pool []ForYouItem, blurbs map[int6
 }
 
 // disposePicks maps the model's picks back onto the retrieved pool: unknown
-// ids and duplicates are dropped, reasons are attached. Ordering is OURS, not
+// keys and duplicates are dropped, reasons are attached. The echoed title is
+// cross-checked against the key so a model cannot attach the right reasoning to
+// the wrong database item. Ordering is OURS, not
 // the model's — fit grade first, embedding similarity as tiebreak — and weak
 // grades (≤2) only surface when nothing rated ≥3, so the junk tail stays cut.
 func disposePicks(pool []ForYouItem, picks []aiRecPick, limit int) []ForYouItem {
-	byID := make(map[int64]ForYouItem, len(pool))
+	byTitle := make(map[string]ForYouItem, len(pool))
 	for _, it := range pool {
-		byID[it.ID] = it
+		byTitle[recommendationTitleKey(it.Title)] = it
 	}
 	type graded struct {
 		item ForYouItem
@@ -432,11 +445,27 @@ func disposePicks(pool []ForYouItem, picks []aiRecPick, limit int) []ForYouItem 
 	var kept []graded
 	used := map[int64]bool{}
 	for _, p := range picks {
-		it, ok := byID[p.ID]
-		if !ok || used[p.ID] {
+		if p.Key < 1 || p.Key > len(pool) {
 			continue
 		}
-		used[p.ID] = true
+		it := pool[p.Key-1]
+		pickedTitle := recommendationTitleKey(p.Title)
+		if pickedTitle == "" {
+			continue
+		}
+		if recommendationTitleKey(it.Title) != pickedTitle {
+			// Small models occasionally emit the intended title beside another
+			// candidate's key. Recover only on an exact normalized title match.
+			var ok bool
+			it, ok = byTitle[pickedTitle]
+			if !ok {
+				continue
+			}
+		}
+		if used[it.ID] {
+			continue
+		}
+		used[it.ID] = true
 		it.Reason = strings.TrimSpace(p.Reason)
 		kept = append(kept, graded{item: it, fit: p.Fit})
 	}
@@ -462,4 +491,14 @@ func disposePicks(pool []ForYouItem, picks []aiRecPick, limit int) []ForYouItem 
 		}
 	}
 	return out
+}
+
+func recommendationTitleKey(title string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(title)) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/karbowiak/heya/internal/llm"
@@ -17,7 +19,7 @@ var ErrAIDisabled = errors.New("ai is disabled — enable it in Settings → AI"
 // mode this may spawn (and block on) llama-server startup; ctx bounds that
 // wait. The returned model string is what goes into the request ("" for
 // single-model local servers).
-func (a *App) aiClient(ctx context.Context, s AISettings) (*llm.Client, string, error) {
+func (a *App) aiClient(ctx context.Context, s AISettings) (llm.Completer, string, error) {
 	switch s.Mode {
 	case "", "off":
 		return nil, "", ErrAIDisabled
@@ -36,9 +38,73 @@ func (a *App) aiClient(ctx context.Context, s AISettings) (*llm.Client, string, 
 			return nil, "", fmt.Errorf("%w: no model selected", llm.ErrNotConfigured)
 		}
 		return llm.NewClient(baseURL, s.APIKey), s.Model, nil
+	case "claude", "codex":
+		agentModel := aiAgentModel(s)
+		if agentModel == "" {
+			return nil, "", fmt.Errorf("%w: no agent model selected", llm.ErrNotConfigured)
+		}
+		return a.aiAgentClient(s), agentModel, nil
 	default:
 		return nil, "", fmt.Errorf("invalid ai mode %q", s.Mode)
 	}
+}
+
+func aiAgentModel(s AISettings) string {
+	if s.Mode == "claude" {
+		return s.ClaudeModel
+	}
+	if s.Mode == "codex" {
+		return s.CodexModel
+	}
+	return ""
+}
+
+func (a *App) aiAgentClient(s AISettings) *llm.AgentClient {
+	provider := llm.AgentProvider(s.Mode)
+	binary := aiClaudeBinary()
+	if provider == llm.AgentCodex {
+		binary = aiCodexBinary()
+	}
+	isolatedHome := filepath.Join(a.config.DataDir.Value, "llm", "agents", string(provider))
+	homeDir := isolatedHome
+	useSystemAuth := aiUseSystemAgents()
+	processHome := ""
+	configDir := ""
+	if useSystemAuth {
+		userHome, _ := os.UserHomeDir()
+		processHome = userHome
+		if provider == llm.AgentCodex {
+			homeDir = os.Getenv("CODEX_HOME")
+			if homeDir == "" && userHome != "" {
+				homeDir = filepath.Join(userHome, ".codex")
+			}
+		} else {
+			homeDir = userHome
+			configDir = os.Getenv("CLAUDE_CONFIG_DIR")
+		}
+	}
+	if homeDir == "" {
+		homeDir = isolatedHome
+		processHome = ""
+		useSystemAuth = false
+	}
+	if absolute, err := filepath.Abs(homeDir); err == nil {
+		homeDir = absolute
+	}
+	if configDir != "" {
+		if absolute, err := filepath.Abs(configDir); err == nil {
+			configDir = absolute
+		}
+	}
+	return llm.NewAgentClient(llm.AgentConfig{
+		Provider:      provider,
+		Binary:        binary,
+		HomeDir:       homeDir,
+		ProcessHome:   processHome,
+		ConfigDir:     configDir,
+		OAuthToken:    s.ClaudeToken,
+		UseSystemAuth: useSystemAuth,
+	})
 }
 
 func aiExternalBaseURL(s AISettings) (string, error) {
@@ -150,12 +216,16 @@ func (a *App) AIModels(ctx context.Context) ([]string, error) {
 			ids = append(ids, m.ID)
 		}
 		return ids, nil
-	default:
+	case "external":
 		baseURL, err := aiExternalBaseURL(s)
 		if err != nil {
 			return nil, err
 		}
 		return llm.NewClient(baseURL, s.APIKey).Models(ctx)
+	case "claude", "codex":
+		return a.aiAgentClient(s).Models(ctx)
+	default:
+		return nil, fmt.Errorf("invalid ai mode %q", s.Mode)
 	}
 }
 
@@ -181,6 +251,15 @@ type AIStatusReport struct {
 	LocalModel  string        `json:"local_model,omitempty"`
 	ContextSize int           `json:"context_size,omitempty"`
 	Local       AILocalStatus `json:"local"`
+	Agent       AIAgentStatus `json:"agent"`
+}
+
+// AIAgentStatus is the non-network readiness view for subscription runtimes.
+type AIAgentStatus struct {
+	Provider      string `json:"provider,omitempty"`
+	BinaryPresent bool   `json:"binary_present"`
+	Authenticated bool   `json:"authenticated"`
+	SetupHint     string `json:"setup_hint,omitempty"`
 }
 
 // AIStatus reports whether the subsystem could serve a request right now,
@@ -206,6 +285,20 @@ func (a *App) AIStatus(ctx context.Context) AIStatusReport {
 			DownloadError:    dlErr,
 		},
 	}
+	if s.Mode == "claude" || s.Mode == "codex" {
+		agent := a.aiAgentClient(s)
+		report.Model = aiAgentModel(s)
+		report.Agent = AIAgentStatus{
+			Provider:      s.Mode,
+			BinaryPresent: agent.BinaryPresent(),
+			Authenticated: agent.Authenticated(),
+		}
+		if s.Mode == "claude" {
+			report.Agent.SetupHint = "Run `claude setup-token`, then paste the token in Settings → AI."
+		} else {
+			report.Agent.SetupHint = "Inside the Heya container run: codex -c cli_auth_credentials_store=\"file\" login --device-auth"
+		}
+	}
 
 	switch s.Mode {
 	case "", "off":
@@ -227,6 +320,17 @@ func (a *App) AIStatus(ctx context.Context) AIStatusReport {
 		} else if s.Model == "" {
 			report.Detail = "no model selected"
 		} else {
+			report.Ready = true
+		}
+	case "claude", "codex":
+		switch {
+		case !report.Agent.BinaryPresent:
+			report.Detail = s.Mode + " CLI is not installed"
+		case !report.Agent.Authenticated:
+			report.Detail = s.Mode + " subscription is not authenticated"
+		case aiAgentModel(s) == "":
+			report.Detail = "no agent model selected"
+		default:
 			report.Ready = true
 		}
 	}

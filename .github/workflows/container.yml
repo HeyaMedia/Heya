@@ -8,10 +8,11 @@
 #   :<ver>-cuda       NVIDIA — CUDA/TensorRT ONNX + NVENC transcode (amd64)
 #   :<ver>-openvino   Intel  — OpenVINO ONNX (Arc/iGPU) + QSV/VAAPI (amd64)
 #
-# The amd64 app binary is built once, uploaded as an artifact, and then packaged
-# in parallel onto the CPU/CUDA/OpenVINO runtime images. Arm64 stays native on
-# the GitHub-hosted ubuntu-24.04-arm runner and builds the full app image there,
-# NO QEMU. CPU digests are merged into one multi-arch manifest.
+# The amd64 app bundle (Heya + pinned agent CLIs) is built once, uploaded as an
+# artifact, and then packaged in parallel onto the CPU/CUDA/OpenVINO runtime
+# images. Arm64 stays native on the GitHub-hosted ubuntu-24.04-arm runner and
+# builds the full app image there, NO QEMU. CPU digests are merged into one
+# multi-arch manifest.
 # Auth: GITHUB_TOKEN — no manual secrets needed.
 
 name: Container
@@ -48,10 +49,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Build Nuxt + Go once for amd64 and export only the final binary. The
-      # tiny package jobs below put this same artifact onto CPU/CUDA/OpenVINO
-      # runtimes without rebuilding frontend/backend three times.
-      - name: Build amd64 app binary
+      # Build Nuxt + Go and fetch the pinned agent CLIs once for amd64. The tiny
+      # package jobs below put this same bundle onto CPU/CUDA/OpenVINO runtimes
+      # without rebuilding frontend/backend or downloading the CLIs three times.
+      - name: Build amd64 app bundle
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -62,11 +63,11 @@ jobs:
           cache-from: type=gha,scope=app-amd64
           cache-to: type=gha,mode=max,scope=app-amd64
 
-      - name: Upload amd64 app binary
+      - name: Upload amd64 app bundle
         uses: actions/upload-artifact@v7
         with:
           name: app-amd64
-          path: ${{ runner.temp }}/heya-amd64/heya
+          path: ${{ runner.temp }}/heya-amd64/
           if-no-files-found: error
           retention-days: 1
 
@@ -77,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download amd64 app binary
+      - name: Download amd64 app bundle
         uses: actions/download-artifact@v8
         with:
           name: app-amd64
@@ -86,7 +87,10 @@ jobs:
       - name: Prepare package context
         run: |
           cp .docker/Dockerfile.package "${{ runner.temp }}/package-amd64/Dockerfile"
-          ls -lh "${{ runner.temp }}/package-amd64/heya"
+          ls -lh \
+            "${{ runner.temp }}/package-amd64/heya" \
+            "${{ runner.temp }}/package-amd64/agent-clis/claude" \
+            "${{ runner.temp }}/package-amd64/agent-clis/codex/bin/codex"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -259,7 +263,7 @@ jobs:
         variant: [cuda, openvino]
     steps:
       - uses: actions/checkout@v7
-      - name: Download amd64 app binary
+      - name: Download amd64 app bundle
         uses: actions/download-artifact@v8
         with:
           name: app-amd64
@@ -268,7 +272,10 @@ jobs:
       - name: Prepare package context
         run: |
           cp .docker/Dockerfile.package "${{ runner.temp }}/package-${{ matrix.variant }}/Dockerfile"
-          ls -lh "${{ runner.temp }}/package-${{ matrix.variant }}/heya"
+          ls -lh \
+            "${{ runner.temp }}/package-${{ matrix.variant }}/heya" \
+            "${{ runner.temp }}/package-${{ matrix.variant }}/agent-clis/claude" \
+            "${{ runner.temp }}/package-${{ matrix.variant }}/agent-clis/codex/bin/codex"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -295,7 +302,7 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      # Package the prebuilt amd64 app binary onto the prebuilt GPU runtime —
+      # Package the prebuilt amd64 app bundle onto the prebuilt GPU runtime —
       # amd64 only because CUDA/OpenVINO runtime images are x86_64.
       - name: Build and push ${{ matrix.variant }}
         uses: docker/build-push-action@v7

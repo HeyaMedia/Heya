@@ -16,7 +16,7 @@ import (
 var aiCmd = &cobra.Command{
 	Use:   "ai",
 	Short: "AI subsystem controls",
-	Long:  "Configure, inspect, and exercise the LLM subsystem (local llama-server or an external OpenAI-compatible provider).",
+	Long:  "Configure, inspect, and exercise the LLM subsystem (local llama-server, external API, or Claude/Codex subscription).",
 }
 
 var aiStatusCmd = &cobra.Command{
@@ -33,6 +33,12 @@ var aiStatusCmd = &cobra.Command{
 			if st.Mode == "external" {
 				fmt.Printf("provider      : %s\n", st.Provider)
 				fmt.Printf("model         : %s\n", st.Model)
+			}
+			if st.Mode == "claude" || st.Mode == "codex" {
+				fmt.Printf("agent         : %s\n", st.Agent.Provider)
+				fmt.Printf("model         : %s\n", st.Model)
+				fmt.Printf("CLI present   : %v\n", st.Agent.BinaryPresent)
+				fmt.Printf("authenticated : %v\n", st.Agent.Authenticated)
 			}
 			fmt.Printf("local model   : %s\n", st.LocalModel)
 			fmt.Printf("context size  : %d\n", st.ContextSize)

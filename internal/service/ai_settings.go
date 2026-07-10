@@ -23,13 +23,19 @@ const (
 	aiEnvLocalModel   = "HEYA_AI_LOCAL_MODEL"
 	aiEnvLocalBackend = "HEYA_AI_LOCAL_BACKEND"
 	aiEnvContext      = "HEYA_AI_CONTEXT"
+	aiEnvClaudeModel  = "HEYA_AI_CLAUDE_MODEL"
+	aiEnvCodexModel   = "HEYA_AI_CODEX_MODEL"
+	aiEnvClaudeToken  = "HEYA_AI_CLAUDE_TOKEN" //nolint:gosec // G101: env var *name*, not a credential
+	aiEnvClaudeBinary = "HEYA_AI_CLAUDE_BINARY"
+	aiEnvCodexBinary  = "HEYA_AI_CODEX_BINARY"
+	aiEnvSystemAgents = "HEYA_AI_USE_SYSTEM_AGENTS"
 )
 
 // AISettings is the user-tunable configuration of the AI subsystem, stored as
 // one JSON blob in system_settings (key=ai). Mode defaults to "off" so a
 // fresh install never spawns processes or phones external APIs.
 type AISettings struct {
-	Mode         string `json:"mode"`          // off | local | external
+	Mode         string `json:"mode"`          // off | local | external | claude | codex
 	Provider     string `json:"provider"`      // preset id (external mode)
 	APIKey       string `json:"api_key"`       // bearer key (external mode)
 	Model        string `json:"model"`         // provider model id (external mode)
@@ -37,6 +43,9 @@ type AISettings struct {
 	LocalModel   string `json:"local_model"`   // curated catalog id (local mode)
 	LocalBackend string `json:"local_backend"` // auto | cpu | vulkan
 	ContextSize  int    `json:"context_size"`  // llama-server --ctx-size
+	ClaudeModel  string `json:"claude_model"`  // Claude subscription model id or alias
+	CodexModel   string `json:"codex_model"`   // Codex subscription model id
+	ClaudeToken  string `json:"claude_token"`  // setup-token output (Claude mode)
 }
 
 // DefaultAISettings returns the fallback applied when no system_settings row
@@ -49,6 +58,8 @@ func DefaultAISettings() AISettings {
 		LocalModel:   llm.DefaultLocalModel,
 		LocalBackend: llm.BackendAuto,
 		ContextSize:  16384,
+		ClaudeModel:  "sonnet",
+		CodexModel:   "gpt-5.6-luna",
 	}
 }
 
@@ -106,6 +117,15 @@ func (a *App) AISettings(ctx context.Context) AISettings {
 	if v, ok := aiIntFromEnv(aiEnvContext); ok {
 		s.ContextSize = v
 	}
+	if v, ok := aiStringFromEnv(aiEnvClaudeModel); ok {
+		s.ClaudeModel = v
+	}
+	if v, ok := aiStringFromEnv(aiEnvCodexModel); ok {
+		s.CodexModel = v
+	}
+	if v, ok := aiStringFromEnv(aiEnvClaudeToken); ok {
+		s.ClaudeToken = v
+	}
 	return s
 }
 
@@ -133,6 +153,12 @@ func (a *App) aiSettingsFromDB(ctx context.Context) AISettings {
 			if s.ContextSize == 0 {
 				s.ContextSize = d.ContextSize
 			}
+			if s.ClaudeModel == "" {
+				s.ClaudeModel = d.ClaudeModel
+			}
+			if s.CodexModel == "" {
+				s.CodexModel = d.CodexModel
+			}
 		}
 	}
 	return s
@@ -154,6 +180,9 @@ func aiEnvLocks() map[string]string {
 	check("base_url", aiEnvBaseURL)
 	check("local_model", aiEnvLocalModel)
 	check("local_backend", aiEnvLocalBackend)
+	check("claude_model", aiEnvClaudeModel)
+	check("codex_model", aiEnvCodexModel)
+	check("claude_token", aiEnvClaudeToken)
 	if _, ok := aiIntFromEnv(aiEnvContext); ok {
 		locks["context_size"] = aiEnvContext
 	}
@@ -165,9 +194,9 @@ func aiEnvLocks() map[string]string {
 // fields refuse a *changed* value and silently keep the DB row otherwise.
 func (a *App) SetAISettings(ctx context.Context, s AISettings) error {
 	switch s.Mode {
-	case "off", "local", "external":
+	case "off", "local", "external", "claude", "codex":
 	default:
-		return fmt.Errorf("invalid mode %q (off|local|external)", s.Mode)
+		return fmt.Errorf("invalid mode %q (off|local|external|claude|codex)", s.Mode)
 	}
 	switch s.LocalBackend {
 	case llm.BackendAuto, llm.BackendCPU, llm.BackendVulkan:
@@ -192,6 +221,9 @@ func (a *App) SetAISettings(ctx context.Context, s AISettings) error {
 	if s.APIKey == "" {
 		s.APIKey = persisted.APIKey
 	}
+	if s.ClaudeToken == "" {
+		s.ClaudeToken = persisted.ClaudeToken
+	}
 
 	// Validate-all-then-write-all: refuse changes to env-locked fields.
 	effective := a.AISettings(ctx)
@@ -209,6 +241,9 @@ func (a *App) SetAISettings(ctx context.Context, s AISettings) error {
 		{"local_model", aiEnvLocalModel, s.LocalModel != effective.LocalModel},
 		{"local_backend", aiEnvLocalBackend, s.LocalBackend != effective.LocalBackend},
 		{"context_size", aiEnvContext, s.ContextSize != effective.ContextSize},
+		{"claude_model", aiEnvClaudeModel, s.ClaudeModel != effective.ClaudeModel},
+		{"codex_model", aiEnvCodexModel, s.CodexModel != effective.CodexModel},
+		{"claude_token", aiEnvClaudeToken, s.ClaudeToken != effective.ClaudeToken},
 	}
 	locks := aiEnvLocks()
 	for _, c := range checks {
@@ -244,6 +279,15 @@ func (a *App) SetAISettings(ctx context.Context, s AISettings) error {
 	if _, locked := locks["context_size"]; locked {
 		out.ContextSize = persisted.ContextSize
 	}
+	if _, locked := locks["claude_model"]; locked {
+		out.ClaudeModel = persisted.ClaudeModel
+	}
+	if _, locked := locks["codex_model"]; locked {
+		out.CodexModel = persisted.CodexModel
+	}
+	if _, locked := locks["claude_token"]; locked {
+		out.ClaudeToken = persisted.ClaudeToken
+	}
 
 	// Persisting the key server-side is the point of this blob — it is never
 	// echoed to clients (GET goes through AISettingsView, which redacts).
@@ -257,15 +301,19 @@ func (a *App) SetAISettings(ctx context.Context, s AISettings) error {
 // AISettingsView is the API-safe projection of AISettings: the key never
 // leaves the server, only its presence and a short hint.
 type AISettingsView struct {
-	Mode         string `json:"mode"`
-	Provider     string `json:"provider"`
-	APIKeySet    bool   `json:"api_key_set"`
-	APIKeyHint   string `json:"api_key_hint,omitempty" doc:"last 4 characters, for recognition only"`
-	Model        string `json:"model"`
-	BaseURL      string `json:"base_url"`
-	LocalModel   string `json:"local_model"`
-	LocalBackend string `json:"local_backend"`
-	ContextSize  int    `json:"context_size"`
+	Mode            string `json:"mode"`
+	Provider        string `json:"provider"`
+	APIKeySet       bool   `json:"api_key_set"`
+	APIKeyHint      string `json:"api_key_hint,omitempty" doc:"last 4 characters, for recognition only"`
+	Model           string `json:"model"`
+	BaseURL         string `json:"base_url"`
+	LocalModel      string `json:"local_model"`
+	LocalBackend    string `json:"local_backend"`
+	ContextSize     int    `json:"context_size"`
+	ClaudeModel     string `json:"claude_model"`
+	CodexModel      string `json:"codex_model"`
+	ClaudeTokenSet  bool   `json:"claude_token_set"`
+	ClaudeTokenHint string `json:"claude_token_hint,omitempty" doc:"last 4 characters, for recognition only"`
 }
 
 // AISettingsForAPI returns the redacted settings view for the settings UI.
@@ -275,15 +323,46 @@ func (a *App) AISettingsForAPI(ctx context.Context) AISettingsView {
 	if n := len(s.APIKey); n >= 8 {
 		hint = "…" + s.APIKey[n-4:]
 	}
-	return AISettingsView{
-		Mode:         s.Mode,
-		Provider:     s.Provider,
-		APIKeySet:    s.APIKey != "",
-		APIKeyHint:   hint,
-		Model:        s.Model,
-		BaseURL:      s.BaseURL,
-		LocalModel:   s.LocalModel,
-		LocalBackend: s.LocalBackend,
-		ContextSize:  s.ContextSize,
+	claudeHint := ""
+	if n := len(s.ClaudeToken); n >= 8 {
+		claudeHint = "…" + s.ClaudeToken[n-4:]
 	}
+	return AISettingsView{
+		Mode:            s.Mode,
+		Provider:        s.Provider,
+		APIKeySet:       s.APIKey != "",
+		APIKeyHint:      hint,
+		Model:           s.Model,
+		BaseURL:         s.BaseURL,
+		LocalModel:      s.LocalModel,
+		LocalBackend:    s.LocalBackend,
+		ContextSize:     s.ContextSize,
+		ClaudeModel:     s.ClaudeModel,
+		CodexModel:      s.CodexModel,
+		ClaudeTokenSet:  s.ClaudeToken != "",
+		ClaudeTokenHint: claudeHint,
+	}
+}
+
+func aiClaudeBinary() string {
+	if value, ok := aiStringFromEnv(aiEnvClaudeBinary); ok {
+		return value
+	}
+	return "claude"
+}
+
+func aiCodexBinary() string {
+	if value, ok := aiStringFromEnv(aiEnvCodexBinary); ok {
+		return value
+	}
+	return "codex"
+}
+
+func aiUseSystemAgents() bool {
+	value, ok := aiStringFromEnv(aiEnvSystemAgents)
+	if !ok {
+		return false
+	}
+	enabled, err := strconv.ParseBool(value)
+	return err == nil && enabled
 }

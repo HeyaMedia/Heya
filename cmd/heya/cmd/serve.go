@@ -62,6 +62,14 @@ var serveCmd = &cobra.Command{
 		// never opt in; a local DB always passes.
 		passive := cfg.PassiveMode.Value
 		devBackend, _ := cmd.Flags().GetBool("dev-backend")
+		// Dev should reuse an already-installed Claude/Codex CLI and its normal
+		// login by default. Production remains isolated under HEYA_DATA_DIR.
+		// An explicit env value (including false) always wins.
+		if devBackend {
+			if _, configured := os.LookupEnv("HEYA_AI_USE_SYSTEM_AGENTS"); !configured {
+				_ = os.Setenv("HEYA_AI_USE_SYSTEM_AGENTS", "true")
+			}
+		}
 		if !passive {
 			// Classify the host pgx will ACTUALLY dial (via pgx's own parser), not
 			// a naive URL parse — otherwise a ?host=, DSN keyword form, PGHOST env,

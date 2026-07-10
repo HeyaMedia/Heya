@@ -89,6 +89,17 @@
     </div>
 
     <div v-if="aiShowing" class="rb-ai-summary">
+      <div class="rb-ai-summary-head">
+        <div class="rb-ai-kicker">
+          <Icon name="sparkle" :size="12" />
+          <span>AI curation</span>
+          <span class="rb-ai-count">{{ aiItemCount }} {{ aiItemCount === 1 ? 'match' : 'matches' }}</span>
+        </div>
+        <button class="rb-ai-reroll" :disabled="aiPending" @click="rerollAI">
+          <Icon name="refresh" :size="12" />
+          {{ aiPending ? 'Curating…' : 'Re-roll' }}
+        </button>
+      </div>
       <p v-if="aiNote" class="rb-ai-summary-note">{{ aiNote }}</p>
       <div class="rb-ai-meta" :title="aiProbesTitle">AI-curated · {{ aiMeta }}</div>
     </div>
@@ -99,7 +110,7 @@
       </div>
     </div>
 
-    <div v-else-if="displayItems.length" class="grid-posters">
+    <div v-else-if="displayItems.length" class="grid-posters" :class="{ 'rb-ai-grid': aiShowing }">
       <AppContextMenu v-for="(item, i) in displayItems" :key="item.id" :items="contextItemsFor(item)">
         <NuxtLink :to="mediaUrl(item as any)" class="grid-tile card-tile rb-tile">
           <MediaCard
@@ -228,6 +239,9 @@ function askAI() {
   }
   aiQ.value = q
 }
+function rerollAI() {
+  if (!aiPending.value) aiQuery.refetch()
+}
 function clearSearch() {
   nlQuery.value = ''
   aiQ.value = ''
@@ -250,6 +264,7 @@ const aiMeta = computed(() => {
   return d ? `${d.model || d.mode} · ${(d.duration_ms / 1000).toFixed(1)}s` : ''
 })
 const aiNote = computed(() => aiQuery.data.value?.note ?? '')
+const aiItemCount = computed(() => aiQuery.data.value?.items.length ?? 0)
 const aiProbesTitle = computed(() => {
   const probes = aiQuery.data.value?.probes
   return probes?.length ? `Searched: ${probes.join(' · ')}` : ''
@@ -422,15 +437,40 @@ function reset() {
 
 /* The model's overall "I looked for… these fit because…" explanation. */
 .rb-ai-summary {
-  background: rgba(255, 255, 255, 0.02);
+  background: linear-gradient(110deg, rgba(230, 185, 74, 0.055), rgba(255, 255, 255, 0.018) 55%);
   border: 1px solid var(--gold-soft);
   border-radius: var(--r-md);
-  padding: 12px 16px;
-  margin-bottom: 18px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.rb-ai-summary-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-bottom: 9px;
+}
+.rb-ai-kicker {
+  display: flex; align-items: center; gap: 7px;
+  color: var(--gold-bright); font-family: var(--font-mono); font-size: 10px;
+  font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.rb-ai-count {
+  color: var(--fg-3); font-weight: 500; letter-spacing: 0;
+  text-transform: none;
+}
+.rb-ai-reroll {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--fg-2); background: rgba(255, 255, 255, 0.025);
+  font-size: 11px; cursor: pointer;
+}
+.rb-ai-reroll:hover:not(:disabled) { color: var(--fg-0); border-color: var(--border-hover); }
+.rb-ai-reroll:disabled { opacity: 0.5; cursor: default; }
+.rb-ai-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 190px));
+  justify-content: start;
 }
 .rb-ai-summary-note {
   font-size: 13px; line-height: 1.55; color: var(--fg-1);
-  margin: 0 0 6px;
+  margin: 0 0 7px;
 }
 .rb-ai-meta {
   font-size: 11px; font-family: var(--font-mono); color: var(--fg-3);
@@ -463,6 +503,7 @@ function reset() {
   .page-pad { padding: 20px 16px 60px; }
   .rb-title { font-size: 26px; }
   .rb-controls { flex-wrap: wrap; }
+  .rb-ai-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 }
 </style>
 

@@ -1,15 +1,30 @@
 # syntax=docker/dockerfile:1.7
 #
-# Package a prebuilt Heya binary onto a selected runtime image.
+# Package a prebuilt Heya app bundle onto a selected runtime image.
 #
 # The release workflow uses this for amd64 CPU/CUDA/OpenVINO images after
-# building Nuxt + Go once into an uploaded `heya` artifact.
+# building Nuxt + Go and fetching the pinned agent CLIs once.
 
 ARG BASE_RUNTIME_IMAGE=ghcr.io/heyamedia/heya-runtime:latest
 
 FROM ${BASE_RUNTIME_IMAGE} AS runtime
 
 COPY --link --chmod=0755 heya /usr/local/bin/heya
+COPY --link --chmod=0755 agent-clis/claude /usr/local/bin/claude
+COPY --link agent-clis/codex /opt/heya-agent-clis/codex
+COPY --link agent-clis/licenses /usr/share/doc/heya-agent-clis
+
+# GitHub artifacts do not preserve executable bits. Restore only the native
+# programs Codex ships; metadata and licenses remain non-executable.
+RUN chmod 0755 \
+      /opt/heya-agent-clis/codex/bin/codex \
+      /opt/heya-agent-clis/codex/bin/codex-code-mode-host \
+      /opt/heya-agent-clis/codex/codex-path/rg \
+      /opt/heya-agent-clis/codex/codex-resources/bwrap \
+      /opt/heya-agent-clis/codex/codex-resources/zsh/bin/zsh && \
+    ln -s /opt/heya-agent-clis/codex/bin/codex /usr/local/bin/codex
+
+ENV CODEX_HOME=/data/llm/agents/codex
 
 ENTRYPOINT ["/usr/local/bin/heya"]
 CMD ["serve"]

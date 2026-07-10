@@ -1,6 +1,28 @@
 {
   "components": {
     "schemas": {
+      "AIAgentStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "authenticated": {
+            "type": "boolean"
+          },
+          "binary_present": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "setup_hint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "binary_present",
+          "authenticated"
+        ],
+        "type": "object"
+      },
       "AIChatRequest": {
         "additionalProperties": false,
         "properties": {
@@ -380,6 +402,15 @@
           "base_url": {
             "type": "string"
           },
+          "claude_model": {
+            "type": "string"
+          },
+          "claude_token": {
+            "type": "string"
+          },
+          "codex_model": {
+            "type": "string"
+          },
           "context_size": {
             "format": "int64",
             "type": "integer"
@@ -408,7 +439,10 @@
           "base_url",
           "local_model",
           "local_backend",
-          "context_size"
+          "context_size",
+          "claude_model",
+          "codex_model",
+          "claude_token"
         ],
         "type": "object"
       },
@@ -432,6 +466,19 @@
             "type": "boolean"
           },
           "base_url": {
+            "type": "string"
+          },
+          "claude_model": {
+            "type": "string"
+          },
+          "claude_token_hint": {
+            "description": "last 4 characters, for recognition only",
+            "type": "string"
+          },
+          "claude_token_set": {
+            "type": "boolean"
+          },
+          "codex_model": {
             "type": "string"
           },
           "context_size": {
@@ -462,7 +509,10 @@
           "base_url",
           "local_model",
           "local_backend",
-          "context_size"
+          "context_size",
+          "claude_model",
+          "codex_model",
+          "claude_token_set"
         ],
         "type": "object"
       },
@@ -477,6 +527,9 @@
             "format": "uri",
             "readOnly": true,
             "type": "string"
+          },
+          "agent": {
+            "$ref": "#/components/schemas/AIAgentStatus"
           },
           "context_size": {
             "format": "int64",
@@ -508,7 +561,8 @@
         "required": [
           "mode",
           "ready",
-          "local"
+          "local",
+          "agent"
         ],
         "type": "object"
       },

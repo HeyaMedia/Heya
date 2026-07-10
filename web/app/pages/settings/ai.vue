@@ -17,6 +17,10 @@ type AISettingsView = {
   local_model: string
   local_backend: string
   context_size: number
+  claude_model: string
+  codex_model: string
+  claude_token_set: boolean
+  claude_token_hint?: string
 }
 type AIDownloadProgress = { current_file?: string; bytes_done: number; bytes_total: number; started_at?: string }
 type AIStatus = {
@@ -36,6 +40,12 @@ type AIStatus = {
     download_state: string
     download_progress?: AIDownloadProgress
     download_error?: string
+  }
+  agent: {
+    provider?: string
+    binary_present: boolean
+    authenticated: boolean
+    setup_hint?: string
   }
 }
 type AIChatResponse = {
@@ -57,10 +67,24 @@ const saving = ref(false)
 const downloading = ref(false)
 const loadingModels = ref(false)
 const apiKeyDraft = ref('')
+const claudeTokenDraft = ref('')
 
 const isOff = computed(() => (settings.value?.mode ?? 'off') === 'off')
 const isLocal = computed(() => settings.value?.mode === 'local')
 const isExternal = computed(() => settings.value?.mode === 'external')
+const isAgent = computed(() => settings.value?.mode === 'claude' || settings.value?.mode === 'codex')
+const isClaude = computed(() => settings.value?.mode === 'claude')
+const isCodex = computed(() => settings.value?.mode === 'codex')
+const agentModel = computed({
+  get: () => isClaude.value ? (settings.value?.claude_model ?? '') : (settings.value?.codex_model ?? ''),
+  set: (value: string) => {
+    if (!settings.value) return
+    if (isClaude.value) settings.value.claude_model = value
+    else settings.value.codex_model = value
+  },
+})
+const agentModelField = computed(() => isClaude.value ? 'ai.claude_model' : 'ai.codex_model')
+const agentModelOptions = computed(() => [...new Set([agentModel.value, ...providerModels.value].filter(Boolean))])
 const isCustomProvider = computed(() => settings.value?.provider === 'custom')
 const selectedProvider = computed(() => providers.value.find(p => p.id === settings.value?.provider))
 const selectedLocalModel = computed(() => localModels.value.find(m => m.id === settings.value?.local_model))
@@ -81,10 +105,14 @@ const testing = ref(false)
 const testResult = ref<AIChatResponse | null>(null)
 const testError = ref('')
 
+let statusRequest = 0
 async function loadStatus() {
+  const request = ++statusRequest
   try {
-    status.value = await $heya('/api/ai/status') as AIStatus
-    downloading.value = status.value?.local.download_state === 'downloading'
+    const next = await $heya('/api/ai/status') as AIStatus
+    if (request !== statusRequest) return
+    status.value = next
+    downloading.value = next.local.download_state === 'downloading'
   } catch { /* transient poll failure — keep last snapshot */ }
 }
 async function loadSettings() {
@@ -110,9 +138,13 @@ async function save() {
       local_model: settings.value.local_model,
       local_backend: settings.value.local_backend,
       context_size: Number(settings.value.context_size) || 0,
+      claude_model: settings.value.claude_model,
+      codex_model: settings.value.codex_model,
+      claude_token: claudeTokenDraft.value, // empty = keep stored token
     }
     settings.value = await $heya('/api/ai/settings', { method: 'PUT', body: body as any }) as AISettingsView
     apiKeyDraft.value = ''
+    claudeTokenDraft.value = ''
     flash.value = { kind: 'ok', text: 'AI settings saved.' }
     loadStatus()
   } catch (e: any) {
@@ -125,7 +157,9 @@ async function save() {
 async function setMode(mode: string) {
   if (!settings.value || settings.value.mode === mode) return
   settings.value.mode = mode
+  providerModels.value = []
   await save()
+  if (mode === 'claude' || mode === 'codex') await fetchProviderModels()
 }
 
 async function startDownload() {
@@ -152,6 +186,7 @@ async function stopRuntime() {
 async function fetchProviderModels() {
   loadingModels.value = true
   providerModels.value = []
+  flash.value = null
   try {
     const res = await $heya('/api/ai/models') as { models: string[] }
     providerModels.value = res.models
@@ -183,6 +218,7 @@ async function runTest() {
 let pollTimer: ReturnType<typeof setInterval> | null = null
 onMounted(async () => {
   await Promise.all([loadSettings(), loadCatalog(), loadStatus(), ensureSources()])
+  if (isAgent.value) void fetchProviderModels()
   let last = 0
   pollTimer = setInterval(() => {
     const interval = dlActive.value || downloading.value ? 1500 : 5000
@@ -199,8 +235,8 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
       <h2 class="sv2-page-title">AI</h2>
       <p class="sv2-page-desc">
         Optional language-model subsystem powering smart collections, playlist
-        generation, and recommendations. Run a small model fully locally, or
-        bring an API key for any OpenAI-compatible provider. Off by default —
+        generation, and recommendations. Run a small model locally, bring an
+        API key, or use a Claude/Codex subscription. Off by default —
         nothing runs and nothing phones home until you enable it.
       </p>
     </header>
@@ -212,14 +248,14 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
     >
       <div class="mode-row">
         <button
-          v-for="m in ['off', 'local', 'external']" :key="m"
+          v-for="m in ['off', 'local', 'external', 'claude', 'codex']" :key="m"
           class="mode-btn" :class="{ active: settings?.mode === m }"
           :disabled="saving || isLocked('ai.mode')"
           @click="setMode(m)"
         >
-          <span class="mode-name">{{ m === 'off' ? 'Off' : m === 'local' ? 'Local model' : 'External provider' }}</span>
+          <span class="mode-name">{{ m === 'off' ? 'Off' : m === 'local' ? 'Local model' : m === 'external' ? 'External provider' : m === 'claude' ? 'Claude subscription' : 'Codex subscription' }}</span>
           <span class="mode-desc">
-            {{ m === 'off' ? 'Disabled entirely' : m === 'local' ? 'Private, runs on this machine' : 'Bring your own API key' }}
+            {{ m === 'off' ? 'Disabled entirely' : m === 'local' ? 'Private, runs on this machine' : m === 'external' ? 'Bring your own API key' : 'Use your existing account' }}
           </span>
         </button>
       </div>
@@ -229,7 +265,67 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         <span v-else-if="status.ready && isLocal" class="mode-detail">
           {{ dl?.running ? `llama-server warm (${dl?.running_model})` : 'llama-server cold — starts on first request' }}
         </span>
+        <span v-else-if="status.ready && isAgent" class="mode-detail">
+          {{ status.agent.provider }} · {{ status.model }} · no Heya tools
+        </span>
       </div>
+    </SettingsSection>
+
+    <SettingsSection
+      v-if="isAgent"
+      :title="isClaude ? 'Claude Agent' : 'Codex'"
+      icon="sparkle"
+      description="Heya launches the official native CLI with an isolated working directory, minimal environment, structured output, and no Heya tools enabled."
+    >
+      <div class="artifact-card" :class="{ ok: status?.agent.authenticated && status?.agent.binary_present }">
+        <div class="artifact-info">
+          <StatusBadge :state="status?.agent.binary_present ? 'ok' : 'error'">
+            CLI {{ status?.agent.binary_present ? 'installed' : 'missing' }}
+          </StatusBadge>
+          <StatusBadge :state="status?.agent.authenticated ? 'ok' : 'warn'">
+            {{ status?.agent.authenticated ? 'Authenticated' : 'Login required' }}
+          </StatusBadge>
+        </div>
+      </div>
+
+      <SettingsField
+        v-if="isClaude"
+        label="Subscription token"
+        description="Run `claude setup-token` on a trusted machine, then paste its output here. The token is stored server-side and never echoed back."
+        :lockedBy="isLocked('ai.claude_token') ? lockTooltip('ai.claude_token') : undefined"
+      >
+        <input
+          v-model="claudeTokenDraft" type="password" class="sv2-input" autocomplete="off"
+          :placeholder="settings?.claude_token_set ? `token set (${settings.claude_token_hint}) — enter to replace` : 'paste Claude setup token'"
+          :disabled="saving || isLocked('ai.claude_token')"
+          @blur="claudeTokenDraft && save()"
+        >
+      </SettingsField>
+
+      <SettingsField
+        v-if="isCodex"
+        label="ChatGPT login"
+        description="Codex device login is stored in Heya's persistent data volume. Run this once inside the Heya container:"
+      >
+        <code class="setup-command">codex -c cli_auth_credentials_store=&quot;file&quot; login --device-auth</code>
+      </SettingsField>
+
+      <SettingsField label="Model" :lockedBy="isLocked(agentModelField) ? lockTooltip(agentModelField) : undefined">
+        <div class="model-row">
+          <select
+            v-model="agentModel" class="sv2-select"
+            :disabled="saving || isLocked(agentModelField)"
+            @change="save"
+          >
+            <option v-for="m in agentModelOptions" :key="m" :value="m">{{ m }}</option>
+          </select>
+          <button class="sv2-btn ghost" :disabled="loadingModels" @click="fetchProviderModels">
+            <Icon :name="loadingModels ? 'spinner' : 'refresh'" :size="13" />
+            {{ loadingModels ? 'Loading…' : providerModels.length ? `${providerModels.length} models` : 'Fetch models' }}
+          </button>
+        </div>
+        <p v-if="isClaude" class="field-note">Aliases automatically follow the current model in each Claude tier; exact model IDs also work.</p>
+      </SettingsField>
     </SettingsSection>
 
     <SettingsSection
@@ -394,8 +490,20 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 <style scoped>
 .mode-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
   gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.setup-command {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: 12px;
+  user-select: all;
 }
 .mode-btn {
   display: flex; flex-direction: column; align-items: flex-start; gap: 4px;

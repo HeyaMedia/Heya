@@ -127,9 +127,11 @@ Model dropdown populates from `/v1/models`.
 
 ### Config, CLI, UI
 
-- Env → DB provenance as usual: `HEYA_AI_MODE ∈ {off, local, external}`
+- Env → DB provenance as usual: `HEYA_AI_MODE ∈ {off, local, external, claude, codex}`
   (default **off**), `HEYA_AI_PROVIDER`, `HEYA_AI_API_KEY`, `HEYA_AI_MODEL`,
-  `HEYA_AI_BASE_URL`, `HEYA_AI_CONTEXT`, local model choice + data dir.
+  `HEYA_AI_BASE_URL`, `HEYA_AI_CONTEXT`, local model choice + data dir,
+  `HEYA_AI_CLAUDE_MODEL`, `HEYA_AI_CODEX_MODEL`, and the redacted
+  `HEYA_AI_CLAUDE_TOKEN` subscription credential.
 - CLI-first: `heya ai status`, `heya ai test`, `heya ai chat "…"`,
   `heya ai models`.
 - Settings UI: mode toggle, provider dropdown, key field, model select

@@ -1,11 +1,24 @@
-// Package llm is Heya's language-model subsystem. Everything — local and
-// external — speaks the OpenAI-compatible chat-completions API through one
-// Client. "Local" is a managed llama-server subprocess (llama.cpp) owned by
-// LocalRuntime; "external" is any provider from the preset table (or a custom
-// base URL). Consumers never care which one they're talking to.
+// Package llm is Heya's language-model subsystem. Local and external models
+// use an OpenAI-compatible Client; subscription-backed Claude and Codex modes
+// use hardened wrappers around the vendors' official native CLIs. Consumers
+// depend only on Completer and never care which transport they are using.
 package llm
 
-import "errors"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+)
+
+// Completer is the provider-neutral surface used by Heya's AI features.
+// OpenAI-compatible HTTP endpoints and subscription-backed agent CLIs both
+// implement it. Tool support deliberately lives above this interface so Heya
+// can expose an explicit allowlist instead of inheriting an agent's built-ins.
+type Completer interface {
+	Complete(context.Context, Request) (*Response, error)
+	CompleteJSON(context.Context, Request, string, json.RawMessage, any) error
+	Models(context.Context) ([]string, error)
+}
 
 // Message is one chat turn in the OpenAI wire shape.
 type Message struct {

@@ -220,7 +220,7 @@ func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixR
 	return result, nil
 }
 
-func (a *App) aiMusicMakePlan(ctx context.Context, client *llm.Client, model, query string) aiMusicPlan {
+func (a *App) aiMusicMakePlan(ctx context.Context, client llm.Completer, model, query string) aiMusicPlan {
 	var plan aiMusicPlan
 	err := client.CompleteJSON(ctx, llm.Request{
 		Model:       model,
