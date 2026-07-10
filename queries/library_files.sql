@@ -222,21 +222,14 @@ UPDATE library_files
 SET content_hash = $2, updated_at = now()
 WHERE id = $1;
 
--- name: ListDeletedFilesBySize :many
--- Move-detection candidates: recently soft-deleted files with the same byte
--- size. Size alone is NOT sufficient to claim a move — the scanner requires a
--- matching basename or mtime on top (see relocate logic in scanner.go) so a
--- coincidentally same-sized new file can't inherit a deleted file's
--- identity/watch history. Newest deletions first for deterministic preference.
-SELECT * FROM library_files
-WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
-  AND deleted_at > now() - interval '7 days'
-ORDER BY deleted_at DESC
-LIMIT 16;
-
 -- name: RelocateLibraryFile :exec
+-- Move detection (matchMovedFiles in the kickoff worker) claims this row for
+-- a new on-disk path; keeping the id preserves probe data, trickplay,
+-- segments, fingerprints, track_files, and file links. parse_result is left
+-- alone on purpose: the old and new owner scopes both re-enter the pipeline,
+-- and the apply phase refreshes parse_result under the new naming.
 UPDATE library_files
-SET path = $2, mtime = $3, parse_result = $4, deleted_at = NULL, updated_at = now()
+SET path = $2, mtime = $3, deleted_at = NULL, updated_at = now()
 WHERE id = $1;
 
 -- name: ListMediaResolutions :many

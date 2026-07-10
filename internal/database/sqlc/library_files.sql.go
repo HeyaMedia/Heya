@@ -278,65 +278,6 @@ func (q *Queries) ListAllLibraryFilePaths(ctx context.Context, libraryID int64) 
 	return items, nil
 }
 
-const listDeletedFilesBySize = `-- name: ListDeletedFilesBySize :many
-SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
-WHERE library_id = $1 AND size = $2 AND deleted_at IS NOT NULL
-  AND deleted_at > now() - interval '7 days'
-ORDER BY deleted_at DESC
-LIMIT 16
-`
-
-type ListDeletedFilesBySizeParams struct {
-	LibraryID int64 `json:"library_id"`
-	Size      int64 `json:"size"`
-}
-
-// Move-detection candidates: recently soft-deleted files with the same byte
-// size. Size alone is NOT sufficient to claim a move — the scanner requires a
-// matching basename or mtime on top (see relocate logic in scanner.go) so a
-// coincidentally same-sized new file can't inherit a deleted file's
-// identity/watch history. Newest deletions first for deterministic preference.
-func (q *Queries) ListDeletedFilesBySize(ctx context.Context, arg ListDeletedFilesBySizeParams) ([]LibraryFile, error) {
-	rows, err := q.db.Query(ctx, listDeletedFilesBySize, arg.LibraryID, arg.Size)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []LibraryFile{}
-	for rows.Next() {
-		var i LibraryFile
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.LibraryID,
-			&i.Path,
-			&i.Size,
-			&i.Mtime,
-			&i.MediaItemID,
-			&i.ParseResult,
-			&i.Status,
-			&i.ErrorMessage,
-			&i.DeletedAt,
-			&i.MediaInfo,
-			&i.Keyframes,
-			&i.HasTrickplay,
-			&i.ContentHash,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.VideoHeight,
-			&i.SegmentsAnalyzedAt,
-			&i.SegmentsDetectedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listDeletedLibraryFiles = `-- name: ListDeletedLibraryFiles :many
 SELECT id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at FROM library_files
 WHERE library_id = $1 AND deleted_at IS NOT NULL
@@ -993,24 +934,23 @@ func (q *Queries) ReapplyLibraryFileParse(ctx context.Context, arg ReapplyLibrar
 
 const relocateLibraryFile = `-- name: RelocateLibraryFile :exec
 UPDATE library_files
-SET path = $2, mtime = $3, parse_result = $4, deleted_at = NULL, updated_at = now()
+SET path = $2, mtime = $3, deleted_at = NULL, updated_at = now()
 WHERE id = $1
 `
 
 type RelocateLibraryFileParams struct {
-	ID          int64              `json:"id"`
-	Path        string             `json:"path"`
-	Mtime       pgtype.Timestamptz `json:"mtime"`
-	ParseResult []byte             `json:"parse_result"`
+	ID    int64              `json:"id"`
+	Path  string             `json:"path"`
+	Mtime pgtype.Timestamptz `json:"mtime"`
 }
 
+// Move detection (matchMovedFiles in the kickoff worker) claims this row for
+// a new on-disk path; keeping the id preserves probe data, trickplay,
+// segments, fingerprints, track_files, and file links. parse_result is left
+// alone on purpose: the old and new owner scopes both re-enter the pipeline,
+// and the apply phase refreshes parse_result under the new naming.
 func (q *Queries) RelocateLibraryFile(ctx context.Context, arg RelocateLibraryFileParams) error {
-	_, err := q.db.Exec(ctx, relocateLibraryFile,
-		arg.ID,
-		arg.Path,
-		arg.Mtime,
-		arg.ParseResult,
-	)
+	_, err := q.db.Exec(ctx, relocateLibraryFile, arg.ID, arg.Path, arg.Mtime)
 	return err
 }
 

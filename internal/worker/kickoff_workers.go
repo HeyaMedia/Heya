@@ -247,6 +247,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 			Int("discovered", result.Discovered).
 			Int("changed", result.New).
 			Int("deleted", result.Deleted).
+			Int("moved", result.Moved).
 			Bool("scanner", supportsScanner(lib.MediaType)).
 			Int("enqueued", n).
 			Int("reprobed", reprobed).
@@ -274,6 +275,7 @@ type libraryScanOutcome struct {
 	Discovered int
 	New        int
 	Deleted    int
+	Moved      int
 }
 
 // ---------------------------------------------------------------------------
@@ -817,6 +819,7 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 		scopeSet[scope] = true
 	}
 
+	var newFiles []scanner.InventoryFile
 	inv, err := scanner.WalkInventoryWithObserver(ctx, lib.Paths, sink, &scanner.InventoryObserver{
 		OnFile: func(file scanner.InventoryFile) {
 			if !scannerInventoryFileTracked(file) {
@@ -824,11 +827,14 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 			}
 			seen[file.Path] = true
 			scope := scannerScopeForInventoryFile(lib.MediaType, file)
+			existing, found := existingByPath[file.Path]
+			if !found {
+				newFiles = append(newFiles, file)
+			}
 			if initialFullScan {
 				markChangedScope(scope)
 				return
 			}
-			existing, found := existingByPath[file.Path]
 			if !found || existing.DeletedAt.Valid || libraryFileChanged(existing, file) {
 				outcome.New++
 				markChangedScope(scope)
@@ -856,6 +862,11 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 		markChangedScope(ScannerScopeForLibraryDirectory(lib, scope))
 	}
 
+	// Relocate moves/renames BEFORE the soft-delete pass so a moved file keeps
+	// its library_files id — and with it probe data, trickplay, segments,
+	// fingerprints, track_files, and file links.
+	outcome.Moved = w.relocateMovedFiles(ctx, q, lib, existingRows, seen, newFiles, markChangedScope)
+
 	var missing []string
 	for _, row := range existingRows {
 		if row.DeletedAt.Valid || seen[row.Path] {
@@ -875,6 +886,110 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 	}
 
 	return outcome, compactScannerScopes(sortedMapKeys(scopeSet)), inv, nil
+}
+
+// scannerFileMove pairs a file that appeared on disk with the known row it
+// relocates: same byte size plus a matching basename (move across dirs) or
+// µs-truncated mtime (rename in place). Size alone is deliberately not
+// enough — a coincidentally same-sized new file would steal the old row's
+// identity, probe data, and watch-adjacent state.
+type scannerFileMove struct {
+	Row  sqlc.ListLibraryFilesForScanRow
+	File scanner.InventoryFile
+}
+
+// matchMovedFiles pairs new on-disk files against rows whose paths are gone:
+// missed by this walk (deleted in this very scan) or already soft-deleted
+// within the last 7 days (a move noticed across two scans, e.g. via watcher
+// events). Live missing rows win over older soft-deleted ones; basename
+// matches win over mtime matches. Pure so the pairing rules are testable
+// without a database.
+func matchMovedFiles(existingRows []sqlc.ListLibraryFilesForScanRow, seen map[string]bool, newFiles []scanner.InventoryFile) []scannerFileMove {
+	if len(newFiles) == 0 {
+		return nil
+	}
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	bySize := map[int64][]sqlc.ListLibraryFilesForScanRow{}
+	for _, row := range existingRows {
+		if seen[row.Path] {
+			continue
+		}
+		if row.DeletedAt.Valid && row.DeletedAt.Time.Before(cutoff) {
+			continue
+		}
+		bySize[row.Size] = append(bySize[row.Size], row)
+	}
+	if len(bySize) == 0 {
+		return nil
+	}
+	for _, bucket := range bySize {
+		sort.Slice(bucket, func(i, j int) bool {
+			if bucket[i].DeletedAt.Valid != bucket[j].DeletedAt.Valid {
+				return !bucket[i].DeletedAt.Valid // live missing rows first
+			}
+			if bucket[i].DeletedAt.Valid && !bucket[i].DeletedAt.Time.Equal(bucket[j].DeletedAt.Time) {
+				return bucket[i].DeletedAt.Time.After(bucket[j].DeletedAt.Time) // newest deletion first
+			}
+			return bucket[i].Path < bucket[j].Path
+		})
+	}
+
+	consumed := map[int64]bool{}
+	var moves []scannerFileMove
+	claim := func(file scanner.InventoryFile, match func(sqlc.ListLibraryFilesForScanRow) bool) bool {
+		for _, row := range bySize[file.Size] {
+			if consumed[row.ID] || !match(row) {
+				continue
+			}
+			consumed[row.ID] = true
+			moves = append(moves, scannerFileMove{Row: row, File: file})
+			return true
+		}
+		return false
+	}
+	// Basename pass first across ALL new files, so a basename match is never
+	// beaten to its row by another file's weaker mtime match.
+	remaining := make([]scanner.InventoryFile, 0, len(newFiles))
+	for _, file := range newFiles {
+		base := filepath.Base(file.Path)
+		if !claim(file, func(row sqlc.ListLibraryFilesForScanRow) bool { return filepath.Base(row.Path) == base }) {
+			remaining = append(remaining, file)
+		}
+	}
+	for _, file := range remaining {
+		if file.MTime.IsZero() {
+			continue
+		}
+		want := file.MTime.Truncate(time.Microsecond)
+		claim(file, func(row sqlc.ListLibraryFilesForScanRow) bool {
+			return row.Mtime.Valid && row.Mtime.Time.Truncate(time.Microsecond).Equal(want)
+		})
+	}
+	return moves
+}
+
+// relocateMovedFiles applies matchMovedFiles pairings: the row keeps its id
+// under the new path and escapes the soft-delete pass, while both the old
+// and new owner scopes re-enter the pipeline (already marked for the new
+// path by the walk observer) — naming carries identity, so a renamed owner
+// must re-match and the old owner must re-plan what it lost.
+func (w *KickoffLibraryScanWorker) relocateMovedFiles(ctx context.Context, q *sqlc.Queries, lib sqlc.Library, existingRows []sqlc.ListLibraryFilesForScanRow, seen map[string]bool, newFiles []scanner.InventoryFile, markChangedScope func(string)) int {
+	moved := 0
+	for _, move := range matchMovedFiles(existingRows, seen, newFiles) {
+		if err := q.RelocateLibraryFile(ctx, sqlc.RelocateLibraryFileParams{
+			ID:    move.Row.ID,
+			Path:  move.File.Path,
+			Mtime: pgtype.Timestamptz{Time: move.File.MTime, Valid: !move.File.MTime.IsZero()},
+		}); err != nil {
+			log.Warn().Err(err).Int64("file_id", move.Row.ID).Str("from", move.Row.Path).Str("to", move.File.Path).Msg("kickoff_library_scan: relocate moved file failed")
+			continue
+		}
+		seen[move.Row.Path] = true // old path escapes the soft-delete pass
+		markChangedScope(ScannerScopeForLibraryPath(lib, move.Row.Path))
+		log.Info().Int64("file_id", move.Row.ID).Str("from", move.Row.Path).Str("to", move.File.Path).Msg("kickoff_library_scan: detected file move")
+		moved++
+	}
+	return moved
 }
 
 type scannerNFODirState struct {

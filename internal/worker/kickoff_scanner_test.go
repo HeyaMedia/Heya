@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -49,6 +51,105 @@ func TestTimestamptzChangedTruncatesToMicroseconds(t *testing.T) {
 	require.True(t, timestamptzChanged(a, b), "a >1µs difference must still be detected")
 
 	require.True(t, timestamptzChanged(a, pgtype.Timestamptz{}), "validity mismatch must read as changed")
+}
+
+func TestMatchMovedFilesPairsBySizePlusBasenameOrMtime(t *testing.T) {
+	mtime := time.Date(2026, 7, 10, 4, 0, 0, 123456789, time.UTC)
+	rows := []sqlc.ListLibraryFilesForScanRow{
+		{ID: 1, Path: "/media/Movies/Old Name (1999)/movie.mkv", Size: 100, Mtime: pgtype.Timestamptz{Time: mtime.Truncate(time.Microsecond), Valid: true}},
+		{ID: 2, Path: "/media/Movies/Kept (2001)/kept.mkv", Size: 100, Mtime: pgtype.Timestamptz{Time: mtime.Truncate(time.Microsecond), Valid: true}},
+		{ID: 3, Path: "/media/Movies/Renamed (2002)/before.mkv", Size: 300, Mtime: pgtype.Timestamptz{Time: mtime.Truncate(time.Microsecond), Valid: true}},
+	}
+	seen := map[string]bool{"/media/Movies/Kept (2001)/kept.mkv": true} // still on disk — never a candidate
+
+	moves := matchMovedFiles(rows, seen, []scanner.InventoryFile{
+		// moved across dirs: same size + same basename, mtime irrelevant
+		{Path: "/media/Movies/New Name (1999)/movie.mkv", Size: 100, MTime: mtime.Add(time.Hour)},
+		// renamed in place: same size + same µs-mtime, basename differs
+		{Path: "/media/Movies/Renamed (2002)/after.mkv", Size: 300, MTime: mtime},
+		// same size as row 1 but different basename AND mtime: no claim
+		{Path: "/media/Movies/Impostor (2020)/impostor.mkv", Size: 100, MTime: mtime.Add(48 * time.Hour)},
+	})
+
+	require.Len(t, moves, 2)
+	byID := map[int64]string{}
+	for _, m := range moves {
+		byID[m.Row.ID] = m.File.Path
+	}
+	require.Equal(t, "/media/Movies/New Name (1999)/movie.mkv", byID[1])
+	require.Equal(t, "/media/Movies/Renamed (2002)/after.mkv", byID[3])
+}
+
+func TestMatchMovedFilesNeverClaimsBySizeAlone(t *testing.T) {
+	rows := []sqlc.ListLibraryFilesForScanRow{
+		{ID: 1, Path: "/media/Movies/Gone (1999)/gone.mkv", Size: 100},
+	}
+	moves := matchMovedFiles(rows, map[string]bool{}, []scanner.InventoryFile{
+		{Path: "/media/Movies/Fresh (2024)/fresh.mkv", Size: 100, MTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+	})
+	require.Empty(t, moves, "size alone must not transfer a row's identity")
+}
+
+func TestMatchMovedFilesSkipsStaleSoftDeletes(t *testing.T) {
+	old := pgtype.Timestamptz{Time: time.Now().Add(-8 * 24 * time.Hour), Valid: true}
+	recent := pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}
+	rows := []sqlc.ListLibraryFilesForScanRow{
+		{ID: 1, Path: "/media/Movies/Stale (1999)/movie.mkv", Size: 100, DeletedAt: old},
+		{ID: 2, Path: "/media/Movies/Recent (2001)/movie.mkv", Size: 100, DeletedAt: recent},
+	}
+	moves := matchMovedFiles(rows, map[string]bool{}, []scanner.InventoryFile{
+		{Path: "/media/Movies/Moved (2001)/movie.mkv", Size: 100},
+	})
+	require.Len(t, moves, 1)
+	require.Equal(t, int64(2), moves[0].Row.ID, "stale soft-deletes are out of the 7-day window; the recent one wins")
+}
+
+func TestRelocateMovedFilesKeepsRowIDAndEscapesSoftDelete(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "kickoff-move-detection-test",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	mtime := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	orig, err := q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+		LibraryID:   lib.ID,
+		Path:        "/media/movies/Old Title (1999)/Old Title.mkv",
+		Size:        100,
+		Mtime:       pgtype.Timestamptz{Time: mtime, Valid: true},
+		ParseResult: []byte("{}"),
+		Status:      sqlc.FileStatusMatched,
+	})
+	require.NoError(t, err)
+
+	rows, err := q.ListLibraryFilesForScan(ctx, lib.ID)
+	require.NoError(t, err)
+
+	w := &KickoffLibraryScanWorker{DB: pool}
+	seen := map[string]bool{}
+	var scopes []string
+	moved := w.relocateMovedFiles(ctx, q, lib, rows, seen, []scanner.InventoryFile{
+		{Path: "/media/movies/New Title (1999)/Old Title.mkv", RelPath: "New Title (1999)/Old Title.mkv", Size: 100, MTime: mtime},
+	}, func(scope string) { scopes = append(scopes, scope) })
+
+	require.Equal(t, 1, moved)
+	require.True(t, seen["/media/movies/Old Title (1999)/Old Title.mkv"], "old path must escape the soft-delete pass")
+	require.Contains(t, scopes, "/media/movies/Old Title (1999)", "old owner scope re-enters the pipeline")
+
+	row, err := q.GetLibraryFileByID(ctx, orig.ID)
+	require.NoError(t, err)
+	require.Equal(t, "/media/movies/New Title (1999)/Old Title.mkv", row.Path, "row keeps its id under the new path")
+	require.False(t, row.DeletedAt.Valid)
 }
 
 func TestOversizedScannerArtifactCancelsWorkerRetry(t *testing.T) {
