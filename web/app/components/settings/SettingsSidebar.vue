@@ -92,7 +92,7 @@ function isActive(to: string) {
   transition: background 0.12s, color 0.12s;
 }
 .sv2-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
   color: var(--fg-0);
 }
 .sv2-item.active {

@@ -121,7 +121,7 @@ const emit = defineEmits<{
   text-decoration: none;
   cursor: pointer;
 }
-.mnav-item:active { background: rgba(255, 255, 255, 0.06); }
+.mnav-item:active { background: rgb(var(--ink) / 0.06); }
 .mnav-item.active { color: var(--gold); background: var(--gold-soft); }
 .mnav-sub {
   margin-left: 28px;

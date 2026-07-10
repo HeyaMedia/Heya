@@ -343,7 +343,7 @@ onMounted(load)
   font-size: 10px;
   font-weight: 700;
 }
-.tab.active .tab-badge { background: var(--gold); color: #1a1408; }
+.tab.active .tab-badge { background: var(--gold); color: var(--accent-ink); }
 
 .overrides-summary {
   display: flex; align-items: center; gap: 8px;
@@ -362,7 +362,7 @@ onMounted(load)
   font-size: 11.5px;
   color: var(--fg-3);
   font-style: italic;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--ink) / 0.02);
   border: 1px dashed var(--border);
   border-radius: var(--r-sm);
 }
@@ -424,7 +424,7 @@ onMounted(load)
   color: var(--fg-3);
   transition: background 0.12s, color 0.12s;
 }
-.priority-btn:hover:not(:disabled) { background: rgba(255,255,255,0.04); color: var(--fg-1); }
+.priority-btn:hover:not(:disabled) { background: rgb(var(--ink) / 0.04); color: var(--fg-1); }
 .priority-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .sv2-input {
@@ -473,13 +473,13 @@ onMounted(load)
   gap: 8px;
 }
 .pw-flash.ok {
-  background: rgba(111, 191, 124, 0.10);
-  border: 1px solid rgba(111, 191, 124, 0.25);
+  background: color-mix(in srgb, var(--good) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--good) 25%, transparent);
   color: var(--good);
 }
 .pw-flash.err {
-  background: rgba(217, 107, 107, 0.10);
-  border: 1px solid rgba(217, 107, 107, 0.30);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
   color: var(--bad);
 }
 

@@ -229,7 +229,7 @@ async function playFrom(idx: number) {
   padding: 36px 40px 28px;
   overflow: hidden;
   border-radius: 0 0 var(--r-md) var(--r-md);
-  color: #fff;
+  color: #fff; /* on the fixed per-kind gradient — stays literal, see .bd-hero-tint..bd-back-link below */
 }
 .bd-hero-tint {
   position: absolute; inset: 0;
@@ -268,9 +268,9 @@ async function playFrom(idx: number) {
 :deep(.tl-track) {
   padding: 9px 12px;
   border-radius: var(--r-md);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 -1px 0 rgb(var(--ink) / 0.035);
 }
-:deep(.tl-track:hover) { background: rgba(255, 255, 255, 0.045); }
+:deep(.tl-track:hover) { background: rgb(var(--ink) / 0.045); }
 :deep(.tl-body) { gap: 0; }
 :deep(.tl-head) {
   position: static;

@@ -55,6 +55,10 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 </script>
 
 <style scoped>
+/* This entire component is a fullscreen image viewer — the overlay, nav
+   buttons, close button, and counter all paint directly over the displayed
+   artwork. Per the design system's on-artwork rule, these stay literal
+   black/white rather than theming with --ink/--shade/--gold. */
 .lb-overlay {
   position: fixed;
   inset: 0;

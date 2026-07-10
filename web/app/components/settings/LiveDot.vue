@@ -33,8 +33,8 @@ defineProps<{ connected?: boolean, label?: string }>()
   animation: sv2-live-pulse 1.5s ease-in-out infinite;
 }
 @keyframes sv2-live-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(111, 191, 124, 0.5); }
-  70%  { box-shadow: 0 0 0 6px rgba(111, 191, 124, 0); }
-  100% { box-shadow: 0 0 0 0   rgba(111, 191, 124, 0); }
+  0%   { box-shadow: 0 0 0 0   color-mix(in srgb, var(--good) 50%, transparent); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0   transparent; }
 }
 </style>

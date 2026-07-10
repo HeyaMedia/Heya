@@ -221,7 +221,7 @@ function lastFetchedText(): string {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
-.watcher-card.dim { background: rgba(255,255,255,0.012); border-style: dashed; }
+.watcher-card.dim { background: rgb(var(--ink) / 0.012); border-style: dashed; }
 .watcher-icon {
   width: 36px; height: 36px;
   border-radius: var(--r-sm);
@@ -256,7 +256,7 @@ function lastFetchedText(): string {
   font-size: 12px;
   display: flex; align-items: center; gap: 8px;
 }
-.sv2-flash.err { background: rgba(217, 107, 107, 0.10); border: 1px solid rgba(217, 107, 107, 0.30); color: var(--bad); }
+.sv2-flash.err { background: color-mix(in srgb, var(--bad) 10%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); color: var(--bad); }
 
 /* Phone: minmax(200px) only fits 1 column at 390px — force 2. */
 @media (max-width: 720px) {

@@ -101,7 +101,7 @@ function close() { open.value = false }
   position: fixed;
   inset: 0;
   z-index: 5000;
-  background: rgba(0, 0, 0, 0.62);
+  background: rgb(var(--shade) / 0.62);
   backdrop-filter: blur(6px) saturate(110%);
   -webkit-backdrop-filter: blur(6px) saturate(110%);
 }
@@ -176,7 +176,7 @@ function close() { open.value = false }
 }
 .app-dialog-close:hover {
   color: var(--fg-0);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
 }
 
 /* ── Body ─────────────────────────────────────── */
@@ -194,7 +194,7 @@ function close() { open.value = false }
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--ink) / 0.02);
   flex-shrink: 0;
 }
 

@@ -270,7 +270,7 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
-.lib-card.missing { border-color: rgba(217,107,107,0.30); background: rgba(217,107,107,0.04); }
+.lib-card.missing { border-color: color-mix(in srgb, var(--bad) 30%, transparent); background: color-mix(in srgb, var(--bad) 4%, transparent); }
 
 .lib-icon {
   width: 36px; height: 36px;
@@ -315,8 +315,8 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
 .scan-summary {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px;
-  background: rgba(111, 191, 124, 0.08);
-  border: 1px solid rgba(111, 191, 124, 0.25);
+  background: color-mix(in srgb, var(--good) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--good) 25%, transparent);
   border-radius: var(--r-sm);
   font-size: 12px;
   color: var(--good);

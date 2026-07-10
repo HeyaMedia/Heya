@@ -165,8 +165,8 @@ const feed = computed<FeedRow[]>(() => {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.72) 45%, rgba(12,12,16,0.3) 100%),
-    linear-gradient(to top, var(--bg-1) 0%, rgba(12,12,16,0.75) 30%, transparent 60%);
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 72%, transparent) 45%, color-mix(in srgb, var(--bg-1) 30%, transparent) 100%),
+    linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 75%, transparent) 30%, transparent 60%);
 }
 .newin-inner {
   position: relative;
@@ -257,8 +257,8 @@ const feed = computed<FeedRow[]>(() => {
   font-size: 8.5px;
   letter-spacing: 0.1em;
   color: var(--gold);
-  background: rgba(7, 7, 10, 0.8);
-  border: 1px solid rgba(230, 185, 74, 0.35);
+  background: rgba(7, 7, 10, 0.8); /* on artwork — stays literal */
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 999px;
   padding: 2px 6px;
 }

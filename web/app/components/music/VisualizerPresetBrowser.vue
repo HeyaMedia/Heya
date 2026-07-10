@@ -223,7 +223,7 @@ onMounted(() => {
   outline: none;
 }
 .pb-search-input::placeholder { color: rgba(255,255,255,0.3); }
-.pb-search-input:focus { border-color: rgba(230, 185, 74, 0.5); }
+.pb-search-input:focus { border-color: color-mix(in srgb, var(--gold) 50%, transparent); }
 
 .pb-tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,0.08); }
 .pb-tab {

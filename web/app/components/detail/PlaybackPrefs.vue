@@ -191,7 +191,7 @@ onMounted(loadData)
   color: var(--fg-1);
   transition: background 0.12s;
 }
-.pp-toggle:hover { background: rgba(255,255,255,0.02); }
+.pp-toggle:hover { background: rgb(var(--ink) / 0.02); }
 .pp-toggle > :last-child { margin-left: auto; color: var(--fg-3); }
 .pp-toggle-chev { transition: transform 0.2s; }
 .pp-toggle[data-state="open"] .pp-toggle-chev { transform: rotate(180deg); }
@@ -241,7 +241,7 @@ onMounted(loadData)
 .pp-label {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: rgba(255,255,255,0.55);
+  color: rgb(var(--ink) / 0.55);
 }
 
 .pp-reset {
@@ -249,7 +249,7 @@ onMounted(loadData)
   margin-top: 8px;
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.06em;
-  color: rgba(255,255,255,0.4);
+  color: rgb(var(--ink) / 0.4);
   transition: color 0.12s;
   align-self: flex-start;
 }

@@ -397,7 +397,7 @@ watch(activeLyricIdx, (i) => {
   transform: translateX(-50%);
   padding: 4px 12px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.6); /* badge painted over the art/visualizer — stays literal */
   color: var(--fg-0);
   font-size: 11px;
   font-weight: 700;
@@ -496,7 +496,7 @@ watch(activeLyricIdx, (i) => {
   position: relative;
   cursor: pointer;
 }
-.nps-icon:active { background: rgba(255, 255, 255, 0.08); }
+.nps-icon:active { background: rgb(var(--ink) / 0.08); }
 .nps-icon.active { color: var(--gold); }
 .nps-play {
   width: 64px;
@@ -543,7 +543,7 @@ watch(activeLyricIdx, (i) => {
   justify-content: center;
   cursor: pointer;
 }
-.nps-sicon:active { background: rgba(255, 255, 255, 0.08); }
+.nps-sicon:active { background: rgb(var(--ink) / 0.08); }
 .nps-sicon.active { color: var(--gold); }
 
 /* Bottom-of-pane hint that the queue lives one swipe below. */

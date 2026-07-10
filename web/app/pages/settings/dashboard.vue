@@ -489,8 +489,8 @@ onMounted(async () => {
 
 .running-card {
   display: flex; align-items: center; gap: 14px;
-  background: rgba(230, 185, 74, 0.06);
-  border: 1px solid rgba(230, 185, 74, 0.25);
+  background: color-mix(in srgb, var(--gold) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 25%, transparent);
   border-radius: var(--r-md);
   padding: 12px 16px;
   margin-top: 10px;
@@ -502,9 +502,9 @@ onMounted(async () => {
   animation: dash-pulse 1.6s infinite;
 }
 @keyframes dash-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(230, 185, 74, 0.6); }
-  70%  { box-shadow: 0 0 0 12px rgba(230, 185, 74, 0); }
-  100% { box-shadow: 0 0 0 0   rgba(230, 185, 74, 0); }
+  0%   { box-shadow: 0 0 0 0   color-mix(in srgb, var(--gold) 60%, transparent); }
+  70%  { box-shadow: 0 0 0 12px transparent; }
+  100% { box-shadow: 0 0 0 0   transparent; }
 }
 .running-info { flex: 1; min-width: 0; }
 .running-label {
@@ -533,12 +533,12 @@ onMounted(async () => {
 }
 .pill-val { font-weight: 700; color: var(--fg-0); }
 .pill-lbl { color: var(--fg-3); }
-.state-pill.running   { border-color: rgba(111,191,124,0.3); }
-.state-pill.available { border-color: rgba(230,185,74,0.3); }
-.state-pill.retryable { border-color: rgba(230,185,74,0.3); }
-.state-pill.discarded { border-color: rgba(217,107,107,0.3); }
+.state-pill.running   { border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+.state-pill.available { border-color: color-mix(in srgb, var(--gold) 30%, transparent); }
+.state-pill.retryable { border-color: color-mix(in srgb, var(--gold) 30%, transparent); }
+.state-pill.discarded { border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 
-.empty-state.err { color: var(--bad); background: rgba(217,107,107,0.06); border-color: rgba(217,107,107,0.25); margin-top: 10px; }
+.empty-state.err { color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, transparent); border-color: color-mix(in srgb, var(--bad) 25%, transparent); margin-top: 10px; }
 
 .accel-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .accel-chip {
@@ -590,7 +590,7 @@ onMounted(async () => {
   font-size: 8px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em;
   padding: 2px 6px; border-radius: 999px;
-  background: rgba(217, 107, 107, 0.85); color: #fff;
+  background: color-mix(in srgb, var(--bad) 85%, transparent); color: #fff;
 }
 .missing-meta { margin-top: 6px; }
 .missing-title { font-size: 11px; font-weight: 500; color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -42,13 +42,13 @@ const { user, logout } = useAuth()
 
 <style scoped>
 .ud-trigger:hover .ud-avatar,
-.ud-trigger[data-state="open"] .ud-avatar { box-shadow: 0 0 0 2px rgba(230, 185, 74, 0.3); }
+.ud-trigger[data-state="open"] .ud-avatar { box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 30%, transparent); }
 
 .ud-avatar {
   width: 32px; height: 32px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--gold-deep), var(--gold));
-  color: #1a1408;
+  color: var(--accent-ink);
   font-size: 11px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
   letter-spacing: 0.04em;
@@ -62,7 +62,7 @@ const { user, logout } = useAuth()
   width: 40px; height: 40px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--gold-deep), var(--gold));
-  color: #1a1408;
+  color: var(--accent-ink);
   font-size: 14px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;

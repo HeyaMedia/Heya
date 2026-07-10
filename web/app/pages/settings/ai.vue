@@ -517,8 +517,8 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 }
 .mode-btn:hover:not(:disabled) { border-color: var(--fg-4); }
 .mode-btn.active {
-  border-color: rgba(111, 191, 124, 0.4);
-  background: rgba(111, 191, 124, 0.05);
+  border-color: color-mix(in srgb, var(--good) 40%, transparent);
+  background: color-mix(in srgb, var(--good) 5%, transparent);
 }
 .mode-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .mode-name { font-size: 13.5px; font-weight: 500; color: var(--fg-0); }
@@ -539,7 +539,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
-.artifact-card.ok { border-color: rgba(111, 191, 124, 0.3); }
+.artifact-card.ok { border-color: color-mix(in srgb, var(--good) 30%, transparent); }
 .artifact-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .artifact-text { font-size: 12px; color: var(--fg-2); font-family: var(--font-mono); }
 .dl-error { margin: 10px 0 0; font-size: 12px; color: var(--bad, #e5484d); }
@@ -598,9 +598,9 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   border: 1px solid var(--border);
   background: var(--bg-2);
 }
-.test-card.ok { border-color: rgba(111, 191, 124, 0.3); }
+.test-card.ok { border-color: color-mix(in srgb, var(--good) 30%, transparent); }
 .test-card.err {
-  border-color: rgba(229, 72, 77, 0.35);
+  border-color: color-mix(in srgb, var(--bad) 35%, transparent);
   display: flex; align-items: center; gap: 10px;
 }
 .test-reply {

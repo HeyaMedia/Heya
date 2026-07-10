@@ -161,7 +161,7 @@ async function changePassword() {
   height: 56px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--gold-deep), var(--gold));
-  color: #1a1408;
+  color: var(--accent-ink);
   font-weight: 700;
   font-size: 18px;
   letter-spacing: 0.04em;
@@ -193,13 +193,13 @@ async function changePassword() {
   gap: 8px;
 }
 .pw-flash.ok {
-  background: rgba(111, 191, 124, 0.10);
-  border: 1px solid rgba(111, 191, 124, 0.25);
+  background: color-mix(in srgb, var(--good) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--good) 25%, transparent);
   color: var(--good);
 }
 .pw-flash.err {
-  background: rgba(217, 107, 107, 0.10);
-  border: 1px solid rgba(217, 107, 107, 0.30);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
   color: var(--bad);
 }
 

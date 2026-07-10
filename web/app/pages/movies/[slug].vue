@@ -656,7 +656,7 @@ watch(detail, async (d) => {
   position: absolute; inset: 0; z-index: 3;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.15s;
-  color: #fff; pointer-events: none;
+  color: #fff; pointer-events: none; /* on artwork — stays literal */
 }
 .video-card:hover .video-play { opacity: 1; }
 

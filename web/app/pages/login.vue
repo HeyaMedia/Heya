@@ -122,8 +122,8 @@ async function submit() {
 .field input:focus { border-color: var(--gold); }
 .field input::placeholder { color: var(--fg-3); }
 .error-msg {
-  background: rgba(217, 107, 107, 0.1);
-  border: 1px solid rgba(217, 107, 107, 0.3);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
   border-radius: var(--r-md);
   padding: 10px 14px;
   font-size: 13px;

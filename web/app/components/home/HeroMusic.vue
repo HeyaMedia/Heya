@@ -125,12 +125,12 @@ function albumTo(al: MediaItem) {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.5) 55%, transparent 100%),
-    linear-gradient(to top, var(--bg-1) 0%, rgba(12,12,16,0.7) 25%, transparent 55%);
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 50%, transparent) 55%, transparent 100%),
+    linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 70%, transparent) 25%, transparent 55%);
 }
 .music-bg-gradient.playing {
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.35) 60%, transparent 100%),
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 35%, transparent) 60%, transparent 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 30%);
 }
 .music-inner {
@@ -207,7 +207,7 @@ function albumTo(al: MediaItem) {
   position: absolute;
   inset: auto 0 0 0;
   padding: 24px 10px 8px;
-  background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+  background: linear-gradient(to top, rgba(0,0,0,0.85), transparent); /* on artwork — stays literal */
 }
 .music-cover-title {
   font-size: 12.5px;
@@ -228,7 +228,7 @@ function albumTo(al: MediaItem) {
   aspect-ratio: 1;
   border-radius: var(--r-lg);
   overflow: hidden;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgb(var(--ink) / 0.08);
 }
 .music-now-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 @media (max-width: 900px) {

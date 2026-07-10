@@ -164,8 +164,8 @@ onMounted(load)
   transition: border-color 0.12s, background 0.12s;
 }
 .session-card.current {
-  border-color: rgba(111, 191, 124, 0.30);
-  background: rgba(111, 191, 124, 0.04);
+  border-color: color-mix(in srgb, var(--good) 30%, transparent);
+  background: color-mix(in srgb, var(--good) 4%, transparent);
 }
 
 .session-icon {
@@ -218,13 +218,13 @@ onMounted(load)
   transition: background 0.12s, color 0.12s;
 }
 .session-revoke:hover:not(:disabled) {
-  background: rgba(217, 107, 107, 0.12);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
 }
 .session-revoke:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .sv2-btn.ghost:hover {
-  border-color: rgba(217, 107, 107, 0.30);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
   color: var(--bad);
 }
 </style>

@@ -82,6 +82,11 @@ them without a discussion.
   `internal/database/sqlc` from handlers — go through `service/`.
 - **Trickplay + thumbnails are kickoff-driven only.** Never trigger them
   inline from the scan pipeline. Trickplay defaults off per-library.
+- **No color literals in frontend CSS.** The app themes (dark/light/OLED ×
+  9 accents) via CSS custom properties on `<html>` attributes. Canvas
+  overlays use `rgb(var(--ink) / α)`, accents use the `--gold` aliases on
+  canvas / raw `--accent` on artwork, and artwork scrims stay literal. Full
+  vocabulary table in [docs/ui.md](docs/ui.md#theming--tokens-only-no-color-literals).
 - **Image URLs are unconditional.** Always emit `/api/media/{id}/image/{type}`
   (or the `usePosterUrl` / `useBackdropUrl` / `useAlbumCoverUrl` composables)
   on the FE — don't gate on `poster_path` / `backdrop_path` / `cover_path`

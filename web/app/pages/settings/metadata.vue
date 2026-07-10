@@ -214,7 +214,7 @@ onMounted(load)
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
-.empty-state.err { color: var(--bad); background: rgba(217,107,107,0.06); border-color: rgba(217,107,107,0.25); }
+.empty-state.err { color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, transparent); border-color: color-mix(in srgb, var(--bad) 25%, transparent); }
 
 .lib-table {
   background: var(--bg-2);
@@ -240,7 +240,7 @@ onMounted(load)
 }
 .lib-row { border-bottom: 1px solid var(--border); }
 .lib-row:last-child { border-bottom: 0; }
-.lib-row:hover { background: rgba(255,255,255,0.02); }
+.lib-row:hover { background: rgb(var(--ink) / 0.02); }
 
 .col-lib { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .lib-icon { color: var(--fg-3); flex-shrink: 0; }

@@ -101,7 +101,7 @@ const open = defineModel<boolean>('open')
   position: fixed;
   inset: 0;
   z-index: 399;
-  background: rgba(0, 0, 0, 0.62);
+  background: rgb(var(--shade) / 0.62);
   backdrop-filter: blur(6px) saturate(110%);
   -webkit-backdrop-filter: blur(6px) saturate(110%);
 }
@@ -197,7 +197,7 @@ const open = defineModel<boolean>('open')
   flex-shrink: 0;
   margin: 10px auto 2px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
+  background: rgb(var(--ink) / 0.22);
 }
 
 /* ── Header ───────────────────────────────────────── */

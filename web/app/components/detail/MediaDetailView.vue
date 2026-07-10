@@ -534,7 +534,7 @@ onMounted(async () => {
 }
 .hero-poster {
   position: relative;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgb(var(--ink) / 0.06);
   border-radius: var(--r-md); overflow: hidden; align-self: start;
 }
 .hero-info { display: flex; flex-direction: column; justify-content: center; }
@@ -547,7 +547,7 @@ onMounted(async () => {
 .ext-rating {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 10px; border-radius: var(--r-sm);
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.04); border: 1px solid var(--border);
   font-size: 12px;
 }
 .ext-rating-source {
@@ -564,7 +564,7 @@ onMounted(async () => {
 
 .keyword-tag {
   font-size: 10px; font-family: var(--font-mono); padding: 3px 8px; border-radius: 999px;
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--fg-2); letter-spacing: 0.02em;
+  background: rgb(var(--ink) / 0.04); border: 1px solid var(--border); color: var(--fg-2); letter-spacing: 0.02em;
   transition: background 0.15s, color 0.15s;
 }
 .keyword-tag:hover { background: var(--gold-soft); color: var(--gold); border-color: transparent; }
@@ -616,7 +616,7 @@ onMounted(async () => {
 .video-play {
   position: absolute; inset: 0; z-index: 3;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.3);
+  background: rgba(0,0,0,0.3); /* on artwork — stays literal */
   opacity: 0; transition: opacity 0.15s;
   pointer-events: none; color: #fff;
 }
@@ -642,17 +642,17 @@ onMounted(async () => {
   font-size: 9px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.06em;
   padding: 3px 8px; border-radius: 999px;
-  background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(6px); /* on artwork — stays literal */
   color: var(--good); pointer-events: none;
 }
 
 .scroll-arrow {
   width: 28px; height: 28px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.06); border: 1px solid var(--border);
   color: var(--fg-2); transition: all 0.15s;
 }
-.scroll-arrow:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
+.scroll-arrow:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
 /* Tablet (folded from the previous 900px collapse point onto the ratified
    960px convention — docs/ui.md "Responsive conventions"). No structural

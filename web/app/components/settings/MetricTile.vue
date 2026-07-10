@@ -39,9 +39,9 @@ defineProps<{
   position: relative;
   overflow: hidden;
 }
-.sv2-tile.tone-good { border-color: rgba(111, 191, 124, 0.3); }
-.sv2-tile.tone-warn { border-color: rgba(230, 185, 74, 0.3); }
-.sv2-tile.tone-bad  { border-color: rgba(217, 107, 107, 0.3); }
+.sv2-tile.tone-good { border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+.sv2-tile.tone-warn { border-color: color-mix(in srgb, var(--gold) 30%, transparent); }
+.sv2-tile.tone-bad  { border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 
 .sv2-tile-head {
   display: flex;

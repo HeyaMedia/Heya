@@ -56,7 +56,7 @@ function collapse() { coverExpanded.value = false }
   z-index: 45;
   border-radius: var(--r-lg, 12px);
   overflow: hidden;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 10px 34px rgb(var(--shade) / 0.55);
   border: 1px solid var(--border);
 }
 .mbc-link { display: block; width: 100%; height: 100%; }

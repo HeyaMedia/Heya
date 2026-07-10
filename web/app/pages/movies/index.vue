@@ -809,7 +809,7 @@ onMounted(async () => {
     background: transparent; border: 0; border-radius: var(--r-sm);
     color: var(--fg-2); cursor: pointer;
   }
-  .list-phone-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+  .list-phone-more:active { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 
   /* Detail view collapses to the same header row as list, plus a genre-chip
      row underneath — the overview paragraph drops to keep row height sane
@@ -834,7 +834,7 @@ onMounted(async () => {
     background: transparent; border: 0; border-radius: var(--r-sm);
     color: var(--fg-2); cursor: pointer;
   }
-  .bdr-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+  .bdr-more:active { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
   .browse-detail-row-phone .browse-detail-genres { margin-top: 0; max-height: none; }
 }
 </style>

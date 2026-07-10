@@ -128,10 +128,10 @@ function detailUrl(item: ContinueWatchingItem): string {
 .scroll-btn {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.06); border: 1px solid var(--border);
   color: var(--fg-2); transition: all 0.15s;
 }
-.scroll-btn:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
+.scroll-btn:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
 .cw-tile {
   width: 280px; flex-shrink: 0; cursor: pointer;
@@ -142,14 +142,14 @@ function detailUrl(item: ContinueWatchingItem): string {
 .cw-play-overlay {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.3);
+  background: rgba(0,0,0,0.3); /* on artwork — stays literal */
   opacity: 0; transition: opacity 0.15s;
   z-index: 3; pointer-events: none;
 }
 .cw-tile:hover .cw-play-overlay { opacity: 1; }
 .cw-play-btn {
   width: 40px; height: 40px; border-radius: 50%;
-  background: rgba(255,255,255,0.18); backdrop-filter: blur(8px);
+  background: rgba(255,255,255,0.18); backdrop-filter: blur(8px); /* on artwork — stays literal */
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
 

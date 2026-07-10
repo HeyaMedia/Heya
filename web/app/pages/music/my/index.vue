@@ -301,7 +301,7 @@ async function playLovedTracks(startIdx: number) {
 .ms-stat {
   min-width: 100px;
   padding: 12px 20px;
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   text-decoration: none;
@@ -309,7 +309,7 @@ async function playLovedTracks(startIdx: number) {
   transition: all 0.15s;
 }
 .ms-stat:hover {
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border-color: var(--gold-soft);
   transform: translateY(-2px);
 }
@@ -369,7 +369,7 @@ async function playLovedTracks(startIdx: number) {
   cursor: pointer;
   transition: background 0.15s;
 }
-.ms-track-row:hover { background: rgba(255,255,255,0.04); }
+.ms-track-row:hover { background: rgb(var(--ink) / 0.04); }
 .ms-track-art {
   position: relative;
   width: 44px; height: 44px;
@@ -380,8 +380,8 @@ async function playLovedTracks(startIdx: number) {
 .ms-track-play {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55);
-  color: #fff;
+  background: rgba(0,0,0,0.55); /* on artwork — stays literal */
+  color: #fff; /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
 }

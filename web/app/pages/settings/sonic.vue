@@ -424,8 +424,8 @@ onBeforeUnmount(() => {
   transition: border-color 0.2s ease, background 0.2s ease;
 }
 .enable-card.on {
-  border-color: rgba(111, 191, 124, 0.3);
-  background: rgba(111, 191, 124, 0.04);
+  border-color: color-mix(in srgb, var(--good) 30%, transparent);
+  background: color-mix(in srgb, var(--good) 4%, transparent);
 }
 .enable-info { min-width: 0; flex: 1; }
 .enable-row { display: flex; align-items: center; gap: 10px; }
@@ -438,7 +438,7 @@ onBeforeUnmount(() => {
 .enable-toggle {
   width: 48px; height: 26px;
   border-radius: 100px;
-  background: rgba(255,255,255,0.08);
+  background: rgb(var(--ink) / 0.08);
   border: 0;
   position: relative; cursor: pointer;
   flex-shrink: 0;
@@ -451,7 +451,7 @@ onBeforeUnmount(() => {
   width: 20px; height: 20px;
   border-radius: 50%; background: #fff;
   transition: transform 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  box-shadow: 0 1px 3px rgb(var(--shade) / 0.4);
 }
 .enable-toggle.on .enable-knob { transform: translateX(22px); }
 

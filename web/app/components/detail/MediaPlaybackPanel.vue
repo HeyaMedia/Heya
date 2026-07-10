@@ -10,6 +10,8 @@ defineProps<{ mediaItemId: number }>()
 
 <style scoped>
 .prefs-panel {
+  /* Floats over the hero backdrop image (see movies/tv detail pages'
+     .hero-side) — stays literal glass rather than theme tokens. */
   padding: 12px;
   background: rgba(0,0,0,0.45); backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.06);

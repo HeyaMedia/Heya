@@ -424,20 +424,24 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
 .viz-track-sub { font-size: 11px; color: rgba(255,255,255,0.55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .viz-transport { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+/* This whole root is a fixed #000 canvas (never follows --bg-*), so its
+   accent usages read from --accent/--accent-bright directly rather than the
+   --gold/--gold-bright aliases (which the light theme darkens for
+   readability on a var(--bg-*) surface — not applicable here). */
 .viz-play {
   width: 42px; height: 42px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--bg-0); background: var(--gold); border: 0; cursor: pointer;
-  box-shadow: 0 6px 18px var(--gold-glow);
+  color: var(--accent-ink); background: var(--accent); border: 0; cursor: pointer;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent);
   transition: transform 0.12s ease, background 0.15s;
 }
-.viz-play:hover { transform: scale(1.06); background: var(--gold-bright); }
+.viz-play:hover { transform: scale(1.06); background: var(--accent-bright); }
 
 .viz-seek { display: flex; align-items: center; gap: 10px; flex: 1 1 220px; min-width: 160px; }
 .viz-t { font-size: 10px; font-family: var(--font-mono); color: rgba(255,255,255,0.5); min-width: 34px; text-align: center; flex-shrink: 0; }
 .viz-rail { position: relative; flex: 1; min-width: 0; height: 4px; border-radius: 999px; background: rgba(255,255,255,0.18); cursor: pointer; }
 .viz-rail:hover { height: 6px; }
-.viz-rail-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--gold); }
+.viz-rail-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
 .viz-rail-knob {
   position: absolute; top: 50%; width: 12px; height: 12px;
   border-radius: 50%; background: #fff; transform: translate(-50%, -50%);
@@ -474,7 +478,7 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
   transition: background 0.15s, color 0.15s;
 }
 .viz-pill:hover { color: #fff; background: rgba(255,255,255,0.14); }
-.viz-pill.active { color: var(--bg-0); background: var(--gold); border-color: transparent; }
+.viz-pill.active { color: var(--accent-ink); background: var(--accent); border-color: transparent; }
 
 .viz-sep { width: 1px; height: 24px; background: rgba(255,255,255,0.12); flex-shrink: 0; }
 
@@ -486,7 +490,7 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
   transition: background 0.15s, color 0.15s;
 }
 .viz-ic:hover { background: rgba(255,255,255,0.12); color: #fff; }
-.viz-ic.active { color: var(--gold); }
+.viz-ic.active { color: var(--accent); }
 .viz-ic.liked { color: #ff5b7a; }
 .viz-ic.sm { width: 30px; height: 30px; }
 
@@ -513,7 +517,7 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
 
 /* Always-on progress line */
 .viz-progress { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; height: 3px; background: rgba(255,255,255,0.14); }
-.viz-progress-fill { height: 100%; background: var(--gold); box-shadow: 0 0 8px var(--gold); transition: width 0.25s linear; }
+.viz-progress-fill { height: 100%; background: var(--accent); box-shadow: 0 0 8px var(--accent); transition: width 0.25s linear; }
 
 .viz-fade-enter-active, .viz-fade-leave-active { transition: opacity 0.25s ease; }
 .viz-fade-enter-from, .viz-fade-leave-to { opacity: 0; }
@@ -612,18 +616,18 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
   text-align: left;
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
+  color: var(--fg-0);
   padding: 7px 9px;
   border-radius: var(--r-xs);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.08);
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: background 0.12s;
 }
-.viz-presetpop-name:hover { background: rgba(255, 255, 255, 0.12); }
+.viz-presetpop-name:hover { background: rgb(var(--ink) / 0.12); }
 .viz-presetpop-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .viz-presetpop-nav button {
   display: inline-flex;
@@ -631,13 +635,13 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
   justify-content: center;
   height: 34px;
   border-radius: var(--r-xs);
-  color: rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgb(var(--ink) / 0.8);
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.08);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.viz-presetpop-nav button:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.viz-presetpop-nav button:hover { background: rgb(var(--ink) / 0.14); color: var(--fg-0); }
 .viz-presetpop-item,
 .viz-presetpop-browse {
   display: flex;
@@ -655,7 +659,7 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
   transition: background 0.12s, color 0.12s;
 }
 .viz-presetpop-item:hover,
-.viz-presetpop-browse:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.viz-presetpop-browse:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 .viz-presetpop-item.liked { color: #ff5b7a; }
 .viz-presetpop-switch { padding: 4px 8px; }
 </style>

@@ -558,7 +558,7 @@ onScopeDispose(() => {
   justify-content: center;
   gap: 6px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.55); /* scrim over the cover art — stays literal */
   opacity: 0;
   transition: opacity 0.15s ease;
 }
@@ -567,6 +567,7 @@ onScopeDispose(() => {
   width: 24px; height: 24px;
   display: flex; align-items: center; justify-content: center;
   border-radius: 50%;
+  /* buttons painted over the cover art — stays literal */
   background: rgba(255, 255, 255, 0.12);
   border: 0;
   color: #fff;
@@ -613,7 +614,7 @@ onScopeDispose(() => {
   border-radius: 6px;
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   color: var(--fg-3);
 }
@@ -697,8 +698,8 @@ onScopeDispose(() => {
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
-.pb-viz-btn:hover { background: rgba(255, 255, 255, 0.06); border-color: var(--border); }
-.pb-viz-btn.active { border-color: rgba(230, 185, 74, 0.4); background: var(--gold-soft); }
+.pb-viz-btn:hover { background: rgb(var(--ink) / 0.06); border-color: var(--border); }
+.pb-viz-btn.active { border-color: color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); }
 .pb-viz-meter { width: 34px; height: 20px; }
 
 /* ── Compact band (720.02–1200px) ───────────────────────────────────────
@@ -781,14 +782,14 @@ onScopeDispose(() => {
     to right,
     var(--gold) 0%,
     var(--gold) calc(1% * var(--pb-vol, 0)),
-    rgba(255, 255, 255, 0.08) calc(1% * var(--pb-vol, 0)),
-    rgba(255, 255, 255, 0.08) 100%
+    rgb(var(--ink) / 0.08) calc(1% * var(--pb-vol, 0)),
+    rgb(var(--ink) / 0.08) 100%
   );
 }
 .pb-more-volume-range::-moz-range-track {
   height: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink) / 0.08);
 }
 .pb-more-volume-range::-moz-range-progress {
   height: 4px;
@@ -803,7 +804,7 @@ onScopeDispose(() => {
   margin-top: -5px;
   border-radius: 50%;
   background: var(--fg-0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px rgb(var(--shade) / 0.4);
 }
 .pb-more-volume-range::-moz-range-thumb {
   width: 14px;
@@ -811,6 +812,6 @@ onScopeDispose(() => {
   border: 0;
   border-radius: 50%;
   background: var(--fg-0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px rgb(var(--shade) / 0.4);
 }
 </style>

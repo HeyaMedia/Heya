@@ -144,6 +144,8 @@ const displayRatings = computed<ExternalRating[]>(() => {
 .ratings { display: flex; flex-direction: column; gap: 6px; }
 
 .rating-card {
+  /* Floats over the hero backdrop image (see movies/tv detail pages'
+     .hero-side) — stays literal glass rather than theme tokens. */
   display: flex; flex-direction: column; gap: 7px;
   padding: 10px 12px 11px;
   background: rgba(0,0,0,0.45); backdrop-filter: blur(12px);

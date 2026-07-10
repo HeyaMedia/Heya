@@ -228,15 +228,15 @@ const hasOverviews = computed(() => overviewsByLang.value.length > 0)
 .loc-card {
   padding: 12px 14px;
   border-radius: var(--r-sm);
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.02);
+  border: 1px solid rgb(var(--ink) / 0.04);
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .loc-card.loc-primary {
   background: var(--gold-soft);
-  border-color: rgba(251, 191, 36, 0.35);
+  border-color: color-mix(in srgb, var(--gold) 35%, transparent);
 }
 .loc-card.loc-primary .loc-lang {
   color: var(--gold-bright);
@@ -248,7 +248,7 @@ const hasOverviews = computed(() => overviewsByLang.value.length > 0)
   gap: 8px;
   padding-bottom: 4px;
   margin-bottom: 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgb(var(--ink) / 0.05);
 }
 
 .loc-lang {
@@ -265,7 +265,7 @@ const hasOverviews = computed(() => overviewsByLang.value.length > 0)
   color: var(--fg-4);
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
 }
 
 .loc-flag {
@@ -277,7 +277,7 @@ const hasOverviews = computed(() => overviewsByLang.value.length > 0)
   padding: 1px 6px;
   border-radius: 3px;
   background: var(--gold);
-  color: #000;
+  color: var(--accent-ink);
   margin-left: auto;
 }
 

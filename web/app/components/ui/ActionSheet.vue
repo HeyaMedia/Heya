@@ -100,7 +100,7 @@ function run(item: ContextMenuItem) {
   text-align: left;
   cursor: pointer;
 }
-.action-sheet-row:active { background: rgba(255, 255, 255, 0.06); }
+.action-sheet-row:active { background: rgb(var(--ink) / 0.06); }
 .action-sheet-row-icon { flex-shrink: 0; opacity: 0.8; }
 .action-sheet-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

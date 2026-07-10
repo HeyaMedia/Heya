@@ -217,8 +217,8 @@ onMounted(load)
   display: flex; align-items: center; justify-content: center;
   transition: background 0.12s, color 0.12s;
 }
-.list-btn:hover { background: rgba(255,255,255,0.04); color: var(--fg-1); }
-.list-btn.danger:hover { background: rgba(217, 107, 107, 0.12); color: var(--bad); }
+.list-btn:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-1); }
+.list-btn.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
 
 .list-edit { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .list-edit-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }

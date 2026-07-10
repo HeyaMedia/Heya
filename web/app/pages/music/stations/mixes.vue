@@ -148,7 +148,7 @@ async function playMix(mix: Mix) {
 .ms-mixes-builder-cta {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 14px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--fg-1);
@@ -178,17 +178,18 @@ async function playMix(mix: Mix) {
   background: var(--bg-3);
   overflow: hidden;
   border-radius: var(--r-md);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 18px rgb(var(--shade) / 0.45);
 }
 .ms-mix-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ms-mix-art-fallback {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   color: var(--gold);
-  background: linear-gradient(135deg, rgba(255, 196, 50, 0.10), rgba(255, 196, 50, 0.02));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 10%, transparent), color-mix(in srgb, var(--gold) 2%, transparent));
 }
 .ms-mix-art-gradient {
   position: absolute; inset: 0;
+  /* scrim over the cover art — stays literal */
   background: linear-gradient(0deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.1) 45%, transparent 75%);
   pointer-events: none;
 }
@@ -212,7 +213,7 @@ async function playMix(mix: Mix) {
   color: var(--bg-0);
   border: 0;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); /* button painted over the cover art — stays literal */
   cursor: pointer;
   opacity: 0;
   transform: translateY(8px);

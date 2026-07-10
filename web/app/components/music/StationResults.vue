@@ -179,7 +179,7 @@ function formatTotalDuration(rows: StationTrack[]): string {
 .sr-action-btn {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 7px 14px;
-  background: rgba(255,255,255,0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--fg-1);
@@ -188,7 +188,7 @@ function formatTotalDuration(rows: StationTrack[]): string {
   cursor: pointer;
   transition: all 0.15s;
 }
-.sr-action-btn:hover { background: rgba(255,255,255,0.09); border-color: var(--fg-3); }
+.sr-action-btn:hover { background: rgb(var(--ink) / 0.09); border-color: var(--fg-3); }
 .sr-action-btn.primary {
   background: var(--gold);
   color: var(--bg-0);
@@ -207,7 +207,7 @@ function formatTotalDuration(rows: StationTrack[]): string {
   cursor: pointer;
   transition: background 0.15s;
 }
-.sr-track-row:hover { background: rgba(255,255,255,0.04); }
+.sr-track-row:hover { background: rgb(var(--ink) / 0.04); }
 .sr-track-idx {
   text-align: right;
   font-family: var(--font-mono);
@@ -224,8 +224,8 @@ function formatTotalDuration(rows: StationTrack[]): string {
 .sr-track-play {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55);
-  color: #fff;
+  background: rgba(0,0,0,0.55); /* on artwork — stays literal */
+  color: #fff; /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
 }

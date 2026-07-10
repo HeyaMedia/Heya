@@ -342,7 +342,7 @@ watch(cfg, (next) => {
 .ts-switch input { opacity: 0; width: 0; height: 0; }
 .ts-slider {
   position: absolute; inset: 0;
-  background: rgba(255,255,255,0.08);
+  background: rgb(var(--ink) / 0.08);
   border-radius: 12px;
   transition: background 0.2s;
 }
@@ -354,7 +354,7 @@ watch(cfg, (next) => {
   border-radius: 50%;
   background: #fff;
   transition: transform 0.2s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  box-shadow: 0 1px 3px rgb(var(--shade) / 0.4);
 }
 .ts-switch.sm .ts-slider::before { top: 3px; left: 3px; width: 14px; height: 14px; }
 .ts-switch input:checked + .ts-slider { background: var(--good); }
@@ -365,18 +365,18 @@ watch(cfg, (next) => {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 18px;
   background: var(--gold-soft);
-  border: 1px solid rgba(230, 185, 74, 0.30);
+  border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
   border-radius: var(--r-md);
   text-decoration: none;
   color: inherit;
   margin-bottom: 14px;
   transition: background 0.12s;
 }
-.login-cta:hover { background: rgba(230, 185, 74, 0.18); }
+.login-cta:hover { background: color-mix(in srgb, var(--gold) 18%, transparent); }
 .login-icon {
   width: 40px; height: 40px;
   border-radius: var(--r-md);
-  background: rgba(230, 185, 74, 0.18);
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
   color: var(--gold);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
@@ -403,7 +403,7 @@ watch(cfg, (next) => {
   transition: border-color 0.12s;
 }
 .url-card:hover { border-color: var(--gold); }
-.url-card.funnel { border-color: rgba(230, 185, 74, 0.20); background: var(--gold-soft); }
+.url-card.funnel { border-color: color-mix(in srgb, var(--gold) 20%, transparent); background: var(--gold-soft); }
 .url-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .url-label {
   font-family: var(--font-mono);

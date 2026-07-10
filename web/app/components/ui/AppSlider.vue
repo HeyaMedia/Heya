@@ -97,7 +97,7 @@ const bipolarRangeStyle = computed(() => {
 .app-slider-track {
   position: relative;
   flex-grow: 1;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink) / 0.08);
   border-radius: 999px;
   height: 4px;
   overflow: hidden;
@@ -123,7 +123,7 @@ const bipolarRangeStyle = computed(() => {
   height: 14px;
   background: var(--fg-0);
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px rgb(var(--shade) / 0.4);
   outline: none;
   transition: transform 0.12s, box-shadow 0.12s;
   position: relative;
@@ -131,7 +131,7 @@ const bipolarRangeStyle = computed(() => {
 }
 .app-slider-thumb:hover { transform: scale(1.15); }
 .app-slider-thumb:focus-visible {
-  box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 30%, transparent), 0 1px 3px rgb(var(--shade) / 0.4);
 }
 .app-slider-thumb[data-disabled] { background: var(--fg-3); }
 
@@ -145,7 +145,7 @@ const bipolarRangeStyle = computed(() => {
   transform: translate(-50%, -50%);
   width: 1px;
   height: 8px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgb(var(--ink) / 0.18);
   z-index: 0;
 }
 </style>

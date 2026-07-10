@@ -288,8 +288,8 @@ const stationCountSub = computed(() => {
   transition: border-color 0.15s, background 0.15s, transform 0.15s;
 }
 .ri-strip-tile:hover {
-  border-color: rgba(255, 196, 50, 0.4);
-  background: rgba(255, 196, 50, 0.05);
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
+  background: color-mix(in srgb, var(--gold) 5%, transparent);
   transform: translateY(-1px);
 }
 .ri-strip-tile > :first-child { color: var(--gold); flex-shrink: 0; }
@@ -323,8 +323,8 @@ const stationCountSub = computed(() => {
   font-family: inherit;
 }
 .ri-tag:hover {
-  background: rgba(255, 196, 50, 0.08);
-  border-color: rgba(255, 196, 50, 0.3);
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent);
   color: var(--gold);
 }
 .ri-tag-count {

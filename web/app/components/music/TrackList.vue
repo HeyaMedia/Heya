@@ -277,7 +277,7 @@ function openSheet(t: TrackListRow, i: number) {
   cursor: pointer;
   transition: background 0.15s;
 }
-.tl-track:hover { background: rgba(255, 255, 255, 0.04); }
+.tl-track:hover { background: rgb(var(--ink) / 0.04); }
 /* `.tl-body` qualifier bumps specificity to (0,4,0) — strictly more than any
    page-level `:deep(.tl-track:hover)` override, which compiles to a
    descendant selector at (0,3,0) (`[data-v-x] .tl-track:hover`). Without
@@ -315,8 +315,8 @@ function openSheet(t: TrackListRow, i: number) {
 .tl-art-play {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  background: rgba(0, 0, 0, 0.55); /* on artwork — stays literal */
+  color: #fff; /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -324,8 +324,8 @@ function openSheet(t: TrackListRow, i: number) {
 .tl-art-missing {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  color: #d96b6b;
+  background: rgba(0, 0, 0, 0.55); /* on artwork — stays literal */
+  color: var(--bad);
 }
 
 .tl-c-title { min-width: 0; }
@@ -422,6 +422,6 @@ function openSheet(t: TrackListRow, i: number) {
   color: var(--fg-2);
   cursor: pointer;
 }
-.tl-phone-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+.tl-phone-more:active { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 }
 </style>

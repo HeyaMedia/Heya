@@ -189,17 +189,17 @@ onMounted(load)
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 100% 0%, rgba(230, 185, 74, 0.07), transparent 60%);
+  background: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--gold) 7%, transparent), transparent 60%);
   pointer-events: none;
 }
 .hero-logo {
   width: 56px;
   height: 56px;
   border-radius: var(--r-md);
-  background: rgba(230, 185, 74, 0.10);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(230, 185, 74, 0.2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 20%, transparent);
 }
 .hero-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .hero-name { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; color: var(--fg-0); }

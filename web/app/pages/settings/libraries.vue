@@ -773,7 +773,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   transition: border-color 0.15s ease;
 }
 .lib-card:hover { border-color: var(--border-strong); }
-.lib-card.scanning { border-color: var(--gold); background: rgba(230, 185, 74, 0.04); }
+.lib-card.scanning { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 4%, transparent); }
 
 .lib-left { flex-shrink: 0; }
 .lib-icon {
@@ -796,7 +796,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   transform: rotate(-90deg);
   pointer-events: none;
 }
-.ring-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 3; }
+.ring-track { fill: none; stroke: rgb(var(--ink) / 0.06); stroke-width: 3; }
 .ring-fill  { fill: none; stroke: var(--gold); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
 
 .lib-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -828,7 +828,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
 .lib-progress { display: flex; flex-direction: column; gap: 4px; }
 .prog-track {
   height: 4px; border-radius: 2px;
-  background: rgba(255,255,255,0.06); overflow: hidden;
+  background: rgb(var(--ink) / 0.06); overflow: hidden;
 }
 .prog-fill { height: 100%; background: var(--gold); transition: width 0.4s ease; }
 .prog-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
@@ -854,12 +854,12 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   padding: 2px 8px; border-radius: 999px;
   font-family: var(--font-mono); font-size: 9px; font-weight: 600;
   letter-spacing: 0.04em;
-  background: rgba(255,255,255,0.04); color: var(--fg-3);
+  background: rgb(var(--ink) / 0.04); color: var(--fg-3);
 }
 .tag.rate  { background: rgba(255, 180, 100, 0.10); color: rgb(255, 180, 100); }
 .tag.nfo   { background: rgba(200, 200, 255, 0.08); color: rgb(180, 180, 230); }
 .tag.img   { background: rgba(140, 220, 180, 0.10); color: rgb(140, 220, 180); }
-.tag.watch { background: rgba(111, 191, 124, 0.10); color: var(--good); }
+.tag.watch { background: color-mix(in srgb, var(--good) 10%, transparent); color: var(--good); }
 .tag.trick { background: rgba(200, 140, 255, 0.10); color: rgb(200, 140, 255); }
 .tag.lang  { background: rgba(140, 160, 255, 0.10); color: rgb(140, 160, 255); }
 
@@ -876,7 +876,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   letter-spacing: 0.02em;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
-.lib-scanner:hover { color: var(--fg-0); border-color: var(--border-strong); background: rgba(255,255,255,0.04); }
+.lib-scanner:hover { color: var(--fg-0); border-color: var(--border-strong); background: rgb(var(--ink) / 0.04); }
 .lib-sv2-go { color: var(--fg-4); }
 
 .lib-actions { display: flex; gap: 4px; flex-shrink: 0; }
@@ -889,13 +889,13 @@ watch(() => route.query.library, () => syncScannerFromRoute())
 }
 .row-btn:hover:not(:disabled) {
   color: var(--fg-0);
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border-color: var(--border);
 }
 .row-btn.danger:hover:not(:disabled) {
   color: var(--bad);
-  background: rgba(217,107,107,0.10);
-  border-color: rgba(217,107,107,0.25);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 25%, transparent);
 }
 .row-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -907,7 +907,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   cursor: pointer;
   transition: background 0.12s;
 }
-.menu-item:hover { background: rgba(255,255,255,0.06); }
+.menu-item:hover { background: rgb(var(--ink) / 0.06); }
 
 /* dialog inner */
 .dialog-identity {
@@ -970,7 +970,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   flex-shrink: 0;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
-.path-remove:hover { color: var(--bad); border-color: rgba(217,107,107,0.30); background: rgba(217,107,107,0.06); }
+.path-remove:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 30%, transparent); background: color-mix(in srgb, var(--bad) 6%, transparent); }
 
 .add-path {
   display: inline-flex; align-items: center; gap: 5px;
@@ -998,8 +998,8 @@ watch(() => route.query.library, () => syncScannerFromRoute())
 .form-error {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px;
-  background: rgba(217,107,107,0.10);
-  border: 1px solid rgba(217,107,107,0.25);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 25%, transparent);
   border-radius: var(--r-sm);
   color: var(--bad);
   font-size: 12px;
@@ -1010,7 +1010,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   padding: 16px 18px; border-radius: var(--r-md);
   background: var(--bg-2); border: 1px solid var(--border);
 }
-.missing-card.warn { border-color: rgba(217,107,107,0.30); background: rgba(217,107,107,0.05); }
+.missing-card.warn { border-color: color-mix(in srgb, var(--bad) 30%, transparent); background: color-mix(in srgb, var(--bad) 5%, transparent); }
 .missing-info { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .missing-count {
   font-size: 28px; font-weight: 700; font-family: var(--font-mono);

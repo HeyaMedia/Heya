@@ -220,7 +220,7 @@ onMounted(load)
   transition: background 0.12s, color 0.12s;
 }
 .sess-revoke:hover {
-  background: rgba(217, 107, 107, 0.12);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
 }
 

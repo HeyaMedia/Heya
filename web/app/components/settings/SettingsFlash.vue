@@ -19,7 +19,7 @@ defineProps<{ flash: FlashMessage | null }>()
   font-size: 12px;
   display: flex; align-items: center; gap: 8px;
 }
-.sv2-flash.ok   { background: rgba(111,191,124,0.10); border: 1px solid rgba(111,191,124,0.25); color: var(--good); }
-.sv2-flash.warn { background: rgba(230,185,74,0.10); border: 1px solid rgba(230,185,74,0.30); color: var(--gold); }
-.sv2-flash.err  { background: rgba(217,107,107,0.10); border: 1px solid rgba(217,107,107,0.30); color: var(--bad); }
+.sv2-flash.ok   { background: color-mix(in srgb, var(--good) 10%, transparent); border: 1px solid color-mix(in srgb, var(--good) 25%, transparent); color: var(--good); }
+.sv2-flash.warn { background: color-mix(in srgb, var(--gold) 10%, transparent); border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent); color: var(--gold); }
+.sv2-flash.err  { background: color-mix(in srgb, var(--bad) 10%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); color: var(--bad); }
 </style>

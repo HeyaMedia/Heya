@@ -119,9 +119,9 @@ async function apply(r: ProviderSearchResult) {
 .mid-result {
   display: flex; align-items: flex-start; gap: 14px;
   padding: 14px 20px; transition: background 0.12s;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-bottom: 1px solid rgb(var(--ink) / 0.03);
 }
-.mid-result:hover { background: rgba(255,255,255,0.02); }
+.mid-result:hover { background: rgb(var(--ink) / 0.02); }
 .mid-cover {
   width: 64px; height: 64px; border-radius: var(--r-sm); object-fit: cover;
   flex-shrink: 0; background: var(--bg-3);

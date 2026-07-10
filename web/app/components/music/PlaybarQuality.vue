@@ -228,7 +228,7 @@ function msClock(ms: number | null | undefined) {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--fg-2);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   cursor: pointer;
   white-space: nowrap;
@@ -236,13 +236,13 @@ function msClock(ms: number | null | undefined) {
 }
 .pb-quality:hover,
 .pb-quality.open {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgb(var(--ink) / 0.1);
   color: var(--fg-0);
   border-color: var(--border-strong);
 }
 .pb-quality.hires {
   color: var(--gold-bright, var(--gold));
-  border-color: rgba(230, 185, 74, 0.35);
+  border-color: color-mix(in srgb, var(--gold) 35%, transparent);
   background: var(--gold-soft, rgba(230, 185, 74, 0.08));
 }
 </style>
@@ -272,7 +272,7 @@ function msClock(ms: number | null | undefined) {
   height: 6px;
   border-radius: 50%;
   background: var(--gold, #e6b94a);
-  box-shadow: 0 0 8px rgba(230, 185, 74, 0.5);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--gold) 50%, transparent);
 }
 .pbq-fid {
   margin-left: auto;

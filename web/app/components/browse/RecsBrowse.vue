@@ -391,7 +391,7 @@ function reset() {
 /* Rating segmented control — mirrors TagBrowse's .tb-seg / FilterBar's .fb-seg. */
 .rb-seg {
   display: inline-flex; gap: 2px; padding: 2px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
 }
@@ -404,7 +404,7 @@ function reset() {
 .rb-seg button.active { background: var(--gold-soft); color: var(--gold-bright); }
 
 .rb-note {
-  font-size: 13px; color: var(--fg-2); background: rgba(255,255,255,0.03);
+  font-size: 13px; color: var(--fg-2); background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border); border-radius: var(--r-sm);
   padding: 10px 14px; margin-bottom: 20px;
 }
@@ -437,7 +437,7 @@ function reset() {
 
 /* The model's overall "I looked for… these fit because…" explanation. */
 .rb-ai-summary {
-  background: linear-gradient(110deg, rgba(230, 185, 74, 0.055), rgba(255, 255, 255, 0.018) 55%);
+  background: linear-gradient(110deg, color-mix(in srgb, var(--gold) 5.5%, transparent), rgb(var(--ink) / 0.018) 55%);
   border: 1px solid var(--gold-soft);
   border-radius: var(--r-md);
   padding: 14px 16px;
@@ -459,7 +459,7 @@ function reset() {
 .rb-ai-reroll {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--r-sm);
-  color: var(--fg-2); background: rgba(255, 255, 255, 0.025);
+  color: var(--fg-2); background: rgb(var(--ink) / 0.025);
   font-size: 11px; cursor: pointer;
 }
 .rb-ai-reroll:hover:not(:disabled) { color: var(--fg-0); border-color: var(--border-hover); }
@@ -486,7 +486,7 @@ function reset() {
 .rb-reason {
   margin-top: -10px;
   padding: 18px 12px 10px;
-  background: rgba(255, 255, 255, 0.035);
+  background: rgb(var(--ink) / 0.035);
   border: 1px solid var(--border);
   border-top: 0;
   border-radius: 0 0 var(--r-md) var(--r-md);

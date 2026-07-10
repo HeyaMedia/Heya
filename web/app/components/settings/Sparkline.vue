@@ -9,7 +9,7 @@ const props = withDefaults(defineProps<{
   width?: number
 }>(), {
   stroke: 'var(--gold)',
-  fill: 'rgba(230, 185, 74, 0.10)',
+  fill: 'color-mix(in srgb, var(--gold) 10%, transparent)',
   height: 28,
   width: 120,
 })

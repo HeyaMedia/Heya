@@ -281,7 +281,7 @@ watch(() => props.mediaId, () => {
   transition: background 0.12s;
 }
 .sub-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
 }
 
 .sub-codec-badge {
@@ -324,7 +324,7 @@ watch(() => props.mediaId, () => {
 .sub-source-badge {
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
   color: var(--fg-3);
   font-size: 9px;
   font-weight: 600;
@@ -335,15 +335,15 @@ watch(() => props.mediaId, () => {
 .sub-tag {
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   color: var(--fg-3);
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.sub-tag-forced { background: rgba(217, 107, 107, 0.15); color: var(--bad); }
-.sub-tag-default { background: rgba(74, 222, 128, 0.12); color: var(--good); }
+.sub-tag-forced { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
+.sub-tag-default { background: color-mix(in srgb, var(--good) 12%, transparent); color: var(--good); }
 .sub-tag-hi { background: rgba(96, 165, 250, 0.12); color: rgb(96, 165, 250); }
 .sub-tag-trusted { background: var(--gold-soft); color: var(--gold-bright); }
 
@@ -360,7 +360,7 @@ watch(() => props.mediaId, () => {
   transition: all 0.12s;
 }
 .sub-delete-btn:hover {
-  background: rgba(217, 107, 107, 0.12);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
 }
 
@@ -441,11 +441,11 @@ watch(() => props.mediaId, () => {
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgb(var(--ink) / 0.03);
   transition: background 0.12s;
 }
 .sub-result:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--ink) / 0.02);
 }
 
 .sub-result-main {

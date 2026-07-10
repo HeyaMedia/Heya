@@ -415,7 +415,7 @@ function onDrop(_event: DragEvent, toIndex: number) {
   transition: background 0.12s;
   border-left: 2px solid transparent;
 }
-.qp-row:hover { background: rgba(255,255,255,0.04); }
+.qp-row:hover { background: rgb(var(--ink) / 0.04); }
 .qp-row.current {
   background: var(--gold-soft, rgba(255, 196, 50, 0.08));
   border-left-color: var(--gold);
@@ -513,8 +513,8 @@ function onDrop(_event: DragEvent, toIndex: number) {
 .qp-np-card {
   margin: 14px 16px 6px;
   padding: 10px 12px;
-  background: rgba(255, 196, 50, 0.06);
-  border: 1px solid rgba(255, 196, 50, 0.15);
+  background: color-mix(in srgb, var(--gold) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 15%, transparent);
   border-radius: var(--r-md);
 }
 .qp-np-title { font-size: 13px; font-weight: 700; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -541,20 +541,20 @@ function onDrop(_event: DragEvent, toIndex: number) {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.25);
+  color: rgb(var(--ink) / 0.25);
   padding: 4px 8px;
   border-radius: var(--r-sm);
   cursor: pointer;
   transition: color 0.3s ease, transform 0.3s ease, background 0.15s;
 }
-.lyric-line:hover { background: rgba(255, 196, 50, 0.05); color: rgba(255, 255, 255, 0.4); }
+.lyric-line:hover { background: color-mix(in srgb, var(--gold) 5%, transparent); color: rgb(var(--ink) / 0.4); }
 .lyric-line.active {
   color: var(--gold);
-  filter: drop-shadow(0 0 8px rgba(255, 196, 50, 0.6));
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--gold) 60%, transparent));
   transform: scale(1.02);
   transform-origin: left center;
 }
-.lyric-line.past { color: rgba(255, 255, 255, 0.5); }
+.lyric-line.past { color: rgb(var(--ink) / 0.5); }
 .lyric-line.unsynced { font-size: 14px; line-height: 1.6; color: var(--fg-1); font-weight: 500; cursor: default; }
 .lyric-line.unsynced:hover { background: transparent; }
 
@@ -595,14 +595,14 @@ function onDrop(_event: DragEvent, toIndex: number) {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 0;
   color: var(--fg-3);
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.12s, color 0.12s;
 }
-.qp-timing-reset:hover { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
+.qp-timing-reset:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 .mono { font-family: var(--font-mono); }
 
 /* Fullscreen launcher — pinned at the bottom of the lyrics tab. */
@@ -618,7 +618,7 @@ function onDrop(_event: DragEvent, toIndex: number) {
   justify-content: center;
   gap: 8px;
   padding: 9px 0;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   color: var(--fg-1);

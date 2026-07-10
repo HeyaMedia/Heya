@@ -91,6 +91,8 @@ function clearSelection() {
 
 // Deterministic per-name gradient so the same tile stays the same color
 // across visits — uses a stable hash of the name to pick from the palette.
+// Fixed categorical colors (like artwork), not canvas chrome — stay literal
+// in both themes so a category keeps the same hue.
 const PALETTE = [
   'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
   'linear-gradient(135deg, #ec4899 0%, #be185d 100%)',
@@ -143,16 +145,16 @@ function categoryIcon(name: string) {
   padding: 14px 16px;
   border: 0;
   border-radius: var(--r-md);
-  color: #fff;
+  color: #fff; /* on the fixed gradient tile — stays literal */
   text-align: left;
   cursor: pointer;
   font-family: inherit;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 6px 14px rgb(var(--shade) / 0.3);
   transition: transform 0.15s, box-shadow 0.15s;
 }
 .pc-cat-tile:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 20px rgb(var(--shade) / 0.45);
 }
 .pc-cat-name { font-size: 16px; font-weight: 700; letter-spacing: -0.005em; }
 
@@ -161,7 +163,7 @@ function categoryIcon(name: string) {
   background: transparent; border: 0; font-size: 12px; color: var(--fg-2); cursor: pointer;
   padding: 6px 10px; border-radius: var(--r-sm); display: inline-flex; align-items: center; gap: 4px;
 }
-.pc-drill-back:hover { color: var(--gold); background: rgba(255, 196, 50, 0.06); }
+.pc-drill-back:hover { color: var(--gold); background: color-mix(in srgb, var(--gold) 6%, transparent); }
 .pc-drill-title { margin: 0; }
 
 .pc-loading, .pc-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; max-width: 540px; }

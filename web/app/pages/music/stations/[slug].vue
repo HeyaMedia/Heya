@@ -160,9 +160,9 @@ function refetch() { stationQuery.refetch() }
   width: 64px; height: 64px;
   border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
-  color: #fff;
+  color: #fff; /* on the fixed gradient icon swatch — stays literal */
   flex-shrink: 0;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 16px rgb(var(--shade) / 0.35);
 }
 .ms-st-text { flex: 1; min-width: 0; }
 .ms-st-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
@@ -172,7 +172,7 @@ function refetch() { stationQuery.refetch() }
   display: flex; gap: 4px;
   margin-bottom: 24px;
   padding: 4px;
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   width: fit-content;

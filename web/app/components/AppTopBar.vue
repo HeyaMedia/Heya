@@ -26,7 +26,7 @@
           <svg width="22" height="22" viewBox="0 0 22 22">
             <circle cx="11" cy="11" r="10" fill="none" stroke="var(--gold)" stroke-width="1.5" />
             <circle cx="11" cy="11" r="4" fill="var(--gold)" />
-            <circle cx="11" cy="11" r="1.5" fill="#0a0a0a" />
+            <circle cx="11" cy="11" r="1.5" fill="var(--bg-0)" />
           </svg>
         </div>
         <span class="brand-name">heya<span class="brand-dot">.</span>media</span>
@@ -173,7 +173,7 @@
       >
         <template #trigger>
           <svg v-if="hasActivity" class="activity-ring" viewBox="0 0 36 36" preserveAspectRatio="xMidYMid meet">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2" />
+            <circle cx="18" cy="18" r="16" fill="none" stroke="rgb(var(--ink) / 0.06)" stroke-width="2" />
             <circle
               class="ring-arc"
               cx="18" cy="18" r="16"
@@ -875,7 +875,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   align-items: center;
   gap: 24px;
   padding: 0 24px;
-  background: rgba(7, 7, 10, 0.85);
+  background: color-mix(in srgb, var(--bg-0) 85%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
@@ -905,7 +905,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   transition: color 0.15s ease, background 0.15s ease;
   text-decoration: none;
 }
-.topbar-tabs .tab:hover { color: var(--fg-0); background: rgba(255,255,255,0.04); }
+.topbar-tabs .tab:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.04); }
 .topbar-tabs .tab.active { color: var(--gold); }
 .topbar-right { display: flex; align-items: center; gap: 10px; justify-self: end; }
 .search-wrap { display: flex; align-items: center; gap: 8px; }
@@ -1013,7 +1013,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
 }
 .search-result:hover,
 .search-result.active {
-  background: rgba(255,255,255,0.05);
+  background: rgb(var(--ink) / 0.05);
 }
 .search-result.active {
   outline: 1px solid var(--gold-soft);
@@ -1087,7 +1087,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   color: var(--fg-1);
   text-decoration: none;
   transition: color 0.12s ease;
-  background: rgba(255,255,255,0.02);
+  background: rgb(var(--ink) / 0.02);
 }
 .search-footer:hover { color: var(--gold); }
 /* Activity button — uses the global .btn-icon class for size/hover/active so it
@@ -1100,8 +1100,8 @@ watch(() => route.fullPath, () => { closeDropdown() })
 .activity-icon.active { color: var(--gold); }
 
 @keyframes pulse-activity {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 185, 74, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(230, 185, 74, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 40%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 0%, transparent); }
 }
 
 /* Activity-dropdown styles moved to the non-scoped block below — see note there. */
@@ -1287,8 +1287,8 @@ watch(() => route.fullPath, () => { closeDropdown() })
   animation: pulse-activity 2s ease-in-out infinite;
 }
 @keyframes pulse-activity {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(230, 185, 74, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(230, 185, 74, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 40%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 0%, transparent); }
 }
 
 .activity-section { padding: 10px 16px; }
@@ -1314,7 +1314,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   gap: 4px;
   padding: 8px 10px;
   margin: 4px 0;
-  background: rgba(255, 255, 255, 0.025);
+  background: rgb(var(--ink) / 0.025);
   border: 1px solid var(--border);
   border-radius: var(--r-xs);
 }
@@ -1365,8 +1365,8 @@ watch(() => route.fullPath, () => { closeDropdown() })
 /* Now Playing — one card per live playback session in the activity panel. */
 .now-playing-card {
   padding: 8px 10px;
-  background: rgba(255, 196, 50, 0.04);
-  border: 1px solid rgba(255, 196, 50, 0.12);
+  background: color-mix(in srgb, var(--gold) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 12%, transparent);
   border-radius: var(--r-sm);
 }
 .now-playing-card + .now-playing-card { margin-top: 6px; }
@@ -1419,7 +1419,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
 .np-progress-bar {
   flex: 1;
   height: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -1452,7 +1452,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   height: calc(100% + 2px);
   transform: rotate(-90deg);
 }
-.activity-dropdown .mini-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 2.5; }
+.activity-dropdown .mini-track { fill: none; stroke: rgb(var(--ink) / 0.06); stroke-width: 2.5; }
 .activity-dropdown .mini-fill {
   fill: none;
   stroke: var(--gold);
@@ -1475,7 +1475,7 @@ watch(() => route.fullPath, () => { closeDropdown() })
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--fg-3);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   padding: 2px 7px;
   border-radius: 100px;
   flex-shrink: 0;

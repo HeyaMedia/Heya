@@ -623,8 +623,8 @@ watch([() => props.seasonId, () => props.episodeId], () => {
   inset: 0;
   background: linear-gradient(
     to bottom,
-    rgba(19, 19, 24, 0.3) 0%,
-    rgba(19, 19, 24, 0.6) 50%,
+    color-mix(in srgb, var(--bg-2) 30%, transparent) 0%,
+    color-mix(in srgb, var(--bg-2) 60%, transparent) 50%,
     var(--bg-2) 100%
   );
 }
@@ -645,8 +645,8 @@ watch([() => props.seasonId, () => props.episodeId], () => {
   border-radius: var(--r-sm);
   object-fit: cover;
   flex-shrink: 0;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow-2);
+  border: 1px solid rgb(var(--ink) / 0.08);
 }
 
 .me-title-block {
@@ -758,7 +758,7 @@ watch([() => props.seasonId, () => props.episodeId], () => {
 }
 
 .me-nav-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.04);
   color: var(--fg-1);
 }
 
@@ -794,7 +794,7 @@ watch([() => props.seasonId, () => props.episodeId], () => {
   font-size: 13px;
   font-weight: 600;
   background: var(--gold);
-  color: #1a1408;
+  color: var(--accent-ink);
   border: none;
   cursor: pointer;
   transition: all 0.15s;

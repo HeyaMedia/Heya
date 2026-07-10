@@ -145,8 +145,8 @@ const form = defineModel<Record<string, any>>('form', { required: true })
   align-items: center;
   padding: 0 12px;
   border-radius: var(--r-sm);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.03);
+  border: 1px solid rgb(var(--ink) / 0.04);
   font-size: 13px;
   color: var(--fg-2);
   font-family: var(--font-mono);

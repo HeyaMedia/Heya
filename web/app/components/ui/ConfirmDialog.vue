@@ -62,7 +62,7 @@ function onOpenChange(v: boolean) {
 <style scoped>
 .cd-overlay {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgb(var(--shade) / 0.6);
   backdrop-filter: blur(6px);
 }
 .cd-content {

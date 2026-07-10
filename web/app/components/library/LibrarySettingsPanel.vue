@@ -424,7 +424,7 @@ const countries = [
 }
 
 .toggle-row:last-child { border-bottom: none; }
-.toggle-row:hover { background: rgba(255, 255, 255, 0.02); }
+.toggle-row:hover { background: rgb(var(--ink) / 0.02); }
 
 .toggle-info { flex: 1; min-width: 0; }
 .toggle-name { display: block; font-size: 13px; font-weight: 500; color: var(--fg-1); }

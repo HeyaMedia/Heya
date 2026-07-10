@@ -94,7 +94,7 @@ function stillUrl(it: UpNextItem) {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.55) 55%, rgba(12,12,16,0.25) 100%),
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 55%, transparent) 55%, color-mix(in srgb, var(--bg-1) 25%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 45%);
 }
 .tonight-inner {
@@ -139,12 +139,12 @@ function stillUrl(it: UpNextItem) {
   text-align: left;
   padding: 10px;
   border-radius: var(--r-md);
-  background: rgba(7, 7, 10, 0.5);
+  background: rgba(7, 7, 10, 0.5); /* on artwork — stays literal */
   border: 1px solid var(--border);
   transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
 .tonight-card:hover {
-  background: rgba(19, 19, 24, 0.75);
+  background: rgba(19, 19, 24, 0.75); /* on artwork — stays literal */
   border-color: var(--border-strong);
   transform: translateY(-1px);
 }
@@ -165,7 +165,7 @@ function stillUrl(it: UpNextItem) {
   align-items: center;
   justify-content: center;
   color: var(--fg-0);
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.35); /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
 }

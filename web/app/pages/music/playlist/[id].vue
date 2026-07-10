@@ -327,10 +327,12 @@ function formatDate(iso: string) {
   filter: blur(60px) brightness(0.45) saturate(2.2);
   transform: scale(1.4);
   z-index: 0;
-  background-color: #2a1f3b;
+  background-color: #2a1f3b; /* fallback fill behind the blurred cover art — stays literal */
 }
 .pl-hero-fade {
   position: absolute; inset: 0;
+  /* decorative wash + scrim over the backdrop art — stays literal; already
+     fades to the theme-aware var(--bg-0) where it meets the page canvas */
   background:
     linear-gradient(135deg, rgba(230, 70, 130, 0.35), rgba(120, 50, 200, 0.35) 60%, rgba(0,0,0,0.25)),
     linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.3) 60%, var(--bg-0) 100%);
@@ -345,10 +347,10 @@ function formatDate(iso: string) {
 .pl-hero-art {
   width: 200px; height: 200px;
   border-radius: var(--r-md);
-  background: linear-gradient(135deg, #e64682, #7832c8);
+  background: linear-gradient(135deg, #e64682, #7832c8); /* generated placeholder art — stays literal */
   display: flex; align-items: center; justify-content: center;
-  color: rgba(255,255,255,0.9);
-  box-shadow: 0 24px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.9); /* icon on the generated placeholder art — stays literal */
+  box-shadow: 0 24px 48px rgb(var(--shade) / 0.6), 0 0 0 1px rgb(var(--ink) / 0.05);
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -383,6 +385,7 @@ function formatDate(iso: string) {
 }
 .btn-ghost {
   background: transparent;
+  /* floating button painted over the hero backdrop — stays literal */
   border: 1px solid rgba(255,255,255,0.12);
   color: var(--fg-2);
   width: 40px; height: 40px;
@@ -399,7 +402,7 @@ function formatDate(iso: string) {
 .pl-title-text { min-width: 0; }
 .pl-title { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .pl-missing { opacity: 0.5; cursor: default; }
-.pl-missing-icon { color: #d96b6b; vertical-align: -1px; margin-left: 4px; }
+.pl-missing-icon { color: var(--bad); vertical-align: -1px; margin-left: 4px; }
 .pl-artist { font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pl-album { font-size: 13px; color: var(--fg-2); overflow: hidden; }
 .pl-album-link { color: inherit; text-decoration: none; }
@@ -417,7 +420,7 @@ function formatDate(iso: string) {
   transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
 .list-row:hover .pl-remove { opacity: 1; }
-.pl-remove:hover { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.pl-remove:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 .mono { font-family: var(--font-mono); }
 
 .m-empty-state {

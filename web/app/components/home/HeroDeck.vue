@@ -157,7 +157,7 @@ onMounted(() => {
   gap: 2px;
   padding: 3px;
   border-radius: 999px;
-  background: rgba(7, 7, 10, 0.55);
+  background: rgba(7, 7, 10, 0.55); /* on artwork — stays literal */
   border: 1px solid var(--border);
   backdrop-filter: blur(12px);
 }
@@ -174,7 +174,7 @@ onMounted(() => {
 .deck-tab:hover { color: var(--fg-0); }
 .deck-tab.active {
   color: var(--gold);
-  background: rgba(230, 185, 74, 0.1);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .deck-pin {
   display: flex;

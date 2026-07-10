@@ -33,10 +33,23 @@ const pageVisibility = useDocumentVisibility()
 const shouldAnimate = computed(() => props.active && pageVisibility.value === 'visible')
 
 // Theme colors resolved from CSS vars at mount; fall back to gold-ish defaults.
+// Re-resolved live on the 'heya:theme' event (see useAppearance.ts) so a
+// theme/accent switch doesn't leave the meter painting stale colors.
 let gold = '#e6b94a'
 let goldBright = '#f4cd6b'
-let dim = 'rgba(255,255,255,0.10)'
+// --ink / --shade are the theme's "glass on canvas" / "recessed on canvas"
+// channels (heya.css) — space-separated RGB triplets, e.g. "255 255 255".
+// Track backgrounds, LED gaps, and label text below all used to hardcode
+// the dark-theme literal; resolving them means they follow light/OLED too.
+let inkTriplet = '255 255 255'
+let shadeTriplet = '0 0 0'
+let dim = tripletRgba(inkTriplet, 0.10)
 const clip = '#ff5b5b'
+
+function tripletRgba(triplet: string, alpha: number): string {
+  const parts = triplet.trim().split(/\s+/).join(', ')
+  return `rgba(${parts}, ${alpha})`
+}
 
 // VU meter smoothing (attack fast, release slow) — per stereo channel.
 let vuL = 0
@@ -52,6 +65,11 @@ function resolveColors(el: HTMLElement) {
   const gb = cs.getPropertyValue('--gold-bright').trim()
   if (g) gold = g
   if (gb) goldBright = gb || g
+  const ink = cs.getPropertyValue('--ink').trim()
+  const shade = cs.getPropertyValue('--shade').trim()
+  if (ink) inkTriplet = ink
+  if (shade) shadeTriplet = shade
+  dim = tripletRgba(inkTriplet, 0.10)
 }
 
 function fitCanvas(canvas: HTMLCanvasElement) {
@@ -243,7 +261,7 @@ function drawMeter(ctx: CanvasRenderingContext2D, w: number, y: number, h: numbe
   const radius = h * 0.22
 
   // Track background.
-  ctx.fillStyle = 'rgba(255,255,255,0.06)'
+  ctx.fillStyle = tripletRgba(inkTriplet, 0.06)
   roundRect(ctx, trackX, y, trackW, h, radius)
   ctx.fill()
 
@@ -258,7 +276,7 @@ function drawMeter(ctx: CanvasRenderingContext2D, w: number, y: number, h: numbe
   grad.addColorStop(1, clip)
   ctx.fillStyle = grad
   ctx.fillRect(trackX, y, trackW * frac, h)
-  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillStyle = tripletRgba(shadeTriplet, 0.5)
   const seg = Math.max(7, h * 0.55)
   for (let x = trackX + seg; x < trackX + trackW; x += seg) ctx.fillRect(x - 1, y, 2, h)
   ctx.restore()
@@ -267,11 +285,11 @@ function drawMeter(ctx: CanvasRenderingContext2D, w: number, y: number, h: numbe
   const fs = Math.min(h * 0.66, 15)
   ctx.font = `600 ${fs}px ui-monospace, monospace`
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'
+  ctx.fillStyle = tripletRgba(inkTriplet, 0.6)
   ctx.textAlign = 'left'
   ctx.fillText(label, h * 0.15, y + h / 2)
   ctx.textAlign = 'right'
-  ctx.fillStyle = db > -1 ? clip : 'rgba(255,255,255,0.5)'
+  ctx.fillStyle = db > -1 ? clip : tripletRgba(inkTriplet, 0.5)
   ctx.fillText(db <= floor ? '−∞ dB' : `${db.toFixed(1)} dB`, w - h * 0.15, y + h / 2)
   ctx.textAlign = 'left'
 }
@@ -321,12 +339,23 @@ function frame() {
   startLoop()
 }
 
+// Theme/accent can change live (useAppearance.ts dispatches this after every
+// applied change). While the rAF loop is running the next frame just picks
+// up the reassigned color vars for free; when it's parked (paused/inactive
+// meter) nothing else would repaint, so force one frame through explicitly.
+function onThemeChange() {
+  const canvas = canvasRef.value
+  if (canvas) resolveColors(canvas)
+  if (!rafId) drawFrame()
+}
+
 onMounted(() => {
   const canvas = canvasRef.value
   if (!canvas) return
   resolveColors(canvas)
   drawFrame()
   startLoop()
+  window.addEventListener('heya:theme', onThemeChange)
 })
 watch(shouldAnimate, (run) => {
   if (run) startLoop()
@@ -338,6 +367,7 @@ watch(shouldAnimate, (run) => {
 onUnmounted(() => {
   cancelled = true
   stopLoop()
+  window.removeEventListener('heya:theme', onThemeChange)
 })
 </script>
 

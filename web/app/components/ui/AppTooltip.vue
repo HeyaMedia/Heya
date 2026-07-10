@@ -73,7 +73,7 @@ withDefaults(defineProps<{
   text-transform: none;
   /* Tooltips render fast; skip the larger surface shadow stack and use a
      lighter one so they don't feel like a popover. */
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 18px rgb(var(--shade) / 0.45);
   border-radius: var(--r-sm);
   max-width: 240px;
   z-index: 300;

@@ -136,7 +136,7 @@ const crewByDepartment = computed(() => {
 .cct-pill .section-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .cct-pill .tab-bar { display: flex; gap: 4px; }
 .cct-pill .tab-btn { padding: 8px 16px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; color: var(--fg-2); background: none; border: none; cursor: pointer; transition: all 0.15s; }
-.cct-pill .tab-btn:hover { background: rgba(255,255,255,0.04); }
+.cct-pill .tab-btn:hover { background: rgb(var(--ink) / 0.04); }
 .cct-pill .tab-btn[data-state="active"] { background: var(--bg-3); color: var(--fg-0); font-weight: 600; }
 .cct-pill .tab-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); margin-left: 4px; }
 .cct-pill .cast-card { width: 120px; }
@@ -172,10 +172,10 @@ const crewByDepartment = computed(() => {
 .cct-underline .scroll-arrow {
   width: 28px; height: 28px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.06); border: 1px solid var(--border);
   color: var(--fg-2); transition: all 0.15s;
 }
-.cct-underline .scroll-arrow:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
+.cct-underline .scroll-arrow:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
 /* Expanded grid (pill only) — keep after the width rules so `width: auto` wins. */
 .cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }

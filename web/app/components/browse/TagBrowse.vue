@@ -234,7 +234,7 @@ watch(() => [props.kind, props.rawName], () => loadMore(true))
 /* Media-type segmented control — mirrors FilterBar's .fb-seg / .view-toggle. */
 .tb-seg {
   display: inline-flex; gap: 2px; padding: 2px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
 }
@@ -247,7 +247,7 @@ watch(() => [props.kind, props.rawName], () => loadMore(true))
 .tb-seg button:hover { color: var(--fg-0); }
 .tb-seg button.active { background: var(--gold-soft); color: var(--gold-bright); }
 .tb-seg-count { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
-.tb-seg button.active .tb-seg-count { color: rgba(230,185,74,0.7); }
+.tb-seg button.active .tb-seg-count { color: color-mix(in srgb, var(--gold) 70%, transparent); }
 
 .tb-caret { opacity: 0.45; margin-left: -2px; }
 

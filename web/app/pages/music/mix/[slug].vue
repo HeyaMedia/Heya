@@ -223,7 +223,7 @@ function formatTime(seconds: number): string {
   align-items: flex-end;
   padding: 32px 32px 24px;
   margin-bottom: 16px;
-  background: linear-gradient(180deg, rgba(255, 196, 50, 0.04), transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 4%, transparent), transparent);
   border-bottom: 1px solid var(--border);
 }
 .mix-hero-art {
@@ -236,7 +236,7 @@ function formatTime(seconds: number): string {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 12px 32px rgb(var(--shade) / 0.55);
 }
 .mix-hero-cell { width: 100%; height: 100%; object-fit: cover; }
 .mix-hero-cell.s0 { grid-area: 1 / 1; }

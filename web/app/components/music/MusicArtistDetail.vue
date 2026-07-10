@@ -802,6 +802,8 @@ if (import.meta.client) {
 .hero-fade {
   position: absolute;
   inset: 0;
+  /* scrim over the backdrop photo — stays literal black; already fades to
+     the theme-aware var(--bg-0) where it meets the page canvas */
   background:
     linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 55%, var(--bg-0) 100%),
     linear-gradient(90deg, rgba(0,0,0,0.45) 0%, transparent 60%);
@@ -821,7 +823,7 @@ if (import.meta.client) {
   width: 200px;
   height: 200px;
   border-radius: 50%;
-  box-shadow: 0 22px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 22px 48px rgb(var(--shade) / 0.7), 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .hero-meta { flex: 1; min-width: 0; }
 .hero-kind {
@@ -840,7 +842,7 @@ if (import.meta.client) {
   line-height: 0.96;
   margin-bottom: 10px;
   letter-spacing: -0.025em;
-  text-shadow: 0 2px 24px rgba(0,0,0,0.55);
+  text-shadow: 0 2px 24px rgba(0,0,0,0.55); /* legibility shadow over hero photo — stays literal */
 }
 .tag-row {
   display: flex;
@@ -852,6 +854,7 @@ if (import.meta.client) {
   display: inline-flex;
   padding: 3px 10px;
   border-radius: 999px;
+  /* badge painted over the hero photo — stays literal glass */
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.10);
   font-size: 11px;
@@ -872,7 +875,7 @@ if (import.meta.client) {
   font-size: 13px;
   max-width: 72ch;
   margin: 0;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+  text-shadow: 0 1px 8px rgba(0,0,0,0.5); /* legibility shadow over hero photo — stays literal */
 }
 .hero-bio.collapsed {
   display: -webkit-box;
@@ -904,7 +907,7 @@ if (import.meta.client) {
   color: var(--fg-1);
   font-family: var(--font-mono);
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+  text-shadow: 0 1px 8px rgba(0,0,0,0.5); /* legibility shadow over hero photo — stays literal */
 }
 .hero-stats-stars {
   display: inline-flex;
@@ -927,6 +930,7 @@ if (import.meta.client) {
   width: 44px;
   height: 44px;
   border-radius: 50%;
+  /* floating buttons painted over the hero photo — stays literal */
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(0,0,0,0.4);
   color: var(--fg-0);
@@ -953,7 +957,7 @@ if (import.meta.client) {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: #d96b6b; margin-right: 6px;
+  color: var(--bad); margin-right: 6px;
 }
 
 /* `.hero-floating-actions` is position:absolute, so it and `.hero-meta`'s
@@ -1042,10 +1046,10 @@ if (import.meta.client) {
 .pill-btn:hover { filter: brightness(1.1); }
 .pill-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
 .pill-btn-ghost {
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   color: var(--fg-1);
 }
-.pill-btn-ghost:hover { background: rgba(255,255,255,0.10); }
+.pill-btn-ghost:hover { background: rgb(var(--ink) / 0.10); }
 
 .tt-list {
   list-style: none;
@@ -1064,7 +1068,7 @@ if (import.meta.client) {
   transition: background 0.12s;
   min-height: 32px;
 }
-.tt-row:hover { background: rgba(255,255,255,0.04); }
+.tt-row:hover { background: rgb(var(--ink) / 0.04); }
 .tt-row:hover .tt-rank { opacity: 0; }
 .tt-row:hover .tt-hover-play { opacity: 1; }
 .tt-row-missing { opacity: 0.55; }
@@ -1074,7 +1078,7 @@ if (import.meta.client) {
 .tt-row-active:hover { background: var(--gold-soft); }
 .tt-row-active .tt-title { color: var(--gold); }
 .tt-vu { margin-left: auto; }
-.tt-missing-icon { color: #d96b6b; }
+.tt-missing-icon { color: var(--bad); }
 .tt-leader {
   position: relative;
   display: flex;
@@ -1108,7 +1112,7 @@ if (import.meta.client) {
 }
 .tt-hover-play:hover { filter: brightness(1.1); }
 .tt-hover-play.tt-hover-play-disabled {
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   color: var(--fg-3);
   cursor: default;
 }
@@ -1166,7 +1170,7 @@ if (import.meta.client) {
 .member-chip {
   padding: 7px 12px;
   border-radius: var(--r-sm);
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   min-width: 140px;
 }
@@ -1187,7 +1191,7 @@ if (import.meta.client) {
 }
 .discog-tile { text-decoration: none; color: inherit; display: block; }
 .discog-art-wrap { position: relative; }
-.discog-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
+.discog-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgb(var(--shade) / 0.45); }
 .discog-missing .discog-art { filter: grayscale(1); opacity: 0.55; }
 .discog-play {
   position: absolute;
@@ -1211,7 +1215,7 @@ if (import.meta.client) {
 .discog-tile:hover .discog-play { opacity: 1; transform: none; }
 /* Now-playing album — gold ring on the art + gold title, with an animated
    VuMeter badge pinned top-left of the cover. */
-.discog-active .discog-art { box-shadow: 0 8px 18px rgba(0,0,0,0.45), 0 0 0 2px var(--gold); }
+.discog-active .discog-art { box-shadow: 0 8px 18px rgb(var(--shade) / 0.45), 0 0 0 2px var(--gold); }
 .discog-active .discog-title { color: var(--gold); }
 .discog-nowplaying {
   position: absolute;
@@ -1222,7 +1226,7 @@ if (import.meta.client) {
   justify-content: center;
   padding: 4px 6px;
   border-radius: var(--r-xs);
-  background: rgba(0,0,0,0.6);
+  background: rgba(0,0,0,0.6); /* badge painted over the album cover — stays literal */
   backdrop-filter: blur(6px);
 }
 .discog-meta { margin-top: 8px; padding: 0 2px; }
@@ -1289,7 +1293,7 @@ if (import.meta.client) {
   gap: 5px;
   padding: 3px 11px;
   border-radius: 999px;
-  background: rgba(255,255,255,0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   font-size: 11px;
   color: var(--fg-1);

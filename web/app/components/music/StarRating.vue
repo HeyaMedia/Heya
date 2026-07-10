@@ -141,7 +141,7 @@ function onMouseLeave() {
   border-radius: 50%;
   transition: opacity 0.15s, color 0.15s, background 0.15s, transform 0.12s;
 }
-.sr-clear:hover { opacity: 1; color: var(--fg-1); background: rgba(255,255,255,0.06); }
+.sr-clear:hover { opacity: 1; color: var(--fg-1); background: rgb(var(--ink) / 0.06); }
 .sr-clear-active { opacity: 1; color: var(--gold) !important; background: var(--gold-soft) !important; transform: scale(1.08); }
 /* When the row is unrated the clear button is non-actionable — render it
    invisible so the gutter still reserves width but isn't a visual hit. */
@@ -153,11 +153,11 @@ function onMouseLeave() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.22);
+  color: rgb(var(--ink) / 0.22);
   transition: color 0.12s, transform 0.12s;
 }
 .sr-readonly .sr-star { cursor: default; }
-.sr-hovering .sr-star { color: rgba(255, 255, 255, 0.32); }
+.sr-hovering .sr-star { color: rgb(var(--ink) / 0.32); }
 .sr-half, .sr-full { color: var(--gold) !important; }
 .sr-star:hover { transform: scale(1.06); }
 .sr-readonly .sr-star:hover { transform: none; }

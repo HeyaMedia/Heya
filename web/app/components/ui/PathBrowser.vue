@@ -423,7 +423,7 @@ watch(() => props.modelValue, (v) => {
   flex-shrink: 0;
   transition: color 0.1s, background 0.1s;
 }
-.pb-trigger-mini:hover { color: var(--fg-0); background: rgba(255, 255, 255, 0.06); }
+.pb-trigger-mini:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.06); }
 </style>
 
 <!--
@@ -474,7 +474,7 @@ watch(() => props.modelValue, (v) => {
   cursor: pointer;
   transition: color 0.1s, background 0.1s;
 }
-.pb-crumb:hover { color: var(--fg-0); background: rgba(255, 255, 255, 0.06); }
+.pb-crumb:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.06); }
 .pb-crumb.active { color: var(--gold); font-weight: 600; }
 .pb-crumb-root { color: var(--fg-3); padding-left: 6px; padding-right: 6px; }
 .pb-crumb-root.active { color: var(--gold); }
@@ -497,8 +497,8 @@ watch(() => props.modelValue, (v) => {
 .pb-filter-input {
   width: 100%;
   height: 30px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid rgb(var(--ink) / 0.06);
   border-radius: var(--r-sm);
   padding: 0 28px 0 32px;
   color: var(--fg-0);
@@ -507,8 +507,8 @@ watch(() => props.modelValue, (v) => {
   transition: border-color 0.12s, background 0.12s;
 }
 .pb-filter-input:focus {
-  border-color: rgba(230, 185, 74, 0.4);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
+  background: rgb(var(--ink) / 0.06);
 }
 .pb-filter-input::placeholder { color: var(--fg-3); }
 
@@ -526,7 +526,7 @@ watch(() => props.modelValue, (v) => {
   color: var(--fg-3);
   transition: color 0.1s, background 0.1s;
 }
-.pb-filter-clear:hover { color: var(--fg-0); background: rgba(255, 255, 255, 0.06); }
+.pb-filter-clear:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.06); }
 
 /* ── List ────────────────────────────────────────────────────── */
 .pb-list {
@@ -553,7 +553,7 @@ watch(() => props.modelValue, (v) => {
   transition: background 0.08s, color 0.08s;
 }
 .pb-row:hover,
-.pb-row.highlighted { background: rgba(255, 255, 255, 0.05); color: var(--fg-0); }
+.pb-row.highlighted { background: rgb(var(--ink) / 0.05); color: var(--fg-0); }
 
 .pb-row-parent { color: var(--fg-3); font-family: var(--font-mono); font-size: 12px; }
 .pb-row-parent .pb-row-meta { margin-left: auto; color: var(--fg-4); }
@@ -608,7 +608,7 @@ watch(() => props.modelValue, (v) => {
   gap: 10px;
   padding: 10px 12px;
   border-top: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--ink) / 0.02);
 }
 
 .pb-footer-path {
@@ -642,7 +642,7 @@ watch(() => props.modelValue, (v) => {
   padding: 0 14px;
   border-radius: var(--r-sm);
   background: var(--gold);
-  color: #1a1408;
+  color: var(--accent-ink);
   font-size: 12px;
   font-weight: 600;
   border: 0;

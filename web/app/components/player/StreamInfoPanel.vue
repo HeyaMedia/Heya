@@ -351,7 +351,7 @@ function stateLabel(state: string): string {
   color: rgba(255, 255, 255, 0.4);
   margin-bottom: 12px;
 }
-.sip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold, #e6b94a); box-shadow: 0 0 8px rgba(230,185,74,0.4); }
+.sip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent); }
 .sip-id { margin-left: auto; color: rgba(255,255,255,0.2); font-size: 9px; }
 .sip-mode-btn {
   font: inherit; font-size: 9px;
@@ -403,7 +403,7 @@ function stateLabel(state: string): string {
 .sip-tag.transcode, .sip-tag.encode { background: rgba(255,100,80,0.12); color: #ff7050; }
 .sip-tag.hdr { background: rgba(255,180,0,0.15); color: #ffb400; }
 .sip-tag.lang { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); }
-.sip-tag.default { background: rgba(230,185,74,0.12); color: var(--gold, #e6b94a); }
+.sip-tag.default { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .sip-tag.forced { background: rgba(200,130,255,0.12); color: rgb(200,130,255); }
 .sip-tag.sdh { background: rgba(100,180,255,0.12); color: rgb(100,180,255); }
 .sip-tag.reason { background: rgba(255,180,80,0.08); color: rgba(255,180,80,0.85); }
@@ -411,7 +411,7 @@ function stateLabel(state: string): string {
 
 .sip-pb-bar { position: relative; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
 .sip-pb-buf { position: absolute; inset: 0; right: auto; background: rgba(255,255,255,0.18); }
-.sip-pb-fill { position: absolute; inset: 0; right: auto; background: var(--gold, #e6b94a); }
+.sip-pb-fill { position: absolute; inset: 0; right: auto; background: var(--accent); }
 .sip-pb-times { display: flex; justify-content: space-between; font-size: 10px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; }
 
 .sip-pulse {

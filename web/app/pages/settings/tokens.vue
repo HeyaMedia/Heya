@@ -276,7 +276,7 @@ onMounted(load)
   transition: background 0.12s, color 0.12s;
   flex-shrink: 0;
 }
-.token-revoke:hover { background: rgba(217, 107, 107, 0.12); color: var(--bad); }
+.token-revoke:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); }
 
 .expiry-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .expiry-chip {
@@ -297,7 +297,7 @@ onMounted(load)
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px;
   background: var(--gold-soft);
-  border: 1px solid rgba(230, 185, 74, 0.30);
+  border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
   border-radius: var(--r-sm);
   font-size: 12px;
   color: var(--gold);

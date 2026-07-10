@@ -195,15 +195,15 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 
 <style scoped>
 .enable-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 20px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md); }
-.enable-card.on { border-color: rgba(111, 191, 124, 0.3); background: rgba(111, 191, 124, 0.04); }
+.enable-card.on { border-color: color-mix(in srgb, var(--good) 30%, transparent); background: color-mix(in srgb, var(--good) 4%, transparent); }
 .enable-info { min-width: 0; flex: 1; }
 .enable-row { display: flex; align-items: center; gap: 10px; }
 .enable-label { font-size: 14px; font-weight: 500; color: var(--fg-0); }
 .enable-sub { margin: 6px 0 0; font-size: 12px; color: var(--fg-3); max-width: 560px; line-height: 1.5; }
-.enable-toggle { width: 48px; height: 26px; border-radius: 100px; background: rgba(255,255,255,0.08); border: 0; position: relative; cursor: pointer; flex-shrink: 0; transition: background 0.2s ease; }
+.enable-toggle { width: 48px; height: 26px; border-radius: 100px; background: rgb(var(--ink) / 0.08); border: 0; position: relative; cursor: pointer; flex-shrink: 0; transition: background 0.2s ease; }
 .enable-toggle.on { background: var(--good); }
 .enable-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
-.enable-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.2s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+.enable-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.2s ease; box-shadow: 0 1px 3px rgb(var(--shade) / 0.4); }
 .enable-toggle.on .enable-knob { transform: translateX(22px); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin: 12px 0 28px; }
 .fetch-progress { margin-top: 14px; }

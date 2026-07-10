@@ -409,15 +409,15 @@ onMounted(load)
 }
 .user-card:hover { border-color: var(--border-strong); }
 .user-card.self {
-  border-color: rgba(111, 191, 124, 0.3);
-  background: rgba(111, 191, 124, 0.04);
+  border-color: color-mix(in srgb, var(--good) 30%, transparent);
+  background: color-mix(in srgb, var(--good) 4%, transparent);
 }
 
 .user-avatar {
   width: 40px; height: 40px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--gold-deep), var(--gold));
-  color: #1a1408;
+  color: var(--accent-ink);
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.04em;
@@ -433,7 +433,7 @@ onMounted(load)
   display: inline-flex; align-items: center;
   padding: 1px 8px;
   border-radius: 999px;
-  background: rgba(111, 191, 124, 0.12);
+  background: color-mix(in srgb, var(--good) 12%, transparent);
   color: var(--good);
   font-family: var(--font-mono);
   font-size: 9px; font-weight: 700;
@@ -459,13 +459,13 @@ onMounted(load)
 }
 .row-btn:hover:not(:disabled) {
   color: var(--fg-0);
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border-color: var(--border);
 }
 .row-btn.danger:hover:not(:disabled) {
   color: var(--bad);
-  background: rgba(217,107,107,0.10);
-  border-color: rgba(217,107,107,0.25);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 25%, transparent);
 }
 .row-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
@@ -528,13 +528,13 @@ onMounted(load)
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 .pw-btn:hover:not(:disabled) { color: var(--fg-0); border-color: var(--border-strong); }
-.pw-btn.active { color: var(--gold); border-color: rgba(230, 185, 74, 0.4); }
+.pw-btn.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
 .pw-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .pw-gen {
   flex-shrink: 0;
   display: inline-flex; align-items: center; gap: 5px;
   padding: 0 12px;
-  border: 1px solid rgba(230, 185, 74, 0.35);
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
   border-radius: var(--r-sm);
   background: var(--gold-soft);
   color: var(--gold-bright);
@@ -554,8 +554,8 @@ onMounted(load)
 .form-error {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px;
-  background: rgba(217,107,107,0.10);
-  border: 1px solid rgba(217,107,107,0.25);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 25%, transparent);
   border-radius: var(--r-sm);
   color: var(--bad);
   font-size: 12px;

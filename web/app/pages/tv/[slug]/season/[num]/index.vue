@@ -373,7 +373,7 @@ watch(numParam, async () => {
 .hero-bg-fade {
   position: absolute; inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.7) 40%, rgba(12,12,16,0.4) 100%),
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 70%, transparent) 40%, color-mix(in srgb, var(--bg-1) 40%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
 }
 .hero-content { position: relative; z-index: 1; display: flex; gap: 28px; padding: 36px 48px 24px; align-items: flex-end; }
@@ -393,7 +393,7 @@ watch(numParam, async () => {
 /* Progress bar */
 .season-progress {
   width: 100%; max-width: 320px; height: 3px;
-  background: rgba(255,255,255,0.08); border-radius: 2px;
+  background: rgb(var(--ink) / 0.08); border-radius: 2px;
   margin-top: 10px; overflow: hidden;
 }
 .season-progress-fill {
@@ -420,7 +420,7 @@ watch(numParam, async () => {
   font-family: var(--font-mono); color: var(--fg-3);
   text-decoration: none; transition: all 0.15s; flex-shrink: 0;
 }
-.season-nav-item:hover { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.season-nav-item:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 .season-nav-item.active { background: var(--gold-soft); color: var(--gold); }
 .season-nav-item.watched .season-nav-num { color: var(--fg-2); }
 

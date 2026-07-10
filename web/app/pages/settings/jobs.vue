@@ -709,7 +709,7 @@ onMounted(() => {
 }
 .job-row { border-bottom: 1px solid var(--border); cursor: pointer; color: var(--fg-1); }
 .job-row:last-child { border-bottom: 0; }
-.job-row:hover, .job-row.expanded { background: rgba(255,255,255,0.02); }
+.job-row:hover, .job-row.expanded { background: rgb(var(--ink) / 0.02); }
 
 .col-state { text-transform: capitalize; font-weight: 500; display: flex; align-items: center; }
 .state-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; }
@@ -730,8 +730,8 @@ onMounted(() => {
   color: var(--fg-3); border: 1px solid transparent;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.row-btn:hover { color: var(--fg-0); background: rgba(255,255,255,0.05); border-color: var(--border); }
-.row-btn.danger:hover { color: var(--bad); background: rgba(217,107,107,0.08); border-color: rgba(217,107,107,0.25); }
+.row-btn:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.05); border-color: var(--border); }
+.row-btn.danger:hover { color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, transparent); border-color: color-mix(in srgb, var(--bad) 25%, transparent); }
 
 .detail {
   grid-column: 1 / -1;
@@ -758,7 +758,7 @@ onMounted(() => {
 }
 .err-block {
   font-family: var(--font-mono); font-size: 11px; color: var(--bad);
-  background: rgba(217,107,107,0.06); border: 1px solid rgba(217,107,107,0.15);
+  background: color-mix(in srgb, var(--bad) 6%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 15%, transparent);
   border-radius: var(--r-sm);
   padding: 8px 12px; margin: 4px 0 0;
   overflow-x: auto; white-space: pre-wrap;
@@ -910,7 +910,7 @@ onMounted(() => {
 }
 
 .worker-row:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgb(var(--ink) / 0.025);
 }
 
 .worker-row.locked {
@@ -956,7 +956,7 @@ onMounted(() => {
   padding: 0 6px;
   color: var(--gold);
   background: var(--gold-soft);
-  border: 1px solid rgba(230, 185, 74, 0.26);
+  border: 1px solid color-mix(in srgb, var(--gold) 26%, transparent);
   border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 9px;
@@ -965,8 +965,8 @@ onMounted(() => {
 
 .worker-source.db {
   color: var(--good);
-  background: rgba(111, 191, 124, 0.09);
-  border-color: rgba(111, 191, 124, 0.22);
+  background: color-mix(in srgb, var(--good) 9%, transparent);
+  border-color: color-mix(in srgb, var(--good) 22%, transparent);
 }
 
 .worker-input {

@@ -61,7 +61,7 @@ const detailLink = computed(() => `/music/podcasts/feed?feed=${encodeURIComponen
   align-items: center;
   justify-content: center;
   color: var(--fg-3);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 18px rgb(var(--shade) / 0.35);
 }
 .pc-art img { width: 100%; height: 100%; object-fit: cover; }
 .pc-art-fallback {

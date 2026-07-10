@@ -109,8 +109,8 @@ function playbackLabel(action: string) {
 <style scoped>
 .stream-details {
   padding: 12px;
-  background: rgba(0,0,0,0.45); backdrop-filter: blur(12px);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: rgb(var(--shade) / 0.45); backdrop-filter: blur(12px);
+  border: 1px solid rgb(var(--ink) / 0.06);
   border-radius: var(--r-md);
 }
 .stream-header {
@@ -128,17 +128,17 @@ function playbackLabel(action: string) {
   font-size: 9px; font-weight: 700; font-family: var(--font-mono);
   padding: 2px 7px; border-radius: 100px;
   text-transform: uppercase; letter-spacing: 0.06em;
-  background: rgba(255,255,255,0.06); color: var(--fg-2);
+  background: rgb(var(--ink) / 0.06); color: var(--fg-2);
 }
 .playback-decision.pd-direct_play { background: rgba(76,175,80,0.16); color: var(--good); }
 .playback-decision.pd-remux { background: rgba(96,165,250,0.16); color: rgb(96,165,250); }
-.playback-decision.pd-transcode { background: rgba(251,191,36,0.16); color: var(--gold); }
+.playback-decision.pd-transcode { background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--gold); }
 
 .stream-track {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 8px; margin-bottom: 2px;
   border-radius: var(--r-xs);
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
 }
 .track-badge {
   min-width: 26px; padding: 1px 4px;
@@ -147,17 +147,17 @@ function playbackLabel(action: string) {
 }
 .track-badge.vid { background: rgba(96,165,250,0.12); color: rgb(96,165,250); }
 .track-badge.aud { background: rgba(168,85,247,0.12); color: rgb(168,85,247); }
-.track-badge.sub { background: rgba(251,191,36,0.12); color: var(--gold); }
+.track-badge.sub { background: color-mix(in srgb, var(--gold) 12%, transparent); color: var(--gold); }
 .track-info { font-size: 11px; color: var(--fg-2); line-height: 1.4; }
 
 /* Subtitle group: a full-width toggle row, then the tracks indented under it.
    Button reset so it lays out identically to the sibling track rows. */
 .subs-toggle {
   width: 100%; text-align: left; cursor: pointer;
-  background: rgba(255,255,255,0.03); border: 0;
+  background: rgb(var(--ink) / 0.03); border: 0;
   transition: background 0.12s ease;
 }
-.subs-toggle:hover { background: rgba(255,255,255,0.06); }
+.subs-toggle:hover { background: rgb(var(--ink) / 0.06); }
 .subs-toggle-label { display: inline-flex; align-items: center; gap: 6px; }
 .subs-caret { opacity: 0.5; transition: transform 0.15s ease; }
 .subs-caret.open { transform: rotate(180deg); }
@@ -168,9 +168,9 @@ function playbackLabel(action: string) {
   text-transform: uppercase; letter-spacing: 0.03em;
   vertical-align: middle;
 }
-.stag.default { background: rgba(255,255,255,0.06); color: var(--fg-3); }
+.stag.default { background: rgb(var(--ink) / 0.06); color: var(--fg-3); }
 .stag.hdr { background: rgba(76,175,80,0.15); color: var(--good); }
-.stag.forced { background: rgba(251,191,36,0.12); color: var(--gold); }
+.stag.forced { background: color-mix(in srgb, var(--gold) 12%, transparent); color: var(--gold); }
 .stag.hi { background: rgba(96,165,250,0.12); color: rgb(96,165,250); }
 .playback-reasons {
   display: flex; flex-wrap: wrap; gap: 4px;

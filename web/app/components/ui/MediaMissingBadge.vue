@@ -12,6 +12,9 @@
 </template>
 
 <style scoped>
+/* Overlaid on poster/cover artwork (see comment above) — on artwork, stays
+   literal so the badge reads consistently over any art rather than shifting
+   with --bad's per-theme adjustment. */
 .missing-badge {
   position: absolute; top: 8px; right: 8px; z-index: 4;
   display: inline-flex; align-items: center; justify-content: center;

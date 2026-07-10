@@ -56,6 +56,10 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+/* This whole card is a still-image tile — every rgba(0,0,0,*) / rgba(255,255,255,*)
+   below (gradient scrim, check/play buttons, badge, title/meta text, progress
+   track) is painted directly over the episode still artwork, so they
+   deliberately stay literal rather than switching to --ink/--shade. */
 .epc {
   border-radius: var(--r-md);
   overflow: visible;

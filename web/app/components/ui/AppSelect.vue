@@ -102,9 +102,9 @@ const isCustom = computed(() => {
   padding: 7px 10px 7px 12px;
   font-size: 12px; font-weight: 500;
   font-family: inherit;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgb(var(--ink) / 0.85);
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid rgb(var(--ink) / 0.1);
   border-radius: var(--r-sm);
   cursor: pointer;
   outline: none;
@@ -112,25 +112,25 @@ const isCustom = computed(() => {
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .app-select-trigger:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #fff;
+  background: rgb(var(--ink) / 0.1);
+  border-color: rgb(var(--ink) / 0.22);
+  color: rgb(var(--ink) / 1);
 }
 .app-select-trigger[data-state="open"] {
   border-color: var(--gold);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink) / 0.08);
 }
 .app-select-trigger.is-custom {
   color: var(--gold);
-  border-color: rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.08);
+  border-color: color-mix(in srgb, var(--gold) 35%, transparent);
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
 }
 .app-select-trigger.is-custom[data-state="open"] {
   border-color: var(--gold);
-  background: rgba(251, 191, 36, 0.12);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
 }
 .app-select-trigger:focus-visible {
-  outline: 2px solid rgba(251, 191, 36, 0.4);
+  outline: 2px solid color-mix(in srgb, var(--gold) 40%, transparent);
   outline-offset: 2px;
 }
 
@@ -168,11 +168,11 @@ const isCustom = computed(() => {
 }
 .app-select-viewport {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-color: rgb(var(--ink) / 0.2) transparent;
 }
 .app-select-viewport::-webkit-scrollbar { width: 8px; }
 .app-select-viewport::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgb(var(--ink) / 0.15);
   border-radius: 4px;
 }
 

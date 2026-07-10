@@ -87,7 +87,7 @@ const topTags = computed(() => {
   align-items: center;
   justify-content: center;
   color: var(--fg-3);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 18px rgb(var(--shade) / 0.35);
 }
 .rs-art img {
   width: 100%;
@@ -97,7 +97,7 @@ const topTags = computed(() => {
   image-rendering: auto;
 }
 .rs-art-fallback {
-  background: linear-gradient(135deg, rgba(255, 196, 50, 0.15), rgba(255, 196, 50, 0.04));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 15%, transparent), color-mix(in srgb, var(--gold) 4%, transparent));
 }
 .rs-play {
   position: absolute;
@@ -116,7 +116,7 @@ const topTags = computed(() => {
   opacity: 0;
   transform: translateY(6px);
   transition: opacity 0.2s, transform 0.2s;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45); /* button painted over the station art — stays literal */
 }
 .rs-art:hover .rs-play { opacity: 1; transform: translateY(0); }
 .rs-spin { animation: rs-spin 0.9s linear infinite; }
@@ -129,6 +129,7 @@ const topTags = computed(() => {
   width: 30px;
   height: 30px;
   border-radius: 50%;
+  /* button painted over the station art — stays literal */
   background: rgba(0, 0, 0, 0.5);
   color: rgba(255, 255, 255, 0.85);
   border: 0;

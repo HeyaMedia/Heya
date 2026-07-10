@@ -111,13 +111,13 @@ function onIdentified() {
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgb(var(--ink) / 0.04);
 }
 .mea-row:last-child {
   border-bottom: none;
 }
 .mea-row:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--ink) / 0.02);
 }
 
 .mea-cover {
@@ -168,7 +168,7 @@ function onIdentified() {
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgb(var(--ink) / 0.07);
   color: var(--fg-2);
   flex-shrink: 0;
 }

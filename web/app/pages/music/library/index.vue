@@ -227,7 +227,7 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 .ms-stat {
   min-width: 100px;
   padding: 12px 20px;
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   text-decoration: none;
@@ -235,7 +235,7 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
   transition: all 0.15s;
 }
 .ms-stat:hover {
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border-color: var(--gold-soft);
   transform: translateY(-2px);
 }
@@ -264,7 +264,7 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 .ms-nav-card {
   display: flex; align-items: center; gap: 14px;
   padding: 18px 20px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  background: linear-gradient(135deg, rgb(var(--ink) / 0.03), rgb(var(--ink) / 0.01));
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   text-decoration: none; color: inherit;
@@ -272,7 +272,7 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 }
 .ms-nav-card :deep(svg) { color: var(--gold); flex-shrink: 0; }
 .ms-nav-card:hover {
-  background: linear-gradient(135deg, rgba(255,196,50,0.08), rgba(255,196,50,0.02));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 8%, transparent), color-mix(in srgb, var(--gold) 2%, transparent));
   border-color: var(--gold-soft);
   transform: translateY(-1px);
 }

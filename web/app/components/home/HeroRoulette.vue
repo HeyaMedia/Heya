@@ -269,7 +269,7 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.65) 50%, rgba(12,12,16,0.2) 100%),
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 65%, transparent) 50%, color-mix(in srgb, var(--bg-1) 20%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 40%);
 }
 .roulette-inner {
@@ -334,14 +334,14 @@ onUnmounted(() => {
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(7, 7, 10, 0.4);
+  background: color-mix(in srgb, var(--bg-0) 40%, transparent);
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .filter-chip:hover { color: var(--fg-0); border-color: var(--border-strong); }
 .filter-chip.on {
   color: var(--gold);
-  border-color: rgba(230, 185, 74, 0.45);
-  background: rgba(230, 185, 74, 0.08);
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
 }
 .filter-sep {
   width: 1px;
@@ -357,11 +357,11 @@ onUnmounted(() => {
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--bg-2);
-  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgb(var(--ink) / 0.06);
   transition: box-shadow 0.3s;
 }
 .wheel-frame.spinning {
-  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 48px rgba(230, 185, 74, 0.35), 0 0 0 1px rgba(230, 185, 74, 0.4);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 48px color-mix(in srgb, var(--gold) 35%, transparent), 0 0 0 1px color-mix(in srgb, var(--gold) 40%, transparent);
 }
 .wheel-frame.settled { animation: wheel-pop 0.4s cubic-bezier(0.2, 1.6, 0.4, 1); }
 @keyframes wheel-pop {
@@ -389,7 +389,7 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(to bottom, rgba(7,7,10,0.55), transparent 30%, transparent 70%, rgba(7,7,10,0.55));
+  background: linear-gradient(to bottom, rgba(7,7,10,0.55), transparent 30%, transparent 70%, rgba(7,7,10,0.55)); /* on artwork — stays literal */
 }
 .wheel-empty {
   height: 100%;

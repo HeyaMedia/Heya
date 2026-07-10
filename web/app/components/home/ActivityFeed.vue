@@ -97,7 +97,7 @@ onMounted(async () => {
   padding: 10px 16px; transition: background 0.12s;
 }
 .feed-item.clickable { cursor: pointer; }
-.feed-item.clickable:hover { background: rgba(255,255,255,0.03); }
+.feed-item.clickable:hover { background: rgb(var(--ink) / 0.03); }
 
 .feed-icon {
   width: 28px; height: 28px; border-radius: 8px;

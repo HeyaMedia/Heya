@@ -47,17 +47,17 @@ const checked = defineModel<boolean>({ default: false })
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgb(var(--ink) / 0.08);
+  border: 1px solid rgb(var(--ink) / 0.12);
   border-radius: 999px;
   padding: 2px;
   cursor: pointer;
   position: relative;
   transition: background 0.15s, border-color 0.15s;
 }
-.app-switch:hover { border-color: rgba(255, 255, 255, 0.22); }
+.app-switch:hover { border-color: rgb(var(--ink) / 0.22); }
 .app-switch:focus-visible {
-  outline: 2px solid rgba(251, 191, 36, 0.4);
+  outline: 2px solid color-mix(in srgb, var(--gold) 40%, transparent);
   outline-offset: 2px;
 }
 .app-switch[data-disabled] { opacity: 0.4; cursor: not-allowed; }
@@ -67,7 +67,7 @@ const checked = defineModel<boolean>({ default: false })
 
 .app-switch[data-state="checked"] {
   background: var(--gold-soft);
-  border-color: rgba(230, 185, 74, 0.4);
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
 }
 
 .app-switch-thumb {

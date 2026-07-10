@@ -347,6 +347,7 @@ onUnmounted(stopTimer)
 }
 .ch-dot { opacity: 0.5; }
 .ch-progress {
+  /* Sits over the hero backdrop like .ch-chip-* above — stays literal. */
   margin-top: 8px; width: 260px; max-width: 100%; height: 4px;
   background: rgba(255,255,255,0.14); border-radius: 100px; overflow: hidden;
 }
@@ -388,7 +389,7 @@ onUnmounted(stopTimer)
   color: inherit; text-decoration: none; cursor: pointer;
   transition: background 0.12s ease;
 }
-.ch-row:hover { background: rgba(255,255,255,0.045); }
+.ch-row:hover { background: rgb(var(--ink) / 0.045); }
 .ch-row-idx {
   width: 26px; flex-shrink: 0; text-align: center;
   font-family: var(--font-mono); font-size: 13px; color: var(--fg-3);
@@ -426,7 +427,7 @@ onUnmounted(stopTimer)
   flex-shrink: 0;
   width: 30px; height: 30px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border); background: rgb(var(--ink) / 0.03);
   color: var(--fg-3); cursor: pointer;
   transition: all 0.13s ease;
 }

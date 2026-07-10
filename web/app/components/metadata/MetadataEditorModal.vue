@@ -42,7 +42,7 @@ defineEmits<{ close: [] }>()
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgb(var(--shade) / 0.75);
   backdrop-filter: blur(8px);
 }
 
@@ -73,7 +73,7 @@ defineEmits<{ close: [] }>()
   height: 34px;
   border-radius: 50%;
   border: none;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.5); /* on artwork — stays literal (floats over the editor's backdrop header) */
   color: var(--fg-2);
   cursor: pointer;
   display: flex;
@@ -82,7 +82,7 @@ defineEmits<{ close: [] }>()
   transition: all 0.15s;
 }
 .me-close:hover {
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.7); /* on artwork — stays literal */
   color: var(--fg-0);
 }
 

@@ -215,7 +215,7 @@ async function createList() {
 .list-type-icon { opacity: 0.4; flex-shrink: 0; }
 
 .drop-target {
-  background: rgba(212,175,55,0.1);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
   border: 1px dashed var(--gold);
   border-radius: var(--r-sm);
 }

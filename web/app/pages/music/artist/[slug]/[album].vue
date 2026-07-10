@@ -455,7 +455,7 @@ function playFromIndex(i: number) {
 .hero-cover {
   width: 220px; height: 220px;
   border-radius: var(--r-md);
-  box-shadow: 0 24px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05);
+  box-shadow: 0 24px 48px rgb(var(--shade) / 0.6), 0 0 0 1px rgb(var(--ink) / 0.05);
   flex-shrink: 0;
 }
 .hero-meta { flex: 1; min-width: 0; }
@@ -492,6 +492,7 @@ function playFromIndex(i: number) {
   width: 48px;
   height: 48px;
   border-radius: 50%;
+  /* floating buttons painted over the hero backdrop — stays literal */
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(0,0,0,0.4);
   color: var(--fg-0);
@@ -519,7 +520,7 @@ function playFromIndex(i: number) {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: #d96b6b; margin-right: 6px;
+  color: var(--bad); margin-right: 6px;
 }
 
 /* `.hero-floating-actions` is position:absolute, so it and `.hero-sub`'s
@@ -568,7 +569,7 @@ function playFromIndex(i: number) {
 .tl-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .tl-text { min-width: 0; }
 .tl-title { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tl-missing-icon { color: #d96b6b; flex-shrink: 0; }
+.tl-missing-icon { color: var(--bad); flex-shrink: 0; }
 .tl-format-row { margin-top: 2px; }
 .tl-disc { text-align: center; color: var(--fg-3); }
 .mono { font-family: var(--font-mono); }
@@ -583,9 +584,9 @@ function playFromIndex(i: number) {
 :deep(.tl-track) {
   padding: 9px 12px;
   border-radius: var(--r-md);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 -1px 0 rgb(var(--ink) / 0.035);
 }
-:deep(.tl-track:hover) { background: rgba(255, 255, 255, 0.045); }
+:deep(.tl-track:hover) { background: rgb(var(--ink) / 0.045); }
 :deep(.tl-c-index) { font-size: 13px; }
 :deep(.tl-c-duration) { font-size: 13px; }
 /* This page never tinted the index column gold on the active row (only the
@@ -615,7 +616,7 @@ function playFromIndex(i: number) {
   color: inherit;
   display: block;
 }
-.similar-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
+.similar-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgb(var(--shade) / 0.45); }
 .similar-meta { margin-top: 10px; padding: 0 2px; }
 .similar-title {
   font-size: 13px;

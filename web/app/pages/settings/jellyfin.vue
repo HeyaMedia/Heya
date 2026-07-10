@@ -143,10 +143,10 @@ onMounted(() => { ensureSources(); load() })
   font-size: 13px;
 }
 .jf-flash.ok {
-  background: color-mix(in oklab, #22c55e 14%, transparent);
+  background: color-mix(in srgb, var(--good) 14%, transparent);
 }
 .jf-flash.err {
-  background: color-mix(in oklab, #ef4444 16%, transparent);
+  background: color-mix(in srgb, var(--bad) 16%, transparent);
 }
 .jf-hint {
   margin-top: 12px;

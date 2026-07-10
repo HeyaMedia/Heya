@@ -417,7 +417,7 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.6) 50%, transparent 100%),
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 60%, transparent) 50%, transparent 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 40%),
     radial-gradient(ellipse at 85% 110%, rgba(var(--hero-tint), 0.16), transparent 55%);
 }
@@ -433,7 +433,7 @@ onUnmounted(() => {
 }
 .hero-poster {
   align-self: center;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgb(var(--ink) / 0.06);
   border-radius: var(--r-md);
   overflow: hidden;
   display: block;
@@ -454,7 +454,7 @@ onUnmounted(() => {
   object-fit: contain;
   object-position: left center;
   margin: 4px 0 12px;
-  filter: drop-shadow(0 4px 24px rgba(0, 0, 0, 0.6));
+  filter: drop-shadow(0 4px 24px rgba(0, 0, 0, 0.6)); /* on artwork — stays literal */
 }
 .hero-info {
   display: flex;
@@ -499,14 +499,14 @@ onUnmounted(() => {
   width: 32px;
   height: 3px;
   border-radius: 2px;
-  background: rgba(255,255,255,0.2);
+  background: rgb(var(--ink) / 0.2);
   position: relative;
   overflow: hidden;
   cursor: pointer;
   transition: background 0.15s;
 }
-.hero-dot:hover { background: rgba(255,255,255,0.35); }
-.hero-dot.active { background: rgba(255,255,255,0.15); }
+.hero-dot:hover { background: rgb(var(--ink) / 0.35); }
+.hero-dot.active { background: rgb(var(--ink) / 0.15); }
 .hero-dot.active::after {
   content: '';
   position: absolute;
@@ -538,7 +538,7 @@ onUnmounted(() => {
   .hero-info { justify-content: flex-end; }
   .hero-bg-gradient {
     background:
-      linear-gradient(to top, var(--bg-1) 0%, rgba(10, 10, 14, 0.92) 24%, rgba(10, 10, 14, 0.5) 50%, transparent 78%),
+      linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 92%, transparent) 24%, color-mix(in srgb, var(--bg-1) 50%, transparent) 50%, transparent 78%),
       radial-gradient(ellipse at 50% 100%, rgba(var(--hero-tint), 0.18), transparent 60%);
   }
   .hero-synopsis { display: none; }

@@ -275,7 +275,7 @@ onMounted(async () => {
 .lib-pad { padding: 0 32px 80px; }
 .lib-pad-top { padding: 0 32px; }
 .empty-lib { padding: 80px 32px; text-align: center; color: var(--fg-2); font-size: 15px; }
-.list-missing-icon { color: #d96b6b; vertical-align: -1px; margin-left: 4px; }
+.list-missing-icon { color: var(--bad); vertical-align: -1px; margin-left: 4px; }
 .book-filters {
   display: flex;
   flex-wrap: wrap;
@@ -322,7 +322,7 @@ onMounted(async () => {
 }
 .book-kind-pill {
   padding: 3px 8px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
 }
 .book-kind-badge.kind-audiobook,
 .book-kind-pill.kind-audiobook {

@@ -227,6 +227,7 @@ function onPhoneRowClick(i: number) {
 }
 .pd-hero-tint {
   position: absolute; inset: 0;
+  /* scrim over the blurred backdrop art — stays literal */
   background: linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.5) 100%);
   z-index: 0;
 }
@@ -243,7 +244,7 @@ function onPhoneRowClick(i: number) {
   height: 180px;
   border-radius: var(--r-md);
   overflow: hidden;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55); /* cast onto the always-dark blurred backdrop — stays literal */
   flex-shrink: 0;
   background: var(--bg-3);
   display: flex;
@@ -254,6 +255,8 @@ function onPhoneRowClick(i: number) {
 .pd-hero-art-fallback { background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(99, 102, 241, 0.06)); }
 .pd-hero-art img { width: 100%; height: 100%; object-fit: cover; }
 .pd-hero-meta { min-width: 0; }
+/* .pd-kind..pd-stats sit on the blurred hero backdrop art — colors below
+   stay literal white/black (artwork doesn't theme). */
 .pd-kind {
   font-size: 11px;
   font-family: var(--font-mono);
@@ -295,7 +298,7 @@ function onPhoneRowClick(i: number) {
   transition: border-color 0.15s, background 0.15s;
   align-items: center;
 }
-.pd-ep:hover { border-color: rgba(255, 196, 50, 0.3); background: rgba(255, 196, 50, 0.04); }
+.pd-ep:hover { border-color: color-mix(in srgb, var(--gold) 30%, transparent); background: color-mix(in srgb, var(--gold) 4%, transparent); }
 .pd-ep-num { color: var(--fg-3); font-size: 11px; text-align: right; }
 .pd-ep-art {
   width: 56px;

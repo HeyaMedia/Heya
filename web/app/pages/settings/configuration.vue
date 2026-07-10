@@ -218,7 +218,7 @@ onMounted(load)
   font-size: 12px;
 }
 .cfg-row:last-child { border-bottom: 0; }
-.cfg-row:hover { background: rgba(255,255,255,0.02); }
+.cfg-row:hover { background: rgb(var(--ink) / 0.02); }
 .cfg-row:hover .cfg-key-copy { opacity: 1; }
 
 .cfg-key {

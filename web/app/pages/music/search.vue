@@ -567,7 +567,7 @@ async function playVibe(startIdx: number) {
 .ms-input {
   width: 100%;
   padding: 14px 44px 14px 42px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--fg-0);
@@ -576,7 +576,7 @@ async function playVibe(startIdx: number) {
   transition: border-color 0.15s, background 0.15s;
 }
 .ms-input::placeholder { color: var(--fg-3); }
-.ms-input:focus { border-color: var(--gold); background: rgba(255,255,255,0.06); }
+.ms-input:focus { border-color: var(--gold); background: rgb(var(--ink) / 0.06); }
 .ms-input-clear {
   position: absolute; right: 8px;
   width: 28px; height: 28px;
@@ -587,7 +587,7 @@ async function playVibe(startIdx: number) {
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
 }
-.ms-input-clear:hover { color: var(--fg-0); background: rgba(255,255,255,0.06); }
+.ms-input-clear:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.06); }
 
 .ms-vibe-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -640,7 +640,7 @@ async function playVibe(startIdx: number) {
   text-align: left;
   transition: background 0.15s, color 0.15s;
 }
-.ms-recent-row:hover { background: rgba(255,255,255,0.04); color: var(--fg-0); }
+.ms-recent-row:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
 .ms-recent-row :deep(svg) { color: var(--fg-3); flex-shrink: 0; }
 .ms-recent-spacer { flex: 1; }
 .ms-recent-remove {
@@ -650,7 +650,7 @@ async function playVibe(startIdx: number) {
   color: var(--fg-3);
   transition: background 0.15s, color 0.15s;
 }
-.ms-recent-row:hover .ms-recent-remove:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); }
+.ms-recent-row:hover .ms-recent-remove:hover { background: rgb(var(--ink) / 0.08); color: var(--fg-0); }
 
 /* ---- Empty hint ---- */
 .ms-empty-hint {
@@ -668,7 +668,7 @@ async function playVibe(startIdx: number) {
   padding: 1px 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   color: var(--fg-1);
 }
 
@@ -723,7 +723,7 @@ async function playVibe(startIdx: number) {
   cursor: pointer;
   transition: background 0.15s;
 }
-.ms-track-row:hover { background: rgba(255,255,255,0.04); }
+.ms-track-row:hover { background: rgb(var(--ink) / 0.04); }
 .ms-track-art {
   position: relative;
   width: 44px; height: 44px;
@@ -734,13 +734,13 @@ async function playVibe(startIdx: number) {
 .ms-track-play {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55);
-  color: #fff;
+  background: rgba(0,0,0,0.55); /* on artwork — stays literal */
+  color: #fff; /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
 }
 .ms-track-row:hover .ms-track-play { opacity: 1; }
-.ms-track-play-missing { opacity: 1; color: #d96b6b; }
+.ms-track-play-missing { opacity: 1; color: var(--bad); }
 .ms-track-missing { opacity: 0.5; cursor: default; }
 .ms-track-missing:hover { background: transparent; }
 .ms-track-meta { min-width: 0; }
@@ -807,7 +807,7 @@ async function playVibe(startIdx: number) {
   color: var(--fg-2);
   cursor: pointer;
 }
-.ms-track-more:active { background: rgba(255, 255, 255, 0.06); color: var(--fg-0); }
+.ms-track-more:active { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 
 @media (max-width: 720px) {
   .ms-search-head { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 20px; }

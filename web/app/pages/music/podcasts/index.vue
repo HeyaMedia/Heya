@@ -256,7 +256,7 @@ function formatProgress(ep: ContinueEpisode) {
   color: inherit;
   transition: border-color 0.15s, background 0.15s;
 }
-.pp-continue-row:hover { border-color: rgba(255, 196, 50, 0.3); background: rgba(255, 196, 50, 0.04); }
+.pp-continue-row:hover { border-color: color-mix(in srgb, var(--gold) 30%, transparent); background: color-mix(in srgb, var(--gold) 4%, transparent); }
 .pp-continue-art {
   width: 48px;
   height: 48px;
@@ -281,7 +281,7 @@ function formatProgress(ep: ContinueEpisode) {
   margin-bottom: 4px;
 }
 .pp-continue-progress { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--fg-3); }
-.pp-progress-bar { flex: 1; height: 3px; background: rgba(255, 255, 255, 0.06); border-radius: 999px; overflow: hidden; }
+.pp-progress-bar { flex: 1; height: 3px; background: rgb(var(--ink) / 0.06); border-radius: 999px; overflow: hidden; }
 .pp-progress-fill { height: 100%; background: var(--gold); }
 .mono { font-family: var(--font-mono); }
 

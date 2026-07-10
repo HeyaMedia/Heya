@@ -248,8 +248,8 @@ function formatRating(r: any): string {
   align-items: center;
   padding: 0 12px;
   border-radius: var(--r-sm);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.03);
+  border: 1px solid rgb(var(--ink) / 0.04);
   font-size: 13px;
   color: var(--fg-2);
   font-family: var(--font-mono);
@@ -352,12 +352,12 @@ function formatRating(r: any): string {
   font-size: 12px;
   color: var(--fg-1);
   padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.04);
   border-radius: var(--r-sm);
 }
 
 .mf-tag-subtle {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
   color: var(--fg-2);
 }
 
@@ -377,7 +377,7 @@ function formatRating(r: any): string {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.04);
   border-radius: var(--r-sm);
 }
 

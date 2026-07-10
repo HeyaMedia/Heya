@@ -359,7 +359,7 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
   font-family: var(--font-mono);
   font-size: 10.5px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.06em;
-  background: rgba(255,255,255,0.02);
+  background: rgb(var(--ink) / 0.02);
   border: 1px solid var(--border);
   color: var(--fg-4);
   cursor: pointer;
@@ -367,16 +367,16 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
 }
 .lvl-chip:hover { border-color: var(--border-strong); color: var(--fg-2); }
 .lvl-chip .lvl-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-4); }
-.lvl-chip.active        { background: rgba(255,255,255,0.05); color: var(--fg-1); }
+.lvl-chip.active        { background: rgb(var(--ink) / 0.05); color: var(--fg-1); }
 .lvl-chip.trace.active  { color: var(--fg-3); border-color: var(--fg-4); }
 .lvl-chip.trace.active  .lvl-dot { background: var(--fg-3); }
-.lvl-chip.debug.active  { color: var(--fg-2); border-color: rgba(255,255,255,0.20); }
+.lvl-chip.debug.active  { color: var(--fg-2); border-color: rgb(var(--ink) / 0.20); }
 .lvl-chip.debug.active  .lvl-dot { background: var(--fg-2); }
 .lvl-chip.info.active   { color: rgb(140, 160, 255); border-color: rgba(140, 160, 255, 0.40); background: rgba(140, 160, 255, 0.08); }
 .lvl-chip.info.active   .lvl-dot { background: rgb(140, 160, 255); }
-.lvl-chip.warn.active   { color: var(--gold); border-color: rgba(230, 185, 74, 0.40); background: var(--gold-soft); }
+.lvl-chip.warn.active   { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); }
 .lvl-chip.warn.active   .lvl-dot { background: var(--gold); }
-.lvl-chip.error.active  { color: var(--bad); border-color: rgba(217, 107, 107, 0.40); background: rgba(217, 107, 107, 0.10); }
+.lvl-chip.error.active  { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); background: color-mix(in srgb, var(--bad) 10%, transparent); }
 .lvl-chip.error.active  .lvl-dot { background: var(--bad); }
 
 .lvl-all {
@@ -454,7 +454,7 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
   line-height: 1.55;
   padding: 6px 0;
 }
-.log-list.paused { box-shadow: inset 0 0 0 2px rgba(230, 185, 74, 0.30); }
+.log-list.paused { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--gold) 30%, transparent); }
 
 .log-state {
   display: flex; align-items: center; gap: 8px;
@@ -471,10 +471,10 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
   align-items: baseline;
 }
 .log-row.has-fields { cursor: pointer; }
-.log-row:hover { background: rgba(255,255,255,0.02); }
-.log-row.warn  { background: rgba(230, 185, 74, 0.04); }
-.log-row.error { background: rgba(217, 107, 107, 0.06); }
-.log-row.expanded { background: rgba(255,255,255,0.04); }
+.log-row:hover { background: rgb(var(--ink) / 0.02); }
+.log-row.warn  { background: color-mix(in srgb, var(--gold) 4%, transparent); }
+.log-row.error { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.log-row.expanded { background: rgb(var(--ink) / 0.04); }
 
 .lr-time   { color: var(--fg-4); white-space: nowrap; }
 .lr-level  { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
@@ -494,7 +494,7 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
   gap: 2px 12px;
   padding: 6px 10px;
   border-left: 2px solid var(--gold);
-  background: rgba(255,255,255,0.02);
+  background: rgb(var(--ink) / 0.02);
 }
 .lr-field-k { color: var(--gold); font-size: 11px; }
 .lr-field-v { color: var(--fg-1); font-size: 11px; white-space: pre-wrap; word-break: break-word; }
@@ -507,8 +507,8 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.sv2-btn.warn  { border: 1px solid rgba(230, 185, 74, 0.40); background: var(--gold-soft); color: var(--gold); }
-.sv2-btn.warn:hover:not(:disabled) { background: rgba(230, 185, 74, 0.18); }
+.sv2-btn.warn  { border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); color: var(--gold); }
+.sv2-btn.warn:hover:not(:disabled) { background: color-mix(in srgb, var(--gold) 18%, transparent); }
 
 /* Phone: the toolbar's fixed-width search input is the one thing here that
    can overflow 390px on its own (everything else already wraps). The

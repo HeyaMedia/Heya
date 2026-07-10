@@ -274,7 +274,7 @@ async function playFrom(startIdx: number) {
 .ms-page-btn {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 8px 12px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--fg-1);
@@ -283,7 +283,7 @@ async function playFrom(startIdx: number) {
   cursor: pointer;
   transition: all 0.15s;
 }
-.ms-page-btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); border-color: var(--fg-3); }
+.ms-page-btn:hover:not(:disabled) { background: rgb(var(--ink) / 0.08); border-color: var(--fg-3); }
 .ms-page-btn:disabled { opacity: 0.35; cursor: default; }
 
 .ms-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }

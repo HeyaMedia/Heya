@@ -104,14 +104,14 @@ watch(() => route.path, () => { navOpen.value = false })
   height: 36px;
   padding: 0 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   border: 1px solid var(--border);
   color: var(--fg-1);
   font-size: 13px;
   font-weight: 500;
   flex-shrink: 0;
 }
-.sv2-phone-nav-btn:active { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
+.sv2-phone-nav-btn:active { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
 @media (max-width: 720px) {
   .sv2-content {

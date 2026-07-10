@@ -376,7 +376,7 @@ async function uploadFile(e: Event) {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.6); /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -389,7 +389,7 @@ async function uploadFile(e: Event) {
   height: 32px;
   border-radius: 50%;
   border: none;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.15); /* on artwork — stays literal */
   color: var(--fg-0);
   cursor: pointer;
   display: flex;
@@ -398,10 +398,10 @@ async function uploadFile(e: Event) {
   transition: background 0.12s;
 }
 .mei-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.25); /* on artwork — stays literal */
 }
 .mei-btn-danger:hover {
-  background: rgba(217, 107, 107, 0.4);
+  background: rgba(217, 107, 107, 0.4); /* on artwork — stays literal */
 }
 
 .mei-meta {
@@ -414,7 +414,7 @@ async function uploadFile(e: Event) {
   font-size: 9px;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   color: var(--fg-2);
   text-transform: uppercase;
 }
@@ -533,7 +533,7 @@ async function uploadFile(e: Event) {
   font-size: 8px;
   font-weight: 700;
   text-transform: uppercase;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.7); /* on artwork — stays literal */
   color: var(--fg-2);
   border-radius: 3px;
   pointer-events: none;
@@ -545,7 +545,7 @@ async function uploadFile(e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.55); /* on artwork — stays literal */
   color: var(--gold-bright);
   opacity: 0;
   transition: opacity 0.15s;

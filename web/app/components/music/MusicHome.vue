@@ -761,12 +761,12 @@ async function playPlaylist(id: number, name: string) {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 4px;
-  border-bottom: 1px solid var(--border-soft, rgba(255, 255, 255, 0.04));
+  border-bottom: 1px solid var(--border-soft, rgb(var(--ink) / 0.04));
   text-decoration: none;
   color: inherit;
   transition: background 0.15s, color 0.15s;
 }
-.mh-genre-row:hover { background: rgba(255, 196, 50, 0.04); color: var(--gold); }
+.mh-genre-row:hover { background: color-mix(in srgb, var(--gold) 4%, transparent); color: var(--gold); }
 .mh-genre-name-cell {
   flex: 1;
   font-size: 14px;

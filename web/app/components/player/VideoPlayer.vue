@@ -972,7 +972,7 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
 .p { position: fixed; inset: 0; z-index: 9999; background: #000; }
 video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
 .p-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); font-size: 14px; gap: 8px; z-index: 20; }
-.spinner { width: 28px; height: 28px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--gold, #e6b94a); border-radius: 50%; animation: spin 0.7s linear infinite; }
+.spinner { width: 28px; height: 28px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
 
 /* Resume overlay — full-surface dimmer with a centered card. Mounts only
    while resumeOpen is true; the video element is paused while it's up. */
@@ -1000,7 +1000,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--gold);
+  color: var(--accent);
   margin-bottom: 6px;
 }
 .resume-title {
@@ -1026,7 +1026,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 }
 .resume-progress-fill {
   height: 100%;
-  background: var(--gold);
+  background: var(--accent);
   border-radius: 999px;
 }
 .resume-progress-label {
@@ -1058,7 +1058,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
    box, so nudge it left a hair. The pause glyph is symmetric — left alone. */
 .center-btn.is-play :deep(svg) { transform: translateX(-2px); }
 /* Buffering ring — concentric with the button, wrapping it. */
-.center-ring { position: absolute; inset: -7px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.12); border-top-color: var(--gold, #e6b94a); animation: spin 0.7s linear infinite; pointer-events: none; }
+.center-ring { position: absolute; inset: -7px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.12); border-top-color: var(--accent); animation: spin 0.7s linear infinite; pointer-events: none; }
 
 .ctrl-bottom { padding: 40px 20px 16px; background: linear-gradient(to top, rgba(0,0,0,0.6), transparent); }
 
@@ -1068,9 +1068,9 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .seekbar:hover .seekbar-bg { height: 6px; }
 .seekbar-buf { position: absolute; left: 0; height: 3px; background: rgba(255,255,255,0.18); border-radius: 2px; pointer-events: none; transition: height 0.12s; }
 .seekbar:hover .seekbar-buf { height: 6px; }
-.seekbar-fill { position: absolute; left: 0; height: 3px; background: var(--gold, #e6b94a); border-radius: 2px; pointer-events: none; transition: height 0.12s; }
+.seekbar-fill { position: absolute; left: 0; height: 3px; background: var(--accent); border-radius: 2px; pointer-events: none; transition: height 0.12s; }
 .seekbar:hover .seekbar-fill { height: 6px; }
-.seekbar-thumb { position: absolute; width: 14px; height: 14px; background: var(--gold, #e6b94a); border-radius: 50%; transform: translate(-50%, 0); opacity: 0; pointer-events: none; transition: opacity 0.15s; box-shadow: 0 0 6px rgba(230,185,74,0.4); }
+.seekbar-thumb { position: absolute; width: 14px; height: 14px; background: var(--accent); border-radius: 50%; transform: translate(-50%, 0); opacity: 0; pointer-events: none; transition: opacity 0.15s; box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 40%, transparent); }
 .seekbar:hover .seekbar-thumb { opacity: 1; }
 .seekbar-tip { position: absolute; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #fff; font-size: 11px; font-family: var(--font-mono, monospace); padding: 3px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
 .seekbar-tip.has-thumb { padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; bottom: 28px; border-radius: 6px; }
@@ -1081,7 +1081,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .ctrl-row { display: flex; align-items: center; gap: 4px; }
 .c-btn { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.8); background: transparent; transition: all 0.12s; flex-shrink: 0; }
 .c-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
-.c-btn.active { color: var(--gold, #e6b94a); }
+.c-btn.active { color: var(--accent); }
 
 /* Volume */
 .vol-group { display: flex; align-items: center; gap: 4px; }
@@ -1116,9 +1116,9 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
   box-shadow: 0 12px 40px rgba(0,0,0,0.55);
   transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
-.skip-seg-btn :deep(svg) { color: var(--gold, #e6b94a); }
+.skip-seg-btn :deep(svg) { color: var(--accent); }
 .skip-seg-btn:hover {
-  background: rgba(230,185,74,0.16); border-color: var(--gold, #e6b94a);
+  background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent);
   transform: translateY(-1px);
 }
 .upnext-card {
@@ -1128,20 +1128,20 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
   box-shadow: 0 12px 40px rgba(0,0,0,0.6);
   display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
-.upnext-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gold, #e6b94a); }
+.upnext-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); }
 .upnext-title { font-size: 18px; font-weight: 700; color: #fff; }
 .upnext-ep-title { font-size: 13px; color: rgba(255,255,255,0.6); max-width: 200px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .upnext-countdown-ring { position: relative; width: 48px; height: 48px; margin: 6px 0; }
 .upnext-countdown-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring-bg { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 3; }
-.ring-fill { fill: none; stroke: var(--gold, #e6b94a); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 125.6; transition: stroke-dashoffset 1s linear; }
+.ring-fill { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 125.6; transition: stroke-dashoffset 1s linear; }
 .ring-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; color: #fff; font-family: var(--font-mono, monospace); }
 .upnext-actions { display: flex; gap: 8px; margin-top: 4px; }
 .upnext-btn {
   padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
   display: flex; align-items: center; gap: 6px; transition: all 0.15s;
 }
-.upnext-btn.play { background: var(--gold, #e6b94a); color: #000; }
+.upnext-btn.play { background: var(--accent); color: var(--accent-ink); }
 .upnext-btn.play:hover { filter: brightness(1.1); }
 .upnext-btn.cancel { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
 .upnext-btn.cancel:hover { background: rgba(255,255,255,0.14); color: #fff; }
@@ -1179,10 +1179,10 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
   background: rgba(255, 255, 255, 0.08);
 }
 .app-menu-trigger.vp-trigger[data-state="open"] {
-  color: var(--gold, #e6b94a);
+  color: var(--accent);
   background: rgba(255, 255, 255, 0.08);
 }
-.app-menu-trigger.vp-trigger.active { color: var(--gold, #e6b94a); }
+.app-menu-trigger.vp-trigger.active { color: var(--accent); }
 
 /* Current-quality badge sitting next to the sliders icon. */
 .vp-trigger .quality-badge {
@@ -1191,7 +1191,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
   font-family: var(--font-mono, monospace);
   color: rgba(255, 255, 255, 0.6);
 }
-.vp-trigger[data-state="open"] .quality-badge { color: var(--gold, #e6b94a); }
+.vp-trigger[data-state="open"] .quality-badge { color: var(--accent); }
 
 /* The player root is a z-index:9999 fixed overlay, so a menu portalled to
    <body> (reka wraps it at z-index:200) would paint *behind* the video.
@@ -1209,8 +1209,8 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
 }
-.vp-item.active { color: var(--gold, #e6b94a); }
-.vp-item-check { color: var(--gold, #e6b94a); flex-shrink: 0; }
+.vp-item.active { color: var(--accent); }
+.vp-item-check { color: var(--accent); flex-shrink: 0; }
 
 .vp-item .sub-tag {
   font-size: 9px;

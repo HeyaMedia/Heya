@@ -331,7 +331,7 @@ watch(() => route.fullPath, () => { if (open.value) close() })
   background: transparent;
   border: 0;
 }
-.so-back:active { background: rgba(255,255,255,0.08); }
+.so-back:active { background: rgb(var(--ink) / 0.08); }
 
 .so-input-wrap {
   flex: 1;
@@ -431,7 +431,7 @@ watch(() => route.fullPath, () => { if (open.value) close() })
   text-align: left;
   color: var(--fg-0);
 }
-.so-result:active { background: rgba(255,255,255,0.06); }
+.so-result:active { background: rgb(var(--ink) / 0.06); }
 
 .so-result-thumb {
   width: 38px;
@@ -481,7 +481,7 @@ watch(() => route.fullPath, () => { if (open.value) close() })
   font-size: 13px;
   font-weight: 500;
   color: var(--fg-1);
-  background: rgba(255,255,255,0.02);
+  background: rgb(var(--ink) / 0.02);
 }
 .so-see-all:active { color: var(--gold); }
 

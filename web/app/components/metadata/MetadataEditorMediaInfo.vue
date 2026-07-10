@@ -287,13 +287,13 @@ watch(() => [props.mediaId, props.fileId], () => {
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   color: var(--fg-2);
   font-family: var(--font-mono);
 }
 
 .mi-tag-forced {
-  background: rgba(217, 107, 107, 0.15);
+  background: color-mix(in srgb, var(--bad) 15%, transparent);
   color: var(--bad);
 }
 
@@ -311,7 +311,7 @@ watch(() => [props.mediaId, props.fileId], () => {
 .mi-default-badge {
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(74, 222, 128, 0.12);
+  background: color-mix(in srgb, var(--good) 12%, transparent);
   color: var(--good);
   font-size: 9px;
   font-weight: 700;

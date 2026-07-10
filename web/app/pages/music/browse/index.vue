@@ -106,6 +106,8 @@ const loading = computed(() => moodsQuery.isPending.value || genresQuery.isPendi
 
 // Tile background gradients — deterministic per-index so the rail looks
 // painted rather than random. Mood/tempo/genre each get their own palette.
+// These are fixed categorical colors (like artwork), not canvas chrome —
+// they stay literal in both themes so a mood/genre keeps the same hue.
 const MOOD_GRADIENTS = [
   'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', // happy
   'linear-gradient(135deg, #ec4899 0%, #be185d 100%)', // party
@@ -156,16 +158,16 @@ function genreGradient(i: number) { return GENRE_GRADIENTS[i % GENRE_GRADIENTS.l
   overflow: hidden;
   position: relative;
   text-decoration: none;
-  color: #fff;
+  color: #fff; /* on the fixed gradient tile — stays literal */
   display: flex;
   align-items: flex-end;
   padding: 14px 16px;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 16px rgb(var(--shade) / 0.35);
 }
 .bp-tile:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 24px rgb(var(--shade) / 0.5);
 }
 .bp-tile-body { width: 100%; }
 .bp-tile-label { font-size: 17px; font-weight: 700; letter-spacing: -0.005em; }

@@ -155,7 +155,7 @@ function switchMode(m: 'local' | 'smb') {
 .lpi-tab.active {
   background: var(--bg-4);
   color: var(--fg-0);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  box-shadow: var(--shadow-1);
 }
 
 /* SMB form */

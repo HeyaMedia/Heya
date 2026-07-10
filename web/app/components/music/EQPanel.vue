@@ -356,7 +356,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   gap: 4px;
   padding: 3px;
   margin-bottom: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
@@ -386,7 +386,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   flex-direction: column;
   gap: 8px;
   padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
@@ -403,7 +403,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   justify-content: space-between;
   padding: 10px 14px;
   margin-bottom: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
@@ -420,13 +420,13 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--fg-1);
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   cursor: pointer;
   transition: all 0.15s;
 }
-.eq-preset:hover { background: rgba(255,255,255,0.08); }
-.eq-preset.active { background: var(--gold-soft); border-color: rgba(230,185,74,0.4); color: var(--gold-bright); }
+.eq-preset:hover { background: rgb(var(--ink) / 0.08); }
+.eq-preset.active { background: var(--gold-soft); border-color: color-mix(in srgb, var(--gold) 40%, transparent); color: var(--gold-bright); }
 
 .eq-bands {
   display: flex;
@@ -439,7 +439,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 .eq-bar-track {
   width: 12px;
   height: 160px;
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border-radius: 6px;
   position: relative;
   cursor: ns-resize;
@@ -450,7 +450,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   left: 0; right: 0;
   top: 50%;
   height: 1px;
-  background: rgba(255,255,255,0.18);
+  background: rgb(var(--ink) / 0.18);
 }
 .eq-bar-fill {
   position: absolute;
@@ -517,7 +517,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   gap: 10px;
   padding: 7px 10px;
   border-radius: var(--r-sm);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
 }
 .chain-row.chain-pinned { background: transparent; border-style: dashed; opacity: 0.8; }
@@ -534,13 +534,13 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; line-height: 1;
   color: var(--fg-2);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   border-radius: 3px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.chain-arrow:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); color: var(--fg-0); }
+.chain-arrow:hover:not(:disabled) { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 .chain-arrow:disabled { opacity: 0.3; cursor: default; }
 
 /* Output devices */
@@ -548,14 +548,14 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
 .dev-reveal {
   font-size: 11px;
   color: var(--fg-2);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px 10px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.dev-reveal:hover { background: rgba(255, 255, 255, 0.1); color: var(--fg-0); }
+.dev-reveal:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
 
 .dev-list { display: flex; flex-direction: column; gap: 4px; }
 .dev-row {
@@ -565,14 +565,14 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   width: 100%;
   padding: 8px 10px;
   border-radius: var(--r-sm);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   cursor: pointer;
   text-align: left;
   transition: background 0.12s, border-color 0.12s;
 }
-.dev-row:hover { background: rgba(255, 255, 255, 0.06); }
-.dev-row.active { border-color: rgba(230, 185, 74, 0.4); background: var(--gold-soft); }
+.dev-row:hover { background: rgb(var(--ink) / 0.06); }
+.dev-row.active { border-color: color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); }
 .dev-dot {
   width: 8px; height: 8px;
   flex-shrink: 0;
@@ -609,13 +609,13 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   font-size: 12px;
   font-weight: 500;
   color: var(--fg-0);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink) / 0.06);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   cursor: pointer;
   transition: background 0.12s;
 }
-.dev-save:hover { background: rgba(255, 255, 255, 0.12); }
+.dev-save:hover { background: rgb(var(--ink) / 0.12); }
 .dev-del {
   padding: 8px 12px;
   font-size: 12px;
@@ -626,5 +626,11 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.dev-del:hover { background: rgba(220, 80, 80, 0.14); color: #f0a0a0; border-color: rgba(220, 80, 80, 0.4); }
+/* Matches the .btn-danger/.sv2-btn.danger convention (heya.css) instead of a
+   hand-tuned red that duplicated --bad and wouldn't track its theme cut. */
+.dev-del:hover {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
+}
 </style>

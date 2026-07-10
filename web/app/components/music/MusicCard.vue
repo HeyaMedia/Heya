@@ -116,7 +116,7 @@ watch(() => props.src, () => { imgError.value = false })
   background: var(--bg-3);
   overflow: hidden;
   border-radius: var(--r-md);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 18px rgb(var(--shade) / 0.45);
 }
 .mc-circle .mc-art { border-radius: 50%; }
 .mc-art > img {
@@ -129,11 +129,12 @@ watch(() => props.src, () => { imgError.value = false })
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   color: var(--fg-3);
-  background: linear-gradient(135deg, rgba(255, 196, 50, 0.10), rgba(255, 196, 50, 0.02));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 10%, transparent), color-mix(in srgb, var(--gold) 2%, transparent));
 }
 
 .mc-gradient {
   position: absolute; inset: 0;
+  /* scrim over the cover art for caption legibility — stays literal */
   background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.25) 45%, transparent 75%);
   pointer-events: none;
 }
@@ -144,6 +145,7 @@ watch(() => props.src, () => { imgError.value = false })
   display: inline-flex; align-items: center; gap: 3px;
   padding: 3px 9px;
   border-radius: 999px;
+  /* badge painted over the cover art — stays literal */
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(6px);
   font-size: 10px;
@@ -184,7 +186,7 @@ watch(() => props.src, () => { imgError.value = false })
   color: var(--bg-0);
   border: 0;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); /* button painted over the cover art — stays literal */
   cursor: pointer;
   pointer-events: auto;
   transition: transform 0.15s ease-out;
@@ -211,7 +213,7 @@ watch(() => props.src, () => { imgError.value = false })
   font-size: 14px;
   font-weight: 700;
   line-height: 1.25;
-  color: #fff;
+  color: #fff; /* caption painted over the cover art — stays literal */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -219,7 +221,7 @@ watch(() => props.src, () => { imgError.value = false })
 }
 .mc-sub {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.65); /* caption painted over the cover art — stays literal */
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -228,14 +230,14 @@ watch(() => props.src, () => { imgError.value = false })
 
 /* Circular variant — keep label outside the clipped art so it remains
    readable. Circles look weird with text overlay painted on them. */
-.mc-circle .mc-art { box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45); }
+.mc-circle .mc-art { box-shadow: 0 8px 18px rgb(var(--shade) / 0.45); }
 .mc-circle .mc-gradient,
 .mc-circle .mc-info { display: none; }
 
 .mc-progress {
   position: absolute; bottom: 0; left: 0; right: 0;
   height: 3px; z-index: 3;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1); /* track painted over the cover art — stays literal */
   pointer-events: none;
 }
 .mc-progress-fill {

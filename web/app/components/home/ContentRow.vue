@@ -104,13 +104,13 @@ function scrollBy(dir: number) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border: 1px solid var(--border);
   color: var(--fg-2);
   transition: all 0.15s;
 }
 .scroll-btn:hover {
-  background: rgba(255,255,255,0.12);
+  background: rgb(var(--ink) / 0.12);
   color: var(--fg-0);
 }
 .unavailable { opacity: 0.4; cursor: default !important; }

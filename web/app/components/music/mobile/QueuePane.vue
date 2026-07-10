@@ -516,7 +516,7 @@ function rowStyle(i: number): Record<string, string> {
       transition: 'none',
       zIndex: '10',
       position: 'relative',
-      boxShadow: '0 14px 30px rgba(0, 0, 0, 0.45)',
+      boxShadow: '0 14px 30px rgb(var(--shade) / 0.45)',
     }
   }
   const part = rowPartTranslate(i)
@@ -587,13 +587,13 @@ onScopeDispose(() => {
   height: 36px;
   padding: 0 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   color: var(--fg-2);
   font-size: 12px;
   cursor: pointer;
 }
-.qp-chip.active { color: var(--gold); border-color: rgba(230, 185, 74, 0.4); background: var(--gold-soft); }
+.qp-chip.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); }
 .qp-clear {
   margin-left: auto;
   height: 36px;

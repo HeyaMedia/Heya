@@ -103,7 +103,7 @@ async function submit() {
 <style scoped>
 .cpm-overlay {
   position: fixed; inset: 0; z-index: 220;
-  background: rgba(0,0,0,0.6);
+  background: rgb(var(--shade) / 0.6);
   backdrop-filter: blur(8px);
 }
 .cpm-modal {

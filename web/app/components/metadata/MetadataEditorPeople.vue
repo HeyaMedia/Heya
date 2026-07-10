@@ -116,7 +116,7 @@ const crewDepts = computed(() => {
   transition: background 0.12s;
 }
 .mep-person:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink) / 0.03);
 }
 
 .mep-photo {

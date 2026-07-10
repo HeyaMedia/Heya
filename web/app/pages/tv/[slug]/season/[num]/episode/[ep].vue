@@ -314,7 +314,7 @@ watch([numParam, epParam], async () => {
 .hero-bg-fade {
   position: absolute; inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.7) 40%, rgba(12,12,16,0.4) 100%),
+    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 70%, transparent) 40%, color-mix(in srgb, var(--bg-1) 40%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
 }
 

@@ -253,10 +253,10 @@ onMounted(() => { ensureSources(); load() })
   font-size: 13px;
 }
 .ss-flash.ok {
-  background: color-mix(in oklab, #22c55e 14%, transparent);
+  background: color-mix(in srgb, var(--good) 14%, transparent);
 }
 .ss-flash.err {
-  background: color-mix(in oklab, #ef4444 16%, transparent);
+  background: color-mix(in srgb, var(--bad) 16%, transparent);
 }
 .ss-hint {
   margin-top: 12px;
@@ -279,7 +279,7 @@ onMounted(() => { ensureSources(); load() })
 .ss-btn:hover:not(:disabled) {
   color: var(--fg-0);
   border-color: var(--border-strong);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
 }
 .ss-btn:disabled {
   opacity: 0.5;
@@ -287,8 +287,8 @@ onMounted(() => { ensureSources(); load() })
 }
 .ss-btn.danger:hover:not(:disabled) {
   color: var(--bad);
-  border-color: rgba(217, 107, 107, 0.35);
-  background: rgba(217, 107, 107, 0.08);
+  border-color: color-mix(in srgb, var(--bad) 35%, transparent);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
 }
 .ss-secret-row {
   display: flex;

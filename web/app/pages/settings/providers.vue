@@ -234,8 +234,8 @@ onMounted(load)
   border-radius: var(--r-md);
   border: 1px solid var(--border);
 }
-.test-card.ok { background: rgba(111, 191, 124, 0.06); border-color: rgba(111, 191, 124, 0.25); }
-.test-card.err { background: rgba(217, 107, 107, 0.06); border-color: rgba(217, 107, 107, 0.25); }
+.test-card.ok { background: color-mix(in srgb, var(--good) 6%, transparent); border-color: color-mix(in srgb, var(--good) 25%, transparent); }
+.test-card.err { background: color-mix(in srgb, var(--bad) 6%, transparent); border-color: color-mix(in srgb, var(--bad) 25%, transparent); }
 .test-row { display: flex; align-items: center; gap: 14px; padding: 4px 0; font-size: 13px; }
 .test-key {
   width: 110px; flex-shrink: 0;

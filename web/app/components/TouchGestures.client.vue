@@ -184,16 +184,16 @@ onUnmounted(() => {
   width: 36px; height: 36px;
   border-radius: 50%;
   display: grid; place-items: center;
-  background: rgba(12, 12, 18, 0.92);
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
   border: 1px solid var(--border);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 22px rgb(var(--shade) / 0.45);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
 .ptr-spinner {
   width: 18px; height: 18px;
   border-radius: 50%;
-  border: 2px solid var(--gold-soft, rgba(230, 185, 74, 0.25));
+  border: 2px solid var(--gold-soft);
   border-top-color: var(--gold);
 }
 .ptr-spinner.spin { animation: ptr-spin 0.7s linear infinite; }

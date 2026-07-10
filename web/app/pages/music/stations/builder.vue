@@ -553,9 +553,9 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   margin-bottom: 22px;
   overflow: hidden;
   background:
-    radial-gradient(circle at 92% 0%, rgba(227, 181, 83, 0.13), transparent 42%),
-    linear-gradient(145deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025));
-  border: 1px solid rgba(227, 181, 83, 0.24);
+    radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--gold) 13%, transparent), transparent 42%),
+    linear-gradient(145deg, rgb(var(--ink) / 0.055), rgb(var(--ink) / 0.025));
+  border: 1px solid color-mix(in srgb, var(--gold) 24%, transparent);
   border-radius: 12px;
 }
 .ms-mb-ai.unavailable { border-color: var(--border); }
@@ -588,7 +588,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   resize: vertical;
   padding: 13px 14px;
   color: var(--fg-0);
-  background: rgba(0,0,0,0.18);
+  background: rgb(var(--shade) / 0.18);
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
@@ -598,7 +598,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   transition: border-color 0.15s, background 0.15s;
 }
 .ms-mb-ai-input::placeholder { color: var(--fg-3); }
-.ms-mb-ai-input:focus { border-color: var(--gold); background: rgba(0,0,0,0.24); }
+.ms-mb-ai-input:focus { border-color: var(--gold); background: rgb(var(--shade) / 0.24); }
 .ms-mb-ai-foot {
   display: flex; align-items: center; gap: 16px;
   margin-top: 13px;
@@ -645,7 +645,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-tabs {
   display: flex; gap: 4px;
   padding: 4px;
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   margin-bottom: 12px;
@@ -690,7 +690,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-input {
   flex: 1;
   padding: 12px 14px 12px 40px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--fg-0);
@@ -699,7 +699,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   transition: border-color 0.15s, background 0.15s;
 }
 .ms-mb-input::placeholder { color: var(--fg-3); }
-.ms-mb-input:focus { border-color: var(--gold); background: rgba(255,255,255,0.06); }
+.ms-mb-input:focus { border-color: var(--gold); background: rgb(var(--ink) / 0.06); }
 .ms-mb-add-btn {
   padding: 10px 20px;
   background: var(--gold-soft);
@@ -733,7 +733,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   cursor: pointer;
   transition: background 0.15s;
 }
-.ms-mb-ac-row:hover { background: rgba(255,255,255,0.04); }
+.ms-mb-ac-row:hover { background: rgb(var(--ink) / 0.04); }
 .ms-mb-ac-row:hover .ms-mb-ac-add { color: var(--gold); }
 .ms-mb-ac-add { color: var(--fg-3); transition: color 0.15s; }
 .ac-art {
@@ -766,7 +766,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   display: flex; align-items: flex-start; gap: 12px;
   margin-bottom: 20px;
   padding: 12px 14px;
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px dashed var(--border);
   border-radius: var(--r-md);
 }
@@ -786,7 +786,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-chip {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 10px;
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--fg-1);
@@ -900,7 +900,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-action-btn {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 6px 12px;
-  background: rgba(255,255,255,0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--fg-1);
@@ -909,7 +909,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   cursor: pointer;
   transition: all 0.15s;
 }
-.ms-mb-action-btn:hover { background: rgba(255,255,255,0.09); border-color: var(--fg-3); }
+.ms-mb-action-btn:hover { background: rgb(var(--ink) / 0.09); border-color: var(--fg-3); }
 .ms-mb-action-btn:disabled { opacity: 0.4; cursor: default; }
 
 .ms-mb-track-list { display: flex; flex-direction: column; gap: 2px; }
@@ -923,7 +923,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   cursor: pointer;
   transition: background 0.15s;
 }
-.ms-mb-track-row:hover { background: rgba(255,255,255,0.04); }
+.ms-mb-track-row:hover { background: rgb(var(--ink) / 0.04); }
 .ms-mb-track-idx {
   text-align: right;
   font-family: var(--font-mono);
@@ -940,8 +940,8 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-track-play {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55);
-  color: #fff;
+  background: rgba(0,0,0,0.55); /* on artwork — stays literal */
+  color: #fff; /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
 }

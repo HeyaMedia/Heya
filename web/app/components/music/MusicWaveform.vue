@@ -173,6 +173,13 @@ useResizeObserver(wrap, () => draw())
 
 watch(() => [props.peaks, props.progress], () => draw(), { flush: 'post' })
 
+// getCssVar() above already re-reads getComputedStyle on every draw() call —
+// there's no color cache to invalidate here. The missing piece is a repaint
+// trigger: theme/accent can change live (useAppearance.ts) without peaks or
+// progress changing, so without this the bars keep painting the old colors
+// until the next seek/resize.
+useEventListener(window, 'heya:theme', () => draw())
+
 function pctFromEvent(e: PointerEvent): number {
   const el = wrap.value
   if (!el) return 0
@@ -223,7 +230,7 @@ useEventListener(window, 'pointerup', () => { dragging.value = false })
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(255, 255, 255, 0.4);
+  background: rgb(var(--ink) / 0.4);
   pointer-events: none;
 }
 </style>

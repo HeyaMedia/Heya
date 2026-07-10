@@ -286,7 +286,7 @@ function setType(t: string) {
   color: var(--fg-3);
   transition: background 0.15s, color 0.15s;
 }
-.search-clear:hover { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.search-clear:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 
 /* Results header */
 .search-head { margin-bottom: 20px; }
@@ -302,7 +302,7 @@ function setType(t: string) {
   color: var(--fg-2); font-size: 12px; font-weight: 500; cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.search-tab:hover { background: rgba(255,255,255,0.04); color: var(--fg-0); }
+.search-tab:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
 .search-tab.active { background: var(--gold-soft); color: var(--gold); border-color: var(--gold-soft); }
 .search-tab-count { font-size: 10px; font-family: var(--font-mono); color: var(--fg-4); }
 .search-tab.active .search-tab-count { color: var(--gold); }

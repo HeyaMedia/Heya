@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
 }
 .task-row:last-child { border-bottom: none; }
 .task-row.running {
-  background: rgba(230, 185, 74, 0.035);
+  background: color-mix(in srgb, var(--gold) 3.5%, transparent);
 }
 .task-main {
   grid-area: main;
@@ -581,7 +581,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .task-icon.on {
-  background: rgba(111, 191, 124, 0.12);
+  background: color-mix(in srgb, var(--good) 12%, transparent);
   color: var(--good);
 }
 .task-title-wrap { min-width: 0; }
@@ -772,22 +772,22 @@ onBeforeUnmount(() => {
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 .icon-btn:hover {
-  border-color: rgba(230,185,74,0.35);
+  border-color: color-mix(in srgb, var(--gold) 35%, transparent);
   color: var(--fg-0);
 }
 .icon-btn.active {
   background: var(--gold-soft);
-  border-color: rgba(230,185,74,0.3);
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent);
   color: var(--gold);
 }
 .icon-btn.primary {
   background: var(--gold-soft);
-  border-color: rgba(230,185,74,0.3);
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent);
   color: var(--gold);
 }
 .icon-btn.danger {
-  background: rgba(217,107,107,0.10);
-  border-color: rgba(217,107,107,0.25);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 25%, transparent);
   color: var(--bad);
 }
 

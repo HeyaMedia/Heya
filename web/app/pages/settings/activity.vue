@@ -300,7 +300,7 @@ async function sendMsg() {
 .stream-progress { display: flex; align-items: center; gap: 10px; margin-top: 3px; }
 .prog-track {
   flex: 1; height: 4px; border-radius: 2px;
-  background: rgba(255,255,255,0.08); overflow: hidden;
+  background: rgb(var(--ink) / 0.08); overflow: hidden;
 }
 .prog-fill { height: 100%; background: var(--gold); transition: width 0.5s ease; }
 .prog-fill.paused { background: var(--fg-3); }

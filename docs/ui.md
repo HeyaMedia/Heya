@@ -3,6 +3,44 @@
 Frontend conventions for the Nuxt 4 SPA — shared primitives, surface chrome,
 and the gotchas that keep biting if you don't know them.
 
+## Theming — tokens only, no color literals
+
+The app has four theme modes (dark = default, `light`, `oled`, `system`) and
+nine accent presets, driven by `data-theme` / `data-accent` / `data-density`
+attributes on `<html>`. Everything lives in `web/app/assets/css/heya.css`:
+`:root` is dark; `:root[data-theme="light"]` / `[data-theme="oled"]` override
+the same token names. An inline boot script in `nuxt.config.ts` stamps the
+attributes from `localStorage['heya-appearance']` before first paint (no
+flash); `useAppearance()` owns them at runtime and syncs to
+`/api/me/settings.appearance`.
+
+**Never write a color literal in component CSS.** The conversion vocabulary:
+
+| You want | Write | Notes |
+| --- | --- | --- |
+| White-glass overlay on canvas (hover fill, border, chip bg) | `rgb(var(--ink) / 0.06)` | `--ink` flips to warm near-black in light mode |
+| Recessed/darkened canvas fill (input well, track) | `rgb(var(--shade) / 0.3)` | |
+| Accent on the app canvas (text, active states, fills) | `--gold`, `--gold-bright`, `--gold-deep`, `--gold-soft`, `--gold-glow` | These are accent *aliases*, readability-adjusted per theme (light darkens them) |
+| Accent painted **on artwork/video** (badges over posters, player OSD fills) | `--accent`, `--accent-bright`, `--accent-deep` | Theme-invariant — stays vivid over images |
+| Text on an accent-filled button | `var(--accent-ink)` | |
+| Alpha variant of any token | `color-mix(in srgb, var(--gold) 40%, transparent)` | |
+| Scrim/gradient over artwork | literal black/white | Artwork doesn't theme — the *canvas side* of an artwork→page fade uses `var(--bg-1)` / color-mix |
+
+Density: `comfortable` (default) / `compact` via `--tile-min`,
+`--grid-gap-*`, `--row-pad-y`, `--page-pad-*` tokens — consume those instead
+of hardcoding grid/row spacing where it makes sense.
+
+Canvas-drawn components (waveforms, visualizers, EQ) can't use `var()` in
+draw calls — they resolve tokens via `getComputedStyle` once and **must
+listen for the window `'heya:theme'` CustomEvent** (dispatched by
+`useAppearance` after every change) to re-resolve and repaint.
+
+The ambient rotating-backdrop background is `AmbientBackdrop.vue`, mounted
+as the first child of `.app` in `layouts/default.vue` at `z-index: -1`
+(paints above `.app`'s background, below all in-flow content). It's
+route-aware (home = all libraries, `/movies` = movies, …) and fed by
+`GET /api/media/ambient-backdrops`.
+
 ## `surface.css` — anything that floats
 
 Floating elements (popovers, dropdowns, dialogs, tooltips, context menus, the

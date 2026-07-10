@@ -67,7 +67,7 @@ async function copy(text: string | number) {
   transition: opacity 0.12s, background 0.12s;
 }
 .sv2-kv-row:hover .sv2-kv-copy { opacity: 1; }
-.sv2-kv-copy:hover { background: rgba(255,255,255,0.05); color: var(--fg-1); }
+.sv2-kv-copy:hover { background: rgb(var(--ink) / 0.05); color: var(--fg-1); }
 
 /* Phone: the 200px key column leaves almost nothing for the value (paths,
    URLs, version strings) at 390px. Stack key above value instead. */

@@ -76,7 +76,11 @@ withDefaults(defineProps<{
 .mediac { display: block; height: 100%; }
 
 /* Painted from inside the Poster slot, so the gradient sits above the image
-   but below any badges/info. z-index inherits Poster's `isolation: isolate`. */
+   but below any badges/info. z-index inherits Poster's `isolation: isolate`.
+   This gradient, the badges below, and the bottom title/sub/progress overlay
+   all paint directly over poster/cover artwork — on-artwork per the design
+   system's rule, so their black/white literals stay as authored rather than
+   theming with --ink/--shade. */
 .mediac-gradient {
   position: absolute; inset: 0;
   background: linear-gradient(0deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.25) 45%, transparent 72%);
@@ -100,7 +104,8 @@ withDefaults(defineProps<{
 }
 .mediac-badge-tl { top: 8px; left: 8px; }
 .mediac-badge-tr { top: 8px; right: 8px; }
-.mediac-badge-gold { color: var(--gold); }
+/* On artwork — raw accent, not the theme-adjusted --gold alias */
+.mediac-badge-gold { color: var(--accent); }
 
 .mediac-info {
   position: absolute; bottom: 0; left: 0; right: 0; z-index: 3;

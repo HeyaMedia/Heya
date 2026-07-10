@@ -141,8 +141,8 @@ function flag(code: string) {
   color: inherit;
 }
 .rc-country-tile:hover {
-  border-color: rgba(255, 196, 50, 0.3);
-  background: rgba(255, 196, 50, 0.04);
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent);
+  background: color-mix(in srgb, var(--gold) 4%, transparent);
 }
 .rc-flag { font-size: 20px; flex-shrink: 0; line-height: 1; }
 .rc-country-name { flex: 1; min-width: 0; font-size: 13px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -162,7 +162,7 @@ function flag(code: string) {
   gap: 4px;
   transition: color 0.15s, background 0.15s;
 }
-.rc-drill-back:hover { color: var(--gold); background: rgba(255, 196, 50, 0.06); }
+.rc-drill-back:hover { color: var(--gold); background: color-mix(in srgb, var(--gold) 6%, transparent); }
 .rc-drill-title { display: flex; align-items: center; gap: 10px; margin: 0; }
 
 .rc-loading, .rc-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }

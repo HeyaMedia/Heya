@@ -224,7 +224,7 @@ onMounted(async () => {
   padding: 5px 10px; cursor: pointer; transition: background 0.1s;
   position: relative; min-height: 28px;
 }
-.mtb-row:hover { background: rgba(255,255,255,0.03); }
+.mtb-row:hover { background: rgb(var(--ink) / 0.03); }
 .mtb-row.active {
   background: var(--gold-soft);
 }

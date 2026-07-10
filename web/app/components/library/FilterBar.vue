@@ -462,10 +462,10 @@ function langName(code: string) {
 .filter-bar-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); white-space: nowrap; }
 .filter-bar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-.btn-ghost-sm.active { color: var(--gold); border-color: rgba(230, 185, 74, 0.35); }
+.btn-ghost-sm.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 35%, transparent); }
 
 .fb-reset { color: var(--fg-2); }
-.fb-reset:hover { color: var(--bad); border-color: rgba(217, 107, 107, 0.35); }
+.fb-reset:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 
 .fb-caret { opacity: 0.45; margin-left: -2px; transition: transform 0.15s ease; }
 .fb-caret.open { transform: rotate(180deg); }
@@ -481,7 +481,7 @@ function langName(code: string) {
 .view-toggle {
   display: flex; align-items: center; gap: 2px;
   height: 32px; padding: 2px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
 }
@@ -491,7 +491,7 @@ function langName(code: string) {
   color: var(--fg-2);
   transition: background 0.12s ease, color 0.12s ease;
 }
-.view-toggle-btn:hover { color: var(--fg-0); background: rgba(255,255,255,0.06); }
+.view-toggle-btn:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.06); }
 .view-toggle-btn.active { background: var(--gold-soft); color: var(--gold); }
 
 /* Filter pills */
@@ -566,20 +566,20 @@ function langName(code: string) {
 .fb-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .fb-chip {
   padding: 4px 11px; border-radius: 100px; font-size: 11.5px; font-weight: 500;
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.04); border: 1px solid var(--border);
   color: var(--fg-1); cursor: pointer; transition: all 0.15s;
   display: inline-flex; align-items: center; gap: 5px;
 }
 .fb-chip:hover { border-color: var(--fg-3); color: var(--fg-0); }
-.fb-chip.active { background: var(--gold-soft); border-color: rgba(230,185,74,0.5); color: var(--gold-bright); }
+.fb-chip.active { background: var(--gold-soft); border-color: color-mix(in srgb, var(--gold) 50%, transparent); color: var(--gold-bright); }
 .fb-chip-count { font-size: 9.5px; font-family: var(--font-mono); color: var(--fg-3); }
-.fb-chip.active .fb-chip-count { color: rgba(230,185,74,0.65); }
+.fb-chip.active .fb-chip-count { color: color-mix(in srgb, var(--gold) 65%, transparent); }
 
 .fb-range { display: flex; align-items: center; gap: 6px; }
 .fb-range-sep { color: var(--fg-3); font-size: 13px; }
 .fb-input {
   width: 76px; padding: 6px 9px; border-radius: var(--r-sm);
-  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.05); border: 1px solid var(--border);
   color: var(--fg-0); font-size: 12px; font-family: var(--font-mono);
   transition: border-color 0.15s;
 }
@@ -589,7 +589,7 @@ function langName(code: string) {
 /* Watched segmented control */
 .fb-seg {
   display: inline-flex; gap: 2px; padding: 2px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
 }
@@ -614,13 +614,13 @@ function langName(code: string) {
   padding: 6px 9px; font-size: 12px; border-radius: var(--r-sm);
   cursor: pointer; color: var(--fg-1);
 }
-.fb-ta-opt:hover { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.fb-ta-opt:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 
 .fb-pop-foot {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 16px;
   border-top: 1px solid var(--border);
-  background: rgba(0,0,0,0.15);
+  background: rgb(var(--shade) / 0.15);
 }
 .fb-foot-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -628,7 +628,7 @@ function langName(code: string) {
   font-size: 12px; font-weight: 500; color: var(--fg-2);
   transition: background 0.12s ease, color 0.12s ease;
 }
-.fb-foot-btn:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.fb-foot-btn:hover:not(:disabled) { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 .fb-foot-btn:disabled { opacity: 0.35; cursor: default; }
 .fb-foot-btn.gold { color: var(--gold); }
 .fb-foot-btn.gold:hover:not(:disabled) { background: var(--gold-soft); color: var(--gold-bright); }

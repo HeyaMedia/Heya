@@ -671,7 +671,7 @@ onMounted(async () => {
 .hero-portrait {
   position: relative; aspect-ratio: 2/3;
   border-radius: var(--r-md); overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgb(var(--ink) / 0.06);
   background: var(--bg-3);
 }
 .hero-portrait-img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -725,7 +725,7 @@ onMounted(async () => {
   display: inline-flex; align-items: center; gap: 6px;
   height: 30px; padding: 0 12px;
   border-radius: 100px;
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.05); /* on artwork — stays literal, see comment above */
   border: 1px solid var(--border);
   color: var(--fg-2); text-decoration: none;
   font-size: 12px; font-weight: 500;
@@ -794,7 +794,7 @@ onMounted(async () => {
 }
 .stat-row-bar {
   height: 4px; border-radius: 2px;
-  background: rgba(255,255,255,0.06); overflow: hidden;
+  background: rgb(var(--ink) / 0.06); overflow: hidden;
 }
 .stat-row-fill {
   height: 100%; background: var(--gold); border-radius: 2px;
@@ -834,9 +834,9 @@ onMounted(async () => {
 .scope-count {
   font-size: 11px; font-family: var(--font-mono);
   color: var(--fg-3); padding: 1px 7px; border-radius: 999px;
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
 }
-.scope-btn.active .scope-count { background: rgba(255,196,50,0.12); color: var(--gold); }
+.scope-btn.active .scope-count { background: color-mix(in srgb, var(--gold) 12%, transparent); color: var(--gold); }
 
 /* Known-for credits get a slightly dimmed look so users can tell at a
    glance they're not clickable / not local. */

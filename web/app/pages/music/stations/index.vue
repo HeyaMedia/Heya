@@ -244,13 +244,13 @@ async function playMix(mix: Mix) {
   padding: 20px;
   border-radius: var(--r-md);
   text-decoration: none;
-  color: #fff;
+  color: #fff; /* on the fixed gradient tile — stays literal */
   display: flex; align-items: flex-end; gap: 14px;
   overflow: hidden;
   transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px rgb(var(--shade) / 0.35);
 }
-.ms-station-card:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
+.ms-station-card:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgb(var(--shade) / 0.45); }
 .ms-station-body { flex: 1; }
 .ms-station-icon {
   display: block;
@@ -272,6 +272,7 @@ async function playMix(mix: Mix) {
 .ms-station-arrow {
   width: 40px; height: 40px;
   border-radius: 50%;
+  /* badge painted over the gradient tile — stays literal */
   background: rgba(255,255,255,0.2);
   backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center;
@@ -288,7 +289,7 @@ async function playMix(mix: Mix) {
 }
 .ms-browse-card {
   padding: 24px 22px;
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   text-decoration: none;
@@ -296,7 +297,7 @@ async function playMix(mix: Mix) {
   transition: all 0.15s;
 }
 .ms-browse-card:hover {
-  background: rgba(255,255,255,0.06);
+  background: rgb(var(--ink) / 0.06);
   border-color: var(--gold-soft);
   transform: translateY(-2px);
 }

@@ -138,7 +138,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
-.empty-state.err { color: var(--bad); background: rgba(217,107,107,0.06); border-color: rgba(217,107,107,0.25); margin-bottom: 16px; }
+.empty-state.err { color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, transparent); border-color: color-mix(in srgb, var(--bad) 25%, transparent); margin-bottom: 16px; }
 
 .tiles {
   display: grid;
@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
 }
 .pool-segment { height: 100%; transition: width 0.4s ease; }
 .pool-segment.used { background: var(--gold); }
-.pool-segment.idle { background: rgba(111, 191, 124, 0.6); }
+.pool-segment.idle { background: color-mix(in srgb, var(--good) 60%, transparent); }
 .pool-legend {
   display: flex; gap: 14px;
   margin-top: 6px;
@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
 .legend { display: inline-flex; align-items: center; gap: 5px; }
 .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
 .legend.used .dot { background: var(--gold); }
-.legend.idle .dot { background: rgba(111, 191, 124, 0.6); }
+.legend.idle .dot { background: color-mix(in srgb, var(--good) 60%, transparent); }
 .legend.free .dot { background: var(--bg-0); border: 1px solid var(--border); }
 
 .tbl-list { display: flex; flex-direction: column; gap: 4px; }

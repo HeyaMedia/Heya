@@ -330,6 +330,8 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 .np-backdrop-tint {
   position: absolute;
   inset: 0;
+  /* scrim over the blurred backdrop art — stays literal; already fades to
+     the theme-aware var(--bg-0) where it meets the page canvas */
   background:
     radial-gradient(ellipse at top, rgba(0,0,0,0.35), rgba(0,0,0,0.7)),
     linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.75) 70%, var(--bg-0) 100%);
@@ -344,6 +346,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   width: 40px;
   height: 40px;
   border-radius: 50%;
+  /* button floating over the backdrop art — stays literal */
   background: rgba(255, 255, 255, 0.08);
   border: 0;
   color: var(--fg-0);
@@ -380,7 +383,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--bg-3);
-  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  box-shadow: 0 32px 80px rgb(var(--shade) / 0.55), 0 0 0 1px rgb(var(--ink) / 0.04);
 }
 .np-art-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .np-art-placeholder {
@@ -509,7 +512,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   position: relative;
   transition: background 0.15s, color 0.15s;
 }
-.np-icon:hover { background: rgba(255, 255, 255, 0.07); color: var(--fg-0); }
+.np-icon:hover { background: rgba(255, 255, 255, 0.07); color: var(--fg-0); } /* floating over the backdrop art — stays literal */
 .np-icon.active { color: var(--gold); }
 .np-play {
   width: 60px;

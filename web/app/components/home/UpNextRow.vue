@@ -108,10 +108,10 @@ function detailUrl(item: UpNextItem): string {
 .scroll-btn {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.06); border: 1px solid var(--border);
   color: var(--fg-2); transition: all 0.15s;
 }
-.scroll-btn:hover { background: rgba(255,255,255,0.12); color: var(--fg-0); }
+.scroll-btn:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
 .un-tile { flex-shrink: 0; cursor: pointer; }
 
@@ -121,7 +121,7 @@ function detailUrl(item: UpNextItem): string {
 .un-play-overlay {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.35);
+  background: rgba(0,0,0,0.35); /* on artwork — stays literal */
   opacity: 0;
   transition: opacity 0.15s;
   pointer-events: none;
@@ -130,7 +130,7 @@ function detailUrl(item: UpNextItem): string {
 .un-tile:hover .un-play-overlay { opacity: 1; }
 .un-play-btn {
   width: 44px; height: 44px; border-radius: 50%;
-  background: rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.18); /* on artwork — stays literal */
   backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   color: #fff;

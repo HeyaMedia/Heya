@@ -33,28 +33,28 @@ defineProps<{
 
 .sv2-badge-ok {
   color: var(--good);
-  background: rgba(111, 191, 124, 0.10);
-  border-color: rgba(111, 191, 124, 0.25);
+  background: color-mix(in srgb, var(--good) 10%, transparent);
+  border-color: color-mix(in srgb, var(--good) 25%, transparent);
 }
 .sv2-badge-ok .sv2-badge-dot { background: var(--good); }
 
 .sv2-badge-warn {
   color: var(--gold);
   background: var(--gold-soft);
-  border-color: rgba(230, 185, 74, 0.30);
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent);
 }
 .sv2-badge-warn .sv2-badge-dot { background: var(--gold); }
 
 .sv2-badge-error {
   color: var(--bad);
-  background: rgba(217, 107, 107, 0.10);
-  border-color: rgba(217, 107, 107, 0.30);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
 }
 .sv2-badge-error .sv2-badge-dot { background: var(--bad); }
 
 .sv2-badge-idle {
   color: var(--fg-3);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink) / 0.04);
   border-color: var(--border);
 }
 .sv2-badge-idle .sv2-badge-dot { background: var(--fg-4); }

@@ -133,8 +133,8 @@ function tagSize(count: number) {
   text-transform: capitalize;
 }
 .rt-tag:hover {
-  background: rgba(255, 196, 50, 0.08);
-  border-color: rgba(255, 196, 50, 0.3);
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent);
   color: var(--gold);
 }
 .rt-tag-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); }
@@ -153,7 +153,7 @@ function tagSize(count: number) {
   gap: 4px;
   transition: color 0.15s, background 0.15s;
 }
-.rt-drill-back:hover { color: var(--gold); background: rgba(255, 196, 50, 0.06); }
+.rt-drill-back:hover { color: var(--gold); background: color-mix(in srgb, var(--gold) 6%, transparent); }
 .rt-drill-title { margin: 0; text-transform: capitalize; }
 
 .rt-loading, .rt-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }

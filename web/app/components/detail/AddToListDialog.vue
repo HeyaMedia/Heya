@@ -62,7 +62,7 @@ watch(open, (v) => { if (v) loadLists() })
   padding: 10px 12px; border-radius: var(--r-sm); font-size: 13px;
   color: var(--fg-1); transition: background 0.12s; text-align: left;
 }
-.list-option:hover { background: rgba(255,255,255,0.04); }
+.list-option:hover { background: rgb(var(--ink) / 0.04); }
 .list-option.active { color: var(--gold); }
 .list-option-count { margin-left: auto; font-size: 10px; font-family: var(--font-mono); color: var(--fg-4); }
 

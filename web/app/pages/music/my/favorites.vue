@@ -214,7 +214,7 @@ async function playFrom(i: number) {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
   margin-bottom: 28px;
   padding: 14px 18px;
-  background: rgba(255,255,255,0.03);
+  background: rgb(var(--ink) / 0.03);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
@@ -232,7 +232,7 @@ async function playFrom(i: number) {
 .ms-fav-toggle {
   display: flex; gap: 2px;
   padding: 3px;
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border-radius: var(--r-sm);
 }
 .ms-fav-toggle-btn {

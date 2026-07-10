@@ -269,7 +269,7 @@ watch(() => props.section, (s) => {
   text-decoration: none;
   transition: color 0.15s, background 0.15s;
 }
-.ms-nav-item:hover { background: rgba(255,255,255,0.04); color: var(--fg-0); }
+.ms-nav-item:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
 .ms-nav-item.active {
   color: var(--gold);
   background: var(--gold-soft);
@@ -301,7 +301,7 @@ watch(() => props.section, (s) => {
   border-radius: var(--r-sm);
   transition: color 0.15s, background 0.15s;
 }
-.ms-chev:hover { color: var(--fg-0); background: rgba(255,255,255,0.04); }
+.ms-chev:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.04); }
 .ms-chev :deep(svg) { transition: transform 0.2s; }
 /* Rotate the chevron when the collapsible underneath is open. Reka stamps
    data-state on the CollapsibleTrigger button, so a CSS rule is enough —
@@ -348,7 +348,7 @@ watch(() => props.section, (s) => {
   text-decoration: none;
   transition: color 0.15s, background 0.15s;
 }
-.ms-sub-item:hover { background: rgba(255,255,255,0.04); color: var(--fg-0); }
+.ms-sub-item:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
 .ms-sub-item.active { color: var(--gold); background: var(--gold-soft); }
 
 .ms-create {
@@ -367,7 +367,7 @@ watch(() => props.section, (s) => {
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
 }
-.ms-create:hover { background: rgba(255,255,255,0.04); color: var(--fg-0); }
+.ms-create:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
 .ms-create-badge {
   display: inline-flex;
   align-items: center;
@@ -414,7 +414,7 @@ watch(() => props.section, (s) => {
   cursor: pointer;
   transition: background 0.15s;
 }
-.ms-pl-item:hover { background: rgba(255,255,255,0.04); }
+.ms-pl-item:hover { background: rgb(var(--ink) / 0.04); }
 .ms-pl-item.active { background: var(--gold-soft); }
 .ms-pl-cover {
   width: 40px;
@@ -425,7 +425,7 @@ watch(() => props.section, (s) => {
 .ms-pl-cover-loved {
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, var(--gold), color-mix(in oklab, var(--gold) 60%, #c8501c));
-  color: #fff;
+  color: #fff; /* icon on the gold gradient tile — stays literal */
 }
 .ms-pl-meta { flex: 1; min-width: 0; }
 .ms-pl-name {
@@ -452,7 +452,7 @@ watch(() => props.section, (s) => {
 /* Drag-and-drop target state — matches LibrarySidebar's gold dashed
    treatment for movie/TV "add to list" drops. */
 .ms-pl-item.drop-target {
-  background: rgba(212,175,55,0.1);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
   border: 1px dashed var(--gold);
   border-radius: var(--r-sm);
 }

@@ -217,7 +217,7 @@ function onImgError(e: Event | string) {
   color: var(--fg-0);
   transition: background 0.12s ease;
 }
-.track-row:hover { background: rgba(255,255,255,0.03); }
+.track-row:hover { background: rgb(var(--ink) / 0.03); }
 .track-thumb {
   width: 40px; height: 40px;
   background: var(--bg-3);
