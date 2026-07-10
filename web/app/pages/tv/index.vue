@@ -267,6 +267,9 @@ import { useCardContextItems } from '~/composables/useContextMenu'
 // sidebar selection reuses this component instead of remounting + refetching.
 definePageMeta({ key: 'browse-tv' })
 
+// Ambient background: cycling TV-artwork pool with the content veil.
+useBackground().pool('tv')
+
 const mainEl = ref<HTMLElement | null>(null)
 const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<EnrichedMediaItem[]>([])

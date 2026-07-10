@@ -171,11 +171,11 @@ const bgB = ref<string | null>(null)
 // image hides via .ambient-extended and the AmbientBackdrop layer follows
 // the deck's rotation through this watcher.
 const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
+const background = useBackground()
 const currentBg = computed(() => (showA.value ? bgA.value : bgB.value) || null)
 watch([currentBg, ambientEnabled], ([url, on]) => {
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
+  if (on && url) background.set(url)
+  else background.clear()
 }, { immediate: true })
 
 // Artwork-adaptive buttons: Play carries the backdrop's dominant tone,
@@ -513,7 +513,7 @@ onUnmounted(() => {
     radial-gradient(ellipse at 85% 110%, rgba(var(--hero-tint), 0.16), transparent 55%);
 }
 /* Ambient extension: the AmbientBackdrop layer shows this hero's current
-   image full-page (see the ambientArt watcher), so the local copy hides —
+   image full-page (see the background watcher), so the local copy hides —
    its different crop would seam at the hero edges — and the fade softens
    so the artwork continues past the hero bottom instead of ending at
    solid canvas. The trailer video still plays locally on top. */

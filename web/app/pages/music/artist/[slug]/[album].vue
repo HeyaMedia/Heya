@@ -138,10 +138,10 @@ const backdropStyle = computed(() => {
 // untouched. The cover (not the blurred artist-backdrop div) is the artwork
 // this page actually owns, so it's what gets pushed to the ambient channel.
 const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
+const background = useBackground()
 watch([coverUrl, ambientEnabled], ([url, on]) => {
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
+  if (on && url) background.set(url)
+  else background.clear()
 }, { immediate: true })
 
 function trackToPlayable(t: TrackView): Track {
@@ -461,7 +461,7 @@ function playFromIndex(i: number) {
   z-index: 1;
 }
 /* Ambient extension: the AmbientBackdrop layer shows this album's cover
-   full-page (see the ambientArt watcher), so the local blurred backdrop
+   full-page (see the background watcher), so the local blurred backdrop
    hides — its different crop would seam at the hero edges — and the fade
    softens its transition into the page canvas so the artwork continues
    past the hero bottom instead of ending at solid var(--bg-0). */

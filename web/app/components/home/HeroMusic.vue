@@ -322,11 +322,11 @@ const bgFallback = computed(() => (bgUrl.value ? null : spotlight.value?.art || 
 // the local copies hide via .ambient-extended and the AmbientBackdrop layer
 // follows the carousel through this watcher.
 const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
+const background = useBackground()
 watch([bgUrl, bgFallback, ambientEnabled], ([bg, fb, on]) => {
   const url = bg ?? fb
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
+  if (on && url) background.set(url)
+  else background.clear()
 }, { immediate: true })
 
 // CTA wears the spotlight art's dominant tone (falls back to theme gold).

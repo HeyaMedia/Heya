@@ -91,6 +91,7 @@ const nameMap: Record<string, string> = {
   key: 'key',
   'arrow-right': 'arrow-right',
   eye: 'eye',
+  'eye-slash': 'eye-slash',
   'sign-out': 'sign-out',
   wrench: 'wrench',
   'hard-drives': 'hard-drives',

@@ -123,7 +123,7 @@
       </div>
     </div>
 
-    <div v-if="totalCount > 0" class="lib-footer">
+    <div v-if="totalCount > 0 && !hideFooter" class="lib-footer">
       <div class="lib-footer-text">{{ totalCount }} titles</div>
     </div>
   </aside>
@@ -147,6 +147,8 @@ const props = defineProps<{
   showBrowse?: boolean
   /** Show the Roulette link (movies only — the page lives at /movies/roulette). */
   showRoulette?: boolean
+  /** Drop the "N titles" footer (books — the ambient corner cluster sits there). */
+  hideFooter?: boolean
   /** 'sidebar' (default) = fixed 240px aside. 'sheet' = fills an AppSheet body
    *  on phone (movies/tv/books index.vue) — same markup/behavior, just sheds
    *  the standalone-aside chrome. See the `.lib-sidebar-sheet` rule below. */

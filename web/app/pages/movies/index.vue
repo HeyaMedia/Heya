@@ -364,6 +364,11 @@ import { useCardContextItems } from '~/composables/useContextMenu'
 // the sidebar selection reuses this component instead of remounting + refetching.
 definePageMeta({ key: 'browse-movies' })
 
+// Ambient background: this page owns a cycling movie-artwork pool with the
+// content veil (see useBackground.ts) — never stuck on whatever the home
+// hero showed last.
+useBackground().pool('movie')
+
 const mainEl = ref<HTMLElement | null>(null)
 const gridWrap = ref<HTMLElement | null>(null)
 const items = ref<EnrichedMediaItem[]>([])

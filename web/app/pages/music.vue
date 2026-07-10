@@ -58,6 +58,11 @@ definePageMeta({ layout: 'default' })
 // music shell. Suppressed while typing.
 useGlobalHotkeys()
 
+// Ambient background: the whole music shell rides an artist-artwork pool.
+// Child pages that own a specific image (artist/album detail) push their
+// art on TOP of this claim and pop back to the pool when they unmount.
+useBackground().pool('music')
+
 const route = useRoute()
 const router = useRouter()
 

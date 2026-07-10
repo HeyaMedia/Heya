@@ -7,6 +7,7 @@
       :active-view="null"
       type-label="Books"
       :total-count="items.length"
+      :hide-footer="true"
       @select="activeLib = $event"
     />
     <!-- Section-sidebar left drawer — phone (<=720px) and the compact band
@@ -154,6 +155,9 @@
 
 <script setup lang="ts">
 import type { MediaItem, Library, UserList } from '~~/shared/types'
+
+// Ambient background: cycling book-artwork pool with the content veil.
+useBackground().pool('book')
 
 type BookKind = 'book' | 'audiobook'
 type BookKindFilter = 'all' | BookKind

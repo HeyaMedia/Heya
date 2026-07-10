@@ -6,11 +6,14 @@
     individual AppTooltips can still override via :delay.
   -->
   <TooltipProvider :delay-duration="400" :skip-delay-duration="200">
-    <div class="app">
+    <div class="app" :class="{ 'bg-reveal': bgCtl.reveal }">
       <!-- Ambient rotating library-artwork background. First child +
            z-index:-1 = paints above .app's own background, below all
-           in-flow content; no sibling stacking changes needed. -->
+           in-flow content; no sibling stacking changes needed. The corner
+           cluster (reveal/shuffle/pause) steers it; both are excluded from
+           the bg-reveal fade in heya.css. -->
       <AmbientBackdrop />
+      <AmbientControls />
       <AppTopBar />
       <div class="app-main">
         <slot />
@@ -34,4 +37,8 @@
 
 <script setup lang="ts">
 import { TooltipProvider } from 'reka-ui'
+
+// Reveal mode (AmbientControls' eye): flips the .bg-reveal class that fades
+// the whole app away so the ambient artwork shows clean.
+const bgCtl = useBackgroundControls()
 </script>

@@ -68,10 +68,10 @@ const bgUrl = computed(() => props.items[0] ? useBackdropUrl(props.items[0]) : n
 // .ambient-extended and the AmbientBackdrop layer follows the queue through
 // this watcher.
 const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
+const background = useBackground()
 watch([bgUrl, ambientEnabled], ([url, on]) => {
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
+  if (on && url) background.set(url)
+  else background.clear()
 }, { immediate: true })
 
 const totalMinutes = computed(() =>
@@ -109,7 +109,7 @@ function stillUrl(it: UpNextItem) {
     linear-gradient(to top, var(--bg-1) 0%, transparent 45%);
 }
 /* Ambient extension: the AmbientBackdrop layer shows this item's backdrop
-   full-page (see the ambientArt watcher), so the local copy hides — its
+   full-page (see the background watcher), so the local copy hides — its
    different crop would seam at the hero edges — and the fade softens so
    the artwork continues past the hero bottom instead of ending at solid
    canvas. */

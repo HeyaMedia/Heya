@@ -383,11 +383,11 @@ const {
 // only the softened fade stays for text legibility. Off = classic scoped
 // hero, untouched.
 const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
+const background = useBackground()
 const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
 watch([currentHeroBackdrop, ambientEnabled], ([url, on]) => {
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
+  if (on && url) background.set(url)
+  else background.clear()
 }, { immediate: true })
 
 // Lightbox

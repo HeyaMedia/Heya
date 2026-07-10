@@ -185,11 +185,11 @@ let landedGuard: ReturnType<typeof setTimeout> | null = null
 // via .ambient-extended and the AmbientBackdrop layer follows the reel's
 // landings through this watcher.
 const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
+const background = useBackground()
 const currentBg = computed(() => (pick.value && settled.value ? useBackdropUrl(pick.value) : null) || null)
 watch([currentBg, ambientEnabled], ([url, on]) => {
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
+  if (on && url) background.set(url)
+  else background.clear()
 }, { immediate: true })
 
 function spin() {
@@ -294,7 +294,7 @@ onUnmounted(() => {
     linear-gradient(to top, var(--bg-1) 0%, transparent 40%);
 }
 /* Ambient extension: the AmbientBackdrop layer shows this pick's backdrop
-   full-page (see the ambientArt watcher), so the local copies hide — a
+   full-page (see the background watcher), so the local copies hide — a
    duplicate crop would seam where the page meets the chrome. */
 .roulette-bg.ambient-extended .roulette-bg-img { display: none; }
 .roulette-bg.ambient-extended .roulette-bg-gradient { display: none; }

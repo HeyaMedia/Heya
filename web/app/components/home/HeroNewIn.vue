@@ -352,10 +352,10 @@ const bgUrl = computed(() => spotlight.value?.backdrop ?? null)
 // the local `.newin-bg-img` hides via .ambient-extended and the
 // AmbientBackdrop layer follows the carousel through this watcher.
 const { ambientEnabled } = useAppearance()
-const ambientArt = useAmbientArt()
+const background = useBackground()
 watch([bgUrl, ambientEnabled], ([url, on]) => {
-  if (on && url) ambientArt.set(url)
-  else ambientArt.clear()
+  if (on && url) background.set(url)
+  else background.clear()
 }, { immediate: true })
 
 // CTA wears the spotlight backdrop's dominant tone (falls back to theme gold).

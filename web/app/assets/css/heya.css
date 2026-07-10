@@ -278,6 +278,29 @@ a { color: inherit; text-decoration: none; }
 
 .app.music-mode { grid-template-rows: var(--topbar-h) 1fr; }
 
+/* Ambient reveal (AmbientControls' eye button): everything except the
+   backdrop layer and the corner controls fades away so the artwork can be
+   admired full-screen. `visibility: hidden` (not just opacity) so the faded
+   UI also leaves the tab order and accessibility tree — delayed until the
+   fade finishes on the way out, instant-visible on the way back. Escape or
+   the eye button brings the page back. */
+.app > *:not(.ambient-backdrop):not(.ambient-ctls) {
+  transition: opacity 0.6s ease, visibility 0s linear;
+}
+.app.bg-reveal > *:not(.ambient-backdrop):not(.ambient-ctls) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.6s ease, visibility 0s linear 0.6s;
+}
+
+/* Music shell: the Playbar owns the bottom strip — whatever corner controls
+   do render under /music (the art-mode eye on artist/album detail; the pool
+   cluster hides itself entirely there, see AmbientControls) ride above it. */
+.app:has(.music-shell) .ambient-ctls {
+  bottom: calc(var(--playbar-h) + 14px);
+}
+
 .app-main {
   position: relative;
   overflow: hidden;
@@ -743,6 +766,14 @@ a { color: inherit; text-decoration: none; }
    (--shadow-card) aren't cut off at the scroller boundary. */
 .hscroll { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; scroll-padding-left: 48px; padding: 12px 48px 72px; margin: -12px -48px -68px; }
 .hscroll::-webkit-scrollbar { display: none; }
+
+/* vue-virtual-scroller ships `overflow: hidden` on its item wrapper, which
+   beheads every poster's drop shadow and hover lift inside the virtualized
+   library grids (/movies, /tv, /books). Scroll geometry doesn't need the
+   clip — in page-mode the wrapper is a plain relative box and item views
+   translate within it — so let paint escape. `.app` prefix outranks the
+   library's single-class rule regardless of CSS load order. */
+.app .vue-recycle-scroller__item-wrapper { overflow: visible; }
 
 @media (max-width: 900px) {
   .detail-body-below { padding: 0 20px 60px; }

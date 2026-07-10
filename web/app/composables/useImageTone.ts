@@ -75,11 +75,20 @@ export function sampleImageTone(url: string): Promise<ImageTone | null> {
         l = Math.min(0.58, Math.max(0.38, l))
         const [r1, g1, b1] = hslToRgb(h, s, l)
         const [r2, g2, b2] = hslToRgb(h + 180, s, l)
+        // Ink by RELATIVE luminance, not HSL lightness: a saturated yellow
+        // at l=0.5 is perceptually bright (L≈0.7) and white ink on it is
+        // unreadable. 0.2 is the crossover where near-black and white give
+        // equal WCAG contrast against the fill.
+        const lin = (v: number) => {
+          v /= 255
+          return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+        }
+        const L = 0.2126 * lin(r1) + 0.7152 * lin(g1) + 0.0722 * lin(b1)
         resolve({
           main: `rgb(${r1} ${g1} ${b1})`,
           complement: `rgb(${r2} ${g2} ${b2})`,
           complementTriplet: `${r2} ${g2} ${b2}`,
-          ink: l > 0.5 ? '#16130d' : '#ffffff',
+          ink: L > 0.2 ? '#16130d' : '#ffffff',
         })
       } catch {
         resolve(null)

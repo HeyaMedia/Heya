@@ -29,6 +29,7 @@
       <button
         v-if="aiReady"
         class="rb-ai-btn"
+        :style="bgToneStyle"
         :disabled="nlQuery.trim().length < 2 || aiPending"
         @click="askAI"
       >
@@ -38,7 +39,7 @@
     </div>
 
     <div v-if="!searching" class="rb-controls">
-      <AppMenu trigger-class="btn-ghost-sm" :width="240" align="start">
+      <AppMenu trigger-class="btn-ghost-sm rb-steer-btn" :width="240" align="start">
         <template #trigger>
           {{ genre || 'Any genre' }}
           <Icon name="chevdown" :size="10" class="rb-caret" />
@@ -70,7 +71,7 @@
       </div>
 
       <div class="rb-spacer" />
-      <button v-if="genre || minRating" class="btn-ghost-sm" @click="reset">Clear</button>
+      <button v-if="genre || minRating" class="btn-ghost-sm rb-steer-btn" @click="reset">Clear</button>
     </div>
 
     <div v-if="aiPending" class="rb-note rb-ai-note">
@@ -150,6 +151,10 @@ type RecItem = { id: number; title: string; slug: string; year?: string; media_t
 
 const genre = ref('')
 const minRating = ref(0)
+
+// Ask AI wears the ambient backdrop's dominant tone (same trick as the hero
+// CTAs); undefined when ambient is off → the gold-soft CSS coat below.
+const bgToneStyle = useBackgroundToneStyle()
 
 const ratingOptions = [
   { label: 'Any', value: 0 },
@@ -376,24 +381,63 @@ function reset() {
 </script>
 
 <style scoped>
-.rb-head { margin-bottom: 20px; }
+/* Art-proof header — same recipe as SectionHeader: a blended --bg-1 wash
+   behind the text block (no locatable edge) plus triple-halo text shadows,
+   so the title holds up over whatever the ambient pool is showing. */
+.rb-head {
+  position: relative;
+  isolation: isolate;
+  margin-bottom: 20px;
+}
+.rb-head::before {
+  content: '';
+  position: absolute;
+  top: -44px;
+  bottom: -36px;
+  left: -70px;
+  width: min(56%, 560px);
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 90% 75% at 30% 50%,
+    color-mix(in srgb, var(--bg-1) 55%, transparent) 0%,
+    color-mix(in srgb, var(--bg-1) 38%, transparent) 40%,
+    color-mix(in srgb, var(--bg-1) 16%, transparent) 68%,
+    transparent 92%);
+  filter: blur(24px);
+}
 .rb-eyebrow {
   font-size: 10px; font-family: var(--font-mono); font-weight: 700;
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
-.rb-title { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px; }
-.rb-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); }
+.rb-title {
+  font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px;
+  text-shadow:
+    0 1px 2px var(--bg-1),
+    0 0 10px var(--bg-1),
+    0 0 24px var(--bg-1);
+}
+.rb-meta {
+  font-size: 12px; font-family: var(--font-mono);
+  /* fg-1, not the muted tiers — those wash out over bright art. */
+  color: var(--fg-1);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
 
 .rb-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
 .rb-spacer { flex: 1; }
 .rb-caret { opacity: 0.45; margin-left: 4px; }
 
-/* Rating segmented control — mirrors TagBrowse's .tb-seg / FilterBar's .fb-seg. */
+/* Rating segmented control — glassed so it reads over ambient art (the
+   ink-wash recipe it mirrored from FilterBar vanishes against artwork). */
 .rb-seg {
   display: inline-flex; gap: 2px; padding: 2px;
-  background: rgb(var(--ink) / 0.04);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
+  box-shadow: var(--shadow-el);
 }
 .rb-seg button {
   padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: 500;
@@ -404,9 +448,11 @@ function reset() {
 .rb-seg button.active { background: var(--gold-soft); color: var(--gold-bright); }
 
 .rb-note {
-  font-size: 13px; color: var(--fg-2); background: rgb(var(--ink) / 0.03);
+  font-size: 13px; color: var(--fg-2);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
   border: 1px solid var(--border); border-radius: var(--r-sm);
   padding: 10px 14px; margin-bottom: 20px;
+  box-shadow: var(--shadow-el);
 }
 .rb-empty { padding: 60px 0; text-align: center; color: var(--fg-3); font-size: 14px; }
 
@@ -417,6 +463,7 @@ function reset() {
   width: 100%; padding: 12px 16px 12px 40px;
   background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md);
   color: var(--fg-0); font-size: 14px; outline: none; transition: border-color 0.15s;
+  box-shadow: var(--shadow-el);
 }
 .rb-search-input:focus { border-color: var(--gold); }
 .rb-search-input::placeholder { color: var(--fg-4); }
@@ -428,10 +475,17 @@ function reset() {
   background: var(--gold-soft); color: var(--gold-bright);
   border: 1px solid transparent; border-radius: var(--r-md);
   font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
-  transition: filter 0.12s ease, opacity 0.12s ease;
+  box-shadow: var(--shadow-el);
+  /* Slow color glide: the inline tone style (useBackgroundToneStyle)
+     changes as the ambient backdrop rotates. */
+  transition: filter 0.12s ease, opacity 0.12s ease,
+              background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+              color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .rb-ai-btn:hover:not(:disabled) { filter: brightness(1.15); }
-.rb-ai-btn:disabled { opacity: 0.45; cursor: default; }
+/* Dim without dissolving: at 0.45 the tone fill mixed into the artwork
+   behind it and the label lost its contrast guarantee. */
+.rb-ai-btn:disabled { opacity: 0.6; filter: saturate(0.55); cursor: default; }
 
 .rb-ai-note { color: var(--gold-bright); border-color: var(--gold-soft); }
 
@@ -486,11 +540,14 @@ function reset() {
 .rb-reason {
   margin-top: -10px;
   padding: 18px 12px 10px;
-  background: rgb(var(--ink) / 0.035);
+  /* Solid surface, not an ink wash — the slab floats over ambient art and
+     must read as part of the card. */
+  background: var(--bg-2);
   border: 1px solid var(--border);
   border-top: 0;
   border-radius: 0 0 var(--r-md) var(--r-md);
   font-size: 11.5px; line-height: 1.45; color: var(--fg-2);
+  box-shadow: var(--shadow-el);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -512,4 +569,22 @@ function reset() {
 .rb-item { justify-content: space-between; }
 .rb-item.active { color: var(--gold); }
 .rb-check { color: var(--gold); }
+
+/* Steer controls (genre trigger + Clear) — glass over artwork. Unscoped
+   because AppMenu renders the trigger button itself (scoped classes never
+   land on it); the .app-menu-trigger pairing out-specifies the trigger
+   reset's own re-assert rule in heya.css. */
+.rb-steer-btn,
+.app-menu-trigger.rb-steer-btn {
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+}
+.rb-steer-btn:hover,
+.app-menu-trigger.rb-steer-btn:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
 </style>
