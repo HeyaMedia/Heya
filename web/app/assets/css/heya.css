@@ -1,6 +1,31 @@
-/* Heya.media — design tokens & globals */
+/* Heya.media — design tokens & globals
+ *
+ * Theme architecture:
+ *   :root                     = dark (the default; no attribute needed)
+ *   :root[data-theme="light"] = warm-paper light theme
+ *   :root[data-theme="oled"]  = true-black variant of dark
+ *   :root[data-accent="…"]    = accent preset (gold is the default)
+ *   :root[data-density="compact"] = tighter grids/rows/padding
+ *
+ * The attributes are stamped on <html> before first paint by the inline
+ * boot script in nuxt.config.ts and kept in sync by useAppearance().
+ *
+ * Conversion rules used across the app:
+ *   - "white glass" overlays that sit on the CANVAS use the --ink channel:
+ *       rgba(255,255,255,0.06)  →  rgb(var(--ink) / 0.06)
+ *     so they flip to dark-on-paper in the light theme automatically.
+ *   - recessed/darkened canvas fills use the --shade channel the same way:
+ *       rgba(0,0,0,0.3)         →  rgb(var(--shade) / 0.3)
+ *   - overlays that sit on ARTWORK (poster gradients, hero scrims, badges
+ *     over images) stay literal black/white — artwork doesn't theme.
+ *   - accent usages ON THE CANVAS reference the --gold aliases (which the
+ *     light theme darkens for contrast); accent usages ON ARTWORK reference
+ *     --accent directly so they stay vivid over images in every theme.
+ */
 
 :root {
+  color-scheme: dark;
+
   /* surfaces — deep cinematic blacks */
   --bg-0: #07070a;        /* deepest, ambient */
   --bg-1: #0c0c10;        /* canvas */
@@ -9,8 +34,8 @@
   --bg-4: #232329;        /* hover/elevated 2 */
   --bg-5: #2c2c34;        /* border/separator-strong */
 
-  --border:        rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --border:        rgb(var(--ink) / 0.06);
+  --border-strong: rgb(var(--ink) / 0.12);
 
   /* text */
   --fg-0: #f4f3ee;
@@ -19,12 +44,20 @@
   --fg-3: #5d5b56;
   --fg-4: #3a3936;
 
-  /* accent — warm gold */
-  --gold:        #e6b94a;
-  --gold-bright: #f3cb66;
-  --gold-deep:   #b88e2a;
-  --gold-soft:   rgba(230, 185, 74, 0.18);
-  --gold-glow:   rgba(230, 185, 74, 0.35);
+  /* overlay channels (see conversion rules above) — space-separated RGB
+     for use as rgb(var(--ink) / <alpha>) */
+  --ink:   255 255 255;   /* "foreground glass" fills + borders on canvas */
+  --shade: 0 0 0;         /* recessed / dimmed canvas fills */
+
+  /* accent aliases — legacy names kept as the canonical way to say
+     "accent, adjusted for readability on the current theme's canvas".
+     The light theme remaps these to deeper cuts; --accent* themselves are
+     theme-invariant (use those on artwork). */
+  --gold:        var(--accent);
+  --gold-bright: var(--accent-bright);
+  --gold-deep:   var(--accent-deep);
+  --gold-soft:   color-mix(in srgb, var(--accent) 18%, transparent);
+  --gold-glow:   color-mix(in srgb, var(--accent) 35%, transparent);
 
   /* semantic */
   --good:    #4ade80;
@@ -43,6 +76,16 @@
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.65);
 
+  /* density (comfortable defaults; compact overrides below) */
+  --tile-min: 160px;        /* .grid-posters column floor */
+  --tile-min-phone: 110px;
+  --grid-gap-y: 22px;
+  --grid-gap-x: 18px;
+  --row-pad-y: 9px;         /* .list-row vertical padding */
+  --page-pad-t: 28px;
+  --page-pad-x: 40px;
+  --page-pad-b: 80px;
+
   /* topbar / playbar metrics */
   --topbar-h: 60px;
   --playbar-h: 88px;
@@ -58,6 +101,137 @@
   /* type */
   --font-sans: 'Inter', 'Inter Tight', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* ── Accent presets ─────────────────────────────────────────────────
+   Each preset supplies 4 hand-tuned values; soft/glow derive via
+   color-mix in :root. --accent-ink is the text color used ON accent
+   fills (btn-primary etc). Gold doubles as the no-attribute default. */
+:root, :root[data-accent="gold"] {
+  --accent:        #e6b94a;
+  --accent-bright: #f3cb66;
+  --accent-deep:   #b88e2a;
+  --accent-ink:    #1a1408;
+}
+:root[data-accent="ember"] {
+  --accent:        #e8834a;
+  --accent-bright: #f49d6b;
+  --accent-deep:   #bd5e28;
+  --accent-ink:    #1a0e06;
+}
+:root[data-accent="crimson"] {
+  --accent:        #d9565c;
+  --accent-bright: #e87b80;
+  --accent-deep:   #ab3238;
+  --accent-ink:    #1a0708;
+}
+:root[data-accent="rose"] {
+  --accent:        #de6f9f;
+  --accent-bright: #ec92b8;
+  --accent-deep:   #b04574;
+  --accent-ink:    #1a0811;
+}
+:root[data-accent="iris"] {
+  --accent:        #9b82e8;
+  --accent-bright: #b6a2f2;
+  --accent-deep:   #6f56bd;
+  --accent-ink:    #0e081a;
+}
+:root[data-accent="ocean"] {
+  --accent:        #5b9ce6;
+  --accent-bright: #82b6f0;
+  --accent-deep:   #3670b5;
+  --accent-ink:    #06101a;
+}
+:root[data-accent="teal"] {
+  --accent:        #45c2b0;
+  --accent-bright: #6cd6c6;
+  --accent-deep:   #26937f;
+  --accent-ink:    #061a16;
+}
+:root[data-accent="moss"] {
+  --accent:        #93c159;
+  --accent-bright: #aed67c;
+  --accent-deep:   #6a9634;
+  --accent-ink:    #0e1a06;
+}
+:root[data-accent="silver"] {
+  --accent:        #b9bec8;
+  --accent-bright: #d5d9e0;
+  --accent-deep:   #878e9b;
+  --accent-ink:    #12141a;
+}
+
+/* ── OLED — true black. Same warm text family as dark; borders lifted a
+   notch because drop shadows can't separate surfaces from a #000 canvas. */
+:root[data-theme="oled"] {
+  --bg-0: #000000;
+  --bg-1: #000000;
+  --bg-2: #0b0b0e;
+  --bg-3: #141418;
+  --bg-4: #1d1d23;
+  --bg-5: #28282f;
+
+  --border:        rgb(var(--ink) / 0.09);
+  --border-strong: rgb(var(--ink) / 0.16);
+}
+
+/* ── Light — warm paper, inverted within the same hue family as the dark
+   theme's warm foregrounds. Not a white theme: the canvas is the dark
+   theme's ivory text color, aged one shade. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-0: #e7e3da;        /* deepest, ambient */
+  --bg-1: #f1eee7;        /* canvas */
+  --bg-2: #f8f6f1;        /* surface */
+  --bg-3: #fcfbf8;        /* elevated */
+  --bg-4: #ffffff;        /* hover/elevated 2 */
+  --bg-5: #d7d2c7;        /* border/separator-strong */
+
+  --border:        rgb(var(--ink) / 0.10);
+  --border-strong: rgb(var(--ink) / 0.19);
+
+  --fg-0: #1d1a14;
+  --fg-1: #413d33;
+  --fg-2: #6f6a5d;
+  --fg-3: #8d8779;
+  --fg-4: #b4aea1;
+
+  --ink:   35 30 20;      /* warm near-black glass on paper */
+  --shade: 55 47 32;      /* warm recess tint */
+
+  /* accent, cut deeper for contrast on paper. --gold-bright is the
+     "readable accent text" tone (used on soft tints and as hover text),
+     so on paper it goes darker, not lighter. */
+  --gold:        var(--accent-deep);
+  --gold-bright: color-mix(in srgb, var(--accent-deep) 72%, var(--fg-0));
+  --gold-deep:   color-mix(in srgb, var(--accent-deep) 82%, #201603);
+  --gold-soft:   color-mix(in srgb, var(--accent) 24%, transparent);
+  --gold-glow:   color-mix(in srgb, var(--accent) 30%, transparent);
+
+  --good:    #2e8f54;
+  --warning: #9a7a1c;
+  --bad:     #bd4a4a;
+
+  --shadow-1: 0 1px 2px rgba(46, 38, 22, 0.10);
+  --shadow-2: 0 8px 24px rgba(46, 38, 22, 0.14);
+  --shadow-3: 0 24px 64px rgba(46, 38, 22, 0.22);
+
+  /* floating panels: softer drop, no glass brightening on paper */
+  --surface-shadow: 0 24px 60px rgba(46, 38, 22, 0.20);
+  --surface-brighten: brightness(100%);
+}
+
+/* ── Compact density ── */
+:root[data-density="compact"] {
+  --tile-min: 128px;
+  --tile-min-phone: 94px;
+  --grid-gap-y: 14px;
+  --grid-gap-x: 12px;
+  --row-pad-y: 5px;
+  --page-pad-t: 20px;
+  --page-pad-x: 28px;
 }
 
 * { box-sizing: border-box; }
@@ -123,8 +297,8 @@ a { color: inherit; text-decoration: none; }
 .scroll { overflow-y: auto; overflow-x: hidden; }
 .scroll::-webkit-scrollbar { width: 10px; }
 .scroll::-webkit-scrollbar-track { background: transparent; }
-.scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-.scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); border: 2px solid transparent; background-clip: padding-box; }
+.scroll::-webkit-scrollbar-thumb { background: rgb(var(--ink) / 0.08); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink) / 0.18); border: 2px solid transparent; background-clip: padding-box; }
 
 /* === Poster placeholder === */
 .poster {
@@ -183,7 +357,7 @@ a { color: inherit; text-decoration: none; }
   position: relative;
 }
 .card-tile:hover { transform: translateY(-3px); }
-.card-tile:hover .poster { box-shadow: 0 12px 28px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06); }
+.card-tile:hover .poster { box-shadow: var(--shadow-2), 0 0 0 1px rgb(var(--ink) / 0.06); }
 
 /* Generic chips */
 .chip {
@@ -195,14 +369,14 @@ a { color: inherit; text-decoration: none; }
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--fg-1);
-  background: rgba(255,255,255,0.05);
+  background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   text-transform: uppercase;
   font-family: var(--font-mono);
 }
 .chip.gold {
   background: var(--gold-soft);
-  border-color: rgba(230,185,74,0.4);
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
   color: var(--gold-bright);
 }
 
@@ -223,39 +397,39 @@ a { color: inherit; text-decoration: none; }
 }
 .btn-primary {
   background: var(--gold);
-  color: #1a1408;
+  color: var(--accent-ink);
 }
 .btn-primary:hover { background: var(--gold-bright); }
 .btn-secondary {
-  background: rgba(255,255,255,0.08);
+  background: rgb(var(--ink) / 0.08);
   color: var(--fg-0);
   border: 1px solid var(--border);
 }
-.btn-secondary:hover { background: rgba(255,255,255,0.14); }
+.btn-secondary:hover { background: rgb(var(--ink) / 0.14); }
 .btn-danger {
-  background: rgba(217,107,107,0.12);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
-  border: 1px solid rgba(217,107,107,0.25);
+  border: 1px solid color-mix(in srgb, var(--bad) 25%, transparent);
 }
-.btn-danger:hover { background: rgba(217,107,107,0.2); }
+.btn-danger:hover { background: color-mix(in srgb, var(--bad) 20%, transparent); }
 .btn-danger-subtle {
   background: transparent;
   color: var(--bad);
-  border: 1px solid rgba(217,107,107,0.2);
+  border: 1px solid color-mix(in srgb, var(--bad) 20%, transparent);
 }
-.btn-danger-subtle:hover { background: rgba(217,107,107,0.1); }
+.btn-danger-subtle:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
 .btn-ghost {
   background: transparent;
   color: var(--fg-1);
 }
-.btn-ghost:hover { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.btn-ghost:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 .btn-icon {
   width: 40px; height: 40px;
   border-radius: var(--r-md);
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--fg-1);
 }
-.btn-icon:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); }
+.btn-icon:hover { background: rgb(var(--ink) / 0.08); color: var(--fg-0); }
 .btn-icon.active { color: var(--gold); }
 
 /* Headings */
@@ -295,7 +469,7 @@ a { color: inherit; text-decoration: none; }
 /* Progress bar */
 .progress {
   height: 3px;
-  background: rgba(255,255,255,0.08);
+  background: rgb(var(--ink) / 0.08);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -304,7 +478,7 @@ a { color: inherit; text-decoration: none; }
 /* Slider rail (interactive) */
 .rail {
   height: 4px;
-  background: rgba(255,255,255,0.12);
+  background: rgb(var(--ink) / 0.12);
   border-radius: 999px;
   position: relative;
   cursor: pointer;
@@ -331,24 +505,26 @@ a { color: inherit; text-decoration: none; }
 .mt-layout { display: flex; height: 100%; }
 .library-main { flex: 1; min-width: 0; }
 
-.grid-posters { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 22px 18px; }
+.grid-posters { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr)); gap: var(--grid-gap-y) var(--grid-gap-x); }
 /* Phone: denser grid so a 390px screen still lands ~3 columns instead of 2.
    W2b — music pages (artists/albums/my-artists/my-albums) carry their own
    inline minmax(160-180px) overrides at the same breakpoint; see those pages. */
 @media (max-width: 720px) {
-  .grid-posters { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px 12px; }
+  .grid-posters { grid-template-columns: repeat(auto-fill, minmax(var(--tile-min-phone), 1fr)); gap: 14px 12px; }
 }
 .grid-tile { position: relative; min-width: 0; }
 .grid-tile-meta { padding: 10px 2px 0; min-width: 0; }
 .grid-tile-title { font-size: 13px; font-weight: 500; color: var(--fg-0); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grid-tile-sub { font-size: 11px; color: var(--fg-2); font-family: var(--font-mono); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile-badges { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
-.tile-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 5px; border-radius: 3px; background: rgba(0,0,0,0.7); color: var(--gold); border: 1px solid rgba(230,185,74,0.4); }
+/* Sits on artwork: chip stays literal black, accent stays vivid (--accent,
+   not the theme-adjusted --gold). */
+.tile-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 5px; border-radius: 3px; background: rgba(0,0,0,0.7); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 
 .list-rows { display: flex; flex-direction: column; }
 /* 5 tracks: title / year / rating / genre-or-status / added */
-.list-row { display: grid; grid-template-columns: minmax(0, 2.8fr) 0.55fr 0.5fr 1fr 0.9fr; align-items: center; gap: 16px; padding: 9px 12px; border-radius: var(--r-md); font-size: 13px; color: var(--fg-1); cursor: pointer; box-shadow: inset 0 -1px 0 rgba(255,255,255,0.035); transition: background 0.12s ease; }
-.list-row:hover { background: rgba(255,255,255,0.045); }
+.list-row { display: grid; grid-template-columns: minmax(0, 2.8fr) 0.55fr 0.5fr 1fr 0.9fr; align-items: center; gap: 16px; padding: var(--row-pad-y) 12px; border-radius: var(--r-md); font-size: 13px; color: var(--fg-1); cursor: pointer; box-shadow: inset 0 -1px 0 rgb(var(--ink) / 0.035); transition: background 0.12s ease; }
+.list-row:hover { background: rgb(var(--ink) / 0.045); }
 .list-row-head { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-3); cursor: default; padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; box-shadow: none; }
 .list-row-head:hover { background: none; }
 .list-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -367,7 +543,7 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: background 0.12s ease;
 }
-.browse-detail-row:hover { background: rgba(255,255,255,0.04); }
+.browse-detail-row:hover { background: rgb(var(--ink) / 0.04); }
 .browse-detail-poster { width: 104px; flex-shrink: 0; }
 .browse-detail-body { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 4px 8px 4px 0; }
 .browse-detail-title {
@@ -385,8 +561,8 @@ a { color: inherit; text-decoration: none; }
 .browse-detail-res {
   font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   padding: 2px 6px; border-radius: 4px;
-  background: rgba(230,185,74,0.12); color: var(--gold);
-  border: 1px solid rgba(230,185,74,0.3);
+  background: color-mix(in srgb, var(--gold) 12%, transparent); color: var(--gold);
+  border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
 }
 .browse-detail-genres { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; overflow: hidden; max-height: 24px; }
 .browse-detail-overview {
@@ -399,13 +575,16 @@ a { color: inherit; text-decoration: none; }
 /* Detail page shared styles */
 .detail-hero { position: relative; height: 380px; }
 .detail-hero-fade { position: absolute; inset: 0;
-  background: linear-gradient(to bottom, rgba(7,7,10,0.4) 0%, rgba(7,7,10,0.2) 30%, var(--bg-1) 100%);
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--bg-0) 40%, transparent) 0%,
+    color-mix(in srgb, var(--bg-0) 20%, transparent) 30%,
+    var(--bg-1) 100%);
 }
 .back-btn { position: absolute; top: 24px; left: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: var(--r-md); background: rgba(0,0,0,0.6); backdrop-filter: blur(12px); color: var(--fg-0); font-size: 13px; font-weight: 500; z-index: 2; }
 .back-btn:hover { background: rgba(0,0,0,0.8); }
 .detail-body { padding: 0 40px 80px; position: relative; margin-top: -160px; max-width: 1400px; }
 .detail-grid { display: grid; grid-template-columns: 280px 1fr; gap: 40px; margin-bottom: 56px; }
-.detail-poster { box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06); border-radius: var(--r-md); overflow: hidden; }
+.detail-poster { box-shadow: var(--shadow-3), 0 0 0 1px rgb(var(--ink) / 0.06); border-radius: var(--r-md); overflow: hidden; }
 .detail-info { padding-top: 60px; }
 .detail-title { font-size: 52px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.0; margin: 0 0 6px; text-wrap: balance; }
 .detail-tagline { font-style: italic; color: var(--fg-2); font-size: 16px; margin: 6px 0 16px; }
@@ -434,7 +613,9 @@ a { color: inherit; text-decoration: none; }
 .hero-bg-fade {
   position: absolute; inset: 0;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, rgba(12,12,16,0.7) 40%, rgba(12,12,16,0.4) 100%),
+    linear-gradient(to right, var(--bg-1) 0%,
+      color-mix(in srgb, var(--bg-1) 70%, transparent) 40%,
+      color-mix(in srgb, var(--bg-1) 40%, transparent) 100%),
     linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
 }
 .hero-side { display: flex; flex-direction: column; gap: 14px; align-self: start; min-width: 0; }
@@ -490,12 +671,12 @@ a { color: inherit; text-decoration: none; }
 .scroll-controls { display: flex; gap: 4px; align-items: center; }
 .scroll-ctrl-btn {
   width: 28px; height: 28px; border-radius: var(--r-sm);
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.04); border: 1px solid var(--border);
   color: var(--fg-2);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; transition: all 0.15s;
 }
-.scroll-ctrl-btn:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); border-color: var(--border-strong); }
+.scroll-ctrl-btn:hover { background: rgb(var(--ink) / 0.08); color: var(--fg-0); border-color: var(--border-strong); }
 .scroll-ctrl-btn.expand { margin-left: 2px; }
 
 /* Horizontal card scroller */
@@ -516,14 +697,14 @@ a { color: inherit; text-decoration: none; }
 .mono-path { font-family: var(--font-mono); font-size: 12px; color: var(--fg-2) !important; }
 
 /* Buttons reused across views */
-.btn-ghost-sm { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: var(--r-sm); font-size: 12px; color: var(--fg-1); background: rgba(255,255,255,0.04); border: 1px solid var(--border); font-family: var(--font-mono); letter-spacing: 0.02em; }
-.btn-ghost-sm:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); }
+.btn-ghost-sm { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: var(--r-sm); font-size: 12px; color: var(--fg-1); background: rgb(var(--ink) / 0.04); border: 1px solid var(--border); font-family: var(--font-mono); letter-spacing: 0.02em; }
+.btn-ghost-sm:hover { background: rgb(var(--ink) / 0.08); color: var(--fg-0); }
 /* AppMenu's trigger reset (.app-menu-trigger, a component style injected
    after this sheet) zeroes background/border/padding/font at equal
    specificity. Re-assert the ghost chrome on triggers that opt into it so
    menu triggers (sort dropdowns etc.) match their sibling buttons. */
 .app-menu-trigger.btn-ghost-sm {
-  background: rgba(255,255,255,0.04);
+  background: rgb(var(--ink) / 0.04);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 0 12px;
@@ -531,10 +712,11 @@ a { color: inherit; text-decoration: none; }
   font-family: var(--font-mono);
   color: var(--fg-1);
 }
-.app-menu-trigger.btn-ghost-sm:hover { background: rgba(255,255,255,0.08); color: var(--fg-0); }
+.app-menu-trigger.btn-ghost-sm:hover { background: rgb(var(--ink) / 0.08); color: var(--fg-0); }
 
-/* Page padding */
-.page-pad { padding: 28px 40px 80px; }
+/* Page padding — density-tokened on desktop; the narrow/phone breakpoints
+   pin their own gutters (already tight, density shouldn't shrink them). */
+.page-pad { padding: var(--page-pad-t) var(--page-pad-x) var(--page-pad-b); }
 @media (max-width: 1100px) { .page-pad { padding: 24px 24px 80px; } }
 /* Phone: content should run close to full-width (~90%+) rather than keep the
    1100px breakpoint's 24px desktop-ish gutter — this is a deliberate global
@@ -562,7 +744,7 @@ a { color: inherit; text-decoration: none; }
   transition: background 0.12s ease, color 0.12s ease;
   position: relative;
 }
-.lib-item:hover { background: rgba(255,255,255,0.05); color: var(--fg-0); }
+.lib-item:hover { background: rgb(var(--ink) / 0.05); color: var(--fg-0); }
 .lib-item.active {
   background: var(--gold-soft);
   color: var(--gold-bright);
@@ -579,7 +761,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--fg-3);
   font-family: var(--font-mono);
 }
-.lib-item.active .count { color: rgba(230,185,74,0.7); }
+.lib-item.active .count { color: color-mix(in srgb, var(--gold-bright) 70%, transparent); }
 
 /* Animations */
 @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -631,16 +813,16 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.sv2-btn.primary { background: var(--gold); color: #1a1408; }
+.sv2-btn.primary { background: var(--gold); color: var(--accent-ink); }
 .sv2-btn.primary:hover:not(:disabled) { background: var(--gold-deep); }
 .sv2-btn.ghost { border: 1px solid var(--border); background: var(--bg-2); color: var(--fg-2); }
 .sv2-btn.ghost:hover:not(:disabled) { border-color: var(--border-strong); color: var(--fg-0); }
 .sv2-btn.danger {
-  border: 1px solid rgba(217,107,107,0.30);
-  background: rgba(217,107,107,0.06);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
+  background: color-mix(in srgb, var(--bad) 6%, transparent);
   color: var(--bad);
 }
-.sv2-btn.danger:hover:not(:disabled) { background: rgba(217,107,107,0.12); }
+.sv2-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 12%, transparent); }
 .sv2-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .empty-state {

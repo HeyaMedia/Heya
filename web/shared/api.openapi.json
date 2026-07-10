@@ -1680,6 +1680,39 @@
         ],
         "type": "object"
       },
+      "AmbientBackdropItem": {
+        "additionalProperties": false,
+        "properties": {
+          "has_backdrop": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "public_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "public_id",
+          "media_type",
+          "title",
+          "slug",
+          "has_backdrop"
+        ],
+        "type": "object"
+      },
       "ApiTokenView": {
         "additionalProperties": false,
         "properties": {
@@ -1709,6 +1742,28 @@
           "created_at",
           "last_seen_at"
         ],
+        "type": "object"
+      },
+      "AppearanceSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "accent": {
+            "type": "string"
+          },
+          "ambient_intensity": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ambient_mode": {
+            "type": "string"
+          },
+          "density": {
+            "type": "string"
+          },
+          "theme": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "Apply-album-identifyRequest": {
@@ -4799,6 +4854,36 @@
           "name",
           "ok"
         ],
+        "type": "object"
+      },
+      "HomeSectionPref": {
+        "additionalProperties": false,
+        "properties": {
+          "hidden": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "HomeSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/HomeSectionPref"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "IdentifyBody": {
@@ -17356,6 +17441,12 @@
             "readOnly": true,
             "type": "string"
           },
+          "appearance": {
+            "$ref": "#/components/schemas/AppearanceSettings"
+          },
+          "home": {
+            "$ref": "#/components/schemas/HomeSettings"
+          },
           "playback": {
             "$ref": "#/components/schemas/PlaybackSettings"
           },
@@ -17365,7 +17456,9 @@
         },
         "required": [
           "playback",
-          "ui"
+          "ui",
+          "appearance",
+          "home"
         ],
         "type": "object"
       },
@@ -28136,6 +28229,82 @@
           }
         ],
         "summary": "Paginated media items by type",
+        "tags": [
+          "Media"
+        ]
+      }
+    },
+    "/api/media/ambient-backdrops": {
+      "get": {
+        "operationId": "ambient-backdrops",
+        "parameters": [
+          {
+            "description": "Comma-separated media types (movie,tv,music,book). Empty = all four.",
+            "explode": false,
+            "in": "query",
+            "name": "types",
+            "schema": {
+              "description": "Comma-separated media types (movie,tv,music,book). Empty = all four.",
+              "examples": [
+                "movie,tv"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 30,
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AmbientBackdropItem"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Random media items with artwork for the ambient background",
         "tags": [
           "Media"
         ]

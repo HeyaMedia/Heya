@@ -15,14 +15,14 @@
      (album-art hero, splash images) wash out muted text. Earlier 62% looked
      ethereal but failed contrast on light backgrounds. */
   background: color-mix(in oklab, var(--bg-2) 92%, transparent);
-  backdrop-filter: blur(24px) saturate(160%) brightness(108%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%) brightness(108%);
+  backdrop-filter: blur(24px) saturate(160%) var(--surface-brighten, brightness(108%));
+  -webkit-backdrop-filter: blur(24px) saturate(160%) var(--surface-brighten, brightness(108%));
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.02),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    var(--surface-shadow, 0 24px 60px rgba(0, 0, 0, 0.55)),
+    0 0 0 1px rgb(var(--ink) / 0.02),
+    inset 0 1px 0 rgb(var(--ink) / 0.05);
   overflow: hidden;
   z-index: 200;
   /* When reka positions us, use its computed origin so the scale-in
@@ -103,7 +103,7 @@
 }
 .surface-item[data-highlighted],
 .surface-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink) / 0.05);
   color: var(--fg-0);
 }
 .surface-item[data-disabled] {
@@ -115,7 +115,7 @@
 .surface-item-destructive { color: var(--bad); }
 .surface-item-destructive[data-highlighted],
 .surface-item-destructive:hover {
-  background: rgba(255, 80, 80, 0.06);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
   color: var(--bad);
 }
 

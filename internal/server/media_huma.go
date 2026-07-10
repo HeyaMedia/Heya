@@ -56,6 +56,31 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 			return cachedJSON(entries, 30), nil
 		})
 
+	// Ambient-background candidates — random artwork-bearing items for the
+	// rotating page background. Static path segment, so it registers before
+	// /api/media/{id} can swallow it as a slug.
+	huma.Register(api, secured(op(http.MethodGet, "/api/media/ambient-backdrops", "ambient-backdrops", "Random media items with artwork for the ambient background", "Media")),
+		func(ctx context.Context, in *struct {
+			Types string `query:"types" example:"movie,tv" doc:"Comma-separated media types (movie,tv,music,book). Empty = all four."`
+			Limit int32  `query:"limit" minimum:"1" maximum:"100" default:"30"`
+		}) (*JSONOutput[[]service.AmbientBackdropItem], error) {
+			allowed := map[string]bool{"movie": true, "tv": true, "music": true, "book": true}
+			var types []string
+			for _, t := range strings.Split(in.Types, ",") {
+				if t = strings.TrimSpace(t); allowed[t] {
+					types = append(types, t)
+				}
+			}
+			if len(types) == 0 {
+				types = []string{"movie", "tv", "music", "book"}
+			}
+			items, err := app.SampleAmbientBackdrops(ctx, types, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(items, 60), nil
+		})
+
 	// /enriched returns the two enriched-view shapes under a discriminated
 	// envelope so the spec can describe both bodies. The previous design
 	// returned the raw slice with no way to tell movies from tv in OpenAPI.

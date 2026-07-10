@@ -7,6 +7,10 @@
   -->
   <TooltipProvider :delay-duration="400" :skip-delay-duration="200">
     <div class="app">
+      <!-- Ambient rotating library-artwork background. First child +
+           z-index:-1 = paints above .app's own background, below all
+           in-flow content; no sibling stacking changes needed. -->
+      <AmbientBackdrop />
       <AppTopBar />
       <div class="app-main">
         <slot />

@@ -1,6 +1,7 @@
 <template>
   <div class="scroll" style="height: 100%">
     <HeroDeck
+      v-if="showSection('hero')"
       :items="heroItems"
       :movies="movieDetails"
       :play-info="heroPlayInfo"
@@ -15,21 +16,26 @@
       @pin="onPinHeroMode"
     />
 
-    <div class="page-pad">
+    <!-- Sections render in user-configured order (Settings → Appearance)
+         via CSS `order` — DOM stays static, only visual order moves. -->
+    <div class="page-pad home-sections">
       <ContinueWatchingRow
-        v-if="continueWatching.length"
+        v-if="continueWatching.length && showSection('continue-watching')"
+        :style="sectionStyle('continue-watching')"
         :items="continueWatching"
         @play="playContinue"
       />
 
       <UpNextRow
-        v-if="upNextItems.length"
+        v-if="upNextItems.length && showSection('up-next')"
+        :style="sectionStyle('up-next')"
         :items="upNextItems"
         @play="playUpNext"
       />
 
       <ContentRow
-        v-if="recommendedItems.length"
+        v-if="recommendedItems.length && showSection('for-you')"
+        :style="sectionStyle('for-you')"
         title="For You"
         subtitle="From what you've watched & loved"
         :items="recommendedItems"
@@ -40,7 +46,8 @@
       />
 
       <ContentRow
-        v-if="recentMovies.length"
+        v-if="recentMovies.length && showSection('recent-movies')"
+        :style="sectionStyle('recent-movies')"
         title="Recently Added Films"
         subtitle="Across all libraries"
         :items="recentMovies"
@@ -51,7 +58,8 @@
       />
 
       <ContentRow
-        v-if="recentTVItems.length"
+        v-if="recentTVItems.length && showSection('recent-tv')"
+        :style="sectionStyle('recent-tv')"
         title="Recently Added TV"
         subtitle="New shows, seasons & episodes"
         :items="recentTVItems"
@@ -62,7 +70,8 @@
       />
 
       <ContentRow
-        v-if="recentAlbums.length"
+        v-if="recentAlbums.length && showSection('recent-albums')"
+        :style="sectionStyle('recent-albums')"
         title="Recently Added Albums"
         subtitle="Across all libraries"
         :items="recentAlbums"
@@ -75,7 +84,8 @@
       />
 
       <ContentRow
-        v-if="recentArtists.length"
+        v-if="recentArtists.length && showSection('recent-artists')"
+        :style="sectionStyle('recent-artists')"
         title="Recently Added Artists"
         subtitle="New & updated artists"
         :items="recentArtists"
@@ -88,7 +98,8 @@
       />
 
       <ContentRow
-        v-if="recentBooks.length"
+        v-if="recentBooks.length && showSection('recent-books')"
+        :style="sectionStyle('recent-books')"
         title="Recently Added Books"
         subtitle="Across all libraries"
         :items="recentBooks"
@@ -288,6 +299,12 @@ const settingsQuery = useQuery({
   staleTime: 1000 * 60 * 5,
 })
 const pinnedHeroMode = computed(() => settingsQuery.data.value?.ui?.pinned_hero_mode ?? undefined)
+
+// Section visibility + order (Settings → Appearance). Rides the same
+// ['me','settings'] query as pinnedHeroMode; hidden sections skip render,
+// order lands as CSS `order` on the flex column below.
+const { isVisible: showSection, orderOf } = useHomeSections()
+const sectionStyle = (id: string) => ({ order: orderOf(id) })
 
 async function onPinHeroMode(mode: string) {
   const current = settingsQuery.data.value ?? {}
@@ -621,6 +638,14 @@ useLiveRefresh([
 </script>
 
 <style scoped>
+/* Flex column purely so children's CSS `order` (user section order) takes
+   effect; visual layout is unchanged for the default order. */
+.home-sections {
+  display: flex;
+  flex-direction: column;
+}
+.home-sections > .empty-home { order: 99; }
+
 .empty-home {
   display: flex;
   flex-direction: column;

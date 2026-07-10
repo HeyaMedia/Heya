@@ -9,8 +9,10 @@ import (
 
 // UserSettings holds all per-user settings.
 type UserSettings struct {
-	Playback PlaybackSettings `json:"playback"`
-	UI       UISettings       `json:"ui"`
+	Playback   PlaybackSettings   `json:"playback"`
+	UI         UISettings         `json:"ui"`
+	Appearance AppearanceSettings `json:"appearance"`
+	Home       HomeSettings       `json:"home"`
 }
 
 // UISettings holds small frontend preferences that should follow the user
@@ -20,6 +22,39 @@ type UISettings struct {
 	// PinnedHeroMode is the home-hero mode to show on page load
 	// (featured / tonight / new / music / roulette). Empty = featured.
 	PinnedHeroMode string `json:"pinned_hero_mode,omitempty"`
+}
+
+// AppearanceSettings holds theme/visual preferences that follow the user
+// across devices. Empty string / zero values mean "app default" so newly
+// added fields never need migrations.
+type AppearanceSettings struct {
+	// Theme is one of "system", "dark", "light", "oled". Empty = dark.
+	Theme string `json:"theme,omitempty"`
+	// Accent is a named accent preset (gold, ember, crimson, rose, iris,
+	// ocean, teal, moss, silver). Empty = gold.
+	Accent string `json:"accent,omitempty"`
+	// Density is "comfortable" or "compact". Empty = comfortable.
+	Density string `json:"density,omitempty"`
+	// AmbientMode toggles the rotating library-backdrop background:
+	// "on", "off", or empty for the app default (on).
+	AmbientMode string `json:"ambient_mode,omitempty"`
+	// AmbientIntensity is the backdrop visibility percentage (5-60).
+	// 0 = app default.
+	AmbientIntensity int `json:"ambient_intensity,omitempty"`
+}
+
+// HomeSettings controls the composition of the home page.
+type HomeSettings struct {
+	// Sections is the ordered list of home sections. Absent = default
+	// order with everything visible. Unknown IDs are ignored by the FE;
+	// sections missing from the list render after the listed ones.
+	Sections []HomeSectionPref `json:"sections,omitempty"`
+}
+
+// HomeSectionPref is one home section's visibility + position (by index).
+type HomeSectionPref struct {
+	ID     string `json:"id"`
+	Hidden bool   `json:"hidden,omitempty"`
 }
 
 // PlaybackSettings holds playback-related user preferences.

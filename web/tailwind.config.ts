@@ -1,31 +1,32 @@
 import type { Config } from 'tailwindcss'
 
+// Colors reference the heya.css custom properties so any utility usage
+// follows the active theme/accent — never duplicate literal values here.
 export default {
-  darkMode: 'class',
   theme: {
     extend: {
       colors: {
         bg: {
-          0: '#07070a',
-          1: '#0c0c10',
-          2: '#131318',
-          3: '#1a1a20',
-          4: '#232329',
-          5: '#2c2c34',
+          0: 'var(--bg-0)',
+          1: 'var(--bg-1)',
+          2: 'var(--bg-2)',
+          3: 'var(--bg-3)',
+          4: 'var(--bg-4)',
+          5: 'var(--bg-5)',
         },
         fg: {
-          0: '#f4f3ee',
-          1: '#d6d4cc',
-          2: '#8d8a82',
-          3: '#5d5b56',
-          4: '#3a3936',
+          0: 'var(--fg-0)',
+          1: 'var(--fg-1)',
+          2: 'var(--fg-2)',
+          3: 'var(--fg-3)',
+          4: 'var(--fg-4)',
         },
         gold: {
-          DEFAULT: '#e6b94a',
-          bright: '#f3cb66',
-          deep: '#b88e2a',
-          soft: 'rgba(230, 185, 74, 0.18)',
-          glow: 'rgba(230, 185, 74, 0.35)',
+          DEFAULT: 'var(--gold)',
+          bright: 'var(--gold-bright)',
+          deep: 'var(--gold-deep)',
+          soft: 'var(--gold-soft)',
+          glow: 'var(--gold-glow)',
         },
       },
       fontFamily: {

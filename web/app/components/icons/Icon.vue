@@ -35,6 +35,7 @@ const nameMap: Record<string, string> = {
   more: 'dots-three',
   star: 'star',
   check: 'check',
+  chevup: 'caret-up',
   chevdown: 'caret-down',
   chevright: 'caret-right',
   chevleft: 'caret-left',

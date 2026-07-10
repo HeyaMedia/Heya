@@ -194,11 +194,34 @@ export default defineNuxtConfig({
         // Apple never adopted the Web App Manifest icon list.
         { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
       ],
-      // Inline style so the document is dark from byte 0 — before any CSS file
-      // loads and before the spa-loading-template renders. Kills the white
-      // browser-default flash on cold loads / slow connections.
+      // Inline style so the document is painted in the right theme from
+      // byte 0 — before any CSS file loads and before the
+      // spa-loading-template renders. Kills the white browser-default flash
+      // on cold loads / slow connections. The boot script below stamps
+      // data-theme/data-accent/data-density on <html> synchronously (from
+      // the localStorage mirror that useAppearance maintains), so the
+      // attribute-keyed rules here resolve before first paint.
       style: [
-        { innerHTML: 'html,body{background:#0a0a12;margin:0;color-scheme:dark}' },
+        {
+          innerHTML:
+            'html,body{background:#0a0a12;margin:0;color-scheme:dark}' +
+            'html[data-theme=light],html[data-theme=light] body{background:#f1eee7;color-scheme:light}' +
+            'html[data-theme=oled],html[data-theme=oled] body{background:#000}',
+        },
+      ],
+      script: [
+        {
+          innerHTML:
+            '(function(){try{' +
+            'var s=JSON.parse(localStorage.getItem("heya-appearance")||"{}");' +
+            'var t=s.theme||"dark";' +
+            'if(t==="system"){t=window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}' +
+            'var d=document.documentElement.dataset;' +
+            'if(t!=="dark")d.theme=t;' +
+            'if(s.accent&&s.accent!=="gold")d.accent=s.accent;' +
+            'if(s.density&&s.density!=="comfortable")d.density=s.density;' +
+            '}catch(e){}})()',
+        },
       ],
     },
   },
