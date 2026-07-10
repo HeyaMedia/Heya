@@ -951,6 +951,11 @@ func scannerInventoryFileTracked(file scanner.InventoryFile) bool {
 	return file.Class == scanner.ClassPrimaryMedia || file.Class == scanner.ClassExtraMedia
 }
 
+// libraryFileChanged compares µs-truncated mtimes: Postgres timestamptz
+// stores microseconds, while a fresh os.Stat carries nanoseconds on
+// APFS/ext4/ZFS. Comparing untruncated instants means the round-tripped DB
+// value never equals the stat value, so every file reads as "changed" on
+// every scan and the incremental skip never engages.
 func libraryFileChanged(row sqlc.ListLibraryFilesForScanRow, file scanner.InventoryFile) bool {
 	if row.Size != file.Size {
 		return true
@@ -958,17 +963,20 @@ func libraryFileChanged(row sqlc.ListLibraryFilesForScanRow, file scanner.Invent
 	if row.Mtime.Valid != !file.MTime.IsZero() {
 		return true
 	}
-	if row.Mtime.Valid && !row.Mtime.Time.Equal(file.MTime) {
+	if row.Mtime.Valid && !row.Mtime.Time.Truncate(time.Microsecond).Equal(file.MTime.Truncate(time.Microsecond)) {
 		return true
 	}
 	return false
 }
 
+// timestamptzChanged compares µs-truncated for the same reason as
+// libraryFileChanged: one side has been through Postgres, the other is a
+// fresh stat.
 func timestamptzChanged(a, b pgtype.Timestamptz) bool {
 	if a.Valid != b.Valid {
 		return true
 	}
-	if a.Valid && !a.Time.Equal(b.Time) {
+	if a.Valid && !a.Time.Truncate(time.Microsecond).Equal(b.Time.Truncate(time.Microsecond)) {
 		return true
 	}
 	return false
@@ -1233,26 +1241,39 @@ func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.T
 	return queued, failed
 }
 
+// musicScanScopeChunk caps how many artist directories one music
+// process_scan job analyzes. The analyze phase ffprobes every audio file
+// under its scopes serially, so an unbounded batch (a whole-library pass)
+// cannot finish inside scannerProcessTimeout on a real library — it times
+// out, each retry restarts the probe sweep from scratch, and while the job
+// sits running/retryable its unique args block every subsequent scan's
+// insert. Chunks keep per-job work bounded and retryable, and let the
+// process_scan workers run chunks in parallel.
+const musicScanScopeChunk = 24
+
 func processLibraryScanFanoutArgs(lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory) []ProcessLibraryScanArgs {
-	// Music is deliberately batched at the local scan boundary. One analysis
-	// pass discovers every changed artist, after which PersistScannerSearchEntities
-	// creates one narrow artifact per artist and fetch_metadata/apply_metadata
-	// provide the remote-work fanout. Splitting here would repeatedly open the
-	// same library and rebuild overlapping artist/album plans before reaching
-	// the artist-sized metadata work.
+	// Music is deliberately batched at the local scan boundary, in bounded
+	// chunks of artist directories. One analysis pass per chunk discovers its
+	// changed artists, after which PersistScannerSearchEntities creates one
+	// narrow artifact per artist and fetch_metadata/apply_metadata provide
+	// the remote-work fanout. Per-artist splitting here would repeatedly
+	// open the same library before reaching the artist-sized metadata work.
 	if lib.MediaType == sqlc.MediaTypeMusic {
-		args := base
 		requested := compactScannerScopes(scopes)
-		sort.Strings(requested)
-		if len(requested) > 0 && !scannerScopesCoverInventoryOwners(lib, requested, inv) {
-			args.ScopePaths = requested
-		} else {
-			// A full/forced scan already covers every owner in the inventory. Avoid
-			// serializing the complete artist directory list into the River job and
-			// every scanner entity; an empty scope means one whole-library pass.
-			args.ScopePaths = nil
+		if len(requested) == 0 || scannerScopesCoverInventoryOwners(lib, requested, inv) {
+			// Full/forced scan (or changed scopes that already span every
+			// owner): chunk the actual owner list from the inventory instead
+			// of one unbounded whole-library pass.
+			requested = scannerOwnerScopesFromInventory(lib, inv)
 		}
-		return []ProcessLibraryScanArgs{args}
+		sort.Strings(requested)
+		out := make([]ProcessLibraryScanArgs, 0, (len(requested)+musicScanScopeChunk-1)/musicScanScopeChunk)
+		for start := 0; start < len(requested); start += musicScanScopeChunk {
+			args := base
+			args.ScopePaths = requested[start:min(start+musicScanScopeChunk, len(requested))]
+			out = append(out, args)
+		}
+		return out
 	}
 
 	if !scannerMediaTypeRequiresOwnerFanout(lib.MediaType) {
@@ -1319,7 +1340,11 @@ func scannerScopesCoverInventoryOwners(lib sqlc.Library, scopes []string, inv sc
 }
 
 func processLibraryScanNeedsOwnerFanout(lib sqlc.Library, scopes []string) bool {
-	if !scannerMediaTypeRequiresOwnerFanout(lib.MediaType) {
+	// Music re-fans out too: an empty or library-root scope would otherwise
+	// run one unbounded whole-library analysis (see musicScanScopeChunk).
+	// This also converts stale nil-scope music jobs from older deploys into
+	// bounded chunks instead of letting them wedge on the timeout.
+	if !scannerMediaTypeRequiresOwnerFanout(lib.MediaType) && lib.MediaType != sqlc.MediaTypeMusic {
 		return false
 	}
 	if len(scopes) == 0 {

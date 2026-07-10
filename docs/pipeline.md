@@ -49,12 +49,15 @@ Each stage can process a full library or a directory scope from the watcher.
 The scanner emits structured events and records local
 identities/candidates/findings for the admin review UI.
 
-Music batches all changed artist directories into one `process_scan` pass.
-That pass discovers and searches the artists together, then persists one
-narrow handoff artifact per artist. `fetch_metadata` and `apply_metadata` fan
-out from there at artist granularity, so a discography is fetched once and its
-local albums are matched and applied together. Full scans use a single
-whole-library job rather than putting every artist directory in the job args.
+Music batches changed artist directories into `process_scan` passes of at
+most 24 artists each (`musicScanScopeChunk`). Each pass discovers and
+searches its artists together, then persists one narrow handoff artifact per
+artist. `fetch_metadata` and `apply_metadata` fan out from there at artist
+granularity, so a discography is fetched once and its local albums are
+matched and applied together. Chunking (rather than one whole-library job)
+matters because the analyze phase ffprobes every audio file under its scopes:
+an unbounded job blows `scannerProcessTimeout` on a real library, retries
+from scratch, and its unique args block subsequent scans while it wedges.
 
 - **Scoring**: scanner search modules call HeyaMedia search, score candidates
   locally, auto-accept strong matches, and persist ambiguous/rejected cases for

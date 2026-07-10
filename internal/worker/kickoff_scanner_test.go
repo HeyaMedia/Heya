@@ -2,7 +2,9 @@ package worker
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -11,6 +13,43 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
+
+// The DB round-trips mtimes at Postgres's µs precision while a fresh
+// os.Stat carries nanoseconds — the comparison must truncate both sides or
+// every file with sub-µs mtime residue reads as changed on every scan,
+// silently degrading incremental scans into full reprocesses.
+func TestLibraryFileChangedTruncatesMtimeToMicroseconds(t *testing.T) {
+	statMtime := time.Date(2026, 7, 10, 4, 0, 0, 123456789, time.UTC) // ns residue
+	dbMtime := statMtime.Truncate(time.Microsecond)                   // what PG returns
+
+	row := sqlc.ListLibraryFilesForScanRow{
+		Size:  42,
+		Mtime: pgtype.Timestamptz{Time: dbMtime, Valid: true},
+	}
+	file := scanner.InventoryFile{Size: 42, MTime: statMtime}
+	require.False(t, libraryFileChanged(row, file), "µs-truncated equal mtimes must read as unchanged")
+
+	file.MTime = statMtime.Add(2 * time.Second)
+	require.True(t, libraryFileChanged(row, file), "a real mtime change must still be detected")
+
+	file.MTime = statMtime
+	file.Size = 43
+	require.True(t, libraryFileChanged(row, file), "a size change must still be detected")
+}
+
+func TestTimestamptzChangedTruncatesToMicroseconds(t *testing.T) {
+	statMtime := time.Date(2026, 7, 10, 4, 0, 0, 999999999, time.UTC)
+	dbMtime := statMtime.Truncate(time.Microsecond)
+
+	a := pgtype.Timestamptz{Time: dbMtime, Valid: true}
+	b := pgtype.Timestamptz{Time: statMtime, Valid: true}
+	require.False(t, timestamptzChanged(a, b), "µs-truncated equal timestamps must read as unchanged")
+
+	b.Time = statMtime.Add(time.Millisecond)
+	require.True(t, timestamptzChanged(a, b), "a >1µs difference must still be detected")
+
+	require.True(t, timestamptzChanged(a, pgtype.Timestamptz{}), "validity mismatch must read as changed")
+}
 
 func TestOversizedScannerArtifactCancelsWorkerRetry(t *testing.T) {
 	err := &scanner.ArtifactTooLargeError{Kind: "search_result", Size: 17, Limit: 16}
@@ -266,14 +305,30 @@ func TestProcessLibraryScanFanoutBatchesMusicBeforeArtistMetadata(t *testing.T) 
 	}}}
 	base := ProcessLibraryScanArgs{LibraryID: lib.ID, Force: true}
 
-	t.Run("full scan uses one whole-library job", func(t *testing.T) {
+	t.Run("full scan chunks explicit owner scopes", func(t *testing.T) {
 		args := processLibraryScanFanoutArgs(lib, base, []string{
 			"/storage/Music/Alpha",
 			"/storage/Music/Beta",
 			"/storage/Music/Gamma",
 		}, inv)
 
-		require.Equal(t, []ProcessLibraryScanArgs{base}, args)
+		require.Len(t, args, 1)
+		require.Equal(t, []string{
+			"/storage/Music/Alpha",
+			"/storage/Music/Beta",
+			"/storage/Music/Gamma",
+		}, args[0].ScopePaths, "covering scopes expand to the owner list, never a nil whole-library scope")
+	})
+
+	t.Run("empty scopes expand to chunked owners", func(t *testing.T) {
+		args := processLibraryScanFanoutArgs(lib, base, nil, inv)
+
+		require.Len(t, args, 1)
+		require.Equal(t, []string{
+			"/storage/Music/Alpha",
+			"/storage/Music/Beta",
+			"/storage/Music/Gamma",
+		}, args[0].ScopePaths)
 	})
 
 	t.Run("changed artists share one scoped job", func(t *testing.T) {
@@ -289,6 +344,36 @@ func TestProcessLibraryScanFanoutBatchesMusicBeforeArtistMetadata(t *testing.T) 
 			"/storage/Music/Beta",
 		}, args[0].ScopePaths)
 	})
+
+	t.Run("owner lists split into bounded chunks", func(t *testing.T) {
+		var files []scanner.InventoryFile
+		for i := 0; i < musicScanScopeChunk+3; i++ {
+			rel := fmt.Sprintf("Artist%03d/Album/01.flac", i)
+			files = append(files, scanner.InventoryFile{
+				Root: "/storage/Music", Path: "/storage/Music/" + rel, RelPath: rel, Class: scanner.ClassPrimaryMedia,
+			})
+		}
+		bigInv := scanner.Inventory{Roots: []scanner.InventoryRoot{{Root: "/storage/Music", Files: files}}}
+
+		args := processLibraryScanFanoutArgs(lib, base, nil, bigInv)
+
+		require.Len(t, args, 2)
+		require.Len(t, args[0].ScopePaths, musicScanScopeChunk)
+		require.Len(t, args[1].ScopePaths, 3)
+	})
+
+	t.Run("empty library produces no jobs", func(t *testing.T) {
+		args := processLibraryScanFanoutArgs(lib, base, nil, scanner.Inventory{})
+		require.Empty(t, args)
+	})
+}
+
+func TestProcessLibraryScanNeedsOwnerFanoutIncludesMusicRootScopes(t *testing.T) {
+	lib := sqlc.Library{ID: 7, MediaType: sqlc.MediaTypeMusic, Paths: []string{"/storage/Music"}}
+
+	require.True(t, processLibraryScanNeedsOwnerFanout(lib, nil), "nil-scope music jobs must re-fan out into chunks")
+	require.True(t, processLibraryScanNeedsOwnerFanout(lib, []string{"/storage/Music"}), "library-root music scopes must re-fan out")
+	require.False(t, processLibraryScanNeedsOwnerFanout(lib, []string{"/storage/Music/Alpha"}), "artist-scoped music jobs run as-is")
 }
 
 func TestScannerRichMetadataTargetsAndDetail(t *testing.T) {
