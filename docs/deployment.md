@@ -24,9 +24,11 @@ of the corresponding completed regular image. All persistent state lives below
 ## One-command all-in-one
 
 ```bash
+mkdir -p "$HOME/heya-data"
 docker run -d --name heya \
   -p 8080:8080 \
-  -v heya-data:/data \
+  -v "$HOME/heya-data:/data" \
+  -v "/path/to/your/media:/media:ro" \
   -e HEYA_ADMIN_USERNAME=admin \
   -e HEYA_ADMIN_PASSWORD=admin \
   --restart unless-stopped \
@@ -39,6 +41,18 @@ including pgvector, as usual. PostgreSQL listens only on container loopback and
 port 5432 is not exposed; this image is intentionally a single-container unit.
 Use the regular image and external Postgres when the database must be shared,
 backed up independently, or managed separately.
+
+Replace `/path/to/your/media` with an absolute host path, then create a library
+pointing at `/media` under Settings → Libraries. The read-only (`:ro`) mount is
+recommended unless Heya needs to write NFO or other sidecar files. Multiple
+collections can be mounted independently, for example
+`-v /mnt/movies:/media/movies:ro` and `-v /mnt/music:/media/music:ro`.
+
+`$HOME/heya-data` contains the bundled PostgreSQL cluster plus Heya's images,
+models, caches, and service state. A named volume such as
+`-v heya-data:/data` works, but a direct host-path mount is strongly recommended:
+it is visible on the host and much easier to inspect, back up, and migrate.
+Whichever form you choose, never run the AIO image without persistent `/data`.
 
 The two `HEYA_ADMIN_*` variables create `admin` / `admin` only when the database
 does not already contain an administrator. Sign in and change that deliberately
@@ -54,11 +68,15 @@ GPU forms use the same host flags as their regular counterparts:
 
 ```bash
 # NVIDIA
-docker run -d --name heya --gpus all -p 8080:8080 -v heya-data:/data \
+docker run -d --name heya --gpus all -p 8080:8080 \
+  -v "$HOME/heya-data:/data" -v "/path/to/your/media:/media:ro" \
+  -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD=admin \
   ghcr.io/heyamedia/heya:latest-cuda-aio
 
 # Intel OpenVINO
-docker run -d --name heya -p 8080:8080 -v heya-data:/data \
+docker run -d --name heya -p 8080:8080 \
+  -v "$HOME/heya-data:/data" -v "/path/to/your/media:/media:ro" \
+  -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD=admin \
   --device /dev/dri:/dev/dri \
   --group-add "$(getent group render | cut -d: -f3)" \
   ghcr.io/heyamedia/heya:latest-openvino-aio

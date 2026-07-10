@@ -17,14 +17,20 @@ stays focused on libraries, playback, and the UI.
 ## Quick start (Docker)
 
 ```bash
-docker run -d --name heya -p 8080:8080 -v heya-data:/data \
+mkdir -p "$HOME/heya-data"
+docker run -d --name heya -p 8080:8080 \
+  -v "$HOME/heya-data:/data" \
+  -v "/path/to/your/media:/media:ro" \
   -e HEYA_ADMIN_USERNAME=admin \
   -e HEYA_ADMIN_PASSWORD=admin \
   ghcr.io/heyamedia/heya:latest-aio
 ```
 
-That all-in-one image runs private PostgreSQL + pgvector alongside Heya. Or use
-the regular image against your own Postgres:
+Replace `/path/to/your/media` with the absolute path to your films, shows,
+music, or books, then add `/media` as a library in Heya. `$HOME/heya-data`
+holds PostgreSQL and all other Heya state, making it straightforward to inspect
+and back up. A Docker named volume also works, but a normal host path is
+recommended. Or use the regular image against your own Postgres:
 
 ```bash
 docker run -p 8080:8080 -v $PWD/data:/data \
