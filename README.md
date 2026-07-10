@@ -18,6 +18,8 @@ stays focused on libraries, playback, and the UI.
 
 ```bash
 docker run -d --name heya -p 8080:8080 -v heya-data:/data \
+  -e HEYA_ADMIN_USERNAME=admin \
+  -e HEYA_ADMIN_PASSWORD=admin \
   ghcr.io/heyamedia/heya:latest-aio
 ```
 
@@ -30,10 +32,11 @@ docker run -p 8080:8080 -v $PWD/data:/data \
   ghcr.io/heyamedia/heya:latest
 ```
 
-Open http://localhost:8080, create the admin user, add your libraries under
-Settings → Libraries. Hardware transcode and the CUDA/OpenVINO image variants
-are covered in [docs/deployment.md](docs/deployment.md). Every operational
-knob is an env var — [`.env.example`](.env.example) documents them all.
+Open http://localhost:8080 and sign in with `admin` / `admin`, then change the
+password and add your libraries under Settings → Libraries. Hardware transcode
+and the CUDA/OpenVINO image variants are covered in
+[docs/deployment.md](docs/deployment.md). Every operational knob is an env var
+— [`.env.example`](.env.example) documents them all.
 
 ## From source
 

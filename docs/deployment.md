@@ -27,6 +27,8 @@ of the corresponding completed regular image. All persistent state lives below
 docker run -d --name heya \
   -p 8080:8080 \
   -v heya-data:/data \
+  -e HEYA_ADMIN_USERNAME=admin \
+  -e HEYA_ADMIN_PASSWORD=admin \
   --restart unless-stopped \
   ghcr.io/heyamedia/heya:latest-aio
 ```
@@ -37,6 +39,11 @@ including pgvector, as usual. PostgreSQL listens only on container loopback and
 port 5432 is not exposed; this image is intentionally a single-container unit.
 Use the regular image and external Postgres when the database must be shared,
 backed up independently, or managed separately.
+
+The two `HEYA_ADMIN_*` variables create `admin` / `admin` only when the database
+does not already contain an administrator. Sign in and change that deliberately
+simple bootstrap password immediately; subsequent container restarts do not
+reset it.
 
 The zero-configuration database credentials are internal-only `heya` / `heya`.
 They can be changed on first boot with `POSTGRES_USER`, `POSTGRES_PASSWORD`, and

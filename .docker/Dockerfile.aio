@@ -33,7 +33,8 @@ COPY .docker/aio/supervisord.conf /etc/supervisor/conf.d/heya-aio.conf
 ENV PGDATA=/data/postgres \
     POSTGRES_USER=heya \
     POSTGRES_PASSWORD=heya \
-    POSTGRES_DB=heya
+    POSTGRES_DB=heya \
+    HEYA_DATABASE_URL=postgres://heya:heya@127.0.0.1:5432/heya?sslmode=disable
 
 ENTRYPOINT ["/usr/local/bin/heya-aio-entrypoint"]
 CMD ["all-in-one"]
