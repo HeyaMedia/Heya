@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sort"
 	"strconv"
@@ -55,9 +56,10 @@ type embedDocRow struct {
 	doc string
 }
 
-// loadVideoEmbedDocs builds the embed doc for video items. When onlyStale is set
-// it returns only items missing a current-version embedding (the incremental case).
-func (a *App) loadVideoEmbedDocs(ctx context.Context, onlyStale bool) ([]embedDocRow, error) {
+// loadVideoEmbedDocs builds the embed doc for every video item. Staleness is
+// decided by the caller via doc hashes, not here — a doc whose source metadata
+// changed must recompose to be detected.
+func (a *App) loadVideoEmbedDocs(ctx context.Context) ([]embedDocRow, error) {
 	type meta struct {
 		title, desc      string
 		genres, kw, cast []string
@@ -67,10 +69,6 @@ func (a *App) loadVideoEmbedDocs(ctx context.Context, onlyStale bool) ([]embedDo
 
 	itemSQL := `SELECT mi.id, mi.title, coalesce(mi.description,'')
 		FROM media_item_cards mi WHERE mi.media_type IN ('movie','tv','anime')`
-	if onlyStale {
-		itemSQL += ` AND NOT EXISTS (SELECT 1 FROM media_item_facets f
-			WHERE f.media_item_id = mi.id AND f.embedder_version >= ` + strconv.Itoa(textembed.Version) + `)`
-	}
 	rows, err := a.db.Query(ctx, itemSQL)
 	if err != nil {
 		return nil, err
@@ -133,15 +131,20 @@ func (a *App) loadVideoEmbedDocs(ctx context.Context, onlyStale bool) ([]embedDo
 		}
 		return r.Err()
 	}
+	// Deterministic ordering matters: the doc text is hashed for staleness
+	// detection, so row-order jitter would read as a metadata change and
+	// churn re-embeds.
 	if err := appendName(
-		`SELECT mk.media_item_id, k.name FROM media_keywords mk JOIN keywords k ON k.id = mk.keyword_id`,
+		`SELECT mk.media_item_id, k.name FROM media_keywords mk JOIN keywords k ON k.id = mk.keyword_id
+		 ORDER BY mk.media_item_id, k.name`,
 		func(m *meta) *[]string { return &m.kw }); err != nil {
 		return nil, err
 	}
 	if err := appendName(
 		`SELECT media_item_id, name FROM (
-			SELECT mc.media_item_id, p.name, row_number() OVER (PARTITION BY mc.media_item_id ORDER BY mc.display_order) rn
-			FROM media_cast mc JOIN people p ON p.id = mc.person_id) s WHERE rn <= 6`,
+			SELECT mc.media_item_id, p.name, row_number() OVER (PARTITION BY mc.media_item_id ORDER BY mc.display_order, p.name) rn
+			FROM media_cast mc JOIN people p ON p.id = mc.person_id) s WHERE rn <= 6
+		 ORDER BY media_item_id, rn`,
 		func(m *meta) *[]string { return &m.cast }); err != nil {
 		return nil, err
 	}
@@ -158,17 +161,14 @@ func (a *App) loadVideoEmbedDocs(ctx context.Context, onlyStale bool) ([]embedDo
 // overview: "Series S02E05 — Episode Title. <overview>". The series title
 // anchors the episode text to its show, so a probe naming the show still
 // matches; the overview carries the plot-specific text the series blurb omits.
-func (a *App) loadEpisodeEmbedDocs(ctx context.Context, onlyStale bool) ([]embedDocRow, error) {
+// Staleness is decided by the caller via doc hashes.
+func (a *App) loadEpisodeEmbedDocs(ctx context.Context) ([]embedDocRow, error) {
 	q := `SELECT e.id, mi.title, se.season_number, e.episode_number, e.title, e.overview
 		FROM tv_episodes e
 		JOIN tv_seasons se ON se.id = e.season_id
 		JOIN tv_series ts ON ts.id = se.series_id
 		JOIN media_item_cards mi ON mi.id = ts.media_item_id
 		WHERE e.overview <> ''`
-	if onlyStale {
-		q += ` AND NOT EXISTS (SELECT 1 FROM episode_facets f
-			WHERE f.episode_id = e.id AND f.embedder_version >= ` + strconv.Itoa(textembed.Version) + `)`
-	}
 	rows, err := a.db.Query(ctx, q)
 	if err != nil {
 		return nil, err
@@ -196,8 +196,43 @@ func (a *App) loadEpisodeEmbedDocs(ctx context.Context, onlyStale bool) ([]embed
 	return out, rows.Err()
 }
 
-// BackfillVideoEmbeddings embeds every video item AND episode that lacks a
-// current-version embedding (or everything when force), upserting
+// embedDocHash fingerprints the exact text a facet row embedded, so the
+// incremental backfill can detect source-metadata changes (refresh,
+// re-identify, edited overviews) without an embedder_version bump.
+func embedDocHash(doc string) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(doc))
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+type facetState struct {
+	version int32
+	hash    string
+}
+
+// loadFacetStates reads (embedder_version, doc_hash) for every row of a facet
+// table, keyed by its id column — the staleness baseline for the backfill.
+func (a *App) loadFacetStates(ctx context.Context, table, keyCol string) (map[int64]facetState, error) {
+	rows, err := a.db.Query(ctx, `SELECT `+keyCol+`, embedder_version, doc_hash FROM `+table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]facetState{}
+	for rows.Next() {
+		var id int64
+		var st facetState
+		if err := rows.Scan(&id, &st.version, &st.hash); err != nil {
+			return nil, err
+		}
+		out[id] = st
+	}
+	return out, rows.Err()
+}
+
+// BackfillVideoEmbeddings embeds every video item AND episode whose embedding
+// is missing or stale — wrong embedder_version, or a doc_hash mismatch after
+// the source metadata changed (or everything when force) — upserting
 // media_item_facets / episode_facets. Returns the count embedded and skipped
 // (tokenizer failures). Requires the engine enabled.
 func (a *App) BackfillVideoEmbeddings(ctx context.Context, force bool) (embedded, skipped int, err error) {
@@ -208,46 +243,51 @@ func (a *App) BackfillVideoEmbeddings(ctx context.Context, force bool) (embedded
 	if emb == nil {
 		return 0, 0, ErrMLDisabled
 	}
-	docs, err := a.loadVideoEmbedDocs(ctx, !force)
-	if err != nil {
-		return 0, 0, fmt.Errorf("load docs: %w", err)
-	}
-	upsert := func(table, keyCol string, d embedDocRow) error {
-		vec, err := emb.Embed(d.doc)
+	process := func(table, keyCol string, docs []embedDocRow) error {
+		states, err := a.loadFacetStates(ctx, table, keyCol)
 		if err != nil {
-			skipped++ // tokenizer edge case — skip this doc, keep going
-			return nil
+			return fmt.Errorf("load %s states: %w", table, err)
 		}
-		if _, err := a.db.Exec(ctx,
-			`INSERT INTO `+table+` (`+keyCol+`, text_embedding, embedder_version, embedded_at)
-			 VALUES ($1, $2, $3, now())
-			 ON CONFLICT (`+keyCol+`) DO UPDATE
-			   SET text_embedding = EXCLUDED.text_embedding, embedder_version = EXCLUDED.embedder_version, embedded_at = now()`,
-			d.id, pgvector.NewVector(vec), textembed.Version); err != nil {
-			return fmt.Errorf("upsert %s %d: %w", table, d.id, err)
+		for _, d := range docs {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			hash := embedDocHash(d.doc)
+			if st, ok := states[d.id]; !force && ok && st.version >= textembed.Version && st.hash == hash {
+				continue // current version, unchanged source text
+			}
+			vec, err := emb.Embed(d.doc)
+			if err != nil {
+				skipped++ // tokenizer edge case — skip this doc, keep going
+				continue
+			}
+			if _, err := a.db.Exec(ctx,
+				`INSERT INTO `+table+` (`+keyCol+`, text_embedding, embedder_version, doc_hash, embedded_at)
+				 VALUES ($1, $2, $3, $4, now())
+				 ON CONFLICT (`+keyCol+`) DO UPDATE
+				   SET text_embedding = EXCLUDED.text_embedding, embedder_version = EXCLUDED.embedder_version,
+				       doc_hash = EXCLUDED.doc_hash, embedded_at = now()`,
+				d.id, pgvector.NewVector(vec), textembed.Version, hash); err != nil {
+				return fmt.Errorf("upsert %s %d: %w", table, d.id, err)
+			}
+			embedded++
 		}
-		embedded++
 		return nil
 	}
-	for _, d := range docs {
-		if ctx.Err() != nil {
-			return embedded, skipped, ctx.Err()
-		}
-		if err := upsert("media_item_facets", "media_item_id", d); err != nil {
-			return embedded, skipped, err
-		}
+
+	docs, err := a.loadVideoEmbedDocs(ctx)
+	if err != nil {
+		return embedded, skipped, fmt.Errorf("load docs: %w", err)
 	}
-	epDocs, err := a.loadEpisodeEmbedDocs(ctx, !force)
+	if err := process("media_item_facets", "media_item_id", docs); err != nil {
+		return embedded, skipped, err
+	}
+	epDocs, err := a.loadEpisodeEmbedDocs(ctx)
 	if err != nil {
 		return embedded, skipped, fmt.Errorf("load episode docs: %w", err)
 	}
-	for _, d := range epDocs {
-		if ctx.Err() != nil {
-			return embedded, skipped, ctx.Err()
-		}
-		if err := upsert("episode_facets", "episode_id", d); err != nil {
-			return embedded, skipped, err
-		}
+	if err := process("episode_facets", "episode_id", epDocs); err != nil {
+		return embedded, skipped, err
 	}
 	return embedded, skipped, nil
 }
@@ -391,7 +431,7 @@ func (a *App) SemanticSearch(ctx context.Context, query string, facets ForYouFac
 		  AND ($2 = '' OR mi.media_type::text = $2 OR ($2 = 'tv' AND mi.media_type = 'anime'))
 		ORDER BY f.text_embedding <=> $1
 		LIMIT $3`,
-		pgvector.NewVector(qv), facets.Type, int32(limit)*3) // over-fetch for post-filtering
+		pgvector.NewVector(qv), facets.Type, limit*3) // over-fetch for post-filtering
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +461,7 @@ func (a *App) SemanticSearch(ctx context.Context, query string, facets ForYouFac
 
 	// Episode-level pass — movies have no episodes, skip the query entirely.
 	if facets.Type != "movie" {
-		if err := a.semanticEpisodeMerge(ctx, qv, facets, int32(limit)*3, byID, &order); err != nil {
+		if err := a.semanticEpisodeMerge(ctx, qv, facets, limit*3, byID, &order); err != nil {
 			return nil, err
 		}
 	}

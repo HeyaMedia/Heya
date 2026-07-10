@@ -321,6 +321,7 @@ type EpisodeFacet struct {
 	TextEmbedding   pgvector.Vector    `json:"text_embedding"`
 	EmbedderVersion int32              `json:"embedder_version"`
 	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	DocHash         string             `json:"doc_hash"`
 }
 
 type EpisodeOverview struct {
@@ -602,6 +603,7 @@ type MediaItemFacet struct {
 	TextEmbedding   pgvector.Vector    `json:"text_embedding"`
 	EmbedderVersion int32              `json:"embedder_version"`
 	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	DocHash         string             `json:"doc_hash"`
 }
 
 type MediaItemProfile struct {
