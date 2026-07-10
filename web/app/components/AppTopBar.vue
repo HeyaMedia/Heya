@@ -821,6 +821,7 @@ function jobDetail(job: ActiveJob): string {
     const value = args[key]
     if (typeof value === 'string' && value.trim()) return pathLeaf(value)
   }
+  if (job.library_name?.trim()) return job.library_name.trim()
   for (const key of ['media_item_id', 'library_file_id', 'track_file_id', 'track_id', 'album_id', 'artist_id', 'library_id']) {
     const value = args[key]
     if (typeof value === 'number' || typeof value === 'string') {

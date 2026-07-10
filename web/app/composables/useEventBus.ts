@@ -54,6 +54,8 @@ export interface ActiveJob {
   queue: string
   started_at?: string
   args?: string
+  /** Resolved server-side from args.library_id so the UI never shows a raw id. */
+  library_name?: string
 }
 
 export interface ActiveJobsPayload {

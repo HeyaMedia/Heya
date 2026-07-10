@@ -122,6 +122,9 @@ type ActiveJob struct {
 	Queue     string    `json:"queue"`
 	StartedAt time.Time `json:"started_at,omitempty"`
 	ArgsJSON  string    `json:"args,omitempty"`
+	// LibraryName is resolved server-side from args.library_id so the UI
+	// never renders a raw numeric id.
+	LibraryName string `json:"library_name,omitempty"`
 }
 
 type ActiveJobsPayload struct {
