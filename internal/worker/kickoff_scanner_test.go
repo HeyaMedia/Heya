@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -631,12 +631,12 @@ func TestTrackFileNeedsLoudness(t *testing.T) {
 	}))
 }
 
-// The scan-progress denominator lives in library_scan_bursts, maintained at
-// enqueue time: a unit enqueued while the library is idle RESETS the row (a
-// new burst); while other units are active it increments. The freshly
-// inserted job is excluded from the idle check so a burst's first unit
-// can't see itself.
-func TestBumpLibraryScanBurstResetsWhenIdleIncrementsWhenActive(t *testing.T) {
+// The scan-progress denominator lives in library_scan_bursts, maintained
+// transactionally with each unit insert: a unit enqueued while the library
+// is idle RESETS the row (a new burst); while other units are active it
+// increments. The bursts row is locked FOR UPDATE, so concurrent first
+// units serialize — exactly one resets, the rest increment.
+func TestInsertScanUnitWithBurstResetsWhenIdleIncrementsWhenActive(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
 	q := sqlc.New(pool)
@@ -652,34 +652,42 @@ func TestBumpLibraryScanBurstResetsWhenIdleIncrementsWhenActive(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE kind = 'process_scan' AND NULLIF(args->>'library_id','')::bigint = $1`, lib.ID)
+	})
+
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
 
 	burstTotal := func() int64 {
 		var n int64
 		require.NoError(t, pool.QueryRow(ctx, `SELECT units_total FROM library_scan_bursts WHERE library_id = $1`, lib.ID).Scan(&n))
 		return n
 	}
-	insertJob := func() int64 {
-		var id int64
-		err := pool.QueryRow(ctx, `
-			INSERT INTO river_job (kind, queue, args, max_attempts, state)
-			VALUES ('process_scan', 'process_scan', $1, 3, 'available')
-			RETURNING id`, []byte(`{"library_id": `+fmt.Sprint(lib.ID)+`}`)).Scan(&id)
-		require.NoError(t, err)
-		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = $1`, id) })
-		return id
-	}
 
 	// Seed a stale row from a "previous burst".
 	_, err = pool.Exec(ctx, `INSERT INTO library_scan_bursts (library_id, units_total) VALUES ($1, 9000)`, lib.ID)
 	require.NoError(t, err)
 
-	// First unit of a new burst: library idle (its own job excluded) → reset.
-	first := insertJob()
-	bumpLibraryScanBurst(ctx, pool, lib.ID, 1, first)
+	// First unit of a new burst: library idle → reset (the row lock plus
+	// pre-insert idle check make this exact, no self-exclusion needed).
+	require.NoError(t, EnqueueProcessLibraryScan(ctx, rc, pool, ProcessLibraryScanArgs{
+		LibraryID:  lib.ID,
+		ScopePaths: []string{"/media/music/Alpha"},
+	}, PriorityScan, ""))
 	require.EqualValues(t, 1, burstTotal(), "first unit of a burst resets the stale total")
 
-	// Second unit while the first is active → increment.
-	second := insertJob()
-	bumpLibraryScanBurst(ctx, pool, lib.ID, 1, second)
+	// Second unit while the first is queued → increment.
+	require.NoError(t, EnqueueProcessLibraryScan(ctx, rc, pool, ProcessLibraryScanArgs{
+		LibraryID:  lib.ID,
+		ScopePaths: []string{"/media/music/Beta"},
+	}, PriorityScan, ""))
 	require.EqualValues(t, 2, burstTotal(), "subsequent units increment")
+
+	// A dedup'd duplicate insert must not bump the counter.
+	require.NoError(t, EnqueueProcessLibraryScan(ctx, rc, pool, ProcessLibraryScanArgs{
+		LibraryID:  lib.ID,
+		ScopePaths: []string{"/media/music/Beta"},
+	}, PriorityScan, ""))
+	require.EqualValues(t, 2, burstTotal(), "unique-dedup'd inserts leave the counter untouched")
 }

@@ -1395,46 +1395,69 @@ func scannerScopeForPath(path string) string {
 	return filepath.Dir(path)
 }
 
-// bumpLibraryScanBurst maintains the durable per-library scan-burst total
-// that scan progress reads (done = units_total − active jobs). Called right
-// after each pipeline-unit insert; excludeJobID is the job just inserted,
-// so a burst's FIRST unit sees an idle library and resets the row instead
-// of incrementing a finished burst's stale total. Raw SQL because sqlc
-// can't see River's tables. Best-effort: a failed bump only skews the
-// progress bar, never the scan.
-//
-// Known micro-race: two simultaneous first-inserts can each see the other
-// as "already active" and both skip the reset, letting a stale total
-// inflate one burst's bar until it drains. Accepted — enqueue sites are
-// effectively serialized (kickoff fan-out loops, debounced watcher).
-func bumpLibraryScanBurst(ctx context.Context, db *pgxpool.Pool, libraryID int64, units int, excludeJobID int64) {
-	if db == nil || libraryID == 0 || units <= 0 {
-		return
+// insertScanUnitWithBurst inserts one scan pipeline unit and updates the
+// library's durable burst total in the SAME transaction, so the counter and
+// the job can never disagree (a crash rolls back both). The bursts row is
+// locked FOR UPDATE first, which serializes concurrent enqueuers per
+// library: whichever first-unit wins the lock sees an idle library and
+// RESETS the row (a new burst); everyone after it — including a racing
+// first-unit — sees the winner's committed job and increments. The idle
+// check runs inside the lock and before our own insert, so no exclude-self
+// bookkeeping is needed. Unique-dedup'd inserts leave the counter
+// untouched. Raw SQL because sqlc can't see River's tables.
+func insertScanUnitWithBurst(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, libraryID int64, args river.JobArgs, opts *river.InsertOpts) error {
+	if rc == nil {
+		return fmt.Errorf("river client unavailable")
 	}
-	_, err := db.Exec(ctx, `
-		INSERT INTO library_scan_bursts (library_id, started_at, units_total)
-		VALUES ($1, now(), $2)
-		ON CONFLICT (library_id) DO UPDATE SET
-			units_total = CASE WHEN EXISTS (
-					SELECT 1 FROM river_job rj
-					WHERE rj.kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
-					  AND rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-					  AND NULLIF(rj.args->>'library_id', '')::bigint = $1
-					  AND rj.id <> $3
-				) THEN library_scan_bursts.units_total + $2
-				ELSE $2 END,
-			started_at = CASE WHEN EXISTS (
-					SELECT 1 FROM river_job rj
-					WHERE rj.kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
-					  AND rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-					  AND NULLIF(rj.args->>'library_id', '')::bigint = $1
-					  AND rj.id <> $3
-				) THEN library_scan_bursts.started_at
-				ELSE now() END
-	`, libraryID, units, excludeJobID)
+	if db == nil || libraryID == 0 {
+		// No pool (insert-only contexts): the unit still runs, the bar just
+		// loses this unit from its denominator.
+		_, err := rc.Insert(ctx, args, opts)
+		return err
+	}
+	tx, err := db.Begin(ctx)
 	if err != nil {
-		log.Warn().Err(err).Int64("library_id", libraryID).Msg("scan burst bump failed")
+		return err
 	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO library_scan_bursts (library_id, units_total)
+		VALUES ($1, 0)
+		ON CONFLICT (library_id) DO NOTHING`, libraryID); err != nil {
+		return err
+	}
+	var prevTotal int64
+	if err := tx.QueryRow(ctx, `
+		SELECT units_total FROM library_scan_bursts
+		WHERE library_id = $1 FOR UPDATE`, libraryID).Scan(&prevTotal); err != nil {
+		return err
+	}
+	var idle bool
+	if err := tx.QueryRow(ctx, `
+		SELECT NOT EXISTS (
+			SELECT 1 FROM river_job
+			WHERE kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
+			  AND state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+			  AND NULLIF(args->>'library_id', '')::bigint = $1
+		)`, libraryID).Scan(&idle); err != nil {
+		return err
+	}
+	res, err := rc.InsertTx(ctx, tx, args, opts)
+	if err != nil {
+		return err
+	}
+	if res != nil && !res.UniqueSkippedAsDuplicate {
+		if idle {
+			_, err = tx.Exec(ctx, `UPDATE library_scan_bursts SET units_total = 1, started_at = now() WHERE library_id = $1`, libraryID)
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE library_scan_bursts SET units_total = units_total + 1 WHERE library_id = $1`, libraryID)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // EnqueueProcessLibraryScan inserts one process_scan unit and maintains the
@@ -1442,19 +1465,9 @@ func bumpLibraryScanBurst(ctx context.Context, db *pgxpool.Pool, libraryID int64
 // through here (watcher, review actions, pruner requeues, kickoff fan-out)
 // or the progress bar loses its denominator.
 func EnqueueProcessLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args ProcessLibraryScanArgs, priority int, source string) error {
-	if rc == nil {
-		return fmt.Errorf("river client unavailable")
-	}
 	opts := args.InsertOpts()
 	opts.Priority = priority
-	res, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	if err != nil {
-		return err
-	}
-	if res != nil && res.Job != nil && !res.UniqueSkippedAsDuplicate {
-		bumpLibraryScanBurst(ctx, db, args.LibraryID, 1, res.Job.ID)
-	}
-	return nil
+	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
 func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory, priority int, source string) (queued, failed int) {
@@ -1569,35 +1582,15 @@ func scannerScopeIsLibraryRoot(lib sqlc.Library, scope string) bool {
 }
 
 func enqueueApplyLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args ApplyLibraryScanArgs, priority int, source string) error {
-	if rc == nil {
-		return fmt.Errorf("river client unavailable")
-	}
 	opts := args.InsertOpts()
 	opts.Priority = priority
-	res, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	if err != nil {
-		return err
-	}
-	if res != nil && res.Job != nil && !res.UniqueSkippedAsDuplicate {
-		bumpLibraryScanBurst(ctx, db, args.LibraryID, 1, res.Job.ID)
-	}
-	return nil
+	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
 func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args FetchLibraryMetadataArgs, priority int, source string) error {
-	if rc == nil {
-		return fmt.Errorf("river client unavailable")
-	}
 	opts := args.InsertOpts()
 	opts.Priority = priority
-	res, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	if err != nil {
-		return err
-	}
-	if res != nil && res.Job != nil && !res.UniqueSkippedAsDuplicate {
-		bumpLibraryScanBurst(ctx, db, args.LibraryID, 1, res.Job.ID)
-	}
-	return nil
+	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
 func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, scanner.Result, int64, error) {
