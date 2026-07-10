@@ -7,15 +7,8 @@
 DROP TABLE IF EXISTS public.scan_run_artifacts;
 
 -- +goose Down
-CREATE TABLE IF NOT EXISTS public.scan_run_artifacts (
-    id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
-    scan_run_id bigint NOT NULL,
-    kind text NOT NULL,
-    scope_key text DEFAULT ''::text NOT NULL,
-    schema_version integer DEFAULT 1 NOT NULL,
-    data jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT scan_run_artifacts_pkey PRIMARY KEY (id),
-    CONSTRAINT scan_run_artifacts_scan_run_id_kind_scope_key_key UNIQUE (scan_run_id, kind, scope_key),
-    CONSTRAINT scan_run_artifacts_scan_run_id_fkey FOREIGN KEY (scan_run_id) REFERENCES public.scan_runs(id) ON DELETE CASCADE
-);
+-- One-way drop, intentionally not reversible. Every reader/writer of
+-- scan_run_artifacts was deleted in the same change, so recreating an empty
+-- table would only resurrect dead schema with no code to use it. Consistent
+-- with "no backwards-compat shims while in active dev" (CLAUDE.md).
+SELECT 1;
