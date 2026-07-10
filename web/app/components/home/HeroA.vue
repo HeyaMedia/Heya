@@ -82,13 +82,14 @@
         <div class="hero-actions">
           <button
             class="btn btn-primary"
+            :style="playStyle"
             :disabled="!canPlayCurrent"
             @click="$emit('play', current)"
           >
             <Icon name="play" :size="16" />
             <span class="hero-play-label">{{ playLabel }}</span>
           </button>
-          <NuxtLink :to="mediaUrl(current)" class="btn btn-ghost">
+          <NuxtLink :to="mediaUrl(current)" class="btn btn-ghost" :style="detailsStyle">
             <Icon name="info" :size="16" />
             Details
           </NuxtLink>
@@ -110,6 +111,7 @@
 
 <script setup lang="ts">
 import type { MediaItem, Movie } from '~~/shared/types'
+import type { ImageTone } from '~/composables/useImageTone'
 
 // playInfo: per-item playback hint resolved by the parent. Movies populate
 // fileId from detail.files[0]; TV populates fileId + label from /up-next.
@@ -159,6 +161,23 @@ watch([currentBg, ambientEnabled], ([url, on]) => {
   if (on && url) ambientArt.set(url)
   else ambientArt.clear()
 }, { immediate: true })
+
+// Artwork-adaptive buttons: Play carries the backdrop's dominant tone,
+// Details a soft tint of its complement. Falls back to the theme accent
+// when sampling fails (no backdrop / decode error).
+const tone = ref<ImageTone | null>(null)
+watch(currentBg, async (url) => {
+  tone.value = url ? await sampleImageTone(url) : null
+}, { immediate: true })
+const playStyle = computed(() =>
+  tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)
+const detailsStyle = computed(() =>
+  tone.value
+    ? {
+        background: `rgb(${tone.value.complementTriplet} / 0.16)`,
+        boxShadow: `inset 0 0 0 1px rgb(${tone.value.complementTriplet} / 0.35)`,
+      }
+    : undefined)
 
 // Template only renders when items.length > 0 (`v-if` on the root section),
 // so we can safely treat this as defined inside that scope.
@@ -589,5 +608,33 @@ onUnmounted(() => {
     position: absolute;
     inset: -21px -6px;
   }
+}
+
+/* Dominant-tone shifts blend instead of snapping as the deck cycles. */
+.hero-actions .btn {
+  transition: background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+              color 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── Art-proof readability (the hero sits on raw artwork in ambient mode) ──
+   A --bg-1 halo adapts per theme: paper glow behind dark text in light,
+   dark glow behind light text in dark. */
+.hero-counter,
+.hero-meta-row,
+.hero-synopsis {
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.hero-title { text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1); }
+/* The reason chip gets a real glass backing instead of an 18% tint. */
+.hero-info :deep(.chip) {
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+/* Carousel bars: stronger base + a shade outline so they survive bright art. */
+.hero-dot {
+  background: rgb(var(--ink) / 0.38) !important;
+  box-shadow: 0 0 0 1px rgb(var(--shade) / 0.22), 0 1px 4px rgb(var(--shade) / 0.30);
 }
 </style>
