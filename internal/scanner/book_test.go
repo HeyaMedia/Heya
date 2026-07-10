@@ -7,9 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBookFixtureProducesLocalPlans(t *testing.T) {
@@ -177,6 +181,47 @@ func TestBookDatabaseFormatKeepsAudiobooksLogical(t *testing.T) {
 	if got := bookDatabaseFormat(BookMaterializePreview{Format: "book", FileFormat: "epub"}); got != "epub" {
 		t.Fatalf("ebook database format: got %q, want epub", got)
 	}
+}
+
+func TestApplyBookRowDefaultsMissingSubjectsToEmptyArray(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-book-null-subjects-test",
+		MediaType:    sqlc.MediaTypeBook,
+		Paths:        []string{"/tmp/book-null-subjects"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID:    lib.ID,
+		MediaType:    sqlc.MediaTypeBook,
+		Title:        "Zeus Is Dead",
+		SortTitle:    "zeus is dead",
+		ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+
+	detail := &metadata.MediaDetail{Title: "Zeus Is Dead", Subjects: nil}
+	preview := BookMaterializePreview{Format: "audiobook", FileFormat: "m4b"}
+	created, action, err := applyBookRow(ctx, q, item.ID, detail, preview)
+	require.NoError(t, err)
+	require.Equal(t, "create_book_row", action)
+	require.NotNil(t, created.Subjects)
+	require.Empty(t, created.Subjects)
+
+	updated, action, err := applyBookRow(ctx, q, item.ID, detail, preview)
+	require.NoError(t, err)
+	require.Equal(t, "update_book_row", action)
+	require.NotNil(t, updated.Subjects)
+	require.Empty(t, updated.Subjects)
 }
 
 func assertBookPlan(t *testing.T, plans map[string]BookPlan, title, author, year, format string) {
