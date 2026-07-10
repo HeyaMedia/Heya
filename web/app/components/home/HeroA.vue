@@ -50,7 +50,10 @@
       <div class="hero-info">
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px">
           <Chip gold>{{ current.chip || 'Featured' }}</Chip>
-          <span class="hero-counter">{{ String(currentIdx + 1).padStart(2, '0') }} / {{ String(items.length).padStart(2, '0') }}</span>
+          <span v-if="movie?.rating" class="chip gold hero-rating">
+            <Icon name="star" :size="12" />
+            {{ parseFloat(String(movie.rating)).toFixed(1) }}
+          </span>
         </div>
 
         <NuxtLink :to="mediaUrl(current)" class="hero-title-link">
@@ -64,15 +67,10 @@
           <h1 v-else class="hero-title">{{ current.title }}</h1>
         </NuxtLink>
 
-        <div class="hero-meta-row" v-if="current.year || movie?.runtime_minutes || movie?.rating">
+        <div class="hero-meta-row" v-if="current.year || movie?.runtime_minutes">
           <span v-if="current.year">{{ current.year }}</span>
           <span v-if="movie?.runtime_minutes" class="dot" />
           <span v-if="movie?.runtime_minutes">{{ Math.floor(movie.runtime_minutes / 60) }}h {{ movie.runtime_minutes % 60 }}m</span>
-          <template v-if="movie?.rating">
-            <span class="dot" />
-            <Icon name="star" :size="14" style="color: var(--gold)" />
-            <span style="color: var(--gold)">{{ parseFloat(String(movie.rating)).toFixed(1) }}</span>
-          </template>
         </div>
 
         <p class="hero-synopsis" v-if="current.description">
@@ -95,15 +93,22 @@
           </NuxtLink>
         </div>
 
-        <div class="hero-dots" v-if="items.length > 1" @mouseenter="pauseHero" @mouseleave="resumeHero">
-          <button
-            v-for="(_, i) in items"
-            :key="`hero-${i}-${currentIdx}`"
-            class="hero-dot"
-            :class="{ active: i === currentIdx, paused: (heroPaused || !!trailerSrc) && i === currentIdx }"
-            @click="jumpHero(i)"
-          />
-        </div>
+      </div>
+    </div>
+
+    <!-- Slide navigator: counter + bars in one glass pill, bottom-right
+         (mirrors the detail pages' bd-indicators spot). Clicking a bar pins
+         that slide for 30s before rotation resumes. -->
+    <div class="hero-nav" v-if="items.length > 1" @mouseenter="pauseHero" @mouseleave="resumeHero">
+      <span class="hero-counter">{{ String(currentIdx + 1).padStart(2, '0') }} / {{ String(items.length).padStart(2, '0') }}</span>
+      <div class="hero-dots">
+        <button
+          v-for="(_, i) in items"
+          :key="`hero-${i}-${currentIdx}`"
+          class="hero-dot"
+          :class="{ active: i === currentIdx, paused: (heroPaused || !!trailerSrc) && i === currentIdx }"
+          @click="pinHero(i)"
+        />
       </div>
     </div>
   </section>
@@ -319,6 +324,7 @@ function pauseHero() {
 }
 
 function resumeHero() {
+  if (pinTimer) return // a clicked slide holds until its 30s elapse
   heroPaused.value = false
   if (trailerSrc.value) return // trailer owns the clock
   startTime = Date.now()
@@ -326,6 +332,23 @@ function resumeHero() {
     advanceHero()
     startTimer()
   }, remaining)
+}
+
+// Click-to-pin: jump to the slide and hold it for 30s before rotation
+// resumes. Clicking another bar re-pins; hover pause/resume is bypassed
+// while pinned (see the guard in resumeHero).
+const PIN_MS = 30_000
+let pinTimer: ReturnType<typeof setTimeout> | null = null
+function pinHero(idx: number) {
+  jumpHero(idx)
+  heroPaused.value = true
+  if (timeout) clearTimeout(timeout)
+  if (pinTimer) clearTimeout(pinTimer)
+  pinTimer = setTimeout(() => {
+    pinTimer = null
+    remaining = INTERVAL
+    resumeHero()
+  }, PIN_MS)
 }
 
 function jumpHero(idx: number) {
@@ -616,6 +639,26 @@ onUnmounted(() => {
               color 0.9s cubic-bezier(0.22, 1, 0.36, 1),
               box-shadow 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
+
+/* Slide navigator pill — bottom-right, over artwork in any theme. */
+.hero-nav {
+  position: absolute;
+  right: 24px;
+  bottom: 18px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+}
+.hero-nav .hero-counter { text-shadow: none; }
+.hero-nav .hero-dots { margin: 0; }
 
 /* ── Art-proof readability (the hero sits on raw artwork in ambient mode) ──
    A --bg-1 halo adapts per theme: paper glow behind dark text in light,
