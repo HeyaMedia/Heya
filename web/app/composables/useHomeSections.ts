@@ -37,6 +37,9 @@ interface MeSettingsBlob {
 
 // Module-level so every consumer of the composable shares one write queue.
 let saveChain: Promise<void> = Promise.resolve()
+// Monotonic save counter: a failed save may only roll back the cache if no
+// newer save has been queued since (see persist()).
+let saveSeq = 0
 
 /** Server prefs → full resolved list: server order first (unknown IDs
  *  dropped), then any sections the stored list doesn't know about yet, in
@@ -89,12 +92,19 @@ export function useHomeSections() {
     // Serialize the PUTs: concurrent whole-blob writes can arrive at the
     // server out of order (last write wins), resurrecting a stale section
     // order even though the local cache was right. Each link swallows its
-    // own failure (with a rollback refetch) so the chain never wedges.
+    // own failure so the chain never wedges. Rollback rules: only the
+    // NEWEST queued save may refetch on failure — an older save's rollback
+    // would race the newer in-flight PUT and clobber the optimistic cache
+    // with pre-PUT server state. The refetch is awaited inside the chain so
+    // no later save starts while it runs.
+    const seq = ++saveSeq
     saveChain = saveChain.then(async () => {
       try {
         await $heya('/api/me/settings', { method: 'PUT', body: body as never })
       } catch {
-        queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
+        if (seq === saveSeq) {
+          await queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
+        }
       }
     })
     return saveChain
