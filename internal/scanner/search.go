@@ -49,9 +49,12 @@ type MovieSearchCandidate struct {
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 }
 
-func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider MovieSearchProvider, emit Emitter, decisionsOpt ...SearchDecisions) ([]MovieSearchMatch, error) {
+func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider MovieSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]MovieSearchMatch, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("movie search provider is required")
+	}
+	if threshold <= 0 {
+		threshold = movieAutoMatchThreshold
 	}
 
 	decisions := optionalSearchDecisions(decisionsOpt)
@@ -149,7 +152,7 @@ func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider Movi
 
 		top := scored[0]
 		clearGap := movieSearchClearGap(scored, match.Title)
-		if top.Confidence >= movieAutoMatchThreshold && clearGap {
+		if top.Confidence >= threshold && clearGap {
 			search.Accepted = true
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName

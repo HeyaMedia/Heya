@@ -56,7 +56,7 @@ func TestMovieSearchAgainstHeyaMedia(t *testing.T) {
 	}
 
 	provider := heyamedia.NewHeyaProvider(heyamedia.NewClient(baseURL))
-	results, err := SearchMovieMatches(ctx, matches, provider, &captureEmitter{})
+	results, err := SearchMovieMatches(ctx, matches, provider, &captureEmitter{}, 0)
 	if err != nil {
 		t.Fatalf("search movie matches: %v", err)
 	}

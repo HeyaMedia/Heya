@@ -390,23 +390,24 @@ func (r *LibraryRun) runSearch(ctx context.Context) error {
 		return r.fail(err)
 	}
 	lib := r.lib
+	threshold := MatchThresholdForLibrary(lib)
 	var err error
 	switch {
 	case lib.MediaType == sqlc.MediaTypeMovie:
-		r.result.MovieSearch, err = SearchMovieMatches(ctx, r.result.MovieMatches, r.opts.MovieSearcher, r.sink, r.searchDecisions)
+		r.result.MovieSearch, err = SearchMovieMatches(ctx, r.result.MovieMatches, r.opts.MovieSearcher, r.sink, threshold, r.searchDecisions)
 	case lib.MediaType == sqlc.MediaTypeBook:
-		r.result.BookSearch, err = SearchBookPlans(ctx, r.result.BookPlans, r.opts.BookSearcher, r.sink, r.searchDecisions)
+		r.result.BookSearch, err = SearchBookPlans(ctx, r.result.BookPlans, r.opts.BookSearcher, r.sink, threshold, r.searchDecisions)
 	case lib.MediaType == sqlc.MediaTypeMusic:
-		r.result.MusicSearch, err = SearchMusicArtists(ctx, r.result.MusicArtists, r.opts.MusicSearcher, r.sink, r.searchDecisions)
+		r.result.MusicSearch, err = SearchMusicArtists(ctx, r.result.MusicArtists, r.opts.MusicSearcher, r.sink, threshold, r.searchDecisions)
 	case mediatype.IsTVLike(lib.MediaType):
 		searcher := r.opts.TVSearcher
 		if searcher == nil {
 			searcher = r.opts.MovieSearcher
 		}
 		if lib.MediaType == sqlc.MediaTypeAnime {
-			r.result.TVSearch, err = SearchAnimeMatches(ctx, r.result.TVMatches, searcher, r.sink, r.searchDecisions)
+			r.result.TVSearch, err = SearchAnimeMatches(ctx, r.result.TVMatches, searcher, r.sink, threshold, r.searchDecisions)
 		} else {
-			r.result.TVSearch, err = SearchTVMatches(ctx, r.result.TVMatches, searcher, r.sink, r.searchDecisions)
+			r.result.TVSearch, err = SearchTVMatches(ctx, r.result.TVMatches, searcher, r.sink, threshold, r.searchDecisions)
 		}
 	default:
 		err = fmt.Errorf("scanner currently supports movie, TV-like, music, and book libraries only (got %q)", lib.MediaType)

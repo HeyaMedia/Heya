@@ -165,7 +165,7 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 		{Key: "artist:heya test tones", Artist: "Heya Test Tones"},
 	}
 
-	search, err := SearchMusicArtists(context.Background(), artists, provider, emit)
+	search, err := SearchMusicArtists(context.Background(), artists, provider, emit, 0)
 	if err != nil {
 		t.Fatalf("search music artists: %v", err)
 	}

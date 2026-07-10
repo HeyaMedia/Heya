@@ -5625,6 +5625,10 @@
           "generate_thumbnails": {
             "type": "boolean"
           },
+          "match_threshold": {
+            "format": "double",
+            "type": "number"
+          },
           "preferred_country": {
             "type": "string"
           },

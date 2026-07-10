@@ -120,3 +120,20 @@ func TestParkUnmatchedFilesPreservesMatchedRows(t *testing.T) {
 	require.Equal(t, int64(150), row.Size, "seen-marker still refreshes to current bytes")
 	require.True(t, row.Mtime.Time.Equal(newMtime), "seen-marker still refreshes to current mtime")
 }
+
+func TestMatchThresholdForLibrary(t *testing.T) {
+	lib := sqlc.Library{MediaType: sqlc.MediaTypeMovie, Settings: []byte(`{}`)}
+	require.InDelta(t, 0.85, MatchThresholdForLibrary(lib), 1e-9, "absent setting uses the built-in default")
+
+	lib.MediaType = sqlc.MediaTypeBook
+	require.InDelta(t, 0.70, MatchThresholdForLibrary(lib), 1e-9, "books default lower")
+
+	lib.Settings = []byte(`{"match_threshold":0.92}`)
+	require.InDelta(t, 0.92, MatchThresholdForLibrary(lib), 1e-9)
+
+	lib.Settings = []byte(`{"match_threshold":0.05}`)
+	require.InDelta(t, 0.3, MatchThresholdForLibrary(lib), 1e-9, "clamped low")
+
+	lib.Settings = []byte(`{"match_threshold":1.5}`)
+	require.InDelta(t, 0.99, MatchThresholdForLibrary(lib), 1e-9, "clamped high")
+}

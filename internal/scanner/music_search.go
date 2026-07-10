@@ -51,9 +51,12 @@ type MusicSearchCandidate struct {
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 }
 
-func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider MusicSearchProvider, emit Emitter, decisionsOpt ...SearchDecisions) ([]MusicSearchMatch, error) {
+func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]MusicSearchMatch, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("music search provider is required")
+	}
+	if threshold <= 0 {
+		threshold = musicArtistAutoMatchThreshold
 	}
 
 	decisions := optionalSearchDecisions(decisionsOpt)
@@ -86,7 +89,7 @@ func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider
 				setErr(err)
 				return
 			}
-			results[i] = searchOneMusicArtist(ctx, artist, provider, emit, decisions)
+			results[i] = searchOneMusicArtist(ctx, artist, provider, emit, threshold, decisions)
 		}(i, artist)
 	}
 	wg.Wait()
@@ -104,7 +107,7 @@ func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider
 	return results, nil
 }
 
-func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, emit Emitter, decisions SearchDecisions) MusicSearchMatch {
+func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisions SearchDecisions) MusicSearchMatch {
 	query := metadata.SearchQuery{Title: artist.Artist}
 	search := MusicSearchMatch{
 		Key:   artist.Key,
@@ -210,7 +213,7 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 
 	top := scored[0]
 	clearGap := musicSearchClearGap(scored, artist.Artist)
-	if top.Confidence >= musicArtistAutoMatchThreshold && clearGap {
+	if top.Confidence >= threshold && clearGap {
 		providerID := musicPreferredProviderID(top)
 		search.Accepted = true
 		search.ProviderID = providerID

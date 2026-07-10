@@ -29,6 +29,8 @@ export interface LibrarySettings {
   save_images: boolean
   enable_trickplay: boolean
   generate_thumbnails: boolean
+  /** Scanner auto-accept confidence floor; 0/absent = built-in default (0.85, books 0.70). */
+  match_threshold?: number
 }
 
 export interface Library {

@@ -79,6 +79,7 @@ const nameMap: Record<string, string> = {
   cpu: 'cpu',
   users: 'users',
   info: 'info',
+  target: 'target',
   trash: 'trash',
   pencil: 'pencil-simple',
   warning: 'warning',

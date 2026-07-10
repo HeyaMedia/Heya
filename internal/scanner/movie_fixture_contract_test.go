@@ -69,7 +69,7 @@ func TestMovieFixtureScannerContractPreApplyAndIdempotentMaterialization(t *test
 
 	remotes := movieFixtureRemotes()
 	searchProvider := movieFixtureSearchProvider(remotes)
-	search, err := SearchMovieMatches(ctx, matches, searchProvider, emit)
+	search, err := SearchMovieMatches(ctx, matches, searchProvider, emit, 0)
 	if err != nil {
 		t.Fatalf("search movies: %v", err)
 	}

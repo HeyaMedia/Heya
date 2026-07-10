@@ -53,9 +53,12 @@ type BookSearchCandidate struct {
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 }
 
-func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchProvider, emit Emitter, decisionsOpt ...SearchDecisions) ([]BookSearchMatch, error) {
+func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]BookSearchMatch, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("book search provider is required")
+	}
+	if threshold <= 0 {
+		threshold = bookAutoMatchThreshold
 	}
 	decisions := optionalSearchDecisions(decisionsOpt)
 	results := make([]BookSearchMatch, 0, len(plans))
@@ -161,7 +164,7 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 		}
 
 		top := scored[0]
-		if top.Confidence >= bookAutoMatchThreshold && bookTitleAcceptable(plan.Title, top.Title) {
+		if top.Confidence >= threshold && bookTitleAcceptable(plan.Title, top.Title) {
 			search.Accepted = true
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName

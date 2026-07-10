@@ -48,17 +48,20 @@ type TVSearchCandidate struct {
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 }
 
-func SearchTVMatches(ctx context.Context, matches []TVMatch, provider TVSearchProvider, emit Emitter, decisionsOpt ...SearchDecisions) ([]TVSearchMatch, error) {
-	return searchTVLikeMatches(ctx, matches, provider, emit, "tv", decisionsOpt...)
+func SearchTVMatches(ctx context.Context, matches []TVMatch, provider TVSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]TVSearchMatch, error) {
+	return searchTVLikeMatches(ctx, matches, provider, emit, "tv", threshold, decisionsOpt...)
 }
 
-func SearchAnimeMatches(ctx context.Context, matches []TVMatch, provider TVSearchProvider, emit Emitter, decisionsOpt ...SearchDecisions) ([]TVSearchMatch, error) {
-	return searchTVLikeMatches(ctx, matches, provider, emit, "anime", decisionsOpt...)
+func SearchAnimeMatches(ctx context.Context, matches []TVMatch, provider TVSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]TVSearchMatch, error) {
+	return searchTVLikeMatches(ctx, matches, provider, emit, "anime", threshold, decisionsOpt...)
 }
 
-func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSearchProvider, emit Emitter, domain string, decisionsOpt ...SearchDecisions) ([]TVSearchMatch, error) {
+func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSearchProvider, emit Emitter, domain string, threshold float64, decisionsOpt ...SearchDecisions) ([]TVSearchMatch, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("%s search provider is required", domain)
+	}
+	if threshold <= 0 {
+		threshold = tvAutoMatchThreshold
 	}
 
 	decisions := optionalSearchDecisions(decisionsOpt)
@@ -166,7 +169,7 @@ func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSear
 
 		top := scored[0]
 		clearGap := movieSearchClearGap(scored, match.Title)
-		if top.Confidence >= tvAutoMatchThreshold && clearGap {
+		if top.Confidence >= threshold && clearGap {
 			search.Accepted = true
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName

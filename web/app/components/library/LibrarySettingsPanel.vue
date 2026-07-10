@@ -151,6 +151,34 @@
         ended.
       </p>
     </div>
+
+    <div class="sp-section">
+      <div class="sp-section-head">
+        <div class="sp-section-icon match"><Icon name="target" :size="13" /></div>
+        <div>
+          <h4 class="sp-label">Match confidence</h4>
+          <p class="sp-hint">How sure the scanner must be before accepting a match automatically</p>
+        </div>
+      </div>
+      <div class="threshold-row">
+        <AppSlider
+          :model-value="thresholdValue"
+          :min="50"
+          :max="99"
+          :step="1"
+          aria-label="Auto-match confidence threshold"
+          class="threshold-slider"
+          @update:model-value="setThreshold"
+        />
+        <span class="threshold-value">{{ thresholdValue }}%</span>
+      </div>
+      <p class="sp-footnote">
+        <Icon name="info" :size="11" />
+        Below the threshold, items land in the scanner review queue instead of
+        matching automatically. Default is {{ defaultThresholdPercent }}% for
+        this library type.
+      </p>
+    </div>
   </div>
 </template>
 
@@ -177,7 +205,21 @@ const local = reactive<LibrarySettings>({
   save_images: false,
   enable_trickplay: false,
   generate_thumbnails: true,
+  match_threshold: 0,
 })
+
+// 0 in settings means "use the scanner's built-in default": 0.85 everywhere,
+// 0.70 for books.
+const defaultThreshold = computed(() => (props.mediaType === 'book' ? 0.7 : 0.85))
+const defaultThresholdPercent = computed(() => Math.round(defaultThreshold.value * 100))
+const thresholdValue = computed(() =>
+  Math.round(((local.match_threshold || defaultThreshold.value) as number) * 100),
+)
+
+function setThreshold(percent: number) {
+  local.match_threshold = percent / 100
+  emitUpdate()
+}
 
 function syncFromProps() {
   const s = props.modelValue
@@ -191,6 +233,7 @@ function syncFromProps() {
   local.save_images = s.save_images ?? false
   local.enable_trickplay = s.enable_trickplay ?? false
   local.generate_thumbnails = s.generate_thumbnails ?? true
+  local.match_threshold = s.match_threshold ?? 0
 }
 
 watch(() => props.modelValue, syncFromProps, { immediate: true, deep: true })
@@ -271,6 +314,28 @@ const countries = [
 
 .sp-section-icon.locale { background: rgba(140, 220, 180, 0.1); color: rgb(140, 220, 180); }
 .sp-section-icon.opts { background: rgba(200, 140, 255, 0.1); color: rgb(200, 140, 255); }
+.sp-section-icon.match { background: rgba(255, 190, 120, 0.1); color: rgb(255, 190, 120); }
+
+/* Match confidence */
+.threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px;
+}
+.threshold-slider { flex: 1; }
+.threshold-value {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--fg-1);
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 .sp-label {
   font-size: 13px;

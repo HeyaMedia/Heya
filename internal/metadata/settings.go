@@ -13,6 +13,9 @@ type LibrarySettings struct {
 	SaveImages         bool   `json:"save_images"`
 	EnableTrickplay    bool   `json:"enable_trickplay"`
 	GenerateThumbnails bool   `json:"generate_thumbnails"`
+	// MatchThreshold is the scanner's auto-accept confidence floor for this
+	// library. 0 means "use the built-in default" (0.85; books 0.70).
+	MatchThreshold float64 `json:"match_threshold,omitempty"`
 }
 
 func DefaultSettings(mediaType string) LibrarySettings {
@@ -21,6 +24,7 @@ func DefaultSettings(mediaType string) LibrarySettings {
 		PreferredLanguage: "en",
 		UseLocalData:      true,
 		FetchRatings:      true,
+		MatchThreshold:    0.85,
 	}
 	switch mediaType {
 	case "movie":
@@ -30,6 +34,8 @@ func DefaultSettings(mediaType string) LibrarySettings {
 	case "tv", "anime":
 		base.PreferredCountry = "US"
 		base.GenerateThumbnails = true
+	case "book":
+		base.MatchThreshold = 0.70
 	}
 	return base
 }
@@ -77,5 +83,8 @@ func (s LibrarySettings) Merge(other LibrarySettings) LibrarySettings {
 	s.SaveImages = other.SaveImages
 	s.EnableTrickplay = other.EnableTrickplay
 	s.GenerateThumbnails = other.GenerateThumbnails
+	if other.MatchThreshold > 0 {
+		s.MatchThreshold = other.MatchThreshold
+	}
 	return s
 }

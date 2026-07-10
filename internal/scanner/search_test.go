@@ -91,7 +91,7 @@ func TestSearchMovieMatchesSelectsCandidatesWithoutFetchingMetadata(t *testing.T
 	}}
 
 	emit := &captureEmitter{}
-	results, err := SearchMovieMatches(context.Background(), matches, provider, emit)
+	results, err := SearchMovieMatches(context.Background(), matches, provider, emit, 0)
 	if err != nil {
 		t.Fatalf("search movie matches: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestSearchMovieMatchesUsesStoredDecisions(t *testing.T) {
 	}
 
 	emit := &captureEmitter{}
-	results, err := SearchMovieMatches(context.Background(), matches, provider, emit, decisions)
+	results, err := SearchMovieMatches(context.Background(), matches, provider, emit, 0, decisions)
 	if err != nil {
 		t.Fatalf("search movie matches: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestSearchTVMatchesSelectsCandidates(t *testing.T) {
 	}}
 
 	emit := &captureEmitter{}
-	results, err := SearchTVMatches(context.Background(), matches, provider, emit)
+	results, err := SearchTVMatches(context.Background(), matches, provider, emit, 0)
 	if err != nil {
 		t.Fatalf("search TV matches: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestSearchAnimeMatchesPrefersExactPrimaryTitleOverAltTitleTie(t *testing.T)
 	}}
 
 	emit := &captureEmitter{}
-	results, err := SearchAnimeMatches(context.Background(), matches, provider, emit)
+	results, err := SearchAnimeMatches(context.Background(), matches, provider, emit, 0)
 	if err != nil {
 		t.Fatalf("search anime matches: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestSearchAnimeMatchesUsesDirectProviderID(t *testing.T) {
 	provider := &fakeTVSearchProvider{results: map[string][]metadata.SearchResult{}}
 
 	emit := &captureEmitter{}
-	results, err := SearchAnimeMatches(context.Background(), matches, provider, emit)
+	results, err := SearchAnimeMatches(context.Background(), matches, provider, emit, 0)
 	if err != nil {
 		t.Fatalf("search anime matches: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestSearchTVMatchesUsesStoredDecisions(t *testing.T) {
 	}
 
 	emit := &captureEmitter{}
-	results, err := SearchTVMatches(context.Background(), matches, provider, emit, decisions)
+	results, err := SearchTVMatches(context.Background(), matches, provider, emit, 0, decisions)
 	if err != nil {
 		t.Fatalf("search TV matches: %v", err)
 	}

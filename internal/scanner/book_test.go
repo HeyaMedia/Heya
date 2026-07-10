@@ -153,7 +153,7 @@ func TestSearchBookPlansSelectsAndRejects(t *testing.T) {
 		{Key: bookIdentityKey("Andy Weir", "Project Hail Mary", "2021", "book"), Title: "Project Hail Mary", Author: "Andy Weir", Year: "2021", Format: "book", Confidence: 0.96},
 		{Key: bookIdentityKey("Somebody", "Bad Title", "2020", "book"), Title: "Bad Title", Author: "Somebody", Year: "2020", Format: "book", Confidence: 0.96},
 	}
-	search, err := SearchBookPlans(context.Background(), plans, provider, emit)
+	search, err := SearchBookPlans(context.Background(), plans, provider, emit, 0)
 	if err != nil {
 		t.Fatalf("search books: %v", err)
 	}
