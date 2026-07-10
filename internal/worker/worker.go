@@ -56,6 +56,10 @@ type Config struct {
 	// SonicEnabled gates kickoff_sonic_analysis at runtime. Looks up
 	// the system_settings toggle without importing service/.
 	SonicEnabled SonicEnabledFn
+	// EmbedBackfill runs the recommendations-embedding self-heal sweep
+	// (kickoff_embed_recommendations). Same no-import-of-service
+	// indirection as SonicEnabled; nil-safe (worker no-ops).
+	EmbedBackfill EmbedBackfillFn
 	// Watcher receives Pause/Resume during library scans so fsnotify
 	// doesn't race the scanner's bulk writes. nil during tests + the
 	// `heya queue process` CLI which runs without watchers.
@@ -153,6 +157,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &KickoffThumbnailsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffSonicAnalysisWorker{DB: cfg.DB, Enabled: cfg.SonicEnabled, Progress: cfg.Progress})
 	river.AddWorker(workers, &CleanupScannerArtifactsWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &KickoffEmbedRecommendationsWorker{DB: cfg.DB, EmbedBackfill: cfg.EmbedBackfill, Progress: cfg.Progress})
 
 	// Debounce sweep — owns its own queue and fires every 10s via the
 	// periodic-jobs entry below.
@@ -234,15 +239,16 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 
 			// Kickoffs (each their own queue, UniqueByArgs so click-spam
 			// is a no-op while one is queued/running).
-			"kickoff_refresh_stale":     {MaxWorkers: queueWorkers(cfg, "kickoff_refresh_stale", 1)},
-			"kickoff_music_loudness":    {MaxWorkers: queueWorkers(cfg, "kickoff_music_loudness", 1)},
-			"kickoff_music_fingerprint": {MaxWorkers: queueWorkers(cfg, "kickoff_music_fingerprint", 1)},
-			"kickoff_media_segments":    {MaxWorkers: queueWorkers(cfg, "kickoff_media_segments", 1)},
-			"kickoff_detect_segments":   {MaxWorkers: queueWorkers(cfg, "kickoff_detect_segments", 1)},
-			"kickoff_trickplay":         {MaxWorkers: queueWorkers(cfg, "kickoff_trickplay", 1)},
-			"kickoff_thumbnails":        {MaxWorkers: queueWorkers(cfg, "kickoff_thumbnails", 1)},
-			"kickoff_sonic_analysis":    {MaxWorkers: queueWorkers(cfg, "kickoff_sonic_analysis", 1)},
-			"cleanup_scanner_artifacts": {MaxWorkers: queueWorkers(cfg, "cleanup_scanner_artifacts", 1)},
+			"kickoff_refresh_stale":         {MaxWorkers: queueWorkers(cfg, "kickoff_refresh_stale", 1)},
+			"kickoff_music_loudness":        {MaxWorkers: queueWorkers(cfg, "kickoff_music_loudness", 1)},
+			"kickoff_music_fingerprint":     {MaxWorkers: queueWorkers(cfg, "kickoff_music_fingerprint", 1)},
+			"kickoff_media_segments":        {MaxWorkers: queueWorkers(cfg, "kickoff_media_segments", 1)},
+			"kickoff_detect_segments":       {MaxWorkers: queueWorkers(cfg, "kickoff_detect_segments", 1)},
+			"kickoff_trickplay":             {MaxWorkers: queueWorkers(cfg, "kickoff_trickplay", 1)},
+			"kickoff_thumbnails":            {MaxWorkers: queueWorkers(cfg, "kickoff_thumbnails", 1)},
+			"kickoff_sonic_analysis":        {MaxWorkers: queueWorkers(cfg, "kickoff_sonic_analysis", 1)},
+			"cleanup_scanner_artifacts":     {MaxWorkers: queueWorkers(cfg, "cleanup_scanner_artifacts", 1)},
+			"kickoff_embed_recommendations": {MaxWorkers: queueWorkers(cfg, "kickoff_embed_recommendations", 1)},
 
 			// Misc.
 			"soft_delete":      {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},

@@ -25,6 +25,7 @@ var definitions = []Definition{
 	{ID: "generate_thumbnails", KickoffKind: "kickoff_thumbnails", WorkKinds: []string{"thumbnail_extra"}},
 	{ID: "analyze_music_facets", KickoffKind: "kickoff_sonic_analysis", WorkKinds: []string{"analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"}, Pump: true},
 	{ID: "cleanup_scanner_artifacts", KickoffKind: "cleanup_scanner_artifacts"},
+	{ID: "embed_recommendations", KickoffKind: "kickoff_embed_recommendations"},
 
 	{ID: "transcoding", WorkKinds: []string{"transcode"}, Synthetic: true},
 	{ID: "artwork", WorkKinds: []string{"download_image", "fetch_artwork", "save_images"}, Synthetic: true},

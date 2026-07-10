@@ -215,6 +215,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// re-wired after AddWorker — see lazyWatcher / lazyEnabled below.
 	var watcherPauser worker.WatcherPauser        // assigned after watcher.NewManager
 	var sonicEnabledFn func(context.Context) bool // assigned after App construction
+	var embedBackfillFn worker.EmbedBackfillFn    // assigned after App construction
 
 	progress := worker.NewTaskProgressBroadcaster(hub)
 
@@ -234,6 +235,12 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 				return false
 			}
 			return sonicEnabledFn(ctx)
+		},
+		EmbedBackfill: func(ctx context.Context, force bool) (int, int, error) {
+			if embedBackfillFn == nil {
+				return 0, 0, nil
+			}
+			return embedBackfillFn(ctx, force)
 		},
 		Watcher:      lazyWatcher{ptr: &watcherPauser},
 		Progress:     progress,
@@ -323,6 +330,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// at sonicEnabledFn; assigning here makes that closure live before
 	// any kickoff fires.
 	sonicEnabledFn = app.SonicAnalysisEnabled
+	embedBackfillFn = app.backfillEmbeddingsForTask
 
 	// Cast scrobbles route through the same RecordPlayback dispatch the
 	// HTTP endpoint uses; wired post-construction like SonicEnabled.

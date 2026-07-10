@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -194,6 +195,17 @@ func (a *App) loadEpisodeEmbedDocs(ctx context.Context) ([]embedDocRow, error) {
 		out = append(out, embedDocRow{id: id, doc: doc})
 	}
 	return out, rows.Err()
+}
+
+// backfillEmbeddingsForTask is the scheduled-task entry point
+// (kickoff_embed_recommendations): a disabled or still-downloading engine is
+// a clean no-op there, not a failure.
+func (a *App) backfillEmbeddingsForTask(ctx context.Context, force bool) (int, int, error) {
+	embedded, skipped, err := a.BackfillVideoEmbeddings(ctx, force)
+	if errors.Is(err, ErrMLDisabled) {
+		return 0, 0, nil
+	}
+	return embedded, skipped, err
 }
 
 // embedDocHash fingerprints the exact text a facet row embedded, so the

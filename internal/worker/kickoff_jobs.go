@@ -372,6 +372,23 @@ func (CleanupScannerArtifactsArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// KickoffEmbedRecommendationsArgs sweeps the recommendation embeddings: any
+// item or episode whose stored doc hash no longer matches its recomposed
+// metadata doc re-embeds (self-heal after refreshes, re-identifies, edits).
+// No-ops quickly when the embedding engine is disabled or nothing changed.
+type KickoffEmbedRecommendationsArgs struct {
+	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+}
+
+func (KickoffEmbedRecommendationsArgs) Kind() string { return "kickoff_embed_recommendations" }
+func (KickoffEmbedRecommendationsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "kickoff_embed_recommendations",
+		MaxAttempts: 1,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 func TaskKinds(taskID string) []string {
 	return taskdefs.TaskKinds(taskID)
 }
