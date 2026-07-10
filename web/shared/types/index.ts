@@ -766,6 +766,8 @@ export interface EnrichedMediaItem extends MediaItem {
   rating: number | null
   runtime_minutes?: number
   resolution?: string
+  video_formats: string[]
+  audio_formats: string[]
   release_date?: string
   collection_id?: number
   first_air_date?: string
@@ -781,6 +783,8 @@ export interface FilterState {
   ratingMin: number | null
   ratingMax: number | null
   resolutions: string[]
+  videoFormats: string[]
+  audioFormats: string[]
   watched: 'all' | 'watched' | 'unwatched'
   studioIds: number[]
   studioNames: string[]

@@ -424,7 +424,7 @@ async function syncActiveView(v: string | null) {
     const listId = v.replace('list-', '')
     const list = userLists.value.find(l => String(l.id) === listId)
     if (list?.list_type === 'smart' && list.filter_json) {
-      filters.value = { ...defaultFilters(), ...list.filter_json }
+      await onFiltersChange({ ...defaultFilters(), ...list.filter_json })
       listItems.value = new Set()
       return
     }
@@ -542,9 +542,10 @@ async function onFiltersChange(f: FilterState) {
 async function saveSmartList() {
   const name = prompt('Smart list name:')
   if (!name?.trim()) return
+  const { toast } = useToast()
   try {
     const { $heya } = useNuxtApp()
-    await $heya('/api/me/lists', {
+    const created = await $heya('/api/me/lists', {
       method: 'POST',
       body: {
         name: name.trim(),
@@ -552,9 +553,13 @@ async function saveSmartList() {
         filter_json: filters.value,
         media_type: 'tv',
       } as any,
-    })
+    }) as UserList
     await loadLists()
-  } catch { /* ignore */ }
+    activeView.value = `list-${created.id}`
+    toast.ok(`Saved “${created.name}” in My Lists.`)
+  } catch (e: any) {
+    toast.err(e?.data?.detail || e?.message || 'Could not save the smart list.')
+  }
 }
 
 async function loadLists() {

@@ -95,6 +95,28 @@
                   </div>
                 </div>
 
+                <div class="fb-sec">
+                  <div class="fb-sec-label">Picture format</div>
+                  <div class="fb-chips">
+                    <button
+                      v-for="opt in VIDEO_FORMATS" :key="opt.value"
+                      class="fb-chip" :class="{ active: local.videoFormats.includes(opt.value) }"
+                      @click="toggleFormat('videoFormats', opt.value)"
+                    >{{ opt.label }}</button>
+                  </div>
+                </div>
+
+                <div class="fb-sec">
+                  <div class="fb-sec-label">Audio format</div>
+                  <div class="fb-chips">
+                    <button
+                      v-for="opt in AUDIO_FORMATS" :key="opt.value"
+                      class="fb-chip" :class="{ active: local.audioFormats.includes(opt.value) }"
+                      @click="toggleFormat('audioFormats', opt.value)"
+                    >{{ opt.label }}</button>
+                  </div>
+                </div>
+
                 <div class="fb-sec fb-sec-cols">
                   <div>
                     <div class="fb-sec-label">Resolution</div>
@@ -166,7 +188,7 @@
 
               <div class="fb-pop-foot">
                 <button class="fb-foot-btn" :disabled="activeCount === 0" @click="clearAll">Clear filters</button>
-                <button class="fb-foot-btn gold" :disabled="activeCount === 0" @click="$emit('save-list')">
+                <button class="fb-foot-btn gold" :disabled="activeCount === 0" @click="saveList">
                   <Icon name="bookmark" :size="12" />
                   Save as Smart List
                 </button>
@@ -268,6 +290,33 @@ const tileProxy = computed({
 const panelOpen = ref(false)
 const { isPhone } = useViewport()
 
+const VIDEO_FORMATS = [
+  { value: 'dolby-vision', label: 'Dolby Vision' },
+  { value: 'hdr', label: 'HDR' },
+  { value: 'hdr10', label: 'HDR10' },
+  { value: 'hdr10-plus', label: 'HDR10+' },
+  { value: 'hlg', label: 'HLG' },
+  { value: 'sdr', label: 'SDR' },
+]
+
+const AUDIO_FORMATS = [
+  { value: 'aac', label: 'AAC' },
+  { value: 'flac', label: 'FLAC' },
+  { value: 'dolby-audio', label: 'Dolby Audio' },
+  { value: 'dolby-atmos', label: 'Dolby Atmos' },
+  { value: 'dolby-digital', label: 'Dolby Digital' },
+  { value: 'dolby-digital-plus', label: 'Dolby Digital Plus' },
+  { value: 'truehd', label: 'TrueHD' },
+  { value: 'dts', label: 'DTS' },
+  { value: 'dts-hd', label: 'DTS-HD' },
+  { value: 'dts-x', label: 'DTS:X' },
+  { value: 'opus', label: 'Opus' },
+  { value: 'mp3', label: 'MP3' },
+  { value: 'pcm', label: 'PCM' },
+]
+
+const formatLabel = new Map([...VIDEO_FORMATS, ...AUDIO_FORMATS].map(opt => [opt.value, opt.label]))
+
 const local = reactive<FilterState>({ ...props.filters })
 
 watch(() => props.filters, (f) => {
@@ -303,6 +352,8 @@ const activeCount = computed(() => {
   if (local.ratingMin !== null) c++
   if (local.ratingMax !== null) c++
   if (local.resolutions.length) c += local.resolutions.length
+  if (local.videoFormats.length) c += local.videoFormats.length
+  if (local.audioFormats.length) c += local.audioFormats.length
   if (local.watched !== 'all') c++
   if (local.personIds.length) c += local.personIds.length
   if (local.studioIds.length) c += local.studioIds.length
@@ -320,6 +371,8 @@ const activePills = computed(() => {
   if (local.ratingMin !== null) pills.push({ key: 'ratingMin', label: `≥ ${local.ratingMin}★`, type: 'ratingMin' })
   if (local.ratingMax !== null) pills.push({ key: 'ratingMax', label: `≤ ${local.ratingMax}★`, type: 'ratingMax' })
   for (const r of local.resolutions) pills.push({ key: `res-${r}`, label: r === '4k' ? '4K' : r.toUpperCase(), type: 'resolution' })
+  for (const format of local.videoFormats) pills.push({ key: `video-${format}`, label: formatLabel.get(format) || format, type: 'videoFormat' })
+  for (const format of local.audioFormats) pills.push({ key: `audio-${format}`, label: formatLabel.get(format) || format, type: 'audioFormat' })
   if (local.watched !== 'all') pills.push({ key: 'watched', label: local.watched === 'watched' ? 'Watched' : 'Unwatched', type: 'watched' })
   for (let i = 0; i < local.personNames.length; i++) {
     const label = local.personNames[i]
@@ -344,6 +397,8 @@ function removePill(pill: Pill) {
       const display = r === '4k' ? '4K' : r.toUpperCase()
       return display !== pill.label
     }); break
+    case 'videoFormat': local.videoFormats = local.videoFormats.filter(format => (formatLabel.get(format) || format) !== pill.label); break
+    case 'audioFormat': local.audioFormats = local.audioFormats.filter(format => (formatLabel.get(format) || format) !== pill.label); break
     case 'watched': local.watched = 'all'; break
     case 'person': if (pill.index !== undefined) removePerson(pill.index); return
     case 'studio': if (pill.index !== undefined) removeStudio(pill.index); return
@@ -369,6 +424,19 @@ function toggleResolution(r: string) {
   if (idx >= 0) local.resolutions.splice(idx, 1)
   else local.resolutions.push(r)
   emitFilters()
+}
+
+function toggleFormat(kind: 'videoFormats' | 'audioFormats', format: string) {
+  const formats = local[kind]
+  const idx = formats.indexOf(format)
+  if (idx >= 0) formats.splice(idx, 1)
+  else formats.push(format)
+  emitFilters()
+}
+
+function saveList() {
+  emits('save-list')
+  panelOpen.value = false
 }
 
 function parseNum(e: Event): number | null {

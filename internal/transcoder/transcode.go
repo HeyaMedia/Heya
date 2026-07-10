@@ -143,8 +143,9 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 			if opts.Plan.StripDoViEL {
 				// Strip the Dolby Vision RPU NALs from each access unit. The
 				// HDR10 base layer remains intact and plays on any HEVC+HDR10
-				// client. Requires ffmpeg 6.0+.
-				args = append(args, "-bsf:v", "hevc_metadata=remove_dovi_rpu=1")
+				// client. `remove_dovi` is provided by jellyfin-ffmpeg, which is
+				// the FFmpeg distribution shipped in Heya's runtime image.
+				args = append(args, "-bsf:v", "hevc_metadata=remove_dovi=1")
 			}
 		}
 		return args

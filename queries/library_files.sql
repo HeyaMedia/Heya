@@ -121,6 +121,8 @@ SET media_info = $2,
        FROM jsonb_array_elements($2::jsonb->'streams') AS s
        WHERE s->>'codec_type' = 'video'
        LIMIT 1), 0),
+    video_formats = media_video_formats($2::jsonb),
+    audio_formats = media_audio_formats($2::jsonb),
     updated_at = now()
 WHERE id = $1;
 
@@ -266,6 +268,19 @@ FROM library_files
 WHERE media_item_id = ANY(@media_item_ids::bigint[])
   AND deleted_at IS NULL
 GROUP BY media_item_id;
+
+-- name: ListMediaTechnicalFormats :many
+-- The arrays are denormalized alongside video_height so this browse query
+-- never has to detoast or walk the large ffprobe payloads.
+SELECT lf.media_item_id,
+       COALESCE(array_agg(DISTINCT vf.format) FILTER (WHERE vf.format IS NOT NULL), ARRAY[]::text[])::text[] AS video_formats,
+       COALESCE(array_agg(DISTINCT af.format) FILTER (WHERE af.format IS NOT NULL), ARRAY[]::text[])::text[] AS audio_formats
+FROM library_files lf
+LEFT JOIN LATERAL unnest(lf.video_formats) vf(format) ON true
+LEFT JOIN LATERAL unnest(lf.audio_formats) af(format) ON true
+WHERE lf.media_item_id = ANY(@media_item_ids::bigint[])
+  AND lf.deleted_at IS NULL
+GROUP BY lf.media_item_id;
 
 -- name: TouchLibraryFileSeen :exec
 -- Refreshes the change-detection seen-marker (size+mtime) for a file the

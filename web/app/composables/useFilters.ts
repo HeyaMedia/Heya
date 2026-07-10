@@ -8,6 +8,8 @@ export function defaultFilters(): FilterState {
     ratingMin: null,
     ratingMax: null,
     resolutions: [],
+    videoFormats: [],
+    audioFormats: [],
     watched: 'all',
     studioIds: [],
     studioNames: [],
@@ -25,6 +27,8 @@ export function hasActiveFilters(f: FilterState): boolean {
     f.ratingMin !== null ||
     f.ratingMax !== null ||
     f.resolutions.length > 0 ||
+    f.videoFormats.length > 0 ||
+    f.audioFormats.length > 0 ||
     f.watched !== 'all' ||
     f.studioIds.length > 0 ||
     f.personIds.length > 0 ||
@@ -62,6 +66,16 @@ export function applyFilters(
 
     if (filters.resolutions.length > 0) {
       if (!item.resolution || !filters.resolutions.includes(item.resolution)) return false
+    }
+
+    if (filters.videoFormats.length > 0) {
+      const formats = item.video_formats || []
+      if (!filters.videoFormats.every(format => formats.includes(format))) return false
+    }
+
+    if (filters.audioFormats.length > 0) {
+      const formats = item.audio_formats || []
+      if (!filters.audioFormats.every(format => formats.includes(format))) return false
     }
 
     if (filters.watched === 'watched' && !watchedSet.has(item.id)) return false

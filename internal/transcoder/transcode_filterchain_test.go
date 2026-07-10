@@ -117,7 +117,7 @@ func TestAppendVideoArgs_DVStrip(t *testing.T) {
 		Plan:    &PlaybackPlan{StripDoViEL: true},
 	})
 	assert.Contains(t, args, "-bsf:v")
-	assert.Contains(t, args, "hevc_metadata=remove_dovi_rpu=1")
+	assert.Contains(t, args, "hevc_metadata=remove_dovi=1")
 }
 
 func TestAppendVideoArgs_BothSurgicalFlags(t *testing.T) {
@@ -129,7 +129,7 @@ func TestAppendVideoArgs_BothSurgicalFlags(t *testing.T) {
 	assert.Equal(t, "copy", args[1])
 	assert.Contains(t, args, "-tag:v")
 	assert.Contains(t, args, "hvc1")
-	assert.Contains(t, args, "hevc_metadata=remove_dovi_rpu=1")
+	assert.Contains(t, args, "hevc_metadata=remove_dovi=1")
 }
 
 // Without a Plan, copy path should be the bare "-c:v copy".

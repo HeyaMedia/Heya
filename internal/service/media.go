@@ -557,6 +557,8 @@ type EnrichedMovieView struct {
 	ReleaseDate      string   `json:"release_date,omitempty"`
 	CollectionID     *int64   `json:"collection_id,omitempty"`
 	Resolution       string   `json:"resolution,omitempty"`
+	VideoFormats     []string `json:"video_formats"`
+	AudioFormats     []string `json:"audio_formats"`
 }
 
 // EnrichedTVView holds an enriched TV series with resolution and availability info.
@@ -583,6 +585,8 @@ type EnrichedTVView struct {
 	NumberOfSeasons  int32    `json:"number_of_seasons"`
 	NumberOfEpisodes int32    `json:"number_of_episodes"`
 	Resolution       string   `json:"resolution,omitempty"`
+	VideoFormats     []string `json:"video_formats"`
+	AudioFormats     []string `json:"audio_formats"`
 }
 
 // HeightToResolution converts a pixel height to a display resolution label.
@@ -644,6 +648,7 @@ func (a *App) ListEnrichedMovies(ctx context.Context, limit, offset int32) ([]En
 	}
 
 	resMap := buildResolutionMap(ctx, q, ids)
+	formatMap := buildTechnicalFormatMap(ctx, q, ids)
 	unavailMap := buildUnavailableMap(ctx, q, sqlc.MediaTypeMovie)
 
 	views := make([]EnrichedMovieView, len(movies))
@@ -664,6 +669,8 @@ func (a *App) ListEnrichedMovies(ctx context.Context, limit, offset int32) ([]En
 			RuntimeMinutes:   m.RuntimeMinutes,
 			OriginalLanguage: m.OriginalLanguage,
 			Resolution:       resMap[m.ID],
+			VideoFormats:     formatMap[m.ID].video,
+			AudioFormats:     formatMap[m.ID].audio,
 			CreatedAt:        formatTS(m.CreatedAt),
 			UpdatedAt:        formatTS(m.UpdatedAt),
 			Rating:           ratingFloat(m.Rating),
@@ -696,6 +703,7 @@ func (a *App) ListEnrichedTVSeries(ctx context.Context, limit, offset int32) ([]
 	}
 
 	resMap := buildResolutionMap(ctx, q, ids)
+	formatMap := buildTechnicalFormatMap(ctx, q, ids)
 	unavailMap := map[int64]bool{}
 	if unavailableIDs, err := q.ListUnavailableMediaItemIDsForItems(ctx, ids); err == nil {
 		for _, id := range unavailableIDs {
@@ -723,6 +731,8 @@ func (a *App) ListEnrichedTVSeries(ctx context.Context, limit, offset int32) ([]
 			NumberOfSeasons:  s.NumberOfSeasons,
 			NumberOfEpisodes: s.NumberOfEpisodes,
 			Resolution:       resMap[s.ID],
+			VideoFormats:     formatMap[s.ID].video,
+			AudioFormats:     formatMap[s.ID].audio,
 			CreatedAt:        formatTS(s.CreatedAt),
 			UpdatedAt:        formatTS(s.UpdatedAt),
 			Rating:           ratingFloat(s.Rating),
@@ -749,6 +759,34 @@ func buildResolutionMap(ctx context.Context, q *sqlc.Queries, ids []int64) map[i
 		}
 	}
 	return resMap
+}
+
+type technicalFormats struct {
+	video []string
+	audio []string
+}
+
+func buildTechnicalFormatMap(ctx context.Context, q *sqlc.Queries, ids []int64) map[int64]technicalFormats {
+	formats := make(map[int64]technicalFormats, len(ids))
+	for _, id := range ids {
+		formats[id] = technicalFormats{video: []string{}, audio: []string{}}
+	}
+	if len(ids) == 0 {
+		return formats
+	}
+	rows, err := q.ListMediaTechnicalFormats(ctx, ids)
+	if err != nil {
+		return formats
+	}
+	for _, row := range rows {
+		if row.MediaItemID.Valid {
+			formats[row.MediaItemID.Int64] = technicalFormats{
+				video: row.VideoFormats,
+				audio: row.AudioFormats,
+			}
+		}
+	}
+	return formats
 }
 
 func buildUnavailableMap(ctx context.Context, q *sqlc.Queries, mt sqlc.MediaType) map[int64]bool {
