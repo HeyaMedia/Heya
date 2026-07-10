@@ -177,7 +177,14 @@ onBeforeUnmount(() => {
 .ambient-backdrop {
   position: absolute;
   inset: 0;
-  z-index: -1;
+  /* z-index 0, NOT -1: negative-z children paint in the ROOT stacking
+     context (nothing between here and <html> creates one), and when <html>
+     has its own background the body's background paints AFTER negative-z
+     layers — hiding this layer entirely in some engines. At z:0 the layer
+     paints with the positioned band (above all in-flow backgrounds
+     including body's) while every later sibling in .app still paints above
+     it by tree order. */
+  z-index: 0;
   overflow: hidden;
   pointer-events: none;
 }
