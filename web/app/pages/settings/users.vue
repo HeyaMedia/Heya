@@ -33,12 +33,29 @@ const copied = ref<'create' | 'reset' | null>(null)
 
 // Strong random password from a curated alphabet (ambiguous glyphs like
 // 0/O/1/l/I dropped so it survives being read aloud or copied by hand).
+//
+// Each symbol is used at most once. Chat apps render a matching pair of the
+// same symbol as markdown — Discord italicised a '*…*' span once and silently
+// ate the two asterisks plus everything between them, so the pasted password
+// no longer matched. A lone symbol can't form a pair, so no formatting fires.
+// Letters and digits repeat freely; only the markdown-active symbols are
+// capped.
 function randomPassword(len = 20): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*?'
-  const buf = new Uint32Array(len)
-  crypto.getRandomValues(buf)
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+  const symbols = '!@#$%*?'
+  const alphabet = letters + symbols
+  const usedSymbols = new Set<string>()
   let out = ''
-  for (let i = 0; i < len; i++) out += alphabet[buf[i]! % alphabet.length]
+  while (out.length < len) {
+    const buf = new Uint32Array(1)
+    crypto.getRandomValues(buf)
+    const ch = alphabet[buf[0]! % alphabet.length]!
+    if (symbols.includes(ch)) {
+      if (usedSymbols.has(ch)) continue
+      usedSymbols.add(ch)
+    }
+    out += ch
+  }
   return out
 }
 
