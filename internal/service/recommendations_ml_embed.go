@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/pgvector/pgvector-go"
+	"github.com/rs/zerolog/log"
 )
 
 // This file owns the ML write + read paths: composing the per-item embed doc,
@@ -301,26 +302,65 @@ func (a *App) BackfillVideoEmbeddings(ctx context.Context, force bool) (embedded
 	if err := process("episode_facets", "episode_id", epDocs); err != nil {
 		return embedded, skipped, err
 	}
+
+	// Prune facets whose source left the candidate set (episode overview
+	// cleared, item media_type changed — deletes cascade on their own).
+	// Without this the orphaned vector keeps matching semantic searches
+	// with text that no longer exists anywhere.
+	if err := a.pruneOrphanedFacets(ctx); err != nil {
+		return embedded, skipped, fmt.Errorf("prune orphaned facets: %w", err)
+	}
 	return embedded, skipped, nil
+}
+
+// pruneOrphanedFacets deletes embedding rows that no longer have a doc: rows
+// re-enter via the normal backfill if their source ever qualifies again.
+func (a *App) pruneOrphanedFacets(ctx context.Context) error {
+	itemTag, err := a.db.Exec(ctx, `
+		DELETE FROM media_item_facets f
+		WHERE NOT EXISTS (
+			SELECT 1 FROM media_item_cards mi
+			WHERE mi.id = f.media_item_id AND mi.media_type IN ('movie','tv','anime'))`)
+	if err != nil {
+		return err
+	}
+	epTag, err := a.db.Exec(ctx, `
+		DELETE FROM episode_facets f
+		WHERE NOT EXISTS (
+			SELECT 1 FROM tv_episodes e
+			WHERE e.id = f.episode_id AND e.overview <> '')`)
+	if err != nil {
+		return err
+	}
+	if n := itemTag.RowsAffected() + epTag.RowsAffected(); n > 0 {
+		log.Info().Int64("pruned", n).Msg("recommendations: pruned orphaned embedding facets")
+	}
+	return nil
 }
 
 // EmbeddedVideoCount reports how many video items carry a current-version
 // embedding, and the total candidate count — for the settings-page progress.
+// embedded joins against the candidate set (not raw facet rows) so it can
+// never exceed total even while orphaned facets await the sweep's prune.
 func (a *App) EmbeddedVideoCount(ctx context.Context) (embedded, total int) {
-	_ = a.db.QueryRow(ctx,
-		`SELECT count(*) FROM media_item_facets WHERE embedder_version >= $1`, textembed.Version).Scan(&embedded)
-	_ = a.db.QueryRow(ctx,
-		`SELECT count(*) FROM media_item_cards WHERE media_type IN ('movie','tv','anime')`).Scan(&total)
+	_ = a.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE f.media_item_id IS NOT NULL)
+		FROM media_item_cards mi
+		LEFT JOIN media_item_facets f ON f.media_item_id = mi.id AND f.embedder_version >= $1
+		WHERE mi.media_type IN ('movie','tv','anime')`, textembed.Version).Scan(&total, &embedded)
 	return
 }
 
 // EmbeddedEpisodeCount is the episode-level twin of EmbeddedVideoCount —
 // only episodes with a non-empty overview count as candidates.
 func (a *App) EmbeddedEpisodeCount(ctx context.Context) (embedded, total int) {
-	_ = a.db.QueryRow(ctx,
-		`SELECT count(*) FROM episode_facets WHERE embedder_version >= $1`, textembed.Version).Scan(&embedded)
-	_ = a.db.QueryRow(ctx,
-		`SELECT count(*) FROM tv_episodes WHERE overview <> ''`).Scan(&total)
+	_ = a.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE f.episode_id IS NOT NULL)
+		FROM tv_episodes e
+		LEFT JOIN episode_facets f ON f.episode_id = e.id AND f.embedder_version >= $1
+		WHERE e.overview <> ''`, textembed.Version).Scan(&total, &embedded)
 	return
 }
 
