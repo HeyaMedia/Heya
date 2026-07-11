@@ -5,12 +5,14 @@
   </NuxtLayout>
   <Lightbox />
   <AppToastHost />
+  <OfflineIndicator />
   <!-- Global touch affordances (left-edge swipe → sidebar, pull-to-refresh).
        Client-only; renders only a transient pull indicator on touch devices. -->
   <TouchGestures />
   <!-- Pinia Colada's query inspector is dev-only and tree-shaken from the
        production bundle. It exposes cache entries, status and fetch timing. -->
   <component :is="ColadaDevtools" v-if="ColadaDevtools" />
+  <component :is="DataMetrics" v-if="DataMetrics" />
 </template>
 
 <script setup lang="ts">
@@ -18,6 +20,9 @@ import { defineAsyncComponent } from 'vue'
 
 const ColadaDevtools = import.meta.dev
   ? defineAsyncComponent(() => import('@pinia/colada-devtools').then(mod => mod.PiniaColadaDevtools))
+  : null
+const DataMetrics = import.meta.dev
+  ? defineAsyncComponent(() => import('~/components/dev/DataMetrics.vue'))
   : null
 const route = useRoute()
 const { ready, isAuthenticated } = useAuth()

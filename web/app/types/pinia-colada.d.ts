@@ -7,9 +7,9 @@ declare module '@pinia/colada' {
     queryMeta: {
       /** How eagerly navigation affordances may warm this query. */
       prefetch?: 'none' | 'intent' | 'visible' | 'immediate'
-      /** Future IndexedDB/native-cache policy; persistence is not enabled yet. */
+      /** IndexedDB/native-cache retention policy for successful query data. */
       persistence?: 'none' | 'session' | 'device' | 'offline-essential'
-      /** Prevent future persistence plugins from storing sensitive results. */
+      /** Prevent the persistence layer from storing sensitive results. */
       sensitivity?: 'normal' | 'private' | 'secret'
     }
   }

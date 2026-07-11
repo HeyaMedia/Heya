@@ -101,6 +101,7 @@ const nameMap: Record<string, string> = {
   wand: 'magic-wand',
   spinner: 'spinner',
   'cloud-download': 'cloud-arrow-down',
+  cloud: 'cloud-slash',
   github: 'github-logo',
   refresh: 'arrow-clockwise',
   lightning: 'lightning',

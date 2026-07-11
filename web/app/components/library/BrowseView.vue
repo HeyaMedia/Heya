@@ -63,9 +63,10 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaItem, UserList } from '~~/shared/types'
+import type { MediaItem } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
+import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
@@ -189,23 +190,9 @@ const recentWatched = computed<MediaItem[]>(() => {
   return (recentEpisodesQuery.data.value ?? []).map(episodeToRowItem)
 })
 
-const userListsQuery = useQuery({
-  key: ['me', 'lists'],
-  query: async () => (await $heya('/api/me/lists')) as UserList[],
-  staleTime: 1000 * 60,
-})
-const moviesStateQuery = useQuery({
-  key: ['me', 'state', 'movies'],
-  query: async () => fetchUserState('movies'),
-  staleTime: 1000 * 30,
-  enabled: props.section === 'movie',
-})
-const seriesStateQuery = useQuery({
-  key: ['me', 'state', 'series'],
-  query: async () => fetchUserState('series'),
-  staleTime: 1000 * 30,
-  enabled: props.section === 'tv',
-})
+const userListsQuery = useQuery(userListsOptions())
+const moviesStateQuery = useQuery(() => ({ ...movieUserStateQuery(), enabled: props.section === 'movie' }))
+const seriesStateQuery = useQuery(() => ({ ...seriesUserStateQuery(), enabled: props.section === 'tv' }))
 
 const watchedSet = ref<Set<number>>(new Set())
 const favoritedSet = ref<Set<number>>(new Set())

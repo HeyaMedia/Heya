@@ -13,10 +13,11 @@
 // (backend restarting, network hiccup) leaves the token in place rather
 // than booting the user. Only the openFetch `onResponseError:heya` hook
 // (plugins/heyaApi.client.ts) escalates a real 401 to a logout.
-export default defineNuxtPlugin(async () => {
-  const { hydrate, token, fetchUser } = useAuth()
-  hydrate()
-  if (token.value) {
-    await fetchUser()
-  }
+export default defineNuxtPlugin({
+  name: 'heya:auth',
+  async setup() {
+    const { hydrate, token, fetchUser } = useAuth()
+    hydrate()
+    if (token.value) await fetchUser()
+  },
 })

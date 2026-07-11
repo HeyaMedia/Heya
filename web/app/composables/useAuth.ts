@@ -8,8 +8,10 @@
 // forced logout. Easier to keep these two on plain $fetch.
 import type { User, AuthResponse } from '~~/shared/types'
 import { useQueryCache } from '@pinia/colada'
+import { clearPersistedQueryCache } from '~/utils/queryPersistence.client'
 
 const TOKEN_KEY = 'heya_token'
+const USER_ID_KEY = 'heya_user_id'
 
 const _ready = ref(false)
 
@@ -36,6 +38,7 @@ export function useAuth() {
     token.value = data.token
     user.value = data.user
     localStorage.setItem(TOKEN_KEY, data.token)
+    localStorage.setItem(USER_ID_KEY, String(data.user.id))
   }
 
   async function register(username: string, email: string, password: string) {
@@ -46,6 +49,7 @@ export function useAuth() {
     token.value = data.token
     user.value = data.user
     localStorage.setItem(TOKEN_KEY, data.token)
+    localStorage.setItem(USER_ID_KEY, String(data.user.id))
   }
 
   async function fetchUser() {
@@ -57,9 +61,11 @@ export function useAuth() {
       // would race and ship without an Authorization header, get 401, and
       // be silently swallowed below. login() and register() take the same
       // shortcut for the same reason.
-      user.value = await $fetch<User>('/api/auth/me', {
+      const current = await $fetch<User>('/api/auth/me', {
         headers: { Authorization: `Bearer ${token.value}` },
       })
+      user.value = current
+      localStorage.setItem(USER_ID_KEY, String(current.id))
     } catch {
       // Intentionally silent. Logout-on-error here was too aggressive
       // and booted the user out for any transient blip (backend bouncing
@@ -74,17 +80,20 @@ export function useAuth() {
 
   function logout() {
     const nuxtApp = useNuxtApp()
+    const persistedUserId = user.value?.id ?? localStorage.getItem(USER_ID_KEY)
     if (token.value) {
       nuxtApp.$heya('/api/auth/logout', { method: 'POST' }).catch(() => {})
     }
     token.value = null
     user.value = null
     localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USER_ID_KEY)
     // Query data is user-scoped. Remove it rather than merely invalidating it
     // so another account signing in within the same SPA session can never see
     // the previous user's warm cache (also required before disk persistence).
     const queryCache = useQueryCache(nuxtApp.$pinia)
     queryCache.getEntries().forEach(entry => queryCache.remove(entry))
+    if (persistedUserId) void clearPersistedQueryCache(persistedUserId)
     navigateTo('/login')
   }
 

@@ -2,12 +2,20 @@ import { useQueryCache, type UseQueryOptions } from '@pinia/colada'
 import { collectionDetailQuery, personDetailQuery } from '~/queries/discovery'
 import { mediaDetailQuery } from '~/queries/media'
 import { musicAlbumDetailQuery, musicMixesQuery, playlistDetailQuery } from '~/queries/music'
+import { enrichedCatalogQuery } from '~/queries/catalog'
+import { toValue } from 'vue'
 
 // Central route → data-query registry. NuxtLink already preloads route code;
 // this plugin adds the critical API payload when pointer/focus intent is
 // visible. New domains can join without every poster knowing cache details.
 function queryForPath(pathname: string): UseQueryOptions<unknown> | null {
   const parts = pathname.split('/').filter(Boolean)
+  const movieCatalogRoutes = new Set(['all', 'loved', 'library', 'list', 'franchises'])
+  const tvCatalogRoutes = new Set(['all', 'loved', 'library', 'list'])
+  if (parts[0] === 'movies' && parts[1] && movieCatalogRoutes.has(parts[1])) return enrichedCatalogQuery('movie')
+  if (parts[0] === 'tv' && parts[1] && tvCatalogRoutes.has(parts[1])) return enrichedCatalogQuery('tv')
+  if (parts[0] === 'movies' && ['recommendations', 'roulette', 'collection'].includes(parts[1] ?? '')) return null
+  if (parts[0] === 'tv' && parts[1] === 'recommendations') return null
   if (parts[0] === 'movies' && parts[1]) return mediaDetailQuery(decodeURIComponent(parts[1]))
   if (parts[0] === 'tv' && parts[1]) return mediaDetailQuery(decodeURIComponent(parts[1]))
   if (parts[0] === 'books' && parts[1]) return mediaDetailQuery(decodeURIComponent(parts[1]))
@@ -31,10 +39,16 @@ function queryForPath(pathname: string): UseQueryOptions<unknown> | null {
 
 export default defineNuxtPlugin((nuxtApp) => {
   const queryCache = useQueryCache()
+  const metrics = useDataMetricsStore()
+  const router = useRouter()
   let timer: ReturnType<typeof setTimeout> | null = null
   let pendingHref = ''
   let visibleBudget = 4
   const visiblyWarmed = new Set<string>()
+  const warmedPaths = new Map<string, ReturnType<typeof setTimeout> | null>()
+  let navigationStarted = 0
+  let navigationPath = ''
+  let navigationWarm: boolean | null = null
 
   const connection = (navigator as Navigator & {
     connection?: { saveData?: boolean; effectiveType?: string }
@@ -60,8 +74,18 @@ export default defineNuxtPlugin((nuxtApp) => {
     void preloadRouteComponents(url.pathname)
     const options = queryForPath(url.pathname)
     if (!options) return
+    if (warmedPaths.has(url.pathname)) return
+    const existing = queryCache.get(toValue(options.key))
+    const alreadyCached = existing?.state.value.status === 'success'
+    metrics.recordPrefetch(alreadyCached)
     const entry = queryCache.ensure(options)
     void queryCache.refresh(entry).catch(() => {})
+    const wasteTimer = alreadyCached ? null : setTimeout(() => {
+      if (!warmedPaths.has(url.pathname)) return
+      warmedPaths.delete(url.pathname)
+      metrics.recordPrefetchWasted()
+    }, 30_000)
+    warmedPaths.set(url.pathname, wasteTimer)
   }
 
   // Touch devices do not have hover time. Warm only the first few detail
@@ -92,7 +116,31 @@ export default defineNuxtPlugin((nuxtApp) => {
     }
   }
 
+  router.beforeEach((to) => {
+    navigationStarted = performance.now()
+    navigationPath = to.fullPath
+    const warmed = warmedPaths.get(to.path)
+    if (warmed !== undefined) {
+      if (warmed) clearTimeout(warmed)
+      warmedPaths.delete(to.path)
+      metrics.recordPrefetchUsed()
+      const options = queryForPath(to.path)
+      navigationWarm = options
+        ? queryCache.get(toValue(options.key))?.state.value.status === 'success'
+        : null
+      return
+    }
+    const options = queryForPath(to.path)
+    navigationWarm = options
+      ? queryCache.get(toValue(options.key))?.state.value.status === 'success'
+      : null
+  })
+
   nuxtApp.hook('page:finish', () => {
+    if (navigationStarted) {
+      metrics.recordNavigation(navigationPath, performance.now() - navigationStarted, navigationWarm)
+      navigationStarted = 0
+    }
     visibleObserver?.disconnect()
     visibleBudget = 4
     visiblyWarmed.clear()
@@ -111,7 +159,6 @@ export default defineNuxtPlugin((nuxtApp) => {
     const href = hrefFor(target)
     if (!href || href === pendingHref) return
     cancel()
-    visibleObserver?.disconnect()
     // Respect explicit data-saving for speculative hover. A press/focus still
     // warms immediately because navigation is then highly likely.
     if (connection?.saveData) return
@@ -143,6 +190,8 @@ export default defineNuxtPlugin((nuxtApp) => {
 
   nuxtApp.vueApp.onUnmount(() => {
     cancel()
+    for (const wasteTimer of warmedPaths.values()) if (wasteTimer) clearTimeout(wasteTimer)
+    warmedPaths.clear()
     document.removeEventListener('pointerover', schedule)
     document.removeEventListener('pointerout', leave)
     document.removeEventListener('focusin', immediate)

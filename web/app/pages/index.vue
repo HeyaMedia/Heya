@@ -127,11 +127,12 @@
 </template>
 
 <script setup lang="ts">
-import type { ContextMenuItem, MediaItem, MediaDetail, Movie, UserList } from '~~/shared/types'
+import type { ContextMenuItem, MediaItem, MediaDetail, Movie } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
+import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { mediaDetailQuery, mediaDetailTarget } from '~/queries/media'
 
 const { $heya } = useNuxtApp()
@@ -243,21 +244,9 @@ const forYouQuery = useQuery({
   staleTime: 1000 * 60 * 10,
 })
 
-const userListsQuery = useQuery({
-  key: ['me', 'lists'],
-  query: async () => (await $heya('/api/me/lists')) as UserList[],
-  staleTime: 1000 * 60,
-})
-const movieStateQuery = useQuery({
-  key: ['me', 'state', 'movies'],
-  query: async () => fetchUserState('movies'),
-  staleTime: 1000 * 30,
-})
-const seriesStateQuery = useQuery({
-  key: ['me', 'state', 'series'],
-  query: async () => fetchUserState('series'),
-  staleTime: 1000 * 30,
-})
+const userListsQuery = useQuery(userListsOptions())
+const movieStateQuery = useQuery(movieUserStateQuery())
+const seriesStateQuery = useQuery(seriesUserStateQuery())
 const mediaStateQuery = useQuery({
   key: ['me', 'media-state'],
   query: async () => (await $heya('/api/me/media-state')) as { watched: number[]; favorited: number[] },

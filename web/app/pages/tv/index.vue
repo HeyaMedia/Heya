@@ -273,6 +273,8 @@
 <script setup lang="ts">
 import type { EnrichedMediaItem, Library, UserList, FilterState } from '~~/shared/types'
 import { useCardContextItems } from '~/composables/useContextMenu'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { enrichedCatalogQuery, librariesQuery, seriesUserStateQuery, userListsQuery } from '~/queries/catalog'
 
 // Stable page key shared with the browse sub-routes registered in
 // app/router.options.ts (/tv/library/:id, /tv/loved, …) so switching the
@@ -284,10 +286,14 @@ useBackground().pool('tv')
 
 const mainEl = ref<HTMLElement | null>(null)
 const gridWrap = ref<HTMLElement | null>(null)
-const items = ref<EnrichedMediaItem[]>([])
-const libraries = ref<Library[]>([])
-const userLists = ref<UserList[]>([])
 const loading = ref(true)
+
+const librariesData = useQuery(librariesQuery())
+const listsData = useQuery(userListsQuery())
+const userStateData = useQuery(seriesUserStateQuery())
+const libraries = computed<Library[]>(() => (librariesData.data.value ?? []).filter(isShowLibrary))
+const userLists = computed<UserList[]>(() => listsData.data.value ?? [])
+const queryCache = useQueryCache()
 
 const { isPhone, isCompact } = useViewport()
 // Section-nav left drawer (phone + compact band), opened by AppTopBar's
@@ -310,18 +316,33 @@ const { isDirty, restoreScroll } = browse
 // The Recommended landing (bare /tv) renders rails from their own queries and
 // never needs the full item list, so defer the up-to-5000-item /enriched fetch
 // until a grid view is actually entered.
-const itemsLoaded = ref(false)
+const catalogEnabled = ref(false)
+const catalogData = useQuery(() => ({
+  ...enrichedCatalogQuery('tv'),
+  enabled: catalogEnabled.value,
+}))
+const items = computed<EnrichedMediaItem[]>(() => catalogData.data.value ?? [])
+const itemsLoaded = computed(() => catalogData.data.value !== undefined)
 async function ensureItems() {
   if (itemsLoaded.value) return
   loading.value = true
-  await loadItems()
-  itemsLoaded.value = true
+  catalogEnabled.value = true
+  try { await catalogData.refetch() } catch { /* keep persisted/last-good data */ }
   loading.value = false
 }
 watch(activeView, (v) => { if (v !== 'browse' && v !== 'recommendations') ensureItems() })
 
 const showStates = ref<Map<number, { total: number; watched: number }>>(new Map())
 const favoritedSet = ref<Set<number>>(new Set())
+await Promise.allSettled([
+  waitForQuery(librariesData),
+  waitForQuery(listsData),
+  waitForQuery(userStateData),
+])
+for (const show of userStateData.data.value?.shows ?? []) {
+  showStates.value.set(show.media_item_id, { total: show.total_episodes, watched: show.watched_episodes })
+}
+favoritedSet.value = new Set(userStateData.data.value?.favorited ?? [])
 const fullyWatchedSet = computed(() => new Set(
   [...showStates.value.entries()]
     .filter(([, s]) => s.total > 0 && s.watched >= s.total)
@@ -369,6 +390,15 @@ const cardCtxOpts = computed(() => {
         const next = new Map(showStates.value)
         next.set(id, { total, watched: watched ? total : 0 })
         showStates.value = next
+        queryCache.setQueryData(['me', 'state', 'series'], current => {
+          const state = (current as { shows?: Array<{ media_item_id: number; total_episodes: number; watched_episodes: number }>; favorited?: number[] } | undefined) ?? {}
+          const shows = [...(state.shows ?? [])]
+          const index = shows.findIndex(show => show.media_item_id === id)
+          const row = { media_item_id: id, total_episodes: total, watched_episodes: watched ? total : 0 }
+          if (index >= 0) shows[index] = row
+          else shows.push(row)
+          return { ...state, shows }
+        })
         invalidateContinueWatching()
       } catch { /* ignore */ }
     },
@@ -381,6 +411,10 @@ const cardCtxOpts = computed(() => {
         if (favorited) favoritedSet.value.add(id)
         else favoritedSet.value.delete(id)
         favoritedSet.value = new Set(favoritedSet.value)
+        queryCache.setQueryData(['me', 'state', 'series'], current => {
+          const state = (current as { shows?: unknown[]; favorited?: number[] } | undefined) ?? {}
+          return { ...state, favorited: [...favoritedSet.value] }
+        })
       } catch { /* ignore */ }
     },
     onAddToList: async (listId: number, mediaId: number) => {
@@ -566,10 +600,7 @@ async function saveSmartList() {
 }
 
 async function loadLists() {
-  try {
-    const { $heya } = useNuxtApp()
-    userLists.value = await $heya('/api/me/lists') as UserList[]
-  } catch { /* ignore */ }
+  try { await listsData.refetch() } catch { /* keep the last-good list */ }
 }
 
 // Pulled out of onMounted so useLiveRefresh (below) can re-run just the
@@ -579,42 +610,13 @@ async function loadLists() {
 // swallowed — leaving `items` at its last-good value beats blanking the
 // grid on a background refresh hiccup (matches the original
 // Promise.allSettled fire-and-forget-on-reject behavior).
-async function loadItems() {
-  try {
-    const { $heya } = useNuxtApp()
-    // /api/media/enriched wraps results in `{ movies, tv, type }` since the
-    // API rewrite — unwrap the relevant branch.
-    const res = await $heya('/api/media/enriched', { query: { type: 'tv', limit: 5000 } }) as { tv: EnrichedMediaItem[] | null }
-    items.value = res.tv ?? []
-  } catch { /* keep the last-good list */ }
-}
-
-// This page has no Pinia Colada cache to invalidate — data lands in a plain
-// ref via loadItems() — so useLiveRefresh's `refetch` escape hatch drives
-// it directly instead of a `keys` invalidation.
 useLiveRefresh([
   // Only refetch the grid once it's actually been loaded — on the Recommended
   // landing the item list is deferred and BrowseView refreshes its own rails.
-  { events: ['media.added', 'media.updated'], filter: byMediaType('tv', 'anime'), refetch: () => { if (itemsLoaded.value) loadItems() } },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('tv', 'anime'), keys: [['media', 'catalog', 'tv']] },
 ])
 
 onMounted(async () => {
-  const { $heya } = useNuxtApp()
-  const [libRes, stateRes, listsRes] = await Promise.allSettled([
-    $heya('/api/libraries') as Promise<Library[]>,
-    fetchUserState('series'),
-    $heya('/api/me/lists') as Promise<UserList[]>,
-  ])
-  if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(isShowLibrary)
-  if (stateRes.status === 'fulfilled') {
-    const st = stateRes.value
-    for (const s of (st.shows || [])) {
-      showStates.value.set(s.media_item_id, { total: s.total_episodes, watched: s.watched_episodes })
-    }
-    favoritedSet.value = new Set(st.favorited || [])
-  }
-  if (listsRes.status === 'fulfilled') userLists.value = listsRes.value
-
   // Grid needs the full item list; the Recommended landing doesn't.
   if (activeView.value !== 'browse' && activeView.value !== 'recommendations') await ensureItems()
   loading.value = false
