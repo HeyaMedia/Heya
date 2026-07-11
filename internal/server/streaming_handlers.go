@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
@@ -315,15 +313,11 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duratio
 		duration = 1
 	}
 
-	// Best-effort live keyframe extraction for fMP4 copy-video when scan-time
-	// keyframes are missing (typically SMB inputs, or freshly added files).
-	if kf == nil && opts.UseFMP4 && opts.Profile.VideoCodec == "copy" && input != "pipe:0" {
-		extractCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		k, err := transcoder.ExtractKeyframes(extractCtx, input)
-		cancel()
-		if err == nil && len(k.IFrames) > 0 {
-			kf = k
-		}
+	// Never make playback wait for a full-file scan. Missing or legacy
+	// artifacts use the in-memory heuristic for this session while a shared
+	// background pass persists keyframes and exact boundaries for the next.
+	if opts.Profile.VideoCodec == "copy" && input != "pipe:0" && !transcoder.HasExactHLSBoundaries(kf) {
+		app.EnsureKeyframesAnalyzed(file.ID, input)
 	}
 
 	sessionID := r.URL.Query().Get("sid")

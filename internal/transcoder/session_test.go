@@ -41,6 +41,28 @@ func touchSeg(t *testing.T, s *TranscodeSession, idx int) {
 	require.NoError(t, os.WriteFile(s.SegmentPath(idx), []byte("x"), 0o644))
 }
 
+func TestComputeCopyVideoSegmentEnds_UsesPersistedExactBoundaries(t *testing.T) {
+	kf := &Keyframes{
+		IFrames:            []float64{0, 2, 6, 8, 12},
+		Duration:           18,
+		HLSBoundaryVersion: HLSBoundaryVersion,
+		HLSSegmentDuration: SegmentDuration,
+		HLSSegmentEnds:     []float64{6, 14, 18},
+	}
+	assert.Equal(t, []float64{6, 14, 18}, computeCopyVideoSegmentEnds(18, kf))
+}
+
+func TestComputeCopyVideoSegmentEnds_LegacyArtifactFallsBackImmediately(t *testing.T) {
+	kf := &Keyframes{IFrames: []float64{0, 6, 12}, Duration: 18}
+	assert.Equal(t, []float64{6, 12, 18}, computeCopyVideoSegmentEnds(18, kf))
+
+	// A stale algorithm version must not be trusted.
+	kf.HLSBoundaryVersion = HLSBoundaryVersion + 1
+	kf.HLSSegmentDuration = SegmentDuration
+	kf.HLSSegmentEnds = []float64{9, 18}
+	assert.Equal(t, []float64{6, 12, 18}, computeCopyVideoSegmentEnds(18, kf))
+}
+
 // The output dir accumulates disjoint segment ranges from previous heads
 // (earlier seek targets). Reconcile must mark exactly the files present —
 // range-filling to the highest index on disk marked never-encoded gap

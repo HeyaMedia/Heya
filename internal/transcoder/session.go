@@ -15,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/singleflight"
 )
 
 type Head struct {
@@ -772,6 +773,7 @@ type SessionManager struct {
 
 	mu          sync.Mutex
 	sessions    map[string]*TranscodeSession
+	creating    singleflight.Group // deduplicate concurrent creation for the same session key
 	cleanupStop chan struct{}
 	cleanupOnce sync.Once
 }
@@ -826,22 +828,12 @@ func (m *SessionManager) GetExisting(fileID int64) *TranscodeSession {
 // computeCopyVideoSegmentEnds determines HLS segment boundaries for a
 // copy-video session (video is stream-copied, so cuts can only land on
 // existing keyframes — the same constraint applies whether delivery is fMP4
-// or MPEG-TS). It prefers RealSegmentBoundaries, which asks ffmpeg itself to
-// make the real split decision so the declared playlist can never drift from
-// the physical segments (see that function's doc for why a Go-side
-// prediction isn't safe here). Falls back to the keyframe-heuristic
-// predictor — worse, but still better than refusing to start — when the
-// probe can't run: SMB sources aren't a local path ffmpeg can open directly,
-// and any probe failure (corrupt file, ffmpeg hiccup, timeout) shouldn't
-// block playback outright.
-func computeCopyVideoSegmentEnds(ctx context.Context, filePath string, duration float64, kf *Keyframes) []float64 {
-	if filePath != "" && !vfs.IsSMBPath(filePath) {
-		if ends, err := RealSegmentBoundaries(ctx, filePath, SegmentDuration); err == nil && len(ends) > 0 {
-			return ends
-		} else if err != nil {
-			log.Warn().Err(err).Str("file", vfs.RedactPath(filePath)).
-				Msg("real segment boundary probe failed, falling back to keyframe heuristic")
-		}
+// or MPEG-TS). scan_keyframes persists muxer-exact boundaries in the keyframe
+// artifact. Legacy/unanalysed rows fall back immediately to the keyframe
+// heuristic; playback never scans the complete media file synchronously.
+func computeCopyVideoSegmentEnds(duration float64, kf *Keyframes) []float64 {
+	if HasExactHLSBoundaries(kf) {
+		return append([]float64(nil), kf.HLSSegmentEnds...)
 	}
 	return PlannedSegmentTimes(kf, duration, SegmentDuration)
 }
@@ -853,14 +845,28 @@ func (m *SessionManager) GetOrCreate(ctx context.Context, fileID int64, filePath
 		return s
 	}
 
-	// Compute segment boundaries OUTSIDE the manager lock. For a copy-video
-	// session this may shell out to a throwaway ffmpeg process for several
-	// seconds (see computeCopyVideoSegmentEnds/RealSegmentBoundaries) — the
-	// manager lock must stay free so unrelated work (GetExisting, the idle
-	// cleanup loop, another file's GetOrCreate) isn't stalled behind it.
+	// The playlist, init-segment and first media-segment requests arrive
+	// concurrently. Coalesce them so they all share one resulting session.
+	value, _, _ := m.creating.Do(key, func() (any, error) {
+		return m.createSession(ctx, key, fileID, filePath, opts, duration, kf), nil
+	})
+	return value.(*TranscodeSession)
+}
+
+func (m *SessionManager) createSession(ctx context.Context, key string, fileID int64, filePath string, opts TranscodeOpts, duration float64, kf *Keyframes) *TranscodeSession {
+	// A session may have appeared between GetOrCreate's fast-path check and
+	// this singleflight function starting.
+	if s := m.existingSession(key); s != nil {
+		return s
+	}
+
+	// Compute segment boundaries outside the manager lock. This is now only a
+	// cheap read of persisted analysis (or the in-memory heuristic fallback),
+	// but keeping construction outside the lock also lets unrelated files
+	// create sessions concurrently.
 	var ends []float64
 	if opts.Profile.VideoCodec == "copy" {
-		ends = computeCopyVideoSegmentEnds(ctx, filePath, duration, kf)
+		ends = computeCopyVideoSegmentEnds(duration, kf)
 	} else {
 		ends = fixedIntervalBoundaries(duration, SegmentDuration)
 	}

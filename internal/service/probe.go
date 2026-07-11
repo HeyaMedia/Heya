@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/mediaprobe"
+	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
@@ -17,6 +20,11 @@ import (
 // finish well under a second; SMB sources stream through a pipe and can be
 // slower, but a play request must never hang indefinitely on a flaky mount.
 const onDemandProbeTimeout = 60 * time.Second
+
+// onDemandKeyframeTimeout covers both the packet/keyframe scan and the
+// muxer-exact boundary pass. It runs off the request path, so playback starts
+// immediately with heuristic boundaries while this backfills future sessions.
+const onDemandKeyframeTimeout = 3 * time.Minute
 
 // EnsureFileProbed guarantees a library file carries ffprobe metadata before it
 // is played. The async FFProbeWorker is the normal path (driven by scans); this
@@ -97,4 +105,59 @@ func (a *App) EnsureFileProbed(ctx context.Context, fileID int64) (sqlc.LibraryF
 func mediaInfoEmpty(raw []byte) bool {
 	s := strings.TrimSpace(string(raw))
 	return s == "" || s == "{}" || s == "null"
+}
+
+// EnsureKeyframesAnalyzed starts a non-blocking analysis when playback finds
+// no current exact HLS-boundary artifact. scan_keyframes remains the normal
+// owner; this is the backstop for old rows and files played before enrichment
+// catches up. Concurrent playback requests coalesce into one pass.
+func (a *App) EnsureKeyframesAnalyzed(libraryFileID int64, filePath string) {
+	key := strconv.FormatInt(libraryFileID, 10)
+	go func() {
+		_, _, _ = a.keyframeScan.Do(key, func() (any, error) {
+			ctx, cancel := context.WithTimeout(a.lifetimeCtx, onDemandKeyframeTimeout)
+			defer cancel()
+
+			q := sqlc.New(a.db)
+			file, err := q.GetLibraryFileByID(ctx, libraryFileID)
+			if err != nil {
+				return nil, err
+			}
+			var existing transcoder.Keyframes
+			if json.Unmarshal(file.Keyframes, &existing) == nil && transcoder.HasExactHLSBoundaries(&existing) {
+				return nil, nil
+			}
+
+			// Take ownership from a queued job. If River already started it,
+			// let that worker finish instead of reading the file twice.
+			_, _ = queueops.CancelPendingKeyframeJobsForFile(ctx, a.db, libraryFileID)
+			running, err := queueops.ListRunningKeyframeJobIDsForFile(ctx, a.db, libraryFileID)
+			if err == nil && len(running) > 0 {
+				return nil, nil
+			}
+
+			kf, err := worker.AnalyzeAndPersistKeyframes(ctx, a.db, libraryFileID, filePath)
+			if err != nil {
+				log.Warn().Err(err).Int64("file_id", libraryFileID).Msg("on-demand keyframe analysis failed")
+				return nil, err
+			}
+			if kf == nil || len(kf.IFrames) == 0 {
+				return nil, nil
+			}
+
+			// A probe may have enqueued the same unique job while analysis was
+			// running. The persisted artifact makes that work redundant.
+			_, _ = queueops.CancelPendingKeyframeJobsForFile(ctx, a.db, libraryFileID)
+			if a.river != nil {
+				if ids, listErr := queueops.ListRunningKeyframeJobIDsForFile(ctx, a.db, libraryFileID); listErr == nil {
+					for _, id := range ids {
+						_, _ = a.river.JobCancel(ctx, id)
+					}
+				}
+			}
+
+			log.Info().Int64("file_id", libraryFileID).Msg("on-demand keyframe analysis persisted")
+			return nil, nil
+		})
+	}()
 }

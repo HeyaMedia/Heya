@@ -329,6 +329,37 @@ func CancelJob(ctx context.Context, db DB, id int64) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
+// CancelPendingKeyframeJobsForFile removes redundant queued analysis after an
+// on-demand playback analysis has taken ownership of the same file.
+func CancelPendingKeyframeJobsForFile(ctx context.Context, db DB, libraryFileID int64) (int64, error) {
+	tag, err := db.Exec(ctx, `
+		UPDATE river_job
+		   SET state = 'cancelled', finalized_at = now()
+		 WHERE kind = 'scan_keyframes'
+		   AND state IN ('available', 'pending', 'retryable', 'scheduled')
+		   AND NULLIF(args->>'library_file_id', '')::bigint = $1
+	`, libraryFileID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// ListRunningKeyframeJobIDsForFile lets the on-demand path defer to an
+// analysis already being performed by River instead of duplicating it.
+func ListRunningKeyframeJobIDsForFile(ctx context.Context, db DB, libraryFileID int64) ([]int64, error) {
+	rows, err := db.Query(ctx, `
+		SELECT id FROM river_job
+		 WHERE kind = 'scan_keyframes'
+		   AND state = 'running'
+		   AND NULLIF(args->>'library_file_id', '')::bigint = $1
+	`, libraryFileID)
+	if err != nil {
+		return nil, err
+	}
+	return scanJobIDs(rows)
+}
+
 func RetryJob(ctx context.Context, db DB, id int64) (int64, error) {
 	tag, err := db.Exec(ctx, `
 		UPDATE river_job

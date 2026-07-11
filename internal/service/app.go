@@ -64,6 +64,7 @@ type App struct {
 	recModelsDir  string
 	imageResizer  *imageserve.Resizer
 	imageFetch    singleflight.Group // coalesces concurrent on-demand image fetches by cache key
+	keyframeScan  singleflight.Group // coalesces asynchronous playback-triggered keyframe analysis
 	envLibraries  map[int64]EnvManagedLibrary
 	radioBrowser  *radiobrowser.Client
 	podcastIndex  *podcastindex.Client

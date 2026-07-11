@@ -103,7 +103,7 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 	}
 
 	if hasVideo {
-		if !vfs.IsSMBPath(job.Args.FilePath) {
+		if !vfs.IsSMBPath(job.Args.FilePath) && !hasCurrentHLSBoundaryArtifact(file.Keyframes) {
 			args := ScanKeyframesArgs{
 				LibraryFileID:   job.Args.LibraryFileID,
 				FilePath:        job.Args.FilePath,
@@ -120,6 +120,11 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 	return nil
 }
 
+func hasCurrentHLSBoundaryArtifact(raw []byte) bool {
+	var kf transcoder.Keyframes
+	return json.Unmarshal(raw, &kf) == nil && transcoder.HasExactHLSBoundaries(&kf)
+}
+
 type ScanKeyframesWorker struct {
 	river.WorkerDefaults[ScanKeyframesArgs]
 	DB       *pgxpool.Pool
@@ -128,31 +133,53 @@ type ScanKeyframesWorker struct {
 
 func (w *ScanKeyframesWorker) Work(ctx context.Context, job *river.Job[ScanKeyframesArgs]) error {
 	w.Progress.SetCurrent(ScanKeyframesArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(job.Args.FilePath))
-	kf, err := transcoder.ExtractKeyframes(ctx, job.Args.FilePath)
+	_, err := AnalyzeAndPersistKeyframes(ctx, w.DB, job.Args.LibraryFileID, job.Args.FilePath)
+	return err
+}
+
+// AnalyzeAndPersistKeyframes is shared by the scan_keyframes worker and the
+// on-demand playback backstop. It owns the complete artifact: ordinary video
+// keyframes plus the exact cuts selected by ffmpeg's HLS muxer.
+func AnalyzeAndPersistKeyframes(ctx context.Context, db *pgxpool.Pool, libraryFileID int64, filePath string) (*transcoder.Keyframes, error) {
+	kf, err := transcoder.ExtractKeyframes(ctx, filePath)
 	if err != nil {
-		log.Warn().Err(err).Str("path", vfs.RedactPath(job.Args.FilePath)).Msg("keyframe extraction failed")
-		return fmt.Errorf("keyframes: %w", err)
+		log.Warn().Err(err).Str("path", vfs.RedactPath(filePath)).Msg("keyframe extraction failed")
+		return nil, fmt.Errorf("keyframes: %w", err)
 	}
 	if kf == nil || len(kf.IFrames) == 0 {
-		return nil
+		return kf, nil
+	}
+	// Persist muxer-exact HLS boundaries during background analysis so
+	// playback never has to demux the entire file synchronously. This is
+	// best-effort: keyframes remain useful fallback data when the extra pass
+	// times out or the source cannot be opened by ffmpeg.
+	if ends, boundaryErr := transcoder.RealSegmentBoundaries(ctx, filePath, transcoder.SegmentDuration); boundaryErr != nil {
+		log.Warn().Err(boundaryErr).
+			Str("path", vfs.RedactPath(filePath)).
+			Msg("exact HLS boundary analysis failed; persisting keyframes only")
+	} else {
+		kf.HLSBoundaryVersion = transcoder.HLSBoundaryVersion
+		kf.HLSSegmentDuration = transcoder.SegmentDuration
+		kf.HLSSegmentEnds = ends
 	}
 	kfJSON, err := json.Marshal(kf)
 	if err != nil {
-		return fmt.Errorf("keyframes marshal: %w", err)
+		return nil, fmt.Errorf("keyframes marshal: %w", err)
 	}
-	q := sqlc.New(w.DB)
+	q := sqlc.New(db)
 	if err := q.UpdateLibraryFileKeyframes(ctx, sqlc.UpdateLibraryFileKeyframesParams{
-		ID:        job.Args.LibraryFileID,
+		ID:        libraryFileID,
 		Keyframes: kfJSON,
 	}); err != nil {
-		return fmt.Errorf("keyframes persistence: %w", err)
+		return nil, fmt.Errorf("keyframes persistence: %w", err)
 	}
 	log.Debug().
-		Int64("file_id", job.Args.LibraryFileID).
+		Int64("file_id", libraryFileID).
 		Int("keyframes", len(kf.IFrames)).
+		Int("hls_boundaries", len(kf.HLSSegmentEnds)).
 		Float64("duration", kf.Duration).
 		Msg("keyframes extracted")
-	return nil
+	return kf, nil
 }
 
 func (w *FFProbeWorker) enqueuePostProbeVideoWork(ctx context.Context, q *sqlc.Queries, file sqlc.LibraryFile, scheduledTaskID string, source string) {
