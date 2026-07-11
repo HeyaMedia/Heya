@@ -3761,6 +3761,15 @@
       "EnrichedMovieView": {
         "additionalProperties": false,
         "properties": {
+          "audio_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "available": {
             "type": "boolean"
           },
@@ -3829,6 +3838,15 @@
           "updated_at": {
             "type": "string"
           },
+          "video_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "year": {
             "type": "string"
           }
@@ -3850,13 +3868,24 @@
           "genres",
           "rating",
           "runtime_minutes",
-          "original_language"
+          "original_language",
+          "video_formats",
+          "audio_formats"
         ],
         "type": "object"
       },
       "EnrichedTVView": {
         "additionalProperties": false,
         "properties": {
+          "audio_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "available": {
             "type": "boolean"
           },
@@ -3931,6 +3960,15 @@
           "updated_at": {
             "type": "string"
           },
+          "video_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "year": {
             "type": "string"
           }
@@ -3954,7 +3992,9 @@
           "status",
           "original_language",
           "number_of_seasons",
-          "number_of_episodes"
+          "number_of_episodes",
+          "video_formats",
+          "audio_formats"
         ],
         "type": "object"
       },
@@ -5576,6 +5616,15 @@
       "LibraryFile": {
         "additionalProperties": false,
         "properties": {
+          "audio_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "content_hash": {
             "type": "string"
           },
@@ -5639,6 +5688,15 @@
           "updated_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "video_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "video_height": {
             "format": "int32",
             "type": "integer"
@@ -5664,7 +5722,9 @@
           "updated_at",
           "video_height",
           "segments_analyzed_at",
-          "segments_detected_at"
+          "segments_detected_at",
+          "video_formats",
+          "audio_formats"
         ],
         "type": "object"
       },
@@ -11488,6 +11548,9 @@
               "array",
               "null"
             ]
+          },
+          "retag_dovi": {
+            "type": "string"
           },
           "retag_hevc": {
             "type": "boolean"

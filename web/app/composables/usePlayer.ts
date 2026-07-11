@@ -130,8 +130,10 @@ interface PlaybackData {
   outro_start_ms: number | null
   silence_start_ms: number | null
   intro_end_ms: number | null
+  boundaries_ready: boolean
 }
 const playbackDataCache = new Map<number, PlaybackData | null>()
+const playbackAnalysisRetries = new Map<number, number>()
 
 function toNum(v: unknown): number | null {
   if (v == null) return null
@@ -157,6 +159,7 @@ async function fetchTrackPlayback(trackId: number): Promise<PlaybackData | null>
       outro_start_ms: toNum(f.outro_start_ms),
       silence_start_ms: toNum(f.silence_start_ms),
       intro_end_ms: toNum(f.intro_end_ms),
+      boundaries_ready: f.boundaries_analyzed_at != null,
     }
   } catch {
     return null
@@ -305,6 +308,7 @@ export function usePlayer() {
       outro_start_ms: null,
       silence_start_ms: null,
       intro_end_ms: null,
+      boundaries_ready: false,
     }
   }
   // The (integrated, truePeak) pair to feed the engine for `track`, honoring the
@@ -358,6 +362,21 @@ export function usePlayer() {
     if (trackId <= 0 || playbackDataCache.has(trackId)) return false
     const data = await fetchTrackPlayback(trackId)
     playbackDataCache.set(trackId, data)
+    // Loudness was blocking, but boundaries are intentionally filled behind
+    // playback. Re-fetch briefly until they land, then re-arm smart crossfade
+    // with the hot-added transition points.
+    if (data && !data.boundaries_ready) {
+      const attempt = playbackAnalysisRetries.get(trackId) ?? 0
+      if (attempt < 5) {
+        playbackAnalysisRetries.set(trackId, attempt + 1)
+        setTimeout(() => {
+          playbackDataCache.delete(trackId)
+          void ensureAnalysisAndArm()
+        }, 1000)
+      }
+    } else if (data?.boundaries_ready) {
+      playbackAnalysisRetries.delete(trackId)
+    }
     return true
   }
 

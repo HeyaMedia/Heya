@@ -318,7 +318,9 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error404NotFound("track not found")
 			}
-			return cachedJSON(detail, 300), nil
+			// Loudness/boundaries can be populated on demand; don't let a stale
+			// pre-analysis response hide newly persisted playback data.
+			return noStoreJSON(detail), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks/{id}/files", "list-track-files", "Available formats for a track", "Music")),

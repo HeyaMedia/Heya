@@ -360,6 +360,22 @@ func ListRunningKeyframeJobIDsForFile(ctx context.Context, db DB, libraryFileID 
 	return scanJobIDs(rows)
 }
 
+// CancelPendingLoudnessJobsForTrackFile removes a queued analysis job after
+// playback has persisted both its blocking loudness and async boundaries.
+func CancelPendingLoudnessJobsForTrackFile(ctx context.Context, db DB, trackFileID int64) (int64, error) {
+	tag, err := db.Exec(ctx, `
+		UPDATE river_job
+		   SET state = 'cancelled', finalized_at = now()
+		 WHERE kind = 'scan_track_loudness'
+		   AND state IN ('available', 'pending', 'retryable', 'scheduled')
+		   AND NULLIF(args->>'track_file_id', '')::bigint = $1
+	`, trackFileID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 func RetryJob(ctx context.Context, db DB, id int64) (int64, error) {
 	tag, err := db.Exec(ctx, `
 		UPDATE river_job

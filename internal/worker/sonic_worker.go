@@ -88,7 +88,11 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 	stageHook := func(stage sonicanalysis.AnalyzeStage) {
 		w.Progress.SetStage(AnalyzeTrackFacetsArgs{}.Kind(), job.Args.ScheduledTaskID, label, string(stage))
 	}
-	facets, analyzeErr := lease.Analyzer.AnalyzeWithProgress(ctx, row.FilePath, stageHook)
+	facets, analyzeErr := lease.Analyzer.AnalyzeWithProgressOptions(ctx, row.FilePath, stageHook, sonicanalysis.AnalyzeOptions{
+		// Re-check after the expensive model stages below. An on-demand
+		// waveform may land while those are running.
+		SkipWaveform: true,
+	})
 	if analyzeErr != nil {
 		// Persist a stub row so a permanently-broken track (decode
 		// error, unreadable file) doesn't get re-picked on every
@@ -111,6 +115,17 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 			}
 		}
 		return analyzeErr
+	}
+
+	if existingWaveform, _ := q.GetTrackWaveform(ctx, row.ID); len(existingWaveform) > 0 {
+		facets.Waveform = existingWaveform
+	} else {
+		stageHook(sonicanalysis.StageWaveform)
+		waveform, waveformErr := sonicanalysis.ComputeWaveform(ctx, row.FilePath)
+		if waveformErr != nil {
+			return fmt.Errorf("waveform: %w", waveformErr)
+		}
+		facets.Waveform = waveform
 	}
 
 	if err := persistTrackFacets(ctx, q, row.ID, facets, currentVersion); err != nil {

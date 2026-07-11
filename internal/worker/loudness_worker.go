@@ -21,6 +21,12 @@ import (
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/singleflight"
+)
+
+var (
+	trackLoudnessAnalysis singleflight.Group
+	trackBoundaryAnalysis singleflight.Group
 )
 
 // ScanTrackLoudnessWorker runs ffmpeg's ebur128 filter on one audio file and
@@ -59,42 +65,20 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 
 	w.Progress.SetCurrent(ScanTrackLoudnessArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(lf.Path))
 
-	// Cap wall-clock for the ffmpeg passes. 20× real-time on a modern CPU for
-	// FLAC, so a 10-minute track lands in ~30s; 5 min covers worst-case lossy.
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
+	if err := EnsureTrackLoudness(ctx, w.DB, tf.ID); err != nil {
+		return err
+	}
 
-	// Loudness (ebur128). Skip when already measured — this worker also runs as
-	// a boundary-only backfill, and re-listing loud-but-boundary-less tracks
-	// shouldn't pay for a redundant full-rate analysis pass.
-	if !tf.IntegratedLufs.Valid {
-		result, err := runEBUR128(probeCtx, lf.Path)
-		if err != nil {
-			return fmt.Errorf("ebur128 %s: %w", lf.Path, err)
-		}
-
-		if err := q.UpdateTrackFileLoudness(ctx, sqlc.UpdateTrackFileLoudnessParams{
-			ID:              tf.ID,
-			IntegratedLufs:  pgNumericFromFloat(result.IntegratedLUFS),
-			TruePeakDb:      pgNumericFromFloat(result.TruePeakDB),
-			LoudnessRangeDb: pgNumericFromFloat(result.LoudnessRangeDB),
-			SamplePeakDb:    pgNumericFromFloat(result.SamplePeakDB),
-		}); err != nil {
-			return fmt.Errorf("update track_file loudness: %w", err)
-		}
-
-		// Cascade: if every track in the album now has loudness, enqueue the
-		// album-level analysis. The unique-by-args guard on the worker means
-		// concurrent track workers can't double-enqueue.
-		track, err := q.GetTrackByID(ctx, tf.TrackID)
-		if err == nil {
-			done, err := q.AllAlbumTracksHaveLoudness(ctx, track.AlbumID)
-			if err == nil && done {
-				client := river.ClientFromContext[pgx.Tx](ctx)
-				if client != nil {
-					if _, err := client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(scheduledJobSource(job.Metadata))); err != nil {
-						return fmt.Errorf("enqueue album loudness: %w", err)
-					}
+	// Cascade: if every track in the album now has loudness, enqueue the
+	// album-level analysis. The unique-by-args guard prevents duplicates.
+	track, err := q.GetTrackByID(ctx, tf.TrackID)
+	if err == nil {
+		done, err := q.AllAlbumTracksHaveLoudness(ctx, track.AlbumID)
+		if err == nil && done {
+			client := river.ClientFromContext[pgx.Tx](ctx)
+			if client != nil {
+				if _, err := client.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: track.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(scheduledJobSource(job.Metadata))); err != nil {
+					return fmt.Errorf("enqueue album loudness: %w", err)
 				}
 			}
 		}
@@ -110,9 +94,57 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 	// kickoff tick forever. NULL ms columns mean "analyzed, no usable
 	// boundaries"; the client falls back to a timed crossfade. A genuine ctx
 	// cancellation also fails the stamp write below, so those correctly retry.
-	if !tf.BoundariesAnalyzedAt.Valid {
+	return EnsureTrackBoundaries(ctx, w.DB, tf.ID)
+}
+
+// EnsureTrackLoudness computes and persists replay-gain data exactly once per
+// process, shared by River and blocking playback requests.
+func EnsureTrackLoudness(ctx context.Context, db *pgxpool.Pool, trackFileID int64) error {
+	_, err, _ := trackLoudnessAnalysis.Do(strconv.FormatInt(trackFileID, 10), func() (any, error) {
+		q := sqlc.New(db)
+		tf, err := q.GetTrackFileByID(ctx, trackFileID)
+		if err != nil {
+			return nil, err
+		}
+		if tf.IntegratedLufs.Valid && tf.TruePeakDb.Valid {
+			return nil, nil
+		}
+		lf, err := q.GetLibraryFileByID(ctx, tf.LibraryFileID)
+		if err != nil || lf.DeletedAt.Valid {
+			return nil, err
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		result, err := runEBUR128(probeCtx, lf.Path)
+		if err != nil {
+			return nil, fmt.Errorf("ebur128 %s: %w", lf.Path, err)
+		}
+		return nil, q.UpdateTrackFileLoudness(ctx, sqlc.UpdateTrackFileLoudnessParams{
+			ID:              tf.ID,
+			IntegratedLufs:  pgNumericFromFloat(result.IntegratedLUFS),
+			TruePeakDb:      pgNumericFromFloat(result.TruePeakDB),
+			LoudnessRangeDb: pgNumericFromFloat(result.LoudnessRangeDB),
+			SamplePeakDb:    pgNumericFromFloat(result.SamplePeakDB),
+		})
+	})
+	return err
+}
+
+// EnsureTrackBoundaries computes the cheap smart-crossfade envelope once,
+// independently of the blocking loudness result.
+func EnsureTrackBoundaries(ctx context.Context, db *pgxpool.Pool, trackFileID int64) error {
+	_, err, _ := trackBoundaryAnalysis.Do(strconv.FormatInt(trackFileID, 10), func() (any, error) {
+		q := sqlc.New(db)
+		tf, err := q.GetTrackFileByID(ctx, trackFileID)
+		if err != nil || tf.BoundariesAnalyzedAt.Valid {
+			return nil, err
+		}
+		lf, err := q.GetLibraryFileByID(ctx, tf.LibraryFileID)
+		if err != nil || lf.DeletedAt.Valid {
+			return nil, err
+		}
 		params := sqlc.UpdateTrackFileBoundariesParams{ID: tf.ID}
-		if b, berr := sonicanalysis.DetectBoundaries(probeCtx, lf.Path); berr != nil {
+		if b, berr := sonicanalysis.DetectBoundaries(ctx, lf.Path); berr != nil {
 			log.Debug().Err(berr).Str("path", lf.Path).Msg("boundary detection failed; marking analyzed with no boundaries")
 		} else if b != nil {
 			params.IntroEndMs = pgInt4(b.IntroEndMs)
@@ -120,15 +152,9 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 			params.FadeStartMs = pgInt4(b.FadeStartMs)
 			params.SilenceStartMs = pgInt4(b.SilenceStartMs)
 		}
-		// Surface a stamp-write failure rather than swallowing it: loudness has
-		// already committed independently, so River retries the job, skips the
-		// loudness pass (now present), and re-attempts only the boundary stamp.
-		if err := q.UpdateTrackFileBoundaries(ctx, params); err != nil {
-			return fmt.Errorf("update track_file boundaries: %w", err)
-		}
-	}
-
-	return nil
+		return nil, q.UpdateTrackFileBoundaries(ctx, params)
+	})
+	return err
 }
 
 // ScanAlbumLoudnessWorker runs ebur128 over the *concatenation* of every

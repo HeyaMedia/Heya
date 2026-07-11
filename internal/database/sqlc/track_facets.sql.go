@@ -146,7 +146,9 @@ func (q *Queries) GetArtistCentroid(ctx context.Context, artistID int64) (Artist
 }
 
 const getTrackFacets = `-- name: GetTrackFacets :one
-SELECT track_id, track_embedding, artist_embedding, release_embedding, text_embedding, bpm, bpm_confidence, key_root, key_mode, key_clarity, top_genres, mood_tags, waveform, analyzed_at, analyzer_version FROM track_facets WHERE track_id = $1
+SELECT track_id, track_embedding, artist_embedding, release_embedding, text_embedding, bpm, bpm_confidence, key_root, key_mode, key_clarity, top_genres, mood_tags, waveform, analyzed_at, analyzer_version FROM track_facets
+WHERE track_id = $1
+  AND track_embedding IS NOT NULL
 `
 
 func (q *Queries) GetTrackFacets(ctx context.Context, trackID int64) (TrackFacet, error) {
@@ -1277,7 +1279,12 @@ ON CONFLICT (track_id) DO UPDATE SET
     key_clarity       = EXCLUDED.key_clarity,
     top_genres        = EXCLUDED.top_genres,
     mood_tags         = EXCLUDED.mood_tags,
-    waveform          = EXCLUDED.waveform,
+    -- A cheap on-demand waveform may already have landed while the model job
+    -- was running. Keep it instead of replacing/recomputing equivalent data.
+    waveform          = CASE
+                          WHEN cardinality(track_facets.waveform) > 0 THEN track_facets.waveform
+                          ELSE EXCLUDED.waveform
+                        END,
     analyzed_at       = now(),
     analyzer_version  = EXCLUDED.analyzer_version
 `
@@ -1347,5 +1354,25 @@ type UpsertTrackFacetsStubParams struct {
 // similarity) — only the version/timestamp advance.
 func (q *Queries) UpsertTrackFacetsStub(ctx context.Context, arg UpsertTrackFacetsStubParams) error {
 	_, err := q.db.Exec(ctx, upsertTrackFacetsStub, arg.TrackID, arg.AnalyzerVersion)
+	return err
+}
+
+const upsertTrackWaveform = `-- name: UpsertTrackWaveform :exec
+INSERT INTO track_facets (track_id, waveform, analyzer_version)
+VALUES ($1, $2, 0)
+ON CONFLICT (track_id) DO UPDATE SET
+    waveform = EXCLUDED.waveform
+`
+
+type UpsertTrackWaveformParams struct {
+	TrackID  int64     `json:"track_id"`
+	Waveform []float32 `json:"waveform"`
+}
+
+// Waveforms are cheap CPU/DSP output and may arrive before full Sonic/CLAP
+// facets. Version 0 deliberately leaves a waveform-only row eligible for the
+// current full analyzer; an existing analyzer version is never downgraded.
+func (q *Queries) UpsertTrackWaveform(ctx context.Context, arg UpsertTrackWaveformParams) error {
+	_, err := q.db.Exec(ctx, upsertTrackWaveform, arg.TrackID, arg.Waveform)
 	return err
 }

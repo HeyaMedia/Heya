@@ -2,7 +2,6 @@ package sonicanalysis
 
 import (
 	"context"
-	"fmt"
 	"math"
 )
 
@@ -15,9 +14,8 @@ import (
 // and edge-cases match.
 
 const (
-	boundarySampleRate = 8000 // mono envelope rate — only window energy matters
-	boundaryWindowSec  = 0.1  // 100ms RMS windows
-	boundaryWindowMs   = 100  // boundaryWindowSec * 1000, as an int for ms math
+	boundaryWindowSec  = 0.1 // 100ms RMS windows
+	boundaryWindowMs   = 100 // boundaryWindowSec * 1000, as an int for ms math
 	silenceThresholdDB = -60.0
 )
 
@@ -35,11 +33,11 @@ type Boundaries struct {
 // structural boundaries. Cheap single pass on top of the 8kHz decode — a few
 // hundred ms per track. Returns nil (no error) for empty/too-short audio.
 func DetectBoundaries(ctx context.Context, audioPath string) (*Boundaries, error) {
-	pcm, err := decodePCM(ctx, audioPath, boundarySampleRate)
+	envelope, err := AnalyzePlaybackEnvelope(ctx, audioPath)
 	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
+		return nil, err
 	}
-	return boundariesFromPCM(pcm, boundarySampleRate), nil
+	return envelope.Boundaries, nil
 }
 
 // boundariesFromPCM is the pure DSP core, separated for unit testing.

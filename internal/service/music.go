@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/worker"
 )
 
 // MusicListPage is the standard envelope for paginated music listings.
@@ -107,7 +110,61 @@ func (a *App) GetMusicTrackDetail(ctx context.Context, trackID int64) (*MusicTra
 	if files == nil {
 		files = []sqlc.TrackFile{}
 	}
+	if len(files) > 0 {
+		// Replay gain must be known before the first sample. The same helper is
+		// used by River, so an active background job and this request share one
+		// ffmpeg pass rather than racing.
+		if err := a.EnsureTrackPlaybackReady(ctx, trackID, files[0].ID); err != nil {
+			return nil, fmt.Errorf("analyze track loudness: %w", err)
+		}
+		if refreshed, refreshErr := q.ListTrackFilesByTrack(ctx, trackID); refreshErr == nil {
+			files = refreshed
+		}
+	}
 	return &MusicTrackDetail{GetTrackDetailByIDRow: row, Files: files}, nil
+}
+
+// EnsureTrackPlaybackReady blocks only for replay-gain loudness, then starts
+// waveform and smart-crossfade analysis behind playback.
+func (a *App) EnsureTrackPlaybackReady(ctx context.Context, trackID, trackFileID int64) error {
+	if err := worker.EnsureTrackLoudness(ctx, a.db, trackFileID); err != nil {
+		return err
+	}
+	// Preserve the worker's album-loudness cascade when on-demand playback
+	// supersedes and later cancels its queued per-track job.
+	if a.river != nil {
+		q := sqlc.New(a.db)
+		if track, err := q.GetTrackByID(ctx, trackID); err == nil {
+			if album, err := q.GetAlbumByID(ctx, track.AlbumID); err == nil && !album.LoudnessAnalyzedAt.Valid {
+				if ready, err := q.AllAlbumTracksHaveLoudness(ctx, track.AlbumID); err == nil && ready {
+					_, _ = a.river.Insert(ctx, worker.ScanAlbumLoudnessArgs{AlbumID: track.AlbumID}, nil)
+				}
+			}
+		}
+	}
+	a.ensureTrackPlaybackExtras(trackID, trackFileID)
+	return nil
+}
+
+// ensureTrackPlaybackExtras hot-fills non-blocking playback artifacts after
+// loudness is ready. It outlives the request but stops with the application.
+func (a *App) ensureTrackPlaybackExtras(trackID, trackFileID int64) {
+	go func() {
+		ctx, cancel := context.WithTimeout(a.lifetimeCtx, 5*time.Minute)
+		defer cancel()
+		boundaryDone := make(chan error, 1)
+		waveformDone := make(chan error, 1)
+		go func() { boundaryDone <- worker.EnsureTrackBoundaries(ctx, a.db, trackFileID) }()
+		go func() {
+			_, err := a.ensureTrackWaveform(ctx, trackID)
+			waveformDone <- err
+		}()
+		boundaryErr := <-boundaryDone
+		waveformErr := <-waveformDone
+		if boundaryErr == nil && waveformErr == nil {
+			_, _ = queueops.CancelPendingLoudnessJobsForTrackFile(ctx, a.db, trackFileID)
+		}
+	}()
 }
 
 // ListTracksByArtistSlug returns one artist's tracks (flat, all albums), paginated.

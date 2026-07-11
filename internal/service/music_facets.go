@@ -78,11 +78,38 @@ func (a *App) TrackFacets(ctx context.Context, trackID int64) (*FacetsView, erro
 // TrackWaveform returns just the 2000-bucket waveform for a track,
 // suitable for direct JSON serialization to the playbar.
 func (a *App) TrackWaveform(ctx context.Context, trackID int64) ([]float32, error) {
-	wf, err := sqlc.New(a.db).GetTrackWaveform(ctx, trackID)
-	if err != nil {
-		return nil, noFacetsErr(err, "get waveform")
+	return a.ensureTrackWaveform(ctx, trackID)
+}
+
+func (a *App) ensureTrackWaveform(ctx context.Context, trackID int64) ([]float32, error) {
+	q := sqlc.New(a.db)
+	if wf, err := q.GetTrackWaveform(ctx, trackID); err == nil && len(wf) > 0 {
+		return wf, nil
 	}
-	return wf, nil
+
+	value, err, _ := a.waveformScan.Do(fmt.Sprintf("%d", trackID), func() (any, error) {
+		// Re-check after joining the singleflight; another request or the Sonic
+		// worker may have persisted it while this caller was waiting.
+		if wf, getErr := q.GetTrackWaveform(ctx, trackID); getErr == nil && len(wf) > 0 {
+			return wf, nil
+		}
+		row, getErr := q.GetTrackForAnalysis(ctx, trackID)
+		if getErr != nil {
+			return nil, noFacetsErr(getErr, "resolve waveform source")
+		}
+		wf, computeErr := sonicanalysis.ComputeWaveform(ctx, row.FilePath)
+		if computeErr != nil {
+			return nil, fmt.Errorf("compute waveform: %w", computeErr)
+		}
+		if persistErr := q.UpsertTrackWaveform(ctx, sqlc.UpsertTrackWaveformParams{TrackID: trackID, Waveform: wf}); persistErr != nil {
+			return nil, fmt.Errorf("persist waveform: %w", persistErr)
+		}
+		return wf, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.([]float32), nil
 }
 
 // SimilarMusicTracks returns the top-N most sonically similar tracks to the

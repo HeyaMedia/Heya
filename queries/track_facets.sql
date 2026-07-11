@@ -33,7 +33,12 @@ ON CONFLICT (track_id) DO UPDATE SET
     key_clarity       = EXCLUDED.key_clarity,
     top_genres        = EXCLUDED.top_genres,
     mood_tags         = EXCLUDED.mood_tags,
-    waveform          = EXCLUDED.waveform,
+    -- A cheap on-demand waveform may already have landed while the model job
+    -- was running. Keep it instead of replacing/recomputing equivalent data.
+    waveform          = CASE
+                          WHEN cardinality(track_facets.waveform) > 0 THEN track_facets.waveform
+                          ELSE EXCLUDED.waveform
+                        END,
     analyzed_at       = now(),
     analyzer_version  = EXCLUDED.analyzer_version;
 
@@ -53,10 +58,21 @@ ON CONFLICT (track_id) DO UPDATE SET
     analyzer_version = EXCLUDED.analyzer_version;
 
 -- name: GetTrackFacets :one
-SELECT * FROM track_facets WHERE track_id = $1;
+SELECT * FROM track_facets
+WHERE track_id = $1
+  AND track_embedding IS NOT NULL;
 
 -- name: GetTrackWaveform :one
 SELECT waveform FROM track_facets WHERE track_id = $1;
+
+-- name: UpsertTrackWaveform :exec
+-- Waveforms are cheap CPU/DSP output and may arrive before full Sonic/CLAP
+-- facets. Version 0 deliberately leaves a waveform-only row eligible for the
+-- current full analyzer; an existing analyzer version is never downgraded.
+INSERT INTO track_facets (track_id, waveform, analyzer_version)
+VALUES ($1, $2, 0)
+ON CONFLICT (track_id) DO UPDATE SET
+    waveform = EXCLUDED.waveform;
 
 -- name: NextTrackForAnalysis :one
 -- Pick the next track that either has no facets row yet, or whose facets row

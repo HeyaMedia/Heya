@@ -3,6 +3,8 @@ package sonicanalysis
 import (
 	"context"
 	"fmt"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Waveform generation — produces N max-absolute-peak buckets across
@@ -19,6 +21,48 @@ const (
 	waveformSampleRate = 8000
 	waveformDefaultN   = 2000
 )
+
+var playbackEnvelopeAnalysis singleflight.Group
+
+// PlaybackEnvelope contains the two cheap artifacts derived from the same
+// low-rate mono decode.
+type PlaybackEnvelope struct {
+	Waveform   []float32
+	Boundaries *Boundaries
+}
+
+// AnalyzePlaybackEnvelope decodes once at 8 kHz and derives waveform peaks and
+// smart-crossfade boundaries from the same PCM. Concurrent callers share it.
+func AnalyzePlaybackEnvelope(ctx context.Context, audioPath string) (*PlaybackEnvelope, error) {
+	value, err, _ := playbackEnvelopeAnalysis.Do(audioPath, func() (any, error) {
+		pcm, decodeErr := decodePCM(ctx, audioPath, waveformSampleRate)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode: %w", decodeErr)
+		}
+		waveform, waveformErr := waveformFromPCM(pcm, waveformDefaultN)
+		if waveformErr != nil {
+			return nil, waveformErr
+		}
+		return &PlaybackEnvelope{
+			Waveform:   waveform,
+			Boundaries: boundariesFromPCM(pcm, waveformSampleRate),
+		}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*PlaybackEnvelope), nil
+}
+
+// ComputeWaveform generates the standard persisted waveform without loading
+// any Sonic/CLAP models. It is safe to use from playback's on-demand path.
+func ComputeWaveform(ctx context.Context, audioPath string) ([]float32, error) {
+	envelope, err := AnalyzePlaybackEnvelope(ctx, audioPath)
+	if err != nil {
+		return nil, err
+	}
+	return envelope.Waveform, nil
+}
 
 // computeWaveform decodes audio and reduces it to `n` peak buckets
 // covering the full duration in time order.
