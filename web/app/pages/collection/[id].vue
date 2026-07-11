@@ -130,6 +130,8 @@
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
 import type { ImageTone } from '~/composables/useImageTone'
+import { useQuery } from '@pinia/colada'
+import { collectionDetailQuery } from '~/queries/discovery'
 
 interface CollectionDetail {
   id: number
@@ -167,6 +169,28 @@ const keywords = ref<string[]>([])
 const ownedCount = ref(0)
 const loading = ref(true)
 const watchedIds = ref<Set<number>>(new Set())
+
+// The collection payload is a real destination query now: intent hovering can
+// warm it, and a cold navigation remains on the previous page until it lands.
+// User watch state is awaited alongside it so the first collection paint does
+// not briefly show every film as unwatched.
+const collectionQuery = useQuery(() => collectionDetailQuery(id.value))
+const watchedStatePromise = fetchUserState('movies')
+const [, watchedState] = await Promise.allSettled([
+  waitForQuery(collectionQuery),
+  watchedStatePromise,
+])
+const payload = collectionQuery.data.value
+if (payload) {
+  collection.value = payload.collection
+  parts.value = payload.parts || []
+  movies.value = payload.movies || []
+  genres.value = payload.genres || []
+  keywords.value = payload.keywords || []
+  ownedCount.value = payload.owned_count || 0
+}
+if (watchedState.status === 'fulfilled') watchedIds.value = new Set(watchedState.value.watched || [])
+loading.value = false
 
 // NuxtImg types its `error` payload as `string | Event`; narrow before use.
 function onImgError(e: Event | string) {
@@ -300,22 +324,6 @@ const ctaStyle = computed(() =>
   heroTone.value ? { background: heroTone.value.main, color: heroTone.value.ink } : undefined)
 
 onMounted(async () => {
-  const [res, state] = await Promise.allSettled([
-    $heya('/api/collections/{id}', { path: { id: id.value } }) as Promise<{
-      collection: CollectionDetail; parts: CollectionPart[]; movies: MediaItem[]; genres: string[]; keywords: string[]; owned_count: number
-    }>,
-    fetchUserState('movies'),
-  ])
-  if (res.status === 'fulfilled') {
-    collection.value = res.value.collection
-    parts.value = res.value.parts || []
-    movies.value = res.value.movies || []
-    genres.value = res.value.genres || []
-    keywords.value = res.value.keywords || []
-    ownedCount.value = res.value.owned_count || 0
-  }
-  if (state.status === 'fulfilled') watchedIds.value = new Set(state.value.watched || [])
-  loading.value = false
   await nextTick()
   seedCarousel()
 })

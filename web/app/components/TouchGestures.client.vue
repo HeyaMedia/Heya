@@ -10,7 +10,7 @@
 
   2. Pull-to-refresh → pulling down while the page scroller is already at the top
      reveals a spinner; releasing past the threshold refetches the data behind
-     the current page (vue-query active observers) — fresh API data without a
+     the current page (Pinia Colada active observers) — fresh API data without a
      full navigation, so scroll position and app state survive.
 
   Overlays (visualizer, dialogs, lightbox) are Teleported outside `.app`, so
@@ -39,11 +39,11 @@
 </template>
 
 <script setup lang="ts">
-import { useQueryClient } from '@tanstack/vue-query'
+import { useQueryCache } from '@pinia/colada'
 
 const { isCoarse, isCompact } = useViewport()
 const sidebar = useSectionSidebar()
-const queryClient = useQueryClient()
+const queryClient = useQueryCache()
 
 // --- Tunables --------------------------------------------------------------
 const EDGE_ZONE = 24        // px from the left edge that arms the edge-swipe
@@ -137,12 +137,12 @@ async function doRefresh() {
   refreshing.value = true
   pullY.value = 56 // rest the spinner in view while queries refetch
   try {
-    // Refetch the data behind the current page (every mounted vue-query
+    // Refetch the data behind the current page (every active Colada query
     // observer) instead of a full navigation — keeps scroll + app state, just
     // pulls fresh API data. The 450ms floor stops the spinner flashing when a
     // refetch resolves instantly from a warm connection.
     await Promise.all([
-      queryClient.invalidateQueries({ refetchType: 'active' }),
+      queryClient.invalidateQueries(),
       new Promise((resolve) => setTimeout(resolve, 450)),
     ])
   } catch { /* refetch failures surface through the pages themselves */ }

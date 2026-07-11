@@ -4,8 +4,7 @@
       <NuxtLink to="/music/podcasts" class="pc-back">
         <Icon name="chevleft" :size="14" /> Podcasts
       </NuxtLink>
-      <h1 class="pc-title">Browse Categories</h1>
-      <p class="pc-sub">Pick a topic to surface the trending shows in that bucket.</p>
+      <MusicPageHead title="Browse Categories" subtitle="Pick a topic to surface the trending shows in that bucket." />
     </header>
 
     <!-- Drilldown: trending podcasts in the selected category. -->
@@ -48,7 +47,7 @@
 
 <script setup lang="ts">
 import type { Podcast } from '~/composables/usePodcasts'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -59,10 +58,10 @@ const router = useRouter()
 const { $heya } = useNuxtApp()
 
 const categoriesQuery = useQuery({
-  queryKey: ['podcasts', 'categories'],
-  queryFn: async () => ((await $heya('/api/podcasts/categories')) as { items: Category[] }).items ?? [],
+  key: ['podcasts', 'categories'],
+  query: async () => ((await $heya('/api/podcasts/categories')) as { items: Category[] }).items ?? [],
   staleTime: 1000 * 60 * 60 * 24, // 24h — Podcast Index categories rarely change
-  retry: false,
+  retry: 0,
 })
 const categories = computed<Category[]>(() => categoriesQuery.data.value ?? [])
 const unavailable = computed(() => {
@@ -73,13 +72,14 @@ const unavailable = computed(() => {
 const selectedCategory = computed(() => (route.query.cat as string | undefined) ?? '')
 
 const trendingQuery = useQuery({
-  queryKey: ['podcasts', 'trending', { category: selectedCategory }],
-  queryFn: async () => ((await $heya('/api/podcasts/trending', { query: { max: 40, category: selectedCategory.value } })) as { items: Podcast[] }).items ?? [],
+  key: () => ['podcasts', 'trending', { category: selectedCategory.value }],
+  query: async () => ((await $heya('/api/podcasts/trending', { query: { max: 40, category: selectedCategory.value } })) as { items: Podcast[] }).items ?? [],
   enabled: () => selectedCategory.value.length > 0,
   staleTime: 1000 * 60 * 30,
 })
+await Promise.all([waitForQuery(categoriesQuery), waitForQuery(trendingQuery)])
 const trending = computed<Podcast[]>(() => trendingQuery.data.value ?? [])
-const podcastsLoading = computed(() => trendingQuery.isFetching.value)
+const podcastsLoading = computed(() => trendingQuery.isLoading.value)
 
 function selectCategory(name: string) {
   router.replace({ query: { cat: name } })
@@ -129,8 +129,6 @@ function categoryIcon(name: string) {
 .pc-head { margin-bottom: 28px; }
 .pc-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .pc-back:hover { color: var(--gold); }
-.pc-title { font-size: 28px; font-weight: 700; margin-top: 6px; letter-spacing: -0.01em; }
-.pc-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
 
 .pc-cat-grid {
   display: grid;

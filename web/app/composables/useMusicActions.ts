@@ -18,6 +18,7 @@
 
 import type { ContextMenuItem } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
+import { musicAlbumDetailQuery } from '~/queries/music'
 
 export interface TrackEntity {
   id: number
@@ -54,13 +55,14 @@ export interface ArtistEntity {
 }
 
 export function useMusicActions() {
-  const { play, queue, addToQueue, playNext } = usePlayer()
+  const { play, queue, addToQueue, playNext } = usePlayerBindings()
   const { $heya } = useNuxtApp()
   const playlists = usePlaylists()
   const radio = useRadio()
   const trackRatings = useRatings('track')
   const albumRatings = useRatings('album')
   const artistRatings = useRatings('artist')
+  const loadQuery = useQueryLoader()
 
   if (import.meta.client) playlists.ensureLoaded()
 
@@ -197,9 +199,10 @@ export function useMusicActions() {
   // network round-trip happens on click. ---
   async function fetchAlbumTracks(album: AlbumEntity): Promise<Track[]> {
     try {
-      const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
-        path: { artist_slug: album.artist_slug, album_slug: album.album_slug },
-      }) as unknown as { tracks: Array<{ id: number; title: string; duration: number; artist_name?: string; files?: unknown[] }> }
+      const detail = await loadQuery(musicAlbumDetailQuery({
+        artistSlug: album.artist_slug,
+        albumSlug: album.album_slug,
+      }))
       // Only queue tracks that still have a file on disk (detail.tracks[].files
       // is server-filtered to live files; empty means removed).
       return (detail.tracks ?? [])
@@ -207,7 +210,7 @@ export function useMusicActions() {
         .map((t) => ({
           id: t.id,
           title: t.title,
-          artist: t.artist_name || album.artist_name || '',
+          artist: album.artist_name || detail.artist?.name || '',
           album: album.title,
           duration: t.duration,
           stream_url: `/api/music/tracks/${t.id}/stream`,

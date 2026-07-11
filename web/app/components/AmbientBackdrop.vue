@@ -48,7 +48,7 @@
 // Mounted as the first child of `.app` with z-index:-1 — .app carries no
 // background (heya.css) so the layer sits between the body canvas and all
 // content. Turning ambient off restores the plain-canvas look everywhere.
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 const { $heya } = useNuxtApp()
 const route = useRoute()
@@ -97,8 +97,8 @@ const active = computed(
 const intensity = computed(() => prefs.value.ambientIntensity || 30)
 
 const poolQuery = useQuery({
-  queryKey: computed(() => ['ambient-backdrops', typesKey.value]),
-  queryFn: async () =>
+  key: () => ['ambient-backdrops', typesKey.value],
+  query: async () =>
     (await $heya('/api/media/ambient-backdrops', {
       query: { types: typesKey.value, limit: POOL_SIZE },
     })) as Candidate[],

@@ -2,7 +2,7 @@
   MiniPlayer — compact persistent bar for phones. Position-agnostic: this
   component renders a plain 64px-tall row: the parent (W1c) is responsible
   for docking it (fixed, above BottomNav, safe-area padding etc). Reads
-  everything from the global usePlayer() singleton — no props.
+  everything from the global usePlayerBindings() singleton — no props.
 
   Emits:
     expand — whole-bar tap (except the two transport buttons)
@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-const { currentTrack, playing, position, duration, togglePlay, nextTrack, stop } = usePlayer()
+const { currentTrack, playing, position, duration, togglePlay, nextTrack, stop } = usePlayerBindings()
 
 const emit = defineEmits<{ expand: [] }>()
 

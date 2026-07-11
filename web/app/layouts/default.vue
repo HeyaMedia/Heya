@@ -23,7 +23,7 @@
 
       <!--
         Phone player mount (MiniPlayer + sheets) — shared MobilePlayerHost,
-        because usePlayer() is a global singleton: music keeps playing
+        because usePlayerBindings() is a global singleton: music keeps playing
         app-wide, so the bar must be visible app-wide too. settings.vue
         mounts the same host; pages/music.vue renders inside this layout's
         <slot>, so /music is covered by this one mount (docs/responsive-plan

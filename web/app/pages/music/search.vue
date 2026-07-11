@@ -1,5 +1,6 @@
 <template>
   <div class="ms-search page-pad">
+    <MusicPageHead title="Search" />
     <div class="ms-search-head">
       <div class="ms-input-wrap">
         <Icon name="search" :size="18" class="ms-input-icon" />
@@ -23,12 +24,12 @@
       <button
         type="button"
         class="ms-vibe-btn"
-        :disabled="!q.trim() || vibeQuery.isFetching.value"
-        :title="vibeQuery.isFetching.value ? 'Searching…' : 'Find tracks that match this vibe (CLAP)'"
+        :disabled="!q.trim() || vibeQuery.isLoading.value"
+        :title="vibeQuery.isLoading.value ? 'Searching…' : 'Find tracks that match this vibe (CLAP)'"
         @click="runVibe"
       >
         <Icon name="sparkle" :size="14" />
-        {{ vibeQuery.isFetching.value ? 'Vibing…' : 'Vibe Search' }}
+        {{ vibeQuery.isLoading.value ? 'Vibing…' : 'Vibe Search' }}
       </button>
     </div>
 
@@ -60,7 +61,7 @@
 
     <!-- Text search results -->
     <div v-if="hasQuery" class="ms-results">
-      <div v-if="quickQuery.isFetching.value && !hasAnyResults" class="ms-loading">Searching…</div>
+      <div v-if="quickQuery.isLoading.value && !hasAnyResults" class="ms-loading">Searching…</div>
 
       <!-- Artists -->
       <section v-if="artists.length" class="ms-section">
@@ -202,7 +203,7 @@
 
       <!-- Nothing found, no search in flight -->
       <div
-        v-if="hasQuery && !quickQuery.isFetching.value && !hasAnyResults && !vibeResults.length"
+        v-if="hasQuery && !quickQuery.isLoading.value && !hasAnyResults && !vibeResults.length"
         class="ms-no-results"
       >
         <h3>Nothing found for "{{ submitted }}"</h3>
@@ -220,20 +221,22 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 import { refDebounced } from '@vueuse/core'
+import { musicAlbumDetailQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const router = useRouter()
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const recent = useRecentSearches('music')
 const recentEntries = recent.entries
 const actions = useMusicActions()
 const { isPhone, isCoarse } = useViewport()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
+const loadQuery = useQueryLoader()
 
 // Phone-only "..." sheet for the Tracks section — same context-menu items
 // AppContextMenu already exposes via right-click/long-press, surfaced as an
@@ -326,8 +329,8 @@ interface TrackRow {
 }
 
 const quickQuery = useQuery({
-  queryKey: ['search', 'quick', 'music', submitted],
-  queryFn: async () => {
+  key: () => ['search', 'quick', 'music', submitted.value],
+  query: async () => {
     const res = await $heya('/api/search/quick', {
       query: { q: submitted.value },
     }) as unknown as QuickResult
@@ -368,8 +371,8 @@ interface VibeRow {
 
 const vibeTrigger = ref('')
 const vibeQuery = useQuery({
-  queryKey: ['search', 'vibe', vibeTrigger],
-  queryFn: async () => {
+  key: () => ['search', 'vibe', vibeTrigger.value],
+  query: async () => {
     const res = await $heya('/api/music/search-sonic', {
       query: { q: vibeTrigger.value, limit: 24 },
     }) as unknown as { items: VibeRow[] }
@@ -477,15 +480,13 @@ function onEsc() {
 // --- Play actions ---
 async function playAlbum(al: AlbumRow) {
   try {
-    const res = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
-      path: { artist_slug: al.artist_slug, album_slug: al.slug },
-    }) as unknown as { tracks?: Array<{ id: number; title: string; artist_name: string; duration: number; disc_number: number; track_number: number }> }
+    const res = await loadQuery(musicAlbumDetailQuery({ artistSlug: al.artist_slug, albumSlug: al.slug }))
     const list = res.tracks ?? []
     if (!list.length) return
     const built: Track[] = list.map((t) => ({
       id: t.id,
       title: t.title,
-      artist: t.artist_name || al.artist_name,
+      artist: al.artist_name,
       album: al.title,
       duration: t.duration,
       stream_url: `/api/music/tracks/${t.id}/stream`,
@@ -567,8 +568,11 @@ async function playVibe(startIdx: number) {
 .ms-input {
   width: 100%;
   padding: 14px 44px 14px 42px;
-  background: rgb(var(--ink) / 0.04);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   border-radius: 10px;
   color: var(--fg-0);
   font-size: 15px;

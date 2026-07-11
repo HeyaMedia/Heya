@@ -1,15 +1,12 @@
 <template>
   <div class="ml page-pad">
-    <header class="ml-head">
-      <div>
-        <h1 class="ml-title">Loved Songs</h1>
-        <div class="ml-sub">Every track you've rated, sorted by score. Rate ½★ to add — clear the rating to remove.</div>
-      </div>
-      <div class="ml-meta">
-        <div class="ml-count">{{ total.toLocaleString() }}</div>
-        <div class="ml-count-lbl">tracks</div>
-      </div>
-    </header>
+    <MusicPageHead title="Loved Songs">
+      <template #subtitle>
+        <span>Every track you've rated, sorted by score. Rate ½★ to add — clear the rating to remove.</span>
+        <span class="dot">·</span>
+        <span>{{ total.toLocaleString() }} tracks</span>
+      </template>
+    </MusicPageHead>
 
     <div v-if="pending && !rows.length" class="ml-loading">Loading…</div>
 
@@ -40,7 +37,7 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -68,21 +65,22 @@ interface RatedTrackRow {
   available?: boolean
 }
 
-const { play, queue, currentTrack, playing, formatTime } = usePlayer()
+const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
 const actions = useMusicActions()
 
 const lovedQuery = useQuery({
-  queryKey: ['me', 'ratings', 'loved-list'],
-  queryFn: async () => {
+  key: ['me', 'ratings', 'loved-list'],
+  query: async () => {
     const r = await $heya('/api/me/ratings/tracks', { query: { min_rating: 1, limit: 500 } }) as unknown as { items: RatedTrackRow[]; total: number }
     trackRatings.primeMany(r.items.map((t) => [t.track_id, t.rating] as [number, number]))
     return r
   },
   staleTime: 1000 * 30,
 })
+await waitForQuery(lovedQuery)
 const pending = computed(() => lovedQuery.isPending.value)
 const rows = computed(() => lovedQuery.data.value?.items ?? [])
 const total = computed(() => lovedQuery.data.value?.total ?? 0)
@@ -148,19 +146,7 @@ async function playFrom(i: number) {
 <style scoped>
 .ml { max-width: 1300px; }
 
-.ml-head {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
-  margin-bottom: 28px;
-}
-.ml-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
-.ml-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; max-width: 540px; }
-.ml-meta { text-align: right; }
-.ml-count { font-size: 28px; font-weight: 700; color: var(--gold); }
-.ml-count-lbl {
-  font-size: 10px; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.1em;
-  color: var(--fg-3); margin-top: -2px;
-}
+.dot { opacity: 0.4; }
 
 .ml-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
 .ml-empty {

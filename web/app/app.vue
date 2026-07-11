@@ -1,4 +1,5 @@
 <template>
+  <NuxtLoadingIndicator color="var(--gold)" :height="3" :throttle="120" />
   <NuxtLayout>
     <NuxtPage v-if="ready" />
   </NuxtLayout>
@@ -7,19 +8,16 @@
   <!-- Global touch affordances (left-edge swipe → sidebar, pull-to-refresh).
        Client-only; renders only a transient pull indicator on touch devices. -->
   <TouchGestures />
-  <!-- Dev-only in-app query-cache overview (bottom-left toggle, ⌘⇧Q). Reads
-       the live $queryClient: every query's key, status, staleness, observers,
-       age + per-query invalidate/refetch/remove. Async-imported behind
-       import.meta.dev so it (and its type-only deps) drop out of the prod
-       single binary. Replaces the old TanStack floating widget. -->
-  <component :is="QueryCachePanel" v-if="QueryCachePanel" />
+  <!-- Pinia Colada's query inspector is dev-only and tree-shaken from the
+       production bundle. It exposes cache entries, status and fetch timing. -->
+  <component :is="ColadaDevtools" v-if="ColadaDevtools" />
 </template>
 
 <script setup lang="ts">
 import { defineAsyncComponent } from 'vue'
 
-const QueryCachePanel = import.meta.dev
-  ? defineAsyncComponent(() => import('~/components/dev/QueryCachePanel.vue'))
+const ColadaDevtools = import.meta.dev
+  ? defineAsyncComponent(() => import('@pinia/colada-devtools').then(mod => mod.PiniaColadaDevtools))
   : null
 const route = useRoute()
 const { ready, isAuthenticated } = useAuth()

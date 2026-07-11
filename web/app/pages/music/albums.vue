@@ -28,24 +28,20 @@
 </template>
 
 <script setup lang="ts">
-import type { MusicAlbumRow, MusicListPage } from '~~/shared/types'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { musicAlbumsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
-const { $heya } = useNuxtApp()
 const actions = useMusicActions()
-const albumsQuery = useQuery({
-  queryKey: ['music', 'albums', 'list', { limit: 500 }],
-  queryFn: async () => (await $heya('/api/music/albums', { query: { limit: 500 } })) as unknown as MusicListPage<MusicAlbumRow>,
-  staleTime: 1000 * 60,
-})
+const albumsQuery = useQuery(musicAlbumsQuery())
+await waitForQuery(albumsQuery)
 const pending = computed(() => albumsQuery.isPending.value)
 const rows = computed(() => albumsQuery.data.value?.items ?? [])
 </script>
 
 <style scoped>
-.m-h2 { font-size: 24px; font-weight: 600; margin-bottom: 20px; }
+.m-h2 { font-size: 24px; font-weight: 600; margin-bottom: 20px; text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
 .m-loading, .m-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
 /* Was inline-style grid-template-columns — moved to a scoped class so the
    phone override below can win (media queries can't beat an inline style). */

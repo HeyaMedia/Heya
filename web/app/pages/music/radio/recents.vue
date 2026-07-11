@@ -4,8 +4,7 @@
       <NuxtLink to="/music/radio" class="rr-back">
         <Icon name="chevleft" :size="14" /> Radio
       </NuxtLink>
-      <h1 class="rr-title">Recently Played</h1>
-      <p class="rr-sub">Your last 30 stations — same row twice means you came back, the dedup hides the duplicates.</p>
+      <MusicPageHead title="Recently Played" subtitle="Your last 30 stations — same row twice means you came back, the dedup hides the duplicates." />
     </header>
 
     <div v-if="loading" class="rr-loading">Loading…</div>
@@ -30,7 +29,7 @@
 
 <script setup lang="ts">
 import type { RadioStationView } from '~/composables/useRadio'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -45,10 +44,11 @@ if (import.meta.client) radio.ensureFavoritesLoaded()
 
 const { $heya } = useNuxtApp()
 const recentsQuery = useQuery({
-  queryKey: ['me', 'radio', 'recents', { limit: 30 }],
-  queryFn: async () => ((await $heya('/api/me/radio/recents', { query: { limit: 30 } })) as { items: RecentRow[] }).items ?? [],
+  key: ['me', 'radio', 'recents', { limit: 30 }],
+  query: async () => ((await $heya('/api/me/radio/recents', { query: { limit: 30 } })) as { items: RecentRow[] }).items ?? [],
   staleTime: 1000 * 30,
 })
+await waitForQuery(recentsQuery)
 const recents = computed<RecentRow[]>(() => recentsQuery.data.value ?? [])
 const loading = computed(() => recentsQuery.isPending.value)
 
@@ -67,8 +67,6 @@ function rowToStation(r: RecentRow): RadioStationView {
 .rr-head { margin-bottom: 24px; }
 .rr-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .rr-back:hover { color: var(--gold); }
-.rr-title { font-size: 28px; font-weight: 700; margin-top: 6px; letter-spacing: -0.01em; }
-.rr-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; max-width: 600px; }
 .rr-loading { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
 .rr-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px;

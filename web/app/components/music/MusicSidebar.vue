@@ -18,7 +18,7 @@
 
       <!-- Library — the full catalog. Clicking the row opens the Library
            hub; the chevron toggles direct access to Artists / Albums / Songs. -->
-      <li>
+      <li @pointerenter="libraryEnter" @pointerleave="libraryLeave">
         <CollapsibleRoot v-model:open="libraryOpen">
           <div class="ms-group-row">
             <NuxtLink to="/music/library" class="ms-nav-item flex-grow" :class="{ active: libraryActive }">
@@ -46,7 +46,7 @@
       </li>
 
       <!-- My Music — the user's saved + rated content + sound profile. -->
-      <li>
+      <li @pointerenter="myMusicEnter" @pointerleave="myMusicLeave">
         <CollapsibleRoot v-model:open="myMusicOpen">
           <div class="ms-group-row">
             <NuxtLink to="/music/my" class="ms-nav-item flex-grow" :class="{ active: myMusicActive }">
@@ -79,7 +79,7 @@
       <!-- Stations — replaces Browse. Hub aggregates auto-mixes, custom
            stations (Library Radio, Deep Cuts, Time Travel, Random Album
            Radio), the mix builder, and the mood/genre/tempo browse. -->
-      <li>
+      <li @pointerenter="stationsEnter" @pointerleave="stationsLeave">
         <CollapsibleRoot v-model:open="stationsOpen">
           <div class="ms-group-row">
             <NuxtLink to="/music/stations" class="ms-nav-item flex-grow" :class="{ active: stationsActive }">
@@ -181,7 +181,7 @@ defineEmits<{ 'create-playlist': [] }>()
 // hiding behind it. Gate on a track being present too — the cover only renders
 // when coverExpanded AND a track is loaded, so without this the sidebar would
 // stay shrunk (empty gap, no cover) after playback stops with the mode still on.
-const { currentTrack } = usePlayer()
+const { currentTrack } = usePlayerBindings()
 const coverExpanded = useState('music_cover_expanded', () => false)
 const coverShown = computed(() => coverExpanded.value && !!currentTrack.value)
 
@@ -190,13 +190,6 @@ const coverShown = computed(() => coverExpanded.value && !!currentTrack.value)
 // conventions: gate on pointer coarseness, not viewport width).
 const { isCoarse } = useViewport()
 const dragDrop = useMusicDragDrop()
-
-// Auto-open the group that contains the active section. User can still
-// collapse manually after — these are open by default if the user happens
-// to be inside the group.
-const libraryOpen = ref(true)
-const myMusicOpen = ref(true)
-const stationsOpen = ref(true)
 
 const librarySections = ['library', 'artists', 'albums', 'songs']
 const myMusicSections = ['my', 'my-artists', 'my-albums', 'my-favorites', 'stats']
@@ -208,10 +201,48 @@ const stationsActive = computed(() =>
   stationsSections.includes(props.section) || props.section?.startsWith('browse'),
 )
 
-watch(() => props.section, (s) => {
-  if (librarySections.includes(s)) libraryOpen.value = true
-  if (myMusicSections.includes(s)) myMusicOpen.value = true
-  if (stationsSections.includes(s) || s?.startsWith('browse')) stationsOpen.value = true
+// Groups are collapsed by default and follow the route: the group holding
+// the active section auto-expands, the others fold. Layered on top:
+// hover-expand (desktop pointer only) with intent delays, and the chevron
+// as a manual override. Resolution order: manual ?? (route-pinned || hover).
+// A navigation clears the manual override so the route re-asserts itself —
+// that's what makes "navigate out → folds back on its own" work.
+function groupState(pinned: ComputedRef<boolean>) {
+  const manual = ref<boolean | null>(null)
+  const hover = ref(false)
+  let enterT: ReturnType<typeof setTimeout> | undefined
+  let leaveT: ReturnType<typeof setTimeout> | undefined
+  const open = computed({
+    get: () => manual.value ?? (pinned.value || hover.value),
+    set: (v: boolean) => { manual.value = v },
+  })
+  // 150ms in / 300ms out: enough to ignore a pointer passing through, and
+  // enough grace to travel from the group row into its sub-links.
+  function pointerEnter() {
+    if (isCoarse.value) return
+    clearTimeout(leaveT)
+    enterT = setTimeout(() => { hover.value = true }, 150)
+  }
+  function pointerLeave() {
+    clearTimeout(enterT)
+    leaveT = setTimeout(() => { hover.value = false }, 300)
+  }
+  function reset() {
+    manual.value = null
+    hover.value = false
+  }
+  onBeforeUnmount(() => { clearTimeout(enterT); clearTimeout(leaveT) })
+  return { open, pointerEnter, pointerLeave, reset }
+}
+
+const { open: libraryOpen, pointerEnter: libraryEnter, pointerLeave: libraryLeave, reset: libraryReset } = groupState(libraryActive)
+const { open: myMusicOpen, pointerEnter: myMusicEnter, pointerLeave: myMusicLeave, reset: myMusicReset } = groupState(myMusicActive)
+const { open: stationsOpen, pointerEnter: stationsEnter, pointerLeave: stationsLeave, reset: stationsReset } = groupState(stationsActive)
+
+watch(() => props.section, () => {
+  libraryReset()
+  myMusicReset()
+  stationsReset()
 })
 </script>
 
@@ -350,6 +381,13 @@ watch(() => props.section, (s) => {
 @keyframes ms-collapse-up {
   from { height: var(--reka-collapsible-content-height); opacity: 1; }
   to   { height: 0; opacity: 0; }
+}
+/* Hover-expand makes groups open/close far more often than before — snap
+   instead of animate for users who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ms-collapsible[data-state="open"],
+  .ms-collapsible[data-state="closed"] { animation: none; }
+  .ms-chev :deep(svg) { transition: none; }
 }
 
 .ms-sub {

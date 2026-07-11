@@ -4,8 +4,7 @@
       <NuxtLink to="/music/radio" class="rf-back">
         <Icon name="chevleft" :size="14" /> Radio
       </NuxtLink>
-      <h1 class="rf-title">Favorite Stations</h1>
-      <p class="rf-sub">{{ subline }}</p>
+      <MusicPageHead title="Favorite Stations" :subtitle="subline" />
     </header>
 
     <div v-if="loading" class="rf-loading">Loading…</div>
@@ -31,7 +30,7 @@
 
 <script setup lang="ts">
 import type { RadioStationView } from '~/composables/useRadio'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -45,10 +44,11 @@ if (import.meta.client) radio.ensureFavoritesLoaded()
 
 const { $heya } = useNuxtApp()
 const favoritesQuery = useQuery({
-  queryKey: ['me', 'radio', 'favorites'],
-  queryFn: async () => ((await $heya('/api/me/radio/favorites')) as { items: FavoriteRow[] }).items ?? [],
+  key: ['me', 'radio', 'favorites'],
+  query: async () => ((await $heya('/api/me/radio/favorites')) as { items: FavoriteRow[] }).items ?? [],
   staleTime: 1000 * 30,
 })
+await waitForQuery(favoritesQuery)
 const favorites = computed<FavoriteRow[]>(() => favoritesQuery.data.value ?? [])
 const loading = computed(() => favoritesQuery.isPending.value)
 
@@ -70,8 +70,6 @@ const subline = computed(() => {
 .rf-head { margin-bottom: 24px; }
 .rf-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .rf-back:hover { color: var(--gold); }
-.rf-title { font-size: 28px; font-weight: 700; margin-top: 6px; letter-spacing: -0.01em; }
-.rf-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
 .rf-loading { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
 .rf-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px;

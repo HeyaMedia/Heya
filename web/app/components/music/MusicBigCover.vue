@@ -31,7 +31,7 @@
 </template>
 
 <script setup lang="ts">
-const { currentTrack } = usePlayer()
+const { currentTrack } = usePlayerBindings()
 const coverExpanded = useState('music_cover_expanded', () => false)
 const lightbox = useLightbox()
 

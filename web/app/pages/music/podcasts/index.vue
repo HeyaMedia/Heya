@@ -1,27 +1,24 @@
 <template>
   <div class="page-pad podcast-page">
-    <header class="pp-head">
-      <h1 class="pp-title">Podcasts</h1>
-      <p class="pp-sub">{{ headlineSub }}</p>
-      <div class="pp-search">
-        <Icon name="search" :size="16" class="pp-search-icon" />
-        <input
-          v-model="searchQuery"
-          type="search"
-          class="pp-search-input"
-          placeholder="Search by show, host, topic…"
-          @keydown.enter="runSearch"
-        />
-        <button v-if="searchQuery" class="pp-search-clear" @click="clearSearch">
-          <Icon name="close" :size="14" />
-        </button>
-      </div>
-    </header>
+    <MusicPageHead title="Podcasts" :subtitle="headlineSub" />
+    <div class="pp-search">
+      <Icon name="search" :size="16" class="pp-search-icon" />
+      <input
+        v-model="searchQuery"
+        type="search"
+        class="pp-search-input"
+        placeholder="Search by show, host, topic…"
+        @keydown.enter="runSearch"
+      />
+      <button v-if="searchQuery" class="pp-search-clear" @click="clearSearch">
+        <Icon name="close" :size="14" />
+      </button>
+    </div>
 
     <!-- Discovery strip — hidden during search so results aren't pushed
          below the fold. -->
     <nav v-if="!searchResults.length" class="pp-strip">
-      <NuxtLink to="/music/podcasts/categories" class="pp-strip-tile">
+      <NuxtLink to="/music/podcasts/categories" class="pp-strip-tile steer-glass">
         <Icon name="grid" :size="20" />
         <div>
           <div class="pp-strip-title">Browse Categories</div>
@@ -92,7 +89,7 @@
 
 <script setup lang="ts">
 import type { Podcast } from '~/composables/usePodcasts'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -102,10 +99,10 @@ if (import.meta.client) actions.ensureSubscriptionsLoaded()
 const { $heya } = useNuxtApp()
 
 const trendingQuery = useQuery({
-  queryKey: ['podcasts', 'trending', { max: 30 }],
-  queryFn: async () => ((await $heya('/api/podcasts/trending', { query: { max: 30 } })) as { items: Podcast[] }).items ?? [],
+  key: ['podcasts', 'trending', { max: 30 }],
+  query: async () => ((await $heya('/api/podcasts/trending', { query: { max: 30 } })) as { items: Podcast[] }).items ?? [],
   staleTime: 1000 * 60 * 30,
-  retry: false, // 503 (PI not configured) shouldn't trigger retries
+  retry: 0, // 503 (PI not configured) shouldn't trigger retries
 })
 const trending = computed<Podcast[]>(() => trendingQuery.data.value ?? [])
 const trendingPending = computed(() => trendingQuery.isPending.value)
@@ -130,17 +127,22 @@ interface ContinueEpisode {
 }
 
 const subscriptionsQuery = useQuery({
-  queryKey: ['me', 'podcasts', 'subscriptions'],
-  queryFn: async () => ((await $heya('/api/me/podcasts/subscriptions')) as { items: Subscription[] }).items ?? [],
+  key: ['me', 'podcasts', 'subscriptions'],
+  query: async () => ((await $heya('/api/me/podcasts/subscriptions')) as { items: Subscription[] }).items ?? [],
   staleTime: 1000 * 30,
 })
 const subscriptions = computed<Subscription[]>(() => subscriptionsQuery.data.value ?? [])
 
 const continueQuery = useQuery({
-  queryKey: ['me', 'podcasts', 'continue', { limit: 8 }],
-  queryFn: async () => ((await $heya('/api/me/podcasts/continue', { query: { limit: 8 } })) as { items: ContinueEpisode[] }).items ?? [],
+  key: ['me', 'podcasts', 'continue', { limit: 8 }],
+  query: async () => ((await $heya('/api/me/podcasts/continue', { query: { limit: 8 } })) as { items: ContinueEpisode[] }).items ?? [],
   staleTime: 1000 * 30,
 })
+await Promise.all([
+  waitForQuery(trendingQuery),
+  waitForQuery(subscriptionsQuery),
+  waitForQuery(continueQuery),
+])
 const continueListening = computed<ContinueEpisode[]>(() => continueQuery.data.value ?? [])
 
 const searchQuery = ref('')
@@ -183,17 +185,17 @@ function formatProgress(ep: ContinueEpisode) {
 
 <style scoped>
 .podcast-page { padding-bottom: 80px; }
-.pp-head { margin-bottom: 28px; max-width: 720px; }
-.pp-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
-.pp-sub { color: var(--fg-3); font-size: 13px; margin: 4px 0 18px; }
-.pp-search { position: relative; display: flex; align-items: center; }
+.pp-search { position: relative; display: flex; align-items: center; max-width: 720px; margin-bottom: 28px; }
 .pp-search-icon { position: absolute; left: 14px; color: var(--fg-3); }
 .pp-search-input {
   width: 100%;
   padding: 12px 36px 12px 38px;
   font-size: 14px;
-  background: var(--bg-2);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   border-radius: var(--r-md);
   color: var(--fg-0);
   outline: none;
@@ -214,8 +216,6 @@ function formatProgress(ep: ContinueEpisode) {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   text-decoration: none;
   color: inherit;
@@ -223,7 +223,6 @@ function formatProgress(ep: ContinueEpisode) {
 }
 .pp-strip-tile:hover {
   border-color: rgba(99, 102, 241, 0.4);
-  background: rgba(99, 102, 241, 0.05);
   transform: translateY(-1px);
 }
 .pp-strip-tile > :first-child { color: #6366f1; flex-shrink: 0; }
@@ -288,8 +287,8 @@ function formatProgress(ep: ContinueEpisode) {
 @media (max-width: 720px) {
   /* music.vue's phone header already reads "Podcasts" directly above this
      page — the live sub line + search box both stay. */
-  .pp-title { display: none; }
-  .pp-head { margin-bottom: 20px; }
+  :deep(.mhd-title) { display: none; }
+  :deep(.mhd) { margin-bottom: 20px; }
   .pp-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
   .page-pad { padding-left: 16px; padding-right: 16px; }
 }

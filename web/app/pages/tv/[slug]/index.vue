@@ -261,22 +261,19 @@
 <script setup lang="ts">
 import type { ContextMenuItem, MediaDetail, MediaItem, MediaRecommendation, UserList } from '~~/shared/types'
 import type { ImageTone } from '~/composables/useImageTone'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { mediaDetailQuery } from '~/queries/media'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
 const lightbox = useLightbox()
 
 const { $heya } = useNuxtApp()
-const detailQuery = useQuery({
-  queryKey: ['media', 'detail', slug],
-  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: slug.value as never } })) as MediaDetail,
-  staleTime: 1000 * 60 * 5,
-  retry: false,
-})
+const detailQuery = useQuery(() => mediaDetailQuery(slug.value))
+await waitForQuery(detailQuery)
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
-watch(detailQuery.error, (err) => { if (err) navigateTo('/tv') })
+watch(detailQuery.error, (err) => { if (err) navigateTo('/tv') }, { immediate: true })
 const showMetadataEditor = ref(false)
 const videoModal = ref<{ key: string; title: string } | null>(null)
 

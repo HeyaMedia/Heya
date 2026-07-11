@@ -1,10 +1,6 @@
 <template>
   <div class="ms-lib page-pad">
-    <header class="ms-lib-head">
-      <div>
-        <h1 class="ms-lib-title">Library</h1>
-        <div class="ms-lib-sub">Everything in your music collection.</div>
-      </div>
+    <MusicPageHead title="Library" subtitle="Everything in your music collection.">
       <div class="ms-stat-row">
         <NuxtLink to="/music/artists" class="ms-stat">
           <div class="ms-stat-num">{{ statsLoading ? '—' : artistCount.toLocaleString() }}</div>
@@ -19,7 +15,7 @@
           <div class="ms-stat-lbl">Songs</div>
         </NuxtLink>
       </div>
-    </header>
+    </MusicPageHead>
 
     <!-- Quick browse cards — visually loud entries into the sub-lists. -->
     <section class="ms-nav-row">
@@ -117,15 +113,17 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { musicAlbumDetailQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 // Right-click on desktop, long-press on touch — the card shelves' only
 // play/queue path on coarse pointers (hover-play is hidden there).
 const actions = useMusicActions()
+const loadQuery = useQueryLoader()
 
 interface RecentAlbumRow {
   id: number
@@ -157,8 +155,8 @@ interface MusicCounts { artists: number; albums: number; tracks: number }
 // full list pipeline (join + sort of the whole table) server-side just to
 // read `total`; the tracks one alone cost ~900ms per landing view.
 const countsQuery = useQuery({
-  queryKey: ['music', 'library', 'counts'],
-  queryFn: async () => await $heya('/api/music/counts') as unknown as MusicCounts,
+  key: ['music', 'library', 'counts'],
+  query: async () => await $heya('/api/music/counts') as unknown as MusicCounts,
   staleTime: 1000 * 60 * 5,
 })
 
@@ -169,13 +167,14 @@ const statsLoading = computed(() => countsQuery.isLoading.value)
 
 // Recent shelves come from the existing music-home aggregator (single call).
 const homeQuery = useQuery({
-  queryKey: ['music', 'library', 'home'],
-  queryFn: async () => {
+  key: ['music', 'library', 'home'],
+  query: async () => {
     const r = await $heya('/api/music/home', { query: { limit: 18 } }) as unknown as MusicHomeBody
     return r
   },
   staleTime: 1000 * 60,
 })
+await Promise.all([waitForQuery(countsQuery), waitForQuery(homeQuery)])
 
 const recentAlbums = computed<RecentAlbumRow[]>(() => homeQuery.data.value?.recent_albums ?? [])
 const recentArtists = computed<RecentArtistRow[]>(() => homeQuery.data.value?.recent_artists ?? [])
@@ -184,9 +183,7 @@ const homeLoading = computed(() => homeQuery.isLoading.value)
 // --- Play actions ---
 async function playAlbum(al: RecentAlbumRow, _i: number) {
   try {
-    const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
-      path: { artist_slug: al.artist_slug, album_slug: al.slug },
-    }) as unknown as { tracks: { id: number; title: string; duration: number; files?: unknown[] }[] }
+    const detail = await loadQuery(musicAlbumDetailQuery({ artistSlug: al.artist_slug, albumSlug: al.slug }))
     // Only queue tracks that still have a file on disk.
     const list = (detail.tracks ?? []).filter((t) => (t.files?.length ?? 0) > 0)
     if (!list.length) return
@@ -214,28 +211,21 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 <style scoped>
 .ms-lib { max-width: 1400px; }
 
-.ms-lib-head {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
-  margin-bottom: 32px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--border);
-}
-.ms-lib-title { font-size: 32px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-lib-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
-
 .ms-stat-row { display: flex; gap: 8px; }
 .ms-stat {
   min-width: 100px;
   padding: 12px 20px;
-  background: rgb(var(--ink) / 0.03);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   border-radius: var(--r-md);
   text-decoration: none;
   text-align: center;
   transition: all 0.15s;
 }
 .ms-stat:hover {
-  background: rgb(var(--ink) / 0.06);
   border-color: var(--gold-soft);
   transform: translateY(-2px);
 }
@@ -264,15 +254,17 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 .ms-nav-card {
   display: flex; align-items: center; gap: 14px;
   padding: 18px 20px;
-  background: linear-gradient(135deg, rgb(var(--ink) / 0.03), rgb(var(--ink) / 0.01));
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   border-radius: var(--r-md);
   text-decoration: none; color: inherit;
   transition: all 0.15s;
 }
 .ms-nav-card :deep(svg) { color: var(--gold); flex-shrink: 0; }
 .ms-nav-card:hover {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 8%, transparent), color-mix(in srgb, var(--gold) 2%, transparent));
   border-color: var(--gold-soft);
   transform: translateY(-1px);
 }
@@ -305,11 +297,10 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 .ms-empty a:hover { text-decoration: underline; }
 
 @media (max-width: 720px) {
-  .ms-lib-head { flex-direction: column; align-items: stretch; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; }
   /* music.vue's phone section header already reads "Library" directly
      above this page — the sub line ("Everything in your music
      collection.") stays since it's not duplicated anywhere else. */
-  .ms-lib-title { display: none; }
+  :deep(.mhd-title) { display: none; }
   .ms-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .ms-stat { min-width: 0; padding: 12px 8px; }
 

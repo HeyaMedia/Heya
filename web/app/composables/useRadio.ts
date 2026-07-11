@@ -59,7 +59,7 @@ function rowToTrack(row: RadioTrackRow): Track {
 }
 
 export function useRadio() {
-  const { play, queue } = usePlayer()
+  const { play, queue } = usePlayerBindings()
   const starting = useState('radio_starting', () => false)
 
   async function startRadio(seed: RadioSeed, seedTrack?: Track) {
@@ -162,7 +162,7 @@ function hashStationUUID(uuid: string): number {
 // doesn't re-implement them. The store ref is reactive — favorites change
 // across pages without a refetch.
 export function useRadioActions() {
-  const { play, queue } = usePlayer()
+  const { play, queue } = usePlayerBindings()
   const favoriteUUIDs = useState<Set<string>>('radio_favorite_uuids', () => new Set())
   const favoritesLoaded = useState('radio_favorites_loaded', () => false)
   const loadingStationUUID = useState<string | null>('radio_loading_uuid', () => null)

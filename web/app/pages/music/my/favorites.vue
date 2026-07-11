@@ -1,15 +1,12 @@
 <template>
   <div class="ms-fav page-pad">
-    <header class="ms-fav-head">
-      <div>
-        <h1 class="ms-fav-title">My Favorites</h1>
-        <div class="ms-fav-sub">Tracks you've rated above your threshold. Rate any track from anywhere — they'll show up here.</div>
-      </div>
-      <div class="ms-fav-meta">
-        <div class="ms-fav-count">{{ totalFavorites.toLocaleString() }}</div>
-        <div class="ms-fav-count-lbl">favorites</div>
-      </div>
-    </header>
+    <MusicPageHead title="My Favorites">
+      <template #subtitle>
+        <span>Tracks you've rated above your threshold. Rate any track from anywhere — they'll show up here.</span>
+        <span class="dot">·</span>
+        <span>{{ totalFavorites.toLocaleString() }} favorites</span>
+      </template>
+    </MusicPageHead>
 
     <!-- Threshold control -->
     <div class="ms-fav-controls">
@@ -21,13 +18,13 @@
       <div class="ms-fav-toggle">
         <button
           type="button"
-          class="ms-fav-toggle-btn"
+          class="ms-fav-toggle-btn steer-glass"
           :class="{ active: viewMode === 'favorites' }"
           @click="viewMode = 'favorites'"
         >Favorites only</button>
         <button
           type="button"
-          class="ms-fav-toggle-btn"
+          class="ms-fav-toggle-btn steer-glass"
           :class="{ active: viewMode === 'all' }"
           @click="viewMode = 'all'"
         >All rated</button>
@@ -63,7 +60,7 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -75,7 +72,7 @@ const columns: TrackListColumn[] = [
   { key: 'duration', kind: 'duration' },
 ]
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
@@ -102,8 +99,8 @@ const viewMode = ref<'favorites' | 'all'>('favorites')
 
 // Threshold (1..10) lives server-side per user
 const thresholdQuery = useQuery({
-  queryKey: ['me', 'ratings', 'threshold'],
-  queryFn: async () => (await $heya('/api/me/ratings/threshold')) as unknown as { rating: number },
+  key: ['me', 'ratings', 'threshold'],
+  query: async () => (await $heya('/api/me/ratings/threshold')) as unknown as { rating: number },
   staleTime: 1000 * 60,
 })
 const threshold = computed(() => thresholdQuery.data.value?.rating ?? 7)
@@ -121,8 +118,8 @@ const effectiveMin = computed(() => (viewMode.value === 'favorites' ? threshold.
 // Paginated rated-tracks list — keyed on threshold + mode so the filter
 // re-runs when either changes.
 const ratedQuery = useQuery({
-  queryKey: ['me', 'ratings', 'list', effectiveMin] as const,
-  queryFn: async () => {
+  key: () => ['me', 'ratings', 'list', effectiveMin.value] as const,
+  query: async () => {
     const r = await $heya('/api/me/ratings/tracks', {
       query: { min_rating: effectiveMin.value, limit: 200 },
     }) as unknown as ListBody
@@ -132,6 +129,7 @@ const ratedQuery = useQuery({
   },
   staleTime: 1000 * 30,
 })
+await Promise.all([waitForQuery(thresholdQuery), waitForQuery(ratedQuery)])
 
 const tracks = computed<RatedTrackRow[]>(() => ratedQuery.data.value?.items ?? [])
 const totalFavorites = computed(() => ratedQuery.data.value?.total ?? 0)
@@ -192,23 +190,7 @@ async function playFrom(i: number) {
 <style scoped>
 .ms-fav { max-width: 1300px; }
 
-.ms-fav-head {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
-  margin-bottom: 24px;
-}
-.ms-fav-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-fav-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; max-width: 540px; }
-.ms-fav-meta { text-align: right; }
-.ms-fav-count {
-  font-size: 28px; font-weight: 700;
-  color: var(--gold);
-}
-.ms-fav-count-lbl {
-  font-size: 10px; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.1em;
-  color: var(--fg-3);
-  margin-top: -2px;
-}
+.dot { opacity: 0.4; }
 
 .ms-fav-controls {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
@@ -237,8 +219,6 @@ async function playFrom(i: number) {
 }
 .ms-fav-toggle-btn {
   padding: 6px 14px;
-  background: transparent;
-  border: 0;
   border-radius: 4px;
   color: var(--fg-2);
   font-size: 12px;
@@ -246,7 +226,6 @@ async function playFrom(i: number) {
   cursor: pointer;
   transition: all 0.15s;
 }
-.ms-fav-toggle-btn:hover { color: var(--fg-0); }
 .ms-fav-toggle-btn.active { background: var(--gold-soft); color: var(--gold); }
 
 .ms-fav-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }

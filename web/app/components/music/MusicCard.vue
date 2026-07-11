@@ -116,7 +116,15 @@ watch(() => props.src, () => { imgError.value = false })
   background: var(--bg-3);
   overflow: hidden;
   border-radius: var(--r-md);
-  box-shadow: 0 8px 18px rgb(var(--shade) / 0.45);
+  /* Same elevation + hover lift as the app-wide .card-tile/.poster combo —
+     box-shadow follows border-radius, so the circle variant gets a round
+     shadow from this same rule. */
+  box-shadow: var(--shadow-card);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.mc:hover .mc-art {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover), 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .mc-circle .mc-art { border-radius: 50%; }
 .mc-art > img {
@@ -230,7 +238,6 @@ watch(() => props.src, () => { imgError.value = false })
 
 /* Circular variant — keep label outside the clipped art so it remains
    readable. Circles look weird with text overlay painted on them. */
-.mc-circle .mc-art { box-shadow: 0 8px 18px rgb(var(--shade) / 0.45); }
 .mc-circle .mc-gradient,
 .mc-circle .mc-info { display: none; }
 

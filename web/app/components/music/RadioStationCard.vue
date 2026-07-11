@@ -87,8 +87,12 @@ const topTags = computed(() => {
   align-items: center;
   justify-content: center;
   color: var(--fg-3);
-  box-shadow: 0 8px 18px rgb(var(--shade) / 0.35);
+  /* card-tile's hover lift applies to the root; its shadow swap targets
+     .poster children only, so mirror it here for the art tile. */
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.18s ease;
 }
+.rs-card:hover .rs-art { box-shadow: var(--shadow-card-hover), 0 0 0 1px rgb(var(--ink) / 0.06); }
 .rs-art img {
   width: 100%;
   height: 100%;

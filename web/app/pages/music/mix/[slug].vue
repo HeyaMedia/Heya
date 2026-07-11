@@ -80,28 +80,10 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
-
-interface MixTrack {
-  track_id: number
-  track_title: string
-  duration: number
-  album_id: number
-  album_title: string
-  album_slug: string
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-}
-interface Mix {
-  seed_artist_id: number
-  seed_artist_name: string
-  seed_artist_slug: string
-  name: string
-  tracks: MixTrack[]
-}
 
 const { isPhone } = useViewport()
 
@@ -109,17 +91,14 @@ const route = useRoute()
 const slug = computed(() => String(route.params.slug ?? ''))
 
 const { $heya } = useNuxtApp()
-const { play, currentTrack, queue } = usePlayer()
+const { play, currentTrack, queue } = usePlayerBindings()
 const actions = useMusicActions()
 
 // Shares the cache key with MusicHome's mixes-for-you query — opening
 // a mix detail page from the home shelf reads from the same cache slot,
 // no refetch needed. The 1h staleTime matches the home shelf.
-const mixesQuery = useQuery({
-  queryKey: ['music', 'home', 'mixes-for-you'],
-  queryFn: async () => ((await $heya('/api/music/home/mixes-for-you')) as { items: Mix[] }).items ?? [],
-  staleTime: 1000 * 60 * 60,
-})
+const mixesQuery = useQuery(musicMixesQuery())
+await waitForQuery(mixesQuery)
 const mix = computed<Mix | null>(() => (mixesQuery.data.value ?? []).find(m => m.seed_artist_slug === slug.value) ?? null)
 const loading = computed(() => mixesQuery.isPending.value)
 
@@ -224,7 +203,8 @@ function formatTime(seconds: number): string {
   padding: 32px 32px 24px;
   margin-bottom: 16px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 4%, transparent), transparent);
-  border-bottom: 1px solid var(--border);
+  /* No border-bottom: a divider re-splits the page into stacked panels;
+     spacing + the glass track table below define the edge on their own. */
 }
 .mix-hero-art {
   flex-shrink: 0;
@@ -236,7 +216,8 @@ function formatTime(seconds: number): string {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  box-shadow: 0 12px 32px rgb(var(--shade) / 0.55);
+  /* Hero-poster shadow formula (matches the detail pages). */
+  box-shadow: 0 24px 60px rgb(var(--shade) / 0.5), 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .mix-hero-cell { width: 100%; height: 100%; object-fit: cover; }
 .mix-hero-cell.s0 { grid-area: 1 / 1; }
@@ -253,16 +234,24 @@ function formatTime(seconds: number): string {
   color: var(--gold);
   margin-bottom: 6px;
 }
-.m-title { font-size: 38px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 6px; }
-.m-sub { color: var(--fg-3); font-size: 13px; max-width: 560px; margin-bottom: 14px; }
+/* Halos — the mix hero sits over the shell's ambient pool. */
+.m-title {
+  font-size: 38px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 6px;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
+.m-sub {
+  color: var(--fg-1); font-size: 13px; max-width: 560px; margin-bottom: 14px;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
 
 .mix-hero-stats {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--fg-2);
+  color: var(--fg-1);
   font-size: 13px;
   margin-bottom: 18px;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .mix-seed-link {
   color: var(--fg-1);
@@ -279,9 +268,12 @@ function formatTime(seconds: number): string {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: var(--bg-2);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-el);
   color: var(--fg-1);
   font-size: 13px;
   cursor: pointer;
@@ -316,10 +308,13 @@ function formatTime(seconds: number): string {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--fg-3);
+  /* Renders outside TrackList's glass panel, straight over the ambient
+     art — fg-2 + halo instead of fg-3 so it survives bright washes. */
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
   font-weight: 600;
   cursor: default;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
   margin-bottom: 4px;
 }
 /* Cancels heya.css's global `.list-row:hover` background — this scoped

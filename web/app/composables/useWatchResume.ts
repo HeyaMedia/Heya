@@ -1,5 +1,5 @@
 // useWatchResume — reactive "is this item in progress?" lookup. Reads from
-// the shared `me-watch-continue` vue-query cache so every consumer
+// the shared `me-watch-continue` Pinia Colada cache so every consumer
 // (hero, movie detail page, TV detail page) hits the same data and only
 // one network round-trip happens per session.
 //
@@ -10,7 +10,7 @@
 // button just defaults to "Play" (the dialog inside the player will
 // catch the saved progress via its own API call regardless).
 
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
 
 interface ContinueWatchingRow {
   entity_type: string
@@ -25,12 +25,12 @@ const CW_QUERY_KEY = ['me', 'watch', 'continue'] as const
 
 // useWatchResumeList returns the shared CW query — pages/index.vue uses
 // the same key. Reading it from a second place doesn't trigger a refetch
-// thanks to vue-query's dedup.
+// thanks to Pinia Colada's dedup.
 export function useWatchResumeList() {
   const { $heya } = useNuxtApp()
   return useQuery({
-    queryKey: CW_QUERY_KEY,
-    queryFn: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingRow[],
+    key: CW_QUERY_KEY,
+    query: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingRow[],
     staleTime: 1000 * 30,
   })
 }
@@ -42,8 +42,8 @@ export function useWatchResumeList() {
 // (or a hard reload). Returns the composable so callers can grab it at
 // setup time and invoke on demand.
 export function useInvalidateContinueWatching() {
-  const queryClient = useQueryClient()
-  return () => queryClient.invalidateQueries({ queryKey: CW_QUERY_KEY })
+  const queryClient = useQueryCache()
+  return () => queryClient.invalidateQueries({ key: CW_QUERY_KEY })
 }
 
 // useWatchResume returns a reactive object describing whether the given

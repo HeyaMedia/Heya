@@ -13,7 +13,7 @@
 //      the saved scrollTop for the *incoming* route; on a fresh push we
 //      reset to 0 (top of the new page, matches standard SPA expectations).
 //
-// The nextTick + double-rAF is intentional. vue-query hands us cached data
+// The nextTick + double-rAF is intentional. Pinia Colada hands us cached data
 // synchronously on remount, so the new page typically renders in one frame
 // — but image loads and async children can grow the content height across
 // a few more frames. Double-rAF lets the layout settle before we set

@@ -299,11 +299,11 @@
 import type { MediaDetail, MediaExtra } from '~~/shared/types'
 import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
 
-const props = defineProps<{ mediaId: number }>()
+const props = defineProps<{ mediaId: number; initialDetail?: MediaDetail }>()
 const lightbox = useLightbox()
 
-const detail = ref<MediaDetail | null>(null)
-const loading = ref(true)
+const detail = ref<MediaDetail | null>(props.initialDetail ?? null)
+const loading = ref(!props.initialDetail)
 const contentTab = ref('')
 const contentExpanded = ref(false)
 
@@ -515,12 +515,14 @@ function recPosterUrl(r: any): string {
 
 onMounted(async () => {
   const { $heya } = useNuxtApp()
-  try {
-    detail.value = await $heya('/api/media/{id}', {
-      path: { id: props.mediaId as any },
-    }) as MediaDetail
-  } catch { /* empty */ }
-  loading.value = false
+  if (!detail.value) {
+    try {
+      detail.value = await $heya('/api/media/{id}', {
+        path: { id: props.mediaId as any },
+      }) as MediaDetail
+    } catch { /* empty */ }
+    loading.value = false
+  }
 
   const first = contentTabs.value[0]
   if (first) contentTab.value = first.id

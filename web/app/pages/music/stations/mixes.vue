@@ -1,15 +1,11 @@
 <template>
   <div class="ms-mixes page-pad">
-    <header class="ms-mixes-head">
-      <div>
-        <h1 class="ms-mixes-title">Mixes for You</h1>
-        <div class="ms-mixes-sub">Auto-generated from your recent listening. Each mix is seeded on an artist and grown via sonic neighbors.</div>
-      </div>
-      <NuxtLink to="/music/stations/builder" class="ms-mixes-builder-cta">
+    <MusicPageHead title="Mixes for You" subtitle="Auto-generated from your recent listening. Each mix is seeded on an artist and grown via sonic neighbors.">
+      <NuxtLink to="/music/stations/builder" class="ms-mixes-builder-cta steer-glass">
         <Icon name="sparkle" :size="14" />
         <span>Build your own</span>
       </NuxtLink>
-    </header>
+    </MusicPageHead>
 
     <div v-if="isLoading && !mixes.length" class="ms-mixes-loading">Building your mixes…</div>
 
@@ -58,11 +54,11 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const actions = useMusicActions()
 
@@ -103,13 +99,14 @@ interface Mix {
 }
 
 const mixesQuery = useQuery({
-  queryKey: ['music', 'stations', 'mixes', 'all'],
-  queryFn: async () => {
+  key: ['music', 'stations', 'mixes', 'all'],
+  query: async () => {
     const r = await $heya('/api/music/home/mixes-for-you', { query: { max: 20 } }) as unknown as { items: Mix[] }
     return r.items ?? []
   },
   staleTime: 1000 * 60 * 15,
 })
+await waitForQuery(mixesQuery)
 const mixes = computed<Mix[]>(() => mixesQuery.data.value ?? [])
 const isLoading = computed(() => mixesQuery.isLoading.value)
 
@@ -137,19 +134,9 @@ async function playMix(mix: Mix) {
 <style scoped>
 .ms-mixes { max-width: 1400px; }
 
-.ms-mixes-head {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
-  margin-bottom: 24px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--border);
-}
-.ms-mixes-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-mixes-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; max-width: 540px; }
 .ms-mixes-builder-cta {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 14px;
-  background: rgb(var(--ink) / 0.04);
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--fg-1);
   text-decoration: none;
@@ -157,7 +144,7 @@ async function playMix(mix: Mix) {
   font-weight: 600;
   transition: all 0.15s;
 }
-.ms-mixes-builder-cta:hover { background: var(--gold-soft); color: var(--gold); border-color: var(--gold-soft); }
+.ms-mixes-builder-cta:hover { border-color: var(--gold-soft); }
 
 .ms-mixes-grid {
   display: grid;
@@ -250,13 +237,12 @@ async function playMix(mix: Mix) {
 .ms-mixes-empty p { font-size: 13px; max-width: 400px; margin: 0 auto; line-height: 1.5; }
 
 @media (max-width: 720px) {
-  .ms-mixes-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; }
   /* music.vue's phone header for this route reads "Mixes" — "Mixes for
      You" is the same page identity plus flavor text, no new information
      (unlike the per-mix detail page, which names the seed artist), so it's
      redundant weight here. The description line + "Build your own" CTA
      both carry real info and stay. */
-  .ms-mixes-title { display: none; }
+  :deep(.mhd-title) { display: none; }
   .ms-mixes-builder-cta { align-self: flex-start; }
 
   .ms-mixes-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 14px; }

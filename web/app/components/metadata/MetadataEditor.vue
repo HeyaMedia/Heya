@@ -188,7 +188,7 @@
 
 <script setup lang="ts">
 import { TabsRoot, TabsList, TabsTrigger } from 'reka-ui'
-import { useQueryClient } from '@tanstack/vue-query'
+import { useQueryCache } from '@pinia/colada'
 import type { MediaDetail, UpdateMediaMetadataRequest } from '~~/shared/types'
 
 const props = defineProps<{
@@ -199,7 +199,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>()
 
-const queryClient = useQueryClient()
+const queryClient = useQueryCache()
 
 const detail = ref<any>(null)
 const library = ref<any>(null)
@@ -559,7 +559,7 @@ function onIdentified() {
   // whether it's cached under the slug or the numeric id — so that page
   // reflects the new identity immediately instead of waiting out its
   // staleTime or needing a manual reload.
-  queryClient.invalidateQueries({ queryKey: ['media', 'detail'] })
+  queryClient.invalidateQueries({ key: ['media', 'detail'] })
 }
 
 watch(() => props.mediaId, () => {

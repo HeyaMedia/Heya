@@ -1,5 +1,5 @@
 <template>
-  <footer class="playbar">
+  <footer class="playbar" :style="pbToneStyle">
     <!-- Left: now playing (idle placeholder when nothing is loaded). When the
          cover is folded out into the sidebar, the small art hides and the text
          shifts right to sit beside the big cover. -->
@@ -136,6 +136,7 @@
         <MusicWaveform
           :peaks="waveform"
           :progress="scrubPct / 100"
+          :accent="waveAccent"
           @seek="onWaveformSeek"
         />
         <span class="pb-time">{{ formatTime(duration) }}</span>
@@ -298,10 +299,30 @@ const {
   togglePlay, seek, setVolume, toggleMute, toggleShuffle,
   cycleRepeat, nextTrack, prevTrack, stop, pause,
   toggleQueue, toggleLyrics, formatTime,
-} = usePlayer()
+} = usePlayerBindings()
 
 // Visualizer overlay toggle (fullscreen host is mounted at the shell level).
 const vis = useVisualizer()
+
+// Tone-follow accent: the playbar adopts the playing album's palette — the
+// cover is sampled (same sampleImageTone as the detail-page hero buttons)
+// and published as --pb-accent/--pb-accent-ink on the bar. Consumers: the
+// play button (0.9s glide between palettes) and the waveform's played bars.
+// Falls back to the theme accent when idle or sampling fails. Sequence-
+// guarded so a slow sample can't land after the track already changed.
+const pbToneStyle = ref<Record<string, string> | undefined>()
+let toneSeq = 0
+watch(() => currentTrack.value?.poster, (src) => {
+  const seq = ++toneSeq
+  if (!src) { pbToneStyle.value = undefined; return }
+  sampleImageTone(src).then((t) => {
+    if (seq !== toneSeq) return
+    pbToneStyle.value = t ? { '--pb-accent': t.main, '--pb-accent-ink': t.ink } : undefined
+  })
+}, { immediate: true })
+// Canvas can't read a CSS var transition — hand the resolved color straight
+// to the waveform so its next paint uses it.
+const waveAccent = computed(() => pbToneStyle.value?.['--pb-accent'] ?? null)
 
 // --- Left-zone navigation + artwork actions --------------------------------
 // The now-playing art/title/artist/album navigate rather than opening the
@@ -536,12 +557,22 @@ onScopeDispose(() => {
   gap: 16px;
   padding: 0 16px;
   height: var(--playbar-h);
-  /* Glass over the ambient-backdrop layer (same treatment as the topbar). */
-  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  /* Design-system glass over the ambient-backdrop layer. No border-top —
+     the upward shadow defines the edge (mirror of FilterBar's downward
+     one), keeping the bar and the content plane one continuous surface. */
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid var(--border);
+  box-shadow: 0 -10px 28px rgb(var(--shade) / 0.14);
   z-index: 40;
+}
+/* Firefox: backdrop-filter renders seam lines on gradient-adjacent panels
+   (same workaround as the sidebars) — solid-enough glass, no blur. */
+@supports (-moz-appearance: none) {
+  .playbar {
+    backdrop-filter: none;
+    background: color-mix(in srgb, var(--bg-2) 84%, transparent);
+  }
 }
 .pb-left { display: flex; align-items: center; gap: 12px; transition: padding-left 0.28s ease; }
 /* When the cover folds out into the sidebar, the big art occupies the corner
@@ -549,7 +580,7 @@ onScopeDispose(() => {
    text past it (+ ~12px gap) so it doesn't sit under the enlarged cover. */
 .pb-left-expanded { padding-left: calc(var(--music-sidebar-w) + 4px); }
 
-.pb-cover-wrap { position: relative; width: 56px; height: 56px; flex-shrink: 0; border-radius: 6px; }
+.pb-cover-wrap { position: relative; width: 56px; height: 56px; flex-shrink: 0; border-radius: 6px; box-shadow: var(--shadow-el); }
 .pb-cover-btn { display: block; width: 100%; height: 100%; background: transparent; border: 0; padding: 0; cursor: pointer; }
 .pb-cover-img { width: 56px; height: 56px; border-radius: 6px; }
 /* Hover affordances over the art: full-image + fold-out. */
@@ -597,19 +628,25 @@ onScopeDispose(() => {
 .pb-play {
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: var(--fg-0);
-  color: var(--bg-0);
+  /* Tone-follow: --pb-accent carries the sampled palette of the playing
+     album (script above); idle falls back to the neutral fg field. */
+  background: var(--pb-accent, var(--fg-0));
+  color: var(--pb-accent-ink, var(--bg-0));
   display: flex; align-items: center; justify-content: center;
-  /* background + color use the slower 0.3s so the armed red field eases back
-     to the resting button after stop() fires, matching the icon/ring fades.
-     opacity too, so it dims gently to the idle/disabled state after a stop. */
-  transition: transform 0.15s ease, background 0.3s ease, color 0.3s ease, opacity 0.3s ease;
+  /* background/color glide 0.9s between album palettes (same curve as the
+     detail-page tone buttons); it also eases the armed field back after a
+     hold-to-stop. opacity dims gently to the idle/disabled state. */
+  transition: transform 0.15s ease, filter 0.15s ease,
+    background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.3s ease;
   position: relative;
 }
-.pb-play:hover { transform: scale(1.06); background: var(--gold); }
+/* Brightness pop instead of a fixed hover color — works on any sampled tone. */
+.pb-play:hover { transform: scale(1.06); filter: brightness(1.15); }
 /* Idle (no track): the transport is inert. Dim it and drop the hover pop. */
 .pb-play:disabled { opacity: 0.4; cursor: default; }
-.pb-play:disabled:hover { transform: none; background: var(--fg-0); }
+.pb-play:disabled:hover { transform: none; filter: none; }
 .pb-controls .btn-icon:disabled { opacity: 0.3; cursor: default; }
 /* Left-side idle placeholder standing in for the cover + track text. */
 .pb-cover-placeholder {
@@ -629,8 +666,8 @@ onScopeDispose(() => {
    red icon + red ring read as an alert. */
 .pb-play.pb-play-armed {
   transform: scale(1);
-  background: #2a1416;
-  color: #ff5b5b;
+  background: color-mix(in srgb, var(--bad) 20%, var(--bg-1));
+  color: var(--bad);
 }
 /* The ring overlays the button edge and closes clockwise from 12 o'clock over
    the remaining 2s (rotate(-90deg) puts the stroke's start point at the top;
@@ -647,12 +684,12 @@ onScopeDispose(() => {
 }
 .pb-play-ring-track {
   fill: none;
-  stroke: rgba(255, 91, 91, 0.18);
+  stroke: color-mix(in srgb, var(--bad) 20%, transparent);
   stroke-width: 3;
 }
 .pb-play-ring-fill {
   fill: none;
-  stroke: #ff5b5b;
+  stroke: var(--bad);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-dasharray: 100.53;
@@ -748,7 +785,7 @@ onScopeDispose(() => {
 .pb-more-check { color: var(--gold-bright, var(--gold)); flex-shrink: 0; }
 .pb-more-destructive { color: var(--bad); }
 .pb-more-destructive[data-highlighted],
-.pb-more-destructive:hover { background: rgba(255, 80, 80, 0.06); color: var(--bad); }
+.pb-more-destructive:hover { background: color-mix(in srgb, var(--bad) 8%, transparent); color: var(--bad); }
 
 .pb-more-volume-row {
   display: flex;

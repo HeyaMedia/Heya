@@ -71,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -81,23 +81,24 @@ interface TempoBucket { key: string; label: string; min_bpm: number; max_bpm: nu
 
 const { $heya } = useNuxtApp()
 
-// Three independent queries fire in parallel (vue-query handles concurrency
+// Three independent queries fire in parallel (Pinia Colada handles concurrency
 // natively). Each is cached separately so revisiting this page is instant.
 const moodsQuery = useQuery({
-  queryKey: ['music', 'browse', 'moods'],
-  queryFn: async () => ((await $heya('/api/music/browse/moods')) as { items: MoodBucket[] }).items ?? [],
+  key: ['music', 'browse', 'moods'],
+  query: async () => ((await $heya('/api/music/browse/moods')) as { items: MoodBucket[] }).items ?? [],
   staleTime: 1000 * 60 * 5,
 })
 const genresQuery = useQuery({
-  queryKey: ['music', 'browse', 'genres'],
-  queryFn: async () => ((await $heya('/api/music/browse/genres')) as { items: GenreBucket[] }).items ?? [],
+  key: ['music', 'browse', 'genres'],
+  query: async () => ((await $heya('/api/music/browse/genres')) as { items: GenreBucket[] }).items ?? [],
   staleTime: 1000 * 60 * 5,
 })
 const tempoQuery = useQuery({
-  queryKey: ['music', 'browse', 'tempo'],
-  queryFn: async () => ((await $heya('/api/music/browse/tempo')) as { items: TempoBucket[] }).items ?? [],
+  key: ['music', 'browse', 'tempo'],
+  query: async () => ((await $heya('/api/music/browse/tempo')) as { items: TempoBucket[] }).items ?? [],
   staleTime: 1000 * 60 * 5,
 })
+await Promise.all([waitForQuery(moodsQuery), waitForQuery(genresQuery), waitForQuery(tempoQuery)])
 
 const moods = computed<MoodBucket[]>(() => (moodsQuery.data.value ?? []).filter(x => x.track_count > 0))
 const genres = computed<GenreBucket[]>(() => genresQuery.data.value ?? [])
@@ -141,7 +142,7 @@ function genreGradient(i: number) { return GENRE_GRADIENTS[i % GENRE_GRADIENTS.l
 
 <style scoped>
 .browse-page { padding-bottom: 80px; }
-.bp-title { font-size: 30px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; }
+.bp-title { font-size: 30px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
 .bp-sub { color: var(--fg-3); font-size: 13px; max-width: 600px; margin-bottom: 32px; }
 
 .bp-section { margin-bottom: 40px; }

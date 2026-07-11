@@ -1,15 +1,10 @@
 <template>
   <div class="ms-mb page-pad">
-    <header class="ms-mb-head">
-      <div>
-        <h1 class="ms-mb-title">Mix Builder</h1>
-        <div class="ms-mb-sub">Give the AI a scene to soundtrack, or blend artists, albums, tracks, and vibes by hand.</div>
-      </div>
-    </header>
+    <MusicPageHead title="Mix Builder" subtitle="Give the AI a scene to soundtrack, or blend artists, albums, tracks, and vibes by hand." />
 
     <!-- AI Director — narrative intent becomes several acoustic CLAP probes;
          the LLM only sequences real tracks returned from the library. -->
-    <section class="ms-mb-ai" :class="{ unavailable: aiReadyQuery.isSuccess.value && !aiReady }">
+    <section class="ms-mb-ai" :class="{ unavailable: aiReadyQuery.status.value === 'success' && !aiReady }">
       <div class="ms-mb-ai-head">
         <div>
           <div class="ms-mb-ai-kicker"><Icon name="sparkle" :size="12" /> AI Director</div>
@@ -56,7 +51,7 @@
         v-for="t in tabs"
         :key="t.kind"
         type="button"
-        class="ms-mb-tab"
+        class="ms-mb-tab steer-glass"
         :class="{ active: addKind === t.kind }"
         @click="setKind(t.kind)"
       >
@@ -224,20 +219,21 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 import { refDebounced } from '@vueuse/core'
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const playlistsApi = usePlaylists()
 
 const aiReadyQuery = useQuery({
-  queryKey: ['ai-ready'],
-  queryFn: async () => (await $heya('/api/ai/ready')) as { ready: boolean; mode: string },
+  key: ['ai-ready'],
+  query: async () => (await $heya('/api/ai/ready')) as { ready: boolean; mode: string },
   staleTime: 1000 * 60 * 10,
 })
+await waitForQuery(aiReadyQuery)
 const aiReady = computed(() => aiReadyQuery.data.value?.ready === true)
 const aiPrompt = ref('')
 
@@ -278,8 +274,8 @@ const trackCount = ref(30)
 interface AcRow { id: number; title: string; sub: string; cover: string | null }
 
 const autocompleteQuery = useQuery({
-  queryKey: ['mix-builder', 'autocomplete', addKind, searchQDebounced],
-  queryFn: async () => {
+  key: ['mix-builder', 'autocomplete', addKind, searchQDebounced],
+  query: async () => {
     if (searchQDebounced.value.length < 2) return [] as AcRow[]
     const r = await $heya('/api/search/quick', { query: { q: searchQDebounced.value } }) as unknown as {
       buckets: {
@@ -542,10 +538,6 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 <style scoped>
 .ms-mb { max-width: 900px; }
 
-.ms-mb-head { margin-bottom: 24px; }
-.ms-mb-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-mb-sub { color: var(--fg-3); font-size: 14px; margin-top: 4px; max-width: 640px; }
-
 /* AI Director */
 .ms-mb-ai {
   position: relative;
@@ -654,8 +646,6 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-tab {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 16px;
-  background: transparent;
-  border: 0;
   border-radius: var(--r-sm);
   color: var(--fg-2);
   font-size: 13px;
@@ -663,7 +653,6 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   cursor: pointer;
   transition: all 0.15s;
 }
-.ms-mb-tab:hover { color: var(--fg-0); }
 .ms-mb-tab.active {
   background: var(--gold-soft);
   color: var(--gold);
@@ -690,8 +679,11 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-input {
   flex: 1;
   padding: 12px 14px 12px 40px;
-  background: rgb(var(--ink) / 0.04);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   border-radius: 8px;
   color: var(--fg-0);
   font-size: 14px;
@@ -989,8 +981,8 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 @media (max-width: 720px) {
   /* music.vue's phone header already reads "Mix Builder" — the
      description line right below stays, it's not duplicated elsewhere. */
-  .ms-mb-title { display: none; }
-  .ms-mb-head { margin-bottom: 18px; }
+  :deep(.mhd-title) { display: none; }
+  :deep(.mhd) { margin-bottom: 18px; }
 
   .ms-mb-ai { padding: 15px; }
   .ms-mb-ai-head { flex-direction: column; gap: 4px; }

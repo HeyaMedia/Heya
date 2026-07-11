@@ -1,4 +1,5 @@
 <template>
+  <Transition name="qp-slide">
   <aside class="queue-panel scroll" v-if="queueOpen">
     <!-- Header with tabs (hibiki-style) -->
     <div class="qp-tabs">
@@ -182,6 +183,7 @@
       </div>
     </div>
   </aside>
+  </Transition>
 </template>
 
 <script setup lang="ts">
@@ -189,7 +191,7 @@ const {
   playing, currentTrack, queue, queueOpen, position, formatTime,
   shuffled, repeatMode, currentIndex, playedTracks, upcomingTracks,
   jumpTo, removeFromQueue, moveInQueue, clearUpcoming, seek, sideTab,
-} = usePlayer()
+} = usePlayerBindings()
 
 // The active tab lives in shared player state so the playbar's Queue / Lyrics
 // buttons can open the panel straight onto the tab they name.
@@ -317,11 +319,59 @@ function onDrop(_event: DragEvent, toIndex: number) {
 .queue-panel {
   width: var(--music-queue-w);
   flex-shrink: 0;
-  background: var(--bg-2);
-  border-left: 1px solid var(--border);
+  /* Mirror of MusicSidebar's chrome-fade glass: the TOP holds the navbar's
+     opaque --chrome for a beat, then fades into panel glass — topbar and
+     queue read as one continuous surface. No border-left (same rule as the
+     left sidebar: any divider re-splits the frame; glass-vs-content
+     contrast defines the edge). The two gradients MUST stay identical or
+     the frame's two flanks stop matching. */
+  background: linear-gradient(to bottom,
+    var(--chrome) 0,
+    var(--chrome) 14px,
+    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+/* Firefox: seam-line workaround — no blur, more solid glass, S-curve stops
+   (keep identical to MusicSidebar's Firefox block). */
+@supports (-moz-appearance: none) {
+  .queue-panel {
+    backdrop-filter: none;
+    background: linear-gradient(to bottom,
+      var(--chrome) 0,
+      var(--chrome) 14px,
+      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
+      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
+      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
+      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
+  }
+}
+
+/* Open/close: the dock slides its width in/out (content pinned at full
+   width so text never squishes mid-flight); the compact-band overlay
+   slides in from the right edge instead (it's position:fixed there, so
+   width-animating it would just stretch, not slide). */
+.qp-slide-enter-active,
+.qp-slide-leave-active {
+  transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+  overflow: hidden;
+}
+.qp-slide-enter-from,
+.qp-slide-leave-to { width: 0; opacity: 0; }
+.qp-slide-enter-active > *,
+.qp-slide-leave-active > * { width: var(--music-queue-w); flex-shrink: 0; }
+@media (min-width: 720.02px) and (max-width: 1200px) {
+  .qp-slide-enter-active,
+  .qp-slide-leave-active { transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease; }
+  .qp-slide-enter-from,
+  .qp-slide-leave-to { width: min(var(--music-queue-w), 90vw); transform: translateX(100%); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qp-slide-enter-active,
+  .qp-slide-leave-active { transition: none; }
 }
 
 /* Compact band (720.02-1200px): the docked panel becomes a floating overlay
@@ -417,7 +467,7 @@ function onDrop(_event: DragEvent, toIndex: number) {
 }
 .qp-row:hover { background: rgb(var(--ink) / 0.04); }
 .qp-row.current {
-  background: var(--gold-soft, rgba(255, 196, 50, 0.08));
+  background: var(--gold-soft);
   border-left-color: var(--gold);
 }
 .qp-row.played { opacity: 0.5; }
@@ -482,8 +532,8 @@ function onDrop(_event: DragEvent, toIndex: number) {
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.15);
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 15%, transparent);
   padding: 2px 6px;
   border-radius: 999px;
   font-family: var(--font-mono);
@@ -492,7 +542,7 @@ function onDrop(_event: DragEvent, toIndex: number) {
 .qp-live-dot {
   width: 5px;
   height: 5px;
-  background: #f87171;
+  background: var(--bad);
   border-radius: 50%;
   animation: qp-live-pulse 1.8s ease-in-out infinite;
 }

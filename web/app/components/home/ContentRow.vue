@@ -19,6 +19,13 @@
           :class="{ unavailable: item.available === false }"
           :style="{ width: `${tileWidth || 168}px`, flexShrink: 0 }"
           @click="item.available !== false && $emit('tile', item)"
+          @keydown.enter.prevent="item.available !== false && $emit('tile', item)"
+          @pointerenter="scheduleIntent(item)"
+          @pointerleave="cancelIntent"
+          @focus="signalIntent(item)"
+          @pointerdown="signalIntent(item)"
+          :tabindex="item.available === false ? -1 : 0"
+          role="link"
         >
           <MediaCard
             :idx="i"
@@ -53,12 +60,32 @@ const props = defineProps<{
   contextItems?: (item: RowItem) => ContextMenuItem[]
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   tile: [item: MediaItem]
   more: []
+  intent: [item: MediaItem]
 }>()
 
 const scrollEl = ref<HTMLElement>()
+let intentTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelIntent() {
+  if (!intentTimer) return
+  clearTimeout(intentTimer)
+  intentTimer = null
+}
+
+function signalIntent(item: MediaItem) {
+  cancelIntent()
+  if (item.available !== false) emit('intent', item)
+}
+
+function scheduleIntent(item: MediaItem) {
+  cancelIntent()
+  intentTimer = setTimeout(() => signalIntent(item), 100)
+}
+
+onScopeDispose(cancelIntent)
 
 function contextMenuItems(item: RowItem): ContextMenuItem[] {
   return props.contextItems?.(item) ?? []

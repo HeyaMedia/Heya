@@ -1,61 +1,48 @@
-export interface LibraryPlaybackOverride {
-  default_audio_language?: string
-  default_subtitle_language?: string
-  subtitle_mode?: string
-  subtitle_priority?: string[]
-}
+import { useQuery, useQueryCache } from '@pinia/colada'
+import {
+  meSettingsQuery,
+  type LibraryPlaybackOverride,
+  type PlaybackSettings,
+  type UserSettingsBlob,
+} from '~/queries/user'
 
-export interface PlaybackSettings {
-  default_audio_language: string
-  default_subtitle_language: string
-  subtitle_mode: 'auto' | 'always' | 'forced_only' | 'off'
-  subtitle_priority: string[]
-  default_quality: string
-  library_overrides: Record<string, LibraryPlaybackOverride>
-}
+export type { LibraryPlaybackOverride, PlaybackSettings } from '~/queries/user'
 
 export interface UserSettingsData {
   playback: PlaybackSettings
 }
 
-const DEFAULT_SETTINGS: UserSettingsData = {
-  playback: {
-    default_audio_language: '',
-    default_subtitle_language: '',
-    subtitle_mode: 'auto',
-    subtitle_priority: ['ass', 'srt', 'subrip', 'webvtt', 'pgs'],
-    default_quality: 'auto',
-    library_overrides: {},
-  },
+const DEFAULT_PLAYBACK: PlaybackSettings = {
+  default_audio_language: '',
+  default_subtitle_language: '',
+  subtitle_mode: 'auto',
+  subtitle_priority: ['ass', 'srt', 'subrip', 'webvtt', 'pgs'],
+  default_quality: 'auto',
+  library_overrides: {},
 }
 
-const _settings = ref<UserSettingsData | null>(null)
-const _loaded = ref(false)
-
 export function useUserSettings() {
-  const settings = computed<UserSettingsData>(() => _settings.value ?? DEFAULT_SETTINGS)
+  const queryCache = useQueryCache()
+  const settingsQuery = useQuery(meSettingsQuery())
+  const settings = computed<UserSettingsData>(() => ({
+    playback: settingsQuery.data.value?.playback ?? DEFAULT_PLAYBACK,
+  }))
 
   async function load() {
-    if (_loaded.value) return
-    try {
-      const { $heya } = useNuxtApp()
-      _settings.value = await $heya('/api/me/settings') as UserSettingsData
-      _loaded.value = true
-    } catch {
-      _settings.value = { ...DEFAULT_SETTINGS }
-      _loaded.value = true
-    }
+    if (settingsQuery.data.value !== undefined) return
+    try { await settingsQuery.refetch() } catch { /* defaults remain usable */ }
   }
 
   async function save(updated: UserSettingsData) {
-    _settings.value = updated
+    const previous = settingsQuery.data.value ?? {}
+    const next: UserSettingsBlob = { ...previous, playback: updated.playback }
+    queryCache.setQueryData(['me', 'settings'], next)
     try {
       const { $heya } = useNuxtApp()
-      await $heya('/api/me/settings', {
-        method: 'PUT',
-        body: updated as any,
-      })
-    } catch {}
+      await $heya('/api/me/settings', { method: 'PUT', body: next as never })
+    } catch {
+      queryCache.setQueryData(['me', 'settings'], previous)
+    }
   }
 
   function playbackForLibrary(libraryId?: number | string): PlaybackSettings {

@@ -1,6 +1,6 @@
 import type { AudioOutputDevice } from '~~/shared/types/audio'
 import { audioSinkSupported, setAudioSinkId } from '~/engine/context'
-import type { AudioProfile } from '~/composables/useAudioSettings'
+import type { AudioProfile } from '~/stores/audio-settings'
 
 // Per-output-device EQ profiles.
 //
@@ -86,7 +86,7 @@ async function enumerate(): Promise<AudioOutputDevice[]> {
 }
 
 export function useAudioDevices() {
-  const settings = useAudioSettings()
+  const settings = useAudioSettingsStore()
 
   // Apply the saved profile for a device key, if one exists. No profile → leave
   // the current EQ/crossfeed as-is (opt-in behavior).

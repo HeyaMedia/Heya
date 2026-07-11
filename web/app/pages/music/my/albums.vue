@@ -1,6 +1,6 @@
 <template>
   <div class="page-pad">
-    <h2 class="m-h2">My Albums</h2>
+    <MusicPageHead title="My Albums" />
     <div v-if="pending" class="m-loading">Loading…</div>
     <div v-else-if="!rows.length" class="m-empty">
       No favorited albums yet — tap the heart on an album page to add it here.
@@ -29,7 +29,7 @@
 
 <script setup lang="ts">
 import type { MusicAlbumRow, MusicListPage } from '~~/shared/types'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -38,16 +38,16 @@ interface LovedAlbumRow extends MusicAlbumRow { loved_at: string }
 const { $heya } = useNuxtApp()
 const actions = useMusicActions()
 const myAlbumsQuery = useQuery({
-  queryKey: ['me', 'loved', 'albums', { limit: 500 }],
-  queryFn: async () => (await $heya('/api/me/ratings/albums', { query: { min_rating: 1, limit: 500 } })) as unknown as MusicListPage<LovedAlbumRow>,
+  key: ['me', 'loved', 'albums', { limit: 500 }],
+  query: async () => (await $heya('/api/me/ratings/albums', { query: { min_rating: 1, limit: 500 } })) as unknown as MusicListPage<LovedAlbumRow>,
   staleTime: 1000 * 30,
 })
+await waitForQuery(myAlbumsQuery)
 const pending = computed(() => myAlbumsQuery.isPending.value)
 const rows = computed(() => myAlbumsQuery.data.value?.items ?? [])
 </script>
 
 <style scoped>
-.m-h2 { font-size: 24px; font-weight: 600; margin-bottom: 20px; }
 .m-loading, .m-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; max-width: 480px; }
 /* Was inline-style grid-template-columns — moved to a scoped class so the
    phone override below can win (media queries can't beat an inline style). */

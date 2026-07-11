@@ -5,14 +5,14 @@
 //
 // Heya specifics vs a stock implementation:
 //   - the now-playing artwork comes from the track's `poster` URL
-//   - usePlayer().seek() takes a 0..1 fraction, so the per-second seek actions
+//   - usePlayerBindings().seek() takes a 0..1 fraction, so the per-second seek actions
 //     convert through the current duration
 //   - radio streams carry negative ids, so the metadata key is stringified
 export function useMediaSession() {
   if (import.meta.server) return
   if (!('mediaSession' in navigator)) return
 
-  const player = usePlayer()
+  const player = usePlayerBindings()
   const ms = navigator.mediaSession
 
   // Media Session artwork must be an absolute HTTP(S) URL the OS can fetch —

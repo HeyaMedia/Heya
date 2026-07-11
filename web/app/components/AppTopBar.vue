@@ -50,15 +50,6 @@
     </nav>
 
     <div class="topbar-right">
-      <button
-        v-if="isDev"
-        class="btn-icon qcp-nav-btn"
-        :class="{ active: devQueryOpen }"
-        title="Query cache (⌘⇧Q)"
-        @click="devQueryOpen = !devQueryOpen"
-      >
-        <Icon name="database" :size="16" />
-      </button>
       <div class="search-wrap open" ref="searchWrapRef">
         <!-- Phone (<=720px) and the compact band (720.02-1200px, see
              useViewport().isCompact): the dropdown below is cramped at
@@ -345,11 +336,6 @@ const {
 // `kind` gates whether the current route even has a section sidebar to
 // open; the drawer itself is mounted by the section pages, not here.
 const sidebar = useSectionSidebar()
-
-// Dev-only Query Cache toggle (left of search). Shares open-state with
-// components/dev/QueryCachePanel.vue via this useState key.
-const isDev = import.meta.dev
-const devQueryOpen = useState('dev_query_panel', () => false)
 
 type ActivityLibraryProgress = {
   library_id: number
@@ -1144,10 +1130,8 @@ watch(() => route.fullPath, () => { closeDropdown() })
        search-wrap below has real space to expand into. */
     justify-self: stretch;
   }
-  /* Dev-only query-cache toggle and the (currently inert) cast button
-     aren't part of the required phone set (brand/search/avatar) — hide
-     them so the search input gets the width instead. */
-  .qcp-nav-btn,
+  /* The currently inert cast button isn't part of the required phone set
+     (brand/search/avatar) — hide it so search gets the width instead. */
   .topbar-cast-btn { display: none; }
   .search-wrap.open {
     flex: 1;
@@ -1209,7 +1193,6 @@ watch(() => route.fullPath, () => { closeDropdown() })
   /* Dev-only Query Cache toggle — not part of the compact-band set, and
      crowds the ladder at the narrow end (~744px). Hidden the same way the
      phone query already drops it. */
-  .qcp-nav-btn { display: none; }
   /* Fixed 280px on desktop; here the pill flexes to fill the freed space,
      capped generously so it doesn't sprawl on the wide end of the band, and
      floored low so it never forces the row to overflow at the narrow end. */

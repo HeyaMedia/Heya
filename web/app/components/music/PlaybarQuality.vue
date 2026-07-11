@@ -79,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 import { PopoverArrow, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import { useAudioContextState } from '~/engine/context'
 import { computeNormalizationGain } from '~/engine/dsp/normalization'
@@ -88,7 +88,7 @@ const props = defineProps<{ trackId: number }>()
 
 const open = ref(false)
 
-// Primary (best-quality) file for the track. vue-query keyed on the track id so
+// Primary (best-quality) file for the track. Pinia Colada keyed on the track id so
 // it dedupes with anything else that asks, and survives the popover closing.
 interface TrackFileInfo {
   id: number
@@ -114,14 +114,14 @@ interface TrackDetail {
 
 const trackIdRef = computed(() => props.trackId)
 const { data: detailData } = useQuery({
-  queryKey: ['music', 'track', 'detail', trackIdRef],
-  queryFn: async () => {
+  key: () => ['music', 'track', 'detail', trackIdRef.value],
+  query: async () => {
     const { $heya } = useNuxtApp()
     return (await $heya('/api/music/tracks/{id}', { path: { id: props.trackId } })) as TrackDetail
   },
   enabled: computed(() => props.trackId > 0),
   staleTime: 1000 * 60 * 60,
-  retry: false,
+  retry: 0,
 })
 const file = computed<TrackFileInfo | null>(() => detailData.value?.files?.[0] ?? null)
 const albumLufs = computed(() => toNum(detailData.value?.album_integrated_lufs))
@@ -129,12 +129,9 @@ const albumPeak = computed(() => toNum(detailData.value?.album_true_peak_db))
 
 const { facets } = useTrackFacets(trackIdRef)
 
-const player = usePlayer()
-const settings = useAudioSettings()
-const eq = settings.eq
-const crossfade = settings.crossfade
-const crossfeed = settings.crossfeed
-const rg = settings.replayGain
+const player = usePlayerBindings()
+const settings = useAudioSettingsStore()
+const { eq, crossfade, crossfeed, replayGain: rg } = storeToRefs(settings)
 const { sampleRate: outRate } = useAudioContextState()
 
 function toNum(v: unknown): number | null {

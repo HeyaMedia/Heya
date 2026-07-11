@@ -8,21 +8,17 @@
 // whichever page happens to be mounted.
 export default defineNuxtPlugin(() => {
   const { on } = useEventBus()
-  const nuxtApp = useNuxtApp()
+  const queryCache = useQueryCache()
 
-  // $queryClient is provided by plugins/vue-query.client.ts. Read it lazily
-  // inside the handler (off the captured nuxtApp, not at setup time) so plugin
-  // load order doesn't matter — by the time an event arrives at runtime, every
-  // plugin has long since initialised and provided the client.
   on('media.watched', () => {
     // CW_QUERY_KEY from useWatchResume.ts — kept as a literal here since that
     // module doesn't export the constant.
-    nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'watch', 'continue'] })
-    nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'watch', 'recent'] })
+    queryCache.invalidateQueries({ key: ['me', 'watch', 'continue'] })
+    queryCache.invalidateQueries({ key: ['me', 'watch', 'recent'] })
     // Episode-level feed behind the TV Recommended "Recently Watched" rail —
     // must invalidate here too (not only in BrowseView) so watching an
     // episode from the player / detail page keeps the rail fresh cross-page.
-    nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'watch', 'recent-episodes'] })
-    nuxtApp.$queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+    queryCache.invalidateQueries({ key: ['me', 'watch', 'recent-episodes'] })
+    queryCache.invalidateQueries({ key: ['me', 'state'] })
   })
 })

@@ -141,7 +141,7 @@ const props = defineProps<{
   artists: Artistish[]
 }>()
 
-const { currentTrack, playing } = usePlayer()
+const { currentTrack, playing } = usePlayerBindings()
 
 interface MusicRow {
   key: string

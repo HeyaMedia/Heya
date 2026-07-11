@@ -279,7 +279,9 @@
 <script setup lang="ts">
 import type { MediaDetail, MediaExtra, MediaItem, MediaRecommendation, StreamInfoResponse, UserList } from '~~/shared/types'
 import type { ImageTone } from '~/composables/useImageTone'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { mediaDetailQuery } from '~/queries/media'
+import { collectionDetailQuery } from '~/queries/discovery'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
@@ -289,17 +291,13 @@ const lightbox = useLightbox()
 // or another movie page is instant. Reactive key on slug means a new movie
 // URL re-fetches naturally.
 const { $heya } = useNuxtApp()
-const detailQuery = useQuery({
-  queryKey: ['media', 'detail', slug],
-  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: slug.value as never } })) as MediaDetail,
-  staleTime: 1000 * 60 * 5,
-  retry: false,
-})
+const detailQuery = useQuery(() => mediaDetailQuery(slug.value))
+await waitForQuery(detailQuery)
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
 
 // Redirect on confirmed failure rather than every transient error.
-watch(detailQuery.error, (err) => { if (err) navigateTo('/movies') })
+watch(detailQuery.error, (err) => { if (err) navigateTo('/movies') }, { immediate: true })
 
 // Drives the Play button label switch — shows "Resume" when there's saved
 // progress on this movie's media_item, "Play" otherwise.
@@ -406,14 +404,10 @@ const listStyle = computed(() =>
 
 // Part of a collection → the full set as a bottom row (View collection
 // covers the parts not in the library yet).
-const collectionQuery = useQuery({
-  queryKey: computed(() => ['collection', detail.value?.collection?.id ?? 0]),
-  queryFn: async () => (await $heya('/api/collections/{id}', {
-    path: { id: detail.value!.collection!.id },
-  })) as { movies?: MediaItem[] },
-  enabled: computed(() => !!detail.value?.collection?.id),
-  staleTime: 1000 * 60 * 10,
-})
+const collectionQuery = useQuery(() => ({
+  ...collectionDetailQuery(detail.value?.collection?.id ?? 0),
+  enabled: !!detail.value?.collection?.id,
+}))
 const collectionMovies = computed<MediaItem[]>(() => collectionQuery.data.value?.movies ?? [])
 
 // "More Like This": library titles only by default; the appearance toggle

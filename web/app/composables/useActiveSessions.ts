@@ -1,6 +1,6 @@
 // useActiveSessions exposes the list of live playback sessions to any
 // consumer (activity panel, dedicated sessions page later). Backed by
-// vue-query for the initial fetch + remount-survives caching, plus an
+// Pinia Colada for the initial fetch + remount-survives caching, plus an
 // event-bus subscription so the cache stays live without polling.
 //
 // The server emits a payload-less `session.update` ping on every change
@@ -9,7 +9,7 @@
 // sessions. On each ping we invalidate the query so it re-fetches through the
 // auth-scoped /api/sessions/active endpoint (own-only for non-admins).
 
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import { formatTime } from './useHeyaPlayer'
 
 export interface ActiveSession {
@@ -50,12 +50,12 @@ const SESSIONS_QUERY_KEY = ['sessions', 'active'] as const
 
 export function useActiveSessions() {
   const { $heya } = useNuxtApp()
-  const queryClient = useQueryClient()
+  const queryClient = useQueryCache()
   const { on, connect } = useEventBus()
 
   const query = useQuery({
-    queryKey: SESSIONS_QUERY_KEY,
-    queryFn: async () => {
+    key: SESSIONS_QUERY_KEY,
+    query: async () => {
       const res = await $heya('/api/sessions/active') as { items: ActiveSession[] }
       return res.items ?? []
     },
@@ -71,7 +71,7 @@ export function useActiveSessions() {
   if (import.meta.client) {
     connect()
     const off = on('session.update', () => {
-      queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
+      queryClient.invalidateQueries({ key: SESSIONS_QUERY_KEY })
     })
     onScopeDispose(off)
   }

@@ -36,7 +36,7 @@
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 
 const sleep = useSleepTimer()
-const player = usePlayer()
+const player = usePlayerBindings()
 const open = ref(false)
 
 interface Opt { label: string, minutes?: number, endOfTrack?: boolean }

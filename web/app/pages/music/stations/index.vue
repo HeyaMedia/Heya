@@ -1,15 +1,11 @@
 <template>
   <div class="ms-stations page-pad">
-    <header class="ms-st-head">
-      <div>
-        <h1 class="ms-st-title">Stations</h1>
-        <div class="ms-st-sub">Endless, personalised streams from your own library.</div>
-      </div>
+    <MusicPageHead title="Stations" subtitle="Endless, personalised streams from your own library.">
       <NuxtLink to="/music/stations/builder" class="ms-st-builder-cta">
         <Icon name="sparkle" :size="16" />
         <span>Mix Builder</span>
       </NuxtLink>
-    </header>
+    </MusicPageHead>
 
     <!-- Mixes for You -->
     <MusicScrollRow
@@ -65,17 +61,17 @@
     <section class="ms-section">
       <h2 class="section-title-lg ms-section-title">Browse by Feel</h2>
       <div class="ms-browse-grid">
-        <NuxtLink to="/music/browse" class="ms-browse-card mood">
+        <NuxtLink to="/music/browse" class="ms-browse-card steer-glass mood">
           <div class="ms-browse-emoji">💭</div>
           <div class="ms-browse-name">Moods</div>
           <div class="ms-browse-desc">Tracks tagged with how they feel</div>
         </NuxtLink>
-        <NuxtLink to="/music/browse" class="ms-browse-card genre">
+        <NuxtLink to="/music/browse" class="ms-browse-card steer-glass genre">
           <div class="ms-browse-emoji">🎼</div>
           <div class="ms-browse-name">Genres</div>
           <div class="ms-browse-desc">By style, decade, and scene</div>
         </NuxtLink>
-        <NuxtLink to="/music/browse" class="ms-browse-card tempo">
+        <NuxtLink to="/music/browse" class="ms-browse-card steer-glass tempo">
           <div class="ms-browse-emoji">⚡</div>
           <div class="ms-browse-name">Tempo</div>
           <div class="ms-browse-desc">Slow burns to peak-time bangers</div>
@@ -90,11 +86,11 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const actions = useMusicActions()
 
@@ -135,13 +131,14 @@ interface Mix {
 }
 
 const mixesQuery = useQuery({
-  queryKey: ['music', 'stations', 'mixes'],
-  queryFn: async () => {
+  key: ['music', 'stations', 'mixes'],
+  query: async () => {
     const r = await $heya('/api/music/home/mixes-for-you', { query: { max: 8 } }) as unknown as { items: Mix[] }
     return r.items ?? []
   },
   staleTime: 1000 * 60 * 30,
 })
+await waitForQuery(mixesQuery)
 const mixes = computed<Mix[]>(() => mixesQuery.data.value ?? [])
 const mixesLoading = computed(() => mixesQuery.isLoading.value)
 
@@ -206,14 +203,6 @@ async function playMix(mix: Mix) {
 <style scoped>
 .ms-stations { max-width: 1400px; }
 
-.ms-st-head {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
-  margin-bottom: 32px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--border);
-}
-.ms-st-title { font-size: 32px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-st-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
 .ms-st-builder-cta {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 10px 18px;
@@ -289,15 +278,12 @@ async function playMix(mix: Mix) {
 }
 .ms-browse-card {
   padding: 24px 22px;
-  background: rgb(var(--ink) / 0.03);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   text-decoration: none;
   color: inherit;
   transition: all 0.15s;
 }
 .ms-browse-card:hover {
-  background: rgb(var(--ink) / 0.06);
   border-color: var(--gold-soft);
   transform: translateY(-2px);
 }
@@ -320,10 +306,9 @@ async function playMix(mix: Mix) {
 }
 
 @media (max-width: 720px) {
-  .ms-st-head { flex-direction: column; align-items: stretch; gap: 14px; margin-bottom: 24px; padding-bottom: 20px; }
   /* music.vue's phone section header already reads "Stations" directly
      above this page — the sub line and the Mix Builder CTA both stay. */
-  .ms-st-title { display: none; }
+  :deep(.mhd-title) { display: none; }
   .ms-st-builder-cta { justify-content: center; }
 
   .ms-station-grid { gap: 10px; }

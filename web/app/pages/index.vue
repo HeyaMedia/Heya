@@ -42,6 +42,7 @@
         :context-items="homeMediaContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
+        @intent="prefetchMediaIntent"
         @more="navigateTo('/movies/recommendations')"
       />
 
@@ -54,6 +55,7 @@
         :context-items="homeMediaContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
+        @intent="prefetchMediaIntent"
         @more="navigateTo('/movies')"
       />
 
@@ -66,6 +68,7 @@
         :context-items="homeMediaContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
+        @intent="prefetchMediaIntent"
         @more="navigateTo('/tv')"
       />
 
@@ -94,6 +97,7 @@
         :tile-width="168"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
+        @intent="prefetchMediaIntent"
         @more="navigateTo('/music/artists')"
       />
 
@@ -106,6 +110,7 @@
         :context-items="homeBookContextItems"
         more="See all"
         @tile="(item) => navigateTo(mediaUrl(item))"
+        @intent="prefetchMediaIntent"
         @more="navigateTo('/books')"
       />
 
@@ -125,11 +130,20 @@
 import type { ContextMenuItem, MediaItem, MediaDetail, Movie, UserList } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
+import { mediaDetailQuery, mediaDetailTarget } from '~/queries/media'
 
 const { $heya } = useNuxtApp()
-const queryClient = useQueryClient()
+const queryClient = useQueryCache()
 const invalidateContinueWatching = useInvalidateContinueWatching()
+
+function prefetchMediaIntent(item: MediaItem) {
+  const to = mediaUrl(item)
+  void preloadRouteComponents(to)
+  const entry = queryClient.ensure(mediaDetailQuery(mediaDetailTarget(item)))
+  void queryClient.refresh(entry).catch(() => {})
+}
 
 // Music rows show recent ALBUMS plus recent ARTISTS. Items are normalized to
 // MediaItem-ish so ContentRow renders them, with poster_src set to the
@@ -173,26 +187,26 @@ interface RecentArtistEntry {
   added_at: string
 }
 
-// One vue-query per rail. Each caches independently so cross-page navigation
+// One Pinia Colada per rail. Each caches independently so cross-page navigation
 // returns instantly. Event-bus listeners below invalidate by key to refresh.
 const moviesQuery = useQuery({
-  queryKey: ['media', 'recent', 'movie'],
-  queryFn: async () => (await $heya('/api/media', { query: { type: 'movie', sort: 'added', limit: 20 } })) as MediaItem[],
+  key: ['media', 'recent', 'movie'],
+  query: async () => (await $heya('/api/media', { query: { type: 'movie', sort: 'added', limit: 20 } })) as MediaItem[],
   staleTime: 1000 * 60,
 })
 const tvQuery = useQuery({
-  queryKey: ['media', 'recent', 'tv'],
-  queryFn: async () => (await $heya('/api/media/tv/recently-added', { query: { limit: 20 } })) as RecentTVEntry[],
+  key: ['media', 'recent', 'tv'],
+  query: async () => (await $heya('/api/media/tv/recently-added', { query: { limit: 20 } })) as RecentTVEntry[],
   staleTime: 1000 * 60,
 })
 const booksQuery = useQuery({
-  queryKey: ['media', 'recent', 'book'],
-  queryFn: async () => (await $heya('/api/media', { query: { type: 'book', sort: 'added', limit: 20 } })) as MediaItem[],
+  key: ['media', 'recent', 'book'],
+  query: async () => (await $heya('/api/media', { query: { type: 'book', sort: 'added', limit: 20 } })) as MediaItem[],
   staleTime: 1000 * 60,
 })
 const musicHomeQuery = useQuery({
-  queryKey: ['home', 'recent-albums'],
-  queryFn: async () => {
+  key: ['home', 'recent-albums'],
+  query: async () => {
     const home = await $heya('/api/music/home', { query: { limit: 20 } }) as {
       recent_albums: Array<{
         id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string; available?: boolean
@@ -207,13 +221,13 @@ const musicHomeQuery = useQuery({
   staleTime: 1000 * 60,
 })
 const continueWatchingQuery = useQuery({
-  queryKey: ['me', 'watch', 'continue'],
-  queryFn: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingItem[],
+  key: ['me', 'watch', 'continue'],
+  query: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingItem[],
   staleTime: 1000 * 30,
 })
 const recentWatchedQuery = useQuery({
-  queryKey: ['me', 'watch', 'recent'],
-  queryFn: async () => (await $heya('/api/me/watch/recent')) as Array<{
+  key: ['me', 'watch', 'recent'],
+  query: async () => (await $heya('/api/me/watch/recent')) as Array<{
     media_item_id: number; title: string; poster_path: string; slug: string; media_type: string
   }>,
   staleTime: 1000 * 30,
@@ -221,8 +235,8 @@ const recentWatchedQuery = useQuery({
 // Personalized "For You" — the taste-vector + TMDB-graph engine. Excludes
 // seeds (hearts / watched) server-side, so no client-side filtering needed.
 const forYouQuery = useQuery({
-  queryKey: ['for-you', { limit: 20 }],
-  queryFn: async () => (await $heya('/api/me/recommendations', { query: { limit: 20 } })) as {
+  key: ['for-you', { limit: 20 }],
+  query: async () => (await $heya('/api/me/recommendations', { query: { limit: 20 } })) as {
     items: { id: number; public_id?: string; title: string; slug: string; year?: string; media_type: string; reason?: string; available: boolean }[]
     has_signal: boolean
   },
@@ -230,23 +244,23 @@ const forYouQuery = useQuery({
 })
 
 const userListsQuery = useQuery({
-  queryKey: ['me', 'lists'],
-  queryFn: async () => (await $heya('/api/me/lists')) as UserList[],
+  key: ['me', 'lists'],
+  query: async () => (await $heya('/api/me/lists')) as UserList[],
   staleTime: 1000 * 60,
 })
 const movieStateQuery = useQuery({
-  queryKey: ['me', 'state', 'movies'],
-  queryFn: async () => fetchUserState('movies'),
+  key: ['me', 'state', 'movies'],
+  query: async () => fetchUserState('movies'),
   staleTime: 1000 * 30,
 })
 const seriesStateQuery = useQuery({
-  queryKey: ['me', 'state', 'series'],
-  queryFn: async () => fetchUserState('series'),
+  key: ['me', 'state', 'series'],
+  query: async () => fetchUserState('series'),
   staleTime: 1000 * 30,
 })
 const mediaStateQuery = useQuery({
-  queryKey: ['me', 'media-state'],
-  queryFn: async () => (await $heya('/api/me/media-state')) as { watched: number[]; favorited: number[] },
+  key: ['me', 'media-state'],
+  query: async () => (await $heya('/api/me/media-state')) as { watched: number[]; favorited: number[] },
   staleTime: 1000 * 30,
 })
 
@@ -296,12 +310,7 @@ const { playContinue, playUpNext } = usePlaybackNav()
 // Pinned hero mode — server-persisted in user settings so it follows the
 // user across devices. The deck itself mirrors to localStorage for instant
 // paint; this query is the authority.
-interface MeSettings { playback?: Record<string, unknown>; ui?: { pinned_hero_mode?: string } }
-const settingsQuery = useQuery({
-  queryKey: ['me', 'settings'],
-  queryFn: async () => (await $heya('/api/me/settings')) as MeSettings,
-  staleTime: 1000 * 60 * 5,
-})
+const settingsQuery = useQuery(meSettingsQuery())
 const pinnedHeroMode = computed(() => settingsQuery.data.value?.ui?.pinned_hero_mode ?? undefined)
 
 // Section visibility + order (Settings → Appearance). Rides the same
@@ -312,10 +321,10 @@ const sectionStyle = (id: string) => ({ order: orderOf(id) })
 
 async function onPinHeroMode(mode: string) {
   const current = settingsQuery.data.value ?? {}
-  const next: MeSettings = { ...current, ui: { ...current.ui, pinned_hero_mode: mode } }
+  const next: UserSettingsBlob = { ...current, ui: { ...current.ui, pinned_hero_mode: mode } }
   try {
     await $heya('/api/me/settings', { method: 'PUT', body: next as never })
-    queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
+    queryClient.invalidateQueries({ key: ['me', 'settings'] })
   } catch { /* localStorage mirror still holds it for this device */ }
 }
 
@@ -535,7 +544,7 @@ async function toggleHomeWatched(id: number, watched: boolean, item: MediaItem) 
     else next.delete(id)
     setRef.value = next
     invalidateContinueWatching()
-    queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+    queryClient.invalidateQueries({ key: ['me', 'state'] })
   } catch { /* ignore */ }
 }
 
@@ -549,8 +558,8 @@ async function toggleHomeFavorite(id: number, favorited: boolean) {
     if (favorited) next.add(id)
     else next.delete(id)
     homeFavoritedSet.value = next
-    queryClient.invalidateQueries({ queryKey: ['me', 'media-state'] })
-    queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+    queryClient.invalidateQueries({ key: ['me', 'media-state'] })
+    queryClient.invalidateQueries({ key: ['me', 'state'] })
   } catch { /* ignore */ }
 }
 
@@ -571,7 +580,9 @@ async function rebuildHeroDetails() {
   for (const item of heroItems.value) {
     if (movieDetails.value[item.id]) continue // already fetched in this session
     try {
-      const detail = await $heya('/api/media/{id}', { path: { id: String(item.id) } }) as MediaDetail
+      const entry = queryClient.ensure(mediaDetailQuery(mediaDetailTarget(item)))
+      const detail = (await queryClient.refresh(entry)).data
+      if (!detail) continue
       // Local trailer file → hero trailer takeover for this slide.
       const trailer = detail.extras?.find(x => x.extra_type === 'trailer' && x.file_path)
       if (trailer) heroTrailers.value[item.id] = trailer.id

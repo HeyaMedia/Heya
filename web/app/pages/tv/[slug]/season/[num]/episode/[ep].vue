@@ -119,7 +119,8 @@
 
 <script setup lang="ts">
 import type { MediaDetail, StreamInfoResponse } from '~~/shared/types'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { mediaDetailQuery } from '~/queries/media'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
@@ -136,15 +137,11 @@ const currentEpNum = computed(() => parseInt(epParam.value) || 1)
 // Shared MediaDetail cache key with the series + season pages so navigating
 // down a TV tree is instant after the first fetch.
 const { $heya } = useNuxtApp()
-const detailQuery = useQuery({
-  queryKey: ['media', 'detail', slug],
-  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: slug.value as never } })) as MediaDetail,
-  staleTime: 1000 * 60 * 5,
-  retry: false,
-})
+const detailQuery = useQuery(() => mediaDetailQuery(slug.value))
+await waitForQuery(detailQuery)
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
-watch(detailQuery.error, (err) => { if (err) navigateTo(`/tv/${slug.value}`) })
+watch(detailQuery.error, (err) => { if (err) navigateTo(`/tv/${slug.value}`) }, { immediate: true })
 
 // Live refresh — a re-enrich or metadata edit lands new data server-side while
 // this page is open. It reads the shared ['media','detail', slug] doc, but the

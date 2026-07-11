@@ -68,7 +68,7 @@
       <!-- Floating round actions -->
       <div class="hero-floating-actions">
         <span v-if="!artistPlayable" class="hero-missing"><Icon name="trash" :size="13" /> Missing on disk</span>
-        <button class="hero-round hero-round-primary" :disabled="!artistPlayable" @click="playAll(false)" title="Play">
+        <button class="hero-round hero-round-primary" :style="heroToneStyle" :disabled="!artistPlayable" @click="playAll(false)" title="Play">
           <Icon name="play" :size="22" />
         </button>
         <button class="hero-round" :disabled="!artistPlayable" @click="playAll(true)" title="Shuffle">
@@ -95,7 +95,7 @@
     <section v-if="topTracks.length" class="top-tracks artist-section">
       <div class="section-row-head tt-head">
         <h2 class="section-title-lg">Popular Tracks</h2>
-        <button class="pill-btn" @click="playTopAll(false)" :disabled="!hasPlayableTopTracks">
+        <button class="pill-btn" :style="heroToneStyle" @click="playTopAll(false)" :disabled="!hasPlayableTopTracks">
           <Icon name="play" :size="13" /><span>Play</span>
         </button>
         <button class="pill-btn pill-btn-ghost" @click="playTopAll(true)" :disabled="!hasPlayableTopTracks">
@@ -360,22 +360,23 @@
 import type { AlbumView, Artist, ArtistTopTrackRow, MediaDetail, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
 import type { DragAlbumPayload } from '~/composables/useMusicDragDrop'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { mediaDetailQuery } from '~/queries/media'
 
-// slug keys + addresses the detail query so it shares the vue-query cache
+// slug keys + addresses the detail query so it shares the Pinia Colada cache
 // entry with the parent page's ['media','detail',slug] fetch — keying by
 // mediaId created a second cache entry and re-ran the heaviest endpoint on
 // every artist page view, sequentially after the page's own copy.
 const props = defineProps<{ mediaId: number; slug: string }>()
 
 const route = useRoute()
-const { play, queue, currentTrack, playing, formatTime } = usePlayer()
+const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 const radio = useRadio()
 
 // Now-playing markers. A Popular Tracks row lights up when the playing track
 // is it; a discography tile lights up when the playing track belongs to that
 // album (album ids are globally unique, so an id match is unambiguous). Both
-// read the shared usePlayer() state, so they react live as playback advances.
+// read the shared usePlayerBindings() state, so they react live as playback advances.
 function isTopTrackActive(t: ArtistTopTrackRow) {
   const id = currentTrack.value?.id
   return id != null && id === t.local_track_id
@@ -409,13 +410,13 @@ const ttExpanded = ref(false)
 const { user } = useAuth()
 const isAdmin = computed(() => user.value?.is_admin === true)
 const showMetadataEditor = ref(false)
-const queryClient = useQueryClient()
+const queryClient = useQueryCache()
 
 function onEditorClose() {
   showMetadataEditor.value = false
   // Edits and refreshes land server-side; drop the cached detail so the
   // page (and this component) re-reads the updated artist.
-  queryClient.invalidateQueries({ queryKey: ['media', 'detail', props.slug] })
+  queryClient.invalidateQueries({ key: ['media', 'detail', props.slug] })
 }
 
 interface SimilarArtistRow {
@@ -439,40 +440,36 @@ interface SonicSimilarArtistRow {
 }
 
 const { $heya } = useNuxtApp()
-const detailQuery = useQuery({
-  queryKey: ['media', 'detail', () => props.slug],
-  queryFn: async () => (await $heya('/api/media/{id}', { path: { id: props.slug } })) as MediaDetail,
-  staleTime: 1000 * 60 * 5,
-})
+const detailQuery = useQuery(() => mediaDetailQuery(props.slug))
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
 
 const artistSlugForQueries = computed(() => detail.value?.media_item?.slug ?? (route.params.slug as string | undefined) ?? '')
 
 const similarQuery = useQuery({
-  queryKey: ['music', 'artist', 'similar', artistSlugForQueries],
-  queryFn: async () => (await $heya('/api/music/artists/{slug}/similar', { path: { slug: artistSlugForQueries.value } })) as SimilarArtistRow[],
+  key: () => ['music', 'artist', 'similar', artistSlugForQueries.value],
+  query: async () => (await $heya('/api/music/artists/{slug}/similar', { path: { slug: artistSlugForQueries.value } })) as SimilarArtistRow[],
   enabled: () => artistSlugForQueries.value.length > 0,
   staleTime: 1000 * 60 * 30,
-  retry: false,
+  retry: 0,
 })
 const similar = computed<SimilarArtistRow[]>(() => similarQuery.data.value ?? [])
 
 const sonicSimilarQuery = useQuery({
-  queryKey: ['music', 'artist', 'sonic-similar', artistSlugForQueries, { limit: 12 }],
-  queryFn: async () => ((await $heya('/api/music/artists/{slug}/sonic-similar', { path: { slug: artistSlugForQueries.value }, query: { limit: 12 } })) as { items: SonicSimilarArtistRow[] }).items ?? [],
+  key: () => ['music', 'artist', 'sonic-similar', artistSlugForQueries.value, { limit: 12 }],
+  query: async () => ((await $heya('/api/music/artists/{slug}/sonic-similar', { path: { slug: artistSlugForQueries.value }, query: { limit: 12 } })) as { items: SonicSimilarArtistRow[] }).items ?? [],
   enabled: () => artistSlugForQueries.value.length > 0,
   staleTime: 1000 * 60 * 30,
-  retry: false,
+  retry: 0,
 })
 const sonicSimilar = computed<SonicSimilarArtistRow[]>(() => sonicSimilarQuery.data.value ?? [])
 
 const topTracksQuery = useQuery({
-  queryKey: ['music', 'artist', 'top-tracks', artistSlugForQueries, { limit: 25 }],
-  queryFn: async () => ((await $heya('/api/music/artists/{slug}/top-tracks', { path: { slug: artistSlugForQueries.value }, query: { limit: 25 } })) as { items: ArtistTopTrackRow[] }).items ?? [],
+  key: () => ['music', 'artist', 'top-tracks', artistSlugForQueries.value, { limit: 25 }],
+  query: async () => ((await $heya('/api/music/artists/{slug}/top-tracks', { path: { slug: artistSlugForQueries.value }, query: { limit: 25 } })) as { items: ArtistTopTrackRow[] }).items ?? [],
   enabled: () => artistSlugForQueries.value.length > 0,
   staleTime: 1000 * 60 * 30,
-  retry: false,
+  retry: 0,
 })
 // Owned-only filter — Last.fm rows we can't play are noise on a library page.
 // External links to Last.fm still live in the "Around the web" section.
@@ -553,6 +550,21 @@ const background = useBackground()
 watch([backdropUrl, ambientEnabled], ([url, on]) => {
   if (on && url) background.set(url)
   else background.clear()
+}, { immediate: true })
+
+// Tone-adaptive primary actions — sample the hero art (backdrop first,
+// poster fallback) and paint the Play buttons in the artist's palette,
+// same pattern as the movie/TV detail heroes. Sequence-guarded against a
+// slow sample landing after the route already changed artists.
+const heroToneStyle = ref<Record<string, string> | undefined>()
+let heroToneSeq = 0
+watch(() => backdropUrl.value || artistPosterUrl.value, (src) => {
+  const seq = ++heroToneSeq
+  if (!src) { heroToneStyle.value = undefined; return }
+  sampleImageTone(src).then((t) => {
+    if (seq !== heroToneSeq) return
+    heroToneStyle.value = t ? { background: t.main, color: t.ink } : undefined
+  })
 }, { immediate: true })
 
 const totalAlbums = computed(() => albums.value.length)
@@ -771,10 +783,10 @@ if (import.meta.client) {
   const off = bus.on('media.updated', (e) => {
     const payload = e.payload as { media_item_id?: number } | undefined
     if (payload?.media_item_id === props.mediaId) {
-      queryClient.invalidateQueries({ queryKey: ['media', 'detail', props.slug] })
-      queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'similar', artistSlugForQueries.value] })
-      queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'sonic-similar', artistSlugForQueries.value, { limit: 12 }] })
-      queryClient.invalidateQueries({ queryKey: ['music', 'artist', 'top-tracks', artistSlugForQueries.value, { limit: 25 }] })
+      queryClient.invalidateQueries({ key: ['media', 'detail', props.slug] })
+      queryClient.invalidateQueries({ key: ['music', 'artist', 'similar', artistSlugForQueries.value] })
+      queryClient.invalidateQueries({ key: ['music', 'artist', 'sonic-similar', artistSlugForQueries.value, { limit: 12 }] })
+      queryClient.invalidateQueries({ key: ['music', 'artist', 'top-tracks', artistSlugForQueries.value, { limit: 25 }] })
     }
   })
   onBeforeUnmount(() => { off() })
@@ -967,13 +979,51 @@ if (import.meta.client) {
 .hero-round-primary {
   width: 58px;
   height: 58px;
+  /* Tone-follow: the inline heroToneStyle paints the artist's sampled
+     palette over this gold fallback; the 0.9s glide covers the swap. */
   background: var(--gold);
   color: var(--bg-0);
   border-color: transparent;
   box-shadow: 0 10px 24px var(--gold-glow);
+  transition: transform 0.1s, filter 0.15s,
+    background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.hero-round-primary:hover { background: var(--gold-bright); }
+/* Brightness pop for hover (works on any sampled tone — the inline tone
+   style outranks hover rules). The background re-assert is for the
+   UN-toned fallback: without it, .hero-round:hover's dark wash (higher
+   specificity than .hero-round-primary) would swallow the gold. */
+.hero-round-primary:hover { background: var(--gold); filter: brightness(1.12); }
 .hero-round:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
+/* Ambient-extended: the hero text sits on the theme's ambient wash, not on
+   the raw photo — swap the literal-black legibility shadows for theme-aware
+   halos, and re-coat chips/buttons in theme glass so light mode stops
+   rendering them as dark smudges (they were locked-dark rgba). */
+.hero.ambient-extended .hero-title { text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1); }
+.hero.ambient-extended .hero-bio,
+.hero.ambient-extended .hero-stats,
+.hero.ambient-extended .hero-kind { text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
+.hero.ambient-extended .tag-chip {
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  border-color: var(--border);
+  box-shadow: var(--shadow-el);
+}
+.hero.ambient-extended .tag-chip:hover {
+  background: var(--gold-soft);
+  color: var(--gold);
+  border-color: var(--gold-soft);
+}
+.hero.ambient-extended .hero-round:not(.hero-round-primary) {
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  border-color: var(--border);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-el);
+}
+.hero.ambient-extended .hero-round:not(.hero-round-primary):hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
 .hero-missing {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; font-family: var(--font-mono);
@@ -1040,6 +1090,11 @@ if (import.meta.client) {
 /* Popular Tracks ================================================== */
 .top-tracks {}
 .section-row-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+/* Section titles sit over the ambient-extended wash — halo them. */
+.artist-section :deep(.section-title-lg),
+.artist-section .section-title-lg {
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
 .section-row-head .more {
   font-size: 11px;
   color: var(--fg-3);
@@ -1062,7 +1117,9 @@ if (import.meta.client) {
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: filter 0.12s;
+  transition: filter 0.12s,
+    background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .pill-btn:hover { filter: brightness(1.1); }
 .pill-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
@@ -1074,10 +1131,17 @@ if (import.meta.client) {
 
 .tt-list {
   list-style: none;
-  padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
+  /* Glass panel — same surface TrackList wears, so the numbered rows stay
+     readable over the ambient-extended artwork. */
+  background: color-mix(in oklab, var(--bg-2) 76%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-el);
+  padding: 6px 8px;
 }
 .tt-row {
   display: grid;

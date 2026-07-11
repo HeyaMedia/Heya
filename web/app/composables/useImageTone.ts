@@ -44,56 +44,99 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 
 /** Resolves to null on any failure (missing image, tainted canvas, …). */
 export function sampleImageTone(url: string): Promise<ImageTone | null> {
+  if (!import.meta.client) return Promise.resolve(null)
+  return sampleOnce(url).then((tone) => {
+    if (tone || !url.startsWith('/api/')) return tone
+    // Same-origin endpoints can 302 to third-party CDNs (album covers still
+    // pointing at provider art) — those hosts send no ACAO header, so the
+    // CORS-mode <img> load fails before the canvas ever sees pixels. Retry
+    // through the server-side byte proxy (?proxy=1, honored by the album
+    // cover endpoint; harmless no-op where bytes are already local), using
+    // fetch→blob→ImageBitmap instead of a crossorigin <img> so no-cors
+    // cache entries from regular <img> renders can't clash with it.
+    const sep = url.includes('?') ? '&' : '?'
+    return sampleBytes(`${url}${sep}proxy=1`)
+  })
+}
+
+async function sampleBytes(url: string): Promise<ImageTone | null> {
+  // Normal path rides the HTTP cache (the proxy sets max-age=3600, so
+  // repeat samples of the same cover — every track of an album — are
+  // free). The 'reload' retry only fires when the cached path failed:
+  // it bypasses AND replaces a stale/poisoned entry (e.g. a cached 302
+  // from before the endpoint learned ?proxy=1).
+  return (await sampleBytesOnce(url, 'default')) ?? sampleBytesOnce(url, 'reload')
+}
+
+async function sampleBytesOnce(url: string, cache: RequestCache): Promise<ImageTone | null> {
+  try {
+    const res = await fetch(url, { cache })
+    if (!res.ok) return null
+    const bitmap = await createImageBitmap(await res.blob())
+    try {
+      return toneFromSource(bitmap)
+    } finally {
+      bitmap.close()
+    }
+  } catch {
+    return null
+  }
+}
+
+function sampleOnce(url: string): Promise<ImageTone | null> {
   return new Promise((resolve) => {
     if (!import.meta.client) return resolve(null)
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onerror = () => resolve(null)
-    img.onload = () => {
-      try {
-        const c = document.createElement('canvas')
-        c.width = c.height = 24
-        const ctx = c.getContext('2d', { willReadFrequently: true })
-        if (!ctx) return resolve(null)
-        ctx.drawImage(img, 0, 0, 24, 24)
-        const d = ctx.getImageData(0, 0, 24, 24).data
-        // Average the most saturated third of pixels — grabs the image's
-        // color identity instead of its (usually grey) global average.
-        const px: [number, number, number, number][] = []
-        for (let i = 0; i < d.length; i += 4) {
-          const r = d[i]!, g = d[i + 1]!, b = d[i + 2]!
-          px.push([r, g, b, Math.max(r, g, b) - Math.min(r, g, b)])
-        }
-        px.sort((a, b) => b[3] - a[3])
-        const n = Math.max(1, Math.floor(px.length / 3))
-        let rs = 0, gs = 0, bs = 0
-        for (let i = 0; i < n; i++) { rs += px[i]![0]; gs += px[i]![1]; bs += px[i]![2] }
-        let [h, s, l] = rgbToHsl(rs / n, gs / n, bs / n)
-        // Clamp into button-friendly territory: saturated enough to read as
-        // a color, mid lightness so ink contrast is decidable.
-        s = Math.min(0.85, Math.max(0.4, s * 1.15))
-        l = Math.min(0.58, Math.max(0.38, l))
-        const [r1, g1, b1] = hslToRgb(h, s, l)
-        const [r2, g2, b2] = hslToRgb(h + 180, s, l)
-        // Ink by RELATIVE luminance, not HSL lightness: a saturated yellow
-        // at l=0.5 is perceptually bright (L≈0.7) and white ink on it is
-        // unreadable. 0.2 is the crossover where near-black and white give
-        // equal WCAG contrast against the fill.
-        const lin = (v: number) => {
-          v /= 255
-          return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
-        }
-        const L = 0.2126 * lin(r1) + 0.7152 * lin(g1) + 0.0722 * lin(b1)
-        resolve({
-          main: `rgb(${r1} ${g1} ${b1})`,
-          complement: `rgb(${r2} ${g2} ${b2})`,
-          complementTriplet: `${r2} ${g2} ${b2}`,
-          ink: L > 0.2 ? '#16130d' : '#ffffff',
-        })
-      } catch {
-        resolve(null)
-      }
-    }
+    img.onload = () => resolve(toneFromSource(img))
     img.src = url
   })
+}
+
+/** Shared pixel path: 24×24 downsample → saturated-third average → clamp. */
+function toneFromSource(src: CanvasImageSource): ImageTone | null {
+  try {
+    const c = document.createElement('canvas')
+    c.width = c.height = 24
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return null
+    ctx.drawImage(src, 0, 0, 24, 24)
+    const d = ctx.getImageData(0, 0, 24, 24).data
+    // Average the most saturated third of pixels — grabs the image's
+    // color identity instead of its (usually grey) global average.
+    const px: [number, number, number, number][] = []
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i]!, g = d[i + 1]!, b = d[i + 2]!
+      px.push([r, g, b, Math.max(r, g, b) - Math.min(r, g, b)])
+    }
+    px.sort((a, b) => b[3] - a[3])
+    const n = Math.max(1, Math.floor(px.length / 3))
+    let rs = 0, gs = 0, bs = 0
+    for (let i = 0; i < n; i++) { rs += px[i]![0]; gs += px[i]![1]; bs += px[i]![2] }
+    let [h, s, l] = rgbToHsl(rs / n, gs / n, bs / n)
+    // Clamp into button-friendly territory: saturated enough to read as
+    // a color, mid lightness so ink contrast is decidable.
+    s = Math.min(0.85, Math.max(0.4, s * 1.15))
+    l = Math.min(0.58, Math.max(0.38, l))
+    const [r1, g1, b1] = hslToRgb(h, s, l)
+    const [r2, g2, b2] = hslToRgb(h + 180, s, l)
+    // Ink by RELATIVE luminance, not HSL lightness: a saturated yellow
+    // at l=0.5 is perceptually bright (L≈0.7) and white ink on it is
+    // unreadable. 0.2 is the crossover where near-black and white give
+    // equal WCAG contrast against the fill.
+    const lin = (v: number) => {
+      v /= 255
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    }
+    const L = 0.2126 * lin(r1) + 0.7152 * lin(g1) + 0.0722 * lin(b1)
+    return {
+      main: `rgb(${r1} ${g1} ${b1})`,
+      complement: `rgb(${r2} ${g2} ${b2})`,
+      complementTriplet: `${r2} ${g2} ${b2}`,
+      ink: L > 0.2 ? '#16130d' : '#ffffff',
+    }
+  } catch {
+    return null
+  }
 }

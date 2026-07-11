@@ -197,7 +197,7 @@ const props = withDefaults(defineProps<{
   onRatingChange?: (id: number, value: number) => void
   /** Icon size for the art column's hover-play / missing glyph. */
   artPlayIconSize?: number
-  /** Defaults to the global m:ss formatter; pass usePlayer().formatTime for
+  /** Defaults to the global m:ss formatter; pass usePlayerBindings().formatTime for
    *  pages that used it today (adds h:mm:ss past an hour, "0:00" for 0). */
   durationFormatter?: (seconds: number) => string
   /** Window rows against the nearest scroll container. Intended for lists
@@ -248,6 +248,16 @@ function openSheet(t: TrackListRow, i: number) {
    size, hover tint, header sticky-ness, ...). */
 
 .tl {
+/* Glass surface: every consumer sits over the music shell's rotating
+   ambient pool (or a detail page's claimed art), and bare rows painted
+   straight onto bright artwork washed out — the album/songs pages were
+   near-unreadable in light mode. One panel here fixes all of them. */
+background: color-mix(in oklab, var(--bg-2) 76%, transparent);
+backdrop-filter: blur(10px);
+-webkit-backdrop-filter: blur(10px);
+border-radius: var(--r-lg);
+box-shadow: var(--shadow-el);
+padding: 4px 6px 8px;
 
 .tl-row {
   display: grid;
@@ -259,8 +269,11 @@ function openSheet(t: TrackListRow, i: number) {
   top: 0;
   z-index: 4;
   padding: 8px 10px;
-  background: var(--bg-1);
-  color: var(--fg-3);
+  /* Near-opaque (not blurred: a nested backdrop-filter under .tl's own
+     one renders ~30% opaque — docs/ui.md gotcha #4) so rows scrolling
+     beneath the stuck header stay masked. */
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  color: var(--fg-2);
   font-size: 10px;
   font-family: var(--font-mono);
   text-transform: uppercase;

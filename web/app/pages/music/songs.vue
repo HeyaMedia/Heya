@@ -1,37 +1,32 @@
 <template>
   <div class="ms-songs page-pad">
-    <div class="ms-songs-head">
-      <div>
-        <h1 class="ms-songs-title">All Songs</h1>
-        <div class="ms-songs-meta">
-          <span v-if="total > 0">{{ total.toLocaleString() }} tracks</span>
-          <span v-else-if="loading">Loading…</span>
-          <span v-else>—</span>
-          <span class="dot">·</span>
-          <span>Page {{ page }} of {{ totalPages }}</span>
-        </div>
-      </div>
-      <div class="ms-songs-actions">
-        <button
-          class="ms-page-btn"
-          :disabled="page <= 1 || loading"
-          @click="goPage(page - 1)"
-          aria-label="Previous page"
-        >
-          <Icon name="chevleft" :size="14" />
-          <span>Prev</span>
-        </button>
-        <button
-          class="ms-page-btn"
-          :disabled="page >= totalPages || loading"
-          @click="goPage(page + 1)"
-          aria-label="Next page"
-        >
-          <span>Next</span>
-          <Icon name="chevright" :size="14" />
-        </button>
-      </div>
-    </div>
+    <MusicPageHead title="All Songs">
+      <template #subtitle>
+        <span v-if="total > 0">{{ total.toLocaleString() }} tracks</span>
+        <span v-else-if="loading">Loading…</span>
+        <span v-else>—</span>
+        <span class="dot">·</span>
+        <span>Page {{ page }} of {{ totalPages }}</span>
+      </template>
+      <button
+        class="ms-page-btn steer-glass"
+        :disabled="page <= 1 || loading"
+        @click="goPage(page - 1)"
+        aria-label="Previous page"
+      >
+        <Icon name="chevleft" :size="14" />
+        <span>Prev</span>
+      </button>
+      <button
+        class="ms-page-btn steer-glass"
+        :disabled="page >= totalPages || loading"
+        @click="goPage(page + 1)"
+        aria-label="Next page"
+      >
+        <span>Next</span>
+        <Icon name="chevright" :size="14" />
+      </button>
+    </MusicPageHead>
 
     <div v-if="loading && !rows.length" class="ms-loading">Loading songs…</div>
 
@@ -57,12 +52,12 @@
     <!-- Pagination footer -->
     <div v-if="totalPages > 1" class="ms-pagination">
       <button
-        class="ms-page-btn"
+        class="ms-page-btn steer-glass"
         :disabled="page <= 1 || loading"
         @click="goPage(1)"
       >First</button>
       <button
-        class="ms-page-btn"
+        class="ms-page-btn steer-glass"
         :disabled="page <= 1 || loading"
         @click="goPage(page - 1)"
       >
@@ -70,14 +65,14 @@
       </button>
       <span class="ms-page-info">Page {{ page }} of {{ totalPages }}</span>
       <button
-        class="ms-page-btn"
+        class="ms-page-btn steer-glass"
         :disabled="page >= totalPages || loading"
         @click="goPage(page + 1)"
       >
         <Icon name="chevright" :size="14" />
       </button>
       <button
-        class="ms-page-btn"
+        class="ms-page-btn steer-glass"
         :disabled="page >= totalPages || loading"
         @click="goPage(totalPages)"
       >Last</button>
@@ -88,7 +83,7 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -106,7 +101,7 @@ const PAGE_SIZE = 1000
 
 const route = useRoute()
 const router = useRouter()
-const { play, queue, currentTrack } = usePlayer()
+const { play, queue, currentTrack } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
@@ -169,8 +164,8 @@ const page = computed({
 const offset = computed(() => (page.value - 1) * PAGE_SIZE)
 
 const songsQuery = useQuery({
-  queryKey: ['music', 'songs', offset],
-  queryFn: async () => {
+  key: () => ['music', 'songs', offset.value],
+  query: async () => {
     const res = await $heya('/api/music/tracks', {
       query: { limit: PAGE_SIZE, offset: offset.value },
     }) as unknown as PageBody
@@ -179,6 +174,7 @@ const songsQuery = useQuery({
   staleTime: 1000 * 30,
   placeholderData: (prev) => prev,
 })
+await waitForQuery(songsQuery)
 
 const rows = computed<TrackRow[]>(() => songsQuery.data.value?.items ?? [])
 
@@ -211,7 +207,7 @@ watch(rows, async (list) => {
 }, { immediate: true })
 const total = computed(() => songsQuery.data.value?.total ?? 0)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
-const loading = computed(() => songsQuery.isFetching.value)
+const loading = computed(() => songsQuery.isLoading.value)
 
 const activeTrackId = computed(() => currentTrack.value?.id ?? null)
 
@@ -257,34 +253,20 @@ async function playFrom(startIdx: number) {
 <style scoped>
 .ms-songs { max-width: 1400px; }
 
-.ms-songs-head {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
-  margin-bottom: 24px;
-}
-.ms-songs-title { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-songs-meta {
-  margin-top: 4px;
-  color: var(--fg-3); font-size: 12px;
-  font-family: var(--font-mono); letter-spacing: 0.04em;
-  display: flex; align-items: center; gap: 8px;
-}
-.ms-songs-meta .dot { opacity: 0.4; }
-.ms-songs-actions { display: flex; gap: 8px; align-items: center; }
+.dot { opacity: 0.4; }
 
+/* Layout only — the glass coat comes from the shared .steer-glass class. */
 .ms-page-btn {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 8px 12px;
-  background: rgb(var(--ink) / 0.04);
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--fg-1);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
-.ms-page-btn:hover:not(:disabled) { background: rgb(var(--ink) / 0.08); border-color: var(--fg-3); }
-.ms-page-btn:disabled { opacity: 0.35; cursor: default; }
+.ms-page-btn:disabled { opacity: 0.35; cursor: default; background: color-mix(in oklab, var(--bg-2) 82%, transparent); color: var(--fg-1); }
 
 .ms-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
 

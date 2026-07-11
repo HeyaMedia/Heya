@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 const { isPhone } = useViewport()
-const { currentTrack, muted, volume, toggleMute, setVolume } = usePlayer()
+const { currentTrack, muted, volume, toggleMute, setVolume } = usePlayerBindings()
 
 const npOpen = ref(false)
 

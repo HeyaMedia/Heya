@@ -3,8 +3,10 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import type { Library, LibrarySettings } from '~~/shared/types'
 import type { LibraryScanProgress, ScannerEventPayload } from '~/composables/useEventBus'
+import { useQueryCache } from '@pinia/colada'
 
-const { $heya, $queryClient } = useNuxtApp()
+const { $heya } = useNuxtApp()
+const queryCache = useQueryCache()
 const { confirm } = useConfirm()
 const { scanProgress, scannerEvents } = useEventBus()
 
@@ -350,7 +352,7 @@ async function deleteLib(lib: Library) {
     // WS round-trip — the deleted library's media is gone everywhere and the
     // global listener (plugins/cache-invalidation.client.ts) handles other
     // tabs / CLI deletes.
-    $queryClient.invalidateQueries()
+    queryCache.invalidateQueries()
     flash.value = { kind: 'ok', text: 'Library deleted.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Delete failed.' }

@@ -1,9 +1,18 @@
 export default defineNuxtConfig({
   ssr: false,
-  compatibilityDate: '2025-05-19',
+  compatibilityDate: "2025-05-19",
   devtools: { enabled: true },
 
-  modules: ['@nuxtjs/tailwindcss', 'nuxt-open-fetch', 'nuxt-phosphor-icons', '@vueuse/nuxt', '@nuxt/image', '@vite-pwa/nuxt'],
+  modules: [
+    "@pinia/nuxt",
+    "@pinia/colada-nuxt",
+    "@nuxtjs/tailwindcss",
+    "nuxt-open-fetch",
+    "nuxt-phosphor-icons",
+    "@vueuse/nuxt",
+    "@nuxt/image",
+    "@vite-pwa/nuxt",
+  ],
 
   // PWA install support (Wave 4 of docs/responsive-plan.md). Self-hosted app
   // with frequent tagged releases. `generateSW` (the module default) precaches
@@ -27,30 +36,35 @@ export default defineNuxtConfig({
   // the denylist keeps that fallback from ever answering a top-level
   // navigation to an API path (e.g. an image URL opened directly).
   pwa: {
-    registerType: 'prompt',
+    registerType: "prompt",
     // Poll for a new service worker hourly while the app is open; the plugin
     // layers on foreground + boot checks and applies the update when idle.
     client: {
       periodicSyncForUpdates: 3600,
     },
     manifest: {
-      id: '/',
-      name: 'Heya',
-      short_name: 'Heya',
-      description: 'Self-hosted media server for movies, TV, music, and books.',
-      start_url: '/',
-      display: 'standalone',
-      background_color: '#0a0a12',
-      theme_color: '#0a0a12',
+      id: "/",
+      name: "Heya",
+      short_name: "Heya",
+      description: "Self-hosted media server for movies, TV, music, and books.",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#0a0a12",
+      theme_color: "#0a0a12",
       // No `orientation` lock: on foldables the portrait lock stops Chrome
       // from resizing the standalone window across a fold/unfold — the app
       // stays at the folded viewport (~70% height) until fully relaunched.
       // Unlocked, the window resizes live and the responsive breakpoints
       // (useViewport + CSS media queries) react without a restart.
       icons: [
-        { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-        { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
-        { src: '/pwa-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        { src: "/pwa-192x192.png", sizes: "192x192", type: "image/png" },
+        { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png" },
+        {
+          src: "/pwa-maskable-512x512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "maskable",
+        },
       ],
     },
     workbox: {
@@ -60,8 +74,8 @@ export default defineNuxtConfig({
       // + its font, ~3.5 MB) is the subtitle renderer for ASS tracks — only
       // needed when a video with ASS subs actually plays, not part of the
       // shell, so it's excluded from precache and fetched on demand instead.
-      globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-      globIgnores: ['**/akarisub/**'],
+      globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
+      globIgnores: ["**/akarisub/**"],
       // The html glob above never actually matches the SPA shell: Nitro
       // writes index.html AFTER the client build where workbox's glob runs,
       // so without this explicit entry the built sw.js contained NO html in
@@ -71,9 +85,9 @@ export default defineNuxtConfig({
       // build; the shell is tiny and references content-hashed assets, so
       // always-refetch-on-update is the correct behavior anyway.
       additionalManifestEntries: [
-        { url: '/index.html', revision: Date.now().toString(36) },
+        { url: "/index.html", revision: Date.now().toString(36) },
       ],
-      navigateFallback: '/index.html',
+      navigateFallback: "/index.html",
       navigateFallbackDenylist: [/^\/api/],
       // The ONLY `/api/*` requests the SW may intercept: media images. Their
       // URLs are stable but the CONTENT is mutable — album covers especially
@@ -91,10 +105,11 @@ export default defineNuxtConfig({
       // LRU, quota-purge.
       runtimeCaching: [
         {
-          urlPattern: /\/api\/(?:media|person|studio)\/[^/]+\/image|\/api\/music\/artists\/[^/]+\/albums\/[^/]+\/cover/,
-          handler: 'StaleWhileRevalidate',
+          urlPattern:
+            /\/api\/(?:media|person|studio)\/[^/]+\/image|\/api\/music\/artists\/[^/]+\/albums\/[^/]+\/cover/,
+          handler: "StaleWhileRevalidate",
           options: {
-            cacheName: 'heya-images',
+            cacheName: "heya-images",
             expiration: {
               maxEntries: 500,
               maxAgeSeconds: 60 * 60 * 24 * 7,
@@ -115,11 +130,11 @@ export default defineNuxtConfig({
   image: {
     providers: {
       heya: {
-        name: 'heya',
-        provider: '~/providers/heya.ts',
+        name: "heya",
+        provider: "~/providers/heya.ts",
       },
     },
-    provider: 'heya',
+    provider: "heya",
   },
 
   // Typed OpenAPI client. The schema is regenerated by `make gen-api-client`
@@ -129,15 +144,13 @@ export default defineNuxtConfig({
   openFetch: {
     clients: {
       heya: {
-        baseURL: '',
-        schema: './shared/api.openapi.json',
+        baseURL: "",
+        schema: "./shared/api.openapi.json",
       },
     },
   },
 
-  components: [
-    { path: '~/components', pathPrefix: false },
-  ],
+  components: [{ path: "~/components", pathPrefix: false }],
 
   // Vite ships `server.allowedHosts` defaulting to localhost-only, which
   // rejects any request with an external Host header — Tailscale MagicDNS
@@ -149,50 +162,106 @@ export default defineNuxtConfig({
   // Dev-only — embedded SPA in prod never touches Vite.
   vite: {
     server: {
-      allowedHosts: ['.ts.net'],
+      allowedHosts: [".ts.net"],
+    },
+    build: {
+      // Consolidate CSS into fewer files
+      cssCodeSplit: false,
+      minify: "terser",
+      terserOptions: {
+        compress: {
+          drop_console: process.env.NODE_ENV === "production",
+          drop_debugger: true,
+          pure_funcs: ["console.log", "console.info", "console.debug"],
+        },
+      },
+    },
+    optimizeDeps: {
+      include: [
+        "@vue/devtools-core",
+        "@vue/devtools-kit",
+        "butterchurn", // CJS
+        "butterchurn-presets", // CJS
+        "butterchurn-presets/lib/butterchurnPresetsExtra.min.js", // CJS
+        "butterchurn-presets/lib/butterchurnPresetsExtra2.min.js", // CJS
+        "butterchurn-presets/lib/butterchurnPresetsMD1.min.js", // CJS
+        "hls.js",
+        "reka-ui",
+        "vue-virtual-scroller",
+      ],
     },
   },
 
+  // Nitro
+  nitro: {
+    preset: "bun",
+    minify: true,
+    compressPublicAssets: true,
+    sourceMap: false,
+
+    // Esbuild minification
+    esbuild: {
+      options: {
+        minifySyntax: true,
+        minifyWhitespace: true,
+        minifyIdentifiers: true,
+        treeShaking: true,
+        target: "esnext",
+      },
+    },
+  },
+
+  // Experimental performance features
+  experimental: {
+    renderJsonPayloads: true, // Faster SSR JSON payloads via native JSON.parse
+    writeEarlyHints: false, // No-op on nitro's bun preset (node-only feature)
+    viewTransition: true, // Smooth page transitions via View Transitions API
+    payloadExtraction: false, // Disabled — conflicts with dynamic route caching on disk
+  },
+
   css: [
-    '@fontsource/inter/400.css',
-    '@fontsource/inter/500.css',
-    '@fontsource/inter/600.css',
-    '@fontsource/inter/700.css',
-    '@fontsource/jetbrains-mono/400.css',
-    '@fontsource/jetbrains-mono/500.css',
-    '@fontsource/jetbrains-mono/600.css',
-    '@fontsource/jetbrains-mono/700.css',
-    '~/assets/css/heya.css',
-    '~/assets/css/main.css',
-    '~/assets/css/surface.css',
+    "@fontsource/inter/400.css",
+    "@fontsource/inter/500.css",
+    "@fontsource/inter/600.css",
+    "@fontsource/inter/700.css",
+    "@fontsource/jetbrains-mono/400.css",
+    "@fontsource/jetbrains-mono/500.css",
+    "@fontsource/jetbrains-mono/600.css",
+    "@fontsource/jetbrains-mono/700.css",
+    "~/assets/css/heya.css",
+    "~/assets/css/main.css",
+    "~/assets/css/surface.css",
   ],
 
   runtimeConfig: {
     public: {
-      apiBase: '/api',
+      apiBase: "/api",
     },
   },
 
   app: {
     head: {
-      title: 'Heya',
+      title: "Heya",
       meta: [
-        { charset: 'utf-8' },
-        { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
-        { name: 'theme-color', content: '#0a0a12' },
+        { charset: "utf-8" },
+        {
+          name: "viewport",
+          content: "width=device-width, initial-scale=1, viewport-fit=cover",
+        },
+        { name: "theme-color", content: "#0a0a12" },
       ],
       link: [
-        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
         // @vite-pwa/nuxt (unlike plain vite-plugin-pwa in a non-Nuxt app)
         // does NOT inject <link rel="manifest"> itself — Nuxt owns its own
         // head/document rendering instead of the raw index.html Vite
         // normally transforms, and this module's setup never touches
         // `app.head` (verified against its source — no head/link/meta
         // manipulation at all). Both this and apple-touch-icon are manual.
-        { rel: 'manifest', href: '/manifest.webmanifest' },
+        { rel: "manifest", href: "/manifest.webmanifest" },
         // iOS/iPadOS "Add to Home Screen" reads apple-touch-icon directly —
         // Apple never adopted the Web App Manifest icon list.
-        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+        { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
       ],
       // Inline style so the document is painted in the right theme from
       // byte 0 — before any CSS file loads and before the
@@ -204,26 +273,25 @@ export default defineNuxtConfig({
       style: [
         {
           innerHTML:
-            'html,body{background:#0a0a12;margin:0;color-scheme:dark}' +
-            'html[data-theme=light],html[data-theme=light] body{background:#f1eee7;color-scheme:light}' +
-            'html[data-theme=oled],html[data-theme=oled] body{background:#000}',
+            "html,body{background:#0a0a12;margin:0;color-scheme:dark}" +
+            "html[data-theme=light],html[data-theme=light] body{background:#f1eee7;color-scheme:light}" +
+            "html[data-theme=oled],html[data-theme=oled] body{background:#000}",
         },
       ],
       script: [
         {
           innerHTML:
-            '(function(){try{' +
+            "(function(){try{" +
             'var s=JSON.parse(localStorage.getItem("heya-appearance")||"{}");' +
             'var t=s.theme||"dark";' +
             'if(t==="system"){t=window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}' +
-            'var d=document.documentElement.dataset;' +
+            "var d=document.documentElement.dataset;" +
             'if(t!=="dark")d.theme=t;' +
             'if(s.accent&&s.accent!=="gold")d.accent=s.accent;' +
             'if(s.density&&s.density!=="comfortable")d.density=s.density;' +
-            '}catch(e){}})()',
+            "}catch(e){}})()",
         },
       ],
     },
   },
-
-})
+});

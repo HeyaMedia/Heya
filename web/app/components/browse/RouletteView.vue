@@ -114,7 +114,7 @@
 // "Anything" is the whole library. Filters narrow either. A slot reel of
 // your own posters decelerates onto the pick; its backdrop takes over the
 // page background on settle.
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 import type { ImageTone } from '~/composables/useImageTone'
 
 interface EnrichedMovie {
@@ -134,8 +134,8 @@ type RouletteEntry = EnrichedMovie & { reason?: string }
 const { $heya } = useNuxtApp()
 
 const moviesQuery = useQuery({
-  queryKey: ['media', 'enriched', 'movie'],
-  queryFn: async () => {
+  key: ['media', 'enriched', 'movie'],
+  query: async () => {
     const body = await $heya('/api/media/enriched', { query: { type: 'movie', limit: 2000 } }) as { movies?: EnrichedMovie[] }
     return (body.movies ?? []).filter(m => m.available !== false)
   },
@@ -147,8 +147,8 @@ const moviesQuery = useQuery({
 // so genre/runtime filters work on this pool too.
 interface RecItem { id: number; reason?: string; available: boolean }
 const recsQuery = useQuery({
-  queryKey: ['for-you-roulette'],
-  queryFn: async () => (await $heya('/api/me/recommendations', {
+  key: ['for-you-roulette'],
+  query: async () => (await $heya('/api/me/recommendations', {
     query: { type: 'movie', limit: 60 },
   })) as { items: RecItem[]; has_signal: boolean },
   staleTime: 1000 * 60 * 5,

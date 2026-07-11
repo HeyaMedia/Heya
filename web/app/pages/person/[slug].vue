@@ -297,17 +297,21 @@
 
 <script setup lang="ts">
 import type { PersonResponse } from '~~/shared/types'
+import { useQuery } from '@pinia/colada'
+import { personDetailQuery } from '~/queries/discovery'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
 const lightbox = useLightbox()
 
-const data = ref<PersonResponse | null>(null)
+const detailQuery = useQuery(() => personDetailQuery(slug.value))
+await waitForQuery(detailQuery)
+const data = computed<PersonResponse | null>(() => detailQuery.data.value ?? null)
 // Hero portrait falls back to the initials placeholder if /api/person/{id}/image
 // genuinely can't be resolved (dead upstream URL). Reset per person.
 const heroImgError = ref(false)
 watch(() => data.value?.person?.id, () => { heroImgError.value = false })
-const loading = ref(true)
+const loading = computed(() => detailQuery.isPending.value)
 const activeFilter = ref('all')
 const bioExpanded = ref(false)
 const selectedBioLang = ref('en')
@@ -707,15 +711,6 @@ const activeFilterOptions = computed(() =>
   scope.value === 'library' ? filterOptions.value : knownForFilterOptions.value,
 )
 
-onMounted(async () => {
-  try {
-    const { $heya } = useNuxtApp()
-    data.value = await $heya('/api/person/{id}', { path: { id: slug.value } }) as PersonResponse
-  } catch { /* empty */ }
-  loading.value = false
-  // Backdrop seeding is reactive (the backdropPool watcher above) — photos
-  // first, upgrading to credit backdrops when the probe pass resolves.
-})
 </script>
 
 <style scoped>

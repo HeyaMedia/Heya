@@ -31,7 +31,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ reroll: [] }>()
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const playlistsApi = usePlaylists()
 const saveError = ref<string | null>(null)
 

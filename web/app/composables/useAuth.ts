@@ -7,6 +7,7 @@
 // handler — and a wrong-password login is a 401 we want to surface, not a
 // forced logout. Easier to keep these two on plain $fetch.
 import type { User, AuthResponse } from '~~/shared/types'
+import { useQueryCache } from '@pinia/colada'
 
 const TOKEN_KEY = 'heya_token'
 
@@ -72,13 +73,18 @@ export function useAuth() {
   }
 
   function logout() {
+    const nuxtApp = useNuxtApp()
     if (token.value) {
-      const { $heya } = useNuxtApp()
-      $heya('/api/auth/logout', { method: 'POST' }).catch(() => {})
+      nuxtApp.$heya('/api/auth/logout', { method: 'POST' }).catch(() => {})
     }
     token.value = null
     user.value = null
     localStorage.removeItem(TOKEN_KEY)
+    // Query data is user-scoped. Remove it rather than merely invalidating it
+    // so another account signing in within the same SPA session can never see
+    // the previous user's warm cache (also required before disk persistence).
+    const queryCache = useQueryCache(nuxtApp.$pinia)
+    queryCache.getEntries().forEach(entry => queryCache.remove(entry))
     navigateTo('/login')
   }
 

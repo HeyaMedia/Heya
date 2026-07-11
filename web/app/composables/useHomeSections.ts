@@ -1,9 +1,10 @@
 // Home page composition — per-user section visibility + order, persisted in
 // /api/me/settings (settings.home.sections). Shares the ['me','settings']
-// vue-query key with pages/index.vue's pinned-hero query, so edits in
+// Pinia Colada key with pages/index.vue's pinned-hero query, so edits in
 // Settings → Appearance reflect on Home through cache invalidation with no
 // extra plumbing.
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { meSettingsQuery } from '~/queries/user'
 
 export interface HomeSectionDef {
   id: string
@@ -61,16 +62,12 @@ export function resolveSections(prefs?: HomeSectionPref[]) {
 
 export function useHomeSections() {
   const { $heya } = useNuxtApp()
-  const queryClient = useQueryClient()
+  const queryClient = useQueryCache()
 
-  const settingsQuery = useQuery({
-    queryKey: ['me', 'settings'],
-    queryFn: async () => (await $heya('/api/me/settings')) as MeSettingsBlob,
-    staleTime: 1000 * 60 * 5,
-  })
+  const settingsQuery = useQuery(meSettingsQuery())
 
   const sections = computed(() =>
-    resolveSections(settingsQuery.data.value?.home?.sections),
+    resolveSections(settingsQuery.data.value?.home?.sections as HomeSectionPref[] | undefined),
   )
 
   const isVisible = (id: string) => !sections.value.find((s) => s.id === id)?.hidden
@@ -82,7 +79,7 @@ export function useHomeSections() {
   async function persist(next: HomeSectionPref[]) {
     // Cancel any in-flight refetch so it can't overwrite the optimistic
     // cache with pre-PUT server state mid-sequence.
-    await queryClient.cancelQueries({ queryKey: ['me', 'settings'] })
+    await queryClient.cancelQueries({ key: ['me', 'settings'] })
     const current =
       (queryClient.getQueryData(['me', 'settings']) as MeSettingsBlob | undefined) ?? {}
     const body: MeSettingsBlob = { ...current, home: { ...current.home, sections: next } }
@@ -103,7 +100,7 @@ export function useHomeSections() {
         await $heya('/api/me/settings', { method: 'PUT', body: body as never })
       } catch {
         if (seq === saveSeq) {
-          await queryClient.invalidateQueries({ queryKey: ['me', 'settings'] })
+          await queryClient.invalidateQueries({ key: ['me', 'settings'] })
         }
       }
     })

@@ -4,8 +4,7 @@
       <NuxtLink to="/music/radio" class="rc-back">
         <Icon name="chevleft" :size="14" /> Radio
       </NuxtLink>
-      <h1 class="rc-title">Browse by Country</h1>
-      <p class="rc-sub">Pick a country to see its highest-voted stations.</p>
+      <MusicPageHead title="Browse by Country" subtitle="Pick a country to see its highest-voted stations." />
     </header>
 
     <!-- Drilldown view: stations for the selected country. -->
@@ -41,7 +40,7 @@
         <button
           v-for="c in countries"
           :key="c.iso_3166_1"
-          class="rc-country-tile"
+          class="rc-country-tile steer-glass"
           @click="selectCountry(c)"
         >
           <span class="rc-flag">{{ flag(c.iso_3166_1) }}</span>
@@ -55,7 +54,7 @@
 
 <script setup lang="ts">
 import type { RadioStationView } from '~/composables/useRadio'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -69,10 +68,11 @@ if (import.meta.client) radio.ensureFavoritesLoaded()
 const { $heya } = useNuxtApp()
 
 const countriesQuery = useQuery({
-  queryKey: ['radio', 'countries'],
-  queryFn: async () => ((await $heya('/api/radio/countries')) as { items: CountryRow[] }).items ?? [],
+  key: ['radio', 'countries'],
+  query: async () => ((await $heya('/api/radio/countries')) as { items: CountryRow[] }).items ?? [],
   staleTime: 1000 * 60 * 60, // 1h — country list doesn't change often
 })
+await waitForQuery(countriesQuery)
 const countries = computed<CountryRow[]>(() => countriesQuery.data.value ?? [])
 
 // URL `?code=` drives the selection (and thus the stations query). Sharing
@@ -82,13 +82,13 @@ const selectedName = computed(() => countries.value.find((c) => c.iso_3166_1 ===
 const selectedFlag = computed(() => flag(selectedCode.value))
 
 const stationsQuery = useQuery({
-  queryKey: ['radio', 'search', { countrycode: selectedCode }],
-  queryFn: async () => ((await $heya('/api/radio/search', { query: { countrycode: selectedCode.value, limit: 50 } })) as { items: RadioStationView[] }).items ?? [],
+  key: () => ['radio', 'search', { countrycode: selectedCode.value }],
+  query: async () => ((await $heya('/api/radio/search', { query: { countrycode: selectedCode.value, limit: 50 } })) as { items: RadioStationView[] }).items ?? [],
   enabled: () => selectedCode.value.length > 0,
   staleTime: 1000 * 60 * 5,
 })
 const stations = computed<RadioStationView[]>(() => stationsQuery.data.value ?? [])
-const stationsLoading = computed(() => stationsQuery.isFetching.value)
+const stationsLoading = computed(() => stationsQuery.isLoading.value)
 
 async function selectCountry(c: CountryRow) {
   router.replace({ query: { code: c.iso_3166_1 } })
@@ -110,7 +110,7 @@ function flag(code: string) {
     .join('')
 }
 
-// vue-query auto-fires when selectedCode is non-empty — no manual onMounted.
+// Pinia Colada auto-fires when selectedCode is non-empty — no manual onMounted.
 </script>
 
 <style scoped>
@@ -118,8 +118,6 @@ function flag(code: string) {
 .rc-head { margin-bottom: 24px; }
 .rc-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .rc-back:hover { color: var(--gold); }
-.rc-title { font-size: 28px; font-weight: 700; margin-top: 6px; letter-spacing: -0.01em; }
-.rc-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
 
 .rc-country-grid {
   display: grid;
@@ -131,8 +129,6 @@ function flag(code: string) {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   text-align: left;
   cursor: pointer;
@@ -142,7 +138,6 @@ function flag(code: string) {
 }
 .rc-country-tile:hover {
   border-color: color-mix(in srgb, var(--gold) 30%, transparent);
-  background: color-mix(in srgb, var(--gold) 4%, transparent);
 }
 .rc-flag { font-size: 20px; flex-shrink: 0; line-height: 1; }
 .rc-country-name { flex: 1; min-width: 0; font-size: 13px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

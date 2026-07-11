@@ -24,13 +24,15 @@
 // need to claim when the default is wrong.
 
 import type { ImageTone } from './useImageTone'
+import { storeToRefs } from 'pinia'
+import { useBackgroundStore } from '~/stores/background'
 
 export type BackgroundClaim =
   | { kind: 'art'; url: string }
   | { kind: 'pool'; types: string[] }
 
 export function useBackgroundStack() {
-  return useState<BackgroundClaim[]>('background_claims', () => [])
+  return storeToRefs(useBackgroundStore()).claims
 }
 
 /** The winning claim — what AmbientBackdrop actually shows. */
@@ -44,7 +46,7 @@ export function useBackgroundClaim() {
  *  crossfade; null while ambient is off. Sampled once app-wide — consumers
  *  just read. */
 export function useBackgroundTone() {
-  return useState<ImageTone | null>('background_tone', () => null)
+  return storeToRefs(useBackgroundStore()).tone
 }
 
 /** Ready-made artwork-adaptive button style: the current background's
@@ -87,15 +89,7 @@ export interface BackgroundControls {
 }
 
 export function useBackgroundControls() {
-  return useState<BackgroundControls>('background_controls', () => ({
-    mode: 'off',
-    rotating: false,
-    cycle: 0,
-    paused: false,
-    shuffleReq: 0,
-    reveal: false,
-    current: null,
-  }))
+  return storeToRefs(useBackgroundStore()).controls
 }
 
 /** Component-scoped owner handle. Repeated set()/pool() calls replace this

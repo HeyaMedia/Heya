@@ -18,9 +18,9 @@
              so it isn't masked; it anchors to the position:relative .card-tile. -->
         <Poster :idx="a.id" :src="artistPosterUrl(a)" aspect="1/1" style="border-radius: 50%" :class="{ 'poster--missing': a.available === false }" />
         <MediaMissingBadge v-if="a.available === false" />
-        <div style="margin-top: 10px">
-          <div style="font-size: 13px; font-weight: 500">{{ a.name }}</div>
-          <div style="font-size: 11px; color: var(--fg-3); font-family: var(--font-mono)">{{ a.album_count }} / {{ a.track_count }}</div>
+        <div class="art-meta">
+          <div class="art-name">{{ a.name }}</div>
+          <div class="art-count">{{ a.album_count }} / {{ a.track_count }}</div>
         </div>
       </NuxtLink>
       </AppContextMenu>
@@ -29,18 +29,15 @@
 </template>
 
 <script setup lang="ts">
-import type { MusicArtistRow, MusicListPage } from '~~/shared/types'
-import { useQuery } from '@tanstack/vue-query'
+import type { MusicArtistRow } from '~~/shared/types'
+import { useQuery } from '@pinia/colada'
+import { musicArtistsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
-const { $heya } = useNuxtApp()
 const actions = useMusicActions()
-const artistsQuery = useQuery({
-  queryKey: ['music', 'artists', 'list', { limit: 500 }],
-  queryFn: async () => (await $heya('/api/music/artists', { query: { limit: 500 } })) as unknown as MusicListPage<MusicArtistRow>,
-  staleTime: 1000 * 60,
-})
+const artistsQuery = useQuery(musicArtistsQuery())
+await waitForQuery(artistsQuery)
 const pending = computed(() => artistsQuery.isPending.value)
 const rows = computed(() => artistsQuery.data.value?.items ?? [])
 
@@ -51,8 +48,21 @@ const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl({ id: a.media_item_i
 </script>
 
 <style scoped>
-.m-h2 { font-size: 24px; font-weight: 600; margin-bottom: 20px; }
+.m-h2 { font-size: 24px; font-weight: 600; margin-bottom: 20px; text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
 .m-loading, .m-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
+.art-meta { margin-top: 10px; }
+.art-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-0);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.art-count {
+  font-size: 11px;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
 /* Was inline-style grid-template-columns — moved to a scoped class so the
    phone override below can win (media queries can't beat an inline style). */
 .m-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }

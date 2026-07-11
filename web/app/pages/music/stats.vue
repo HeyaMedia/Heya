@@ -1,10 +1,14 @@
 <template>
   <div class="page-pad ys-page">
-    <h1 class="ys-title">Your Sound</h1>
-    <p class="ys-sub">
-      A picture of your listening, derived by joining every scrobble against the sonic-analysis facets.
-      <span v-if="stats">Based on {{ stats.total_plays.toLocaleString() }} {{ stats.total_plays === 1 ? 'play' : 'plays' }}.</span>
-    </p>
+    <MusicPageHead title="Your Sound">
+      <template #subtitle>
+        <span>A picture of your listening, derived by joining every scrobble against the sonic-analysis facets.</span>
+        <template v-if="stats">
+          <span class="dot">·</span>
+          <span>Based on {{ stats.total_plays.toLocaleString() }} {{ stats.total_plays === 1 ? 'play' : 'plays' }}.</span>
+        </template>
+      </template>
+    </MusicPageHead>
 
     <div v-if="loading" class="m-loading">Loading…</div>
 
@@ -69,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -82,10 +86,11 @@ interface ListeningStats {
 
 const { $heya } = useNuxtApp()
 const statsQuery = useQuery({
-  queryKey: ['me', 'listening-stats'],
-  queryFn: async () => (await $heya('/api/me/listening-stats')) as ListeningStats,
+  key: ['me', 'listening-stats'],
+  query: async () => (await $heya('/api/me/listening-stats')) as ListeningStats,
   staleTime: 1000 * 60,
 })
+await waitForQuery(statsQuery)
 const stats = computed<ListeningStats | null>(() => statsQuery.data.value ?? null)
 const loading = computed(() => statsQuery.isPending.value)
 
@@ -124,8 +129,7 @@ function tempoLabel(band: string) {
 
 <style scoped>
 .ys-page { padding-bottom: 80px; max-width: 1100px; }
-.ys-title { font-size: 30px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; }
-.ys-sub { color: var(--fg-3); font-size: 13px; margin-bottom: 32px; max-width: 700px; }
+.dot { opacity: 0.4; }
 .m-loading { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
 
 .ys-empty {
@@ -244,7 +248,7 @@ function tempoLabel(band: string) {
      exact same label with no extra information, so it's redundant weight at
      the top of a short screen. The live-data sub line right below it (play
      count) carries real info and stays. */
-  .ys-title { display: none; }
+  :deep(.mhd-title) { display: none; }
 
   .ys-card { padding: 14px 16px 18px; }
   .ys-bar-row { grid-template-columns: 88px 1fr 40px; gap: 8px; }

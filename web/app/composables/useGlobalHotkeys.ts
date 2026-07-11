@@ -22,7 +22,7 @@ function isActivatable(el: Element | null): boolean {
 }
 
 export function useGlobalHotkeys() {
-  const player = usePlayer()
+  const player = usePlayerBindings()
   const vis = useVisualizer()
   // Shared with the HotkeyHelp modal mounted in the music shell.
   const helpOpen = useState('music_hotkey_help_open', () => false)

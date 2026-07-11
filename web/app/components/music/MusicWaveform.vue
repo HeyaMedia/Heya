@@ -43,9 +43,14 @@ const props = withDefaults(defineProps<{
   ariaLabel?: string
   /** Overrides the aria-valuetext announcement (e.g. "1:23 of 3:45"). */
   valueText?: string | null
+  /** Played-bar color override (the playbar's tone-follow accent). Canvas
+   *  paint can't resolve a CSS var transition, so the owner passes the
+   *  resolved color; null falls back to the theme accent. */
+  accent?: string | null
 }>(), {
   ariaLabel: 'Seek',
   valueText: null,
+  accent: null,
 })
 
 const emit = defineEmits<{
@@ -135,7 +140,7 @@ function draw() {
   ctx.clearRect(0, 0, c.width, c.height)
 
   const baseColor = getCssVar('--fg-3', '#666')
-  const fillColor = getCssVar('--gold', '#d4af37')
+  const fillColor = props.accent || getCssVar('--gold', '#d4af37')
 
   const peaks = props.peaks ?? []
   if (peaks.length === 0) {
@@ -171,7 +176,7 @@ function draw() {
 onMounted(draw)
 useResizeObserver(wrap, () => draw())
 
-watch(() => [props.peaks, props.progress], () => draw(), { flush: 'post' })
+watch(() => [props.peaks, props.progress, props.accent], () => draw(), { flush: 'post' })
 
 // getCssVar() above already re-reads getComputedStyle on every draw() call —
 // there's no color cache to invalidate here. The missing piece is a repaint

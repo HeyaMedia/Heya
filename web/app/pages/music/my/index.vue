@@ -1,10 +1,6 @@
 <template>
   <div class="ms-my page-pad">
-    <header class="ms-my-head">
-      <div>
-        <h1 class="ms-my-title">My Music</h1>
-        <div class="ms-my-sub">Everything you've saved, loved, or built.</div>
-      </div>
+    <MusicPageHead title="My Music" subtitle="Everything you've saved, loved, or built.">
       <div class="ms-stat-row">
         <NuxtLink to="/music/my/artists" class="ms-stat">
           <div class="ms-stat-num">{{ lovedArtistsCount.toLocaleString() }}</div>
@@ -23,7 +19,7 @@
           <div class="ms-stat-lbl">My Sound</div>
         </NuxtLink>
       </div>
-    </header>
+    </MusicPageHead>
 
     <!-- My Playlists -->
     <MusicScrollRow
@@ -147,15 +143,17 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { musicAlbumDetailQuery, userPlaylistsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 // Right-click on desktop, long-press on touch — the card shelves' only
 // play/queue path on coarse pointers (hover-play is hidden there).
 const actions = useMusicActions()
+const loadQuery = useQueryLoader()
 
 interface PlaylistRow {
   id: number
@@ -197,30 +195,32 @@ interface LovedAlbumRow {
 interface ListBody<T> { items: T[]; total: number }
 
 // All four feeds in parallel; counts come from the `total` field of each.
-const playlistsQuery = useQuery({
-  queryKey: ['me', 'playlists'],
-  queryFn: async () => (await $heya('/api/me/playlists')) as unknown as { items: PlaylistRow[] },
-  staleTime: 1000 * 30,
-})
+const playlistsQuery = useQuery(userPlaylistsQuery())
 // Loved Songs is now driven by the rating system — any track rated 1★+
 // counts. Keeps the "playlist of stuff you like" feel without requiring the
 // user to pick between two parallel love/rate mechanisms.
 interface RatedTrackRow extends LovedTrackRow { rating: number }
 const lovedTracksQuery = useQuery({
-  queryKey: ['me', 'ratings', 'tracks', 'shelf'],
-  queryFn: async () => (await $heya('/api/me/ratings/tracks', { query: { min_rating: 1, limit: 8 } })) as unknown as ListBody<RatedTrackRow>,
+  key: ['me', 'ratings', 'tracks', 'shelf'],
+  query: async () => (await $heya('/api/me/ratings/tracks', { query: { min_rating: 1, limit: 8 } })) as unknown as ListBody<RatedTrackRow>,
   staleTime: 1000 * 30,
 })
 const lovedArtistsQuery = useQuery({
-  queryKey: ['me', 'loved', 'artists', 'shelf'],
-  queryFn: async () => (await $heya('/api/me/ratings/artists', { query: { min_rating: 1, limit: 12 } })) as unknown as ListBody<LovedArtistRow>,
+  key: ['me', 'loved', 'artists', 'shelf'],
+  query: async () => (await $heya('/api/me/ratings/artists', { query: { min_rating: 1, limit: 12 } })) as unknown as ListBody<LovedArtistRow>,
   staleTime: 1000 * 30,
 })
 const lovedAlbumsQuery = useQuery({
-  queryKey: ['me', 'loved', 'albums', 'shelf'],
-  queryFn: async () => (await $heya('/api/me/ratings/albums', { query: { min_rating: 1, limit: 12 } })) as unknown as ListBody<LovedAlbumRow>,
+  key: ['me', 'loved', 'albums', 'shelf'],
+  query: async () => (await $heya('/api/me/ratings/albums', { query: { min_rating: 1, limit: 12 } })) as unknown as ListBody<LovedAlbumRow>,
   staleTime: 1000 * 30,
 })
+await Promise.all([
+  waitForQuery(playlistsQuery),
+  waitForQuery(lovedTracksQuery),
+  waitForQuery(lovedArtistsQuery),
+  waitForQuery(lovedAlbumsQuery),
+])
 
 const playlists = computed(() => playlistsQuery.data.value?.items ?? [])
 const lovedTracks = computed(() => lovedTracksQuery.data.value?.items ?? [])
@@ -240,9 +240,7 @@ const isLoading = computed(() =>
 
 async function playLovedAlbum(al: LovedAlbumRow) {
   try {
-    const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
-      path: { artist_slug: al.artist_slug, album_slug: al.slug },
-    }) as unknown as { tracks: { id: number; title: string; duration: number; files?: unknown[] }[] }
+    const detail = await loadQuery(musicAlbumDetailQuery({ artistSlug: al.artist_slug, albumSlug: al.slug }))
     const playable = (detail.tracks ?? []).filter((t) => (t.files?.length ?? 0) > 0)
     if (!playable.length) return
     const built: Track[] = playable.map((t) => ({
@@ -288,28 +286,21 @@ async function playLovedTracks(startIdx: number) {
 <style scoped>
 .ms-my { max-width: 1400px; }
 
-.ms-my-head {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
-  margin-bottom: 32px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--border);
-}
-.ms-my-title { font-size: 32px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-my-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
-
 .ms-stat-row { display: flex; gap: 8px; }
 .ms-stat {
   min-width: 100px;
   padding: 12px 20px;
-  background: rgb(var(--ink) / 0.03);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   border-radius: var(--r-md);
   text-decoration: none;
   text-align: center;
   transition: all 0.15s;
 }
 .ms-stat:hover {
-  background: rgb(var(--ink) / 0.06);
   border-color: var(--gold-soft);
   transform: translateY(-2px);
 }
@@ -416,10 +407,9 @@ async function playLovedTracks(startIdx: number) {
 .ms-empty p { font-size: 13px; line-height: 1.6; max-width: 400px; margin: 0 auto; }
 
 @media (max-width: 720px) {
-  .ms-my-head { flex-direction: column; align-items: stretch; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; }
   /* music.vue's phone section header already reads "My Music" directly
      above this page — the sub line stays, it's not duplicated elsewhere. */
-  .ms-my-title { display: none; }
+  :deep(.mhd-title) { display: none; }
   .ms-stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .ms-stat { min-width: 0; padding: 12px 8px; }
 

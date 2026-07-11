@@ -1,18 +1,18 @@
-import { useQueryClient } from '@tanstack/vue-query'
-import type { QueryKey } from '@tanstack/vue-query'
+import { useQueryCache } from '@pinia/colada'
+import type { EntryKey } from '@pinia/colada'
 import type { MediaPayload, WsEvent } from './useEventBus'
 
 export interface LiveRefreshGroup {
   /** WS event-type strings (e.g. 'media.added', 'media.updated') that feed this group. */
   events: string[]
   /**
-   * vue-query keys to invalidate when this group fires. Uses vue-query's
+   * Pinia Colada keys to invalidate when this group fires. Uses prefix
    * default prefix matching, so a partial key like ['media', 'recent',
    * 'movie'] invalidates every query whose key starts with that prefix.
    */
-  keys?: QueryKey[]
+  keys?: EntryKey[]
   /**
-   * Escape hatch for pages that don't keep their data behind a vue-query
+   * Escape hatch for pages that don't keep their data behind a Pinia Colada
    * cache — movies/index.vue and tv/index.vue populate a plain ref from an
    * onMounted() fetch, so there's no query key to invalidate. Called
    * instead of, or alongside, invalidating `keys`.
@@ -30,7 +30,7 @@ const WINDOW_MS = 4000
 
 /**
  * Subscribes to the WS event bus and coalesces matching events into
- * vue-query cache invalidations (and/or a raw `refetch`), so pages stay
+ * query-cache invalidations (and/or a raw `refetch`), so pages stay
  * live as new content is matched/enriched without hammering the API.
  *
  * WHY the coalescing exists: a library scan can match hundreds of files in
@@ -46,8 +46,7 @@ const WINDOW_MS = 4000
  * idle again until the next event. Net effect: at most one invalidation
  * burst per ~4s per group, however many events land in that window.
  *
- * `refetchType: 'active'` on every invalidateQueries call is the other
- * half: only queries with a mounted observer actually refetch. A cached
+ * Pinia Colada only refetches active entries on invalidation. A cached
  * query for a page you're not currently on is marked stale and refetches
  * lazily next time something reads it, instead of firing in the
  * background for no visible benefit.
@@ -57,7 +56,7 @@ const WINDOW_MS = 4000
  */
 export function useLiveRefresh(groups: LiveRefreshGroup[]) {
   const { on } = useEventBus()
-  const queryClient = useQueryClient()
+  const queryClient = useQueryCache()
   const cleanups: Array<() => void> = []
 
   for (const group of groups) {
@@ -66,7 +65,7 @@ export function useLiveRefresh(groups: LiveRefreshGroup[]) {
 
     const fire = () => {
       for (const key of group.keys ?? []) {
-        queryClient.invalidateQueries({ queryKey: key, refetchType: 'active' })
+        queryClient.invalidateQueries({ key })
       }
       group.refetch?.()
     }

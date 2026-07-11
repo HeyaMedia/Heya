@@ -1,6 +1,6 @@
 <template>
   <div class="page-pad">
-    <h2 class="m-h2">My Artists</h2>
+    <MusicPageHead title="My Artists" />
     <div v-if="pending" class="m-loading">Loading…</div>
     <div v-else-if="!rows.length" class="m-empty">
       No rated artists yet — rate an artist from their page to add them here.
@@ -17,9 +17,9 @@
         style="text-align: center; text-decoration: none; color: inherit"
       >
         <Poster :idx="a.id" :src="artistPosterUrl(a)" aspect="1/1" style="border-radius: 50%" />
-        <div style="margin-top: 10px">
-          <div style="font-size: 13px; font-weight: 500">{{ a.name }}</div>
-          <div style="font-size: 11px; color: var(--fg-3); font-family: var(--font-mono)">{{ a.album_count }} / {{ a.track_count }}</div>
+        <div class="art-meta">
+          <div class="art-name">{{ a.name }}</div>
+          <div class="art-count">{{ a.album_count }} / {{ a.track_count }}</div>
         </div>
       </NuxtLink>
       </AppContextMenu>
@@ -29,7 +29,7 @@
 
 <script setup lang="ts">
 import type { MusicArtistRow, MusicListPage } from '~~/shared/types'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -38,10 +38,11 @@ interface LovedArtistRow extends MusicArtistRow { loved_at: string }
 const { $heya } = useNuxtApp()
 const actions = useMusicActions()
 const myArtistsQuery = useQuery({
-  queryKey: ['me', 'loved', 'artists', { limit: 500 }],
-  queryFn: async () => (await $heya('/api/me/ratings/artists', { query: { min_rating: 1, limit: 500 } })) as unknown as MusicListPage<LovedArtistRow>,
+  key: ['me', 'loved', 'artists', { limit: 500 }],
+  query: async () => (await $heya('/api/me/ratings/artists', { query: { min_rating: 1, limit: 500 } })) as unknown as MusicListPage<LovedArtistRow>,
   staleTime: 1000 * 30,
 })
+await waitForQuery(myArtistsQuery)
 const pending = computed(() => myArtistsQuery.isPending.value)
 const rows = computed(() => myArtistsQuery.data.value?.items ?? [])
 
@@ -51,8 +52,21 @@ const artistPosterUrl = (a: MusicArtistRow) => usePosterUrl({ id: a.media_item_i
 </script>
 
 <style scoped>
-.m-h2 { font-size: 24px; font-weight: 600; margin-bottom: 20px; }
 .m-loading, .m-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; max-width: 480px; }
+/* Same washout fix as artists.vue: name/count sit over the ambient pool. */
+.art-meta { margin-top: 10px; }
+.art-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-0);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.art-count {
+  font-size: 11px;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
 /* Was inline-style grid-template-columns — moved to a scoped class so the
    phone override below can win (media queries can't beat an inline style). */
 .m-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }

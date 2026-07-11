@@ -4,7 +4,8 @@ import type { MusicAlbumDetail, TrackFile, TrackView } from '~~/shared/types'
 // MP3 fallback) and routes the player through the bit-perfect endpoint.
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { musicAlbumDetailQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
@@ -14,7 +15,7 @@ const route = useRoute()
 const artistSlug = computed(() => route.params.slug as string)
 const albumSlug = computed(() => route.params.album as string)
 
-const { play, queue, currentTrack, playing, formatTime } = usePlayer()
+const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 
 const albumRatings = useRatings('album')
 async function onRateAlbum(id: number, v: number) {
@@ -29,14 +30,9 @@ async function onRate(trackId: number, v: number) {
 }
 
 const { $heya } = useNuxtApp()
-const queryClient = useQueryClient()
-const detailQuery = useQuery({
-  queryKey: ['music', 'album', artistSlug, albumSlug],
-  queryFn: async () => (await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
-    path: { artist_slug: artistSlug.value, album_slug: albumSlug.value },
-  })) as MusicAlbumDetail,
-  staleTime: 1000 * 60 * 5,
-})
+const queryClient = useQueryCache()
+const detailQuery = useQuery(() => musicAlbumDetailQuery({ artistSlug: artistSlug.value, albumSlug: albumSlug.value }))
+await waitForQuery(detailQuery)
 const detail = computed<MusicAlbumDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
 
@@ -49,7 +45,7 @@ watch(() => detail.value?.tracks ?? [], async (list) => {
 
 // Refresh on media.updated for this album's parent artist (album loudness
 // finishing also goes through media.updated with the artist's media_item_id).
-// Server-side refetch via queryClient.invalidateQueries so vue-query handles
+// Server-side refetch via queryClient.invalidateQueries so Pinia Colada handles
 // the request semantics + caches the new result.
 if (import.meta.client) {
   const bus = useEventBus()
@@ -57,7 +53,7 @@ if (import.meta.client) {
   const off = bus.on('media.updated', (e) => {
     const payload = e.payload as { media_item_id?: number } | undefined
     if (payload && detail.value && payload.media_item_id === detail.value.media_item_id) {
-      queryClient.invalidateQueries({ queryKey: ['music', 'album', artistSlug.value, albumSlug.value] })
+      queryClient.invalidateQueries({ key: ['music', 'album', artistSlug.value, albumSlug.value] })
     }
   })
   onBeforeUnmount(() => { off() })
@@ -69,7 +65,7 @@ const showAlbumEdit = ref(false)
 const showAlbumIdentify = ref(false)
 
 function invalidateAlbum() {
-  queryClient.invalidateQueries({ queryKey: ['music', 'album', artistSlug.value, albumSlug.value] })
+  queryClient.invalidateQueries({ key: ['music', 'album', artistSlug.value, albumSlug.value] })
 }
 
 function onAlbumSaved() {
@@ -142,6 +138,19 @@ const background = useBackground()
 watch([coverUrl, ambientEnabled], ([url, on]) => {
   if (on && url) background.set(url)
   else background.clear()
+}, { immediate: true })
+
+// Tone-adaptive Play — sampled from the cover, same as the other detail
+// heroes. Sequence-guarded against slow samples racing a route change.
+const heroToneStyle = ref<Record<string, string> | undefined>()
+let heroToneSeq = 0
+watch(coverUrl, (src) => {
+  const seq = ++heroToneSeq
+  if (!src) { heroToneStyle.value = undefined; return }
+  sampleImageTone(src).then((t) => {
+    if (seq !== heroToneSeq) return
+    heroToneStyle.value = t ? { background: t.main, color: t.ink } : undefined
+  })
 }, { immediate: true })
 
 function trackToPlayable(t: TrackView): Track {
@@ -322,7 +331,7 @@ function playFromIndex(i: number) {
       <!-- Floating round actions -->
       <div class="hero-floating-actions">
         <span v-if="!albumPlayable" class="hero-missing"><Icon name="trash" :size="13" /> Missing on disk</span>
-        <button class="hero-round hero-round-primary" :disabled="!albumPlayable" @click="playAll(false)" title="Play">
+        <button class="hero-round hero-round-primary" :style="heroToneStyle" :disabled="!albumPlayable" @click="playAll(false)" title="Play">
           <Icon name="play" :size="22" />
         </button>
         <button class="hero-round" :disabled="!albumPlayable" @click="playAll(true)" title="Shuffle">
@@ -529,13 +538,52 @@ function playFromIndex(i: number) {
 .hero-round-primary {
   width: 64px;
   height: 64px;
+  /* Tone-follow: the inline heroToneStyle paints the cover's sampled
+     palette over this gold fallback; the 0.9s glide covers the swap. */
   background: var(--gold);
   color: var(--bg-0);
   border-color: transparent;
   box-shadow: 0 10px 24px var(--gold-glow);
+  transition: transform 0.1s, filter 0.15s,
+    background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.hero-round-primary:hover { background: var(--gold-bright); }
+/* Brightness pop for hover (works on any sampled tone — the inline tone
+   style outranks hover rules). The background re-assert is for the
+   UN-toned fallback: without it, .hero-round:hover's dark wash (higher
+   specificity than .hero-round-primary) would swallow the gold. */
+.hero-round-primary:hover { background: var(--gold); filter: brightness(1.12); }
 .hero-round:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
+/* Ambient-extended: the hero sits on the theme's ambient wash, not the
+   local dark blur — halo the text (the meta row was near-invisible in
+   light mode) and re-coat the round buttons in theme glass. */
+.hero.ambient-extended .hero-title { text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1); }
+.hero.ambient-extended .hero-kind,
+.hero.ambient-extended .hero-sub {
+  color: var(--fg-1);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.hero.ambient-extended .hero-round:not(.hero-round-primary) {
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  border-color: var(--border);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-el);
+}
+.hero.ambient-extended .hero-round:not(.hero-round-primary):hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+.hero.ambient-extended .hero-round.active { color: var(--gold); }
+/* The hero star rating floats bare between the glass circles — give it a
+   matching glass pill so unrated (outline) stars survive the wash. */
+.hero.ambient-extended .hero-rate {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+}
 .hero-missing {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; font-family: var(--font-mono);
@@ -584,8 +632,15 @@ function playFromIndex(i: number) {
 
 .tracklist { padding-top: 24px; }
 /* Hand-rolled header only (the `tl-cols` grid template, reused verbatim as
-   TrackList's `grid-template-columns` prop below it). */
-.tl-cols { grid-template-columns: 48px 1fr 120px 80px 80px !important; }
+   TrackList's `grid-template-columns` prop below it). It renders OUTSIDE
+   TrackList's glass panel (show-header=false), straight over the ambient
+   art — bump it from the global .list-row-head's fg-3 and halo it. */
+.tl-cols {
+  grid-template-columns: 48px 1fr 120px 80px 80px !important;
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  border-bottom: 0;
+}
 .tl-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .tl-text { min-width: 0; }
 .tl-title { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

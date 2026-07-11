@@ -195,6 +195,7 @@
               >
                 <div
                   class="grid-tile card-tile"
+                  :data-prefetch-to="item.available !== false ? mediaUrl(item) : undefined"
                   :class="{ unavailable: item.available === false }"
                   draggable="true"
                   @click="item.available !== false && navigateTo(mediaUrl(item))"
@@ -233,6 +234,7 @@
             <AppContextMenu :items="ctxItemsFor(item)">
               <div
                 class="browse-detail-row"
+                :data-prefetch-to="item.available !== false ? mediaUrl(item) : undefined"
                 :class="{ unavailable: item.available === false, 'browse-detail-row-phone': isPhone }"
                 draggable="true"
                 @click="item.available !== false && navigateTo(mediaUrl(item))"
@@ -305,6 +307,7 @@
             <AppContextMenu :items="ctxItemsFor(item)">
             <div
               class="list-row"
+              :data-prefetch-to="mediaUrl(item)"
               :class="{ 'list-row-phone': isPhone }"
               @click="navigateTo(mediaUrl(item))"
             >
@@ -728,7 +731,7 @@ async function loadItems() {
   } catch { /* keep the last-good list */ }
 }
 
-// This page has no vue-query cache to invalidate — data lands in a plain
+// This page has no Pinia Colada cache to invalidate — data lands in a plain
 // ref via loadItems() — so useLiveRefresh's `refetch` escape hatch drives
 // it directly instead of a `keys` invalidation.
 useLiveRefresh([

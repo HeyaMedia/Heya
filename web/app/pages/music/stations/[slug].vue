@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 import type { StationTrack } from '~/components/music/StationResults.vue'
 
 definePageMeta({ layout: 'default' })
@@ -114,8 +114,8 @@ interface StationBody {
 }
 
 const stationQuery = useQuery({
-  queryKey: ['music', 'stations', slug, activeDecade] as const,
-  queryFn: async (): Promise<StationBody> => {
+  key: () => ['music', 'stations', slug.value, activeDecade.value] as const,
+  query: async (): Promise<StationBody> => {
     if (slug.value === 'library') {
       return await $heya('/api/music/stations/library-radio', { query: { limit: 30 } }) as unknown as StationBody
     }
@@ -136,10 +136,11 @@ const stationQuery = useQuery({
   staleTime: 0,
   refetchOnWindowFocus: false,
 })
+await waitForQuery(stationQuery)
 
 const tracks = computed<StationTrack[]>(() => stationQuery.data.value?.tracks ?? [])
 const label = computed(() => stationQuery.data.value?.label ?? meta.value.title)
-const isLoading = computed(() => stationQuery.isFetching.value)
+const isLoading = computed(() => stationQuery.isLoading.value)
 const errorMsg = computed(() => {
   const e = stationQuery.error.value as { data?: { error?: string }; message?: string } | null
   if (!e) return null

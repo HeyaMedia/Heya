@@ -65,12 +65,12 @@
 <script setup lang="ts">
 import type { MediaItem, UserList } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
 const { $heya } = useNuxtApp()
-const queryClient = useQueryClient()
+const queryClient = useQueryCache()
 const invalidateContinueWatching = useInvalidateContinueWatching()
 const { buildItems: buildCardCtxItems } = useCardContextItems()
 
@@ -89,8 +89,8 @@ interface RailItem {
 interface Rail { key: string; title: string; subtitle?: string; items: RailItem[] }
 
 const railsQuery = useQuery({
-  queryKey: ['recommended', props.section],
-  queryFn: async () => (await $heya('/api/me/recommended/{section}', {
+  key: () => ['recommended', props.section],
+  query: async () => (await $heya('/api/me/recommended/{section}', {
     path: { section: props.section },
   })) as { rails: Rail[] },
   staleTime: 1000 * 60 * 5,
@@ -99,8 +99,8 @@ const rails = computed<Rail[]>(() => railsQuery.data.value?.rails ?? [])
 
 // Personalized "For You" — the taste-vector + TMDB-graph engine, section-scoped.
 const forYouQuery = useQuery({
-  queryKey: ['for-you', props.section],
-  queryFn: async () => (await $heya('/api/me/recommendations', {
+  key: () => ['for-you', props.section],
+  query: async () => (await $heya('/api/me/recommendations', {
     query: { type: props.section, limit: 20 },
   })) as { items: RailItem[]; has_signal: boolean },
   staleTime: 1000 * 60 * 5,
@@ -125,14 +125,14 @@ interface RecentTVEntry {
 }
 
 const recentMoviesQuery = useQuery({
-  queryKey: ['media', 'recent', 'movie'],
-  queryFn: async () => (await $heya('/api/media', { query: { type: 'movie', sort: 'added', limit: 24 } })) as MediaItem[],
+  key: ['media', 'recent', 'movie'],
+  query: async () => (await $heya('/api/media', { query: { type: 'movie', sort: 'added', limit: 24 } })) as MediaItem[],
   staleTime: 1000 * 60,
   enabled: props.section === 'movie',
 })
 const recentTVQuery = useQuery({
-  queryKey: ['media', 'recent', 'tv'],
-  queryFn: async () => (await $heya('/api/media/tv/recently-added', { query: { limit: 24 } })) as RecentTVEntry[],
+  key: ['media', 'recent', 'tv'],
+  query: async () => (await $heya('/api/media/tv/recently-added', { query: { limit: 24 } })) as RecentTVEntry[],
   staleTime: 1000 * 60,
   enabled: props.section === 'tv',
 })
@@ -144,8 +144,8 @@ const recentAdded = computed<MediaItem[]>(() => {
 
 // ── Continue Watching / Recently Watched ──────────────────────────────────
 const continueQuery = useQuery({
-  queryKey: ['me', 'watch', 'continue'],
-  queryFn: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingItem[],
+  key: ['me', 'watch', 'continue'],
+  query: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingItem[],
   staleTime: 1000 * 30,
 })
 const continueItems = computed<ContinueWatchingItem[]>(() =>
@@ -154,8 +154,8 @@ const continueItems = computed<ContinueWatchingItem[]>(() =>
 
 // Movies: one tile per watched movie (/watch/recent, deduped to the item).
 const recentMoviesWatchedQuery = useQuery({
-  queryKey: ['me', 'watch', 'recent'],
-  queryFn: async () => (await $heya('/api/me/watch/recent')) as Array<{
+  key: ['me', 'watch', 'recent'],
+  query: async () => (await $heya('/api/me/watch/recent')) as Array<{
     media_item_id: number; title: string; slug: string; media_type: string
   }>,
   staleTime: 1000 * 30,
@@ -174,8 +174,8 @@ interface RecentEpisode {
   episode_title: string
 }
 const recentEpisodesQuery = useQuery({
-  queryKey: ['me', 'watch', 'recent-episodes'],
-  queryFn: async () => (await $heya('/api/me/watch/recent-episodes')) as RecentEpisode[],
+  key: ['me', 'watch', 'recent-episodes'],
+  query: async () => (await $heya('/api/me/watch/recent-episodes')) as RecentEpisode[],
   staleTime: 1000 * 30,
   enabled: props.section === 'tv',
 })
@@ -190,19 +190,19 @@ const recentWatched = computed<MediaItem[]>(() => {
 })
 
 const userListsQuery = useQuery({
-  queryKey: ['me', 'lists'],
-  queryFn: async () => (await $heya('/api/me/lists')) as UserList[],
+  key: ['me', 'lists'],
+  query: async () => (await $heya('/api/me/lists')) as UserList[],
   staleTime: 1000 * 60,
 })
 const moviesStateQuery = useQuery({
-  queryKey: ['me', 'state', 'movies'],
-  queryFn: async () => fetchUserState('movies'),
+  key: ['me', 'state', 'movies'],
+  query: async () => fetchUserState('movies'),
   staleTime: 1000 * 30,
   enabled: props.section === 'movie',
 })
 const seriesStateQuery = useQuery({
-  queryKey: ['me', 'state', 'series'],
-  queryFn: async () => fetchUserState('series'),
+  key: ['me', 'state', 'series'],
+  query: async () => fetchUserState('series'),
   staleTime: 1000 * 30,
   enabled: props.section === 'tv',
 })
@@ -239,7 +239,7 @@ function contextItemsFor(item: MediaItem) {
         else next.delete(id)
         watchedSet.value = next
         invalidateContinueWatching()
-        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+        queryClient.invalidateQueries({ key: ['me', 'state'] })
       } catch { /* ignore */ }
     },
     onToggleFavorite: async (id: number, favorited: boolean) => {
@@ -252,7 +252,7 @@ function contextItemsFor(item: MediaItem) {
         if (favorited) next.add(id)
         else next.delete(id)
         favoritedSet.value = next
-        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+        queryClient.invalidateQueries({ key: ['me', 'state'] })
       } catch { /* ignore */ }
     },
     onAddToList: async (listId: number, mediaId: number) => {

@@ -137,13 +137,13 @@
 <script setup lang="ts">
 import type { MediaItem, UserList } from '~~/shared/types'
 import { DropdownMenuItem } from 'reka-ui'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryCache } from '@pinia/colada'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
 // Hoisted per the useNuxtApp gotcha — never resolve $heya inside async bodies.
 const { $heya } = useNuxtApp()
-const queryClient = useQueryClient()
+const queryClient = useQueryCache()
 const invalidateContinueWatching = useInvalidateContinueWatching()
 const { buildItems: buildCardCtxItems } = useCardContextItems()
 
@@ -165,8 +165,8 @@ const ratingOptions = [
 
 // Available genres for the steer dropdown, most-common first.
 const genresQuery = useQuery({
-  queryKey: ['genres-all'],
-  queryFn: async () => (await $heya('/api/genres')) as { genre: string; count: number }[],
+  key: ['genres-all'],
+  query: async () => (await $heya('/api/genres')) as { genre: string; count: number }[],
   staleTime: 1000 * 60 * 30,
 })
 const genreOptions = computed(() =>
@@ -175,8 +175,8 @@ const genreOptions = computed(() =>
 
 // Reactive key — changing genre/minRating refetches with the new steer.
 const recsQuery = useQuery({
-  queryKey: ['for-you-browse', props.section, genre, minRating],
-  queryFn: async () => (await $heya('/api/me/recommendations', {
+  key: () => ['for-you-browse', props.section, genre.value, minRating.value],
+  query: async () => (await $heya('/api/me/recommendations', {
     query: {
       type: props.section,
       genre: genre.value || undefined,
@@ -201,8 +201,8 @@ watch(nlQuery, (v) => {
   debTimer = setTimeout(() => { activeQ.value = v.trim() }, 400)
 })
 const semanticQuery = useQuery({
-  queryKey: ['semantic', props.section, activeQ],
-  queryFn: async () => (await $heya('/api/search/semantic', {
+  key: () => ['semantic', props.section, activeQ.value],
+  query: async () => (await $heya('/api/search/semantic', {
     query: { q: activeQ.value, type: props.section, limit: 60 },
   })) as { items: RecItem[]; ml_ready: boolean },
   enabled: computed(() => activeQ.value.length > 1),
@@ -214,8 +214,8 @@ const mlReady = computed(() => semanticQuery.data.value?.ml_ready ?? true)
 // AI curation — explicit (Enter / button), never keystroke-triggered: it costs
 // two LLM round-trips. Availability comes from the shape-minimal /api/ai/ready.
 const aiReadyQuery = useQuery({
-  queryKey: ['ai-ready'],
-  queryFn: async () => (await $heya('/api/ai/ready')) as { ready: boolean; mode: string },
+  key: ['ai-ready'],
+  query: async () => (await $heya('/api/ai/ready')) as { ready: boolean; mode: string },
   staleTime: 1000 * 60 * 10,
 })
 const aiReady = computed(() => aiReadyQuery.data.value?.ready === true)
@@ -223,14 +223,14 @@ const aiReady = computed(() => aiReadyQuery.data.value?.ready === true)
 type AIRecResult = { items: RecItem[]; note?: string; probes?: string[]; model?: string; mode: string; duration_ms: number }
 const aiQ = ref('')
 const aiQuery = useQuery({
-  queryKey: ['ai-recs', props.section, aiQ],
-  queryFn: async () => (await $heya('/api/ai/recommend', {
+  key: () => ['ai-recs', props.section, aiQ.value],
+  query: async () => (await $heya('/api/ai/recommend', {
     method: 'POST',
     body: { query: aiQ.value, type: props.section } as any,
   })) as AIRecResult,
   enabled: computed(() => aiQ.value.length > 1),
   staleTime: 1000 * 60 * 10,
-  retry: false, // expensive call — never auto-retry
+  retry: 0, // expensive call — never auto-retry
 })
 
 function askAI() {
@@ -255,11 +255,11 @@ function clearSearch() {
 // AI results own the grid while the input still says what was asked; editing
 // the text falls back to live semantic matches until the next Enter.
 const aiActive = computed(() => aiQ.value.length > 1 && nlQuery.value.trim() === aiQ.value)
-// isFetching (not isPending) so a retry-after-error shows "Curating…" again
+// isLoading (not isPending) so a retry-after-error shows "Curating…" again
 // instead of the stale error note.
-const aiPending = computed(() => aiActive.value && aiQuery.isFetching.value)
-const aiFailed = computed(() => aiQuery.isError.value && !aiQuery.isFetching.value)
-const aiShowing = computed(() => aiActive.value && !!aiQuery.data.value && !aiQuery.isError.value)
+const aiPending = computed(() => aiActive.value && aiQuery.isLoading.value)
+const aiFailed = computed(() => aiQuery.status.value === 'error' && !aiQuery.isLoading.value)
+const aiShowing = computed(() => aiActive.value && !!aiQuery.data.value && aiQuery.status.value !== 'error')
 const aiErrorMsg = computed(() => {
   const e = aiQuery.error.value as any
   return e?.data?.detail || e?.message || 'request failed'
@@ -289,19 +289,19 @@ const displayLoading = computed(() => {
 })
 
 const userListsQuery = useQuery({
-  queryKey: ['me', 'lists'],
-  queryFn: async () => (await $heya('/api/me/lists')) as UserList[],
+  key: ['me', 'lists'],
+  query: async () => (await $heya('/api/me/lists')) as UserList[],
   staleTime: 1000 * 60,
 })
 const moviesStateQuery = useQuery({
-  queryKey: ['me', 'state', 'movies'],
-  queryFn: async () => fetchUserState('movies'),
+  key: ['me', 'state', 'movies'],
+  query: async () => fetchUserState('movies'),
   staleTime: 1000 * 30,
   enabled: props.section === 'movie',
 })
 const seriesStateQuery = useQuery({
-  queryKey: ['me', 'state', 'series'],
-  queryFn: async () => fetchUserState('series'),
+  key: ['me', 'state', 'series'],
+  query: async () => fetchUserState('series'),
   staleTime: 1000 * 30,
   enabled: props.section === 'tv',
 })
@@ -338,7 +338,7 @@ function contextItemsFor(item: RecItem) {
         else next.delete(id)
         watchedSet.value = next
         invalidateContinueWatching()
-        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+        queryClient.invalidateQueries({ key: ['me', 'state'] })
       } catch { /* ignore */ }
     },
     onToggleFavorite: async (id: number, favorited: boolean) => {
@@ -351,7 +351,7 @@ function contextItemsFor(item: RecItem) {
         if (favorited) next.add(id)
         else next.delete(id)
         favoritedSet.value = next
-        queryClient.invalidateQueries({ queryKey: ['me', 'state'] })
+        queryClient.invalidateQueries({ key: ['me', 'state'] })
       } catch { /* ignore */ }
     },
     onAddToList: async (listId: number, mediaId: number) => {

@@ -308,35 +308,12 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
+import { musicAlbumDetailQuery, musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack } from '~/queries/music'
 
 // Inline row shape declarations — these mirror the sqlc-generated Go types
 // 1:1, but kept local since they're only used in this file and the OpenAPI
 // types are wider (carry pgtype shapes etc.) than we want to bind against.
-interface MixTrack {
-  track_id: number
-  track_title: string
-  duration: number
-  album_id: number
-  album_title: string
-  album_slug: string
-  album_cover_path: string
-  album_year: string
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-  play_count: number
-}
-interface Mix {
-  seed_artist_id: number
-  seed_artist_name: string
-  seed_artist_slug: string
-  seed_artist_media_item_id: number
-  seed_artist_media_item_public_id?: string
-  name: string
-  tracks: MixTrack[]
-}
-
 interface RecentAlbumRow {
   id: number
   title: string
@@ -454,15 +431,16 @@ interface LabelShelf {
 defineEmits<{ 'see-artists': []; 'see-albums': [] }>()
 
 const { $heya } = useNuxtApp()
+const loadQuery = useQueryLoader()
 
-// All home shelves are vue-query'd — the QueryClient (registered in
-// plugins/vue-query.client.ts) is module-scoped, so navigating to an
+// All home shelves are cached by Pinia Colada — the query cache (registered in
+// plugins/Pinia Colada.client.ts) is module-scoped, so navigating to an
 // album/artist page and back is a no-op against the cache: the second
 // mount reads each query's cached payload synchronously, no flash.
 //
 // staleTime per shelf reflects the server-side Cache-Control:
 //   - 30s for "fresh data" shelves (recently added, recently played etc.)
-//   - 5min (300s) for the rotating shelves; refetchInterval also fires at
+//   - 5min (300s) for the rotating shelves; autoRefetch also fires at
 //     the same cadence so the seed-bucket rotation surfaces automatically.
 //   - 1h for mixes-for-you since the underlying KNN computation is heavy.
 //   - 6h for on-this-day since the input is the calendar date.
@@ -475,80 +453,76 @@ async function fetchItems<T>(path: string): Promise<T[]> {
   return res.items ?? []
 }
 
-const mixesQuery = useQuery({
-  queryKey: ['music', 'home', 'mixes-for-you'],
-  queryFn: () => fetchItems<Mix>('/api/music/home/mixes-for-you'),
-  staleTime: 1000 * 60 * 60,
-})
+const mixesQuery = useQuery(musicMixesQuery())
 const mixes = computed<Mix[]>(() => mixesQuery.data.value ?? [])
 
 const recentAlbumsQuery = useQuery({
-  queryKey: ['music', 'home', 'recently-added'],
-  queryFn: () => fetchItems<RecentAlbumRow>('/api/music/home/recently-added'),
+  key: ['music', 'home', 'recently-added'],
+  query: () => fetchItems<RecentAlbumRow>('/api/music/home/recently-added'),
   staleTime: 1000 * 30,
 })
 const recentAlbums = computed<RecentAlbumRow[]>(() => recentAlbumsQuery.data.value ?? [])
 
 const recentArtistsQuery = useQuery({
-  queryKey: ['music', 'home', 'recently-played-artists'],
-  queryFn: () => fetchItems<RecentArtistRow>('/api/music/home/recently-played-artists'),
+  key: ['music', 'home', 'recently-played-artists'],
+  query: () => fetchItems<RecentArtistRow>('/api/music/home/recently-played-artists'),
   staleTime: 1000 * 30,
 })
 const recentArtists = computed<RecentArtistRow[]>(() => recentArtistsQuery.data.value ?? [])
 
 const onThisDayQuery = useQuery({
-  queryKey: ['music', 'home', 'on-this-day'],
-  queryFn: () => fetchItems<OnThisDayRow>('/api/music/home/on-this-day'),
+  key: ['music', 'home', 'on-this-day'],
+  query: () => fetchItems<OnThisDayRow>('/api/music/home/on-this-day'),
   staleTime: 1000 * 60 * 60 * 6,
 })
 const onThisDay = computed<OnThisDayRow[]>(() => onThisDayQuery.data.value ?? [])
 
 const recentPlaylistsQuery = useQuery({
-  queryKey: ['music', 'home', 'recent-playlists'],
-  queryFn: () => fetchItems<PlaylistRow>('/api/music/home/recent-playlists'),
+  key: ['music', 'home', 'recent-playlists'],
+  query: () => fetchItems<PlaylistRow>('/api/music/home/recent-playlists'),
   staleTime: 1000 * 30,
 })
 const recentPlaylists = computed<PlaylistRow[]>(() => recentPlaylistsQuery.data.value ?? [])
 
 // Rotating shelves — server rotates the seed every 5 minutes, so we
-// refetchInterval at the same cadence. Each query refreshes independently,
-// no shared setInterval to clean up on unmount (vue-query handles it).
+// autoRefetch at the same cadence. Each query refreshes independently,
+// no shared setInterval to clean up on unmount (Pinia Colada handles it).
 const moreByArtistsQuery = useQuery({
-  queryKey: ['music', 'home', 'more-by-artists'],
-  queryFn: () => fetchItems<MoreByEntry>('/api/music/home/more-by-artists'),
+  key: ['music', 'home', 'more-by-artists'],
+  query: () => fetchItems<MoreByEntry>('/api/music/home/more-by-artists'),
   staleTime: 1000 * 60 * 5,
-  refetchInterval: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
 })
 const moreByArtists = computed<MoreByEntry[]>(() => moreByArtistsQuery.data.value ?? [])
 
 const genreShelfQuery = useQuery({
-  queryKey: ['music', 'home', 'more-in-genre'],
-  queryFn: async () => (await $heya('/api/music/home/more-in-genre')) as GenreShelf,
+  key: ['music', 'home', 'more-in-genre'],
+  query: async () => (await $heya('/api/music/home/more-in-genre')) as GenreShelf,
   staleTime: 1000 * 60 * 5,
-  refetchInterval: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
 })
 const genreShelf = computed<GenreShelf | null>(() => genreShelfQuery.data.value ?? null)
 
 const mostPlayedShelfQuery = useQuery({
-  queryKey: ['music', 'home', 'most-played-last-month'],
-  queryFn: async () => (await $heya('/api/music/home/most-played-last-month')) as MostPlayedShelf,
+  key: ['music', 'home', 'most-played-last-month'],
+  query: async () => (await $heya('/api/music/home/most-played-last-month')) as MostPlayedShelf,
   staleTime: 1000 * 60 * 5,
 })
 const mostPlayedShelf = computed<MostPlayedShelf | null>(() => mostPlayedShelfQuery.data.value ?? null)
 
 const lapsedShelfQuery = useQuery({
-  queryKey: ['music', 'home', 'lapsed-artists'],
-  queryFn: async () => (await $heya('/api/music/home/lapsed-artists')) as LapsedShelf,
+  key: ['music', 'home', 'lapsed-artists'],
+  query: async () => (await $heya('/api/music/home/lapsed-artists')) as LapsedShelf,
   staleTime: 1000 * 60 * 5,
-  refetchInterval: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
 })
 const lapsedShelf = computed<LapsedShelf | null>(() => lapsedShelfQuery.data.value ?? null)
 
 const labelShelfQuery = useQuery({
-  queryKey: ['music', 'home', 'more-from-label'],
-  queryFn: async () => (await $heya('/api/music/home/more-from-label')) as LabelShelf,
+  key: ['music', 'home', 'more-from-label'],
+  query: async () => (await $heya('/api/music/home/more-from-label')) as LabelShelf,
   staleTime: 1000 * 60 * 5,
-  refetchInterval: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
 })
 const labelShelf = computed<LabelShelf | null>(() => labelShelfQuery.data.value ?? null)
 
@@ -583,7 +557,7 @@ function formatLapsed(a: LapsedArtist) {
   return 'a while ago — back to'
 }
 
-const { play, queue } = usePlayer()
+const { play, queue } = usePlayerBindings()
 const actions = useMusicActions()
 const { isCoarse } = useViewport()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
@@ -622,9 +596,7 @@ async function playMix(mix: Mix) {
 
 async function playAlbumByArtistSlug(artistSlug: string, albumSlug: string, artistName: string, albumTitle: string, albumId: number) {
   try {
-    const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
-      path: { artist_slug: artistSlug, album_slug: albumSlug },
-    }) as { tracks: { id: number; title: string; duration: number; files: { integrated_lufs: string | null; true_peak_db: string | null }[] }[] }
+    const detail = await loadQuery(musicAlbumDetailQuery({ artistSlug, albumSlug }))
     if (!detail.tracks.length) return
     const tracks: Track[] = detail.tracks.map((t) => {
       const primary = t.files[0]
@@ -734,11 +706,15 @@ async function playPlaylist(id: number, name: string) {
 </script>
 
 <style scoped>
-.mh-greeting { font-size: 30px; font-weight: 700; margin-bottom: 24px; letter-spacing: -0.01em; }
+/* Halos on everything painted straight over the ambient pool. */
+.mh-greeting {
+  font-size: 30px; font-weight: 700; margin-bottom: 24px; letter-spacing: -0.01em;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
 .mh-empty { color: var(--fg-3); font-size: 14px; padding: 32px 0; }
 .mh-section { margin-bottom: 36px; }
-.mh-section-title { margin-bottom: 16px; }
-.mh-lapsed-heading { margin-bottom: 12px; color: var(--fg-1); }
+.mh-section-title { margin-bottom: 16px; text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
+.mh-lapsed-heading { margin-bottom: 12px; color: var(--fg-1); text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
 
 /* Shared link wrapper around MusicCard — strips default underlines and lets
    the card own its hover state internally. */

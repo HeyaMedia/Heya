@@ -85,7 +85,7 @@ const route = useRoute()
 const kind = computed(() => route.params.kind as 'mood' | 'genre' | 'tempo')
 const bucketKey = computed(() => route.params.key as string)
 
-const { play, queue, currentTrack, playing, formatTime } = usePlayer()
+const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 const actions = useMusicActions()
 
 const rows = ref<BrowseTrackRow[]>([])

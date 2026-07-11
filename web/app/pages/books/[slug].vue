@@ -1,26 +1,24 @@
 <script setup lang="ts">
 import type { MediaDetail } from '~~/shared/types'
+import { useQuery } from '@pinia/colada'
+import { mediaDetailQuery } from '~/queries/media'
 
 const route = useRoute()
 const slug = computed(() => route.params.slug as string)
 
-const mediaId = ref<number | null>(null)
-const loading = ref(true)
+const detailQuery = useQuery(() => mediaDetailQuery(slug.value))
+await waitForQuery(detailQuery)
+watch(detailQuery.error, (error) => {
+  if (error) navigateTo('/books')
+}, { immediate: true })
 
-onMounted(async () => {
-  try {
-    const { $heya } = useNuxtApp()
-    const detail = await $heya('/api/media/{id}', { path: { id: slug.value } }) as MediaDetail
-    mediaId.value = detail.media_item.id
-  } catch {
-    navigateTo('/books')
-  }
-  loading.value = false
-})
+const detail = computed(() => detailQuery.data.value ?? null)
+const mediaId = computed(() => detail.value?.media_item.id ?? null)
+const loading = computed(() => detailQuery.isPending.value)
 </script>
 
 <template>
-  <MediaDetailView v-if="mediaId" :media-id="mediaId" />
+  <MediaDetailView v-if="mediaId && detail" :media-id="mediaId" :initial-detail="detail" />
   <div v-else-if="loading" style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--fg-3)">
     Loading…
   </div>

@@ -42,7 +42,7 @@ export default defineNuxtPlugin({
     // Re-bind so the non-undefined narrowing carries into the closures below.
     const pwa = injected
 
-    const { playing } = usePlayer()
+    const { playing } = usePlayerBindings()
 
     // "Is real content playing?" Music decks are detached `new Audio()` elements
     // (never in the DOM), so a `<video>` scan can't see them — read the player

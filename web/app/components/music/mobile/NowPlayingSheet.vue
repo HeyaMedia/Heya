@@ -1,6 +1,6 @@
 <!--
   NowPlayingSheet — full-screen now-playing surface for phones, built on
-  AppSheet(size="full"). Reads everything from the global usePlayer()
+  AppSheet(size="full"). Reads everything from the global usePlayerBindings()
   singleton except the lyrics fetch, which mirrors the pattern in
   QueuePanel.vue's lyrics tab ($heya, GET /api/music/tracks/{id}/lyrics).
 
@@ -149,7 +149,7 @@ const {
   shuffled, repeatMode,
   togglePlay, seek, stop,
   toggleShuffle, cycleRepeat, nextTrack, prevTrack, formatTime,
-} = usePlayer()
+} = usePlayerBindings()
 
 // --- Links (mirrors Playbar.vue's artistTo/albumTo computeds) --------------
 const artistTo = computed(() =>

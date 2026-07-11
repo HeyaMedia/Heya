@@ -25,7 +25,7 @@
   commented at each function since none of it is obvious from the code shape
   alone.
 
-  No props, no emits — reads/mutates the global usePlayer() singleton.
+  No props, no emits — reads/mutates the global usePlayerBindings() singleton.
 -->
 <template>
   <div ref="rootEl" class="qp-root">
@@ -130,7 +130,7 @@ const {
   queue, currentTrack, currentIndex, playedTracks, upcomingTracks,
   shuffled, repeatMode, formatTime,
   jumpTo, moveInQueue, removeFromQueue, clearUpcoming, toggleShuffle, cycleRepeat,
-} = usePlayer()
+} = usePlayerBindings()
 
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v))

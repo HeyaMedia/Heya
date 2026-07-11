@@ -111,7 +111,7 @@
 import type { PodcastDetail, PodcastEpisode } from '~/composables/usePodcasts'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 import type { ContextMenuItem } from '~~/shared/types'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -125,11 +125,12 @@ if (import.meta.client) actions.ensureSubscriptionsLoaded()
 
 const { $heya } = useNuxtApp()
 const detailQuery = useQuery({
-  queryKey: ['podcasts', 'feed', feedURL],
-  queryFn: async () => (await $heya('/api/podcasts/feed', { query: { url: feedURL.value } })) as PodcastDetail,
+  key: () => ['podcasts', 'feed', feedURL.value],
+  query: async () => (await $heya('/api/podcasts/feed', { query: { url: feedURL.value } })) as PodcastDetail,
   enabled: () => feedURL.value.length > 0,
   staleTime: 1000 * 60 * 5,
 })
+await waitForQuery(detailQuery)
 const detail = computed<PodcastDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
 const descOpen = ref(false)

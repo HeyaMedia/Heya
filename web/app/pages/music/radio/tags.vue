@@ -4,8 +4,7 @@
       <NuxtLink to="/music/radio" class="rt-back">
         <Icon name="chevleft" :size="14" /> Radio
       </NuxtLink>
-      <h1 class="rt-title">Browse by Tag</h1>
-      <p class="rt-sub">Genres, formats, eras, moods — pick anything to drill into stations.</p>
+      <MusicPageHead title="Browse by Tag" subtitle="Genres, formats, eras, moods — pick anything to drill into stations." />
     </header>
 
     <!-- Drilldown view: stations tagged with the selected tag. -->
@@ -38,7 +37,7 @@
         <button
           v-for="t in tags"
           :key="t.name"
-          class="rt-tag"
+          class="rt-tag steer-glass"
           :style="{ fontSize: tagSize(t.stationcount) + 'px' }"
           @click="selectTag(t.name)"
         >
@@ -52,7 +51,7 @@
 
 <script setup lang="ts">
 import type { RadioStationView } from '~/composables/useRadio'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -66,22 +65,23 @@ if (import.meta.client) radio.ensureFavoritesLoaded()
 const { $heya } = useNuxtApp()
 
 const tagsQuery = useQuery({
-  queryKey: ['radio', 'tags', { limit: 200 }],
-  queryFn: async () => ((await $heya('/api/radio/tags', { query: { limit: 200 } })) as { items: TagRow[] }).items ?? [],
+  key: ['radio', 'tags', { limit: 200 }],
+  query: async () => ((await $heya('/api/radio/tags', { query: { limit: 200 } })) as { items: TagRow[] }).items ?? [],
   staleTime: 1000 * 60 * 60,
 })
+await waitForQuery(tagsQuery)
 const tags = computed<TagRow[]>(() => tagsQuery.data.value ?? [])
 
 const selectedTag = computed(() => (route.query.tag as string | undefined) ?? '')
 
 const stationsQuery = useQuery({
-  queryKey: ['radio', 'search', { tag: selectedTag }],
-  queryFn: async () => ((await $heya('/api/radio/search', { query: { tag: selectedTag.value, limit: 60 } })) as { items: RadioStationView[] }).items ?? [],
+  key: () => ['radio', 'search', { tag: selectedTag.value }],
+  query: async () => ((await $heya('/api/radio/search', { query: { tag: selectedTag.value, limit: 60 } })) as { items: RadioStationView[] }).items ?? [],
   enabled: () => selectedTag.value.length > 0,
   staleTime: 1000 * 60 * 5,
 })
 const stations = computed<RadioStationView[]>(() => stationsQuery.data.value ?? [])
-const stationsLoading = computed(() => stationsQuery.isFetching.value)
+const stationsLoading = computed(() => stationsQuery.isLoading.value)
 
 function selectTag(name: string) {
   router.replace({ query: { tag: name } })
@@ -107,8 +107,6 @@ function tagSize(count: number) {
 .rt-head { margin-bottom: 24px; }
 .rt-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .rt-back:hover { color: var(--gold); }
-.rt-title { font-size: 28px; font-weight: 700; margin-top: 6px; letter-spacing: -0.01em; }
-.rt-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
 
 .rt-tag-cloud {
   display: flex;
@@ -122,8 +120,6 @@ function tagSize(count: number) {
   align-items: baseline;
   gap: 6px;
   padding: 6px 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
   border-radius: 999px;
   font-family: inherit;
   font-weight: 500;
@@ -133,9 +129,7 @@ function tagSize(count: number) {
   text-transform: capitalize;
 }
 .rt-tag:hover {
-  background: color-mix(in srgb, var(--gold) 8%, transparent);
   border-color: color-mix(in srgb, var(--gold) 30%, transparent);
-  color: var(--gold);
 }
 .rt-tag-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); }
 

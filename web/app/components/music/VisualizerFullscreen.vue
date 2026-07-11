@@ -236,7 +236,7 @@ interface MilkdropApi {
 }
 
 const vis = useVisualizer()
-const { playing, currentTrack, position, duration, togglePlay, nextTrack, prevTrack, seek, formatTime } = usePlayer()
+const { playing, currentTrack, position, duration, togglePlay, nextTrack, prevTrack, seek, formatTime } = usePlayerBindings()
 
 const mode = vis.mode
 const mkRef = ref<MilkdropApi | null>(null)

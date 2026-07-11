@@ -6,10 +6,8 @@ import type { BoundaryHints, TransitionPlan } from '~/engine/crossfade/strategy'
 import { TimeBasedCrossfade } from '~/engine/crossfade/timeBased'
 import { alog } from '~/engine/debug'
 import { prefetchManager } from '~/engine/prefetch'
+import { acceptHMRUpdate, defineStore, storeToRefs } from 'pinia'
 
-// Track shape consumed by the player UI. `stream_url` is what the engine
-// actually hits — derived from the track row in the caller (Phase A list
-// endpoints set this to `/api/music/tracks/{id}/stream`).
 export interface Track {
   id: number
   title: string
@@ -24,23 +22,16 @@ export interface Track {
   album_slug?: string
   poster?: string
   loved?: boolean
-  // Origin label for the scrobble's `source` field — 'queue' | 'radio' |
-  // 'album' | 'playlist' | 'search' | 'browse' | 'similar' | ''. Free-form;
-  // analytics on /api/me/listening-stats can group by this.
   source?: string
-  // True when this row is a live ICY stream (internet radio). The player
-  // disables shuffle/repeat/prev/next and shows a "LIVE" badge for these.
   isStream?: boolean
-  // Per-track replay-gain inputs. When present and replay-gain is on,
-  // engine.setActiveNormalization applies a gain so playback hits the engine's
-  // -18 LUFS target. NULL or missing => track plays at the file's native level.
   integrated_lufs?: number | null
   true_peak_db?: number | null
-  // False when the track's file is gone from disk. The player refuses to play
-  // or enqueue these; list pages should pre-filter, but this is the backstop.
   available?: boolean
 }
 
+// Track shape consumed by the player UI. `stream_url` is what the engine
+// actually hits — derived from the track row in the caller (Phase A list
+// endpoints set this to `/api/music/tracks/{id}/stream`).
 // Last.fm-style scrobble threshold: a track counts as "played" once the user
 // has *heard* at least this many seconds, OR the track has ended (whichever
 // comes first). We accumulate wall-clock listened time, not raw position, so
@@ -66,7 +57,7 @@ function persistVolumePrefs(volume: number, muted: boolean) {
 // These coordinate between prepareTransition() (which preloads the pending
 // deck + arms the scheduler) and handleTransition() (fired by the scheduler
 // ~100ms before a gapless cut, or `duration` seconds before a crossfade).
-// They live at module scope so every usePlayer() closure and the once-wired
+// They live at module scope so every usePlayerBindings() closure and the once-wired
 // engine callbacks share the same values. Client-only; SSR never touches them.
 let transitioning = false
 let prefetchedTrackId: number | null = null
@@ -166,16 +157,39 @@ async function fetchTrackPlayback(trackId: number): Promise<PlaybackData | null>
   }
 }
 
-export function usePlayer() {
-  const playing = useState('player_playing', () => false)
-  const currentTrack = useState<Track | null>('player_track', () => null)
-  const position = useState('player_position', () => 0)
-  const duration = useState('player_duration', () => 0)
-  const volume = useState('player_volume', () => 80)
-  const muted = useState('player_muted', () => false)
+export const usePlayerStore = defineStore('player', () => {
+  const playing = ref(false)
+  const currentTrack = ref<Track | null>(null)
+  const position = ref(0)
+  const duration = ref(0)
+  const volume = ref(80)
+  const muted = ref(false)
+  const shuffled = ref(false)
+  const repeatMode = ref<'off' | 'all' | 'one'>('off')
+  const queue = ref<Track[]>([])
+  const originalOrder = ref<Track[]>([])
+  const queueOpen = ref(false)
+  const sideTab = ref<'queue' | 'lyrics'>('queue')
+  const engineWired = ref(false)
+  const scrobbledTrackId = ref<number | null>(null)
+  const sleepAtTrackEnd = ref(false)
+  const sleepDeadline = ref<number | null>(null)
+  const sleepNowTick = ref(0)
+
+  const currentIndex = computed(() => {
+    const track = currentTrack.value
+    return track ? queue.value.findIndex(item => item.id === track.id) : -1
+  })
+  const playedTracks = computed(() => currentIndex.value > 0 ? queue.value.slice(0, currentIndex.value) : [])
+  const upcomingTracks = computed(() => currentIndex.value >= 0 ? queue.value.slice(currentIndex.value + 1) : [])
+  const upcomingCount = computed(() => upcomingTracks.value.length)
+  const nextUp = computed(() => upcomingTracks.value[0] ?? null)
+  const progress = computed(() => duration.value > 0 ? Math.max(0, Math.min(1, position.value / duration.value)) : 0)
+  const hasPrevious = computed(() => currentIndex.value > 0 || position.value > 3)
+  const hasNext = computed(() => upcomingCount.value > 0 || (repeatMode.value !== 'off' && queue.value.length > 0))
 
   // Restore persisted volume/mute once on the client. useState is a singleton,
-  // so a single assignment propagates to every usePlayer() consumer; the flag
+  // so a single assignment propagates to every usePlayerBindings() consumer; the flag
   // keeps repeat calls (one per mounting component) from re-reading storage.
   if (import.meta.client && !volumeRestored) {
     volumeRestored = true
@@ -190,27 +204,7 @@ export function usePlayer() {
       }
     } catch { /* corrupt/absent — keep defaults */ }
   }
-  const shuffled = useState('player_shuffled', () => false)
-  const repeatMode = useState<'off' | 'all' | 'one'>('player_repeat', () => 'off')
-  const queue = useState<Track[]>('player_queue', () => [])
-  // Pre-shuffle ordering, captured when shuffle turns on so it can be restored
-  // (with already-played tracks kept up front) when shuffle turns off.
-  const originalOrder = useState<Track[]>('player_original_order', () => [])
-  const queueOpen = useState('player_queue_open', () => false)
-  // The right-side panel (QueuePanel) is a single surface with two tabs. The
-  // tab lives here (not local to QueuePanel) so the playbar's Queue / Lyrics
-  // buttons can open the panel straight onto the tab they name.
-  const sideTab = useState<'queue' | 'lyrics'>('player_side_tab', () => 'queue')
-  const engineWired = useState('player_engine_wired', () => false)
-  // Tracks the last track ID we already scrobbled this session so the listened
-  // watcher, handleTransition, and handleEnded don't double-fire for one play.
-  const scrobbledTrackId = useState<number | null>('player_scrobbled_track', () => null)
-  // Sleep-timer "stop at end of track" flag. Owned by useSleepTimer; handleEnded
-  // honors it (pause instead of advancing). Shared via useState to avoid an
-  // import cycle between the player and the sleep timer.
-  const sleepAtTrackEnd = useState('player_sleep_at_end', () => false)
-
-  const settings = useAudioSettings()
+  const settings = useAudioSettingsBindings()
 
   // Engine creation touches AudioContext, which the browser refuses to
   // instantiate before a user gesture. Defer it to the first play() call so
@@ -873,21 +867,6 @@ export function usePlayer() {
   // three sections plus drag / remove. `currentIndex` is the index of the
   // playing track in `queue`; -1 when nothing is playing. We derive it from
   // `currentTrack.id` rather than storing both — single source of truth.
-  const currentIndex = computed(() => {
-    const t = currentTrack.value
-    if (!t) return -1
-    return queue.value.findIndex((x) => x.id === t.id)
-  })
-  const playedTracks = computed(() => {
-    const idx = currentIndex.value
-    return idx > 0 ? queue.value.slice(0, idx) : []
-  })
-  const upcomingTracks = computed(() => {
-    const idx = currentIndex.value
-    return idx >= 0 ? queue.value.slice(idx + 1) : []
-  })
-  const upcomingCount = computed(() => upcomingTracks.value.length)
-
   // jumpTo plays the queue item at absolute index, treating the queue as
   // the authoritative ordering. Used by the right-sidebar rows.
   async function jumpTo(index: number) {
@@ -991,13 +970,48 @@ export function usePlayer() {
 
   return {
     playing, currentTrack, position, duration, volume, muted,
-    shuffled, repeatMode, queue, queueOpen, sideTab,
+    shuffled, repeatMode, queue, originalOrder, queueOpen, sideTab,
+    engineWired, scrobbledTrackId, sleepAtTrackEnd, sleepDeadline, sleepNowTick,
     currentIndex, playedTracks, upcomingTracks, upcomingCount,
+    nextUp, progress, hasPrevious, hasNext,
     play, pause, togglePlay, seek, setVolume, toggleMute, stop,
     toggleShuffle, cycleRepeat, nextTrack, prevTrack,
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
     jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
     addToQueue, playNext,
+  }
+})
+
+if (import.meta.hot) import.meta.hot.accept(acceptHMRUpdate(usePlayerStore, import.meta.hot))
+
+/** Template-friendly Pinia bindings. State remains refs when destructured;
+ * actions remain the store's bound actions. New integrations that prefer
+ * property access can consume usePlayerStore() directly. */
+export function usePlayerBindings() {
+  const store = usePlayerStore()
+  return {
+    ...storeToRefs(store),
+    play: store.play,
+    pause: store.pause,
+    togglePlay: store.togglePlay,
+    seek: store.seek,
+    setVolume: store.setVolume,
+    toggleMute: store.toggleMute,
+    stop: store.stop,
+    toggleShuffle: store.toggleShuffle,
+    cycleRepeat: store.cycleRepeat,
+    nextTrack: store.nextTrack,
+    prevTrack: store.prevTrack,
+    toggleLoved: store.toggleLoved,
+    toggleQueue: store.toggleQueue,
+    toggleLyrics: store.toggleLyrics,
+    formatTime: store.formatTime,
+    jumpTo: store.jumpTo,
+    removeFromQueue: store.removeFromQueue,
+    moveInQueue: store.moveInQueue,
+    clearUpcoming: store.clearUpcoming,
+    addToQueue: store.addToQueue,
+    playNext: store.playNext,
   }
 }
 
@@ -1005,7 +1019,7 @@ export function usePlayer() {
 // Crossfade/scheduler concerns are owned by usePlayer.prepareTransition (it
 // needs per-track context for album-aware suppression + plan timing), so they
 // are intentionally NOT set here. Idempotent — re-applied on every mutation.
-function applyAudioSettingsToEngine(engine: ReturnType<typeof useAudioEngine>, settings: ReturnType<typeof useAudioSettings>) {
+function applyAudioSettingsToEngine(engine: ReturnType<typeof useAudioEngine>, settings: ReturnType<typeof useAudioSettingsBindings>) {
   // The SSR stub lacks the chain block accessors; bail when they're missing.
   const e = engine as ReturnType<typeof useAudioEngine> & {
     equalizer?: { enabled: boolean; setAllBands: (b: number[]) => void }

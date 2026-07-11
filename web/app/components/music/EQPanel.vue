@@ -244,21 +244,17 @@
 
 <script setup lang="ts">
 import type { SelectOption } from '~/components/ui/AppSelect.vue'
-import type { DspBlockId } from '~/composables/useAudioSettings'
+import type { DspBlockId } from '~/stores/audio-settings'
 
 const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 
-const settings = useAudioSettings()
+const settings = useAudioSettingsStore()
 // directMode is a plain boolean present on every useAudioEngine() branch
 // (graph/direct/SSR stub) — see useAudioEngine.ts — so this needs no cast.
 const engine = useAudioEngine()
 const eqAvailable = computed(() => !engine.directMode)
-const eq = settings.eq
-const crossfade = settings.crossfade
-const replayGain = settings.replayGain
-const crossfeed = settings.crossfeed
-const dspChain = settings.dspChain
+const { eq, crossfade, replayGain, crossfeed, dspChain } = storeToRefs(settings)
 
 const TABS = [
   { id: 'eq', label: 'Equalizer' },

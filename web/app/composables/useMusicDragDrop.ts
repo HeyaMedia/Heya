@@ -7,6 +7,8 @@
 // Gate all call sites on `!useViewport().isCoarse` — touch keeps the
 // long-press context menu as the only way to add to a playlist.
 
+import { musicAlbumDetailQuery, playlistDetailQuery } from '~/queries/music'
+
 export interface DragTrackPayload {
   kind: 'track'
   track: { id: number; title: string }
@@ -36,6 +38,7 @@ const dragState = reactive({
 })
 
 export function useMusicDragDrop() {
+  const loadQuery = useQueryLoader()
   function onDragStart(event: DragEvent, payload: MusicDragPayload) {
     dragState.dragging = true
     dragState.payload = payload
@@ -81,7 +84,7 @@ export function useMusicDragDrop() {
         toast.info("Can't drop a playlist onto itself")
         return
       }
-      await dropPlaylistOntoPlaylist(payload, playlistId, playlistName)
+      await dropPlaylistOntoPlaylist(payload, playlistId, playlistName, loadQuery)
       return
     }
 
@@ -90,7 +93,7 @@ export function useMusicDragDrop() {
       return
     }
 
-    await dropAlbumOntoPlaylist(payload, playlistId, playlistName)
+    await dropAlbumOntoPlaylist(payload, playlistId, playlistName, loadQuery)
   }
 
   return {
@@ -120,11 +123,11 @@ async function dropTrackOntoPlaylist(payload: DragTrackPayload, playlistId: numb
   }
 }
 
-async function dropAlbumOntoPlaylist(payload: DragAlbumPayload, playlistId: number, playlistName: string) {
+async function dropAlbumOntoPlaylist(payload: DragAlbumPayload, playlistId: number, playlistName: string, loadQuery: ReturnType<typeof useQueryLoader>) {
   const { toast } = useToast()
   const playlists = usePlaylists()
 
-  const trackIds = payload.trackIds ?? await fetchAlbumTrackIds(payload.artist_slug, payload.album_slug)
+  const trackIds = payload.trackIds ?? await fetchAlbumTrackIds(payload.artist_slug, payload.album_slug, loadQuery)
   if (!trackIds.length) {
     toast.err(`"${payload.title}" has no tracks to add`)
     return
@@ -147,16 +150,12 @@ async function dropAlbumOntoPlaylist(payload: DragAlbumPayload, playlistId: numb
   }
 }
 
-async function dropPlaylistOntoPlaylist(payload: DragPlaylistPayload, playlistId: number, playlistName: string) {
+async function dropPlaylistOntoPlaylist(payload: DragPlaylistPayload, playlistId: number, playlistName: string, loadQuery: ReturnType<typeof useQueryLoader>) {
   const { toast } = useToast()
   const playlists = usePlaylists()
-  const { $heya } = useNuxtApp()
-
   let trackIds: number[] = []
   try {
-    const detail = await $heya('/api/me/playlists/{id}', {
-      path: { id: payload.playlistId },
-    }) as unknown as { tracks?: Array<{ track_id: number; available?: boolean }> }
+    const detail = await loadQuery(playlistDetailQuery(payload.playlistId))
     trackIds = (detail.tracks ?? [])
       .filter((t) => t.available !== false)
       .map((t) => t.track_id)
@@ -189,12 +188,9 @@ async function dropPlaylistOntoPlaylist(payload: DragPlaylistPayload, playlistId
 
 // Mirrors useMusicActions.ts's fetchAlbumTracks filtering (files?.length > 0)
 // but only needs ids here, not full Track objects.
-async function fetchAlbumTrackIds(artistSlug: string, albumSlug: string): Promise<number[]> {
-  const { $heya } = useNuxtApp()
+async function fetchAlbumTrackIds(artistSlug: string, albumSlug: string, loadQuery: ReturnType<typeof useQueryLoader>): Promise<number[]> {
   try {
-    const detail = await $heya('/api/music/artists/{artist_slug}/albums/{album_slug}', {
-      path: { artist_slug: artistSlug, album_slug: albumSlug },
-    }) as unknown as { tracks: Array<{ id: number; files?: unknown[] }> }
+    const detail = await loadQuery(musicAlbumDetailQuery({ artistSlug, albumSlug }))
     return (detail.tracks ?? [])
       .filter((t) => (t.files?.length ?? 0) > 0)
       .map((t) => t.id)

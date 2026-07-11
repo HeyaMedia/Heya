@@ -1,13 +1,13 @@
 // useSleepTimer — pause playback after a countdown, or at the end of the
 // current track. State is module-level so the popover control and the ticking
 // (driven once by that control) stay in sync. The "end of track" case is honored
-// by usePlayer.handleEnded via the shared `player_sleep_at_end` state.
+// by usePlayer.handleEnded via the shared Pinia player domain.
 
-const deadline = ref<number | null>(null) // ms epoch for a timed sleep; null = none
-const nowTick = ref<number>(0) // bumped each second by the control to drive `remainingMs`
+import { storeToRefs } from 'pinia'
+import { usePlayerStore } from '~/composables/usePlayer'
 
 export function useSleepTimer() {
-  const atTrackEnd = useState('player_sleep_at_end', () => false)
+  const { sleepAtTrackEnd: atTrackEnd, sleepDeadline: deadline, sleepNowTick: nowTick } = storeToRefs(usePlayerStore())
 
   const remainingMs = computed(() =>
     deadline.value != null ? Math.max(0, deadline.value - (nowTick.value || Date.now())) : 0,

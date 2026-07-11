@@ -147,7 +147,7 @@ const {
   shuffled, repeatMode,
   togglePlay, seek, setVolume, toggleMute, toggleShuffle, cycleRepeat,
   nextTrack, prevTrack, formatTime, toggleQueue,
-} = usePlayer()
+} = usePlayerBindings()
 
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
@@ -383,7 +383,10 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--bg-3);
-  box-shadow: 0 32px 80px rgb(var(--shade) / 0.55), 0 0 0 1px rgb(var(--ink) / 0.04);
+  /* Hero-poster shadow formula (matches the detail pages). The previous
+     80px blur reached past .np-content's 24px paddings on short/narrow
+     viewports and got visibly cropped by .np-root's overflow:hidden. */
+  box-shadow: 0 24px 60px rgb(var(--shade) / 0.5), 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .np-art-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .np-art-placeholder {

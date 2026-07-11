@@ -109,6 +109,8 @@ provide('msr:cardSize', props.cardSize)
   font-weight: 700;
   color: var(--fg-0);
   text-decoration: none;
+  /* Section-title halo — rails sit over the ambient art pool. */
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
 }
 .msr-title.link:hover { color: var(--gold); }
 .msr-title.link:hover .msr-chev { color: var(--gold); }
@@ -132,20 +134,25 @@ provide('msr:cardSize', props.cardSize)
 
 .msr-grow { flex: 1; }
 
+/* Prev/next/expand — small glass circles (the .steer-glass recipe), not
+   solid accent buttons: they're steering chrome, not content actions. */
 .msr-nav {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  border: 0;
-  background: var(--gold);
-  color: var(--bg-0);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+  color: var(--fg-1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: filter 0.15s, transform 0.1s;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
 }
-.msr-nav:hover { filter: brightness(1.1); }
+.msr-nav:hover { background: var(--bg-3); color: var(--fg-0); }
 .msr-nav:active { transform: scale(0.95); }
 .msr-nav :deep(svg) { transition: transform 0.2s; }
 
@@ -154,9 +161,20 @@ provide('msr:cardSize', props.cardSize)
   gap: 16px;
   overflow-x: auto;
   scroll-snap-type: x proximity;
-  padding-bottom: 6px;
+  /* Shadow escape (ContentRow's pattern): pad the clip box out to the page
+     gutter and pull it back with matching negative margins, so the cards'
+     --shadow-card isn't cut off by overflow-x — and the rail runs edge to
+     edge under the page-pad gutter. --msr-bleed MUST track .page-pad's
+     per-breakpoint gutter (40/24/12): every consumer is a page-pad page,
+     and a bleed wider than the gutter would overflow .music-main sideways. */
+  --msr-bleed: var(--page-pad-x, 40px);
+  padding: 12px var(--msr-bleed) 72px;
+  margin: -12px calc(-1 * var(--msr-bleed)) -66px;
+  scroll-padding-left: var(--msr-bleed);
   scrollbar-width: none;
 }
+@media (max-width: 1100px) { .msr-scroller { --msr-bleed: 24px; } }
+@media (max-width: 720px) { .msr-scroller { --msr-bleed: 12px; } }
 .msr-scroller::-webkit-scrollbar { display: none; }
 /* Use :deep(*) instead of :slotted(*) so the sizing rule survives reka-ui's
    slot cloning — AppContextMenu's <Slot>-with-as-child wraps swap the slot
