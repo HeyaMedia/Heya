@@ -353,7 +353,7 @@ func (w *FFProbeWorker) enqueueLoudnessIfMusic(ctx context.Context, q *sqlc.Quer
 	if client == nil {
 		return
 	}
-	if _, err := client.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: tf.ID, ScheduledTaskID: scheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
+	if _, _, err := enqueueTrackLoudnessIfNeeded(ctx, q, client, ScanTrackLoudnessArgs{TrackFileID: tf.ID, ScheduledTaskID: scheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
 		log.Warn().Err(err).Int64("track_file_id", tf.ID).Msg("enqueue track loudness failed")
 	}
 }

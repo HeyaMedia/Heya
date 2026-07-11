@@ -1832,10 +1832,11 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			}
 		}
 		if trackFileNeedsLoudness(trackFile) {
-			if res, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
+			enqueued, duplicate, err := enqueueTrackLoudnessIfNeeded(ctx, q, rc, ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source))
+			if err != nil {
 				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_metadata: enqueue loudness failed")
 				fanout.Failed++
-			} else if res.UniqueSkippedAsDuplicate {
+			} else if duplicate || !enqueued {
 				fanout.Skipped++
 			} else {
 				fanout.Loudness++
@@ -2589,13 +2590,13 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 			}
 			w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Path)
-			res, err := rc.Insert(ctx, ScanTrackLoudnessArgs{TrackFileID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
+			enqueued, duplicate, err := enqueueTrackLoudnessIfNeeded(ctx, q, rc, ScanTrackLoudnessArgs{TrackFileID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
 			switch {
 			case err != nil:
 				log.Warn().Err(err).Int64("track_file_id", row.ID).Msg("kickoff_music_loudness: enqueue track failed")
 				st.Failed++
 				st.Skipped++
-			case res.UniqueSkippedAsDuplicate:
+			case duplicate || !enqueued:
 				st.Skipped++
 			default:
 				st.Enqueued++

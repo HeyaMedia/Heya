@@ -29,6 +29,28 @@ var (
 	trackBoundaryAnalysis singleflight.Group
 )
 
+// enqueueTrackLoudnessIfNeeded re-reads the row immediately before insertion.
+// Pump and scan callers often operate from an older candidate snapshot; an
+// on-demand playback analysis may have completed after that snapshot was
+// built, and must not be resurrected as redundant queued work.
+func enqueueTrackLoudnessIfNeeded(ctx context.Context, q *sqlc.Queries, client *river.Client[pgx.Tx], args ScanTrackLoudnessArgs, opts *river.InsertOpts) (enqueued, duplicate bool, err error) {
+	tf, err := q.GetTrackFileByID(ctx, args.TrackFileID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if !trackFileNeedsLoudness(tf) {
+		return false, false, nil
+	}
+	result, err := client.Insert(ctx, args, opts)
+	if err != nil {
+		return false, false, err
+	}
+	return !result.UniqueSkippedAsDuplicate, result.UniqueSkippedAsDuplicate, nil
+}
+
 // ScanTrackLoudnessWorker runs ffmpeg's ebur128 filter on one audio file and
 // writes integrated_lufs / true_peak_db / loudness_range_db / sample_peak_db
 // back to its track_files row. After the write, checks whether every other
