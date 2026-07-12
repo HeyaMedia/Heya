@@ -64,6 +64,33 @@ export function useBackgroundToneStyle() {
  *  this duration, so indicator and timer can't drift apart. */
 export const BG_ROTATE_MS = 30_000
 
+/** The one size the ambient layer renders at. Preloads MUST warm exactly
+ *  this variant or the crossfade starts before the real bytes exist. */
+export const BG_IMG = { width: 1920, quality: 70 } as const
+
+/** URL helpers bound to the nuxt-image provider. Call in setup and keep the
+ *  returned object — the factory touches useImage()/useNuxtApp(), which
+ *  silently hangs when first called inside a computed or async body
+ *  (docs/ui.md gotcha #1). The methods themselves are safe anywhere. */
+export function useBackgroundImageTools() {
+  const $img = useImage()
+  return {
+    /** The exact URL the ambient layer renders — preload THIS, not the raw url. */
+    variant: (url: string) => $img(url, { ...BG_IMG }),
+    /** Tiny thumb for tone sampling (a 24×24 canvas needs nothing more). */
+    thumb: (url: string) => $img(url, { width: 64 }),
+    /** Fire-and-forget cache warmer for the rendered variant, so the next
+     *  rotation/advance crossfades from a hot cache instead of stuttering. */
+    warm(url: string) {
+      if (!import.meta.client) return
+      const img = new Image()
+      img.decoding = 'async'
+      img.fetchPriority = 'low' // never compete with page content
+      img.src = this.variant(url)
+    },
+  }
+}
+
 /** Two-way channel between the AmbientBackdrop layer and the bottom-left
  *  AmbientControls cluster (and anything else that wants to steer the
  *  background). The layer WRITES mode/rotating/cycle; the controls WRITE

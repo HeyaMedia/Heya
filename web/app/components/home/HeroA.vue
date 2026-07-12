@@ -165,6 +165,15 @@ const bgB = ref<string | null>(null)
 // the deck's rotation through this watcher.
 const { ambientEnabled } = useAppearance()
 const background = useBackground()
+const bgImg = useBackgroundImageTools()
+// Warm the NEXT slide's backdrop whenever the current one settles, so the
+// ring-driven advance (and a shown deck's first rotation) crossfades from
+// a hot cache instead of stuttering mid-fade.
+watch(() => currentIdx.value + props.items.length, () => {
+  if (props.items.length <= 1) return
+  const url = getBackdropUrl((currentIdx.value + 1) % props.items.length)
+  if (url) bgImg.warm(url)
+}, { immediate: true })
 const currentBg = computed(() => (showA.value ? bgA.value : bgB.value) || null)
 watch([currentBg, ambientEnabled], ([url, on]) => {
   if (on && url) background.set(url)
@@ -176,7 +185,9 @@ watch([currentBg, ambientEnabled], ([url, on]) => {
 // when sampling fails (no backdrop / decode error).
 const tone = ref<ImageTone | null>(null)
 watch(currentBg, async (url) => {
-  tone.value = url ? await sampleImageTone(url) : null
+  // Sample the w=64 thumb — a 24×24 canvas average needs kilobytes, not
+  // another copy of the full-size backdrop.
+  tone.value = url ? await sampleImageTone(bgImg.thumb(url)) : null
 }, { immediate: true })
 const playStyle = computed(() =>
   tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)

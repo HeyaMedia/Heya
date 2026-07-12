@@ -6,13 +6,16 @@
     :style="{ '--ambient-opacity': intensity / 100 }"
     aria-hidden="true"
   >
+    <!-- srcA/srcB already carry the resolved ?w=&q= variant URL (see
+         showImage) — no width/quality props, so NuxtImg passes the src
+         through untouched and the rendered file is byte-identical to the
+         preloaded one. With modifier props here, NuxtImg's densities srcset
+         could pick a w=3840 file the preloader never warmed. -->
     <NuxtImg
       v-if="srcA"
       :src="srcA"
       class="ambient-img"
       :class="{ visible: showA, drift: !reducedMotion && !overrideUrl }"
-      width="1920"
-      quality="70"
       alt=""
     />
     <NuxtImg
@@ -20,11 +23,15 @@
       :src="srcB"
       class="ambient-img"
       :class="{ visible: !showA, drift: !reducedMotion && !overrideUrl }"
-      width="1920"
-      quality="70"
       alt=""
     />
-    <div class="ambient-scrim" />
+    <!-- All three scrim looks stay mounted and opacity-crossfade on mode
+         changes — background gradients can't transition, so a single
+         swapped element snapped between looks a beat before the artwork
+         faded. -->
+    <div class="ambient-scrim scrim-open" />
+    <div class="ambient-scrim scrim-veil" />
+    <div class="ambient-scrim scrim-override" />
   </div>
 </template>
 
@@ -54,6 +61,9 @@ const { $heya } = useNuxtApp()
 const route = useRoute()
 const { prefs, ambientEnabled } = useAppearance()
 const { isAuthenticated } = useAuth()
+// Hoisted at setup — the factory touches useImage()/useNuxtApp(), which
+// hangs when first called from timers/async bodies (docs/ui.md gotcha #1).
+const bgImg = useBackgroundImageTools()
 const claim = useBackgroundClaim()
 const overrideUrl = computed(() => (claim.value?.kind === 'art' ? claim.value.url : null))
 const claimedPool = computed(() => (claim.value?.kind === 'pool' ? claim.value.types : null))
@@ -112,7 +122,8 @@ function urlFor(c: Candidate): string {
   return `/api/media/${c.public_id}/image/${type}`
 }
 
-// A/B crossfade state.
+// A/B crossfade state. srcA/srcB hold the RENDERED variant URLs; `shown`
+// keeps the RAW url as identity (claims and pool candidates compare raw).
 const srcA = ref<string | null>(null)
 const srcB = ref<string | null>(null)
 const showA = ref(true)
@@ -122,11 +133,13 @@ let timer: ReturnType<typeof setTimeout> | null = null
 
 // Publish the shown image's dominant tone so any page can paint
 // artwork-adaptive controls (useBackgroundToneStyle). Guarded against
-// out-of-order sampling: only the still-current image lands.
+// out-of-order sampling: only the still-current image lands. Samples the
+// w=64 thumb — a 24×24 canvas average needs kilobytes, not the multi-MB
+// original (which also polluted the cache with a CORS-mode copy).
 const tone = useBackgroundTone()
 watch(shown, async (url) => {
   if (!url) { tone.value = null; return }
-  const t = await sampleImageTone(url)
+  const t = await sampleImageTone(bgImg.thumb(url))
   if (shown.value === url) tone.value = t
 })
 watch(active, (on) => {
@@ -139,21 +152,39 @@ function stop() {
   ctl.value.rotating = false
 }
 
-/** Preload off-DOM, then crossfade to the url. The callback reports whether
- *  the image actually landed — a failed load keeps the previous image on
- *  screen, and identity-tracking callers must not pretend otherwise. */
+/** Preload the RENDERED variant off-DOM, decode it, then crossfade. The
+ *  callback reports whether the image actually landed — a failed load keeps
+ *  the previous image on screen, and identity-tracking callers must not
+ *  pretend otherwise.
+ *
+ *  Sequence-guarded: rapid navigation used to leave several loads in
+ *  flight and whichever FINISHED last won, not whichever was requested
+ *  last — a late stale image would land on top of the right one and the
+ *  backdrop visibly jumped. Only the newest request may flip the fade;
+ *  stale completions are dropped silently (no callback — their rotation
+ *  window belongs to a superseded context). */
+let loadSeq = 0
 function showImage(url: string, then?: (ok: boolean) => void) {
+  // Invalidate any in-flight load BEFORE the no-op check: "show what's
+  // already shown" must still cancel a pending switch, or A → (B loading)
+  // → A leaves B current and it lands late anyway.
+  const seq = ++loadSeq
   if (shown.value === url) { then?.(true); return }
+  const variant = bgImg.variant(url)
   const img = new Image()
-  img.onload = () => {
-    if (showA.value) srcB.value = url
-    else srcA.value = url
+  img.onload = async () => {
+    // Decode off-screen so the crossfade's first painted frame doesn't
+    // stall on a main-thread decode (the visible "stutter" at fade start).
+    try { await img.decode() } catch { /* decodable enough to paint */ }
+    if (seq !== loadSeq) return
+    if (showA.value) srcB.value = variant
+    else srcA.value = variant
     showA.value = !showA.value
     shown.value = url
     then?.(true)
   }
-  img.onerror = () => then?.(false)
-  img.src = url
+  img.onerror = () => { if (seq === loadSeq) then?.(false) }
+  img.src = variant
 }
 
 function scheduleRotation() {
@@ -164,6 +195,23 @@ function scheduleRotation() {
   // BG_ROTATE_MS animation, so ring and timer stay in lockstep.
   ctl.value.rotating = true
   ctl.value.cycle++
+  warmAhead()
+}
+
+/** Warm the next couple of pool variants while this window idles, so the
+ *  upcoming rotation (or a quick manual next) crossfades from a hot cache.
+ *  Low-priority + idle-scheduled: never competes with page content. */
+function warmAhead() {
+  const pool = poolQuery.data.value
+  if (!pool || pool.length < 2) return
+  const kick = () => {
+    for (const off of [1, 2]) {
+      const c = pool[(cursor + off) % pool.length]
+      if (c) bgImg.warm(urlFor(c))
+    }
+  }
+  if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 4000 })
+  else setTimeout(kick, 800)
 }
 
 /** Show a pool candidate and publish its identity for the corner poster
@@ -215,8 +263,24 @@ watch(
     }
     ctl.value.mode = 'pool'
     if (!pool?.length) { stop(); return }
-    // (Re)enter pool mode — pick a random start if the current image
-    // isn't from this pool anyway.
+    // (Re)enter pool mode. If what's on screen is already one of this
+    // pool's images (list → detail without art → back, claim churn on
+    // section navigation), KEEP it — re-anchor the cursor and just rearm
+    // the clock. Random-restarting here made every back-navigation jump
+    // to a new backdrop for no reason.
+    const keep = shown.value ? pool.findIndex((c) => urlFor(c) === shown.value) : -1
+    if (keep >= 0) {
+      cursor = keep
+      const c = pool[keep]!
+      ctl.value.current = {
+        title: c.title,
+        slug: c.slug,
+        mediaType: c.media_type,
+        poster: `/api/media/${c.public_id}/image/poster`,
+      }
+      scheduleRotation()
+      return
+    }
     cursor = Math.floor(Math.random() * pool.length)
     showPool(pool[cursor]!, scheduleRotation)
   },
@@ -315,13 +379,25 @@ onBeforeUnmount(() => {
   to { transform: scale(1.12); }
 }
 
-/* Pool mode: solid canvas at the top edge (topbar zone) and lower third
-   (where rails/text live), lightest in the visual center. Derives from
-   --bg-1 so every theme tints correctly for free. */
+/* Three scrim looks, all mounted, opacity-crossfaded on mode change —
+   backgrounds can't transition, so swapping one element's gradient
+   snapped the veil a beat before the artwork faded. Derive from --bg-1
+   so every theme tints correctly for free. */
 .ambient-scrim {
   position: absolute;
   inset: 0;
   transition: opacity 0.8s ease;
+  opacity: 0;
+}
+
+/* Open pool (no explicit claim — home): solid canvas at the top edge
+   (topbar zone) and lower third (rails/text), lightest in the center.
+   Visible by default (source order beats the base's opacity: 0); the two
+   claimed modes fade it out below. Keep all these opacity rules at ≤
+   (0,2,0) specificity so the trailing `.reveal .ambient-scrim` rule wins
+   every tie by coming last. */
+.scrim-open {
+  opacity: 1;
   background:
     linear-gradient(to bottom,
       color-mix(in srgb, var(--bg-1) 78%, transparent) 0%,
@@ -332,11 +408,13 @@ onBeforeUnmount(() => {
       transparent 45%,
       color-mix(in srgb, var(--bg-0) 45%, transparent) 100%);
 }
+.override-mode .scrim-open,
+.veil-content .scrim-open { opacity: 0; }
+
 /* Content veil (explicit pool claims — the list pages): mirrors the
-   override-mode scrim below so /movies//tv//music read exactly like home,
-   with just a touch more base at the very top where FilterBar/headers sit
-   (hero pages earn their clean top from the heroes' own text washes). */
-.veil-content .ambient-scrim {
+   override scrim so /movies//tv//music read exactly like home, with a
+   touch more base at the very top where FilterBar/headers sit. */
+.scrim-veil {
   background:
     linear-gradient(to bottom,
       color-mix(in srgb, var(--bg-1) 34%, transparent) 0%,
@@ -344,11 +422,12 @@ onBeforeUnmount(() => {
       color-mix(in srgb, var(--bg-1) 55%, transparent) 68%,
       color-mix(in srgb, var(--bg-1) 78%, transparent) 100%);
 }
+.veil-content .scrim-veil { opacity: 1; }
 
 /* Override mode: the hero zone (top) shows the art nearly clean — the
    owning page's own fade handles its text — and the canvas builds back
    up toward the bottom where long-form content lives. */
-.override-mode .ambient-scrim {
+.scrim-override {
   background:
     linear-gradient(to bottom,
       color-mix(in srgb, var(--bg-1) 22%, transparent) 0%,
@@ -356,6 +435,7 @@ onBeforeUnmount(() => {
       color-mix(in srgb, var(--bg-1) 55%, transparent) 68%,
       color-mix(in srgb, var(--bg-1) 78%, transparent) 100%);
 }
+.override-mode .scrim-override { opacity: 1; }
 
 /* Reveal (corner eye button): the artwork clean — no blur, full presence,
    no scrim. The app content fades away via .app.bg-reveal (heya.css). */

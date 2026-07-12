@@ -35,6 +35,16 @@ export const BACKDROP_INTERVAL = 30_000
  */
 export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: BackdropCarouselOptions = {}) {
   const lightbox = useLightbox()
+  // Hoisted here (factory runs in page setup) — see useBackgroundImageTools.
+  const bgImg = useBackgroundImageTools()
+
+  /** Warm the backdrop AFTER idx so the ring-driven advance lands hot. */
+  function warmNext(idx: number) {
+    const n = backdropAssets.value.length
+    if (n <= 1) return
+    const url = getBackdropUrl((idx + 1) % n)
+    if (url) bgImg.warm(url)
+  }
 
   const showA = ref(true)
   const backdropA = ref<string | null>(null)
@@ -67,6 +77,7 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     if (showA.value) { backdropB.value = url } else { backdropA.value = url }
     showA.value = !showA.value
     cycleKey.value++
+    warmNext(idx)
   }
 
   function advanceBackdrop() {
@@ -95,6 +106,7 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
       backdropB.value = getBackdropUrl(0)
     }
     cycleKey.value++
+    warmNext(0)
   }
 
   function openBackdropLightbox() {
