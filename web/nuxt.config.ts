@@ -177,16 +177,21 @@ export default defineNuxtConfig({
     },
     optimizeDeps: {
       include: [
-        "@vue/devtools-core",
-        "@vue/devtools-kit",
-        "butterchurn", // CJS
-        "butterchurn-presets", // CJS
-        "butterchurn-presets/lib/butterchurnPresetsExtra.min.js", // CJS
-        "butterchurn-presets/lib/butterchurnPresetsExtra2.min.js", // CJS
-        "butterchurn-presets/lib/butterchurnPresetsMD1.min.js", // CJS
-        "hls.js",
-        "reka-ui",
-        "vue-virtual-scroller",
+        '@phosphor-icons/vue',
+        '@pinia/colada-devtools',
+        '@pinia/colada-plugin-auto-refetch',
+        '@pinia/colada-plugin-retry',
+        '@vue/devtools-core',
+        '@vue/devtools-kit',
+        'akarisub',
+        'butterchurn', // CJS
+        'butterchurn-presets', // CJS
+        'butterchurn-presets/lib/butterchurnPresetsExtra.min.js', // CJS
+        'butterchurn-presets/lib/butterchurnPresetsExtra2.min.js', // CJS
+        'butterchurn-presets/lib/butterchurnPresetsMD1.min.js', // CJS
+        'hls.js',
+        'reka-ui',
+        'vue-virtual-scroller',
       ],
     },
   },
