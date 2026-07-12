@@ -93,6 +93,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerOpenSubtitlesRoutes(api, app)
 	registerMusicRoutes(api, app)
 	registerMusicHomeRoutes(api, app)
+	registerMusicServicesRoutes(api, app)
 	registerMeRoutes(api, app)
 	registerSessionRoutes(api, app)
 	registerRadioRoutes(api, app)

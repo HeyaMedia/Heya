@@ -63,6 +63,11 @@ type Config struct {
 	// /api/podcasts trending+search endpoints will surface a clear error.
 	PodcastIndexKey    Field[string] `json:"-"` // never exposed via API
 	PodcastIndexSecret Field[string] `json:"-"`
+	// Last.fm application credentials (shared, server-level) — per-user session
+	// keys live in user_music_services. Reads (history import) need only the
+	// key; scrobbling needs both plus a user session.
+	LastfmAPIKey Field[string] `json:"-"`
+	LastfmSecret Field[string] `json:"-"`
 }
 
 // JellyfinConfig gates the Jellyfin-compatible API surface (internal/jellyfin)
@@ -137,6 +142,8 @@ func Load() *Config {
 		TranscodeCacheMaxGB: envInt("HEYA_TRANSCODE_CACHE_MAX_GB", 50),
 		PodcastIndexKey:     envString("HEYA_PODCAST_INDEX_KEY", ""),
 		PodcastIndexSecret:  envString("HEYA_PODCAST_INDEX_SECRET", ""),
+		LastfmAPIKey:        envString("HEYA_LASTFM_API_KEY", ""),
+		LastfmSecret:        envString("HEYA_LASTFM_SECRET", ""),
 		Jellyfin: JellyfinConfig{
 			Enabled: envBool("HEYA_JELLYFIN_API_ENABLED", false),
 		},

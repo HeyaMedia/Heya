@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -53,6 +54,11 @@ func (a *App) RecordPlayback(ctx context.Context, userID int64, ev PlaybackEvent
 			Completed:       ev.Completed,
 			Source:          ev.Source,
 		})
+		if err == nil && ev.Completed {
+			// Outbound scrobble to any linked ListenBrainz/Last.fm accounts —
+			// fire-and-forget, never blocks or fails the playback path.
+			a.ScrobbleOutbound(userID, ev.EntityID, time.Now())
+		}
 		return err
 	default:
 		return fmt.Errorf("unsupported entity_type %q (want movie | episode | track)", ev.EntityType)
