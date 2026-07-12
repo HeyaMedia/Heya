@@ -138,9 +138,8 @@
 </template>
 
 <script setup lang="ts">
-// $heya is grabbed once at script-setup top level (never inside computed()
-// or an async body) — see docs/ui.md gotcha #1.
-const { $heya } = useNuxtApp()
+import { useQuery } from '@pinia/colada'
+import { trackLyricsQuery } from '~/queries/music'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -267,45 +266,22 @@ function scrollToQueue() {
 // Same fetch/sync shape as QueuePanel.vue's lyrics tab, simplified: no
 // timing-offset slider, no click-to-seek — just a scrollable read view with
 // the current line highlighted when synced timing data exists.
-interface LyricsLine { time_ms: number; text: string }
-interface LyricsResponse { synced: boolean; lines: LyricsLine[] }
-
 const showLyrics = ref(false)
-const lyrics = ref<LyricsResponse | null>(null)
-const lyricsLoading = ref(false)
 const lyricRefs = ref<Array<HTMLElement | null>>([])
 const lyricsScrollEl = ref<HTMLElement | null>(null)
-let lastLoadedTrackId: number | null = null
+const lyricTrackId = computed(() => currentTrack.value?.id && currentTrack.value.id > 0 ? currentTrack.value.id : 0)
+const lyricsQuery = useQuery(() => ({
+  ...trackLyricsQuery(lyricTrackId.value),
+  enabled: showLyrics.value && lyricTrackId.value > 0,
+}))
+const lyrics = computed(() => lyricsQuery.data.value ?? null)
+const lyricsLoading = computed(() => lyricsQuery.isPending.value && lyricTrackId.value > 0)
 
 function bindLyricRef(el: HTMLElement | null, i: number) {
   lyricRefs.value[i] = el
 }
 
-async function loadLyrics(trackId: number | null | undefined) {
-  // Negative IDs are synthetic radio/podcast tracks — no library lyrics.
-  if (!trackId || trackId <= 0) { lyrics.value = null; lastLoadedTrackId = trackId ?? null; return }
-  if (trackId === lastLoadedTrackId && lyrics.value) return
-  lastLoadedTrackId = trackId
-  lyricsLoading.value = true
-  lyricRefs.value = []
-  try {
-    lyrics.value = await $heya('/api/music/tracks/{id}/lyrics', { path: { id: trackId } }) as LyricsResponse
-  } catch {
-    lyrics.value = null
-  } finally {
-    lyricsLoading.value = false
-  }
-}
-
-// Only fetch while the lyrics view is actually showing.
-watch(
-  () => [showLyrics.value, currentTrack.value?.id] as const,
-  ([show, id]) => {
-    if (!show) return
-    void loadLyrics(id ?? null)
-  },
-  { immediate: true },
-)
+watch(lyricTrackId, () => { lyricRefs.value = [] })
 
 const activeLyricIdx = computed(() => {
   const list = lyrics.value?.lines

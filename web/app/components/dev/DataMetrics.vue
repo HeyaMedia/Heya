@@ -1,5 +1,5 @@
 <template>
-  <details class="dm-panel">
+  <details class="dm-panel" :class="{ 'dm-panel-music': onMusicRoute }">
     <summary>Data · {{ metrics.cacheEntries }} cached</summary>
     <div class="dm-grid">
       <span>Last navigation</span><b>{{ metrics.lastNavigationMs }} ms</b>
@@ -20,6 +20,8 @@ import { useQueryCache } from '@pinia/colada'
 
 const metrics = useDataMetricsStore()
 const queryCache = useQueryCache()
+const route = useRoute()
+const onMusicRoute = computed(() => route.path === '/music' || route.path.startsWith('/music/'))
 
 function sampleCache() {
   const entries = queryCache.getEntries()
@@ -44,14 +46,16 @@ function formatBytes(bytes: number) {
 
 <style scoped>
 .dm-panel {
-  position: fixed; left: 14px; bottom: 14px; z-index: 10050;
+  position: fixed; right: 14px; bottom: 14px; z-index: 10050;
   width: 260px; padding: 9px 11px; border-radius: 9px;
   color: #ddd; background: rgba(12, 12, 18, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.13);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   font: 11px/1.45 var(--font-mono, monospace);
   backdrop-filter: blur(14px);
+  transition: bottom 180ms ease;
 }
+.dm-panel-music { bottom: calc(var(--playbar-h) + 14px); }
 .dm-panel summary { cursor: pointer; color: var(--gold, #d6b56d); user-select: none; }
 .dm-grid { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin-top: 9px; }
 .dm-grid span { color: #999; }

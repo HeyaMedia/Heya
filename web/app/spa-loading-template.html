@@ -42,27 +42,38 @@
   }
   html[data-theme="light"] .heya-boot-mark { background: #b88e2a; color: #1a1408; }
   .heya-boot-bar {
-    width: 96px;
-    height: 2px;
+    width: min(240px, 58vw);
+    height: 3px;
     background: rgba(255, 255, 255, 0.06);
     border-radius: 999px;
     overflow: hidden;
     position: relative;
   }
   html[data-theme="light"] .heya-boot-bar { background: rgba(35, 30, 20, 0.10); }
-  .heya-boot-bar::after {
-    content: "";
+  .heya-boot-progress {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -40%;
-    width: 40%;
-    background: linear-gradient(90deg, transparent, #e6b94a 50%, transparent);
-    animation: heya-boot-slide 1.4s ease-in-out infinite;
+    inset: 0 auto 0 0;
+    width: 32%;
+    border-radius: inherit;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(230, 185, 74, 0.28) 24%,
+      #e6b94a 48%,
+      #fff0b0 50%,
+      #e6b94a 52%,
+      rgba(230, 185, 74, 0.28) 76%,
+      transparent 100%);
+    filter: drop-shadow(0 0 5px rgba(230, 185, 74, 0.72));
+    transform: translateX(-105%);
+    will-change: transform;
+    animation: heya-boot-slide 1.55s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
   }
-  html[data-theme="light"] .heya-boot-bar::after {
-    background: linear-gradient(90deg, transparent, #b88e2a 50%, transparent);
+  html[data-theme="light"] .heya-boot-progress {
+    background: linear-gradient(90deg, transparent, rgba(184, 142, 42, 0.30), #b88e2a 48%, #6d5013 50%, #b88e2a 52%, rgba(184, 142, 42, 0.30), transparent);
+    filter: drop-shadow(0 0 4px rgba(184, 142, 42, 0.48));
   }
+  .heya-boot-status { margin-top: -16px; min-height: 16px; color: #77746c; font-size: 11px; }
+  html[data-theme="light"] .heya-boot-status { color: #777064; }
   @keyframes heya-boot-in {
     from { opacity: 0; }
     to   { opacity: 1; }
@@ -72,16 +83,20 @@
     50%      { transform: scale(1.04); box-shadow: 0 16px 44px rgba(230, 185, 74, 0.50); }
   }
   @keyframes heya-boot-slide {
-    0%   { transform: translateX(0); }
-    100% { transform: translateX(350%); }
+    from { transform: translateX(-105%); }
+    to   { transform: translateX(315%); }
   }
   @media (prefers-reduced-motion: reduce) {
     .heya-boot,
     .heya-boot-mark,
-    .heya-boot-bar::after { animation: none; }
+    .heya-boot-progress { animation: none !important; }
+    .heya-boot-progress { transform: translateX(105%); }
   }
 </style>
-<div class="heya-boot" aria-hidden="true">
+<div class="heya-boot" role="status" aria-live="polite">
   <div class="heya-boot-mark">H</div>
-  <div class="heya-boot-bar"></div>
+  <div id="heya-boot-bar" class="heya-boot-bar">
+    <div class="heya-boot-progress"></div>
+  </div>
+  <div id="heya-boot-status" class="heya-boot-status">Starting Heya…</div>
 </div>

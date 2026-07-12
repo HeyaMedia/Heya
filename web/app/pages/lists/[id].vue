@@ -46,20 +46,17 @@
 </template>
 
 <script setup lang="ts">
-import type { MediaItem } from '~~/shared/types'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { userListDetailQuery } from '~/queries/lists'
 
 const route = useRoute()
-const listId = computed(() => route.params.id as string)
-
-interface UserList {
-  id: number
-  name: string
-  description: string
-}
-
-const list = ref<UserList | null>(null)
-const items = ref<MediaItem[]>([])
-const loading = ref(true)
+const listId = computed(() => Number(route.params.id))
+const detailQuery = useQuery(() => userListDetailQuery(listId.value))
+const queryCache = useQueryCache()
+await waitForQuery(detailQuery).catch(() => {})
+const list = computed(() => detailQuery.data.value?.list ?? null)
+const items = computed(() => detailQuery.data.value?.items ?? [])
+const loading = computed(() => detailQuery.isPending.value)
 
 async function confirmDelete() {
   if (!list.value) return
@@ -75,20 +72,11 @@ async function confirmDelete() {
     method: 'DELETE',
     path: { id: list.value.id },
   })
+  const entry = queryCache.get(['me', 'lists', listId.value])
+  if (entry) queryCache.remove(entry)
+  await queryCache.invalidateQueries({ key: ['me', 'lists'] })
   navigateTo('/')
 }
-
-onMounted(async () => {
-  try {
-    const { $heya } = useNuxtApp()
-    const res = await $heya('/api/me/lists/{id}', {
-      path: { id: Number(listId.value) },
-    }) as { list: UserList; items: MediaItem[] }
-    list.value = res.list
-    items.value = res.items || []
-  } catch { /* empty */ }
-  loading.value = false
-})
 </script>
 
 <style scoped>

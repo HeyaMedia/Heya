@@ -6,6 +6,7 @@ type Health = components['schemas']['HealthBody']
 type Ready  = components['schemas']['ReadyBody']
 
 const { $heya } = useNuxtApp()
+const clientVersion = useRuntimeConfig().public.heyaVersion
 
 const health = ref<Health | null>(null)
 const ready = ref<Ready | null>(null)
@@ -30,7 +31,8 @@ const overallTone = computed<'good' | 'warn' | 'bad'>(() => {
 })
 
 const buildKv = computed(() => [
-  { key: 'Version',  value: health.value?.version ?? '—', mono: true, copy: true },
+  { key: 'Server version', value: health.value?.version ?? '—', mono: true, copy: true },
+  { key: 'Client version', value: clientVersion, mono: true, copy: true },
   { key: 'Database', value: health.value?.database ?? '—' },
   { key: 'Status',   value: health.value?.status ?? '—' },
 ])

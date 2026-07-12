@@ -3,7 +3,9 @@ import type { QueryMeta } from '@pinia/colada'
 import type { Pinia } from 'pinia'
 import {
   loadPersistedQueryCache,
+  queryCacheClearedAfter,
   queryCacheNamespace,
+  QUERY_CACHE_CLEARED_EVENT,
   savePersistedQueryCache,
   QUERY_CACHE_SCHEMA,
   type PersistedQueryCache,
@@ -24,11 +26,14 @@ function approved(meta?: QueryMeta) {
     && meta.sensitivity !== 'secret'
 }
 
-function prune(entries: Record<string, SerializedQueryEntry>, now = Date.now()) {
+function prune(entries: Record<string, SerializedQueryEntry>, now = Date.now(), minimumWhen = 0) {
   const candidates = Object.entries(entries)
     .filter(([, entry]) => {
       const [data, , when = 0, meta] = entry
-      return data !== undefined && approved(meta as QueryMeta | undefined) && now - when <= maxAge(meta as QueryMeta | undefined)
+      return data !== undefined
+        && when > minimumWhen
+        && approved(meta as QueryMeta | undefined)
+        && now - when <= maxAge(meta as QueryMeta | undefined)
     })
     .sort(([, a], [, b]) => (b[2] ?? 0) - (a[2] ?? 0))
 
@@ -64,12 +69,13 @@ export default defineNuxtPlugin({
       activeUserId = userId
       const generation = ++sessionGeneration
       const namespace = queryCacheNamespace(userId)
+      let minimumWhen = queryCacheClearedAfter(userId)
       const persisted = await loadPersistedQueryCache(namespace)
       if (generation !== sessionGeneration || activeUserId !== userId || !token.value) return
       const lastSuccessWhen = new Map<string, number>()
       let diskEntries: Record<string, SerializedQueryEntry> = {}
       if (persisted) {
-        const hydrated = prune(persisted.entries)
+        const hydrated = prune(persisted.entries, Date.now(), minimumWhen)
         diskEntries = hydrated.entries
         hydrateQueryCache(queryCache, hydrated.entries)
         for (const [key, entry] of Object.entries(hydrated.entries)) lastSuccessWhen.set(key, entry[2] ?? 0)
@@ -94,12 +100,12 @@ export default defineNuxtPlugin({
           }
           // GC of inactive memory entries must not erase their longer-lived
           // offline copy, so updates merge into the last disk snapshot.
-          const selected = prune({ ...diskEntries, ...serialized })
+          const selected = prune({ ...diskEntries, ...serialized }, Date.now(), minimumWhen)
           diskEntries = selected.entries
           const record: PersistedQueryCache = {
             namespace,
             schema: QUERY_CACHE_SCHEMA,
-            appBuild: nuxtApp.$config.app.buildId,
+            appBuild: nuxtApp.$config.public.heyaVersion,
             savedAt: Date.now(),
             entries: selected.entries,
             bytes: selected.bytes,
@@ -124,7 +130,16 @@ export default defineNuxtPlugin({
         { deep: true },
       )
       const flushWhenHidden = () => { if (document.visibilityState === 'hidden') void persist() }
+      const clearOfflineData = (event: Event) => {
+        const detail = (event as CustomEvent<{ userId: string, clearedAt: number }>).detail
+        if (detail?.userId !== String(userId)) return
+        minimumWhen = detail.clearedAt
+        diskEntries = {}
+        lastSuccessWhen.clear()
+        metrics.setPersistenceStats(0, 0, 0)
+      }
       document.addEventListener('visibilitychange', flushWhenHidden)
+      window.addEventListener(QUERY_CACHE_CLEARED_EVENT, clearOfflineData)
       window.addEventListener('pagehide', persist)
 
       stopSession = () => {
@@ -132,6 +147,7 @@ export default defineNuxtPlugin({
         stopWatch()
         if (timer) clearTimeout(timer)
         document.removeEventListener('visibilitychange', flushWhenHidden)
+        window.removeEventListener(QUERY_CACHE_CLEARED_EVENT, clearOfflineData)
         window.removeEventListener('pagehide', persist)
       }
     }

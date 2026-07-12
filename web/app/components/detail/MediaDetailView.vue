@@ -298,12 +298,19 @@
 <script setup lang="ts">
 import type { MediaDetail, MediaExtra } from '~~/shared/types'
 import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { mediaDetailQuery } from '~/queries/media'
+import { mediaUserStateQuery } from '~/queries/catalog'
 
 const props = defineProps<{ mediaId: number; initialDetail?: MediaDetail }>()
 const lightbox = useLightbox()
+const queryCache = useQueryCache()
+if (props.initialDetail) queryCache.setQueryData(['media', 'detail', String(props.mediaId)], props.initialDetail)
+const detailQuery = useQuery(() => mediaDetailQuery(props.mediaId))
+const mediaStateQuery = useQuery(mediaUserStateQuery())
 
-const detail = ref<MediaDetail | null>(props.initialDetail ?? null)
-const loading = ref(!props.initialDetail)
+const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
+const loading = computed(() => detailQuery.isPending.value)
 const contentTab = ref('')
 const contentExpanded = ref(false)
 
@@ -317,6 +324,13 @@ async function toggleFavorite() {
     body: { entity_type: 'media_item', entity_id: detail.value.media_item.id } as any,
   }) as { favorited: boolean }
   isFavorited.value = res.favorited
+  queryCache.setQueryData(['me', 'media-state'], current => {
+    const state = (current as { watched: number[], favorited: number[] } | undefined) ?? { watched: [], favorited: [] }
+    const favorited = new Set(state.favorited)
+    if (res.favorited) favorited.add(detail.value!.media_item.id)
+    else favorited.delete(detail.value!.media_item.id)
+    return { ...state, favorited: [...favorited] }
+  })
 }
 
 // Watched (for movies)
@@ -513,29 +527,16 @@ function recPosterUrl(r: any): string {
   return ''
 }
 
-onMounted(async () => {
-  const { $heya } = useNuxtApp()
-  if (!detail.value) {
-    try {
-      detail.value = await $heya('/api/media/{id}', {
-        path: { id: props.mediaId as any },
-      }) as MediaDetail
-    } catch { /* empty */ }
-    loading.value = false
-  }
-
+watch(detail, (value) => {
+  if (!value) return
   const first = contentTabs.value[0]
   if (first) contentTab.value = first.id
-
   seedCarousel()
+}, { immediate: true })
 
-  if (detail.value) {
-    const res = await $heya('/api/me/favorites/check', {
-      query: { entity_type: 'media_item', entity_id: detail.value.media_item.id },
-    }) as { favorited: boolean }
-    isFavorited.value = res.favorited
-  }
-})
+watch(() => mediaStateQuery.data.value, state => {
+  if (detail.value) isFavorited.value = state?.favorited.includes(detail.value.media_item.id) ?? false
+}, { immediate: true })
 </script>
 
 <style scoped>

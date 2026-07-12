@@ -67,6 +67,7 @@ import type { MediaItem } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
+import { continueWatchingQuery } from '~/queries/activity'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
@@ -144,11 +145,7 @@ const recentAdded = computed<MediaItem[]>(() => {
 })
 
 // ── Continue Watching / Recently Watched ──────────────────────────────────
-const continueQuery = useQuery({
-  key: ['me', 'watch', 'continue'],
-  query: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingItem[],
-  staleTime: 1000 * 30,
-})
+const continueQuery = useQuery(continueWatchingQuery())
 const continueItems = computed<ContinueWatchingItem[]>(() =>
   (continueQuery.data.value ?? []).filter(i => mediaTypeInSection(i.media_type, props.section)),
 )

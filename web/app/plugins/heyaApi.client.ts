@@ -7,6 +7,7 @@
 export default defineNuxtPlugin((nuxtApp) => {
   nuxtApp.hook('openFetch:onRequest:heya', (ctx) => {
     const { token } = useAuth()
+    ctx.options.headers.set('X-Heya-Client-Version', nuxtApp.$config.public.heyaVersion)
     if (token.value) {
       ctx.options.headers.set('Authorization', `Bearer ${token.value}`)
     }

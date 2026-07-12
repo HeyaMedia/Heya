@@ -139,6 +139,9 @@
 </template>
 
 <script setup lang="ts">
+import { useQuery } from '@pinia/colada'
+import { trackLyricsQuery, type LyricsLine } from '~/queries/music'
+
 const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 
@@ -222,43 +225,26 @@ function onVolumeWheel(e: WheelEvent) {
 // Lyrics — same model as QueuePanel but rendered larger.
 // ---------------------------------------------------------------------------
 
-interface LyricsLine { time_ms: number; text: string }
-interface LyricsResponse { synced: boolean; lines: LyricsLine[] }
-
-const lyrics = ref<LyricsResponse | null>(null)
-const lyricsLoading = ref(false)
 const lyricRefs = ref<Array<HTMLElement | null>>([])
 const lyricsCol = ref<HTMLElement | null>(null)
-let lastLoadedTrackId: number | null = null
+const lyricTrackId = computed(() => track.value?.id && track.value.id > 0 ? track.value.id : 0)
+const lyricsQuery = useQuery(() => ({
+  ...trackLyricsQuery(lyricTrackId.value),
+  enabled: props.open && lyricTrackId.value > 0,
+}))
+const lyrics = computed(() => lyricsQuery.data.value ?? null)
+const lyricsLoading = computed(() => lyricsQuery.isPending.value && lyricTrackId.value > 0)
 
 function bindLyricRef(el: HTMLElement | null, i: number) {
   lyricRefs.value[i] = el
-}
-
-async function loadLyrics(trackId: number | null | undefined) {
-  // Same guard as the QueuePanel — radio + podcast rows use negative ids
-  // and have no music-library lyrics. Skip the round trip.
-  if (!trackId || trackId <= 0) { lyrics.value = null; lastLoadedTrackId = trackId ?? null; return }
-  if (lastLoadedTrackId === trackId) return
-  lastLoadedTrackId = trackId
-  lyricsLoading.value = true
-  lyricRefs.value = []
-  try {
-    const { $heya } = useNuxtApp()
-    lyrics.value = await $heya('/api/music/tracks/{id}/lyrics', { path: { id: trackId } }) as LyricsResponse
-  } catch {
-    lyrics.value = null
-  } finally {
-    lyricsLoading.value = false
-  }
 }
 
 // Only fetch when the view is open AND the track changes. Closing the view
 // doesn't dump the cache — reopen for the same track returns instantly.
 watch(
   [() => props.open, () => track.value?.id] as const,
-  ([open, id]) => {
-    if (open && id) loadLyrics(id)
+  ([open]) => {
+    lyricRefs.value = []
     if (!open) {
       // Allow scroll to jump fresh next open instead of inheriting position.
       requestAnimationFrame(() => {

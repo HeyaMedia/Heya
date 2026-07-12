@@ -5,9 +5,17 @@ definePageMeta({ layout: 'settings' })
 // localStorage-only (never synced to the account). This page is purely
 // local: every control writes straight through update(), no save button.
 import type { StreamQuality } from '~/composables/useDeviceSettings'
+import {
+  deviceStorage,
+  type DeviceStorageArea,
+  type DeviceStorageSnapshot,
+  type StorageAreaUsage,
+} from '~/storage/deviceStorage.client'
 
 const { settings, update } = useDeviceSettings()
 const { toast } = useToast()
+const { user } = useAuth()
+const userId = computed(() => (user.value?.id ?? Number(localStorage.getItem('heya_user_id'))) || null)
 
 const QUALITY_OPTIONS: { value: StreamQuality, label: string }[] = [
   { value: 'original', label: 'Original (bit-perfect / best playable)' },
@@ -43,83 +51,39 @@ function onWifiOnlyChange(e: Event) {
   update({ wifiOnlyPrefetch: (e.target as HTMLInputElement).checked })
 }
 
-// --- Storage: navigator.storage.estimate() + the heya-audio-v1 Cache API
-// bucket. No usage() helper exists in engine/prefetch.ts yet (checked at
-// build time — only PrefetchQueue lives there), so entries/bytes are
-// computed inline here from cache.keys() + each Response's content-length
-// header. Defensive throughout: any of these APIs can be absent (Safari
-// private mode, older browsers) or a Response can lack the header.
-const CACHE_NAME = 'heya-audio-v1'
-
 const storageLoading = ref(true)
-const clearing = ref(false)
-const usageBytes = ref<number | null>(null)
-const quotaBytes = ref<number | null>(null)
-const estimateSupported = ref(true)
-const cacheSupported = ref(true)
-const cacheEntries = ref<number | null>(null)
-const cacheBytes = ref<number | null>(null)
-const cacheBytesExact = ref(true)
-
-async function loadCacheStats() {
-  if (!('caches' in window)) {
-    cacheSupported.value = false
-    cacheEntries.value = null
-    cacheBytes.value = null
-    return
-  }
-  try {
-    const cache = await caches.open(CACHE_NAME)
-    const keys = await cache.keys()
-    cacheEntries.value = keys.length
-    let total = 0
-    let exact = true
-    for (const req of keys) {
-      try {
-        const res = await cache.match(req)
-        const len = res?.headers.get('content-length')
-        if (len) total += Number(len)
-        else exact = false
-      } catch {
-        exact = false
-      }
-    }
-    cacheBytes.value = total
-    cacheBytesExact.value = exact
-  } catch {
-    cacheEntries.value = null
-    cacheBytes.value = null
-  }
-}
+const clearing = ref<DeviceStorageArea | null>(null)
+const storage = ref<DeviceStorageSnapshot | null>(null)
 
 async function loadStorage() {
   storageLoading.value = true
   try {
-    if (navigator.storage?.estimate) {
-      const est = await navigator.storage.estimate()
-      usageBytes.value = est.usage ?? null
-      quotaBytes.value = est.quota ?? null
-    } else {
-      estimateSupported.value = false
-    }
+    if (userId.value) storage.value = await deviceStorage.snapshot(userId.value)
   } catch {
-    estimateSupported.value = false
+    toast.err('Could not read browser storage.')
+  } finally {
+    storageLoading.value = false
   }
-  await loadCacheStats()
-  storageLoading.value = false
 }
 
-async function clearAudioCache() {
-  clearing.value = true
+async function clearStorage(area: DeviceStorageArea, label: string) {
+  if (!userId.value) return
+  clearing.value = area
   try {
-    await caches.delete(CACHE_NAME)
+    await deviceStorage.clear(area, userId.value)
     await loadStorage()
-    toast.ok('Prefetched audio cleared.')
+    toast.ok(`${label} cleared.`)
   } catch {
-    toast.err('Could not clear the audio cache.')
+    toast.err(`Could not clear ${label.toLowerCase()}.`)
   } finally {
-    clearing.value = false
+    clearing.value = null
   }
+}
+
+function areaSub(area: StorageAreaUsage, noun: string) {
+  if (!area.available) return 'unsupported by this browser'
+  const count = `${area.entries.toLocaleString()} ${area.entries === 1 ? noun : `${noun}s`}`
+  return `${count} · ${area.exact ? '' : 'at least '}${fmtBytes(area.bytes)}`
 }
 
 onMounted(loadStorage)
@@ -161,32 +125,67 @@ onMounted(loadStorage)
     </SettingsSection>
 
     <SettingsSection title="Storage" icon="hard-drives"
-      description="Cached audio lives in this browser's own storage — clearing it never touches your library.">
+      description="Data kept on this device for instant and offline use. Clearing it never touches your server library or account.">
       <template #actions>
-        <button class="sv2-btn ghost" :disabled="clearing || storageLoading" @click="clearAudioCache">
-          <Icon :name="clearing ? 'spinner' : 'trash'" :size="12" />
-          {{ clearing ? 'Clearing…' : 'Clear prefetched audio' }}
+        <button class="sv2-btn ghost" :disabled="!!clearing || storageLoading" @click="loadStorage">
+          <Icon name="refresh" :size="12" /> Refresh
         </button>
       </template>
 
       <div v-if="storageLoading" class="loading-state">
         <Icon name="spinner" :size="14" /> Reading browser storage…
       </div>
-      <template v-else>
+      <template v-else-if="storage">
         <div class="tiles">
           <MetricTile
             label="Browser storage"
             icon="hard-drives"
-            :value="fmtBytes(usageBytes ?? 0)"
-            :sub="estimateSupported && quotaBytes ? `of ${fmtBytes(quotaBytes)} quota` : 'estimate unavailable'"
+            :value="storage.totalBytes == null ? '—' : fmtBytes(storage.totalBytes)"
+            :sub="storage.quotaBytes ? `of ${fmtBytes(storage.quotaBytes)} quota${storage.persisted ? ' · protected' : ''}` : 'estimate unavailable'"
+          />
+          <MetricTile
+            label="Offline data"
+            icon="database"
+            :value="fmtBytes(storage.offlineData.bytes)"
+            :sub="areaSub(storage.offlineData, 'query')"
           />
           <MetricTile
             label="Prefetched audio"
             icon="download"
-            :value="cacheEntries != null ? `${cacheEntries} ${cacheEntries === 1 ? 'track' : 'tracks'}` : '—'"
-            :sub="cacheBytes != null ? `${fmtBytes(cacheBytes)}${cacheBytesExact ? '' : ' (approx)'}` : (cacheSupported ? 'empty' : 'unsupported')"
+            :value="fmtBytes(storage.audio.bytes)"
+            :sub="areaSub(storage.audio, 'track')"
+          />
+          <MetricTile
+            label="Artwork"
+            icon="image"
+            :value="storage.images.exact ? fmtBytes(storage.images.bytes) : 'Managed cache'"
+            :sub="areaSub(storage.images, 'image')"
+          />
+          <MetricTile
+            label="Offline app"
+            icon="cloud-download"
+            :value="fmtBytes(storage.appShell.bytes)"
+            :sub="areaSub(storage.appShell, 'file')"
           />
         </div>
+
+        <div class="storage-actions">
+          <button class="sv2-btn ghost" :disabled="!!clearing" @click="clearStorage('offline-data', 'Offline data')">
+            <Icon :name="clearing === 'offline-data' ? 'spinner' : 'trash'" :size="12" />
+            Clear offline data
+          </button>
+          <button class="sv2-btn ghost" :disabled="!!clearing" @click="clearStorage('audio', 'Prefetched audio')">
+            <Icon :name="clearing === 'audio' ? 'spinner' : 'trash'" :size="12" />
+            Clear prefetched audio
+          </button>
+          <button class="sv2-btn ghost" :disabled="!!clearing" @click="clearStorage('images', 'Artwork cache')">
+            <Icon :name="clearing === 'images' ? 'spinner' : 'trash'" :size="12" />
+            Clear artwork
+          </button>
+        </div>
+        <p class="storage-note">
+          Offline app files are managed by the installed PWA and replaced automatically on updates.
+        </p>
       </template>
     </SettingsSection>
 
@@ -232,6 +231,18 @@ onMounted(loadStorage)
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 8px;
+}
+
+.storage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.storage-note {
+  margin: 10px 2px 0;
+  color: var(--fg-4);
+  font-size: 11.5px;
 }
 
 /* Checkbox-pill, cloned from settings/jellyfin.vue's .jf-switch/.jf-slider —

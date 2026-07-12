@@ -1,21 +1,21 @@
 <script setup lang="ts">
-import type { MediaDetail } from '~~/shared/types'
+import { useQuery } from '@pinia/colada'
+import { mediaDetailQuery } from '~/queries/media'
 
 const route = useRoute()
 const id = parseInt(route.params.id as string, 10)
 
-onMounted(async () => {
-  if (isNaN(id)) { navigateTo('/'); return }
+if (isNaN(id)) await navigateTo('/')
+else {
+  const detailQuery = useQuery(mediaDetailQuery(id))
   try {
-    const { $heya } = useNuxtApp()
-    // Spec types `id` as `string` because the endpoint accepts slug or numeric ID.
-    const detail = await $heya('/api/media/{id}', { path: { id: String(id) } }) as MediaDetail
-    const url = mediaUrl(detail.media_item)
-    navigateTo(url, { replace: true })
+    await waitForQuery(detailQuery)
+    if (detailQuery.data.value) await navigateTo(mediaUrl(detailQuery.data.value.media_item), { replace: true })
+    else await navigateTo('/')
   } catch {
-    navigateTo('/')
+    await navigateTo('/')
   }
-})
+}
 </script>
 
 <template>

@@ -47,28 +47,23 @@ let nowTimer: ReturnType<typeof setInterval> | null = null
 let queuePoll: ReturnType<typeof setInterval> | null = null
 
 async function loadAll() {
-  const [s, h, r, mq, jSum, tc, ts, sa, tk, mi] = await Promise.allSettled([
-    $heya('/api/stats'),
-    $heya('/api/health'),
-    $heya('/api/health/ready'),
-    $heya('/api/jobs/queue/metadata'),
-    $heya('/api/jobs/summary'),
-    $heya('/api/transcode/status'),
-    $heya('/api/tailscale/status'),
-    $heya('/api/admin/sonicanalysis/status'),
-    $heya('/api/tasks'),
-    $heya('/api/media/missing'),
+  // Apply each result as soon as it arrives. Waiting to inspect a single
+  // Promise.allSettled result meant one slow optional subsystem (most often
+  // Tailscale or Sonic) held every otherwise-fast dashboard value hostage.
+  await Promise.allSettled([
+    $heya('/api/stats').then(value => { stats.value = value as Stats }),
+    $heya('/api/health').then(value => { health.value = value as Health }),
+    $heya('/api/health/ready').then(value => { ready.value = value as Ready }),
+    $heya('/api/jobs/queue/metadata').then(value => { queueStatus.value = value as QueueStatus }),
+    $heya('/api/jobs/summary').then(value => {
+      summary.value = ((value as SummaryRow[]) ?? []).filter(row => row.state !== 'completed' || row.count > 0)
+    }),
+    $heya('/api/transcode/status').then(value => { transcode.value = value as Transcode }),
+    $heya('/api/tailscale/status').then(value => { tailscale.value = value as Tailscale }),
+    $heya('/api/admin/sonicanalysis/status').then(value => { sonic.value = value as SonicLike }),
+    $heya('/api/tasks').then(value => { tasks.value = (value as TaskResponse[]) ?? [] }),
+    $heya('/api/media/missing').then(value => { missing.value = (value as MissingItem[]) ?? [] }),
   ])
-  if (s.status === 'fulfilled')   stats.value = s.value as Stats
-  if (h.status === 'fulfilled')   health.value = h.value as Health
-  if (r.status === 'fulfilled')   ready.value = r.value as Ready
-  if (mq.status === 'fulfilled')  queueStatus.value = mq.value as QueueStatus
-  if (jSum.status === 'fulfilled') summary.value = ((jSum.value as SummaryRow[]) ?? []).filter(row => row.state !== 'completed' || row.count > 0)
-  if (tc.status === 'fulfilled')  transcode.value = tc.value as Transcode
-  if (ts.status === 'fulfilled')  tailscale.value = ts.value as Tailscale
-  if (sa.status === 'fulfilled')  sonic.value = sa.value as SonicLike
-  if (tk.status === 'fulfilled')  tasks.value = (tk.value as TaskResponse[]) ?? []
-  if (mi.status === 'fulfilled')  missing.value = (mi.value as MissingItem[]) ?? []
 }
 
 async function refetchQueue() {
@@ -181,8 +176,8 @@ onUnmounted(() => {
   if (statsDebounce) clearTimeout(statsDebounce)
 })
 
-onMounted(async () => {
-  await loadAll()
+onMounted(() => {
+  void loadAll()
   nowTimer = setInterval(() => { now.value = Date.now() }, 1000)
   queuePoll = setInterval(refetchQueue, 5000)
 })

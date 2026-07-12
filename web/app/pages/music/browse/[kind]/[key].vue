@@ -49,6 +49,8 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
+import { useQuery } from '@pinia/colada'
+import { musicBrowseTracksQuery, type MusicBrowseKind, type MusicBrowseTrack } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
@@ -65,33 +67,18 @@ const columns: TrackListColumn[] = [
 //   tempo  → /api/music/browse/tempo/{key}/tracks
 //
 // All three return the rich track-row shape, so the list rendering is shared.
-interface BrowseTrackRow {
-  track_id: number
-  track_title: string
-  duration: number
-  disc_number: number
-  track_number: number
-  album_id: number
-  album_title: string
-  album_slug: string
-  album_cover_path: string
-  album_year: string
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-}
-
 const route = useRoute()
-const kind = computed(() => route.params.kind as 'mood' | 'genre' | 'tempo')
+const kind = computed(() => route.params.kind as MusicBrowseKind)
 const bucketKey = computed(() => route.params.key as string)
 
 const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 const actions = useMusicActions()
 
-const rows = ref<BrowseTrackRow[]>([])
-const loading = ref(true)
+const tracksQuery = useQuery(() => musicBrowseTracksQuery({ kind: kind.value, key: bucketKey.value }))
+const rows = computed<MusicBrowseTrack[]>(() => tracksQuery.data.value ?? [])
+const loading = computed(() => tracksQuery.isPending.value)
 
-// BrowseTrackRow has no `available` field (the browse endpoints don't
+// MusicBrowseTrack has no `available` field (the browse endpoints don't
 // report it) — tlRows/contextItemsFor both omit it, which TrackList
 // treats as always-available, matching today's unconditional playFrom/menu.
 const tlRows = computed<TrackListRow[]>(() => rows.value.map((t) => ({
@@ -111,37 +98,6 @@ function contextItemsFor(_track: TrackListRow, i: number) {
 }
 
 const activeTrackId = computed(() => currentTrack.value?.id ?? null)
-
-async function load() {
-  loading.value = true
-  rows.value = []
-  try {
-    const { $heya } = useNuxtApp()
-    const k = bucketKey.value
-    let res: { items: BrowseTrackRow[] }
-    if (kind.value === 'mood') {
-      res = await $heya('/api/music/browse/moods/{mood}/tracks', {
-        path: { mood: k }, query: { limit: 500 },
-      }) as { items: BrowseTrackRow[] }
-    } else if (kind.value === 'genre') {
-      res = await $heya('/api/music/browse/genres/{name}/tracks', {
-        path: { name: k }, query: { limit: 500 },
-      }) as { items: BrowseTrackRow[] }
-    } else if (kind.value === 'tempo') {
-      res = await $heya('/api/music/browse/tempo/{band}/tracks', {
-        path: { band: k }, query: { limit: 500 },
-      }) as { items: BrowseTrackRow[] }
-    } else {
-      res = { items: [] }
-    }
-    rows.value = res.items ?? []
-  } catch {
-    rows.value = []
-  } finally {
-    loading.value = false
-  }
-}
-watch([kind, bucketKey], load, { immediate: true })
 
 const totalDuration = computed(() => rows.value.reduce((s, r) => s + (r.duration || 0), 0))
 
@@ -185,7 +141,7 @@ const heroStyle = computed(() => {
   return { background: grad }
 })
 
-function rowToTrack(r: BrowseTrackRow): Track {
+function rowToTrack(r: MusicBrowseTrack): Track {
   return {
     id: r.track_id,
     title: r.track_title,

@@ -8,9 +8,11 @@
 // plugin closes the gap:
 //   • pwa.client.periodicSyncForUpdates (nuxt.config) polls for a new SW hourly
 //     while the app is open;
+//   • startup is gated on a no-cache server/client version comparison; a
+//     mismatch downloads and activates the complete new worker before Nuxt
+//     mounts, while the SPA loading screen reports the real update stage;
 //   • we also re-check on every return to the foreground (covers reopening the
-//     installed PWA from the background, where no fresh navigation fires) and
-//     once shortly after boot;
+//     installed PWA from the background, where no fresh navigation fires);
 //   • when a new version is found we apply it SILENTLY — no prompt — but only
 //     while nothing is playing, so a running song or video is never cut off.
 //     A pending update is held and applied the moment playback stops (or on the
@@ -32,15 +34,134 @@ interface PwaController {
   getSWRegistration: () => ServiceWorkerRegistration | undefined
 }
 
+function setBootStatus(label: string) {
+  const status = document.getElementById('heya-boot-status')
+  if (status) status.textContent = label
+}
+
+function waitForRegistration(pwa: PwaController, timeoutMs = 5000): Promise<ServiceWorkerRegistration | null> {
+  const existing = pwa.getSWRegistration()
+  if (existing) return Promise.resolve(existing)
+  return new Promise((resolve) => {
+    const started = performance.now()
+    const timer = window.setInterval(() => {
+      const registration = pwa.getSWRegistration()
+      if (registration || performance.now() - started >= timeoutMs) {
+        clearInterval(timer)
+        resolve(registration ?? null)
+      }
+    }, 40)
+  })
+}
+
+function waitForInstall(worker: ServiceWorker, timeoutMs = 60_000): Promise<void> {
+  if (worker.state === 'installed' || worker.state === 'activated' || worker.state === 'redundant') return Promise.resolve()
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(done, timeoutMs)
+    function done() {
+      clearTimeout(timeout)
+      worker.removeEventListener('statechange', changed)
+      resolve()
+    }
+    function changed() {
+      if (worker.state === 'installed' || worker.state === 'activated' || worker.state === 'redundant') done()
+    }
+    worker.addEventListener('statechange', changed)
+  })
+}
+
+async function activateWaitingWorker(pwa: PwaController) {
+  setBootStatus('Activating update…')
+  const controlled = new Promise<void>((resolve) => {
+    navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
+  })
+  await pwa.updateServiceWorker(true)
+  await Promise.race([controlled, new Promise<void>(resolve => window.setTimeout(resolve, 5000))])
+  setBootStatus('Update ready · restarting…')
+  window.location.reload()
+  await new Promise<never>(() => {})
+}
+
+async function serverVersion(): Promise<string | null> {
+  try {
+    const response = await fetch(`/api/health?client-check=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { 'cache-control': 'no-cache' },
+    })
+    if (!response.ok) return null
+    return ((await response.json()) as { version?: string }).version ?? null
+  } catch {
+    return null
+  }
+}
+
+async function gateStartupUpdate(pwa: PwaController, clientVersion: string) {
+  if (!('serviceWorker' in navigator) || !navigator.onLine) {
+    setBootStatus(navigator.onLine ? 'Starting Heya…' : 'Offline · starting saved client…')
+    return
+  }
+  setBootStatus('Checking for updates…')
+  const currentServerVersion = await serverVersion()
+  const registration = await waitForRegistration(pwa)
+  if (!registration) {
+    setBootStatus('Starting Heya…')
+    return
+  }
+
+  try {
+    if (registration.waiting) await activateWaitingWorker(pwa)
+    // A matching release identity is stronger than a periodic SW byte check:
+    // the Go binary and embedded Nuxt client were built from the same tag.
+    if (currentServerVersion && currentServerVersion === clientVersion) {
+      setBootStatus('Starting Heya…')
+      return
+    }
+
+    // Workbox may have noticed the changed sw.js during registration before
+    // our explicit update() call. Join that in-flight atomic install instead
+    // of starting a competing check or letting the previous client mount.
+    if (registration.installing) {
+      setBootStatus('Downloading update…')
+      await waitForInstall(registration.installing)
+      if (registration.waiting) await activateWaitingWorker(pwa)
+    }
+
+    const updateFound = new Promise<ServiceWorker | null>((resolve) => {
+      registration.addEventListener('updatefound', () => resolve(registration.installing), { once: true })
+      window.setTimeout(() => resolve(null), 1500)
+    })
+    await registration.update()
+    const installing = registration.installing ?? await updateFound
+    if (installing) {
+      // Browsers do not expose Workbox's byte count. The worker reaches
+      // "installed" only after every precached asset has downloaded, so this
+      // indeterminate stage is still a real, blocking download indicator.
+      setBootStatus('Downloading update…')
+      await waitForInstall(installing)
+    }
+    if (registration.waiting) await activateWaitingWorker(pwa)
+    setBootStatus('Starting Heya…')
+  } catch {
+    // A flaky/offline connection must not lock the user out of an already
+    // installed client. The active worker remains a complete atomic version.
+    setBootStatus('Network unavailable · starting saved client…')
+  }
+}
+
 export default defineNuxtPlugin({
   name: 'heya:pwa-update',
   dependsOn: ['vite-pwa:nuxt:client:plugin'],
-  setup(nuxtApp) {
+  async setup(nuxtApp) {
     const injected = nuxtApp.$pwa as unknown as PwaController | undefined
     // Absent in dev (no SW) or if registration failed — nothing to drive then.
     if (!injected) return
     // Re-bind so the non-undefined narrowing carries into the closures below.
     const pwa = injected
+
+    // Nuxt keeps spa-loading-template mounted until async plugins finish.
+    // Gate mounting on the SW update/install so a server release is applied
+    // atomically before the user sees or interacts with the previous client.
+    await gateStartupUpdate(pwa, nuxtApp.$config.public.heyaVersion)
 
     const { playing } = usePlayerBindings()
 
@@ -106,8 +227,5 @@ export default defineNuxtPlugin({
       applyIfIdle()
     })
 
-    // Belt-and-suspenders over the browser's own launch-time SW check (notably
-    // unreliable for iOS standalone PWAs).
-    nuxtApp.hook('app:mounted', () => { window.setTimeout(checkForUpdate, 2500) })
   },
 })

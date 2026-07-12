@@ -14,6 +14,7 @@
 #   docker build -f .docker/Dockerfile --build-arg BASE_RUNTIME_IMAGE=heya:runtime-cpu -t heya:base .
 
 ARG BASE_RUNTIME_IMAGE=ghcr.io/heyamedia/heya-runtime:latest
+ARG VERSION=dev
 
 # ────────────────────────────────────────────────────────────────
 # Stage 0 — official subscription-agent native CLIs
@@ -54,6 +55,8 @@ RUN --mount=type=cache,target=/root/.npm \
 # Stage 1 — frontend: bun install + nuxi generate
 # ────────────────────────────────────────────────────────────────
 FROM oven/bun:1.3 AS frontend-build
+ARG VERSION
+ENV NUXT_PUBLIC_HEYA_VERSION=${VERSION}
 WORKDIR /app/web
 
 # Install deps first so a code-only change doesn't bust the dep layer.
@@ -73,6 +76,7 @@ RUN bun run build
 # Stage 2 — backend: go build with the SPA embedded into the binary
 # ────────────────────────────────────────────────────────────────
 FROM golang:1.26-bookworm AS backend-build
+ARG VERSION
 WORKDIR /src
 
 # Module cache layer first.
@@ -97,7 +101,9 @@ COPY --from=frontend-build /app/web/.output/public/ ./web/dist/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 GOOS=linux \
-    go build -tags embed_frontend -trimpath -buildvcs=false -ldflags="-s -w" -o /out/heya ./cmd/heya
+    go build -tags embed_frontend -trimpath -buildvcs=false \
+    -ldflags="-s -w -X github.com/karbowiak/heya/internal/ui.Version=${VERSION}" \
+    -o /out/heya ./cmd/heya
 
 # ────────────────────────────────────────────────────────────────
 # Stage 3 — app export: CI artifact for packaging multiple runtimes

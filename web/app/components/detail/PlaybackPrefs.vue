@@ -2,12 +2,17 @@
 import type { PlaybackPreference, MediaLanguagesResponse } from '~~/shared/types'
 import type { SelectOption } from '~/components/ui/AppSelect.vue'
 import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { mediaLanguagesQuery, playbackPreferenceQuery } from '~/queries/playback'
 
 const props = defineProps<{ mediaItemId: number; alwaysOpen?: boolean }>()
 
-const loading = ref(true)
 const saving = ref(false)
-const languages = ref<MediaLanguagesResponse | null>(null)
+const languagesQuery = useQuery(() => mediaLanguagesQuery(props.mediaItemId))
+const preferenceQuery = useQuery(() => playbackPreferenceQuery(props.mediaItemId))
+const queryCache = useQueryCache()
+const loading = computed(() => languagesQuery.isPending.value || preferenceQuery.isPending.value)
+const languages = computed<MediaLanguagesResponse | null>(() => languagesQuery.data.value ?? null)
 const pref = ref<PlaybackPreference>({ media_item_id: 0, audio_language: '', subtitle_language: '', subtitle_mode: '' })
 const expanded = ref(props.alwaysOpen ?? false)
 
@@ -79,25 +84,15 @@ const subMode = computed({
 const hasAudioOptions = computed(() => (languages.value?.audio_languages?.length ?? 0) > 0)
 const hasSubOptions = computed(() => (languages.value?.subtitle_languages?.length ?? 0) > 0)
 
-async function loadData() {
-  loading.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    const [langs, prefData] = await Promise.all([
-      $heya('/api/media/{id}/languages', { path: { id: props.mediaItemId } }) as Promise<MediaLanguagesResponse>,
-      $heya('/api/me/playback/{media_id}', { path: { media_id: props.mediaItemId } }) as Promise<PlaybackPreference>,
-    ])
-    languages.value = langs
-    pref.value = prefData
-  } catch {}
-  loading.value = false
-}
+watch(() => preferenceQuery.data.value, (value) => {
+  if (value && !saving.value) pref.value = { ...value }
+}, { immediate: true })
 
 async function savePref() {
   saving.value = true
   try {
     const { $heya } = useNuxtApp()
-    pref.value = await $heya('/api/me/playback/{media_id}', {
+    const saved = await $heya('/api/me/playback/{media_id}', {
       method: 'PUT',
       path: { media_id: props.mediaItemId },
       body: {
@@ -106,6 +101,8 @@ async function savePref() {
         subtitle_mode: pref.value.subtitle_mode,
       } as any,
     }) as PlaybackPreference
+    pref.value = saved
+    queryCache.setQueryData(['me', 'playback', props.mediaItemId], saved)
   } catch {}
   saving.value = false
 }
@@ -115,7 +112,6 @@ function reset() {
   savePref()
 }
 
-onMounted(loadData)
 </script>
 
 <template>

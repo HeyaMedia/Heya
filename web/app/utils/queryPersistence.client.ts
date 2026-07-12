@@ -2,6 +2,8 @@ const DB_NAME = 'heya-offline'
 const DB_VERSION = 1
 const STORE_NAME = 'query-caches'
 export const QUERY_CACHE_SCHEMA = 1
+export const QUERY_CACHE_CLEARED_EVENT = 'heya:query-cache-cleared'
+const CLEARED_AFTER_PREFIX = 'heya_query_cache_cleared_after:'
 
 export type SerializedQueryEntry = [data: unknown, error: unknown, when?: number, meta?: Record<string, unknown>]
 export interface PersistedQueryCache {
@@ -44,6 +46,11 @@ export function queryCacheNamespace(userId: number | string) {
   return `${location.origin}|user:${userId}|schema:${QUERY_CACHE_SCHEMA}`
 }
 
+export function queryCacheClearedAfter(userId: number | string) {
+  const value = localStorage.getItem(`${CLEARED_AFTER_PREFIX}${userId}`)
+  return value ? Number(value) || 0 : 0
+}
+
 export async function loadPersistedQueryCache(namespace: string) {
   try {
     const record = await transact<PersistedQueryCache | undefined>('readonly', store => store.get(namespace))
@@ -64,7 +71,12 @@ export async function savePersistedQueryCache(record: PersistedQueryCache) {
 }
 
 export async function clearPersistedQueryCache(userId: number | string) {
+  const clearedAt = Date.now()
   try {
     await transact<undefined>('readwrite', store => store.delete(queryCacheNamespace(userId)))
   } catch { /* already absent / storage unavailable */ }
+  try { localStorage.setItem(`${CLEARED_AFTER_PREFIX}${userId}`, String(clearedAt)) } catch { /* unavailable */ }
+  window.dispatchEvent(new CustomEvent(QUERY_CACHE_CLEARED_EVENT, {
+    detail: { userId: String(userId), clearedAt },
+  }))
 }

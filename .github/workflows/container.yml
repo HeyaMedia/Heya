@@ -62,6 +62,8 @@ jobs:
           file: .docker/Dockerfile
           target: binary-export
           platforms: linux/amd64
+          build-args: |
+            VERSION=${{ github.ref_name }}
           outputs: type=local,dest=${{ runner.temp }}/heya-amd64
           cache-from: type=gha,scope=app-amd64
           cache-to: type=gha,mode=max,scope=app-amd64
@@ -179,6 +181,7 @@ jobs:
           platforms: linux/arm64
           build-args: |
             BASE_RUNTIME_IMAGE=${{ steps.img.outputs.runtime_image }}:latest
+            VERSION=${{ github.ref_name }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=base-arm64

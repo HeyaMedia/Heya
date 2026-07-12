@@ -187,6 +187,9 @@
 </template>
 
 <script setup lang="ts">
+import { useQuery } from '@pinia/colada'
+import { trackLyricsQuery, type LyricsLine } from '~/queries/music'
+
 const {
   playing, currentTrack, queue, queueOpen, position, formatTime,
   shuffled, repeatMode, currentIndex, playedTracks, upcomingTracks,
@@ -204,50 +207,22 @@ function openFullscreen() { nowPlayingOpen.value = true }
 
 // --- Lyrics fetch + sync ----------------------------------------------------
 
-interface LyricsLine { time_ms: number; text: string }
-interface LyricsResponse { synced: boolean; lines: LyricsLine[] }
-
-const lyrics = ref<LyricsResponse | null>(null)
-const lyricsLoading = ref(false)
 const lyricRefs = ref<Array<HTMLElement | null>>([])
 const lyricsScroll = ref<HTMLElement | null>(null)
 const lyricsOffsetMs = ref(0)  // user-tunable lyric/audio offset
-let lastLoadedTrackId: number | null = null
+const lyricTrackId = computed(() => currentTrack.value?.id && currentTrack.value.id > 0 ? currentTrack.value.id : 0)
+const lyricsQuery = useQuery(() => ({
+  ...trackLyricsQuery(lyricTrackId.value),
+  enabled: queueOpen.value && tab.value === 'lyrics' && lyricTrackId.value > 0,
+}))
+const lyrics = computed(() => lyricsQuery.data.value ?? null)
+const lyricsLoading = computed(() => lyricsQuery.isPending.value && lyricTrackId.value > 0)
 
 function bindLyricRef(el: HTMLElement | null, i: number) {
   lyricRefs.value[i] = el
 }
 
-async function loadLyrics(trackId: number | null | undefined) {
-  // Negative IDs are synthetic radio / podcast tracks — they have no
-  // music-library lyrics, so skip the round-trip rather than 422'ing.
-  if (!trackId || trackId <= 0) { lyrics.value = null; lastLoadedTrackId = trackId ?? null; return }
-  // Refetch only when the track changes; flipping tab doesn't hit the API.
-  if (trackId === lastLoadedTrackId && lyrics.value) return
-  lastLoadedTrackId = trackId
-  lyricsLoading.value = true
-  lyricRefs.value = []
-  lyricsOffsetMs.value = 0
-  try {
-    const { $heya } = useNuxtApp()
-    lyrics.value = await $heya('/api/music/tracks/{id}/lyrics', { path: { id: trackId } }) as LyricsResponse
-  } catch {
-    lyrics.value = null
-  } finally {
-    lyricsLoading.value = false
-  }
-}
-
-// Fetch lazily: only when the lyrics tab is open AND the queue panel is open.
-// Saves a round trip per track on the queue tab.
-watch(
-  () => [currentTrack.value?.id, tab.value, queueOpen.value] as const,
-  ([id, t, open]) => {
-    if (!open || t !== 'lyrics') return
-    void loadLyrics(id ?? null)
-  },
-  { immediate: true },
-)
+watch(lyricTrackId, () => { lyricRefs.value = []; lyricsOffsetMs.value = 0 })
 
 const activeLyricIdx = computed(() => {
   const list = lyrics.value?.lines

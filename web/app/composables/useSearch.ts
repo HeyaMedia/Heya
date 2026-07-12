@@ -1,4 +1,6 @@
 import type { MediaItem, MediaType } from '~~/shared/types'
+import { useQuery } from '@pinia/colada'
+import { quickSearchQuery } from '~/queries/search'
 
 export interface SearchPerson {
   id: number
@@ -76,35 +78,23 @@ export type SearchType =
 // state once cleared.
 export function useQuickSearch(debounceMs = 200) {
   const query = ref('')
-  const data = ref<QuickSearchResponse | null>(null)
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+  const requestQuery = ref('')
+  const result = useQuery(() => ({
+    ...quickSearchQuery(requestQuery.value),
+    enabled: !!requestQuery.value,
+  }))
+  const data = computed<QuickSearchResponse | null>(() => requestQuery.value ? result.data.value ?? null : null)
+  const loading = computed(() => !!requestQuery.value && result.isPending.value)
+  const error = computed(() => result.error.value
+    ? (result.error.value instanceof Error ? result.error.value.message : 'Search failed')
+    : null)
 
-  let seq = 0
-
-  async function fetchNow(q: string) {
-    const my = ++seq
-    loading.value = true
-    error.value = null
-    try {
-      const { $heya } = useNuxtApp()
-      const res = await $heya('/api/search/quick', { query: { q } })
-      if (my === seq) data.value = res as unknown as QuickSearchResponse
-    } catch (e: any) {
-      if (my === seq) error.value = e?.message || 'Search failed'
-    } finally {
-      if (my === seq) loading.value = false
-    }
-  }
-
-  const debouncedFetch = useDebounceFn(fetchNow, debounceMs)
+  const debouncedFetch = useDebounceFn((value: string) => { requestQuery.value = value }, debounceMs)
 
   watch(query, (q) => {
     const trimmed = q.trim()
     if (!trimmed) {
-      seq++
-      data.value = null
-      loading.value = false
+      requestQuery.value = ''
       return
     }
     debouncedFetch(trimmed)
@@ -124,11 +114,8 @@ export function useQuickSearch(debounceMs = 200) {
   })
 
   function reset() {
-    seq++
     query.value = ''
-    data.value = null
-    loading.value = false
-    error.value = null
+    requestQuery.value = ''
   }
 
   return { query, data, loading, error, isEmpty, totalHits, reset }

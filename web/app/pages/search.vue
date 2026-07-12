@@ -113,7 +113,9 @@
 </template>
 
 <script setup lang="ts">
-import type { QuickSearchResponse, SearchBucket } from '~/composables/useSearch'
+import { useInfiniteQuery, useQuery } from '@pinia/colada'
+import type { SearchType } from '~/composables/useSearch'
+import { filteredSearchQuery, quickSearchQuery, searchBrowseQuery } from '~/queries/search'
 
 const SECTION_LABELS: Record<string, string> = {
   movies: 'Movies', tv: 'TV Shows', music: 'Artists', books: 'Books',
@@ -154,43 +156,17 @@ function clearSearch() {
   inputEl.value?.focus()
 }
 
-// Genre browse data
-interface GenreRow { genre: string; count: number }
-interface CollectionRow { id: number; name: string; poster_path: string; movie_count: number }
+const browseQuery = useQuery(searchBrowseQuery())
+const genres = computed(() => browseQuery.data.value?.genres ?? [])
+const collections = computed(() => browseQuery.data.value?.collections ?? [])
+const genresLoading = computed(() => browseQuery.isPending.value)
 
-const genres = ref<GenreRow[]>([])
-const collections = ref<CollectionRow[]>([])
-const genresLoading = ref(true)
-
-onMounted(async () => {
-  inputEl.value?.focus()
-  try {
-    const { $heya } = useNuxtApp()
-    const [g, c] = await Promise.all([
-      $heya('/api/genres') as Promise<GenreRow[]>,
-      $heya('/api/collections', { query: { limit: 20 } }) as Promise<{ items: CollectionRow[] }>,
-    ])
-    genres.value = g || []
-    collections.value = (c?.items || []).filter(x => x.movie_count > 0)
-  } catch { /* empty */ }
-  genresLoading.value = false
-})
+onMounted(() => inputEl.value?.focus())
 
 // Search results
-const data = ref<QuickSearchResponse | null>(null)
-const loading = ref(false)
-
-async function fetchAll(q: string) {
-  if (!q) { data.value = null; return }
-  loading.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    data.value = await $heya('/api/search/quick', { query: { q } }) as QuickSearchResponse
-  } catch { data.value = null }
-  finally { loading.value = false }
-}
-
-watch(query, (q) => { fetchAll(q) }, { immediate: true })
+const quickQuery = useQuery(() => ({ ...quickSearchQuery(query.value), enabled: !!query.value }))
+const data = computed(() => quickQuery.data.value ?? null)
+const loading = computed(() => quickQuery.isPending.value && !!query.value)
 
 const sectionsForTabs = computed(() => {
   if (!data.value) return []
@@ -209,33 +185,18 @@ const totalAcrossBuckets = computed(() =>
 )
 
 // Paged single-type
-const filteredItems = ref<any[]>([])
-const filteredTotal = ref(0)
-const filteredOffset = ref(0)
-const loadingFiltered = ref(false)
 const PAGE_SIZE = 60
+const filteredQuery = useInfiniteQuery(() => ({
+  ...filteredSearchQuery({ query: query.value, type: activeType.value as SearchType, limit: PAGE_SIZE }),
+  enabled: !!query.value && !!activeType.value,
+}))
+const filteredItems = computed(() => filteredQuery.data.value?.pages.flatMap(page => page.items ?? []) ?? [])
+const filteredTotal = computed(() => filteredQuery.data.value?.pages.at(-1)?.total ?? 0)
+const loadingFiltered = computed(() => filteredQuery.asyncStatus.value === 'loading')
 
 const filteredLabel = computed(() => SECTION_LABELS[activeType.value] || activeType.value)
 
-async function loadFiltered(reset = true) {
-  if (!query.value || !activeType.value) return
-  if (reset) { filteredItems.value = []; filteredOffset.value = 0; filteredTotal.value = 0 }
-  loadingFiltered.value = true
-  try {
-    const { $heya } = useNuxtApp()
-    const res = await $heya('/api/search', {
-      query: { q: query.value, type: activeType.value as any, limit: PAGE_SIZE, offset: filteredOffset.value },
-    }) as SearchBucket<any>
-    filteredItems.value = filteredItems.value.concat(res.items || [])
-    filteredTotal.value = res.total || 0
-    filteredOffset.value += (res.items?.length || 0)
-  } catch { if (reset) { filteredItems.value = []; filteredTotal.value = 0 } }
-  finally { loadingFiltered.value = false }
-}
-
-function loadMore() { loadFiltered(false) }
-
-watch([query, activeType], () => { if (activeType.value) loadFiltered(true) })
+function loadMore() { void filteredQuery.loadNextPage() }
 
 function setType(t: string) {
   router.replace({ path: '/search', query: { q: query.value, ...(t ? { type: t } : {}) } })

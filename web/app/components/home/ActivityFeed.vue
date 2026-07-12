@@ -36,18 +36,11 @@
 </template>
 
 <script setup lang="ts">
-interface ActivityItem {
-  type: string
-  timestamp: string
-  title: string
-  subtitle?: string
-  media_id?: number
-  media_type?: string
-  slug?: string
-  image_url?: string
-}
+import { useQuery } from '@pinia/colada'
+import { activityFeedQuery, type ActivityItem } from '~/queries/activity'
 
-const items = ref<ActivityItem[]>([])
+const activityQuery = useQuery(activityFeedQuery())
+const items = computed(() => activityQuery.data.value ?? [])
 
 function iconFor(type: string) {
   switch (type) {
@@ -73,13 +66,6 @@ function mediaPath(item: ActivityItem) {
 
 // timeAgo comes from useFormat.ts (auto-imported).
 
-onMounted(async () => {
-  try {
-    const { $heya } = useNuxtApp()
-    // Guard against a null payload — a nil slice would crash the v-if.
-    items.value = (await $heya('/api/activity') as ActivityItem[] | null) ?? []
-  } catch { /* empty */ }
-})
 </script>
 
 <style scoped>

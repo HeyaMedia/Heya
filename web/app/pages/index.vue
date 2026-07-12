@@ -132,8 +132,9 @@ import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
-import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
+import { mediaUserStateQuery, movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { mediaDetailQuery, mediaDetailTarget } from '~/queries/media'
+import { continueWatchingQuery as continueWatchingOptions } from '~/queries/activity'
 
 const { $heya } = useNuxtApp()
 const queryClient = useQueryCache()
@@ -221,11 +222,7 @@ const musicHomeQuery = useQuery({
   },
   staleTime: 1000 * 60,
 })
-const continueWatchingQuery = useQuery({
-  key: ['me', 'watch', 'continue'],
-  query: async () => (await $heya('/api/me/watch/continue')) as ContinueWatchingItem[],
-  staleTime: 1000 * 30,
-})
+const continueWatchingQuery = useQuery(continueWatchingOptions())
 const recentWatchedQuery = useQuery({
   key: ['me', 'watch', 'recent'],
   query: async () => (await $heya('/api/me/watch/recent')) as Array<{
@@ -247,11 +244,7 @@ const forYouQuery = useQuery({
 const userListsQuery = useQuery(userListsOptions())
 const movieStateQuery = useQuery(movieUserStateQuery())
 const seriesStateQuery = useQuery(seriesUserStateQuery())
-const mediaStateQuery = useQuery({
-  key: ['me', 'media-state'],
-  query: async () => (await $heya('/api/me/media-state')) as { watched: number[]; favorited: number[] },
-  staleTime: 1000 * 30,
-})
+const mediaStateQuery = useQuery(mediaUserStateQuery())
 
 const recentMovies = computed<MediaItem[]>(() => moviesQuery.data.value ?? [])
 const recentBooks = computed<MediaItem[]>(() => booksQuery.data.value ?? [])

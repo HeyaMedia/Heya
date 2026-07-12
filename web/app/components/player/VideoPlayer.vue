@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import AkariSub from 'akarisub'
 import { DropdownMenuItem } from 'reka-ui'
-import type { StreamAudio, StreamSubtitle, QualityOption, PlaybackPreference } from '~~/shared/types'
+import type { StreamAudio, StreamSubtitle, QualityOption } from '~~/shared/types'
+import { useQuery } from '@pinia/colada'
+import { playbackPreferenceQuery } from '~/queries/playback'
+import { continueWatchingQuery } from '~/queries/activity'
 
 const props = defineProps<{
   fileId: string | number
@@ -16,6 +19,11 @@ const props = defineProps<{
   entityId?: number
 }>()
 const emit = defineEmits<{ close: [] }>()
+const entityPreferenceQuery = useQuery(() => ({
+  ...playbackPreferenceQuery(props.mediaItemId ?? 0),
+  enabled: !!props.mediaItemId,
+}))
+const continueQuery = useQuery(continueWatchingQuery())
 
 const { token } = useAuth()
 const videoEl = ref<HTMLVideoElement>()
@@ -249,9 +257,8 @@ function autoSelectSubtitle(prefs: ReturnType<typeof playbackForLibrary>) {
 }
 
 async function init() {
-  const { $heya } = useNuxtApp()
   const entityPrefPromise = props.mediaItemId
-    ? ($heya('/api/me/playback/{media_id}', { path: { media_id: props.mediaItemId } }) as Promise<PlaybackPreference>).catch(() => null)
+    ? waitForQuery(entityPreferenceQuery).then(() => entityPreferenceQuery.data.value ?? null).catch(() => null)
     : Promise.resolve(null)
 
   await Promise.all([loadStreamInfo(), loadSettings(), entityPrefPromise])
@@ -617,14 +624,8 @@ async function checkResume(): Promise<void> {
 
   let entry: { progress_seconds: number } | undefined
   try {
-    const { $heya } = useNuxtApp()
-    const items = (await $heya('/api/me/watch/continue')) as Array<{
-      entity_type: string
-      entity_id: number
-      media_item_id: number
-      progress_seconds: number
-      file_id?: number
-    }>
+    await waitForQuery(continueQuery)
+    const items = continueQuery.data.value ?? []
     const wantType = props.entityType || 'movie'
     const wantId = props.entityId || (wantType === 'movie' ? props.mediaItemId : 0)
     entry = items.find(it => it.entity_type === wantType && it.entity_id === wantId)

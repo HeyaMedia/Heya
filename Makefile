@@ -9,19 +9,20 @@ GO := GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MODCACHE_DIR) go
 # bumps occasionally break field shapes and we want clients to match.
 OAPI_CODEGEN := github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1
 HEYAMEDIA_URL ?= https://heya.media
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build-frontend:
-	cd web && bun install && bun run build
+	cd web && bun install && NUXT_PUBLIC_HEYA_VERSION=$(VERSION) bun run build
 	rm -rf web/dist
 	mkdir -p web/dist
 	cp -r web/.output/public/* web/dist/
 	touch web/dist/.gitkeep
 
 build: build-frontend
-	$(GO) build -tags embed_frontend -o bin/heya ./cmd/heya
+	$(GO) build -tags embed_frontend -ldflags="-X github.com/karbowiak/heya/internal/ui.Version=$(VERSION)" -o bin/heya ./cmd/heya
 
 build-go:
-	$(GO) build -o bin/heya ./cmd/heya
+	$(GO) build -ldflags="-X github.com/karbowiak/heya/internal/ui.Version=$(VERSION)" -o bin/heya ./cmd/heya
 
 run: build-go
 	./bin/heya serve

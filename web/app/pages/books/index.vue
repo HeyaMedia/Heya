@@ -154,6 +154,8 @@
 
 <script setup lang="ts">
 import type { MediaItem, Library, UserList } from '~~/shared/types'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { booksCatalogQuery, librariesQuery, mediaUserStateQuery, userListsQuery } from '~/queries/catalog'
 
 // Ambient background: cycling book-artwork pool with the content veil.
 useBackground().pool('book')
@@ -168,9 +170,14 @@ const KIND_FILTERS: { key: BookKindFilter; label: string }[] = [
 ]
 
 const gridWrap = ref<HTMLElement | null>(null)
-const items = ref<MediaItem[]>([])
-const libraries = ref<Library[]>([])
-const userLists = ref<UserList[]>([])
+const itemsData = useQuery(booksCatalogQuery())
+const librariesData = useQuery(librariesQuery())
+const listsData = useQuery(userListsQuery())
+const mediaStateData = useQuery(mediaUserStateQuery())
+const items = computed<MediaItem[]>(() => itemsData.data.value ?? [])
+const libraries = computed<Library[]>(() => (librariesData.data.value ?? []).filter(l => l.media_type === 'book'))
+const userLists = computed<UserList[]>(() => listsData.data.value ?? [])
+const queryCache = useQueryCache()
 const favoritedSet = ref<Set<number>>(new Set())
 const loading = ref(true)
 const activeLib = ref<number | null>(null)
@@ -183,6 +190,15 @@ const { isPhone, isCompact } = useViewport()
 // burger — shared singleton state (module-level ref), see useSectionSidebar.ts.
 const sectionSidebar = useSectionSidebar()
 const { buildItems: buildCardCtxItems } = useCardContextItems()
+
+await Promise.allSettled([
+  waitForQuery(itemsData),
+  waitForQuery(librariesData),
+  waitForQuery(listsData),
+  waitForQuery(mediaStateData),
+])
+favoritedSet.value = new Set(mediaStateData.data.value?.favorited ?? [])
+loading.value = false
 
 const scopedItems = computed(() => {
   let list = [...items.value]
@@ -237,6 +253,10 @@ function bookContextItems(item: MediaItem) {
         if (favorited) next.add(id)
         else next.delete(id)
         favoritedSet.value = next
+        queryCache.setQueryData(['me', 'media-state'], current => ({
+          ...(current ?? { watched: [] }),
+          favorited: [...next],
+        }))
       } catch { /* ignore */ }
     },
     onAddToList: async (listId: number, mediaId: number) => {
@@ -252,20 +272,9 @@ function bookContextItems(item: MediaItem) {
   })
 }
 
-onMounted(async () => {
-  const { $heya } = useNuxtApp()
-  const [mediaRes, libRes, listsRes, mediaStateRes] = await Promise.allSettled([
-    $heya('/api/media', { query: { type: 'book', limit: 500 } }) as Promise<MediaItem[]>,
-    $heya('/api/libraries') as Promise<Library[]>,
-    $heya('/api/me/lists') as Promise<UserList[]>,
-    $heya('/api/me/media-state') as Promise<{ watched: number[]; favorited: number[] }>,
-  ])
-  if (mediaRes.status === 'fulfilled') items.value = mediaRes.value
-  if (libRes.status === 'fulfilled') libraries.value = libRes.value.filter(l => l.media_type === 'book')
-  if (listsRes.status === 'fulfilled') userLists.value = listsRes.value
-  if (mediaStateRes.status === 'fulfilled') favoritedSet.value = new Set(mediaStateRes.value.favorited || [])
-  loading.value = false
-})
+useLiveRefresh([
+  { events: ['media.added', 'media.updated'], filter: byMediaType('book'), keys: [['media', 'catalog', 'book']] },
+])
 </script>
 
 <style scoped>

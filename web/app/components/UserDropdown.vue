@@ -3,6 +3,7 @@ import { DropdownMenuItem } from 'reka-ui'
 
 const { user, logout } = useAuth()
 const { prefs, set } = useAppearance()
+const settingsTarget = computed(() => user.value?.is_admin ? '/settings/dashboard' : '/settings/profile')
 
 // The user-scoped settings links, straight from the settings nav's "You"
 // group — one source of truth, so this menu stays in sync with the
@@ -65,7 +66,7 @@ const THEMES = [
     <div class="surface-divider" />
 
     <DropdownMenuItem class="surface-item" as-child>
-      <NuxtLink to="/settings">
+      <NuxtLink :to="settingsTarget">
         <Icon name="settings" :size="15" class="surface-item-icon" />
         <span>Settings</span>
       </NuxtLink>

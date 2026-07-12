@@ -78,6 +78,26 @@ export interface MusicMix {
   tracks: MusicMixTrack[]
 }
 
+export interface LyricsLine { time_ms: number; text: string }
+export interface LyricsResponse { synced: boolean; lines: LyricsLine[] }
+
+export type MusicBrowseKind = 'mood' | 'genre' | 'tempo'
+export interface MusicBrowseTrack {
+  track_id: number
+  track_title: string
+  duration: number
+  disc_number: number
+  track_number: number
+  album_id: number
+  album_title: string
+  album_slug: string
+  album_cover_path: string
+  album_year: string
+  artist_id: number
+  artist_name: string
+  artist_slug: string
+}
+
 const intentMeta = {
   prefetch: 'intent',
   persistence: 'device',
@@ -152,4 +172,38 @@ export const musicArtistsQuery = defineQueryOptions(() => ({
     return await $heya('/api/music/artists', { query: { limit: 500 } }) as unknown as MusicListPage<MusicArtistRow>
   },
   staleTime: 1000 * 60,
+}))
+
+export const trackLyricsQuery = defineQueryOptions((trackId: number) => ({
+  key: ['music', 'track', trackId, 'lyrics'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/music/tracks/{id}/lyrics', { path: { id: trackId } }) as LyricsResponse
+  },
+  staleTime: 1000 * 60 * 30,
+  meta: { prefetch: 'none', persistence: 'device', sensitivity: 'normal' },
+}))
+
+export const musicBrowseTracksQuery = defineQueryOptions((target: { kind: MusicBrowseKind, key: string }) => ({
+  key: ['music', 'browse', target.kind, target.key, 'tracks'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    let response: { items: MusicBrowseTrack[] }
+    if (target.kind === 'mood') {
+      response = await $heya('/api/music/browse/moods/{mood}/tracks', {
+        path: { mood: target.key }, query: { limit: 500 },
+      }) as { items: MusicBrowseTrack[] }
+    } else if (target.kind === 'genre') {
+      response = await $heya('/api/music/browse/genres/{name}/tracks', {
+        path: { name: target.key }, query: { limit: 500 },
+      }) as { items: MusicBrowseTrack[] }
+    } else {
+      response = await $heya('/api/music/browse/tempo/{band}/tracks', {
+        path: { band: target.key }, query: { limit: 500 },
+      }) as { items: MusicBrowseTrack[] }
+    }
+    return response.items ?? []
+  },
+  staleTime: 1000 * 60 * 10,
+  meta: { prefetch: 'intent', persistence: 'device', sensitivity: 'normal' },
 }))

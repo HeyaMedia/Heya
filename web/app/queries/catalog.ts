@@ -1,5 +1,5 @@
 import { defineQueryOptions } from '@pinia/colada'
-import type { CollectionBrowse, EnrichedMediaItem, Library, UserList } from '~~/shared/types'
+import type { CollectionBrowse, EnrichedMediaItem, Library, MediaItem, UserList } from '~~/shared/types'
 import type { UserStateMovies, UserStateSeries } from '~/composables/useUserState'
 
 export type CatalogKind = 'movie' | 'tv'
@@ -82,5 +82,33 @@ export const collectionsBrowseQuery = defineQueryOptions(() => ({
     prefetch: 'none',
     persistence: 'offline-essential',
     sensitivity: 'normal',
+  },
+}))
+
+export const booksCatalogQuery = defineQueryOptions(() => ({
+  key: ['media', 'catalog', 'book'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/media', { query: { type: 'book', limit: 500 } }) as MediaItem[]
+  },
+  staleTime: 1000 * 60 * 5,
+  meta: {
+    prefetch: 'visible',
+    persistence: 'offline-essential',
+    sensitivity: 'normal',
+  },
+}))
+
+export const mediaUserStateQuery = defineQueryOptions(() => ({
+  key: ['me', 'media-state'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/me/media-state') as { watched: number[]; favorited: number[] }
+  },
+  staleTime: 1000 * 30,
+  meta: {
+    prefetch: 'none',
+    persistence: 'offline-essential',
+    sensitivity: 'private',
   },
 }))

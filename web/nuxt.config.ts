@@ -8,7 +8,6 @@ export default defineNuxtConfig({
     "@pinia/colada-nuxt",
     "@nuxtjs/tailwindcss",
     "nuxt-open-fetch",
-    "nuxt-phosphor-icons",
     "@vueuse/nuxt",
     "@nuxt/image",
     "@vite-pwa/nuxt",
@@ -196,7 +195,11 @@ export default defineNuxtConfig({
   nitro: {
     preset: "bun",
     minify: true,
-    compressPublicAssets: true,
+    // The production SPA is embedded and served by Go's http.FileServerFS;
+    // Heya's outer HTTP middleware already gzip-compresses text responses.
+    // FileServerFS does not negotiate Nitro's sibling .gz/.br files, so
+    // generating them only tripled the asset count and bloated the binary.
+    compressPublicAssets: false,
     sourceMap: false,
 
     // Esbuild minification
@@ -220,14 +223,14 @@ export default defineNuxtConfig({
   },
 
   css: [
-    "@fontsource/inter/400.css",
-    "@fontsource/inter/500.css",
-    "@fontsource/inter/600.css",
-    "@fontsource/inter/700.css",
-    "@fontsource/jetbrains-mono/400.css",
-    "@fontsource/jetbrains-mono/500.css",
-    "@fontsource/jetbrains-mono/600.css",
-    "@fontsource/jetbrains-mono/700.css",
+    "@fontsource/inter/latin-400.css",
+    "@fontsource/inter/latin-500.css",
+    "@fontsource/inter/latin-600.css",
+    "@fontsource/inter/latin-700.css",
+    "@fontsource/jetbrains-mono/latin-400.css",
+    "@fontsource/jetbrains-mono/latin-500.css",
+    "@fontsource/jetbrains-mono/latin-600.css",
+    "@fontsource/jetbrains-mono/latin-700.css",
     "~/assets/css/heya.css",
     "~/assets/css/main.css",
     "~/assets/css/surface.css",
@@ -236,6 +239,10 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: "/api",
+      // Release builds receive the git tag from Docker/CI. Local Nuxt starts
+      // get a unique identity so storage diagnostics and update logs never
+      // ambiguously report a production release.
+      heyaVersion: process.env.NUXT_PUBLIC_HEYA_VERSION || `dev-${Date.now().toString(36)}`,
     },
   },
 
