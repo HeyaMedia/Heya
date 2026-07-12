@@ -9,7 +9,11 @@
         :key="`${item.type}-${item.timestamp}-${item.media_id}`"
         class="feed-item"
         :class="{ clickable: item.slug }"
+        :role="item.slug ? 'link' : undefined"
+        :tabindex="item.slug ? 0 : undefined"
         @click="item.slug && navigateTo(mediaPath(item))"
+        @keydown.enter="item.slug && navigateTo(mediaPath(item))"
+        @keydown.space.prevent="item.slug && navigateTo(mediaPath(item))"
       >
         <div class="feed-icon" :class="item.type">
           <Icon :name="iconFor(item.type)" :size="14" />
@@ -20,6 +24,7 @@
           :width="120"
           :quality="80"
           class="feed-poster"
+          alt=""
           @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
         />
         <div class="feed-text">

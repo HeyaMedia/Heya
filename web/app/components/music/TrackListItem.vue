@@ -5,8 +5,12 @@
       :class="{ 'tl-active': active, 'tl-missing': track.available === false, 'tl-phone-row': isPhone }"
       :style="!isPhone ? { gridTemplateColumns } : undefined"
       :draggable="!isCoarse"
+      :role="track.available === false ? undefined : 'button'"
+      :tabindex="track.available === false ? -1 : 0"
+      :aria-label="track.available === false ? undefined : `Play ${track.title}`"
       @click="onRowClick"
       @dblclick="onRowClick"
+      @keydown="onRowKeydown"
       @dragstart="onDragStart($event, { kind: 'track', track: { id: track.id, title: track.title } })"
       @dragend="onDragEnd"
     >
@@ -144,5 +148,16 @@ const subtitlePhone = computed(() => props.track.album
 function onRowClick() {
   if (props.track.available === false) return
   emit('row-click', props.index)
+}
+
+// Keyboard mirror of the row's @click — the row itself is the play control
+// (playbook item 1). Guard on target===currentTarget so Enter/Space pressed
+// on a nested focusable (artist/album link, star rating, phone "more" button)
+// doesn't ALSO fire this row's action via bubbling.
+function onRowKeydown(e: KeyboardEvent) {
+  if (e.target !== e.currentTarget) return
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  e.preventDefault()
+  onRowClick()
 }
 </script>

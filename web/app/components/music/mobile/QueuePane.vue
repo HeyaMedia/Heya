@@ -85,6 +85,17 @@
           class="qp-row qp-row-upcoming"
           :style="rowStyle(i)"
         >
+          <!-- Long-press-drag has no keyboard equivalent — these two small
+               buttons are the fallback for reordering without a drag
+               gesture (keyboard, switch access, screen reader). -->
+          <div class="qp-reorder-btns">
+            <button type="button" class="qp-reorder-btn" :disabled="i === 0" aria-label="Move up" @click="moveUpcoming(i, -1)">
+              <Icon name="chevup" :size="12" />
+            </button>
+            <button type="button" class="qp-reorder-btn" :disabled="i === upcomingTracks.length - 1" aria-label="Move down" @click="moveUpcoming(i, 1)">
+              <Icon name="chevdown" :size="12" />
+            </button>
+          </div>
           <div class="qp-swipe-mask">
             <button
               type="button"
@@ -134,6 +145,14 @@ const {
 
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v))
+}
+
+// Keyboard/tap fallback for the drag-to-reorder gesture below — moves a row
+// one slot at a time via moveInQueue, same index math the gesture handlers use.
+function moveUpcoming(i: number, delta: number) {
+  const target = i + delta
+  if (target < 0 || target >= upcomingTracks.value.length) return
+  moveInQueue(currentIndex.value + 1 + i, currentIndex.value + 1 + target)
 }
 
 // --- Tunables ---------------------------------------------------------
@@ -642,7 +661,8 @@ onScopeDispose(() => {
    `overflow: hidden` also clips an element's own box-shadow, which would
    silently kill the elevated-drag shadow if it lived on the masked element. */
 .qp-row-upcoming {
-  display: block;
+  display: flex;
+  align-items: center;
   padding: 0;
   border-left: none;
   touch-action: pan-y;
@@ -651,9 +671,35 @@ onScopeDispose(() => {
   -webkit-tap-highlight-color: transparent;
   will-change: transform;
 }
+/* Keyboard/tap fallback for reordering — see the template comment above
+   these buttons. Sized to fit within the row's natural height (thumb 44px +
+   6px vertical padding either side) so adding them doesn't grow the row. */
+.qp-reorder-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-left: 2px;
+}
+.qp-reorder-btn {
+  width: 26px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-xs, 4px);
+  background: rgb(var(--ink) / 0.05);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.qp-reorder-btn:active { background: rgb(var(--ink) / 0.1); }
+.qp-reorder-btn:disabled { opacity: 0.3; }
 .qp-swipe-mask {
   position: relative;
   overflow: hidden;
+  flex: 1;
+  min-width: 0;
 }
 .qp-swipe-reveal {
   position: absolute;

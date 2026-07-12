@@ -8,6 +8,7 @@
         type="search"
         class="pp-search-input"
         placeholder="Search by show, host, topic…"
+        aria-label="Search podcasts"
         @keydown.enter="runSearch"
       />
       <button v-if="searchQuery" class="pp-search-clear" @click="clearSearch">

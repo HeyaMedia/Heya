@@ -26,6 +26,14 @@
 -->
 <template>
   <AppSheet v-model:open="open" size="full" title="Now Playing">
+    <template #header>
+      <header class="app-sheet-header nps-header">
+        <DrawerTitle as="h3" class="app-sheet-title">Now Playing</DrawerTitle>
+        <button type="button" class="nps-close" aria-label="Close" @click="open = false">
+          <Icon name="close" :size="18" />
+        </button>
+      </header>
+    </template>
     <div class="nps-scroll">
       <div class="nps-body nps-pane-np">
         <div class="nps-visual">
@@ -88,7 +96,7 @@
         </div>
 
         <div class="nps-transport">
-          <button type="button" class="nps-icon" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
+          <button type="button" class="nps-icon" :class="{ active: shuffled }" aria-label="Shuffle" :aria-pressed="shuffled" @click="toggleShuffle">
             <Icon name="shuffle" :size="20" />
           </button>
           <button type="button" class="nps-icon" aria-label="Previous" @click="prevTrack">
@@ -109,7 +117,7 @@
           <button type="button" class="nps-icon" aria-label="Next" @click="nextTrack">
             <Icon name="next" :size="26" />
           </button>
-          <button type="button" class="nps-icon" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" @click="cycleRepeat">
+          <button type="button" class="nps-icon" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" :aria-pressed="repeatMode !== 'off'" @click="cycleRepeat">
             <Icon name="repeat" :size="20" />
             <span v-if="repeatMode === 'one'" class="nps-repeat-badge">1</span>
           </button>
@@ -119,7 +127,7 @@
           <button type="button" class="nps-sicon" aria-label="Queue" @click="scrollToQueue">
             <Icon name="queue" :size="18" />
           </button>
-          <button type="button" class="nps-sicon" :class="{ active: showLyrics }" aria-label="Lyrics" @click="showLyrics = !showLyrics">
+          <button type="button" class="nps-sicon" :class="{ active: showLyrics }" aria-label="Lyrics" :aria-pressed="showLyrics" @click="showLyrics = !showLyrics">
             <Icon name="lyrics" :size="18" />
           </button>
         </div>
@@ -139,6 +147,7 @@
 
 <script setup lang="ts">
 import { useQuery } from '@pinia/colada'
+import { DrawerTitle } from 'reka-ui'
 import { trackLyricsQuery } from '~/queries/music'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -318,6 +327,33 @@ watch(activeLyricIdx, (i) => {
   scroll-snap-type: y proximity;
   overscroll-behavior: contain;
 }
+
+/* Explicit close affordance — swipe-down/backdrop-tap dismiss the sheet but
+   have no discoverable/keyboard equivalent, so this header slot (replacing
+   AppSheet's default title-only header) adds a real, focusable close
+   button. Reuses .app-sheet-header/.app-sheet-title for identical chrome,
+   just in a flex row with the button pinned to the end. */
+.nps-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.nps-header .app-sheet-title { margin: 0; }
+.nps-close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.nps-close:active { background: rgb(var(--ink) / 0.08); }
 
 .nps-body {
   display: flex;

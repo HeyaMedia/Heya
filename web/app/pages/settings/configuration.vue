@@ -55,8 +55,15 @@ function badgeState(source: string): 'ok' | 'warn' | 'idle' {
   return 'idle'
 }
 
+const { toast } = useToast()
+
 async function copyKey(key: string) {
-  try { await navigator.clipboard.writeText(key) } catch {}
+  try {
+    await navigator.clipboard.writeText(key)
+    toast.ok(`Copied "${key}".`)
+  } catch {
+    toast.err('Clipboard blocked — copy manually.')
+  }
 }
 
 </script>
@@ -87,9 +94,10 @@ async function copyKey(key: string) {
           v-model="filterText"
           class="filter-input"
           placeholder="filter by key or env var…"
+          aria-label="Filter by key or env var"
           spellcheck="false"
         />
-        <select v-model="filterSource" class="filter-select">
+        <select v-model="filterSource" class="filter-select" aria-label="Filter by source">
           <option value="">All sources</option>
           <option value="env">env</option>
           <option value="db">db</option>

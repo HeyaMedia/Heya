@@ -238,6 +238,7 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
             :key="lvl"
             class="lvl-chip"
             :class="[lvl, { active: enabledLevels.has(lvl) }]"
+            :aria-pressed="enabledLevels.has(lvl)"
             :title="`Toggle ${lvl} — double-click to isolate`"
             @click="toggleLevel(lvl)"
             @dblclick="onlyLevel(lvl)"
@@ -247,11 +248,11 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
           </button>
           <button class="lvl-all" :disabled="enabledLevels.size === LEVELS.length" @click="allLevels">all</button>
         </div>
-        <input v-model="search" class="search-input" placeholder="search message + fields…" spellcheck="false" />
+        <input v-model="search" class="search-input" placeholder="search message + fields…" aria-label="Search logs by message or fields" spellcheck="false" />
       </div>
 
       <div class="tb-right">
-        <select v-model="tailWindow" class="tail-select" title="Render tail window">
+        <select v-model="tailWindow" class="tail-select" title="Render tail window" aria-label="Render tail window">
           <option v-for="n in TAIL_OPTIONS" :key="n" :value="n">last {{ n }}</option>
         </select>
         <label class="check-row" :title="autoScroll ? 'Auto-scroll is on' : 'Auto-scroll is off'">
@@ -296,7 +297,12 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
           :key="`${e.time}-${i}`"
           class="log-row"
           :class="[e.level, { expanded: expanded.has(i), 'has-fields': hasFields(e) }]"
+          :role="hasFields(e) ? 'button' : undefined"
+          :tabindex="hasFields(e) ? 0 : undefined"
+          :aria-expanded="hasFields(e) ? expanded.has(i) : undefined"
           @click="hasFields(e) && toggleExpand(i)"
+          @keydown.enter="hasFields(e) && toggleExpand(i)"
+          @keydown.space.prevent="hasFields(e) && toggleExpand(i)"
         >
           <span class="lr-time">{{ formatTime(e.time) }}</span>
           <span class="lr-level" :class="e.level">{{ e.level }}</span>

@@ -227,6 +227,9 @@ onBeforeUnmount(() => {
         <button
           class="enable-toggle"
           :class="{ on: settings?.enabled }"
+          role="switch"
+          :aria-checked="!!settings?.enabled"
+          aria-label="Enable sonic analysis"
           :disabled="!settings || enableSaving || isLocked('sonic_analysis.enabled')"
           :title="isLocked('sonic_analysis.enabled') ? lockTooltip('sonic_analysis.enabled') : (settings?.enabled ? 'Disable' : 'Enable')"
           @click="toggleEnabled"
@@ -344,9 +347,11 @@ onBeforeUnmount(() => {
           label="Accelerator"
           description="Auto detects the best inference EP at boot. Dynamic-batch models (classifier heads, base EffNet) always run on CPU when the primary picks CoreML — the EP otherwise recompiles per call and ends up ~8× slower."
           :lockedBy="isLocked('sonic_analysis.accelerator') ? lockTooltip('sonic_analysis.accelerator') : undefined"
+          v-slot="{ fieldId }"
         >
           <select
             v-if="settings"
+            :id="fieldId"
             v-model="settings.accelerator"
             class="sv2-select"
             :disabled="isLocked('sonic_analysis.accelerator')"

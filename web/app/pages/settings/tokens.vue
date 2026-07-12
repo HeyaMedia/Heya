@@ -72,7 +72,9 @@ async function copyToken() {
     await navigator.clipboard.writeText(revealed.value.token)
     copied.value = true
     setTimeout(() => { copied.value = false }, 1500)
-  } catch {}
+  } catch {
+    flash.value = { kind: 'err', text: 'Clipboard blocked — copy manually.' }
+  }
 }
 
 function closeCreate() {
@@ -158,7 +160,7 @@ function wasUsed(t: ApiToken): boolean {
               <span>· {{ formatExpiry(t.expires_at) }}</span>
             </div>
           </div>
-          <button class="token-revoke" title="Revoke" @click="revoke(t)">
+          <button class="token-revoke" title="Revoke" aria-label="Revoke token" @click="revoke(t)">
             <Icon name="trash" :size="13" />
           </button>
         </div>
@@ -176,8 +178,9 @@ function wasUsed(t: ApiToken): boolean {
       @update:model-value="(v: boolean) => { if (!v) closeCreate() }"
     >
       <template v-if="!revealed">
-        <SettingsField label="Name" description="Shown in this list. Pick something you'll recognise in 6 months.">
+        <SettingsField label="Name" description="Shown in this list. Pick something you'll recognise in 6 months." v-slot="{ fieldId }">
           <input
+            :id="fieldId"
             v-model="draftName"
             class="sv2-input"
             placeholder="e.g. backup script · macbook"
@@ -186,9 +189,9 @@ function wasUsed(t: ApiToken): boolean {
           />
         </SettingsField>
         <SettingsField label="Expiry" description="Tokens with no expiry never auto-revoke.">
-          <div class="expiry-grid">
+          <div class="expiry-grid" role="radiogroup" aria-label="Expiry">
             <label v-for="opt in EXPIRY_OPTIONS" :key="opt.value" class="expiry-chip" :class="{ active: draftExpiryDays === opt.value }">
-              <input type="radio" :value="opt.value" v-model="draftExpiryDays" />
+              <input type="radio" name="token-expiry" :value="opt.value" v-model="draftExpiryDays" />
               {{ opt.label }}
             </label>
           </div>
@@ -283,6 +286,10 @@ function wasUsed(t: ApiToken): boolean {
 .expiry-chip:hover { border-color: var(--border-strong); }
 .expiry-chip.active { border-color: var(--gold); background: var(--gold-soft); color: var(--gold); }
 .expiry-chip input { display: none; }
+
+@media (pointer: coarse) {
+  .expiry-chip { min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center; }
+}
 
 .reveal-warning {
   display: flex; align-items: center; gap: 8px;

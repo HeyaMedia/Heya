@@ -5,8 +5,8 @@
         <div class="mf-card-head">Episode Info</div>
         <div class="mf-grid">
           <div class="mf-field mf-full">
-            <label class="mf-label">Title</label>
-            <input v-model="form.title" type="text" class="mf-input" />
+            <label class="mf-label" for="me-ep-title">Title</label>
+            <input id="me-ep-title" v-model="form.title" type="text" class="mf-input" />
           </div>
           <div class="mf-field">
             <label class="mf-label">Season</label>
@@ -17,12 +17,12 @@
             <div class="mf-readonly">{{ episode?.episode?.episode_number ?? '—' }}</div>
           </div>
           <div class="mf-field">
-            <label class="mf-label">Air Date</label>
-            <input v-model="form.air_date" type="date" class="mf-input" />
+            <label class="mf-label" for="me-ep-air-date">Air Date</label>
+            <input id="me-ep-air-date" v-model="form.air_date" type="date" class="mf-input" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Runtime (min)</label>
-            <input v-model.number="form.runtime_minutes" type="number" class="mf-input" />
+            <label class="mf-label" for="me-ep-runtime">Runtime (min)</label>
+            <input id="me-ep-runtime" v-model.number="form.runtime_minutes" type="number" class="mf-input" />
           </div>
           <div class="mf-field">
             <label class="mf-label">Rating</label>
@@ -40,7 +40,7 @@
       <div class="mf-card mf-card-fill">
         <div class="mf-card-head">Overview</div>
         <div class="mf-field mf-field-fill">
-          <textarea v-model="form.overview" class="mf-textarea mf-textarea-fill" placeholder="Episode overview..." />
+          <textarea v-model="form.overview" class="mf-textarea mf-textarea-fill" aria-label="Overview" placeholder="Episode overview..." />
         </div>
       </div>
     </div>

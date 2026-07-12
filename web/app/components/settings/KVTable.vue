@@ -12,8 +12,20 @@ const props = defineProps<{ rows: Row[] }>()
 
 const visibleRows = computed(() => props.rows.filter(r => r.value !== undefined && r.value !== null && r.value !== ''))
 
-async function copy(text: string | number) {
-  try { await navigator.clipboard.writeText(String(text)) } catch {}
+// Copy feedback: a transient per-row "copied" state (icon swap) plus a
+// polite live-region announcement, so the action isn't silent to screen
+// readers and low-vision users (the button had no success signal before).
+const copiedKey = ref<string | null>(null)
+const announce = ref('')
+async function copy(row: Row) {
+  try {
+    await navigator.clipboard.writeText(String(row.value))
+    copiedKey.value = row.key
+    announce.value = `Copied ${row.key}`
+    setTimeout(() => { if (copiedKey.value === row.key) copiedKey.value = null }, 1500)
+  } catch {
+    announce.value = `Couldn't copy ${row.key}`
+  }
 }
 </script>
 
@@ -26,11 +38,14 @@ async function copy(text: string | number) {
         <button
           v-if="r.copy && r.value != null"
           class="sv2-kv-copy"
+          :class="{ copied: copiedKey === r.key }"
+          :aria-label="copiedKey === r.key ? `Copied ${r.key}` : `Copy ${r.key}`"
           :title="`Copy ${r.key}`"
-          @click="copy(r.value)"
-        ><Icon name="clipboard" :size="11" /></button>
+          @click="copy(r)"
+        ><Icon :name="copiedKey === r.key ? 'check' : 'clipboard'" :size="11" aria-hidden="true" /></button>
       </span>
     </div>
+    <span class="sr-only" role="status" aria-live="polite">{{ announce }}</span>
   </div>
 </template>
 
@@ -68,6 +83,7 @@ async function copy(text: string | number) {
 }
 .sv2-kv-row:hover .sv2-kv-copy { opacity: 1; }
 .sv2-kv-copy:hover { background: rgb(var(--ink) / 0.05); color: var(--fg-1); }
+.sv2-kv-copy.copied { opacity: 1; color: var(--good); }
 
 /* Phone: the 200px key column leaves almost nothing for the value (paths,
    URLs, version strings) at 390px. Stack key above value instead. */

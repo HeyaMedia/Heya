@@ -10,6 +10,7 @@
           type="search"
           class="ms-input"
           placeholder="Search artists, albums, songs — or describe a vibe and press Enter"
+          aria-label="Search music"
           autocomplete="off"
           spellcheck="false"
           @keydown.esc="onEsc"
@@ -40,14 +41,13 @@
         <button type="button" class="ms-recent-clear" @click="recent.clear()">Clear all</button>
       </div>
       <ul class="ms-recent-list">
-        <li v-for="r in recentEntries" :key="r">
+        <li v-for="r in recentEntries" :key="r" class="ms-recent-li">
           <button type="button" class="ms-recent-row" @click="useRecent(r)">
             <Icon name="clock" :size="14" />
             <span>{{ r }}</span>
-            <span class="ms-recent-spacer" />
-            <span class="ms-recent-remove" :title="`Remove '${r}'`" @click.stop="recent.remove(r)">
-              <Icon name="close" :size="12" />
-            </span>
+          </button>
+          <button type="button" class="ms-recent-remove" :aria-label="`Remove '${r}'`" @click.stop="recent.remove(r)">
+            <Icon name="close" :size="12" />
           </button>
         </li>
       </ul>
@@ -145,7 +145,11 @@
             :class="{ 'kb-active': isActive('track', i), 'ms-track-missing': t.available === false }"
             :data-kb-idx="flatIdx('track', i)"
             :draggable="!isCoarse"
+            :role="t.available === false ? undefined : 'button'"
+            :tabindex="t.available === false ? -1 : 0"
+            :aria-label="t.available === false ? undefined : `Play ${t.title}`"
             @click="t.available !== false && playTrack(i)"
+            @keydown="onTrackRowKeydown($event, i, t)"
             @dragstart="onDragStart($event, { kind: 'track', track: { id: t.id, title: t.title } })"
             @dragend="onDragEnd"
           >
@@ -185,7 +189,17 @@
           <div class="ms-section-count">{{ vibeResults.length }} tracks</div>
         </div>
         <ul class="ms-track-list">
-          <li v-for="(r, i) in vibeResults" :key="`vibe-${r.track_id}`" class="ms-track-row" @click="playVibe(i)">
+          <li
+            v-for="(r, i) in vibeResults"
+            :key="`vibe-${r.track_id}`"
+            class="ms-track-row"
+            role="button"
+            tabindex="0"
+            :aria-label="`Play ${r.track_title}`"
+            @click="playVibe(i)"
+            @keydown.enter="playVibe(i)"
+            @keydown.space.prevent="playVibe(i)"
+          >
             <div class="ms-track-art">
               <NuxtImg :src="useAlbumCoverUrl(r.artist_slug, r.album_slug) ?? ''" :alt="r.album_title" :width="160" :quality="80" densities="1x 2x" loading="lazy" />
               <div class="ms-track-play"><Icon name="play" :size="14" /></div>
@@ -477,6 +491,16 @@ function onEsc() {
   else inputEl.value?.blur()
 }
 
+// Keyboard mirror of the track row's @click (playbook item 1). Guarded on
+// target===currentTarget so Enter/Space on the nested "more actions" button
+// (phone-only) doesn't also trigger playTrack.
+function onTrackRowKeydown(e: KeyboardEvent, i: number, t: TrackRow) {
+  if (e.target !== e.currentTarget) return
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  e.preventDefault()
+  if (t.available !== false) playTrack(i)
+}
+
 // --- Play actions ---
 async function playAlbum(al: AlbumRow) {
   try {
@@ -631,30 +655,46 @@ async function playVibe(startIdx: number) {
 .ms-recent-list {
   display: flex; flex-direction: column; gap: 2px;
 }
+/* The row used to be a single <button> with the remove affordance nested
+   inside it as a <span> — invalid interactive-in-interactive nesting once
+   that span grew a real click handler. Split into two sibling buttons
+   (trigger + remove) inside this flex wrapper instead; the hover/rounding
+   moves up to the wrapper so the visual reads identically to the old
+   single-button row. */
+.ms-recent-li {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+  transition: background 0.15s;
+}
+.ms-recent-li:hover { background: rgb(var(--ink) / 0.04); }
 .ms-recent-row {
   display: flex; align-items: center; gap: 12px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 10px 12px;
   background: transparent;
   border: 0;
-  border-radius: var(--r-sm);
   color: var(--fg-1);
   font-size: 13px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s, color 0.15s;
+  transition: color 0.15s;
 }
-.ms-recent-row:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
+.ms-recent-li:hover .ms-recent-row { color: var(--fg-0); }
 .ms-recent-row :deep(svg) { color: var(--fg-3); flex-shrink: 0; }
-.ms-recent-spacer { flex: 1; }
 .ms-recent-remove {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px;
+  margin-right: 10px;
+  background: transparent;
+  border: 0;
   border-radius: 50%;
   color: var(--fg-3);
+  cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.ms-recent-row:hover .ms-recent-remove:hover { background: rgb(var(--ink) / 0.08); color: var(--fg-0); }
+.ms-recent-remove:hover, .ms-recent-remove:focus-visible { background: rgb(var(--ink) / 0.08); color: var(--fg-0); }
 
 /* ---- Empty hint ---- */
 .ms-empty-hint {
@@ -790,12 +830,12 @@ async function playVibe(startIdx: number) {
 .ms-inline-btn:hover { filter: brightness(1.2); }
 
 .ms-error {
-  color: #ff7676;
+  color: var(--bad);
   font-size: 13px;
   padding: 12px 14px;
   border-radius: var(--r-sm);
-  background: rgba(255, 118, 118, 0.06);
-  border: 1px solid rgba(255, 118, 118, 0.2);
+  background: color-mix(in srgb, var(--bad) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 20%, transparent);
   margin-top: 12px;
 }
 

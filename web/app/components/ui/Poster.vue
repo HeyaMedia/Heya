@@ -3,7 +3,7 @@
     <NuxtImg
       v-if="src && !imgError"
       :src="src"
-      :alt="title"
+      :alt="title ?? ''"
       :width="width ?? 200"
       :quality="80"
       densities="1x 2x"

@@ -167,8 +167,10 @@ onMounted(async () => {
           label="Hardware acceleration"
           description="Which GPU encoder ffmpeg uses. Auto probes the system at boot and picks the strongest. Set manually only to override detection or force CPU."
           :lockedBy="isLocked('transcoder.hwaccel') ? lockTooltip('transcoder.hwaccel') : undefined"
+          v-slot="{ fieldId }"
         >
           <select
+            :id="fieldId"
             v-model="form.hwAccel"
             class="sv2-select"
             :disabled="isLocked('transcoder.hwaccel')"
@@ -182,9 +184,11 @@ onMounted(async () => {
           label="Transcode cache size"
           description="Maximum disk used for cached HLS segments. Oldest segments are evicted when reached."
           :lockedBy="isLocked('transcoder.cache_max_gb') ? lockTooltip('transcoder.cache_max_gb') : undefined"
+          v-slot="{ fieldId }"
         >
           <div class="num-with-unit">
             <input
+              :id="fieldId"
               v-model.number="form.cacheMaxGB"
               type="number" min="1" max="500"
               class="sv2-input num"

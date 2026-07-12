@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DropdownMenuItem } from 'reka-ui'
+import { DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem } from 'reka-ui'
 
 const { user, logout } = useAuth()
 const { prefs, set } = useAppearance()
@@ -38,21 +38,29 @@ const THEMES = [
 
     <div class="surface-divider" />
 
-    <!-- Theme quick-switch. Real DropdownMenuItems so arrow-key navigation
-         reaches them (plain buttons are invisible to the menu's roving
-         focus); `select` is prevented so picking a theme applies instantly
-         WITHOUT closing the menu. Full appearance controls live in
-         Settings → Appearance. -->
-    <div class="ud-theme-row" role="group" aria-label="Theme">
-      <DropdownMenuItem
+    <!-- Theme quick-switch. DropdownMenuRadioItems (role="menuitemradio")
+         so arrow-key navigation reaches them (plain buttons are invisible
+         to the menu's roving focus) AND aria-checked is valid ARIA + kept
+         in sync by reka — a bare aria-checked on a generic DropdownMenuItem
+         (role="menuitem") isn't. `select` is still prevented so picking a
+         theme applies instantly WITHOUT closing the menu; the actual write
+         happens through `set()` via the radio group's update event. Full
+         appearance controls live in Settings → Appearance. -->
+    <DropdownMenuRadioGroup
+      class="ud-theme-row"
+      aria-label="Theme"
+      :model-value="prefs.theme"
+      @update:model-value="(v) => set('theme', v as any)"
+    >
+      <DropdownMenuRadioItem
         v-for="t in THEMES"
         :key="t.value"
+        :value="t.value"
         class="ud-theme-btn"
         :class="{ active: prefs.theme === t.value }"
-        :aria-checked="prefs.theme === t.value"
-        @select="(e: Event) => { e.preventDefault(); set('theme', t.value) }"
-      >{{ t.label }}</DropdownMenuItem>
-    </div>
+        @select="(e: Event) => e.preventDefault()"
+      >{{ t.label }}</DropdownMenuRadioItem>
+    </DropdownMenuRadioGroup>
 
     <div class="surface-divider" />
 

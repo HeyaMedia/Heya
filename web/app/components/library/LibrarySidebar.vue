@@ -8,8 +8,11 @@
       <div
         class="lib-item"
         role="button"
+        tabindex="0"
         :class="{ active: activeView === 'browse' }"
         @click="$emit('view', 'browse')"
+        @keydown.enter="$emit('view', 'browse')"
+        @keydown.space.prevent="$emit('view', 'browse')"
       >
         <Icon name="star" :size="16" style="color: var(--gold)" />
         <span>Browse</span>
@@ -17,8 +20,11 @@
       <div
         class="lib-item"
         role="button"
+        tabindex="0"
         :class="{ active: activeView === 'recommendations' }"
         @click="$emit('view', 'recommendations')"
+        @keydown.enter="$emit('view', 'recommendations')"
+        @keydown.space.prevent="$emit('view', 'recommendations')"
       >
         <Icon name="sparkle" :size="16" style="color: var(--gold)" />
         <span>Recommendations</span>
@@ -30,8 +36,11 @@
         v-if="showRoulette"
         class="lib-item"
         role="button"
+        tabindex="0"
         :class="{ active: activeView === 'roulette' }"
         @click="$emit('view', 'roulette')"
+        @keydown.enter="$emit('view', 'roulette')"
+        @keydown.space.prevent="$emit('view', 'roulette')"
       >
         <Icon name="shuffle" :size="16" style="color: var(--gold)" />
         <span>Roulette</span>
@@ -43,8 +52,11 @@
       <div
         class="lib-item"
         role="button"
+        tabindex="0"
         :class="{ active: !activeLib && !activeView }"
         @click="selectLib(null)"
+        @keydown.enter="selectLib(null)"
+        @keydown.space.prevent="selectLib(null)"
       >
         <Icon name="folder" :size="16" />
         <span>All {{ typeLabel }}</span>
@@ -55,8 +67,11 @@
         :key="lib.id"
         class="lib-item lib-item-nested"
         role="button"
+        tabindex="0"
         :class="{ active: activeLib === lib.id && !activeView }"
         @click="selectLib(lib.id)"
+        @keydown.enter="selectLib(lib.id)"
+        @keydown.space.prevent="selectLib(lib.id)"
       >
         <Icon name="folder" :size="12" class="list-type-icon" />
         <span>{{ lib.name }}</span>
@@ -68,8 +83,11 @@
       <div
         class="lib-item"
         role="button"
+        tabindex="0"
         :class="{ active: activeView === 'loved' }"
         @click="$emit('view', 'loved')"
+        @keydown.enter="$emit('view', 'loved')"
+        @keydown.space.prevent="$emit('view', 'loved')"
       >
         <Icon name="heartfill" :size="16" style="color: var(--bad)" />
         <span>Loved</span>
@@ -85,7 +103,7 @@
            drawer (desktop aside, and phone where taps are real touch events
            that skip pointer capture entirely), but required once this
            component renders inside AppSheet's `variant="sheet"`. -->
-      <div class="lib-item lists-toggle" role="button" @click="listsExpanded = !listsExpanded">
+      <div class="lib-item lists-toggle" role="button" tabindex="0" @click="listsExpanded = !listsExpanded" @keydown.enter="listsExpanded = !listsExpanded" @keydown.space.prevent="listsExpanded = !listsExpanded">
         <Icon name="list" :size="16" />
         <span>My Lists</span>
         <Icon :name="listsExpanded ? 'chevdown' : 'chevright'" :size="10" class="expand-icon" />
@@ -96,8 +114,11 @@
           :key="l.id"
           class="lib-item lib-item-nested"
           role="button"
+          tabindex="0"
           :class="{ active: activeView === `list-${l.id}`, 'drop-target': dragOverListId === l.id }"
           @click="$emit('view', `list-${l.id}`)"
+          @keydown.enter="$emit('view', `list-${l.id}`)"
+          @keydown.space.prevent="$emit('view', `list-${l.id}`)"
           @dragover.prevent="$emit('list-dragover', $event, l.id)"
           @dragleave="$emit('list-dragleave')"
           @drop="$emit('list-drop', $event, l.id)"
@@ -106,7 +127,7 @@
           <span>{{ l.name }}</span>
           <span v-if="l.item_count > 0" class="count">{{ l.item_count }}</span>
         </div>
-        <div class="lib-item lib-item-nested lib-item-action" role="button" @click="createList">
+        <div class="lib-item lib-item-nested lib-item-action" role="button" tabindex="0" @click="createList" @keydown.enter="createList" @keydown.space.prevent="createList">
           <Icon name="plus" :size="12" />
           <span>New List</span>
         </div>
@@ -120,8 +141,11 @@
         v-if="collections?.length"
         class="lib-item"
         role="button"
+        tabindex="0"
         :class="{ active: activeView === 'franchises' }"
         @click="$emit('view', 'franchises')"
+        @keydown.enter="$emit('view', 'franchises')"
+        @keydown.space.prevent="$emit('view', 'franchises')"
       >
         <Icon name="film" :size="16" />
         <span>Franchises</span>

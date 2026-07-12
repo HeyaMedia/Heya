@@ -291,7 +291,7 @@ func inflateFromMedia(ctx context.Context, app *service.App, id int64, p *opensu
 	switch item.MediaType {
 	case sqlc.MediaTypeMovie:
 		p.Type = "movie"
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		p.Type = "episode"
 	}
 }

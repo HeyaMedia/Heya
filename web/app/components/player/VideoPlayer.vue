@@ -82,7 +82,20 @@ const seekHover = ref<number | null>(null)
 const activeSubIdx = ref(-1)
 const activeAudioIdx = ref(0)
 const activeQuality = ref('auto')
+// True while focus sits on any control inside .ctrl — keeps the bar visible
+// past the normal 3s auto-hide so a keyboard user's focus never disappears.
+const controlsFocused = ref(false)
+// Single source of truth for "is the control bar showing" — drives both the
+// .ctrl visible class and the VTT overlay's nudge-up so subs clear the bar.
+const ctrlShown = computed(() => controlsVisible.value || state.paused || state.buffering || controlsFocused.value)
+const resumeCardRef = ref<HTMLElement>()
 let assRenderer: AkariSub | null = null
+// VTT path state — non-ASS tracks are served as WebVTT by the backend and
+// rendered through a hidden <track> + custom overlay (see initVTT).
+let vttTrackEl: HTMLTrackElement | null = null
+let vttTextTrack: TextTrack | null = null
+let vttCueChangeHandler: (() => void) | null = null
+const vttCueLines = ref<string[]>([])
 let hideTimer: ReturnType<typeof setTimeout> | null = null
 let sessionId = Math.random().toString(36).slice(2, 10)
 
@@ -284,9 +297,10 @@ async function init() {
 
   if (activeSubIdx.value >= 0) {
     const sub = subtitleTracks.value[activeSubIdx.value]
-    if (sub && (sub.codec === 'ass' || sub.codec === 'ssa')) {
-      fetch(subtitleUrl(sub.index)).catch(() => {})
-    }
+    // Warm the subtitle endpoint for whatever we auto-selected — the server
+    // extracts ASS / converts everything else to WebVTT on first hit, so
+    // this prefetch means the renderer isn't blocked on that work later.
+    if (sub) fetch(subtitleUrl(sub.index)).catch(() => {})
   }
 
   // Before loading the source (which auto-plays on canplay), check whether
@@ -327,7 +341,7 @@ function startPlayback() {
     }
   }
 
-  if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initASS())
+  if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initSubtitles())
 
   loadTrickplay(token.value!).catch(() => {})
   dismissedSegments.value = new Set()
@@ -363,13 +377,29 @@ function awaitVideoReady(): Promise<void> {
 
 function destroyASS() { if (assRenderer) { assRenderer.destroy(); assRenderer = null } }
 
-function initASS() {
+// Tears down whichever renderer is live — AkariSub canvas AND/OR the VTT
+// <track>/overlay. Safe to call when neither exists. Every subtitle switch
+// (ASS ⇄ VTT ⇄ off) funnels through this so renderers never stack.
+function destroySubtitles() {
   destroyASS()
+  destroyVTT()
+}
+
+// Dispatches by codec: ASS/SSA → AkariSub (full styling/positioning needs
+// libass), everything else → the backend has already converted it to WebVTT
+// at /subtitles/{index}, so a native <track> + custom overlay renders it.
+function initSubtitles() {
+  destroySubtitles()
+  if (import.meta.server) return
   if (activeSubIdx.value < 0 || !videoEl.value) return
   const sub = subtitleTracks.value[activeSubIdx.value]
   if (!sub) return
-  const isASS = sub.codec === 'ass' || sub.codec === 'ssa'
-  if (!isASS) return
+  if (sub.codec === 'ass' || sub.codec === 'ssa') initASS(sub)
+  else initVTT(sub)
+}
+
+function initASS(sub: StreamSubtitle) {
+  if (!videoEl.value) return
   try {
     assRenderer = new AkariSub({
       video: videoEl.value,
@@ -389,12 +419,84 @@ function initASS() {
   }
 }
 
+// WebVTT cue text can carry inline tags (<i>, <b>, <c.class>, <v Speaker>,
+// karaoke timestamps). We render plain styled text, so strip the tags and
+// decode the few entities VTT requires escaping — Vue's {{ }} would show
+// them literally otherwise. Order matters: strip tags before decoding so
+// an encoded &lt; can never conjure a tag.
+function stripVttTags(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lrm;|&rlm;/g, '')
+}
+
+function initVTT(sub: StreamSubtitle) {
+  const v = videoEl.value
+  if (!v) return
+  const trackEl = document.createElement('track')
+  trackEl.kind = 'subtitles'
+  trackEl.srclang = normLang(sub.language) || 'en'
+  trackEl.label = sub.title || sub.language || `Track ${sub.index}`
+  trackEl.src = subtitleUrl(sub.index)
+  v.appendChild(trackEl)
+  vttTrackEl = trackEl
+
+  // 'hidden' = browser parses + times the cues (activeCues stays live and
+  // cuechange fires) but paints nothing — we render into our own overlay so
+  // the subs match app styling and can dodge the control bar, instead of
+  // the UA's ::cue box painting underneath/over the OSD.
+  const tt = trackEl.track
+  tt.mode = 'hidden'
+  vttTextTrack = tt
+
+  const handler = () => {
+    // Guard: a queued cuechange (or late track 'load') can land after
+    // teardown / after switching to a different track — ignore it.
+    if (vttTextTrack !== tt) return
+    const cues = tt.activeCues
+    const lines: string[] = []
+    if (cues) {
+      for (let i = 0; i < cues.length; i++) {
+        const cue = cues[i] as VTTCue | undefined
+        if (!cue || typeof cue.text !== 'string') continue
+        for (const line of stripVttTags(cue.text).split('\n')) {
+          if (line.trim()) lines.push(line)
+        }
+      }
+    }
+    vttCueLines.value = lines
+  }
+  vttCueChangeHandler = handler
+  tt.addEventListener('cuechange', handler)
+  // Cues load async; if playback is mid-cue when the track finishes loading
+  // (e.g. sub switched while paused), no cuechange fires until the next cue
+  // boundary — seed from activeCues once the resource is in.
+  trackEl.addEventListener('load', handler)
+  handler()
+}
+
+function destroyVTT() {
+  if (vttTextTrack) {
+    if (vttCueChangeHandler) vttTextTrack.removeEventListener('cuechange', vttCueChangeHandler)
+    vttTextTrack.mode = 'disabled'
+  }
+  vttTextTrack = null
+  vttCueChangeHandler = null
+  vttTrackEl?.remove()
+  vttTrackEl = null
+  vttCueLines.value = []
+}
+
 function selectSub(idx: number) {
   activeSubIdx.value = idx
   showSubMenu.value = false
-  awaitVideoReady().then(() => initASS())
+  awaitVideoReady().then(() => initSubtitles())
 }
-function disableSubs() { activeSubIdx.value = -1; showSubMenu.value = false; destroyASS() }
+function disableSubs() { activeSubIdx.value = -1; showSubMenu.value = false; destroySubtitles() }
 function selectAudio(idx: number) {
   if (idx === activeAudioIdx.value) { showAudioMenu.value = false; return }
   const currentTime = state.currentTime
@@ -462,11 +564,37 @@ function setVolume(e: MouseEvent) {
   controls.setVolume(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)))
 }
 
+// Keyboard equivalents for the seek/volume sliders, mirroring the pointer
+// math above. stopPropagation() keeps the window-level shortcut handler
+// (ArrowLeft/Right = skip ±10s) from double-acting on the same keystroke.
+function onSeekKeydown(e: KeyboardEvent) {
+  if (!knownDuration.value) return
+  switch (e.key) {
+    case 'ArrowLeft': controls.seek(Math.max(0, state.currentTime - 5)); break
+    case 'ArrowRight': controls.seek(Math.min(knownDuration.value, state.currentTime + 5)); break
+    case 'Home': controls.seek(0); break
+    case 'End': controls.seek(knownDuration.value); break
+    default: return
+  }
+  e.preventDefault(); e.stopPropagation(); showCtrl()
+}
+
+function onVolumeKeydown(e: KeyboardEvent) {
+  switch (e.key) {
+    case 'ArrowLeft': controls.setVolume(Math.max(0, state.volume - 0.05)); break
+    case 'ArrowRight': controls.setVolume(Math.min(1, state.volume + 0.05)); break
+    case 'Home': controls.setVolume(0); break
+    case 'End': controls.setVolume(1); break
+    default: return
+  }
+  e.preventDefault(); e.stopPropagation(); showCtrl()
+}
+
 function playNextEpisode() {
   const fileRef = upNext.value?.file_public_id || upNext.value?.file_id
   if (!fileRef || !upNext.value?.media_item_id) return
   cancelUpNext()
-  destroyHLS(); destroyASS()
+  destroyHLS(); destroySubtitles()
   const label = `S${String(upNext.value.season_number).padStart(2, '0')}E${String(upNext.value.episode_number).padStart(2, '0')}`
   const params = new URLSearchParams({
     media_item_id: String(upNext.value.media_item_id),
@@ -650,6 +778,15 @@ function onResumePick(seek: boolean) {
   if (resumePickResolver) { resumePickResolver(); resumePickResolver = null }
 }
 
+// Move focus into the resume dialog the moment it mounts — otherwise focus
+// stays wherever it was (often <body>), and a keyboard/screen-reader user
+// gets no indication a modal just appeared. The card itself is the target
+// (tabindex="-1", not in tab order) so the dialog's role+label announce
+// first; Tab from there reaches "Start over" / "Resume at …".
+watch(resumeOpen, (open) => {
+  if (open) nextTick(() => resumeCardRef.value?.focus())
+})
+
 // Immediate heartbeat on pause-state change so the activity panel reacts
 // without waiting for the next 10s tick. (The 5s progress emit already
 // handles position; this catches pause/resume specifically.)
@@ -663,13 +800,18 @@ onUnmounted(() => {
   nowPlaying.end()
 })
 
-function handleClose() { cancelUpNext(); destroyHLS(); destroyASS(); if (document.fullscreenElement) document.exitFullscreen(); emit('close') }
+function handleClose() { cancelUpNext(); destroyHLS(); destroySubtitles(); if (document.fullscreenElement) document.exitFullscreen(); emit('close') }
 
 function showCtrl() {
   controlsVisible.value = true
   if (hideTimer) clearTimeout(hideTimer)
-  hideTimer = setTimeout(() => { if (state.playing) controlsVisible.value = false }, 3000)
+  // Never auto-hide while a control inside .ctrl holds keyboard focus — the
+  // focusin/focusout handlers below keep controlsFocused in sync.
+  hideTimer = setTimeout(() => { if (state.playing && !controlsFocused.value) controlsVisible.value = false }, 3000)
 }
+
+function onControlsFocusIn() { controlsFocused.value = true; showCtrl() }
+function onControlsFocusOut() { controlsFocused.value = false; showCtrl() }
 
 let lastTap = 0, lastTapX = 0
 function onVideoClick(e: MouseEvent) {
@@ -686,11 +828,24 @@ function onVideoClick(e: MouseEvent) {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  // Single-char shortcuts (k/f/m/j/l/i…) must not fire while the user is
+  // typing elsewhere, and arrow keys must not fight an open track menu's
+  // own keyboard navigation.
+  const target = e.target as HTMLElement | null
+  if (target?.matches?.('input,textarea,[contenteditable]')) return
+  if (showAudioMenu.value || showSubMenu.value || showQualityMenu.value) return
+  if (resumeOpen.value && e.key === 'Escape') { onResumePick(false); e.preventDefault(); return }
   if (upNextCountdown.value > 0 && e.key === 'Escape') { cancelUpNext(); e.preventDefault(); return }
   if (upNextCountdown.value > 0 && (e.key === 'Enter' || e.key === 'n')) { playNextEpisode(); e.preventDefault(); return }
   if (showInfoPanel.value && e.key === 'Escape') { showInfoPanel.value = false; e.preventDefault(); return }
   switch (e.key) {
-    case 'Escape': handleClose(); break
+    case 'Escape':
+      // Back out of fullscreen first — closing the whole player on the same
+      // keystroke that a fullscreen user expects to just un-immerse them is
+      // surprising (and doubles up with the browser's own Escape-exits-
+      // fullscreen behavior).
+      if (document.fullscreenElement) { document.exitFullscreen() } else { handleClose() }
+      break
     case ' ': case 'k': controls.togglePlay(); break
     case 'f': controls.toggleFullscreen(); break
     case 'm': controls.toggleMute(); break
@@ -713,30 +868,53 @@ function volIcon() {
 
 useEventListener(window, 'keydown', handleKeydown)
 onMounted(init)
-onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hideTimer) })
+onUnmounted(() => { destroySubtitles(); cancelUpNext(); if (hideTimer) clearTimeout(hideTimer) })
 </script>
 
 <template>
   <div class="p" @mousemove="showCtrl" @click="closeMenus">
     <!-- Loading / Error -->
-    <div v-if="streamState.loading" class="p-center"><div class="spinner" /></div>
-    <div v-else-if="state.error || streamState.error" class="p-center">
+    <div v-if="streamState.loading" class="p-center">
+      <div class="spinner" aria-hidden="true" />
+      <span class="sr-only" aria-live="polite">Loading video…</span>
+    </div>
+    <div v-else-if="state.error || streamState.error" class="p-center" role="alert">
       <Icon name="warning" :size="28" />
       <div style="margin-top: 12px">{{ state.error || streamState.error }}</div>
       <button class="btn btn-secondary" style="margin-top: 16px" @click="handleClose">Go Back</button>
     </div>
 
     <template v-else>
-      <video ref="videoEl" @click="onVideoClick" />
+      <video ref="videoEl" :inert="resumeOpen" @click="onVideoClick" />
+
+      <!-- VTT subtitle overlay — custom rendering of the hidden TextTrack's
+           active cues (see initVTT). Nudges up while the control bar is
+           shown so cues never hide behind it. ASS/SSA tracks paint on the
+           AkariSub canvas instead and never populate vttCueLines. -->
+      <div v-if="vttCueLines.length" class="vtt-layer" :class="{ 'ctrl-up': ctrlShown }">
+        <div class="vtt-cue">
+          <span v-for="(line, i) in vttCueLines" :key="i" class="vtt-line">{{ line }}</span>
+        </div>
+      </div>
 
       <!-- In-player resume prompt — shown on mount when saved progress
-           exists for this item and no ?t= override is set. -->
-      <div v-if="resumeOpen" class="resume-overlay">
-        <div class="resume-card surface">
+           exists for this item and no ?t= override is set. Modal: dialog
+           role + focus moved into the card on open (see the resumeOpen
+           watcher) + the rest of the player made inert so Tab/AT can't
+           reach controls hidden behind the overlay. -->
+      <div v-if="resumeOpen" class="resume-overlay" role="dialog" aria-modal="true" aria-label="Resume playback">
+        <div ref="resumeCardRef" class="resume-card surface" tabindex="-1">
           <div class="resume-kind">Pick up where you left off</div>
           <div class="resume-title">{{ props.title || 'Continue watching' }}</div>
           <div class="resume-progress">
-            <div class="resume-progress-bar"><div class="resume-progress-fill" :style="{ width: knownDuration > 0 ? Math.min(100, Math.round((resumePosition / knownDuration) * 100)) + '%' : '0%' }" /></div>
+            <div
+              class="resume-progress-bar"
+              role="progressbar"
+              :aria-valuemin="0"
+              :aria-valuemax="knownDuration || 0"
+              :aria-valuenow="resumePosition"
+              :aria-valuetext="`${formatTime(resumePosition)} of ${formatTime(knownDuration)}`"
+            ><div class="resume-progress-fill" :style="{ width: knownDuration > 0 ? Math.min(100, Math.round((resumePosition / knownDuration) * 100)) + '%' : '0%' }" /></div>
             <div class="resume-progress-label mono">{{ formatTime(resumePosition) }} / {{ formatTime(knownDuration) }}</div>
           </div>
           <div class="resume-actions">
@@ -751,12 +929,18 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
       </div>
 
       <!-- Controls -->
-      <div class="ctrl" :class="{ visible: controlsVisible || state.paused || state.buffering }">
+      <div
+        class="ctrl"
+        :class="{ visible: ctrlShown }"
+        :inert="resumeOpen"
+        @focusin="onControlsFocusIn"
+        @focusout="onControlsFocusOut"
+      >
         <!-- Top -->
         <div class="ctrl-top">
-          <button class="c-btn" @click="handleClose"><Icon name="chevleft" :size="20" /></button>
+          <button class="c-btn" aria-label="Close player" @click="handleClose"><Icon name="chevleft" :size="20" /></button>
           <div class="ctrl-title">{{ title }}</div>
-          <button class="c-btn" :class="{ active: showInfoPanel }" @click="showInfoPanel = !showInfoPanel"><Icon name="info" :size="18" /></button>
+          <button class="c-btn" :class="{ active: showInfoPanel }" aria-label="Stream info" :aria-expanded="showInfoPanel" @click="showInfoPanel = !showInfoPanel"><Icon name="info" :size="18" /></button>
         </div>
 
         <!-- Center play. The buffering ring is concentric with the button
@@ -764,17 +948,31 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
              peeking out from a separately-centered spinner. -->
         <div class="ctrl-center" @click.stop="controls.togglePlay()">
           <div class="center-play">
-            <div v-if="state.buffering" class="center-ring" />
-            <button class="center-btn" :class="{ 'is-play': state.paused }">
+            <div v-if="state.buffering" class="center-ring" aria-hidden="true" />
+            <button class="center-btn" :class="{ 'is-play': state.paused }" :aria-label="state.paused ? 'Play' : 'Pause'" :aria-pressed="!state.paused">
               <Icon :name="state.paused ? 'play' : 'pause'" :size="40" />
             </button>
           </div>
+          <span class="sr-only" aria-live="polite">{{ state.buffering ? 'Buffering…' : '' }}</span>
         </div>
 
         <!-- Bottom -->
         <div class="ctrl-bottom" @click.stop>
           <!-- Seek -->
-          <div class="seekbar" @click="seek" @mousemove="onSeekHover" @mouseleave="seekHover = null">
+          <div
+            class="seekbar"
+            role="slider"
+            tabindex="0"
+            aria-label="Seek"
+            :aria-valuemin="0"
+            :aria-valuemax="knownDuration || 0"
+            :aria-valuenow="state.currentTime"
+            :aria-valuetext="`${formatTime(state.currentTime)} of ${formatTime(knownDuration)}`"
+            @click="seek"
+            @mousemove="onSeekHover"
+            @mouseleave="seekHover = null"
+            @keydown="onSeekKeydown"
+          >
             <div class="seekbar-bg" />
             <div class="seekbar-buf" :style="{ width: bufferProgress + '%' }" />
             <div class="seekbar-fill" :style="{ width: progress + '%' }" />
@@ -792,13 +990,24 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
           </div>
 
           <div class="ctrl-row">
-            <button class="c-btn" @click="controls.togglePlay()"><Icon :name="state.paused ? 'play' : 'pause'" :size="22" /></button>
-            <button class="c-btn" @click="controls.skip(-10)"><Icon name="skipback" :size="18" /></button>
-            <button class="c-btn" @click="controls.skip(10)"><Icon name="skipforward" :size="18" /></button>
+            <button class="c-btn" :aria-label="state.paused ? 'Play' : 'Pause'" :aria-pressed="!state.paused" @click="controls.togglePlay()"><Icon :name="state.paused ? 'play' : 'pause'" :size="22" /></button>
+            <button class="c-btn" aria-label="Rewind 10 seconds" @click="controls.skip(-10)"><Icon name="skipback" :size="18" /></button>
+            <button class="c-btn" aria-label="Forward 10 seconds" @click="controls.skip(10)"><Icon name="skipforward" :size="18" /></button>
 
             <div class="vol-group">
-              <button class="c-btn" @click="controls.toggleMute()"><Icon :name="volIcon()" :size="18" /></button>
-              <div class="vol-bar" @click="setVolume"><div class="vol-fill" :style="{ width: (state.muted ? 0 : state.volume * 100) + '%' }" /></div>
+              <button class="c-btn" :aria-label="state.muted ? 'Unmute' : 'Mute'" :aria-pressed="state.muted" @click="controls.toggleMute()"><Icon :name="volIcon()" :size="18" /></button>
+              <div
+                class="vol-bar"
+                role="slider"
+                tabindex="0"
+                aria-label="Volume"
+                :aria-valuemin="0"
+                :aria-valuemax="100"
+                :aria-valuenow="Math.round((state.muted ? 0 : state.volume) * 100)"
+                :aria-valuetext="`${Math.round((state.muted ? 0 : state.volume) * 100)}%`"
+                @click="setVolume"
+                @keydown="onVolumeKeydown"
+              ><div class="vol-fill" :style="{ width: (state.muted ? 0 : state.volume * 100) + '%' }" /></div>
             </div>
 
             <div class="time">{{ formatTime(state.currentTime) }} <span class="time-sep">/</span> {{ formatTime(knownDuration) }}</div>
@@ -904,7 +1113,7 @@ onUnmounted(() => { destroyASS(); cancelUpNext(); if (hideTimer) clearTimeout(hi
               </DropdownMenuItem>
             </AppMenu>
 
-            <button class="c-btn" @click="controls.toggleFullscreen()">
+            <button class="c-btn" :aria-label="state.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" :aria-pressed="state.fullscreen" @click="controls.toggleFullscreen()">
               <Icon :name="state.fullscreen ? 'shrink' : 'expand'" :size="18" />
             </button>
           </div>
@@ -1044,11 +1253,52 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 
 :deep(.AkariSub) { z-index: 2 !important; }
 
+/* VTT subtitle overlay. Subtitle text paints on video, so literal white +
+   black scrim/shadow is correct here (the documented on-artwork exception)
+   — not theme tokens. z-index sits above the video and the AkariSub canvas
+   (2) but below .ctrl (10) so the OSD always wins. */
+.vtt-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(4% + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+  transition: bottom 0.25s ease;
+}
+/* Control bar visible → lift cues clear of it (gradient + row ≈ 90px). */
+.vtt-layer.ctrl-up { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.vtt-cue {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: min(88%, 920px);
+  text-align: center;
+}
+.vtt-line {
+  color: #fff;
+  font-size: clamp(16px, 2.6vmin, 28px);
+  line-height: 1.35;
+  font-weight: 500;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 2px 10px;
+  border-radius: 4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 0, 0, 0.4);
+  white-space: pre-wrap;
+}
+
 /* Controls */
 .ctrl { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
 .ctrl.visible { opacity: 1; pointer-events: auto; }
 
-.ctrl-top { display: flex; align-items: center; gap: 10px; padding: 16px 20px 40px; background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent); }
+/* Safe-area insets fall back to 0px on non-notch devices/desktop, so the
+   base 16/20px padding is unchanged there — this only pads out further to
+   clear a notch/Dynamic Island in landscape fullscreen. */
+.ctrl-top { display: flex; align-items: center; gap: 10px; padding: calc(16px + env(safe-area-inset-top, 0px)) calc(20px + env(safe-area-inset-right, 0px)) 40px calc(20px + env(safe-area-inset-left, 0px)); background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent); }
 .ctrl-title { flex: 1; font-size: 15px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .ctrl-center { flex: 1; display: flex; align-items: center; justify-content: center; }
@@ -1061,7 +1311,7 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 /* Buffering ring — concentric with the button, wrapping it. */
 .center-ring { position: absolute; inset: -7px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.12); border-top-color: var(--accent); animation: spin 0.7s linear infinite; pointer-events: none; }
 
-.ctrl-bottom { padding: 40px 20px 16px; background: linear-gradient(to top, rgba(0,0,0,0.6), transparent); }
+.ctrl-bottom { padding: 40px calc(20px + env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) calc(20px + env(safe-area-inset-left, 0px)); background: linear-gradient(to top, rgba(0,0,0,0.6), transparent); }
 
 /* Seek bar */
 .seekbar { position: relative; height: 28px; display: flex; align-items: center; cursor: pointer; margin-bottom: 4px; }
@@ -1093,6 +1343,16 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 /* Time */
 .time { font-size: 12px; font-family: var(--font-mono, monospace); color: rgba(255,255,255,0.7); margin-left: 10px; white-space: nowrap; }
 .time-sep { color: rgba(255,255,255,0.3); margin: 0 2px; }
+
+/* Coarse pointers (touch) get ≥44px hit targets — mouse/trackpad keeps the
+   tighter 38px chrome unchanged. Only the hit area grows for the sliders;
+   the visual track/thumb sizing (absolutely positioned, centered) is
+   untouched. */
+@media (pointer: coarse) {
+  .c-btn { width: 44px; height: 44px; }
+  .seekbar { height: 44px; }
+  .vol-bar { height: 44px; }
+}
 
 /* Info panel — no dimming, positioned top-right, doesn't block video */
 .info-panel-wrap { position: absolute; top: 56px; right: 16px; z-index: 50; pointer-events: none; }
@@ -1184,6 +1444,11 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
   background: rgba(255, 255, 255, 0.08);
 }
 .app-menu-trigger.vp-trigger.active { color: var(--accent); }
+
+/* Match the scoped .c-btn touch-target bump (coarse pointers only). */
+@media (pointer: coarse) {
+  .app-menu-trigger.vp-trigger { min-width: 44px; height: 44px; }
+}
 
 /* Current-quality badge sitting next to the sliders icon. */
 .vp-trigger .quality-badge {

@@ -5,11 +5,18 @@ defineProps<{
   lockedBy?: string         // env-var name if managed externally
   hint?: string
 }>()
+
+// A stable per-field id so the visible <label> is programmatically tied to
+// its control. Exposed through the slot as `fieldId` (bind to the input's
+// :id) and `hintId` (bind to :aria-describedby) — without that binding the
+// label is visual-only and screen readers announce the input nameless.
+const fieldId = useId()
+const hintId = `${fieldId}-hint`
 </script>
 
 <template>
   <div class="sv2-field" :class="{ locked: !!lockedBy }">
-    <label class="sv2-field-label">
+    <label class="sv2-field-label" :for="fieldId">
       {{ label }}
       <span v-if="lockedBy" class="sv2-field-lock" :title="`Managed by ${lockedBy}`">
         <Icon name="key" :size="10" />
@@ -18,9 +25,9 @@ defineProps<{
     </label>
     <p v-if="description" class="sv2-field-desc">{{ description }}</p>
     <div class="sv2-field-control">
-      <slot :locked="!!lockedBy" />
+      <slot :locked="!!lockedBy" :field-id="fieldId" :hint-id="hint ? hintId : undefined" />
     </div>
-    <p v-if="hint" class="sv2-field-hint">{{ hint }}</p>
+    <p v-if="hint" :id="hintId" class="sv2-field-hint">{{ hint }}</p>
   </div>
 </template>
 

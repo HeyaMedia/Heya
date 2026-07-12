@@ -130,6 +130,18 @@ const bipolarRangeStyle = computed(() => {
   z-index: 1;
 }
 .app-slider-thumb:hover { transform: scale(1.15); }
+/* Touch: the 14px thumb is far below the 44px coarse-pointer target the app
+   holds itself to. Extend an invisible hit area around it (44px) without
+   growing the visual dot or shifting the compact layouts (playbar volume,
+   EQ, lyrics offset) that embed this. */
+@media (pointer: coarse) {
+  .app-slider-thumb::before {
+    content: '';
+    position: absolute;
+    inset: -15px;
+    border-radius: 50%;
+  }
+}
 .app-slider-thumb:focus-visible {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 30%, transparent), 0 1px 3px rgb(var(--shade) / 0.4);
 }

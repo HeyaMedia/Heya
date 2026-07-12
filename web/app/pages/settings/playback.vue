@@ -157,9 +157,14 @@ function libraryIcon(kind: string): string {
     </div>
 
     <template v-else-if="settings">
-      <div class="tab-bar">
+      <div class="tab-bar" role="tablist" aria-label="Playback settings scope">
         <button
+          id="playback-tab-global"
           class="tab"
+          role="tab"
+          :aria-selected="activeTab === 'global'"
+          :tabindex="activeTab === 'global' ? 0 : -1"
+          aria-controls="playback-panel"
           :class="{ active: activeTab === 'global' }"
           @click="activeTab = 'global'"
         >
@@ -169,7 +174,12 @@ function libraryIcon(kind: string): string {
         <button
           v-for="l in libraries"
           :key="l.id"
+          :id="`playback-tab-${l.id}`"
           class="tab"
+          role="tab"
+          :aria-selected="activeTab === String(l.id)"
+          :tabindex="activeTab === String(l.id) ? 0 : -1"
+          aria-controls="playback-panel"
           :class="{ active: activeTab === String(l.id) }"
           @click="activeTab = String(l.id)"
         >
@@ -181,25 +191,26 @@ function libraryIcon(kind: string): string {
 
       <!-- GLOBAL DEFAULTS -->
       <template v-if="activeTab === 'global'">
+        <div id="playback-panel" role="tabpanel" aria-labelledby="playback-tab-global" tabindex="0">
         <SettingsSection title="Languages" icon="translate"
           description="ISO 639-1/2 codes — eng, jpn, fre, etc. Leave empty for 'no preference'.">
-          <SettingsField label="Default audio language">
-            <input v-model="settings.playback.default_audio_language" class="sv2-input small" placeholder="eng" maxlength="8" />
+          <SettingsField label="Default audio language" v-slot="{ fieldId }">
+            <input :id="fieldId" v-model="settings.playback.default_audio_language" class="sv2-input small" placeholder="eng" maxlength="8" />
           </SettingsField>
-          <SettingsField label="Default subtitle language">
-            <input v-model="settings.playback.default_subtitle_language" class="sv2-input small" placeholder="eng" maxlength="8" />
+          <SettingsField label="Default subtitle language" v-slot="{ fieldId }">
+            <input :id="fieldId" v-model="settings.playback.default_subtitle_language" class="sv2-input small" placeholder="eng" maxlength="8" />
           </SettingsField>
         </SettingsSection>
 
         <SettingsSection title="Subtitle mode" icon="subtitles">
-          <div class="radio-grid">
+          <div class="radio-grid" role="radiogroup" aria-label="Subtitle mode">
             <label
               v-for="m in SUB_MODES"
               :key="m.value"
               class="radio-card"
               :class="{ active: settings.playback.subtitle_mode === m.value }"
             >
-              <input type="radio" :value="m.value" v-model="settings.playback.subtitle_mode" />
+              <input type="radio" name="subtitle-mode" :value="m.value" v-model="settings.playback.subtitle_mode" />
               <div class="radio-body">
                 <div class="radio-title">{{ m.label }}</div>
                 <div class="radio-desc">{{ m.desc }}</div>
@@ -215,10 +226,10 @@ function libraryIcon(kind: string): string {
               <span class="priority-rank">{{ i + 1 }}</span>
               <span class="priority-label">{{ SUB_PRIORITY_LABELS[fmt] ?? fmt }}</span>
               <span class="priority-spacer" />
-              <button class="priority-btn" :disabled="i === 0" @click="movePriority(settings.playback.subtitle_priority ?? [], i, -1)" title="Move up">
+              <button class="priority-btn" :disabled="i === 0" @click="movePriority(settings.playback.subtitle_priority ?? [], i, -1)" title="Move up" aria-label="Move up">
                 <Icon name="chevright" :size="12" style="transform: rotate(-90deg)" />
               </button>
-              <button class="priority-btn" :disabled="i === (settings.playback.subtitle_priority?.length ?? 0) - 1" @click="movePriority(settings.playback.subtitle_priority ?? [], i, 1)" title="Move down">
+              <button class="priority-btn" :disabled="i === (settings.playback.subtitle_priority?.length ?? 0) - 1" @click="movePriority(settings.playback.subtitle_priority ?? [], i, 1)" title="Move down" aria-label="Move down">
                 <Icon name="chevright" :size="12" style="transform: rotate(90deg)" />
               </button>
             </li>
@@ -227,8 +238,8 @@ function libraryIcon(kind: string): string {
 
         <SettingsSection title="Quality" icon="film"
           description="Cap the maximum playback quality. 'Source' streams the original file; lower values trigger ffmpeg HLS transcoding.">
-          <SettingsField label="Default quality">
-            <select v-model="settings.playback.default_quality" class="sv2-select">
+          <SettingsField label="Default quality" v-slot="{ fieldId }">
+            <select :id="fieldId" v-model="settings.playback.default_quality" class="sv2-select">
               <option v-for="q in QUALITIES" :key="q.value" :value="q.value">{{ q.label }}</option>
             </select>
           </SettingsField>
@@ -238,10 +249,12 @@ function libraryIcon(kind: string): string {
           <Icon name="info" :size="13" />
           <span>{{ totalOverridesUsed }} {{ totalOverridesUsed === 1 ? 'library has' : 'libraries have' }} per-library overrides active.</span>
         </div>
+        </div>
       </template>
 
       <!-- LIBRARY OVERRIDES -->
       <template v-else>
+        <div id="playback-panel" role="tabpanel" :aria-labelledby="`playback-tab-${activeTab}`" tabindex="0">
         <SettingsSection
           :title="`${libraries.find(l => String(l.id) === activeTab)?.name ?? 'Library'} overrides`"
           icon="folder"
@@ -257,14 +270,14 @@ function libraryIcon(kind: string): string {
             </button>
           </template>
 
-          <SettingsField label="Default audio language">
-            <input v-model="getOverride(activeTab).default_audio_language" class="sv2-input small" placeholder="(use global)" maxlength="8" />
+          <SettingsField label="Default audio language" v-slot="{ fieldId }">
+            <input :id="fieldId" v-model="getOverride(activeTab).default_audio_language" class="sv2-input small" placeholder="(use global)" maxlength="8" />
           </SettingsField>
-          <SettingsField label="Default subtitle language">
-            <input v-model="getOverride(activeTab).default_subtitle_language" class="sv2-input small" placeholder="(use global)" maxlength="8" />
+          <SettingsField label="Default subtitle language" v-slot="{ fieldId }">
+            <input :id="fieldId" v-model="getOverride(activeTab).default_subtitle_language" class="sv2-input small" placeholder="(use global)" maxlength="8" />
           </SettingsField>
-          <SettingsField label="Subtitle mode">
-            <select v-model="getOverride(activeTab).subtitle_mode" class="sv2-select">
+          <SettingsField label="Subtitle mode" v-slot="{ fieldId }">
+            <select :id="fieldId" v-model="getOverride(activeTab).subtitle_mode" class="sv2-select">
               <option value="">Use global default</option>
               <option v-for="m in SUB_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
             </select>
@@ -274,6 +287,7 @@ function libraryIcon(kind: string): string {
         <p class="library-note">
           Quality + subtitle format priority are global-only — they apply across every library.
         </p>
+        </div>
       </template>
 
       <div class="save-bar">

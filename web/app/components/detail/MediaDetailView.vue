@@ -12,6 +12,7 @@
           :src="backdropA"
           :width="1920"
           :quality="80"
+          alt=""
           class="hero-bg-img"
           :class="{ visible: showA }"
           @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
@@ -21,6 +22,7 @@
           :src="backdropB"
           :width="1920"
           :quality="80"
+          alt=""
           class="hero-bg-img"
           :class="{ visible: !showA }"
           @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
@@ -31,7 +33,7 @@
       <div class="hero-content">
         <div class="hero-poster">
           <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
-          <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
+          <button class="zoom-btn" aria-label="Expand poster" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
         <div class="hero-info">
@@ -66,10 +68,20 @@
             <button v-if="playableFileRef" class="btn btn-primary" @click="navigateToPrimaryFile"><Icon :name="primaryActionIcon" :size="16" /> {{ primaryActionLabel }}</button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon :name="primaryActionIcon" :size="16" /> No File</button>
             <button class="btn btn-secondary" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
-            <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
+            <button
+              class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }"
+              :aria-label="isFavorited ? 'Remove from favorites' : 'Add to favorites'"
+              :aria-pressed="isFavorited"
+              @click="toggleFavorite"
+            >
               <Icon :name="isFavorited ? 'heartfill' : 'heart'" :size="20" />
             </button>
-            <button class="btn-icon" :style="{ color: isWatched ? 'var(--good)' : 'var(--fg-1)' }" @click="toggleWatched">
+            <button
+              class="btn-icon" :style="{ color: isWatched ? 'var(--good)' : 'var(--fg-1)' }"
+              :aria-label="isWatched ? 'Mark as unwatched' : 'Mark as watched'"
+              :aria-pressed="isWatched"
+              @click="toggleWatched"
+            >
               <Icon name="check" :size="20" />
             </button>
             <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">
@@ -149,7 +161,7 @@
       />
 
       <!-- Expand backdrop -->
-      <button v-if="backdropAssets.length > 0" class="hero-expand" @click="openBackdropLightbox">
+      <button v-if="backdropAssets.length > 0" class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
         <Icon name="expand" :size="14" />
       </button>
     </div>
@@ -172,9 +184,9 @@
             </TabsTrigger>
           </TabsList>
           <div v-if="contentTab === 'videos'" style="display: flex; gap: 8px">
-            <button class="scroll-arrow" @click="scrollContentLeft"><Icon name="chevleft" :size="16" /></button>
-            <button class="scroll-arrow" @click="scrollContentRight"><Icon name="chevright" :size="16" /></button>
-            <button class="scroll-arrow" @click="contentExpanded = !contentExpanded">
+            <button class="scroll-arrow" aria-label="Scroll left" @click="scrollContentLeft"><Icon name="chevleft" :size="16" /></button>
+            <button class="scroll-arrow" aria-label="Scroll right" @click="scrollContentRight"><Icon name="chevright" :size="16" /></button>
+            <button class="scroll-arrow" aria-label="Toggle expanded view" :aria-expanded="contentExpanded" @click="contentExpanded = !contentExpanded">
               <Icon name="chevdown" :size="16" :style="{ transform: contentExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
             </button>
           </div>
@@ -210,10 +222,14 @@
               <div class="section-title" style="font-size: 11px">{{ formatExtraType(group.type) }} ({{ group.items.length }})</div>
               <div style="display: flex; gap: 6px">
                 <template v-if="!extrasExpanded[group.type]">
-                  <button class="scroll-arrow" @click="scrollEl(`extras-${group.type}`, -1)"><Icon name="chevleft" :size="14" /></button>
-                  <button class="scroll-arrow" @click="scrollEl(`extras-${group.type}`, 1)"><Icon name="chevright" :size="14" /></button>
+                  <button class="scroll-arrow" aria-label="Scroll left" @click="scrollEl(`extras-${group.type}`, -1)"><Icon name="chevleft" :size="14" /></button>
+                  <button class="scroll-arrow" aria-label="Scroll right" @click="scrollEl(`extras-${group.type}`, 1)"><Icon name="chevright" :size="14" /></button>
                 </template>
-                <button class="scroll-arrow" @click="extrasExpanded[group.type] = !extrasExpanded[group.type]">
+                <button
+                  class="scroll-arrow" aria-label="Toggle expanded view"
+                  :aria-expanded="!!extrasExpanded[group.type]"
+                  @click="extrasExpanded[group.type] = !extrasExpanded[group.type]"
+                >
                   <Icon name="chevdown" :size="14" :style="{ transform: extrasExpanded[group.type] ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
                 </button>
               </div>
@@ -245,10 +261,10 @@
       <!-- More Like This (horizontal scroll) -->
       <div v-if="detail.recommendations?.length" class="detail-section">
         <div class="section-row-head">
-          <h3 class="section-title-lg">More Like This</h3>
+          <h2 class="section-title-lg">More Like This</h2>
           <div style="display: flex; gap: 8px">
-            <button class="scroll-arrow" @click="scrollRecs(-1)"><Icon name="chevleft" :size="16" /></button>
-            <button class="scroll-arrow" @click="scrollRecs(1)"><Icon name="chevright" :size="16" /></button>
+            <button class="scroll-arrow" aria-label="Scroll left" @click="scrollRecs(-1)"><Icon name="chevleft" :size="16" /></button>
+            <button class="scroll-arrow" aria-label="Scroll right" @click="scrollRecs(1)"><Icon name="chevright" :size="16" /></button>
           </div>
         </div>
         <div class="rec-scroll" ref="recScrollEl">
@@ -565,24 +581,44 @@ watch(() => mediaStateQuery.data.value, state => {
 .ext-rating {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 10px; border-radius: var(--r-sm);
-  background: rgb(var(--ink) / 0.04); border: 1px solid var(--border);
+  /* Glass-backed like .hero-info .chip (heya.css) — the old ink/0.04 wash
+     had no blur and let the raw hero backdrop bleed through the rating
+     value itself. */
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
   font-size: 12px;
 }
 .ext-rating-source {
-  font-family: var(--font-mono); font-weight: 600; color: var(--fg-3);
+  font-family: var(--font-mono); font-weight: 600; color: var(--fg-2);
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
 }
 .ext-rating-value { color: var(--fg-0); font-weight: 600; }
 
 .detail-actions { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
 
-.info-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 20px; margin-top: 16px; max-width: 500px; }
+.info-grid {
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 20px; margin-top: 16px; max-width: 500px;
+  padding: 12px 16px;
+  /* Same glass treatment as the shared MediaCrewSummary's .info-grid — this
+     is MediaDetailView's own duplicate of that grid and had no background at
+     all, so the crew/studio/budget values floated bare on the hero art. */
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+}
 .info-label { font-size: 11px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3); padding-top: 2px; }
 .info-value { font-size: 13px; color: var(--fg-1); line-height: 1.5; }
 
 .keyword-tag {
   font-size: 10px; font-family: var(--font-mono); padding: 3px 8px; border-radius: 999px;
-  background: rgb(var(--ink) / 0.04); border: 1px solid var(--border); color: var(--fg-2); letter-spacing: 0.02em;
+  /* Matches MediaKeywords.vue's solid tag — the old ink/0.04 fill (with only
+     a thin border, no blur) washed out over the raw hero backdrop. */
+  background: var(--bg-3); border: 1px solid var(--border); color: var(--fg-2); letter-spacing: 0.02em;
   transition: background 0.15s, color 0.15s;
 }
 .keyword-tag:hover { background: var(--gold-soft); color: var(--gold); border-color: transparent; }
@@ -591,6 +627,12 @@ watch(() => mediaStateQuery.data.value, state => {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 12px; color: var(--fg-2); padding: 6px 14px;
   border-radius: var(--r-md); border: 1px solid var(--border);
+  /* Glass-backed like .hero-info .chip — was fully transparent (border
+     only) over the raw hero backdrop, so the "Part of X" collection link
+     had nothing behind it. */
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   transition: all 0.15s;
 }
 .collection-badge:hover { background: var(--gold-soft); color: var(--gold); border-color: transparent; }

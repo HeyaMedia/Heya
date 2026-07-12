@@ -68,6 +68,7 @@ const isDefaultSections = computed(
           type="button"
           class="theme-card"
           :class="{ active: prefs.theme === t.value }"
+          :aria-pressed="prefs.theme === t.value"
           @click="set('theme', t.value)"
         >
           <!-- System = split preview, half dark / half light -->
@@ -115,6 +116,7 @@ const isDefaultSections = computed(
           :class="{ active: prefs.accent === a.name }"
           :style="{ '--swatch': a.hex }"
           :aria-label="a.label"
+          :aria-pressed="prefs.accent === a.name"
           @click="set('accent', a.name)"
         >
           <span class="accent-dot">
@@ -127,10 +129,10 @@ const isDefaultSections = computed(
 
     <SettingsSection title="Density" icon="grid"
       description="Comfortable gives artwork room to breathe; Compact fits noticeably more on screen.">
-      <div class="density-grid">
+      <div class="density-grid" role="radiogroup" aria-label="Density">
         <label class="density-card" :class="{ active: prefs.density === 'comfortable' }">
           <input
-            type="radio" value="comfortable" :checked="prefs.density === 'comfortable'"
+            type="radio" name="density" value="comfortable" :checked="prefs.density === 'comfortable'"
             @change="set('density', 'comfortable')"
           />
           <div class="density-body">
@@ -143,7 +145,7 @@ const isDefaultSections = computed(
         </label>
         <label class="density-card" :class="{ active: prefs.density === 'compact' }">
           <input
-            type="radio" value="compact" :checked="prefs.density === 'compact'"
+            type="radio" name="density" value="compact" :checked="prefs.density === 'compact'"
             @change="set('density', 'compact')"
           />
           <div class="density-body">
@@ -414,6 +416,9 @@ const isDefaultSections = computed(
 }
 .move-btn:hover:not(:disabled) { background: rgb(var(--ink) / 0.07); color: var(--fg-0); }
 .move-btn:disabled { opacity: 0.3; cursor: default; }
+@media (pointer: coarse) {
+  .move-btn { width: 44px; height: 44px; }
+}
 .section-text { flex: 1; min-width: 0; }
 .section-name { font-size: 13px; font-weight: 500; color: var(--fg-0); }
 .section-desc { font-size: 11.5px; color: var(--fg-3); margin-top: 1px; }

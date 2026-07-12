@@ -21,6 +21,7 @@
           v-model="nlQuery"
           type="text"
           class="rb-search-input"
+          aria-label="Describe what you're in the mood for"
           :placeholder="searchPlaceholder"
           @keydown.enter="askAI"
         >
@@ -64,6 +65,7 @@
           v-for="opt in ratingOptions"
           :key="opt.value"
           :class="{ active: minRating === opt.value }"
+          :aria-pressed="minRating === opt.value"
           @click="minRating = opt.value"
         >
           {{ opt.label }}

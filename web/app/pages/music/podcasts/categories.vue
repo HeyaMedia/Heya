@@ -130,6 +130,10 @@ function categoryIcon(name: string) {
 .pc-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .pc-back:hover { color: var(--gold); }
 
+@media (pointer: coarse) {
+  .pc-back { min-height: 44px; padding: 10px 0; }
+}
+
 .pc-cat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

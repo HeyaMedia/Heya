@@ -84,12 +84,12 @@ const allUsernames = computed(() =>
 
     <SettingsSection title="Active sessions" icon="eye">
       <template #actions>
-        <select v-model="kindFilter" class="sv2-select">
+        <select v-model="kindFilter" class="sv2-select" aria-label="Filter by kind">
           <option value="">All kinds</option>
           <option value="session">Browser sessions</option>
           <option value="api_token">API tokens</option>
         </select>
-        <select v-model="userFilter" class="sv2-select">
+        <select v-model="userFilter" class="sv2-select" aria-label="Filter by user">
           <option value="">All users</option>
           <option v-for="u in allUsernames" :key="u" :value="u">{{ u }}</option>
         </select>
@@ -219,6 +219,9 @@ const allUsernames = computed(() =>
 .sess-revoke:hover {
   background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
+}
+@media (pointer: coarse) {
+  .sess-revoke { width: 44px; height: 44px; }
 }
 
 /* Phone: minmax(180px) only fits 1 column at 390px — force 2. */

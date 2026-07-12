@@ -5,18 +5,22 @@
     size="md"
     @update:model-value="(v) => v ? null : $emit('close')"
   >
-    <div class="eq-tabs">
+    <div class="eq-tabs" role="tablist" aria-label="Audio settings">
       <button
         v-for="t in TABS"
         :key="t.id"
+        :id="`eq-tab-${t.id}`"
         class="eq-tab"
         :class="{ active: tab === t.id }"
+        role="tab"
+        :aria-selected="tab === t.id"
+        :aria-controls="`eq-panel-${t.id}`"
         @click="tab = t.id"
       >{{ t.label }}</button>
     </div>
 
     <!-- ── Equalizer ─────────────────────────────────────────────── -->
-    <div v-show="tab === 'eq'">
+    <div v-show="tab === 'eq'" id="eq-panel-eq" role="tabpanel" aria-labelledby="eq-tab-eq">
       <!-- iOS runs the direct-element engine (no Web Audio graph — see
            engine/directEngine.ts) so there's no node to hang an equalizer
            off of. Show a notice instead of controls that would silently do
@@ -52,7 +56,16 @@
           <div v-for="(value, i) in eq.bands" :key="i" class="eq-band">
             <div
               class="eq-bar-track"
-              @mousedown="startDrag($event, i)"
+              role="slider"
+              aria-orientation="vertical"
+              :aria-label="`${BAND_LABELS[i]} Hz band`"
+              aria-valuemin="-12"
+              aria-valuemax="12"
+              :aria-valuenow="value"
+              :aria-valuetext="`${value > 0 ? '+' : ''}${value} dB`"
+              tabindex="0"
+              @pointerdown="onBandPointerDown($event, i)"
+              @keydown="onBandKeydown($event, i)"
             >
               <div class="eq-bar-baseline" />
               <div
@@ -101,7 +114,7 @@
     </div>
 
     <!-- ── Playback ──────────────────────────────────────────────── -->
-    <div v-show="tab === 'playback'" class="eq-pane">
+    <div v-show="tab === 'playback'" id="eq-panel-playback" role="tabpanel" aria-labelledby="eq-tab-playback" class="eq-pane">
       <div class="eq-extra-row">
         <span class="eq-extra-label">Crossfade</span>
         <div class="eq-select-wrap">
@@ -154,7 +167,7 @@
     </div>
 
     <!-- ── Effects ───────────────────────────────────────────────── -->
-    <div v-show="tab === 'effects'" class="eq-pane">
+    <div v-show="tab === 'effects'" id="eq-panel-effects" role="tabpanel" aria-labelledby="eq-tab-effects" class="eq-pane">
       <div class="eq-extra-row">
         <span class="eq-extra-label">Crossfeed</span>
         <span class="eq-extra-hint">Eases hard L/R separation on headphones</span>
@@ -202,7 +215,7 @@
     </div>
 
     <!-- ── Output ────────────────────────────────────────────────── -->
-    <div v-show="tab === 'output'" class="eq-pane">
+    <div v-show="tab === 'output'" id="eq-panel-output" role="tabpanel" aria-labelledby="eq-tab-output" class="eq-pane">
       <p v-if="!supported" class="eq-extra-hint">
         This browser doesn't expose per-app audio-output routing (<code>AudioContext.setSinkId</code>), so playback follows the system default output. Chromium-based browsers support it today; other engines light this up automatically once they ship the API.
       </p>
@@ -326,9 +339,12 @@ function knobStyle(value: number) {
 let dragIndex = -1
 let dragRect: DOMRect | null = null
 
-function startDrag(e: MouseEvent, index: number) {
+// Pointer events (not mouse-only) so the same handlers cover touch —
+// mirrors the pointerdown/pointermove/pointerup pattern in MusicWaveform.vue.
+function onBandPointerDown(e: PointerEvent, index: number) {
   dragIndex = index
   dragRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* not capturable */ }
   applyDrag(e.clientY)
 }
 function applyDrag(clientY: number) {
@@ -338,8 +354,32 @@ function applyDrag(clientY: number) {
   const value = Math.round(((1 - Math.max(0, Math.min(1, y))) * 24 - 12) * 2) / 2
   settings.setEQBand(dragIndex, value)
 }
-useEventListener(window, 'mousemove', (e: MouseEvent) => { if (dragIndex >= 0) applyDrag(e.clientY) })
-useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
+useEventListener(window, 'pointermove', (e: PointerEvent) => { if (dragIndex >= 0) applyDrag(e.clientY) })
+useEventListener(window, 'pointerup', () => { dragIndex = -1; dragRect = null })
+
+// Keyboard: arrow keys nudge by 0.5dB (the same step the drag rounds to),
+// Page Up/Down by 2dB, Home/End to the extremes. stopPropagation mirrors
+// MusicWaveform's reasoning — EQPanel opens as a dialog over the player, so
+// there's no global-hotkey conflict risk here, but it keeps arrow keys from
+// also scrolling the dialog body.
+function onBandKeydown(e: KeyboardEvent, index: number) {
+  const cur = eq.value.bands[index] ?? 0
+  let next: number
+  switch (e.key) {
+    case 'ArrowUp':
+    case 'ArrowRight': next = cur + 0.5; break
+    case 'ArrowDown':
+    case 'ArrowLeft': next = cur - 0.5; break
+    case 'PageUp': next = cur + 2; break
+    case 'PageDown': next = cur - 2; break
+    case 'Home': next = -12; break
+    case 'End': next = 12; break
+    default: return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  settings.setEQBand(index, Math.max(-12, Math.min(12, Math.round(next * 2) / 2)))
+}
 </script>
 
 <style scoped>
@@ -440,6 +480,7 @@ useEventListener(window, 'mouseup', () => { dragIndex = -1; dragRect = null })
   position: relative;
   cursor: ns-resize;
   user-select: none;
+  touch-action: none;
 }
 .eq-bar-baseline {
   position: absolute;

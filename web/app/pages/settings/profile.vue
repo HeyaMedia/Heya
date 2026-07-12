@@ -92,8 +92,9 @@ async function changePassword() {
       description="Changing your password doesn't sign you out on other devices. Manage those on the Sessions tab."
     >
       <form class="pw-form" @submit.prevent="changePassword">
-        <SettingsField label="Current password">
+        <SettingsField label="Current password" v-slot="{ fieldId }">
           <input
+            :id="fieldId"
             v-model="currentPwd"
             type="password"
             autocomplete="current-password"
@@ -105,26 +106,34 @@ async function changePassword() {
           label="New password"
           description="Minimum 8 characters."
           :hint="newPwdTooShort ? 'Too short — needs at least 8 characters.' : undefined"
+          v-slot="{ fieldId, hintId }"
         >
           <input
+            :id="fieldId"
             v-model="newPwd"
             type="password"
             autocomplete="new-password"
             class="sv2-input"
             :class="{ invalid: newPwdTooShort }"
+            :aria-invalid="newPwdTooShort"
+            :aria-describedby="hintId"
             placeholder="•••••••••••"
           />
         </SettingsField>
         <SettingsField
           label="Confirm new password"
           :hint="mismatch ? 'Passwords don\'t match.' : undefined"
+          v-slot="{ fieldId, hintId }"
         >
           <input
+            :id="fieldId"
             v-model="confirmPwd"
             type="password"
             autocomplete="new-password"
             class="sv2-input"
             :class="{ invalid: mismatch }"
+            :aria-invalid="mismatch"
+            :aria-describedby="hintId"
             placeholder="•••••••••••"
           />
         </SettingsField>
@@ -136,7 +145,7 @@ async function changePassword() {
           </button>
         </div>
 
-        <div v-if="flash" class="pw-flash" :class="flash.kind">
+        <div v-if="flash" class="pw-flash" :class="flash.kind" role="status" aria-live="polite">
           <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
           {{ flash.text }}
         </div>

@@ -29,7 +29,7 @@
         </div>
         <div class="ms-mb-ai-count">
           <span>{{ trackCount }} tracks</span>
-          <input v-model.number="trackCount" type="range" min="10" max="60" step="5" class="ms-mb-range" />
+          <input v-model.number="trackCount" type="range" min="10" max="60" step="5" class="ms-mb-range" aria-label="Number of tracks" />
         </div>
         <button
           type="button"
@@ -93,16 +93,29 @@
             type="text"
             class="ms-mb-input"
             :placeholder="`add an ${addKind}…`"
+            :aria-label="`Search for an ${addKind} to add`"
+            role="combobox"
+            aria-autocomplete="list"
+            :aria-expanded="autocompleteResults.length > 0"
+            aria-controls="ms-mb-ac-list"
+            :aria-activedescendant="acActiveIdx !== null ? `ms-mb-ac-opt-${acActiveIdx}` : undefined"
             autocomplete="off"
+            @keydown.down.prevent="moveAcActive(1)"
+            @keydown.up.prevent="moveAcActive(-1)"
+            @keydown.enter.prevent="selectAcActive"
           />
         </div>
 
         <!-- Autocomplete dropdown -->
-        <ul v-if="autocompleteResults.length" class="ms-mb-ac">
+        <ul v-if="autocompleteResults.length" id="ms-mb-ac-list" class="ms-mb-ac" role="listbox" aria-label="Search results">
           <li
-            v-for="r in autocompleteResults"
+            v-for="(r, i) in autocompleteResults"
+            :id="`ms-mb-ac-opt-${i}`"
             :key="`${addKind}-${r.id}`"
             class="ms-mb-ac-row"
+            role="option"
+            :aria-selected="acActiveIdx === i"
+            :class="{ 'ms-mb-ac-active': acActiveIdx === i }"
             @click="addAutocompleteSeed(r)"
           >
             <NuxtImg v-if="r.cover" :src="r.cover" :alt="r.title" loading="lazy" :class="addKind === 'artist' ? 'ac-art ac-art-round' : 'ac-art'" />
@@ -147,7 +160,7 @@
     <div class="ms-mb-controls">
       <div class="ms-mb-control">
         <label class="ms-mb-label">Tracks</label>
-        <input v-model.number="trackCount" type="range" min="10" max="100" step="5" class="ms-mb-range" />
+        <input v-model.number="trackCount" type="range" min="10" max="100" step="5" class="ms-mb-range" aria-label="Number of tracks" />
         <span class="ms-mb-count">{{ trackCount }}</span>
       </div>
       <button
@@ -193,7 +206,12 @@
           v-for="(t, i) in builtTracks"
           :key="`bt-${t.track_id}-${i}`"
           class="ms-mb-track-row"
+          role="button"
+          tabindex="0"
+          :aria-label="`Play ${t.track_title}`"
           @click="playFrom(i)"
+          @keydown.enter="playFrom(i)"
+          @keydown.space.prevent="playFrom(i)"
         >
           <div class="ms-mb-track-idx">{{ i + 1 }}</div>
           <div class="ms-mb-track-art">
@@ -311,6 +329,30 @@ const autocompleteQuery = useQuery({
   staleTime: 1000 * 30,
 })
 const autocompleteResults = computed<AcRow[]>(() => autocompleteQuery.data.value ?? [])
+
+// Keyboard nav over the autocomplete dropdown (combobox/listbox pattern) —
+// arrow keys move a highlighted option, Enter adds it. Mirrors search.vue's
+// flatIdx/isActive/moveActive approach for the same kind of results list.
+const acActiveIdx = ref<number | null>(null)
+watch(autocompleteResults, () => { acActiveIdx.value = null })
+
+function moveAcActive(delta: number) {
+  const n = autocompleteResults.value.length
+  if (!n) return
+  const cur = acActiveIdx.value
+  let next: number
+  if (cur === null) next = delta > 0 ? 0 : n - 1
+  else { next = cur + delta; if (next < 0) next = n - 1; if (next >= n) next = 0 }
+  acActiveIdx.value = next
+}
+
+function selectAcActive() {
+  const n = autocompleteResults.value.length
+  if (!n) return
+  const idx = acActiveIdx.value ?? 0
+  const r = autocompleteResults.value[idx]
+  if (r) addAutocompleteSeed(r)
+}
 
 function setKind(k: SeedKind) {
   addKind.value = k
@@ -544,10 +586,17 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   padding: 20px;
   margin-bottom: 22px;
   overflow: hidden;
+  /* Solid glass panel. This page floats over a full-bleed ambient backdrop;
+     the old near-transparent ink wash (0.055/0.025) let the artwork bleed
+     straight through, so the whole AI Director — its textarea especially —
+     washed out and was hard to read. The gold radial accent rides on top of
+     an opaque bg-2 base so the panel reads as a real surface. */
   background:
-    radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--gold) 13%, transparent), transparent 42%),
-    linear-gradient(145deg, rgb(var(--ink) / 0.055), rgb(var(--ink) / 0.025));
-  border: 1px solid color-mix(in srgb, var(--gold) 24%, transparent);
+    radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--gold) 16%, transparent), transparent 44%),
+    color-mix(in oklab, var(--bg-2) 88%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--gold) 32%, transparent);
   border-radius: 12px;
 }
 .ms-mb-ai.unavailable { border-color: var(--border); }
@@ -580,8 +629,10 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   resize: vertical;
   padding: 13px 14px;
   color: var(--fg-0);
-  background: rgb(var(--shade) / 0.18);
-  border: 1px solid var(--border);
+  /* Recessed, opaque well so the prompt text + placeholder stay legible over
+     the ambient backdrop (was shade/0.18 — near-transparent, unreadable). */
+  background: rgb(var(--shade) / 0.55);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   outline: none;
   font: inherit;
@@ -589,14 +640,14 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   line-height: 1.55;
   transition: border-color 0.15s, background 0.15s;
 }
-.ms-mb-ai-input::placeholder { color: var(--fg-3); }
-.ms-mb-ai-input:focus { border-color: var(--gold); background: rgb(var(--shade) / 0.24); }
+.ms-mb-ai-input::placeholder { color: var(--fg-2); }
+.ms-mb-ai-input:focus { border-color: var(--gold); background: rgb(var(--shade) / 0.66); }
 .ms-mb-ai-foot {
   display: flex; align-items: center; gap: 16px;
   margin-top: 13px;
 }
 .ms-mb-ai-hint { flex: 1; color: var(--fg-3); font-size: 11px; line-height: 1.4; }
-.ms-mb-ai-off, .ms-mb-ai-off a { color: #ffb4a8; }
+.ms-mb-ai-off, .ms-mb-ai-off a { color: var(--bad); }
 .ms-mb-ai-count {
   display: flex; align-items: center; gap: 8px;
   min-width: 150px;
@@ -725,7 +776,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   cursor: pointer;
   transition: background 0.15s;
 }
-.ms-mb-ac-row:hover { background: rgb(var(--ink) / 0.04); }
+.ms-mb-ac-row:hover, .ms-mb-ac-row.ms-mb-ac-active { background: rgb(var(--ink) / 0.04); }
 .ms-mb-ac-row:hover .ms-mb-ac-add { color: var(--gold); }
 .ms-mb-ac-add { color: var(--fg-3); transition: color 0.15s; }
 .ac-art {
@@ -791,7 +842,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-chip span {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ms-mb-chip:hover { background: rgba(255, 118, 118, 0.12); border-color: #ff7676; color: #ff7676; }
+.ms-mb-chip:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: var(--bad); color: var(--bad); }
 .ms-mb-chip .chip-x { opacity: 0.5; transition: opacity 0.15s; }
 .ms-mb-chip:hover .chip-x { opacity: 1; }
 .chip-text :deep(svg) { color: var(--gold); }
@@ -811,6 +862,14 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   transition: color 0.15s;
 }
 .ms-mb-chip-clear:hover { color: var(--fg-1); }
+
+/* Coarse pointers (touch): the seed chips and tab pills are comfortably
+   sized for a mouse but sit under the 44px minimum touch target — bump
+   their tap height without touching the desktop mouse layout. */
+@media (pointer: coarse) {
+  .ms-mb-chip, .ms-mb-chip-clear { min-height: 44px; }
+  .ms-mb-tab { min-height: 44px; }
+}
 
 /* Controls */
 .ms-mb-controls {
@@ -855,17 +914,27 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
 .ms-mb-build-btn:disabled { opacity: 0.4; cursor: default; }
 
 .ms-mb-error {
-  color: #ff7676;
+  color: var(--bad);
   font-size: 13px;
   padding: 12px 14px;
   border-radius: var(--r-sm);
-  background: rgba(255, 118, 118, 0.06);
-  border: 1px solid rgba(255, 118, 118, 0.2);
+  background: color-mix(in srgb, var(--bad) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 20%, transparent);
   margin-bottom: 16px;
 }
 
 /* Results */
-.ms-mb-results { margin-top: 8px; }
+.ms-mb-results {
+  margin-top: 8px;
+  /* Solid glass backing so the generated mix reads clearly over the ambient
+     backdrop (the built tracks were washing out same as the AI Director). */
+  padding: 16px 18px;
+  background: color-mix(in oklab, var(--bg-2) 85%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
 .ms-mb-results-head {
   display: flex; align-items: flex-end; justify-content: space-between;
   margin-bottom: 14px;

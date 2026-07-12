@@ -6,7 +6,13 @@
     <div class="mtb-tree scroll">
       <div v-if="loadingLibs" class="mtb-empty">Loading...</div>
       <div v-for="lib in libraries" :key="lib.id" class="mtb-lib">
-        <div class="mtb-row mtb-lib-row" :class="{ open: expandedLibs.has(lib.id) }" @click="toggleLib(lib.id)">
+        <div
+          class="mtb-row mtb-lib-row" :class="{ open: expandedLibs.has(lib.id) }"
+          role="button" tabindex="0"
+          @click="toggleLib(lib.id)"
+          @keydown.enter="toggleLib(lib.id)"
+          @keydown.space.prevent="toggleLib(lib.id)"
+        >
           <Icon :name="expandedLibs.has(lib.id) ? 'chevdown' : 'chevright'" :size="10" class="mtb-chevron" />
           <Icon :name="libIcon(lib.media_type)" :size="14" class="mtb-type-icon" :class="lib.media_type" />
           <span class="mtb-row-label">{{ lib.name }}</span>
@@ -18,7 +24,10 @@
             <div
               class="mtb-row mtb-item-row"
               :class="{ active: selectedMediaId === item.id, open: expandedItems.has(item.id) }"
+              role="button" tabindex="0"
               @click="selectItem(item)"
+              @keydown.enter="selectItem(item)"
+              @keydown.space.prevent="selectItem(item)"
             >
               <Icon
                 v-if="isSeriesType(item.media_type)"
@@ -32,6 +41,7 @@
                 v-if="item.poster_path"
                 :src="usePosterUrl(item) ?? undefined"
                 class="mtb-thumb"
+                alt=""
                 :width="240"
                 :quality="80"
                 densities="1x 2x"
@@ -45,7 +55,10 @@
                 <div
                   class="mtb-row mtb-season-row"
                   :class="{ active: selectedSeasonId === season.id && !selectedEpisodeId, open: expandedSeasons.has(season.id) }"
+                  role="button" tabindex="0"
                   @click="clickSeason(item, season)"
+                  @keydown.enter="clickSeason(item, season)"
+                  @keydown.space.prevent="clickSeason(item, season)"
                 >
                   <Icon :name="expandedSeasons.has(season.id) ? 'chevdown' : 'chevright'" :size="10" class="mtb-chevron" />
                   <span class="mtb-row-label">{{ season.title || `Season ${season.season_number}` }}</span>
@@ -57,7 +70,10 @@
                     :key="ep.id"
                     class="mtb-row mtb-ep-row"
                     :class="{ active: selectedEpisodeId === ep.id }"
+                    role="button" tabindex="0"
                     @click="clickEpisode(item.id, ep.id)"
+                    @keydown.enter="clickEpisode(item.id, ep.id)"
+                    @keydown.space.prevent="clickEpisode(item.id, ep.id)"
                   >
                     <span class="mtb-ep-num">{{ ep.episode_number }}</span>
                     <span class="mtb-row-label">{{ ep.title }}</span>

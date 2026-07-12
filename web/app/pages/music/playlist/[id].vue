@@ -58,7 +58,11 @@
             class="list-row pl-cols"
             :class="{ 'pl-missing': t.available === false }"
             :draggable="!isCoarse"
+            :role="t.available === false ? undefined : 'button'"
+            :tabindex="t.available === false ? -1 : 0"
+            :aria-label="t.available === false ? undefined : `Play ${t.track_title}`"
             @click="t.available !== false && playFrom(i)"
+            @keydown="onRowKeydown($event, i, t)"
             @dragstart="onDragStart($event, { kind: 'track', track: { id: t.track_id, title: t.track_title } })"
             @dragend="onDragEnd"
           >
@@ -170,6 +174,16 @@ function toPlayable(row: PlaylistTrackRow): Track {
 }
 
 function isPlayable(row: PlaylistTrackRow) { return row.available !== false }
+
+// Keyboard mirror of the row's @click (playbook item 1). Guarded on
+// target===currentTarget so Enter/Space on the nested album link or the
+// "Remove" button doesn't also trigger playFrom.
+function onRowKeydown(e: KeyboardEvent, i: number, t: PlaylistTrackRow) {
+  if (e.target !== e.currentTarget) return
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  e.preventDefault()
+  if (t.available !== false) playFrom(i)
+}
 
 async function playAll(shuffle: boolean) {
   let pl = tracks.value.filter(isPlayable).map(toPlayable)
@@ -405,7 +419,8 @@ function formatDate(iso: string) {
   opacity: 0;
   transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
-.list-row:hover .pl-remove { opacity: 1; }
+.list-row:hover .pl-remove,
+.pl-remove:focus-visible { opacity: 1; }
 .pl-remove:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 .mono { font-family: var(--font-mono); }
 

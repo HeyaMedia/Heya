@@ -8,6 +8,7 @@
         v-model="localQuery"
         type="text"
         class="search-input"
+        aria-label="Search movies, TV, music, people"
         placeholder="Search movies, TV, music, people…"
         @keydown.enter="commitQuery"
       />
@@ -20,7 +21,7 @@
         <h1 class="search-title">
           Results for <span class="search-q">"{{ query }}"</span>
         </h1>
-        <div class="search-meta">
+        <div class="search-meta" role="status" aria-live="polite">
           <template v-if="loading">Searching…</template>
           <template v-else-if="totalAcrossBuckets > 0">
             {{ totalAcrossBuckets.toLocaleString() }} match<span v-if="totalAcrossBuckets !== 1">es</span> across {{ sectionsForTabs.length }} categor<span v-if="sectionsForTabs.length === 1">y</span><span v-else>ies</span>
@@ -65,7 +66,7 @@
         </div>
       </div>
 
-      <div v-if="loading || loadingFiltered" class="search-loading-page">
+      <div v-if="loading || loadingFiltered" class="search-loading-page" role="status" aria-live="polite">
         <span class="search-spinner" /> Searching…
       </div>
     </template>

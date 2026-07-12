@@ -20,7 +20,7 @@ FROM (
          mi.public_id, mi.library_id, mi.title, mi.slug, mi.description
   FROM library_files lf
   JOIN media_item_cards mi ON mi.id = lf.media_item_id
-  WHERE mi.media_type = 'tv' AND lf.deleted_at IS NULL
+  WHERE mi.media_type IN ('tv', 'anime') AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
   LIMIT $1
 ) r

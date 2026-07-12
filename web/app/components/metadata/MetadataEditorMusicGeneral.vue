@@ -6,16 +6,16 @@
         <div class="mf-card-head">Artist Identity</div>
         <div class="mf-grid">
           <div class="mf-field mf-full">
-            <label class="mf-label">Name</label>
-            <input v-model="form.title" type="text" class="mf-input" />
+            <label class="mf-label" for="me-artist-name">Name</label>
+            <input id="me-artist-name" v-model="form.title" type="text" class="mf-input" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Sort Name</label>
-            <input v-model="form.sort_name" type="text" class="mf-input" placeholder="Beatles, The" />
+            <label class="mf-label" for="me-artist-sort-name">Sort Name</label>
+            <input id="me-artist-sort-name" v-model="form.sort_name" type="text" class="mf-input" placeholder="Beatles, The" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Disambiguation</label>
-            <input v-model="form.disambiguation" type="text" class="mf-input" placeholder="UK rock band" />
+            <label class="mf-label" for="me-artist-disambiguation">Disambiguation</label>
+            <input id="me-artist-disambiguation" v-model="form.disambiguation" type="text" class="mf-input" placeholder="UK rock band" />
           </div>
         </div>
       </div>
@@ -24,8 +24,8 @@
         <div class="mf-card-head">Provider</div>
         <div class="mf-grid">
           <div class="mf-field mf-full">
-            <label class="mf-label">MusicBrainz ID</label>
-            <input :value="detail.artist?.musicbrainz_id || ''" type="text" class="mf-input mf-input-readonly" readonly placeholder="none — use Identify to pin one" />
+            <label class="mf-label" for="me-artist-mbid">MusicBrainz ID</label>
+            <input id="me-artist-mbid" :value="detail.artist?.musicbrainz_id || ''" type="text" class="mf-input mf-input-readonly" readonly placeholder="none — use Identify to pin one" />
           </div>
         </div>
         <p class="mf-hint">
@@ -40,7 +40,7 @@
       <div class="mf-card mf-card-fill">
         <div class="mf-card-head">Biography</div>
         <div class="mf-field mf-field-fill">
-          <textarea v-model="form.biography" class="mf-textarea mf-textarea-fill" placeholder="Artist biography..." />
+          <textarea v-model="form.biography" class="mf-textarea mf-textarea-fill" aria-label="Biography" placeholder="Artist biography..." />
         </div>
       </div>
     </div>

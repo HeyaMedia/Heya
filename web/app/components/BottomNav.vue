@@ -8,13 +8,14 @@
   extra to gate here.
 -->
 <template>
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" aria-label="Primary">
     <NuxtLink
       v-for="t in tabs"
       :key="t.to"
       :to="t.to"
       class="bn-tab"
       :class="{ active: isActive(t) }"
+      :aria-current="isActive(t) ? 'page' : undefined"
     >
       <Icon :name="t.icon" :size="22" />
       <span>{{ t.label }}</span>

@@ -77,13 +77,51 @@ function onZeroClick() {
 function onMouseLeave() {
   hoverValue.value = null
 }
+
+// Accessibility: pointer users keep the per-half-star click/hover above;
+// keyboard/AT users get the widget as a single role="slider" (mirrors
+// MusicWaveform.vue's pattern) — 0..10 internal scale, one arrow-key step =
+// one half-star. stopPropagation matches MusicWaveform's reasoning: this
+// widget appears inside rows/the playbar where a window-level hotkey
+// listener would otherwise also react to the same arrow keys.
+const ariaValueText = computed(() => {
+  if (props.modelValue === 0) return 'Unrated'
+  const stars = props.modelValue / 2
+  return `${Number.isInteger(stars) ? stars : stars.toFixed(1)} out of 5 stars`
+})
+
+function onKeydown(e: KeyboardEvent) {
+  if (props.readonly) return
+  const cur = props.modelValue
+  let next: number
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'ArrowUp': next = cur + 1; break
+    case 'ArrowLeft':
+    case 'ArrowDown': next = cur - 1; break
+    case 'Home': next = 0; break
+    case 'End': next = 10; break
+    default: return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  emit('update:modelValue', Math.max(0, Math.min(10, next)))
+}
 </script>
 
 <template>
   <div
     class="sr"
     :class="[`sr-${size}`, { 'sr-readonly': readonly, 'sr-hovering': hoverValue !== null }]"
+    :role="readonly ? undefined : 'slider'"
+    :tabindex="readonly ? undefined : 0"
+    :aria-label="readonly ? undefined : 'Rating'"
+    :aria-valuemin="readonly ? undefined : 0"
+    :aria-valuemax="readonly ? undefined : 10"
+    :aria-valuenow="readonly ? undefined : modelValue"
+    :aria-valuetext="readonly ? undefined : ariaValueText"
     @mouseleave="onMouseLeave"
+    @keydown="onKeydown"
   >
     <!-- Clear affordance: small "0" glyph always reserved on the left so
          the widget width never shifts. Visually dim at rest; brightens on

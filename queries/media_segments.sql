@@ -139,7 +139,7 @@ SELECT lf.id, lf.path
 FROM library_files lf
 JOIN media_item_cards mi ON mi.id = lf.media_item_id
 JOIN libraries l ON l.id = lf.library_id
-WHERE l.media_type IN ('movie', 'tv')
+WHERE l.media_type IN ('movie', 'tv', 'anime')
   AND lf.deleted_at IS NULL
   AND lf.media_info IS NOT NULL
   AND EXISTS (
@@ -212,7 +212,7 @@ WITH eligible AS (
         ) AS pending
     FROM library_files lf
     JOIN libraries l ON l.id = lf.library_id
-    WHERE l.media_type = 'tv'
+    WHERE l.media_type IN ('tv', 'anime')
       AND lf.deleted_at IS NULL
       AND lf.media_info IS NOT NULL
       AND lf.media_item_id IS NOT NULL
@@ -267,7 +267,7 @@ SELECT
     ) AS pending
 FROM library_files lf
 JOIN libraries l ON l.id = lf.library_id
-WHERE l.media_type = 'tv'
+WHERE l.media_type IN ('tv', 'anime')
   AND lf.deleted_at IS NULL
   AND lf.media_info IS NOT NULL
   AND lf.media_item_id = sqlc.arg(media_item_id)::bigint

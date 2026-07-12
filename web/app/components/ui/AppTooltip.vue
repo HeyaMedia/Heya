@@ -18,7 +18,14 @@
 -->
 <template>
   <TooltipRoot :delay-duration="delay" :disable-hoverable-content="true">
-    <TooltipTrigger as-child>
+    <!-- reka's TooltipTrigger only wires aria-describedby (a *description*),
+         never an accessible *name* — so an icon-only trigger with no text
+         would be nameless to a screen reader. Forward `label` as aria-label
+         onto the slotted trigger (reka's as-child merges $attrs onto the
+         child), which gives every icon button its name for free. Callers
+         using the #content slot instead of `label` must still supply their
+         own aria-label. -->
+    <TooltipTrigger as-child :aria-label="label || undefined">
       <slot />
     </TooltipTrigger>
     <TooltipPortal>

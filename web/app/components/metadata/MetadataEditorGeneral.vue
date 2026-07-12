@@ -6,24 +6,24 @@
         <div class="mf-card-head">Title & Identity</div>
         <div class="mf-grid">
           <div class="mf-field mf-full">
-            <label class="mf-label">Title</label>
-            <input v-model="form.title" type="text" class="mf-input" />
+            <label class="mf-label" for="me-title">Title</label>
+            <input id="me-title" v-model="form.title" type="text" class="mf-input" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Sort Title</label>
-            <input v-model="form.sort_title" type="text" class="mf-input" />
+            <label class="mf-label" for="me-sort-title">Sort Title</label>
+            <input id="me-sort-title" v-model="form.sort_title" type="text" class="mf-input" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Year</label>
-            <input v-model="form.year" type="text" class="mf-input" maxlength="4" />
+            <label class="mf-label" for="me-year">Year</label>
+            <input id="me-year" v-model="form.year" type="text" class="mf-input" maxlength="4" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Original {{ mediaType === 'tv' ? 'Name' : 'Title' }}</label>
-            <input v-model="form.original_title" type="text" class="mf-input" />
+            <label class="mf-label" for="me-original-title">Original {{ mediaType === 'tv' ? 'Name' : 'Title' }}</label>
+            <input id="me-original-title" v-model="form.original_title" type="text" class="mf-input" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Original Language</label>
-            <input v-model="form.original_language" type="text" class="mf-input" maxlength="5" />
+            <label class="mf-label" for="me-original-language">Original Language</label>
+            <input id="me-original-language" v-model="form.original_language" type="text" class="mf-input" maxlength="5" />
           </div>
         </div>
       </div>
@@ -32,12 +32,12 @@
         <div class="mf-card-head">Movie Info</div>
         <div class="mf-grid">
           <div class="mf-field">
-            <label class="mf-label">Runtime (min)</label>
-            <input v-model.number="form.runtime_minutes" type="number" class="mf-input" />
+            <label class="mf-label" for="me-runtime">Runtime (min)</label>
+            <input id="me-runtime" v-model.number="form.runtime_minutes" type="number" class="mf-input" />
           </div>
           <div class="mf-field mf-full">
-            <label class="mf-label">Tagline</label>
-            <input v-model="form.tagline" type="text" class="mf-input" />
+            <label class="mf-label" for="me-tagline">Tagline</label>
+            <input id="me-tagline" v-model="form.tagline" type="text" class="mf-input" />
           </div>
         </div>
       </div>
@@ -48,7 +48,7 @@
       <div class="mf-card mf-card-fill">
         <div class="mf-card-head">Overview</div>
         <div class="mf-field mf-field-fill">
-          <textarea v-model="form.description" class="mf-textarea mf-textarea-fill" placeholder="Synopsis or description..." />
+          <textarea v-model="form.description" class="mf-textarea mf-textarea-fill" aria-label="Overview" placeholder="Synopsis or description..." />
         </div>
       </div>
     </div>

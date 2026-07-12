@@ -133,6 +133,11 @@ function tagSize(count: number) {
 }
 .rt-tag-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); }
 
+@media (pointer: coarse) {
+  .rt-tag { min-height: 44px; }
+  .rt-back { min-height: 44px; padding: 10px 0; }
+}
+
 .rt-drill-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
 .rt-drill-back {
   background: transparent;

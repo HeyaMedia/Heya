@@ -39,6 +39,7 @@
             v-for="seg in typeSegments"
             :key="seg.value"
             :class="{ active: mediaFilter === seg.value }"
+            :aria-pressed="mediaFilter === seg.value"
             @click="mediaFilter = seg.value"
           >
             {{ seg.label }}<span class="tb-seg-count">{{ seg.count }}</span>

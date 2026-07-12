@@ -126,7 +126,12 @@ function formatTotalDuration(rows: StationTrack[]): string {
           v-for="(t, i) in tracks"
           :key="`st-${t.track_id}-${i}`"
           class="sr-track-row"
+          role="button"
+          tabindex="0"
+          :aria-label="`Play ${t.track_title}`"
           @click="playFrom(i)"
+          @keydown.enter="playFrom(i)"
+          @keydown.space.prevent="playFrom(i)"
         >
           <div class="sr-track-idx">{{ i + 1 }}</div>
           <div class="sr-track-art">
@@ -149,12 +154,12 @@ function formatTotalDuration(rows: StationTrack[]): string {
 
 .sr-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
 .sr-error {
-  color: #ff7676;
+  color: var(--bad);
   font-size: 13px;
   padding: 12px 14px;
   border-radius: var(--r-sm);
-  background: rgba(255, 118, 118, 0.06);
-  border: 1px solid rgba(255, 118, 118, 0.2);
+  background: color-mix(in srgb, var(--bad) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 20%, transparent);
   margin-bottom: 16px;
 }
 
@@ -167,13 +172,17 @@ function formatTotalDuration(rows: StationTrack[]): string {
   font-weight: 700;
   color: var(--fg-0);
   letter-spacing: -0.01em;
+  /* Renders straight over the page's ambient artwork, same as MusicPageHead
+     titles elsewhere — was missing that halo. */
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
 }
 .sr-meta {
   font-size: 12px;
   font-family: var(--font-mono);
-  color: var(--fg-3);
+  color: var(--fg-2);
   margin-top: 4px;
   letter-spacing: 0.04em;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .sr-actions { display: flex; gap: 6px; }
 .sr-action-btn {

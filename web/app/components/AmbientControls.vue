@@ -9,12 +9,13 @@
         class="actl"
         :class="{ on: ctl.reveal }"
         :aria-pressed="ctl.reveal"
+        :aria-label="ctl.reveal ? 'Bring the page back (Esc)' : 'Show the background'"
         :title="ctl.reveal ? 'Bring the page back (Esc)' : 'Show the background'"
         @click="ctl.reveal = !ctl.reveal"
       >
         <Icon :name="ctl.reveal ? 'eye-slash' : 'eye'" :size="13" />
       </button>
-      <button v-if="ctl.mode === 'pool'" class="actl actl-shuffle" title="New background" @click="ctl.shuffleReq++">
+      <button v-if="ctl.mode === 'pool'" class="actl actl-shuffle" aria-label="New background" title="New background" @click="ctl.shuffleReq++">
         <!-- Ring = time until the next automatic switch. Re-keys on every new
              rotation window; duration is bound to BG_ROTATE_MS so the ring and
              the layer's timer can't drift. -->
@@ -33,6 +34,7 @@
         class="actl"
         :class="{ on: ctl.paused }"
         :aria-pressed="ctl.paused"
+        :aria-label="ctl.paused ? 'Resume rotation' : 'Pause rotation'"
         :title="ctl.paused ? 'Resume rotation' : 'Pause rotation'"
         @click="ctl.paused = !ctl.paused"
       >
@@ -166,6 +168,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 }
 .actl:hover { background: var(--bg-3); color: var(--fg-0); }
 .actl.on { color: var(--gold); }
+/* Touch devices wider than the 1200px cutoff below (e.g. iPad Pro
+   landscape) still show this cluster — grow the round buttons to a real
+   touch target under a coarse pointer without touching the mouse-driven
+   26px visual (min-width/height only wins here because it's larger than
+   the explicit 26px above). */
+@media (pointer: coarse) {
+  .actl { min-width: 44px; min-height: 44px; }
+}
 
 /* Cycle-progress ring, same recipe as the hero carousels: fills from
    12 o'clock; full = next image. */

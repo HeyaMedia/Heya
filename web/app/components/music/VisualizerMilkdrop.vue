@@ -12,7 +12,7 @@
 <template>
   <div class="viz-mk">
     <div v-if="error" class="viz-mk-error">{{ error }}</div>
-    <canvas v-show="!error" ref="canvasRef" class="viz-mk-canvas" />
+    <canvas v-show="!error" ref="canvasRef" class="viz-mk-canvas" aria-hidden="true" />
   </div>
 </template>
 
@@ -30,7 +30,19 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 const error = ref('')
 const ready = ref(false)
 const pageVisibility = useDocumentVisibility()
-const shouldAnimate = computed(() => ready.value && pageVisibility.value === 'visible')
+// `prefers-reduced-motion` — the global CSS reset (heya.css) doesn't reach a
+// continuous rAF loop, so it's gated here explicitly. Stops the render loop
+// (last WebGL frame stays on screen) rather than tearing the canvas down.
+const prefersReducedMotion = ref(false)
+let motionMq: MediaQueryList | null = null
+function onMotionChange(e: MediaQueryListEvent) { prefersReducedMotion.value = e.matches }
+onMounted(() => {
+  motionMq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  prefersReducedMotion.value = motionMq.matches
+  motionMq.addEventListener('change', onMotionChange)
+})
+onUnmounted(() => motionMq?.removeEventListener('change', onMotionChange))
+const shouldAnimate = computed(() => ready.value && pageVisibility.value === 'visible' && !prefersReducedMotion.value)
 
 let visualizer: Visualizer | null = null
 let presets: Record<string, object> = {}

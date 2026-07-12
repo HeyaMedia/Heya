@@ -101,8 +101,8 @@ onMounted(loadStorage)
 
     <SettingsSection title="Streaming quality" icon="vol"
       description="Lower tiers ask the server to transcode down for less bandwidth. Takes effect on the next track.">
-      <SettingsField label="Quality">
-        <select class="sv2-select" v-model="qualityChoice">
+      <SettingsField label="Quality" v-slot="{ fieldId }">
+        <select :id="fieldId" class="sv2-select" v-model="qualityChoice">
           <option v-for="q in QUALITY_OPTIONS" :key="q.value" :value="q.value">{{ q.label }}</option>
         </select>
       </SettingsField>
@@ -110,15 +110,16 @@ onMounted(loadStorage)
 
     <SettingsSection title="Prefetch" icon="cloud-download"
       description="Cache upcoming queue tracks ahead of playback so transitions feel instant.">
-      <SettingsField label="Upcoming tracks" description="Upcoming songs downloaded ahead of playback.">
-        <select class="sv2-select" v-model="prefetchChoice">
+      <SettingsField label="Upcoming tracks" description="Upcoming songs downloaded ahead of playback." v-slot="{ fieldId }">
+        <select :id="fieldId" class="sv2-select" v-model="prefetchChoice">
           <option v-for="n in PREFETCH_OPTIONS" :key="n" :value="String(n)">{{ n === 0 ? 'Off' : n }}</option>
         </select>
       </SettingsField>
       <SettingsField label="Only prefetch on Wi-Fi"
-        hint="Best-effort — only Android/Chrome expose the connection type. iOS doesn't, so prefetch always runs there regardless of this setting.">
+        hint="Best-effort — only Android/Chrome expose the connection type. iOS doesn't, so prefetch always runs there regardless of this setting."
+        v-slot="{ fieldId, hintId }">
         <label class="dev-switch">
-          <input type="checkbox" :checked="settings.wifiOnlyPrefetch" @change="onWifiOnlyChange" />
+          <input :id="fieldId" type="checkbox" :aria-describedby="hintId" aria-label="Only prefetch on Wi-Fi" :checked="settings.wifiOnlyPrefetch" @change="onWifiOnlyChange" />
           <span class="dev-slider" />
         </label>
       </SettingsField>
@@ -191,8 +192,8 @@ onMounted(loadStorage)
 
     <SettingsSection title="Playback engine" icon="lightning"
       description="iOS uses compatibility mode automatically for background/lock-screen playback; it disables EQ, visualizers, and crossfade.">
-      <SettingsField label="Engine mode" hint="Takes effect after reloading the app.">
-        <select class="sv2-select" v-model="engineChoice">
+      <SettingsField label="Engine mode" hint="Takes effect after reloading the app." v-slot="{ fieldId, hintId }">
+        <select :id="fieldId" :aria-describedby="hintId" class="sv2-select" v-model="engineChoice">
           <option value="auto">Auto (recommended)</option>
           <option value="on">Compatibility mode (background-audio safe)</option>
           <option value="off">Full engine</option>
@@ -280,7 +281,7 @@ onMounted(loadStorage)
   transition: transform 0.15s ease;
 }
 .dev-switch input:checked + .dev-slider {
-  background: var(--accent, #7c5cff);
+  background: var(--accent);
 }
 .dev-switch input:checked + .dev-slider::before {
   transform: translateX(18px);

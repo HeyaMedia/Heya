@@ -405,7 +405,7 @@ func (s *Server) handleNextUp(w http.ResponseWriter, r *http.Request, p Params) 
 		}
 		seen := map[int64]bool{}
 		for _, row := range recents {
-			if row.MediaType != string(sqlc.MediaTypeTv) || seen[row.MediaItemID] {
+			if (row.MediaType != string(sqlc.MediaTypeTv) && row.MediaType != string(sqlc.MediaTypeAnime)) || seen[row.MediaItemID] {
 				continue
 			}
 			seen[row.MediaItemID] = true

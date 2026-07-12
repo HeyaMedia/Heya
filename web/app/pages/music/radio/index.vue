@@ -8,6 +8,7 @@
         type="search"
         class="ri-search-input"
         placeholder="Search by name, tag, country…"
+        aria-label="Search radio stations"
         @keydown.enter="runSearch"
       />
       <button v-if="searchQuery" class="ri-search-clear" @click="searchQuery = ''; searchResults = []">
@@ -331,6 +332,10 @@ const stationCountSub = computed(() => {
   font-family: var(--font-mono);
 }
 .mono { font-family: var(--font-mono); }
+
+@media (pointer: coarse) {
+  .ri-tag { min-height: 44px; }
+}
 
 @media (max-width: 720px) {
   /* music.vue's phone header already reads "Internet Radio" directly

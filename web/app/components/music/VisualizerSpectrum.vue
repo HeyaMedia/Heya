@@ -10,7 +10,7 @@
   pulled from the live CSS custom properties so it tracks the theme.
 -->
 <template>
-  <canvas ref="canvasRef" class="viz-spec" :class="`viz-spec-${variant}`" />
+  <canvas ref="canvasRef" class="viz-spec" :class="`viz-spec-${variant}`" aria-hidden="true" />
 </template>
 
 <script setup lang="ts">
@@ -30,7 +30,19 @@ import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
 const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const pageVisibility = useDocumentVisibility()
-const shouldAnimate = computed(() => props.active && pageVisibility.value === 'visible')
+// `prefers-reduced-motion` — the global CSS reset (heya.css) doesn't reach a
+// continuous rAF loop, so it's gated here explicitly. Stops the loop (one
+// static frame stays drawn) rather than hiding the canvas outright.
+const prefersReducedMotion = ref(false)
+let motionMq: MediaQueryList | null = null
+function onMotionChange(e: MediaQueryListEvent) { prefersReducedMotion.value = e.matches }
+onMounted(() => {
+  motionMq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  prefersReducedMotion.value = motionMq.matches
+  motionMq.addEventListener('change', onMotionChange)
+})
+onUnmounted(() => motionMq?.removeEventListener('change', onMotionChange))
+const shouldAnimate = computed(() => props.active && pageVisibility.value === 'visible' && !prefersReducedMotion.value)
 
 // Theme colors resolved from CSS vars at mount; fall back to gold-ish defaults.
 // Re-resolved live on the 'heya:theme' event (see useAppearance.ts) so a

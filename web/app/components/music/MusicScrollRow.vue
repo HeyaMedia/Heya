@@ -10,18 +10,18 @@
         {{ title }}
         <Icon v-if="titleHref" name="chevright" :size="14" class="msr-chev" />
       </component>
-      <button v-if="onPlayAll" class="msr-action" @click="onPlayAll" title="Play all">
+      <button v-if="onPlayAll" class="msr-action" @click="onPlayAll" title="Play all" :aria-label="`Play all ${title}`">
         <Icon name="play" :size="13" />
       </button>
-      <button v-if="onShuffleAll" class="msr-action" @click="onShuffleAll" title="Shuffle">
+      <button v-if="onShuffleAll" class="msr-action" @click="onShuffleAll" title="Shuffle" :aria-label="`Shuffle ${title}`">
         <Icon name="shuffle" :size="13" />
       </button>
       <div class="msr-grow" />
       <template v-if="!expanded && overflows">
-        <button class="msr-nav msr-nav-scroll" @click="scroll('left')" title="Scroll left">
+        <button class="msr-nav msr-nav-scroll" @click="scroll('left')" title="Scroll left" aria-label="Scroll left">
           <Icon name="chevleft" :size="16" />
         </button>
-        <button class="msr-nav msr-nav-scroll" @click="scroll('right')" title="Scroll right">
+        <button class="msr-nav msr-nav-scroll" @click="scroll('right')" title="Scroll right" aria-label="Scroll right">
           <Icon name="chevright" :size="16" />
         </button>
       </template>
@@ -30,6 +30,8 @@
         class="msr-nav msr-nav-expand"
         @click="expanded = !expanded"
         :title="expanded ? 'Collapse' : 'Expand all'"
+        :aria-label="expanded ? `Collapse ${title}` : `Show all ${title}`"
+        :aria-expanded="expanded"
       >
         <Icon name="chevdown" :size="16" :style="expanded ? { transform: 'rotate(180deg)' } : undefined" />
       </button>
@@ -195,6 +197,16 @@ provide('msr:cardSize', props.cardSize)
    toggle (.msr-nav-expand) stays — it's a tap target, not a mouse affordance. */
 @media (pointer: coarse) {
   .msr-nav-scroll { display: none; }
+  /* Keep the compact glass visuals but grow the touch target to the app's
+     44px coarse-pointer minimum via an invisible expanded hit-area — the
+     play-all/shuffle/expand controls stay tappable on phones without
+     changing the header's visual density. */
+  .msr-action, .msr-nav-expand { position: relative; }
+  .msr-action::before, .msr-nav-expand::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
 }
 
 /* Phone: rail cards (mixes at 220px, everything else at 170px on desktop)

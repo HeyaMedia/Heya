@@ -76,15 +76,27 @@ watch(() => props.src, () => { imgError.value = false })
       <!-- Hover-only play button — centered, glassy, EpisodeCard pattern.
            Wrap is non-interactive (pointer-events: none) so only the circle
            captures clicks; everything else routes through the outer link. -->
+      <!-- Not a real <button>: the caller wraps this whole card in a
+           NuxtLink (see MusicHome.vue etc.), and a native button nested
+           inside an anchor is invalid interactive-in-interactive HTML. A
+           span with role="button" gets the same click/keyboard behavior
+           without that nesting violation — see CLAUDE.md's "invalid
+           nesting" note for the reasoning; a full DOM restructure (pulling
+           this out as a sibling of every consuming NuxtLink) was assessed
+           as too broad/risky for the ~10 call sites that reuse this card. -->
       <div v-if="!noPlay && !missing" class="mc-play-wrap">
-        <button
-          type="button"
+        <span
+          role="button"
+          tabindex="0"
           class="mc-play"
+          :aria-label="`Play ${title}`"
           :title="`Play ${title}`"
           @click.stop.prevent="emit('play')"
+          @keydown.enter.stop.prevent="emit('play')"
+          @keydown.space.stop.prevent="emit('play')"
         >
           <Icon name="play" :size="18" />
-        </button>
+        </span>
       </div>
 
       <!-- Caption painted on the bottom gradient. -->
@@ -186,7 +198,8 @@ watch(() => props.src, () => { imgError.value = false })
   padding: 0;
   pointer-events: none;
 }
-.mc:hover .mc-play-wrap { opacity: 1; }
+.mc:hover .mc-play-wrap,
+.mc-play-wrap:has(.mc-play:focus-visible) { opacity: 1; }
 .mc-play {
   width: 48px; height: 48px;
   border-radius: 50%;

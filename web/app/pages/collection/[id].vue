@@ -530,4 +530,10 @@ onMounted(async () => {
   .ch-cta-btn { width: 100%; justify-content: center; }
   .ch-row-poster { width: 40px; height: 60px; }
 }
+
+/* Touch: the per-film watched toggle is a 30px circle — bump it to the 44px
+   minimum under a coarse pointer without changing the compact desktop size. */
+@media (pointer: coarse) {
+  .ch-watch-toggle { width: 44px; height: 44px; }
+}
 </style>

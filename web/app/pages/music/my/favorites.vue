@@ -20,12 +20,14 @@
           type="button"
           class="ms-fav-toggle-btn steer-glass"
           :class="{ active: viewMode === 'favorites' }"
+          :aria-pressed="viewMode === 'favorites'"
           @click="viewMode = 'favorites'"
         >Favorites only</button>
         <button
           type="button"
           class="ms-fav-toggle-btn steer-glass"
           :class="{ active: viewMode === 'all' }"
+          :aria-pressed="viewMode === 'all'"
           @click="viewMode = 'all'"
         >All rated</button>
       </div>

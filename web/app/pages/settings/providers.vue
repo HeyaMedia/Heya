@@ -119,14 +119,15 @@ const UPSTREAM_SOURCES = [
 
       <template v-else>
         <SettingsField label="API key"
-          description="Found under your opensubtitles.com profile → API Consumers.">
-          <input v-model="os.api_key" type="text" class="sv2-input" placeholder="Your OpenSubtitles API key" autocomplete="off" />
+          description="Found under your opensubtitles.com profile → API Consumers."
+          v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="os.api_key" type="text" class="sv2-input" placeholder="Your OpenSubtitles API key" autocomplete="off" />
         </SettingsField>
-        <SettingsField label="Username">
-          <input v-model="os.username" type="text" class="sv2-input" placeholder="opensubtitles username" autocomplete="username" />
+        <SettingsField label="Username" v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="os.username" type="text" class="sv2-input" placeholder="opensubtitles username" autocomplete="username" />
         </SettingsField>
-        <SettingsField label="Password">
-          <input v-model="os.password" type="password" class="sv2-input" placeholder="opensubtitles password" autocomplete="current-password" />
+        <SettingsField label="Password" v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="os.password" type="password" class="sv2-input" placeholder="opensubtitles password" autocomplete="current-password" />
         </SettingsField>
 
         <div class="actions-bar">
@@ -142,7 +143,7 @@ const UPSTREAM_SOURCES = [
           <span v-if="!canSave" class="hint-text">All three fields required.</span>
         </div>
 
-        <div v-if="testResult" class="test-card" :class="testResult.ok ? 'ok' : 'err'">
+        <div v-if="testResult" class="test-card" :class="testResult.ok ? 'ok' : 'err'" role="status" aria-live="polite">
           <div class="test-row">
             <span class="test-key">Status</span>
             <StatusBadge :state="testResult.ok ? 'ok' : 'error'">

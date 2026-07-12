@@ -113,11 +113,11 @@ function mediaTypeIcon(t: string): string {
           <div v-for="l in lists" :key="l.id" class="list-card">
             <template v-if="editing === l.id">
               <div class="list-edit">
-                <SettingsField label="Name">
-                  <input v-model="draft.name" class="sv2-input" maxlength="128" />
+                <SettingsField label="Name" v-slot="{ fieldId }">
+                  <input :id="fieldId" v-model="draft.name" class="sv2-input" maxlength="128" />
                 </SettingsField>
-                <SettingsField label="Description">
-                  <textarea v-model="draft.description" class="sv2-textarea" rows="2" maxlength="2000" />
+                <SettingsField label="Description" v-slot="{ fieldId }">
+                  <textarea :id="fieldId" v-model="draft.description" class="sv2-textarea" rows="2" maxlength="2000" />
                 </SettingsField>
                 <div class="list-edit-actions">
                   <button class="sv2-btn ghost" @click="cancelEdit">Cancel</button>
@@ -142,10 +142,10 @@ function mediaTypeIcon(t: string): string {
                 </div>
               </div>
               <div class="list-actions">
-                <button class="list-btn" title="Rename" @click="startEdit(l)">
+                <button class="list-btn" title="Rename" aria-label="Rename list" @click="startEdit(l)">
                   <Icon name="pencil" :size="13" />
                 </button>
-                <button class="list-btn danger" title="Delete" @click="remove(l)">
+                <button class="list-btn danger" title="Delete" aria-label="Delete list" @click="remove(l)">
                   <Icon name="trash" :size="13" />
                 </button>
               </div>

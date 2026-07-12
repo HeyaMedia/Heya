@@ -73,6 +73,7 @@ onMounted(() => { ensureSources() })
         <label class="jf-switch" :title="lockTooltip('jellyfin.enabled')">
           <input
             type="checkbox"
+            aria-label="Enable Jellyfin-compatible API"
             :checked="enabled"
             :disabled="loading || saving || isLocked('jellyfin.enabled')"
             @change="onToggle(($event.target as HTMLInputElement).checked)"
@@ -81,7 +82,7 @@ onMounted(() => { ensureSources() })
         </label>
       </template>
 
-      <div v-if="flash" class="jf-flash" :class="flash.kind">{{ flash.text }}</div>
+      <div v-if="flash" class="jf-flash" :class="flash.kind" :role="flash.kind === 'err' ? 'alert' : 'status'" aria-live="polite">{{ flash.text }}</div>
 
       <template v-if="enabled">
         <KVTable :rows="[
@@ -139,7 +140,7 @@ onMounted(() => { ensureSources() })
   transition: transform 0.15s ease;
 }
 .jf-switch input:checked + .jf-slider {
-  background: var(--accent, #7c5cff);
+  background: var(--accent);
 }
 .jf-switch input:checked + .jf-slider::before {
   transform: translateX(18px);

@@ -544,15 +544,15 @@ watch(() => route.query.library, () => syncScannerFromRoute())
           </div>
 
           <div class="lib-actions">
-            <button class="row-btn" :title="`Configure ${lib.name}`" @click="openEdit(lib)">
+            <button class="row-btn" :title="`Configure ${lib.name}`" :aria-label="`Configure ${lib.name}`" @click="openEdit(lib)">
               <Icon name="settings" :size="14" />
             </button>
 
-            <button v-if="isScannable(lib)" class="row-btn" title="Scanner state" @click="openScanner(lib)">
+            <button v-if="isScannable(lib)" class="row-btn" title="Scanner state" aria-label="Scanner state" @click="openScanner(lib)">
               <Icon name="database" :size="14" />
             </button>
 
-            <AppMenu align="end" :side-offset="8">
+            <AppMenu align="end" :side-offset="8" trigger-title="More actions">
               <template #trigger>
                 <span class="row-btn"><Icon name="more" :size="14" /></span>
               </template>
@@ -568,10 +568,10 @@ watch(() => route.query.library, () => syncScannerFromRoute())
               </template>
             </AppMenu>
 
-            <button v-if="libProgress(lib.id)" class="row-btn danger" title="Cancel scan" @click="cancelLib(lib.id)">
+            <button v-if="libProgress(lib.id)" class="row-btn danger" title="Cancel scan" aria-label="Cancel scan" @click="cancelLib(lib.id)">
               <Icon name="close" :size="14" />
             </button>
-            <button v-else class="row-btn" :disabled="scanning === lib.id" title="Scan now" @click="scanLib(lib.id)">
+            <button v-else class="row-btn" :disabled="scanning === lib.id" title="Scan now" aria-label="Scan now" @click="scanLib(lib.id)">
               <Icon :name="scanning === lib.id ? 'spinner' : 'refresh'" :size="14" />
             </button>
 
@@ -579,6 +579,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
               class="row-btn danger"
               :disabled="isEnvLocked(lib)"
               :title="isEnvLocked(lib) ? envLockTooltip(lib) : `Delete ${lib.name}`"
+              :aria-label="isEnvLocked(lib) ? envLockTooltip(lib) : `Delete ${lib.name}`"
               @click="deleteLib(lib)"
             >
               <Icon :name="isEnvLocked(lib) ? 'key' : 'trash'" :size="14" />

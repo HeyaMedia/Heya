@@ -22,7 +22,11 @@
             v-for="(item, i) in items"
             :key="item.id"
             class="grid-tile card-tile"
+            role="link"
+            tabindex="0"
             @click="navigateTo(mediaUrl(item))"
+            @keydown.enter="navigateTo(mediaUrl(item))"
+            @keydown.space.prevent="navigateTo(mediaUrl(item))"
           >
             <Poster :idx="i" :src="usePosterUrl(item)" aspect="2/3" />
             <div class="grid-tile-meta">

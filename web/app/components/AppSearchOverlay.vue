@@ -30,7 +30,16 @@
 <template>
   <Teleport to="body">
     <Transition name="so-fade">
-      <div v-if="open" class="search-overlay" role="dialog" aria-modal="true" aria-label="Search">
+      <div
+        v-if="open"
+        ref="overlayRef"
+        class="search-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search"
+        @keydown.esc.prevent="handleBack"
+        @keydown.tab="onTrapTab"
+      >
         <header class="so-header">
           <button type="button" class="so-back" aria-label="Close search" @click="handleBack">
             <Icon name="back" :size="20" />
@@ -41,6 +50,7 @@
               ref="inputRef"
               v-model="search.query.value"
               type="search"
+              aria-label="Search"
               autofocus
               autocapitalize="off"
               autocorrect="off"
@@ -112,6 +122,7 @@ const open = defineModel<boolean>('open', { default: false })
 const route = useRoute()
 const search = useQuickSearch(180)
 const inputRef = ref<HTMLInputElement>()
+const overlayRef = ref<HTMLElement>()
 
 interface Section {
   key: 'movies' | 'tv' | 'music' | 'books' | 'albums' | 'tracks' | 'collections' | 'people'
@@ -250,6 +261,33 @@ function close() {
   open.value = false
 }
 
+// ── Focus containment ───────────────────────────────────────────────────
+// Lightweight Tab trap: the overlay covers the full viewport (Teleported to
+// <body>), so there's nothing legitimate to tab out to while it's open.
+// Wraps focus at the first/last focusable descendant instead of pulling in
+// a dedicated focus-trap dependency for this one surface.
+function onTrapTab(e: KeyboardEvent) {
+  const root = overlayRef.value
+  if (!root) return
+  const focusables = Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter(el => el.offsetParent !== null)
+  if (focusables.length === 0) return
+  const first = focusables[0]!
+  const last = focusables[focusables.length - 1]!
+  if (e.shiftKey) {
+    if (document.activeElement === first || !root.contains(document.activeElement)) {
+      e.preventDefault()
+      last.focus()
+    }
+  } else if (document.activeElement === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
 // ── Hardware-back / history wiring ──────────────────────────────────────
 // `pushedState` tracks whether our dummy history entry is still the top of
 // the stack (i.e. no popstate has consumed it yet since we pushed it).
@@ -282,17 +320,32 @@ onUnmounted(() => {
   if (open.value) document.documentElement.style.overflow = ''
 })
 
+// Remembers whatever had focus before the overlay opened (the phone
+// search-trigger button in AppTopBar) so it can be restored on close —
+// otherwise focus silently drops to <body> when a Teleported dialog unmounts.
+let previouslyFocused: HTMLElement | null = null
+
 watch(open, (isOpen) => {
   if (isOpen) {
+    previouslyFocused = document.activeElement as HTMLElement | null
     pushedState = true
     history.pushState({ heyaSearch: true }, '')
     document.documentElement.style.overflow = 'hidden'
+    // Focus the field so the mobile keyboard rises on the SAME tap that opened
+    // the overlay. Critically this watch is { immediate: true }: AppTopBar
+    // mounts this component with `v-if="searchOverlayOpen"`, so on first open
+    // it mounts already-`open`, and a non-immediate watch never saw the
+    // initial `true` — the focus (and scroll-lock / back-button setup) simply
+    // didn't run, leaving focus to the unreliable `autofocus` attr, which is
+    // why it took a throwaway first tap. nextTick waits for the input to mount.
     nextTick(() => inputRef.value?.focus())
   } else {
     document.documentElement.style.overflow = ''
     search.reset()
+    previouslyFocused?.focus()
+    previouslyFocused = null
   }
-})
+}, { immediate: true })
 
 // Route changes (e.g. a result navigation resolving) are a safety net on
 // top of the explicit close() calls above — covers any navigation path we
@@ -332,6 +385,19 @@ watch(() => route.fullPath, () => { if (open.value) close() })
   border: 0;
 }
 .so-back:active { background: rgb(var(--ink) / 0.08); }
+/* Invisible expanded hit-area under a coarse (touch) pointer — the visible
+   36px glyph stays put, but the tappable zone grows to the 44px minimum. */
+@media (pointer: coarse) {
+  .so-back { position: relative; }
+  .so-back::after {
+    content: '';
+    position: absolute;
+    inset: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
 
 .so-input-wrap {
   flex: 1;
@@ -363,6 +429,18 @@ watch(() => route.fullPath, () => { if (open.value) close() })
 .so-input-wrap input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .so-clear { flex-shrink: 0; color: var(--fg-3); background: transparent; border: 0; display: flex; }
 .so-clear:active { color: var(--fg-0); }
+/* Same invisible hit-area treatment as .so-back above. */
+@media (pointer: coarse) {
+  .so-clear { position: relative; }
+  .so-clear::after {
+    content: '';
+    position: absolute;
+    inset: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
 
 .so-body {
   flex: 1;

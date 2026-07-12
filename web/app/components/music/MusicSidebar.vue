@@ -3,14 +3,14 @@
     <!-- Primary nav -->
     <ul class="ms-nav">
       <li>
-        <NuxtLink to="/music" class="ms-nav-item" :class="{ active: section === 'home' }">
+        <NuxtLink to="/music" class="ms-nav-item" :class="{ active: section === 'home' }" :aria-current="section === 'home' ? 'page' : undefined">
           <Icon name="home" :size="20" />
           <span>Home</span>
         </NuxtLink>
       </li>
 
       <li>
-        <NuxtLink to="/music/search" class="ms-nav-item" :class="{ active: section === 'search' }">
+        <NuxtLink to="/music/search" class="ms-nav-item" :class="{ active: section === 'search' }" :aria-current="section === 'search' ? 'page' : undefined">
           <Icon name="search" :size="20" />
           <span>Search</span>
         </NuxtLink>
@@ -21,7 +21,7 @@
       <li @pointerenter="libraryEnter" @pointerleave="libraryLeave">
         <CollapsibleRoot v-model:open="libraryOpen">
           <div class="ms-group-row">
-            <NuxtLink to="/music/library" class="ms-nav-item flex-grow" :class="{ active: libraryActive }">
+            <NuxtLink to="/music/library" class="ms-nav-item flex-grow" :class="{ active: libraryActive }" :aria-current="libraryActive ? 'page' : undefined">
               <Icon name="music" :size="20" />
               <span>Library</span>
             </NuxtLink>
@@ -32,13 +32,13 @@
           <CollapsibleContent class="ms-collapsible">
             <ul class="ms-sub">
               <li>
-                <NuxtLink to="/music/artists" class="ms-sub-item" :class="{ active: section === 'artists' }">Artists</NuxtLink>
+                <NuxtLink to="/music/artists" class="ms-sub-item" :class="{ active: section === 'artists' }" :aria-current="section === 'artists' ? 'page' : undefined">Artists</NuxtLink>
               </li>
               <li>
-                <NuxtLink to="/music/albums" class="ms-sub-item" :class="{ active: section === 'albums' }">Albums</NuxtLink>
+                <NuxtLink to="/music/albums" class="ms-sub-item" :class="{ active: section === 'albums' }" :aria-current="section === 'albums' ? 'page' : undefined">Albums</NuxtLink>
               </li>
               <li>
-                <NuxtLink to="/music/songs" class="ms-sub-item" :class="{ active: section === 'songs' }">Songs</NuxtLink>
+                <NuxtLink to="/music/songs" class="ms-sub-item" :class="{ active: section === 'songs' }" :aria-current="section === 'songs' ? 'page' : undefined">Songs</NuxtLink>
               </li>
             </ul>
           </CollapsibleContent>
@@ -49,7 +49,7 @@
       <li @pointerenter="myMusicEnter" @pointerleave="myMusicLeave">
         <CollapsibleRoot v-model:open="myMusicOpen">
           <div class="ms-group-row">
-            <NuxtLink to="/music/my" class="ms-nav-item flex-grow" :class="{ active: myMusicActive }">
+            <NuxtLink to="/music/my" class="ms-nav-item flex-grow" :class="{ active: myMusicActive }" :aria-current="myMusicActive ? 'page' : undefined">
               <Icon name="user" :size="20" />
               <span>My Music</span>
             </NuxtLink>
@@ -60,16 +60,16 @@
           <CollapsibleContent class="ms-collapsible">
             <ul class="ms-sub">
               <li>
-                <NuxtLink to="/music/my/artists" class="ms-sub-item" :class="{ active: section === 'my-artists' }">Artists</NuxtLink>
+                <NuxtLink to="/music/my/artists" class="ms-sub-item" :class="{ active: section === 'my-artists' }" :aria-current="section === 'my-artists' ? 'page' : undefined">Artists</NuxtLink>
               </li>
               <li>
-                <NuxtLink to="/music/my/albums" class="ms-sub-item" :class="{ active: section === 'my-albums' }">Albums</NuxtLink>
+                <NuxtLink to="/music/my/albums" class="ms-sub-item" :class="{ active: section === 'my-albums' }" :aria-current="section === 'my-albums' ? 'page' : undefined">Albums</NuxtLink>
               </li>
               <li>
-                <NuxtLink to="/music/my/favorites" class="ms-sub-item" :class="{ active: section === 'my-favorites' }">My Favorites</NuxtLink>
+                <NuxtLink to="/music/my/favorites" class="ms-sub-item" :class="{ active: section === 'my-favorites' }" :aria-current="section === 'my-favorites' ? 'page' : undefined">My Favorites</NuxtLink>
               </li>
               <li>
-                <NuxtLink to="/music/stats" class="ms-sub-item" :class="{ active: section === 'stats' }">My Sound</NuxtLink>
+                <NuxtLink to="/music/stats" class="ms-sub-item" :class="{ active: section === 'stats' }" :aria-current="section === 'stats' ? 'page' : undefined">My Sound</NuxtLink>
               </li>
             </ul>
           </CollapsibleContent>
@@ -82,7 +82,7 @@
       <li @pointerenter="stationsEnter" @pointerleave="stationsLeave">
         <CollapsibleRoot v-model:open="stationsOpen">
           <div class="ms-group-row">
-            <NuxtLink to="/music/stations" class="ms-nav-item flex-grow" :class="{ active: stationsActive }">
+            <NuxtLink to="/music/stations" class="ms-nav-item flex-grow" :class="{ active: stationsActive }" :aria-current="stationsActive ? 'page' : undefined">
               <Icon name="compass" :size="20" />
               <span>Stations</span>
             </NuxtLink>
@@ -93,13 +93,13 @@
           <CollapsibleContent class="ms-collapsible">
             <ul class="ms-sub">
               <li>
-                <NuxtLink to="/music/stations/mixes" class="ms-sub-item" :class="{ active: section === 'stations-mixes' }">Mixes</NuxtLink>
+                <NuxtLink to="/music/stations/mixes" class="ms-sub-item" :class="{ active: section === 'stations-mixes' }" :aria-current="section === 'stations-mixes' ? 'page' : undefined">Mixes</NuxtLink>
               </li>
               <li>
-                <NuxtLink to="/music/stations/builder" class="ms-sub-item" :class="{ active: section === 'stations-builder' }">Mix Builder</NuxtLink>
+                <NuxtLink to="/music/stations/builder" class="ms-sub-item" :class="{ active: section === 'stations-builder' }" :aria-current="section === 'stations-builder' ? 'page' : undefined">Mix Builder</NuxtLink>
               </li>
               <li>
-                <NuxtLink to="/music/browse" class="ms-sub-item" :class="{ active: section?.startsWith('browse') }">Moods · Genres · Tempo</NuxtLink>
+                <NuxtLink to="/music/browse" class="ms-sub-item" :class="{ active: section?.startsWith('browse') }" :aria-current="section?.startsWith('browse') ? 'page' : undefined">Moods · Genres · Tempo</NuxtLink>
               </li>
             </ul>
           </CollapsibleContent>
@@ -107,13 +107,13 @@
       </li>
 
       <li>
-        <NuxtLink to="/music/podcasts" class="ms-nav-item" :class="{ active: section === 'podcasts' }">
+        <NuxtLink to="/music/podcasts" class="ms-nav-item" :class="{ active: section === 'podcasts' }" :aria-current="section === 'podcasts' ? 'page' : undefined">
           <Icon name="mic" :size="20" />
           <span>Podcasts</span>
         </NuxtLink>
       </li>
       <li>
-        <NuxtLink to="/music/radio" class="ms-nav-item" :class="{ active: section === 'radio' }">
+        <NuxtLink to="/music/radio" class="ms-nav-item" :class="{ active: section === 'radio' }" :aria-current="section === 'radio' ? 'page' : undefined">
           <Icon name="radio" :size="20" />
           <span>Internet Radio</span>
         </NuxtLink>
@@ -133,7 +133,7 @@
     <div class="ms-section-label">Playlists</div>
     <ul class="ms-playlists">
       <li>
-        <NuxtLink to="/music/loved" class="ms-pl-item" :class="{ active: section === 'loved' }">
+        <NuxtLink to="/music/loved" class="ms-pl-item" :class="{ active: section === 'loved' }" :aria-current="section === 'loved' ? 'page' : undefined">
           <div class="ms-pl-cover ms-pl-cover-loved">
             <Icon name="star" :size="20" weight="fill" />
           </div>
@@ -148,6 +148,7 @@
           :to="`/music/playlist/${pl.id}`"
           class="ms-pl-item"
           :class="{ active: section === 'playlist-' + pl.id, 'drop-target': !isCoarse && dragDrop.dragState.overPlaylistId === pl.id }"
+          :aria-current="section === 'playlist-' + pl.id ? 'page' : undefined"
           @dragover="!isCoarse && dragDrop.onPlaylistDragOver($event, pl.id)"
           @dragleave="!isCoarse && dragDrop.onPlaylistDragLeave()"
           @drop="!isCoarse && dragDrop.onPlaylistDrop($event, pl.id, pl.name)"

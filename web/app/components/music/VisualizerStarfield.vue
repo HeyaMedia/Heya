@@ -10,7 +10,7 @@
   motion-blur streaks (longer the louder it gets).
 -->
 <template>
-  <canvas ref="canvasRef" class="viz-star" />
+  <canvas ref="canvasRef" class="viz-star" aria-hidden="true" />
 </template>
 
 <script setup lang="ts">
@@ -47,7 +47,19 @@ let dpr = 1
 
 let rafId = 0
 let cancelled = false
-const shouldAnimate = computed(() => pageVisibility.value === 'visible')
+// `prefers-reduced-motion` — the global CSS reset (heya.css) doesn't reach a
+// continuous rAF loop, so it's gated here explicitly. Stops the loop (last
+// frame stays on screen) rather than blanking the canvas.
+const prefersReducedMotion = ref(false)
+let motionMq: MediaQueryList | null = null
+function onMotionChange(e: MediaQueryListEvent) { prefersReducedMotion.value = e.matches }
+onMounted(() => {
+  motionMq = window.matchMedia('(prefers-reduced-motion: reduce)')
+  prefersReducedMotion.value = motionMq.matches
+  motionMq.addEventListener('change', onMotionChange)
+})
+onUnmounted(() => motionMq?.removeEventListener('change', onMotionChange))
+const shouldAnimate = computed(() => pageVisibility.value === 'visible' && !prefersReducedMotion.value)
 
 function fitCanvas(canvas: HTMLCanvasElement) {
   dpr = Math.max(1, window.devicePixelRatio || 1)

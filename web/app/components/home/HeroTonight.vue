@@ -6,6 +6,7 @@
         :src="bgUrl"
         :width="1920"
         :quality="70"
+        alt=""
         class="tonight-bg-img"
         @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
       />
@@ -36,6 +37,7 @@
             <NuxtImg
               :src="stillUrl(it)"
               :width="480"
+              alt=""
               class="tonight-still-img"
               @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
             />

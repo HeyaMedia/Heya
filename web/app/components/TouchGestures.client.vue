@@ -21,21 +21,26 @@
   nothing to prerender — it renders only a transient indicator.
 -->
 <template>
-  <div
-    v-if="isCoarse"
-    class="ptr"
-    :class="{ 'ptr-on': pullY > 0 || refreshing }"
-    :style="{ transform: `translate(-50%, ${Math.round(pullY)}px)`, opacity: progress }"
-    aria-hidden="true"
-  >
-    <div class="ptr-ring">
-      <span
-        class="ptr-spinner"
-        :class="{ spin: refreshing || pullY >= REFRESH_AT }"
-        :style="refreshing ? undefined : { transform: `rotate(${progress * 360}deg)` }"
-      />
+  <template v-if="isCoarse">
+    <div
+      class="ptr"
+      :class="{ 'ptr-on': pullY > 0 || refreshing }"
+      :style="{ transform: `translate(-50%, ${Math.round(pullY)}px)`, opacity: progress }"
+      aria-hidden="true"
+    >
+      <div class="ptr-ring">
+        <span
+          class="ptr-spinner"
+          :class="{ spin: refreshing || pullY >= REFRESH_AT }"
+          :style="refreshing ? undefined : { transform: `rotate(${progress * 360}deg)` }"
+        />
+      </div>
     </div>
-  </div>
+    <!-- The visual indicator above is aria-hidden (it's a decorative ring
+         that tracks the finger 1:1) — announce the refresh lifecycle to
+         screen readers separately instead. -->
+    <span class="sr-only" role="status" aria-live="polite">{{ liveMessage }}</span>
+  </template>
 </template>
 
 <script setup lang="ts">
@@ -57,6 +62,7 @@ const REFRESH_AT = 72       // px pull past which release triggers a refresh
 const pullY = ref(0)
 const refreshing = ref(false)
 const progress = computed(() => Math.min(1, pullY.value / REFRESH_AT))
+const liveMessage = ref('')
 
 // --- Per-gesture scratch (non-reactive) ------------------------------------
 let startX = 0
@@ -136,6 +142,7 @@ function onEnd() {
 async function doRefresh() {
   refreshing.value = true
   pullY.value = 56 // rest the spinner in view while queries refetch
+  liveMessage.value = 'Refreshing…'
   try {
     // Refetch the data behind the current page (every active Colada query
     // observer) instead of a full navigation — keeps scroll + app state, just
@@ -148,6 +155,7 @@ async function doRefresh() {
   } catch { /* refetch failures surface through the pages themselves */ }
   refreshing.value = false
   pullY.value = 0
+  liveMessage.value = 'Refreshed'
 }
 
 onMounted(() => {

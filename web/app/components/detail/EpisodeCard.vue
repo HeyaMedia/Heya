@@ -22,11 +22,19 @@ const emit = defineEmits<{
 
 <template>
   <div class="epc" :class="{ 'epc-watched': watched }">
-    <div class="epc-still" @click.prevent="hasFile ? emit('play') : undefined">
-      <NuxtImg :src="stillUrl" :width="500" :quality="80" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+    <div
+      class="epc-still"
+      :role="hasFile ? 'button' : undefined"
+      :tabindex="hasFile ? 0 : undefined"
+      :aria-label="hasFile ? `Play ${title}` : undefined"
+      @click.prevent="hasFile ? emit('play') : undefined"
+      @keydown.enter="hasFile && emit('play')"
+      @keydown.space.prevent="hasFile && emit('play')"
+    >
+      <NuxtImg :src="stillUrl" :width="500" :quality="80" :alt="title" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
       <div class="epc-gradient" />
 
-      <button v-if="typeof watched === 'boolean'" class="epc-check" :class="{ active: watched }" @click.prevent.stop="emit('toggleWatched')" title="Toggle watched">
+      <button v-if="typeof watched === 'boolean'" class="epc-check" :class="{ active: watched }" :aria-pressed="watched" aria-label="Toggle watched" title="Toggle watched" @click.prevent.stop="emit('toggleWatched')">
         <Icon name="check" :size="12" />
       </button>
 

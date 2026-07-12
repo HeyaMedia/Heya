@@ -12,6 +12,7 @@
         :src="bgUrl"
         :width="1920"
         :quality="75"
+        alt=""
         class="newin-bg-img"
         @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
       />

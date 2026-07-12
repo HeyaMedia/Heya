@@ -12,17 +12,21 @@
     </PopoverTrigger>
     <PopoverPortal>
       <PopoverContent class="surface st-pop" side="top" :side-offset="12" align="end" :collision-padding="12">
-        <div class="st-head">Sleep timer</div>
-        <button
-          v-for="opt in OPTIONS"
-          :key="opt.label"
-          class="surface-item st-item"
-          :class="{ on: isActive(opt) }"
-          @click="choose(opt)"
-        >
-          <span>{{ opt.label }}</span>
-          <Icon v-if="isActive(opt)" name="check" :size="13" class="st-check" />
-        </button>
+        <div id="st-head" class="st-head">Sleep timer</div>
+        <div role="radiogroup" aria-labelledby="st-head">
+          <button
+            v-for="opt in OPTIONS"
+            :key="opt.label"
+            class="surface-item st-item"
+            :class="{ on: isActive(opt) }"
+            role="radio"
+            :aria-checked="isActive(opt)"
+            @click="choose(opt)"
+          >
+            <span>{{ opt.label }}</span>
+            <Icon v-if="isActive(opt)" name="check" :size="13" class="st-check" />
+          </button>
+        </div>
         <div v-if="sleep.active.value" class="st-divider" />
         <button v-if="sleep.active.value" class="surface-item st-item st-off" @click="turnOff">
           <span>Turn off</span>

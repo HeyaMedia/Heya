@@ -7,8 +7,8 @@
     <!-- Hero with crossfade backdrops -->
     <div class="hero-section">
       <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
-        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: showA }" />
-        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: !showA }" />
+        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: showA }" />
+        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: !showA }" />
         <div class="hero-bg-fade" />
       </div>
 
@@ -16,7 +16,7 @@
         <div class="hero-left">
           <div class="hero-poster">
             <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
-            <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
+            <button class="zoom-btn" aria-label="Expand poster" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
           </div>
 
           <!-- Stream / media info, beneath the poster -->
@@ -56,10 +56,21 @@
             </button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No File</button>
             <button class="btn btn-secondary" :style="listStyle" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
-            <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
+            <button
+              class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }"
+              :aria-label="isFavorited ? 'Remove from favorites' : 'Add to favorites'"
+              :aria-pressed="isFavorited"
+              @click="toggleFavorite"
+            >
               <Icon :name="isFavorited ? 'heartfill' : 'heart'" :size="20" />
             </button>
-            <button class="btn-icon" :style="{ color: isWatched ? 'var(--good)' : 'var(--fg-1)' }" @click="toggleWatched" :title="isWatched ? 'Mark as unwatched' : 'Mark as watched'">
+            <button
+              class="btn-icon" :style="{ color: isWatched ? 'var(--good)' : 'var(--fg-1)' }"
+              :aria-label="isWatched ? 'Mark as unwatched' : 'Mark as watched'"
+              :aria-pressed="isWatched"
+              :title="isWatched ? 'Mark as unwatched' : 'Mark as watched'"
+              @click="toggleWatched"
+            >
               <Icon name="check" :size="20" />
             </button>
             <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">
@@ -125,7 +136,7 @@
       />
 
       <!-- Expand backdrop -->
-      <button v-if="backdropAssets.length > 0" class="hero-expand" @click="openBackdropLightbox">
+      <button v-if="backdropAssets.length > 0" class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
         <Icon name="expand" :size="14" />
       </button>
     </div>
@@ -137,17 +148,21 @@
       <!-- Extras -->
       <div v-if="groupedExtras.length" class="detail-section">
         <div class="section-row-head">
-          <h3 class="section-title-lg">Extras</h3>
+          <h2 class="section-title-lg">Extras</h2>
         </div>
         <div v-for="group in groupedExtras" :key="group.type" class="extras-group">
           <div class="extras-group-head">
             <div class="extras-group-label">{{ formatExtraType(group.type) }} <span class="tab-count">{{ group.items.length }}</span></div>
             <div class="scroll-controls">
               <template v-if="!extrasExpanded[group.type]">
-                <button class="scroll-ctrl-btn" @click="scrollExtras(group.type, 'left')"><Icon name="chevleft" :size="14" /></button>
-                <button class="scroll-ctrl-btn" @click="scrollExtras(group.type, 'right')"><Icon name="chevright" :size="14" /></button>
+                <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollExtras(group.type, 'left')"><Icon name="chevleft" :size="14" /></button>
+                <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollExtras(group.type, 'right')"><Icon name="chevright" :size="14" /></button>
               </template>
-              <button class="scroll-ctrl-btn expand" @click="extrasExpanded[group.type] = !extrasExpanded[group.type]">
+              <button
+                class="scroll-ctrl-btn expand" aria-label="Toggle expanded view"
+                :aria-expanded="!!extrasExpanded[group.type]"
+                @click="extrasExpanded[group.type] = !extrasExpanded[group.type]"
+              >
                 <Icon name="chevdown" :size="14" :style="{ transform: extrasExpanded[group.type] ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
               </button>
             </div>
@@ -169,7 +184,7 @@
 
       <!-- Videos -->
       <div v-if="detail.videos?.length" class="detail-section">
-        <div class="section-row-head"><h3 class="section-title-lg">Videos</h3></div>
+        <div class="section-row-head"><h2 class="section-title-lg">Videos</h2></div>
         <div class="hscroll">
           <button v-for="(v, i) in detail.videos" :key="v.id" class="video-card" @click="openVideo(v.video_key, v.name)">
             <MediaCard
@@ -199,7 +214,7 @@
         <iframe
           v-if="videoModal"
           class="video-dialog-iframe"
-          :src="`https://www.youtube-nocookie.com/embed/${videoModal.key}?autoplay=1&rel=0`"
+          :src="videoEmbedSrc(videoModal.key)"
           frameborder="0"
           allow="autoplay; encrypted-media; picture-in-picture"
           allowfullscreen
@@ -223,11 +238,11 @@
            adds the rest as heya.media links (new tab, fetch-on-demand). -->
       <div v-if="visibleRecs.length" class="detail-section">
         <div class="section-row-head">
-          <h3 class="section-title-lg">More Like This</h3>
+          <h2 class="section-title-lg">More Like This</h2>
           <div v-if="recsOverflows" class="scroll-controls">
-            <button class="scroll-ctrl-btn" @click="scrollRecs('left')"><Icon name="chevleft" :size="14" /></button>
-            <button class="scroll-ctrl-btn" @click="scrollRecs('right')"><Icon name="chevright" :size="14" /></button>
-            <button class="scroll-ctrl-btn expand" @click="recsExpanded = !recsExpanded">
+            <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollRecs('left')"><Icon name="chevleft" :size="14" /></button>
+            <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollRecs('right')"><Icon name="chevright" :size="14" /></button>
+            <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="recsExpanded" @click="recsExpanded = !recsExpanded">
               <Icon name="chevdown" :size="14" :style="{ transform: recsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
             </button>
           </div>
@@ -365,6 +380,13 @@ function recPosterUrl(r: any): string {
 
 function openVideo(key: string, title: string) {
   videoModal.value = { key, title }
+}
+
+// Autoplay is a motion trigger — skip it under prefers-reduced-motion so
+// opening the trailer dialog doesn't immediately start moving video.
+function videoEmbedSrc(key: string): string {
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  return `https://www.youtube-nocookie.com/embed/${key}?autoplay=${reduceMotion ? 0 : 1}&rel=0`
 }
 
 // Crossfade backdrops — shared carousel engine.
@@ -689,6 +711,12 @@ watch(detail, async (d) => {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 12px; color: var(--fg-2); padding: 6px 14px;
   border-radius: var(--r-md); border: 1px solid var(--border);
+  /* Glass-backed like .hero-info .chip (heya.css) — this had no background
+     at all, just a border ring, so the "Part of X" link floated bare over
+     the raw hero backdrop. */
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   transition: all 0.15s;
 }
 .collection-badge:hover { background: var(--gold-soft); color: var(--gold); border-color: transparent; }

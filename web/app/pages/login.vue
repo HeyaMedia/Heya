@@ -13,19 +13,19 @@
 
       <form @submit.prevent="submit">
         <div v-if="isRegister" class="field">
-          <label>Email</label>
-          <input v-model="email" type="email" placeholder="you@example.com" required />
+          <label for="login-email">Email</label>
+          <input id="login-email" v-model="email" type="email" placeholder="you@example.com" autocomplete="email" required />
         </div>
         <div class="field">
-          <label>Username</label>
-          <input v-model="username" type="text" placeholder="username" required />
+          <label for="login-username">Username</label>
+          <input id="login-username" v-model="username" type="text" placeholder="username" autocomplete="username" required />
         </div>
         <div class="field">
-          <label>Password</label>
-          <input v-model="password" type="password" placeholder="••••••••" required />
+          <label for="login-password">Password</label>
+          <input id="login-password" v-model="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
         </div>
 
-        <div v-if="error" class="error-msg">{{ error }}</div>
+        <div v-if="error" class="error-msg" role="alert">{{ error }}</div>
 
         <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px" :disabled="loading">
           {{ loading ? 'Please wait…' : (isRegister ? 'Create Account' : 'Sign In') }}

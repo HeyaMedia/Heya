@@ -152,7 +152,7 @@ async function submit() {
 .cpm-textarea { resize: vertical; min-height: 64px; }
 .cpm-error {
   font-size: 12px;
-  color: #e34;
+  color: var(--bad);
   margin-top: 4px;
 }
 .cpm-actions {

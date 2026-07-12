@@ -102,7 +102,7 @@ LIMIT $2 OFFSET $3;
 
 -- name: ListMediaItemsByType :many
 SELECT * FROM media_item_cards
-WHERE media_type = $1
+WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
 
@@ -110,7 +110,7 @@ LIMIT $2 OFFSET $3;
 -- Same page shape as ListMediaItemsByType but newest-first — powers the
 -- home "Recently Added" rails (created_at is when the first file matched).
 SELECT * FROM media_item_cards
-WHERE media_type = $1
+WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3;
 

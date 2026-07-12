@@ -174,7 +174,7 @@ function stateLabel(state: string): string {
     <div class="sip-header">
       <div class="sip-dot" />
       <span>Stream Information</span>
-      <button class="sip-mode-btn" :title="mode === 'compact' ? 'Show diagnostics' : 'Hide diagnostics'" @click="toggleMode">
+      <button class="sip-mode-btn" :title="mode === 'compact' ? 'Show diagnostics' : 'Hide diagnostics'" :aria-pressed="mode === 'detailed'" @click="toggleMode">
         {{ mode === 'compact' ? 'Detailed' : 'Compact' }}
       </button>
       <span class="sip-id">#{{ fileId }}</span>

@@ -132,7 +132,8 @@ SELECT count(*)
 FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE mi.media_type = $1
+WHERE (mi.media_type = $1
+       OR ($1::text = 'tv' AND mi.media_type = 'anime'))
   AND ($2::bigint = 0 OR mi.library_id = $2)
   AND (cardinality($3::bigint[]) = 0 OR mi.id = ANY($3::bigint[]))
   AND ($4::text = '' OR mi.title ILIKE '%' || $4 || '%')
@@ -527,7 +528,8 @@ FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 LEFT JOIN artists ar ON ar.media_item_id = mi.id
-WHERE mi.media_type = $1
+WHERE (mi.media_type = $1
+       OR ($1::text = 'tv' AND mi.media_type = 'anime'))
   AND ($2::bigint = 0 OR mi.library_id = $2)
   AND (cardinality($3::bigint[]) = 0 OR mi.id = ANY($3::bigint[]))
   AND ($4::text = '' OR mi.title ILIKE '%' || $4 || '%')

@@ -151,6 +151,7 @@ onMounted(() => { ensureSources() })
         <label class="ss-switch" :title="lockTooltip('subsonic.enabled')">
           <input
             type="checkbox"
+            aria-label="Enable Subsonic-compatible API"
             :checked="enabled"
             :disabled="loading || saving || isLocked('subsonic.enabled')"
             @change="onToggle(($event.target as HTMLInputElement).checked)"
@@ -159,7 +160,7 @@ onMounted(() => { ensureSources() })
         </label>
       </template>
 
-      <div v-if="flash" class="ss-flash" :class="flash.kind">{{ flash.text }}</div>
+      <div v-if="flash" class="ss-flash" :class="flash.kind" :role="flash.kind === 'err' ? 'alert' : 'status'" aria-live="polite">{{ flash.text }}</div>
 
       <template v-if="enabled">
         <KVTable :rows="[
@@ -253,7 +254,7 @@ onMounted(() => { ensureSources() })
   transition: transform 0.15s ease;
 }
 .ss-switch input:checked + .ss-slider {
-  background: var(--accent, #7c5cff);
+  background: var(--accent);
 }
 .ss-switch input:checked + .ss-slider::before {
   transform: translateX(18px);

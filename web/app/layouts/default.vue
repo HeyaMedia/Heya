@@ -6,6 +6,10 @@
     individual AppTooltips can still override via :delay.
   -->
   <TooltipProvider :delay-duration="400" :skip-delay-duration="200">
+    <!-- Skip-to-content: first focusable element in the layout, hidden until
+         a keyboard user Tabs to it (see .skip-link in heya.css). Jumps focus
+         past the persistent top bar / nav straight into the page. -->
+    <a href="#main-content" class="skip-link">Skip to content</a>
     <div class="app" :class="{ 'bg-reveal': bgCtl.reveal }">
       <!-- Ambient rotating library-artwork background. First child +
            z-index:-1 = paints above .app's own background, below all
@@ -15,9 +19,9 @@
       <AmbientBackdrop />
       <AmbientControls />
       <AppTopBar />
-      <div class="app-main">
+      <main id="main-content" class="app-main" tabindex="-1">
         <slot />
-      </div>
+      </main>
       <BottomNav />
       <ConfirmDialog />
 

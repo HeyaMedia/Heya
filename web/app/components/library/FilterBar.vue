@@ -57,6 +57,7 @@
                       :key="g"
                       class="fb-chip"
                       :class="{ active: local.genres.includes(g) }"
+                      :aria-pressed="local.genres.includes(g)"
                       @click="toggleGenre(g)"
                     >
                       {{ g }}<span v-if="genreCounts?.[g]" class="fb-chip-count">{{ genreCounts?.[g] }}</span>
@@ -69,12 +70,12 @@
                     <div class="fb-sec-label">Year</div>
                     <div class="fb-range">
                       <input
-                        type="number" class="fb-input" placeholder="From" :value="local.yearMin"
+                        type="number" class="fb-input" placeholder="From" aria-label="Year from" :value="local.yearMin"
                         @input="local.yearMin = parseNum($event); emitFilters()"
                       >
                       <span class="fb-range-sep">–</span>
                       <input
-                        type="number" class="fb-input" placeholder="To" :value="local.yearMax"
+                        type="number" class="fb-input" placeholder="To" aria-label="Year to" :value="local.yearMax"
                         @input="local.yearMax = parseNum($event); emitFilters()"
                       >
                     </div>
@@ -83,12 +84,12 @@
                     <div class="fb-sec-label">Rating</div>
                     <div class="fb-range">
                       <input
-                        type="number" class="fb-input" placeholder="Min" step="0.5" min="0" max="10" :value="local.ratingMin"
+                        type="number" class="fb-input" placeholder="Min" aria-label="Rating min" step="0.5" min="0" max="10" :value="local.ratingMin"
                         @input="local.ratingMin = parseFloat(($event.target as HTMLInputElement).value) || null; emitFilters()"
                       >
                       <span class="fb-range-sep">–</span>
                       <input
-                        type="number" class="fb-input" placeholder="Max" step="0.5" min="0" max="10" :value="local.ratingMax"
+                        type="number" class="fb-input" placeholder="Max" aria-label="Rating max" step="0.5" min="0" max="10" :value="local.ratingMax"
                         @input="local.ratingMax = parseFloat(($event.target as HTMLInputElement).value) || null; emitFilters()"
                       >
                     </div>
@@ -101,6 +102,7 @@
                     <button
                       v-for="opt in VIDEO_FORMATS" :key="opt.value"
                       class="fb-chip" :class="{ active: local.videoFormats.includes(opt.value) }"
+                      :aria-pressed="local.videoFormats.includes(opt.value)"
                       @click="toggleFormat('videoFormats', opt.value)"
                     >{{ opt.label }}</button>
                   </div>
@@ -112,6 +114,7 @@
                     <button
                       v-for="opt in AUDIO_FORMATS" :key="opt.value"
                       class="fb-chip" :class="{ active: local.audioFormats.includes(opt.value) }"
+                      :aria-pressed="local.audioFormats.includes(opt.value)"
                       @click="toggleFormat('audioFormats', opt.value)"
                     >{{ opt.label }}</button>
                   </div>
@@ -124,6 +127,7 @@
                       <button
                         v-for="r in ['4k', '1080p', '720p', 'sd']" :key="r"
                         class="fb-chip" :class="{ active: local.resolutions.includes(r) }"
+                        :aria-pressed="local.resolutions.includes(r)"
                         @click="toggleResolution(r)"
                       >{{ r === '4k' ? '4K' : r === 'sd' ? 'SD' : r }}</button>
                     </div>
@@ -134,6 +138,7 @@
                       <button
                         v-for="opt in [{ v: 'all', l: 'All' }, { v: 'watched', l: 'Seen' }, { v: 'unwatched', l: 'Unseen' }]"
                         :key="opt.v" :class="{ active: local.watched === opt.v }"
+                        :aria-pressed="local.watched === opt.v"
                         @click="local.watched = opt.v as any; emitFilters()"
                       >{{ opt.l }}</button>
                     </div>
@@ -143,10 +148,11 @@
                 <div v-if="availableLanguages.length > 1" class="fb-sec">
                   <div class="fb-sec-label">Language</div>
                   <div class="fb-chips">
-                    <button class="fb-chip" :class="{ active: local.language === null }" @click="local.language = null; emitFilters()">All</button>
+                    <button class="fb-chip" :class="{ active: local.language === null }" :aria-pressed="local.language === null" @click="local.language = null; emitFilters()">All</button>
                     <button
                       v-for="l in availableLanguages.slice(0, 12)" :key="l"
                       class="fb-chip" :class="{ active: local.language === l }"
+                      :aria-pressed="local.language === l"
                       @click="local.language = local.language === l ? null : l; emitFilters()"
                     >{{ langName(l) }}</button>
                   </div>
@@ -158,7 +164,13 @@
                     <div class="fb-ta">
                       <input v-model="personQuery" type="text" class="fb-input fb-ta-input" placeholder="Search people..." @input="searchPeople">
                       <div v-if="personResults.length > 0" class="fb-ta-drop">
-                        <div v-for="p in personResults" :key="p.id" class="fb-ta-opt" @click="addPerson(p)">{{ p.name }}</div>
+                        <div
+                          v-for="p in personResults" :key="p.id" class="fb-ta-opt"
+                          role="button" tabindex="0"
+                          @click="addPerson(p)"
+                          @keydown.enter="addPerson(p)"
+                          @keydown.space.prevent="addPerson(p)"
+                        >{{ p.name }}</div>
                       </div>
                     </div>
                     <div v-if="local.personNames.length" class="fb-chips" style="margin-top: 6px">
@@ -173,7 +185,13 @@
                     <div class="fb-ta">
                       <input v-model="studioQuery" type="text" class="fb-input fb-ta-input" placeholder="Search studios..." @input="searchStudios">
                       <div v-if="studioResults.length > 0" class="fb-ta-drop">
-                        <div v-for="st in studioResults" :key="st.id" class="fb-ta-opt" @click="addStudio(st)">{{ st.name }}</div>
+                        <div
+                          v-for="st in studioResults" :key="st.id" class="fb-ta-opt"
+                          role="button" tabindex="0"
+                          @click="addStudio(st)"
+                          @keydown.enter="addStudio(st)"
+                          @keydown.space.prevent="addStudio(st)"
+                        >{{ st.name }}</div>
                       </div>
                     </div>
                     <div v-if="local.studioNames.length" class="fb-chips" style="margin-top: 6px">
@@ -221,6 +239,7 @@
               class="view-toggle-btn"
               :class="{ active: view === v.value }"
               :aria-label="v.label"
+              :aria-pressed="view === v.value"
               @click="$emit('view', v.value)"
             >
               <Icon :name="v.icon" :size="15" />

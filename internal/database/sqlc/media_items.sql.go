@@ -639,7 +639,7 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 
 const listMediaItemsByType = `-- name: ListMediaItemsByType :many
 SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards
-WHERE media_type = $1
+WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
 `
@@ -709,7 +709,7 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 
 const listMediaItemsByTypeRecent = `-- name: ListMediaItemsByTypeRecent :many
 SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards
-WHERE media_type = $1
+WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3
 `

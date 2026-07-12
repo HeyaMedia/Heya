@@ -82,7 +82,7 @@
           />
         </div>
         <AppTooltip :label="shuffled ? 'Shuffle on' : 'Shuffle'">
-          <button class="btn-icon" :class="{ active: shuffled }" @click="toggleShuffle">
+          <button class="btn-icon" :class="{ active: shuffled }" :aria-pressed="shuffled" @click="toggleShuffle">
             <Icon name="shuffle" :size="16" />
           </button>
         </AppTooltip>
@@ -120,7 +120,7 @@
           <button class="btn-icon" :disabled="!currentTrack" @click="nextTrack"><Icon name="next" :size="16" /></button>
         </AppTooltip>
         <AppTooltip :label="repeatLabel">
-          <button class="btn-icon" :class="{ active: repeatMode !== 'off' }" @click="cycleRepeat" style="position: relative">
+          <button class="btn-icon" :class="{ active: repeatMode !== 'off' }" :aria-pressed="repeatMode !== 'off'" @click="cycleRepeat" style="position: relative">
             <Icon name="repeat" :size="16" />
             <span v-if="repeatMode === 'one'" class="repeat-badge">1</span>
           </button>
@@ -151,23 +151,23 @@
          popover state) never double-mount. -->
     <div v-if="!isCompact" class="pb-right">
       <AppTooltip label="Lyrics">
-        <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'lyrics' }" @click="toggleLyrics"><Icon name="lyrics" :size="16" /></button>
+        <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'lyrics' }" :aria-pressed="queueOpen && sideTab === 'lyrics'" @click="toggleLyrics"><Icon name="lyrics" :size="16" /></button>
       </AppTooltip>
       <AppTooltip label="Queue">
-        <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'queue' }" @click="toggleQueue"><Icon name="queue" :size="16" /></button>
+        <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'queue' }" :aria-pressed="queueOpen && sideTab === 'queue'" @click="toggleQueue"><Icon name="queue" :size="16" /></button>
       </AppTooltip>
       <AppTooltip label="Equalizer">
-        <button class="btn-icon" :class="{ active: eqOpen }" @click="eqOpen = !eqOpen"><Icon name="eq" :size="16" /></button>
+        <button class="btn-icon" :class="{ active: eqOpen }" :aria-pressed="eqOpen" @click="eqOpen = !eqOpen"><Icon name="eq" :size="16" /></button>
       </AppTooltip>
       <AppTooltip label="Visualizer">
-        <button class="pb-viz-btn" :class="{ active: vis.fullscreenOpen.value }" @click="vis.fullscreenOpen.value = true">
+        <button class="pb-viz-btn" :class="{ active: vis.fullscreenOpen.value }" :aria-pressed="vis.fullscreenOpen.value" @click="vis.fullscreenOpen.value = true">
           <VisualizerSpectrum variant="mini" :active="playing" class="pb-viz-meter" />
         </button>
       </AppTooltip>
       <SleepTimer />
       <div class="pb-volume" @wheel.prevent="onVolumeWheel">
         <AppTooltip :label="muted ? 'Unmute' : 'Mute'">
-          <button class="btn-icon" @click="toggleMute">
+          <button class="btn-icon" :aria-pressed="muted" @click="toggleMute">
             <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="16" />
           </button>
         </AppTooltip>
@@ -265,7 +265,7 @@
              reads as an outside interaction). A styled native input sidesteps
              reka entirely. -->
         <div class="pb-more-row pb-more-volume-row" @click.stop @wheel.prevent="onVolumeWheel">
-          <button class="btn-icon" :class="{ active: muted }" @click="toggleMute">
+          <button class="btn-icon" :class="{ active: muted }" :aria-pressed="muted" @click="toggleMute">
             <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="16" />
           </button>
           <input

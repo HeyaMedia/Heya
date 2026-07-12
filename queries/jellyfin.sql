@@ -42,7 +42,8 @@ FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 LEFT JOIN artists ar ON ar.media_item_id = mi.id
-WHERE mi.media_type = sqlc.arg(media_type)
+WHERE (mi.media_type = sqlc.arg(media_type)
+       OR (sqlc.arg(media_type)::text = 'tv' AND mi.media_type = 'anime'))
   AND (sqlc.arg(library_id)::bigint = 0 OR mi.library_id = sqlc.arg(library_id))
   AND (cardinality(sqlc.arg(only_ids)::bigint[]) = 0 OR mi.id = ANY(sqlc.arg(only_ids)::bigint[]))
   AND (sqlc.arg(search)::text = '' OR mi.title ILIKE '%' || sqlc.arg(search) || '%')
@@ -79,7 +80,8 @@ SELECT count(*)
 FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE mi.media_type = sqlc.arg(media_type)
+WHERE (mi.media_type = sqlc.arg(media_type)
+       OR (sqlc.arg(media_type)::text = 'tv' AND mi.media_type = 'anime'))
   AND (sqlc.arg(library_id)::bigint = 0 OR mi.library_id = sqlc.arg(library_id))
   AND (cardinality(sqlc.arg(only_ids)::bigint[]) = 0 OR mi.id = ANY(sqlc.arg(only_ids)::bigint[]))
   AND (sqlc.arg(search)::text = '' OR mi.title ILIKE '%' || sqlc.arg(search) || '%')

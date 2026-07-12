@@ -70,7 +70,11 @@
               >
                 <div
                   class="grid-tile card-tile"
+                  role="link"
+                  tabindex="0"
                   @click="navigateTo(mediaUrl(item))"
+                  @keydown.enter="navigateTo(mediaUrl(item))"
+                  @keydown.space.prevent="navigateTo(mediaUrl(item))"
                 >
                   <Poster :idx="rowIdx * gridCols + colIdx" :src="usePosterUrl(item)" :aspect="'2/3'" :class="{ 'poster--missing': item.available === false }">
                     <MediaMissingBadge v-if="item.available === false" />
@@ -107,7 +111,11 @@
               <div
                 class="list-row books-list-row"
                 :class="{ 'list-row-phone': isPhone }"
+                role="link"
+                tabindex="0"
                 @click="navigateTo(mediaUrl(item))"
+                @keydown.enter="navigateTo(mediaUrl(item))"
+                @keydown.space.prevent="navigateTo(mediaUrl(item))"
               >
                 <template v-if="isPhone">
                   <Poster :idx="0" :src="usePosterUrl(item)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" :class="{ 'poster--missing': item.available === false }" />

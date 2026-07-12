@@ -42,7 +42,12 @@
               <Icon name="check" :size="14" />
               {{ allWatched ? 'Unmark season' : 'Mark season watched' }}
             </button>
-            <button class="btn-icon" :style="{ color: seasonFavorited ? 'var(--bad)' : 'var(--fg-2)' }" @click="toggleFavorite">
+            <button
+              class="btn-icon" :style="{ color: seasonFavorited ? 'var(--bad)' : 'var(--fg-2)' }"
+              :aria-label="seasonFavorited ? 'Remove season from loved' : 'Add season to loved'"
+              :aria-pressed="seasonFavorited"
+              @click="toggleFavorite"
+            >
               <Icon :name="seasonFavorited ? 'heartfill' : 'heart'" :size="18" />
             </button>
             <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">

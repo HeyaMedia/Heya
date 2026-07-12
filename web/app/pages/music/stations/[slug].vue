@@ -18,6 +18,7 @@
         type="button"
         class="ms-st-decade-btn"
         :class="{ active: activeDecade === d.value }"
+        :aria-pressed="activeDecade === d.value"
         @click="setDecade(d.value)"
       >{{ d.label }}</button>
     </div>
@@ -166,8 +167,17 @@ function refetch() { stationQuery.refetch() }
   box-shadow: 0 6px 16px rgb(var(--shade) / 0.35);
 }
 .ms-st-text { flex: 1; min-width: 0; }
-.ms-st-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
-.ms-st-sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; max-width: 640px; }
+/* Hand-rolled header (doesn't use the shared MusicPageHead), so it was
+   missing that component's halo — the title/subtitle floated bare over the
+   same ambient artwork MusicPageHead protects on every other music page. */
+.ms-st-title {
+  font-size: 30px; font-weight: 700; letter-spacing: -0.01em;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
+.ms-st-sub {
+  color: var(--fg-2); font-size: 13px; margin-top: 4px; max-width: 640px;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
 
 .ms-st-decade-row {
   display: flex; gap: 4px;

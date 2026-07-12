@@ -201,6 +201,7 @@ onBeforeUnmount(() => {
               :key="lvl"
               class="level-btn"
               :class="{ active: logLevel.level === lvl, disabled: setting }"
+              :aria-pressed="logLevel.level === lvl"
               :disabled="setting || logLevel.level === lvl"
               @click="setLogLevel(lvl)"
             >{{ lvl }}</button>

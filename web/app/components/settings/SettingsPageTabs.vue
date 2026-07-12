@@ -14,6 +14,7 @@ const tabs = computed(() => section.value?.tabs ?? [])
       :to="tab.to"
       class="settings-tab"
       :class="{ active: route.path === tab.to }"
+      :aria-current="route.path === tab.to ? 'page' : undefined"
     >
       {{ tab.label }}
     </NuxtLink>

@@ -1870,6 +1870,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "local_slug": {
+            "type": "string"
+          },
           "mbid": {
             "type": "string"
           },

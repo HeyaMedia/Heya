@@ -2,9 +2,9 @@
   <section class="content-row">
     <SectionHeader :title="title" :subtitle="subtitle">
       <template #actions>
-        <span v-if="more" class="more" @click="$emit('more')">{{ more }}</span>
-        <button class="scroll-btn" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
-        <button class="scroll-btn" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
+        <button v-if="more" class="more" @click="$emit('more')">{{ more }}</button>
+        <button class="scroll-btn" aria-label="Scroll left" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll right" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
     <div class="row-scroll" ref="scrollEl">

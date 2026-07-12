@@ -52,10 +52,10 @@
           <!-- Pool source: the personalized engine (rank-weighted) vs the
                whole library. Only offered once the engine has signal. -->
           <div v-if="canForYou" class="rv-seg">
-            <button :class="{ active: effectiveSource === 'foryou' }" @click="source = 'foryou'">
+            <button :class="{ active: effectiveSource === 'foryou' }" :aria-pressed="effectiveSource === 'foryou'" @click="source = 'foryou'">
               <Icon name="sparkle" :size="11" /> For you
             </button>
-            <button :class="{ active: effectiveSource === 'all' }" @click="source = 'all'">Anything</button>
+            <button :class="{ active: effectiveSource === 'all' }" :aria-pressed="effectiveSource === 'all'" @click="source = 'all'">Anything</button>
           </div>
           <span v-if="canForYou" class="rv-filter-sep" />
           <button
@@ -63,6 +63,7 @@
             :key="g"
             class="rv-chip"
             :class="{ on: genreFilter.has(g) }"
+            :aria-pressed="genreFilter.has(g)"
             @click="toggleGenre(g)"
           >{{ g }}</button>
           <span class="rv-filter-sep" />
@@ -71,6 +72,7 @@
             :key="rt.label"
             class="rv-chip"
             :class="{ on: maxRuntime === rt.max }"
+            :aria-pressed="maxRuntime === rt.max"
             @click="maxRuntime = maxRuntime === rt.max ? 0 : rt.max"
           >{{ rt.label }}</button>
         </div>

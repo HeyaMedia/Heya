@@ -42,10 +42,19 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [Math.round(f(h + 1 / 3) * 255), Math.round(f(h) * 255), Math.round(f(h - 1 / 3) * 255)]
 }
 
+// A tone is deterministic per URL (it's a function of the image bytes), so
+// memoize the promise: the hero, the discography grid, and the album page can
+// all sample the same cover and only the first pays. Keeps per-tile tinting
+// (a whole album grid) cheap. Keyed by the original URL, before the ?proxy=1
+// retry rewrite.
+const toneCache = new Map<string, Promise<ImageTone | null>>()
+
 /** Resolves to null on any failure (missing image, tainted canvas, …). */
 export function sampleImageTone(url: string): Promise<ImageTone | null> {
   if (!import.meta.client) return Promise.resolve(null)
-  return sampleOnce(url).then((tone) => {
+  const cached = toneCache.get(url)
+  if (cached) return cached
+  const p = sampleOnce(url).then((tone) => {
     if (tone || !url.startsWith('/api/')) return tone
     // Same-origin endpoints can 302 to third-party CDNs (album covers still
     // pointing at provider art) — those hosts send no ACAO header, so the
@@ -57,6 +66,8 @@ export function sampleImageTone(url: string): Promise<ImageTone | null> {
     const sep = url.includes('?') ? '&' : '?'
     return sampleBytes(`${url}${sep}proxy=1`)
   })
+  toneCache.set(url, p)
+  return p
 }
 
 async function sampleBytes(url: string): Promise<ImageTone | null> {

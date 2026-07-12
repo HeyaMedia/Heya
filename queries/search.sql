@@ -6,7 +6,7 @@
 -- name: SearchMediaByType :many
 SELECT mi.*
 FROM media_item_cards mi
-WHERE mi.media_type = $2
+WHERE (mi.media_type = $2 OR ($2::text = 'tv' AND mi.media_type = 'anime'))
   AND (
     lower(mi.title) % lower($1)
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)
@@ -24,7 +24,7 @@ LIMIT $3 OFFSET $4;
 -- name: SearchMediaByTypeCount :one
 SELECT count(*)
 FROM media_item_cards mi
-WHERE mi.media_type = $2
+WHERE (mi.media_type = $2 OR ($2::text = 'tv' AND mi.media_type = 'anime'))
   AND (
     lower(mi.title) % lower($1)
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)

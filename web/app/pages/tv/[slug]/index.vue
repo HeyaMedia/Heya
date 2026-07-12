@@ -7,15 +7,15 @@
     <!-- Hero with crossfade backdrops -->
     <div class="hero-section">
       <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
-        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: showA }" />
-        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="80" class="hero-bg-img" :class="{ visible: !showA }" />
+        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: showA }" />
+        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: !showA }" />
         <div class="hero-bg-fade" />
       </div>
 
       <div class="hero-content">
         <div class="hero-poster">
           <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
-          <button class="zoom-btn" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
+          <button class="zoom-btn" aria-label="Expand poster" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
         <div class="hero-info">
@@ -50,10 +50,21 @@
             </button>
             <button v-else class="btn btn-primary" disabled style="opacity: 0.4"><Icon name="play" :size="16" /> No Files</button>
             <button class="btn btn-secondary" :style="listStyle" @click="showListModal = true"><Icon name="plus" :size="16" /> My List</button>
-            <button class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }" @click="toggleFavorite">
+            <button
+              class="btn-icon" :style="{ color: isFavorited ? 'var(--bad)' : 'var(--fg-1)' }"
+              :aria-label="isFavorited ? 'Remove from favorites' : 'Add to favorites'"
+              :aria-pressed="isFavorited"
+              @click="toggleFavorite"
+            >
               <Icon :name="isFavorited ? 'heartfill' : 'heart'" :size="20" />
             </button>
-            <button class="btn-icon" :style="{ color: showFullyWatched ? 'var(--good)' : 'var(--fg-1)' }" @click="toggleShowWatched" :title="showFullyWatched ? 'Mark as unwatched' : 'Mark as watched'">
+            <button
+              class="btn-icon" :style="{ color: showFullyWatched ? 'var(--good)' : 'var(--fg-1)' }"
+              :aria-label="showFullyWatched ? 'Mark as unwatched' : 'Mark as watched'"
+              :aria-pressed="showFullyWatched"
+              :title="showFullyWatched ? 'Mark as unwatched' : 'Mark as watched'"
+              @click="toggleShowWatched"
+            >
               <Icon name="check" :size="20" />
             </button>
             <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">
@@ -107,7 +118,7 @@
       />
 
       <!-- Expand backdrop -->
-      <button v-if="backdropAssets.length > 0" class="hero-expand" @click="openBackdropLightbox">
+      <button v-if="backdropAssets.length > 0" class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
         <Icon name="expand" :size="14" />
       </button>
     </div>
@@ -116,7 +127,7 @@
       <!-- Seasons -->
       <div class="detail-section">
         <div class="section-row-head">
-          <h3 class="section-title-lg">Seasons</h3>
+          <h2 class="section-title-lg">Seasons</h2>
         </div>
         <div class="seasons-grid">
           <AppContextMenu
@@ -124,37 +135,52 @@
             :key="s.season_number"
             :items="seasonContextItems(s)"
           >
-            <NuxtLink
-              :to="seasonUrl(s)"
-              class="season-card"
-            >
-              <MediaCard
-                :idx="s.season_number"
-                :src="seasonPosterUrl(s)"
-                aspect="2/3"
-                :title="seasonLabel(s)"
-                :subtitle="seasonSubtitle(s)"
-                :progress-pct="seasonWatchInfo(s) ? seasonWatchPct(s) : 0"
+            <div class="season-card-wrap">
+              <NuxtLink
+                :to="seasonUrl(s)"
+                class="season-card"
               >
-                <template #badges>
-                  <div v-if="seasonWatchInfo(s)" class="season-badge" :class="{ complete: seasonWatchInfo(s)!.remaining === 0 }">
-                    <Icon v-if="seasonWatchInfo(s)!.remaining === 0" name="check" :size="10" />
-                    <span v-else>{{ seasonWatchInfo(s)!.remaining }}</span>
-                  </div>
-                  <div class="season-overlay">
-                    <button class="season-action" :class="{ loved: isSeasonFavorited(s) }" @click.stop.prevent="toggleSeasonFavorite(s)">
-                      <Icon :name="isSeasonFavorited(s) ? 'heartfill' : 'heart'" :size="14" />
-                    </button>
-                    <button class="season-action" :class="{ watched: seasonFullyWatched(s) }" @click.stop.prevent="toggleSeasonWatched(s)">
-                      <Icon name="check" :size="14" />
-                    </button>
-                    <button class="season-action" @click.stop.prevent="openSeasonLightbox(s)">
-                      <Icon name="expand" :size="14" />
-                    </button>
-                  </div>
-                </template>
-              </MediaCard>
-            </NuxtLink>
+                <MediaCard
+                  :idx="s.season_number"
+                  :src="seasonPosterUrl(s)"
+                  aspect="2/3"
+                  :title="seasonLabel(s)"
+                  :subtitle="seasonSubtitle(s)"
+                  :progress-pct="seasonWatchInfo(s) ? seasonWatchPct(s) : 0"
+                >
+                  <template #badges>
+                    <div v-if="seasonWatchInfo(s)" class="season-badge" :class="{ complete: seasonWatchInfo(s)!.remaining === 0 }">
+                      <Icon v-if="seasonWatchInfo(s)!.remaining === 0" name="check" :size="10" />
+                      <span v-else>{{ seasonWatchInfo(s)!.remaining }}</span>
+                    </div>
+                  </template>
+                </MediaCard>
+              </NuxtLink>
+              <!-- Sibling of the NuxtLink, not a descendant — real buttons can't
+                   nest inside a real anchor. Absolutely positioned to land in
+                   the same spot the old in-anchor overlay occupied. -->
+              <div class="season-overlay">
+                <button
+                  class="season-action" :class="{ loved: isSeasonFavorited(s) }"
+                  :aria-label="isSeasonFavorited(s) ? 'Remove season from loved' : 'Add season to loved'"
+                  :aria-pressed="isSeasonFavorited(s)"
+                  @click.stop.prevent="toggleSeasonFavorite(s)"
+                >
+                  <Icon :name="isSeasonFavorited(s) ? 'heartfill' : 'heart'" :size="14" />
+                </button>
+                <button
+                  class="season-action" :class="{ watched: seasonFullyWatched(s) }"
+                  :aria-label="seasonFullyWatched(s) ? 'Mark season unwatched' : 'Mark season watched'"
+                  :aria-pressed="seasonFullyWatched(s)"
+                  @click.stop.prevent="toggleSeasonWatched(s)"
+                >
+                  <Icon name="check" :size="14" />
+                </button>
+                <button class="season-action" aria-label="Expand season poster" @click.stop.prevent="openSeasonLightbox(s)">
+                  <Icon name="expand" :size="14" />
+                </button>
+              </div>
+            </div>
           </AppContextMenu>
         </div>
       </div>
@@ -164,7 +190,7 @@
 
       <!-- Videos -->
       <div v-if="detail.videos?.length" class="detail-section">
-        <div class="section-row-head"><h3 class="section-title-lg">Videos</h3></div>
+        <div class="section-row-head"><h2 class="section-title-lg">Videos</h2></div>
         <div class="hscroll">
           <button v-for="(v, i) in detail.videos" :key="v.id" class="video-card" @click="openVideo(v.video_key, v.name)">
             <MediaCard
@@ -194,7 +220,7 @@
         <iframe
           v-if="videoModal"
           class="video-dialog-iframe"
-          :src="`https://www.youtube-nocookie.com/embed/${videoModal.key}?autoplay=1&rel=0`"
+          :src="videoEmbedSrc(videoModal.key)"
           frameborder="0"
           allow="autoplay; encrypted-media; picture-in-picture"
           allowfullscreen
@@ -205,11 +231,11 @@
            adds the rest as heya.media links (new tab, fetch-on-demand). -->
       <div v-if="visibleRecs.length" class="detail-section">
         <div class="section-row-head">
-          <h3 class="section-title-lg">More Like This</h3>
+          <h2 class="section-title-lg">More Like This</h2>
           <div v-if="recsOverflows" class="scroll-controls">
-            <button class="scroll-ctrl-btn" @click="scrollRecs('left')"><Icon name="chevleft" :size="14" /></button>
-            <button class="scroll-ctrl-btn" @click="scrollRecs('right')"><Icon name="chevright" :size="14" /></button>
-            <button class="scroll-ctrl-btn expand" @click="recsExpanded = !recsExpanded">
+            <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollRecs('left')"><Icon name="chevleft" :size="14" /></button>
+            <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollRecs('right')"><Icon name="chevright" :size="14" /></button>
+            <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="recsExpanded" @click="recsExpanded = !recsExpanded">
               <Icon name="chevdown" :size="14" :style="{ transform: recsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
             </button>
           </div>
@@ -324,6 +350,13 @@ function recPosterUrl(r: any): string {
 
 function openVideo(key: string, title: string) {
   videoModal.value = { key, title }
+}
+
+// Autoplay is a motion trigger — skip it under prefers-reduced-motion so
+// opening the trailer dialog doesn't immediately start moving video.
+function videoEmbedSrc(key: string): string {
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  return `https://www.youtube-nocookie.com/embed/${key}?autoplay=${reduceMotion ? 0 : 1}&rel=0`
 }
 
 // Crossfade backdrops — shared carousel engine.
@@ -788,15 +821,17 @@ watch(detail, async (d) => {
 }
 .season-badge.complete { background: var(--good); color: #000; }
 
-/* Season hover actions (heart, check, expand) — sits in MediaCard's badges
-   slot, anchored top-right above the title overlay so it never collides
-   with the bottom info text. */
+/* Season hover actions (heart, check, expand) — a sibling overlay of the
+   NuxtLink (not slotted inside MediaCard anymore: real buttons can't nest
+   inside a real anchor), anchored top-right above the title overlay so it
+   never collides with the bottom info text. */
+.season-card-wrap { position: relative; }
 .season-overlay {
   position: absolute; top: 8px; right: 8px; z-index: 4;
   display: flex; gap: 4px;
   opacity: 0; transition: opacity 0.15s;
 }
-.season-card:hover .season-overlay { opacity: 1; }
+.season-card-wrap:hover .season-overlay { opacity: 1; }
 .season-action {
   width: 26px; height: 26px; border-radius: var(--r-sm);
   background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
@@ -895,5 +930,17 @@ watch(detail, async (d) => {
      finish the 150ms transition regardless, but forcing it instant removes
      any doubt for a state that's supposed to be permanently on anyway. */
   .season-overlay { opacity: 1; transition: none; }
+  /* The season-action buttons shrink to 20px at phone width (see the
+     max-width: 720px rule above — three buttons + the episode-count badge
+     have no room to stay full-size on a ~100px poster). Rather than grow the
+     visible icon (which WOULD overflow the card), expand just the invisible
+     hit target to the 44px touch minimum via a pseudo-element — same trick
+     as a padded tap target, zero visual change. */
+  .season-action { position: relative; }
+  .season-action::before {
+    content: '';
+    position: absolute;
+    inset: -12px;
+  }
 }
 </style>

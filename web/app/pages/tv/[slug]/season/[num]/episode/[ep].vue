@@ -61,7 +61,12 @@
             <button v-else class="btn btn-primary btn-sm" disabled style="opacity: 0.35">
               <Icon name="play" :size="14" /> No File
             </button>
-            <button class="btn-icon" :style="{ color: watched ? 'var(--good)' : 'var(--fg-2)' }" @click="toggleWatched">
+            <button
+              class="btn-icon" :style="{ color: watched ? 'var(--good)' : 'var(--fg-2)' }"
+              :aria-label="watched ? 'Mark as unwatched' : 'Mark as watched'"
+              :aria-pressed="watched"
+              @click="toggleWatched"
+            >
               <Icon name="check" :size="18" />
             </button>
             <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">

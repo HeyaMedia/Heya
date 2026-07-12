@@ -289,8 +289,9 @@ func (s *Server) resolveLevel(ctx context.Context, req *itemsRequest) (itemLevel
 		if err != nil {
 			return levelNone, ""
 		}
-		// A library's declared type may be 'anime', but its media_items are
-		// stored as 'tv' — query under the runtime type or we'd find nothing.
+		// A library's declared type may be 'anime'; its media_items carry the
+		// true 'anime' type. JFListLibraryItems folds tv→{tv,anime}, so mapping
+		// anime→tv here lists the anime library's items as Jellyfin Series.
 		return levelItems, mediatype.Runtime(lib.MediaType)
 	case KindItem:
 		// A media_item parent: series → seasons (episodes when recursive),
@@ -845,7 +846,7 @@ func playedIDsFor(mt sqlc.MediaType, dec *videoDecor) []int64 {
 	switch mt {
 	case sqlc.MediaTypeMovie:
 		return keys(dec.watchedMovies)
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		return keys(dec.watchedSeries)
 	default:
 		return []int64{}

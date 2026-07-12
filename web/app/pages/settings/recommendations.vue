@@ -121,6 +121,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
           </p>
         </div>
         <button class="enable-toggle" :class="{ on: settings?.enabled }"
+          role="switch" :aria-checked="!!settings?.enabled" aria-label="Enable embedding engine"
           :disabled="!settings || enableSaving || enabledLocked" @click="toggleEnabled">
           <span class="enable-knob" />
         </button>
@@ -171,8 +172,9 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 
       <SettingsSection title="Pipeline settings" icon="settings">
         <SettingsField label="Accelerator" description="Inference execution provider. Auto picks the best available at boot."
-          :lockedBy="accelLocked ? `Locked by ${status?.env_locks?.accelerator}` : undefined">
-          <select v-if="settings" v-model="settings.accelerator" class="sv2-select" :disabled="accelLocked">
+          :lockedBy="accelLocked ? `Locked by ${status?.env_locks?.accelerator}` : undefined"
+          v-slot="{ fieldId }">
+          <select v-if="settings" :id="fieldId" v-model="settings.accelerator" class="sv2-select" :disabled="accelLocked">
             <option v-for="o in availableAccelerators" :key="o.name" :value="o.name">{{ o.label }}</option>
           </select>
         </SettingsField>

@@ -37,7 +37,11 @@
         v-for="(item, i) in items"
         :key="item.id"
         class="grid-tile card-tile"
+        role="link"
+        tabindex="0"
         @click="go(item)"
+        @keydown.enter="go(item)"
+        @keydown.space.prevent="go(item)"
       >
         <MediaCard
           :idx="i"

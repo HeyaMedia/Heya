@@ -246,6 +246,7 @@ function initials(u: { username: string }): string {
               class="row-btn"
               :disabled="u.id === me?.id"
               :title="u.id === me?.id ? 'You can\'t reset your own password here — use the Profile page' : `Reset password for ${u.username}`"
+              :aria-label="u.id === me?.id ? 'You can\'t reset your own password here — use the Profile page' : `Reset password for ${u.username}`"
               @click="openPw(u)"
             >
               <Icon name="key" :size="14" />
@@ -254,6 +255,7 @@ function initials(u: { username: string }): string {
               class="row-btn"
               :disabled="u.id === me?.id"
               :title="u.id === me?.id ? 'You can\'t toggle your own admin flag' : (u.is_admin ? 'Revoke admin' : 'Grant admin')"
+              :aria-label="u.id === me?.id ? 'You can\'t toggle your own admin flag' : (u.is_admin ? 'Revoke admin' : 'Grant admin')"
               @click="toggleAdmin(u)"
             >
               <Icon :name="u.is_admin ? 'key' : 'sparkle'" :size="14" />
@@ -262,6 +264,7 @@ function initials(u: { username: string }): string {
               class="row-btn danger"
               :disabled="u.id === me?.id"
               :title="u.id === me?.id ? 'You can\'t delete your own account' : `Delete ${u.username}`"
+              :aria-label="u.id === me?.id ? 'You can\'t delete your own account' : `Delete ${u.username}`"
               @click="deleteUser(u)"
             >
               <Icon name="trash" :size="14" />
@@ -288,17 +291,18 @@ function initials(u: { username: string }): string {
     <AppDialog v-model="showCreate" title="Add user" description="Creates a new account. The user can change their own password and email after signing in." size="md">
       <div class="dialog-form">
         <div class="form-field">
-          <label class="form-label">Username</label>
-          <input v-model="newUser.username" class="sv2-input" maxlength="64" autocomplete="off" />
+          <label class="form-label" for="user-create-username">Username</label>
+          <input id="user-create-username" v-model="newUser.username" class="sv2-input" maxlength="64" autocomplete="off" />
         </div>
         <div class="form-field">
-          <label class="form-label">Email</label>
-          <input v-model="newUser.email" class="sv2-input" type="email" maxlength="254" autocomplete="off" />
+          <label class="form-label" for="user-create-email">Email</label>
+          <input id="user-create-email" v-model="newUser.email" class="sv2-input" type="email" maxlength="254" autocomplete="off" />
         </div>
         <div class="form-field">
-          <label class="form-label">Initial password (≥ 8 chars)</label>
+          <label class="form-label" for="user-create-password">Initial password (≥ 8 chars)</label>
           <div class="pw-group">
             <input
+              id="user-create-password"
               v-model="newUser.password"
               class="sv2-input"
               :type="showCreatePw ? 'text' : 'password'"
@@ -306,11 +310,11 @@ function initials(u: { username: string }): string {
               placeholder="At least 8 characters"
             />
             <button type="button" class="pw-btn" :class="{ active: showCreatePw }"
-              :title="showCreatePw ? 'Hide' : 'Show'" @click="showCreatePw = !showCreatePw">
+              :title="showCreatePw ? 'Hide' : 'Show'" :aria-label="showCreatePw ? 'Hide password' : 'Show password'" @click="showCreatePw = !showCreatePw">
               <Icon name="eye" :size="14" />
             </button>
             <button type="button" class="pw-btn" :disabled="!newUser.password"
-              :title="copied === 'create' ? 'Copied' : 'Copy'" @click="copyPw(newUser.password, 'create')">
+              :title="copied === 'create' ? 'Copied' : 'Copy'" :aria-label="copied === 'create' ? 'Copied' : 'Copy password'" @click="copyPw(newUser.password, 'create')">
               <Icon :name="copied === 'create' ? 'check' : 'clipboard'" :size="14" />
             </button>
             <button type="button" class="pw-gen" @click="generateCreatePw">
@@ -338,9 +342,10 @@ function initials(u: { username: string }): string {
     <AppDialog v-model="showPw" :title="pwModal ? `Reset password for ${pwModal.username}` : 'Reset password'" description="The user can change it themselves after signing in." size="md">
       <div class="dialog-form">
         <div class="form-field">
-          <label class="form-label">New password (≥ 8 chars)</label>
+          <label class="form-label" for="user-reset-password">New password (≥ 8 chars)</label>
           <div class="pw-group">
             <input
+              id="user-reset-password"
               v-model="pwValue"
               class="sv2-input"
               :type="showResetPw ? 'text' : 'password'"
@@ -348,11 +353,11 @@ function initials(u: { username: string }): string {
               placeholder="At least 8 characters"
             />
             <button type="button" class="pw-btn" :class="{ active: showResetPw }"
-              :title="showResetPw ? 'Hide' : 'Show'" @click="showResetPw = !showResetPw">
+              :title="showResetPw ? 'Hide' : 'Show'" :aria-label="showResetPw ? 'Hide password' : 'Show password'" @click="showResetPw = !showResetPw">
               <Icon name="eye" :size="14" />
             </button>
             <button type="button" class="pw-btn" :disabled="!pwValue"
-              :title="copied === 'reset' ? 'Copied' : 'Copy'" @click="copyPw(pwValue, 'reset')">
+              :title="copied === 'reset' ? 'Copied' : 'Copy'" :aria-label="copied === 'reset' ? 'Copied' : 'Copy password'" @click="copyPw(pwValue, 'reset')">
               <Icon :name="copied === 'reset' ? 'check' : 'clipboard'" :size="14" />
             </button>
             <button type="button" class="pw-gen" @click="generateResetPw">

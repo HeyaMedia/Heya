@@ -343,9 +343,24 @@
               <MediaMissingBadge v-if="!albumPlayable(album)" />
               <!-- Now-playing badge: this album has the currently-playing track. -->
               <div v-if="isAlbumActive(album)" class="discog-nowplaying"><VuMeter :playing="playing" /></div>
-              <button v-if="albumPlayable(album)" class="discog-play" @click.stop.prevent="playAlbum(album, false)" title="Play album">
+              <!-- span, not <button>: this tile is a NuxtLink (below), and a
+                   real button nested inside an anchor is invalid
+                   interactive-in-interactive HTML — see MusicCard.vue's
+                   .mc-play for the same fix + reasoning. -->
+              <span
+                v-if="albumPlayable(album)"
+                role="button"
+                tabindex="0"
+                class="discog-play"
+                :style="discogPlayStyle(album)"
+                aria-label="Play album"
+                title="Play album"
+                @click.stop.prevent="playAlbum(album, false)"
+                @keydown.enter.stop.prevent="playAlbum(album, false)"
+                @keydown.space.stop.prevent="playAlbum(album, false)"
+              >
                 <Icon name="play" :size="14" />
-              </button>
+              </span>
             </div>
             <div class="discog-meta">
               <div class="discog-title">{{ album.title }}</div>
@@ -721,6 +736,27 @@ const groupedDiscography = computed(() => {
     .filter((k) => byKind.has(k))
     .map((kind) => ({ kind, label: KIND_LABEL[kind] ?? kind, albums: byKind.get(kind)! }))
 })
+
+// Per-album cover tone: the always-visible discography Play button wears each
+// record's own sampled palette (semi-transparent glass over the art — see
+// .discog-play). Cheap: sampleImageTone() memoizes per URL and the covers are
+// already HTTP-cached by the Poster render, so a whole grid samples once.
+// Declared AFTER groupedDiscography — the immediate watch reads it at setup.
+const albumTones = reactive<Record<number, { main: string; ink: string }>>({})
+function discogPlayStyle(album: { id: number }): Record<string, string> | undefined {
+  const t = albumTones[album.id]
+  return t ? { '--btn-tone': t.main, color: t.ink } : undefined
+}
+watch(groupedDiscography, (groups) => {
+  if (!import.meta.client || !groups) return
+  for (const g of groups) {
+    for (const al of g.albums) {
+      if (albumTones[al.id] || !albumPlayable(al)) continue
+      const url = useAlbumCoverUrl(route.params.slug as string, al.slug)
+      if (url) sampleImageTone(url).then((t) => { if (t) albumTones[al.id] = { main: t.main, ink: t.ink } })
+    }
+  }
+}, { immediate: true })
 
 // Birthplace can come through as a Wikidata QID we don't yet resolve; only
 // show when it's a human-readable token.
@@ -1533,18 +1569,33 @@ if (import.meta.client) {
   height: 36px;
   border-radius: 50%;
   border: 0;
-  background: var(--gold);
+  /* Always visible — was hover-reveal (opacity 0), which on touch needed a
+     throwaway first tap to "hover" the button in before the real tap
+     registered, so opening an album took two taps. Now it's a permanent
+     affordance: a semi-transparent glass disc tinted with the album's own
+     sampled cover colour (--btn-tone, set inline; --gold until the sample
+     lands), so the artwork still reads through and each record wears its
+     palette. Tap the disc = play; tap anywhere else on the tile = open. */
+  background: color-mix(in srgb, var(--btn-tone, var(--gold)) 52%, transparent);
   color: var(--bg-0);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  backdrop-filter: blur(8px) saturate(140%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 0.2s, transform 0.2s;
-  box-shadow: 0 6px 18px var(--gold-glow);
+  opacity: 1;
+  transform: none;
+  transition: background 0.18s, transform 0.15s, box-shadow 0.18s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38); /* over artwork — literal */
 }
-.discog-tile:hover .discog-play { opacity: 1; transform: none; }
+/* Pointer/keyboard affordance: solidify the tint and lift on hover/focus. */
+.discog-tile:hover .discog-play,
+.discog-play:focus-visible {
+  background: color-mix(in srgb, var(--btn-tone, var(--gold)) 94%, transparent);
+  transform: scale(1.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
 /* Now-playing album — gold ring on the art + gold title, with an animated
    VuMeter badge pinned top-left of the cover. */
 .discog-active .discog-art { box-shadow: 0 8px 18px rgb(var(--shade) / 0.45), 0 0 0 2px var(--gold); }

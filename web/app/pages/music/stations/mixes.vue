@@ -38,9 +38,22 @@
           <div v-else class="ms-mix-art-fallback"><Icon name="sparkle" :size="36" /></div>
           <div class="ms-mix-art-gradient" />
           <div class="ms-mix-art-badge">Mix</div>
-          <button class="ms-mix-play" type="button" :title="`Play ${mix.name}`" @click.stop.prevent="playMix(mix)">
+          <!-- span, not <button>: this tile is a NuxtLink (below), and a
+               real button nested inside an anchor is invalid
+               interactive-in-interactive HTML — see MusicCard.vue's
+               .mc-play for the same fix + reasoning. -->
+          <span
+            role="button"
+            tabindex="0"
+            class="ms-mix-play"
+            aria-label="Play mix"
+            :title="`Play ${mix.name}`"
+            @click.stop.prevent="playMix(mix)"
+            @keydown.enter.stop.prevent="playMix(mix)"
+            @keydown.space.stop.prevent="playMix(mix)"
+          >
             <Icon name="play" :size="18" />
-          </button>
+          </span>
         </div>
         <div class="ms-mix-meta">
           <div class="ms-mix-name">{{ mix.name }}</div>
@@ -206,7 +219,8 @@ async function playMix(mix: Mix) {
   transform: translateY(8px);
   transition: opacity 0.2s, transform 0.2s, filter 0.15s;
 }
-.ms-mix-card:hover .ms-mix-play { opacity: 1; transform: translateY(0); }
+.ms-mix-card:hover .ms-mix-play,
+.ms-mix-play:focus-visible { opacity: 1; transform: translateY(0); }
 .ms-mix-play:hover { filter: brightness(1.1); }
 
 .ms-mix-meta { margin-top: 10px; }

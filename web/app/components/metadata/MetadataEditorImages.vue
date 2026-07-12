@@ -72,19 +72,21 @@
           <span class="mei-lang-count">{{ lang.items.length }}</span>
         </div>
         <div class="mei-lang-grid">
-          <div
+          <button
             v-for="(art, i) in lang.items"
             :key="i"
+            type="button"
             class="mei-find-card"
             :class="{ 'mei-find-card-wide': wideTypes.has(findModalType!) }"
+            :aria-label="`Add poster option ${i + 1}`"
             @click="downloadArt(art)"
           >
             <div class="mei-find-img-wrap" :style="{ aspectRatio: wideTypes.has(findModalType!) ? '16/9' : '2/3' }">
-              <NuxtImg :src="art.url" class="mei-find-img" />
+              <NuxtImg :src="art.url" :alt="`Poster option ${i + 1}`" class="mei-find-img" />
               <div v-if="art.source" class="mei-find-source">{{ art.source }}</div>
               <div class="mei-find-dl"><Icon name="plus" :size="16" /></div>
             </div>
-          </div>
+          </button>
         </div>
       </div>
     </AppDialog>

@@ -172,7 +172,7 @@ func (s *Server) dtoFromMediaItemRow(row sqlc.JFListLibraryItemsRow, serverID st
 		if dec != nil {
 			dto.UserData = movieUserData(row.ID, dec)
 		}
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		dto.Type = "Series"
 		dto.MediaType = "Unknown"
 		dto.IsFolder = true

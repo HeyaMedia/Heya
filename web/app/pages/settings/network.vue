@@ -24,6 +24,7 @@ const rawLoading = ref(false)
 const rawJSON = ref('')
 const rawError = ref('')
 const { flash } = useFlash()
+const { toast } = useToast()
 
 let unsubscribe: (() => void) | null = null
 
@@ -101,7 +102,14 @@ async function loadRaw() {
     rawJSON.value = ''
   } finally { rawLoading.value = false }
 }
-async function copyRaw() { try { await navigator.clipboard.writeText(rawJSON.value) } catch {} }
+async function copyRaw() {
+  try {
+    await navigator.clipboard.writeText(rawJSON.value)
+    toast.ok('Copied JSON to clipboard.')
+  } catch {
+    toast.err('Clipboard blocked — copy manually.')
+  }
+}
 
 const stateDirHint = computed(() => cfg.value?.state_dir || 'data/tailscale/')
 
@@ -170,6 +178,7 @@ watch(cfg, (next) => {
         <label class="ts-switch" :title="lockTooltip('tailscale.enabled')">
           <input
             type="checkbox"
+            aria-label="Enable Tailscale"
             :checked="enabled"
             :disabled="saving || isLocked('tailscale.enabled')"
             @change="onMasterToggle(($event.target as HTMLInputElement).checked)"
@@ -222,8 +231,10 @@ watch(cfg, (next) => {
     <SettingsSection v-if="enabled" title="Tailscale settings" icon="settings">
       <SettingsField label="Hostname"
         description="The name your node shows up as in the Tailscale admin console. Changing this re-onboards."
-        :lockedBy="isLocked('tailscale.hostname') ? lockTooltip('tailscale.hostname') : undefined">
+        :lockedBy="isLocked('tailscale.hostname') ? lockTooltip('tailscale.hostname') : undefined"
+        v-slot="{ fieldId }">
         <input
+          :id="fieldId"
           v-model="hostnameDraft"
           class="sv2-input"
           :disabled="saving || isLocked('tailscale.hostname')"
@@ -233,9 +244,11 @@ watch(cfg, (next) => {
 
       <SettingsField label="HTTPS on :443"
         description="Serve TLS on tailnet :443 using a Tailscale-issued cert. Requires HTTPS to be enabled for your tailnet."
-        :lockedBy="isLocked('tailscale.https') ? lockTooltip('tailscale.https') : undefined">
+        :lockedBy="isLocked('tailscale.https') ? lockTooltip('tailscale.https') : undefined"
+        v-slot="{ fieldId }">
         <label class="ts-switch sm">
           <input
+            :id="fieldId"
             type="checkbox"
             :checked="cfg?.https ?? true"
             :disabled="saving || isLocked('tailscale.https')"
@@ -248,9 +261,11 @@ watch(cfg, (next) => {
 
       <SettingsField label="Funnel (public exposure)"
         description="Publish Heya to the open internet via Tailscale Funnel. Requires Funnel to be allowed for your tailnet."
-        :lockedBy="isLocked('tailscale.funnel') ? lockTooltip('tailscale.funnel') : undefined">
+        :lockedBy="isLocked('tailscale.funnel') ? lockTooltip('tailscale.funnel') : undefined"
+        v-slot="{ fieldId }">
         <label class="ts-switch sm">
           <input
+            :id="fieldId"
             type="checkbox"
             :checked="cfg?.funnel ?? false"
             :disabled="saving || isLocked('tailscale.funnel')"

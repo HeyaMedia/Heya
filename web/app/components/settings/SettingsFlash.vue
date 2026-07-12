@@ -5,8 +5,14 @@ defineProps<{ flash: FlashMessage | null }>()
 </script>
 
 <template>
-  <div v-if="flash" class="sv2-flash" :class="flash.kind">
-    <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
+  <div
+    v-if="flash"
+    class="sv2-flash"
+    :class="flash.kind"
+    :role="flash.kind === 'err' ? 'alert' : 'status'"
+    :aria-live="flash.kind === 'err' ? 'assertive' : 'polite'"
+  >
+    <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" aria-hidden="true" />
     {{ flash.text }}
   </div>
 </template>

@@ -28,6 +28,7 @@ function isActive(item: SettingsNavItem) {
               :to="item.to"
               class="sv2-item"
               :class="{ active: isActive(item) }"
+              :aria-current="isActive(item) ? 'page' : undefined"
             >
               <Icon :name="item.icon" :size="15" class="sv2-item-icon" />
               <span class="sv2-item-label">{{ item.label }}</span>

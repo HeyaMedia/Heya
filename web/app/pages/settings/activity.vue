@@ -217,8 +217,8 @@ async function sendMsg() {
           <span class="mono dim">{{ clientLabel(msgTarget.client_user_agent) }}</span>
         </div>
         <div class="form-field">
-          <label class="form-label">Message</label>
-          <textarea v-model="msgText" class="sv2-input msg-input" maxlength="280" rows="3"
+          <label class="form-label" for="activity-msg-text">Message</label>
+          <textarea id="activity-msg-text" v-model="msgText" class="sv2-input msg-input" maxlength="280" rows="3"
             placeholder="Type a short message…" @keydown.meta.enter="sendMsg" @keydown.ctrl.enter="sendMsg" />
         </div>
       </div>

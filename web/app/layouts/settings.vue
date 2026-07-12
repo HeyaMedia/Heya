@@ -31,11 +31,12 @@ watch(() => route.path, () => { navOpen.value = false })
     document scroll.
   -->
   <TooltipProvider :delay-duration="400" :skip-delay-duration="200">
+    <a href="#main-content" class="skip-link">Skip to content</a>
     <div class="app">
       <AppTopBar />
       <div class="app-main sv2-shell">
         <SettingsSidebar v-if="!isPhone" />
-        <main class="sv2-main scroll">
+        <main id="main-content" class="sv2-main scroll" tabindex="-1">
           <div v-if="isPhone" class="sv2-phone-head">
             <div class="sv2-phone-title">{{ currentTitle }}</div>
             <button type="button" class="sv2-phone-nav-btn" @click="navOpen = true">

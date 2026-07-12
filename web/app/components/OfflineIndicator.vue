@@ -1,6 +1,6 @@
 <template>
   <Transition name="offline-slide">
-    <div v-if="!online && isAuthenticated" class="offline-indicator" role="status">
+    <div v-if="!online && isAuthenticated" class="offline-indicator" role="status" aria-live="polite">
       <Icon name="cloud" :size="13" />
       Offline · showing saved data
     </div>

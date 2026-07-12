@@ -175,6 +175,13 @@ function reset() {
 <style scoped>
 .pp {
   margin-top: 16px;
+  /* Glass panel — MediaDetailView mounts this directly in .hero-info with no
+     wrapper (unlike movies/tv's MediaPlaybackPanel, which supplies its own
+     literal glass), so the old borderless/transparent box let the toggle row
+     and the audio/subtitle form bleed straight into the hero backdrop. */
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   overflow: visible;
@@ -237,7 +244,10 @@ function reset() {
 .pp-label {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: rgb(var(--ink) / 0.55);
+  /* Was a raw ink/0.55 alpha wash — alpha-blended straight into whatever art
+     showed through the (formerly transparent) panel behind it. Token color
+     stays legible now that .pp has its own opaque backing either way. */
+  color: var(--fg-3);
 }
 
 .pp-reset {
@@ -245,13 +255,15 @@ function reset() {
   margin-top: 8px;
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.06em;
-  color: rgb(var(--ink) / 0.4);
+  color: var(--fg-3);
   transition: color 0.12s;
   align-self: flex-start;
 }
 .pp-reset:hover { color: var(--bad); }
 
 
-.pp-inline { border: none; margin-top: 0; }
+/* MediaPlaybackPanel (movies/tv) already wraps this in its own literal glass
+   — avoid stacking a second blurred layer inside it. */
+.pp-inline { background: transparent; border: none; margin-top: 0; }
 .pp-body-inline { border-top: none; padding: 0; }
 </style>

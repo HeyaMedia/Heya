@@ -36,13 +36,14 @@
               :src="`/api/person/${data.person.id}/image`"
               :width="600"
               :quality="80"
+              :alt="data.person.name"
               class="hero-portrait-img"
               @error="heroImgError = true"
             />
             <div v-else class="hero-portrait-placeholder">
               {{ data.person.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2) }}
             </div>
-            <button v-if="galleryUrls.length > 0" class="zoom-btn" @click="openGallery(0)"><Icon name="expand" :size="14" /></button>
+            <button v-if="galleryUrls.length > 0" class="zoom-btn" aria-label="Expand photo" @click="openGallery(0)"><Icon name="expand" :size="14" /></button>
           </div>
         </div>
 
@@ -98,6 +99,7 @@
                 type="button"
                 class="bio-lang-pill"
                 :class="{ active: selectedBioLang === opt.code }"
+                :aria-pressed="selectedBioLang === opt.code"
                 @click="selectedBioLang = opt.code"
               >{{ opt.label }}</button>
             </div>
@@ -196,7 +198,7 @@
         <!-- Cast / Acting credits -->
         <div v-if="activeFilter === 'all' || activeFilter === 'acting'" class="detail-section">
           <template v-if="sortedCast.length">
-            <h3 class="section-title" style="margin-bottom: 16px">Acting</h3>
+            <h2 class="section-title" style="margin-bottom: 16px">Acting</h2>
             <div class="credits-grid">
               <NuxtLink
                 v-for="c in sortedCast"
@@ -219,7 +221,7 @@
         <!-- Crew credits grouped by department -->
         <template v-if="activeFilter === 'all' || activeFilter !== 'acting'">
           <div v-for="dept in filteredCrewDepts" :key="dept.name" class="detail-section">
-            <h3 class="section-title" style="margin-bottom: 16px">{{ dept.name }}</h3>
+            <h2 class="section-title" style="margin-bottom: 16px">{{ dept.name }}</h2>
             <div class="credits-grid">
               <NuxtLink
                 v-for="c in dept.credits"
@@ -244,7 +246,7 @@
       <template v-else-if="scope === 'known'">
         <!-- External cast (acting) — only when the role filter is "all" or "acting" -->
         <div v-if="(activeFilter === 'all' || activeFilter === 'acting') && externalCast.length" class="detail-section">
-          <h3 class="section-title" style="margin-bottom: 16px">Acting</h3>
+          <h2 class="section-title" style="margin-bottom: 16px">Acting</h2>
           <div class="credits-grid">
             <div
               v-for="c in externalCast"
@@ -265,7 +267,7 @@
         <!-- External crew grouped by department -->
         <template v-for="dept in externalCrewDepts" :key="`ext-${dept.name}`">
           <div v-if="activeFilter === 'all' || activeFilter === dept.key" class="detail-section">
-            <h3 class="section-title" style="margin-bottom: 16px">{{ dept.name }}</h3>
+            <h2 class="section-title" style="margin-bottom: 16px">{{ dept.name }}</h2>
             <div class="credits-grid">
               <div
                 v-for="c in dept.credits"
@@ -987,5 +989,12 @@ const activeFilterOptions = computed(() =>
   .filmography-body { padding: 0 16px 60px; }
   .credits-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
   .scope-toggle { display: flex; justify-content: center; }
+}
+
+/* Touch: the bio-language pill is a small text chip (~18px tall by default)
+   with no touch-target concession — bump it to the 44px minimum under a
+   coarse pointer without changing the compact desktop chip. */
+@media (pointer: coarse) {
+  .bio-lang-pill { min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; }
 }
 </style>

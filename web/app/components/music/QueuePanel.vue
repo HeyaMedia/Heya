@@ -19,7 +19,11 @@
           v-for="(t, i) in playedTracks"
           :key="`played-${t.id}-${i}`"
           class="qp-row played"
+          role="button"
+          tabindex="0"
+          :aria-label="`Play ${t.title}`"
           @click="jumpTo(i)"
+          @keydown="onQueueRowKeydown($event, () => jumpTo(i))"
         >
           <Poster :idx="t.id" :src="t.poster ?? null" aspect="1/1" :width="80" class="qp-thumb" />
           <div class="qp-row-info">
@@ -67,7 +71,11 @@
           :key="`upcoming-${t.id}-${i}`"
           class="qp-row upcoming"
           :draggable="true"
+          role="button"
+          tabindex="0"
+          :aria-label="`Play ${t.title}`"
           @click="jumpTo(currentIndex + 1 + i)"
+          @keydown="onQueueRowKeydown($event, () => jumpTo(currentIndex + 1 + i))"
           @dragstart="onDragStart($event, i)"
           @dragover.prevent="onDragOver($event, i)"
           @drop="onDrop($event, i)"
@@ -287,6 +295,16 @@ function onDrop(_event: DragEvent, toIndex: number) {
   if (dragIndex.value < 0 || dragIndex.value === toIndex) return
   moveInQueue(currentIndex.value + 1 + dragIndex.value, currentIndex.value + 1 + toIndex)
   dragIndex.value = -1
+}
+
+// Keyboard mirror for the played/upcoming rows (playbook item 1) — guarded
+// on target===currentTarget so Enter/Space on the upcoming row's nested
+// "Remove" button doesn't also jump playback.
+function onQueueRowKeydown(e: KeyboardEvent, action: () => void) {
+  if (e.target !== e.currentTarget) return
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  e.preventDefault()
+  action()
 }
 </script>
 

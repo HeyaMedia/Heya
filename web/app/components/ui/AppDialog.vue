@@ -43,6 +43,13 @@
               </DialogClose>
             </header>
           </slot>
+          <!-- reka needs exactly one DialogTitle inside DialogContent for the
+               modal's accessible name (it warns and the dialog is unnamed
+               otherwise). When no visible title is given, supply a hidden one
+               — mirrors AppSheet's VisuallyHidden fallback. -->
+          <DialogTitle v-if="!title" class="app-dialog-sr-only">
+            {{ description || 'Dialog' }}
+          </DialogTitle>
           <DialogDescription v-if="!description" as="p" class="app-dialog-sr-only">
             {{ title || 'Dialog' }}
           </DialogDescription>

@@ -16,47 +16,47 @@
 -->
 <template>
   <nav class="mnav">
-    <NuxtLink to="/music" class="mnav-item" :class="{ active: currentSection === 'home' }" @click="emit('navigate')">
+    <NuxtLink to="/music" class="mnav-item" :class="{ active: currentSection === 'home' }" :aria-current="currentSection === 'home' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="home" :size="18" /> <span>Home</span>
     </NuxtLink>
-    <NuxtLink to="/music/search" class="mnav-item" :class="{ active: currentSection === 'search' }" @click="emit('navigate')">
+    <NuxtLink to="/music/search" class="mnav-item" :class="{ active: currentSection === 'search' }" :aria-current="currentSection === 'search' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="search" :size="18" /> <span>Search</span>
     </NuxtLink>
 
     <div class="mnav-group-label">Library</div>
-    <NuxtLink to="/music/library" class="mnav-item" :class="{ active: currentSection === 'library' }" @click="emit('navigate')">
+    <NuxtLink to="/music/library" class="mnav-item" :class="{ active: currentSection === 'library' }" :aria-current="currentSection === 'library' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="music" :size="18" /> <span>Overview</span>
     </NuxtLink>
-    <NuxtLink to="/music/artists" class="mnav-item mnav-sub" :class="{ active: currentSection === 'artists' }" @click="emit('navigate')">Artists</NuxtLink>
-    <NuxtLink to="/music/albums" class="mnav-item mnav-sub" :class="{ active: currentSection === 'albums' }" @click="emit('navigate')">Albums</NuxtLink>
-    <NuxtLink to="/music/songs" class="mnav-item mnav-sub" :class="{ active: currentSection === 'songs' }" @click="emit('navigate')">Songs</NuxtLink>
+    <NuxtLink to="/music/artists" class="mnav-item mnav-sub" :class="{ active: currentSection === 'artists' }" :aria-current="currentSection === 'artists' ? 'page' : undefined" @click="emit('navigate')">Artists</NuxtLink>
+    <NuxtLink to="/music/albums" class="mnav-item mnav-sub" :class="{ active: currentSection === 'albums' }" :aria-current="currentSection === 'albums' ? 'page' : undefined" @click="emit('navigate')">Albums</NuxtLink>
+    <NuxtLink to="/music/songs" class="mnav-item mnav-sub" :class="{ active: currentSection === 'songs' }" :aria-current="currentSection === 'songs' ? 'page' : undefined" @click="emit('navigate')">Songs</NuxtLink>
 
     <div class="mnav-group-label">My Music</div>
-    <NuxtLink to="/music/my" class="mnav-item" :class="{ active: currentSection === 'my' }" @click="emit('navigate')">
+    <NuxtLink to="/music/my" class="mnav-item" :class="{ active: currentSection === 'my' }" :aria-current="currentSection === 'my' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="user" :size="18" /> <span>Overview</span>
     </NuxtLink>
-    <NuxtLink to="/music/my/artists" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-artists' }" @click="emit('navigate')">Artists</NuxtLink>
-    <NuxtLink to="/music/my/albums" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-albums' }" @click="emit('navigate')">Albums</NuxtLink>
-    <NuxtLink to="/music/my/favorites" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-favorites' }" @click="emit('navigate')">My Favorites</NuxtLink>
-    <NuxtLink to="/music/stats" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stats' }" @click="emit('navigate')">My Sound</NuxtLink>
+    <NuxtLink to="/music/my/artists" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-artists' }" :aria-current="currentSection === 'my-artists' ? 'page' : undefined" @click="emit('navigate')">Artists</NuxtLink>
+    <NuxtLink to="/music/my/albums" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-albums' }" :aria-current="currentSection === 'my-albums' ? 'page' : undefined" @click="emit('navigate')">Albums</NuxtLink>
+    <NuxtLink to="/music/my/favorites" class="mnav-item mnav-sub" :class="{ active: currentSection === 'my-favorites' }" :aria-current="currentSection === 'my-favorites' ? 'page' : undefined" @click="emit('navigate')">My Favorites</NuxtLink>
+    <NuxtLink to="/music/stats" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stats' }" :aria-current="currentSection === 'stats' ? 'page' : undefined" @click="emit('navigate')">My Sound</NuxtLink>
 
     <div class="mnav-group-label">Stations</div>
-    <NuxtLink to="/music/stations" class="mnav-item" :class="{ active: currentSection === 'stations' }" @click="emit('navigate')">
+    <NuxtLink to="/music/stations" class="mnav-item" :class="{ active: currentSection === 'stations' }" :aria-current="currentSection === 'stations' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="compass" :size="18" /> <span>Overview</span>
     </NuxtLink>
-    <NuxtLink to="/music/stations/mixes" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stations-mixes' }" @click="emit('navigate')">Mixes</NuxtLink>
-    <NuxtLink to="/music/stations/builder" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stations-builder' }" @click="emit('navigate')">Mix Builder</NuxtLink>
-    <NuxtLink to="/music/browse" class="mnav-item mnav-sub" :class="{ active: currentSection?.startsWith('browse') }" @click="emit('navigate')">Moods · Genres · Tempo</NuxtLink>
+    <NuxtLink to="/music/stations/mixes" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stations-mixes' }" :aria-current="currentSection === 'stations-mixes' ? 'page' : undefined" @click="emit('navigate')">Mixes</NuxtLink>
+    <NuxtLink to="/music/stations/builder" class="mnav-item mnav-sub" :class="{ active: currentSection === 'stations-builder' }" :aria-current="currentSection === 'stations-builder' ? 'page' : undefined" @click="emit('navigate')">Mix Builder</NuxtLink>
+    <NuxtLink to="/music/browse" class="mnav-item mnav-sub" :class="{ active: currentSection?.startsWith('browse') }" :aria-current="currentSection?.startsWith('browse') ? 'page' : undefined" @click="emit('navigate')">Moods · Genres · Tempo</NuxtLink>
 
-    <NuxtLink to="/music/podcasts" class="mnav-item" :class="{ active: currentSection === 'podcasts' }" @click="emit('navigate')">
+    <NuxtLink to="/music/podcasts" class="mnav-item" :class="{ active: currentSection === 'podcasts' }" :aria-current="currentSection === 'podcasts' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="mic" :size="18" /> <span>Podcasts</span>
     </NuxtLink>
-    <NuxtLink to="/music/radio" class="mnav-item" :class="{ active: currentSection === 'radio' }" @click="emit('navigate')">
+    <NuxtLink to="/music/radio" class="mnav-item" :class="{ active: currentSection === 'radio' }" :aria-current="currentSection === 'radio' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="radio" :size="18" /> <span>Internet Radio</span>
     </NuxtLink>
 
     <div class="mnav-group-label">Playlists</div>
-    <NuxtLink to="/music/loved" class="mnav-item" :class="{ active: currentSection === 'loved' }" @click="emit('navigate')">
+    <NuxtLink to="/music/loved" class="mnav-item" :class="{ active: currentSection === 'loved' }" :aria-current="currentSection === 'loved' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="star" :size="18" /> <span>Loved Songs</span>
     </NuxtLink>
     <NuxtLink
@@ -65,6 +65,7 @@
       :to="`/music/playlist/${pl.id}`"
       class="mnav-item mnav-sub"
       :class="{ active: currentSection === 'playlist-' + pl.id }"
+      :aria-current="currentSection === 'playlist-' + pl.id ? 'page' : undefined"
       @click="emit('navigate')"
     >{{ pl.name }}</NuxtLink>
     <button type="button" class="mnav-item mnav-create" @click="emit('navigate'); emit('create-playlist')">

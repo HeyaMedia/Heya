@@ -97,7 +97,11 @@
                   :data-prefetch-to="item.available !== false ? mediaUrl(item) : undefined"
                   :class="{ unavailable: item.available === false }"
                   draggable="true"
+                  role="link"
+                  :tabindex="item.available !== false ? 0 : -1"
                   @click="item.available !== false && navigateTo(mediaUrl(item))"
+                  @keydown.enter="item.available !== false && navigateTo(mediaUrl(item))"
+                  @keydown.space.prevent="item.available !== false && navigateTo(mediaUrl(item))"
                   @dragstart="onDragStart($event, item)"
                   @dragend="onDragEnd"
                 >
@@ -137,7 +141,11 @@
                 :data-prefetch-to="item.available !== false ? mediaUrl(item) : undefined"
                 :class="{ unavailable: item.available === false, 'browse-detail-row-phone': isPhone }"
                 draggable="true"
+                role="link"
+                :tabindex="item.available !== false ? 0 : -1"
                 @click="item.available !== false && navigateTo(mediaUrl(item))"
+                @keydown.enter="item.available !== false && navigateTo(mediaUrl(item))"
+                @keydown.space.prevent="item.available !== false && navigateTo(mediaUrl(item))"
                 @dragstart="onDragStart($event, item)"
                 @dragend="onDragEnd"
               >
@@ -212,7 +220,11 @@
               class="list-row"
               :data-prefetch-to="mediaUrl(item)"
               :class="{ 'list-row-phone': isPhone }"
+              role="link"
+              tabindex="0"
               @click="navigateTo(mediaUrl(item))"
+              @keydown.enter="navigateTo(mediaUrl(item))"
+              @keydown.space.prevent="navigateTo(mediaUrl(item))"
             >
               <template v-if="isPhone">
                 <Poster :idx="0" :src="usePosterUrl(item)" style="width: 44px; height: 66px; border-radius: 4px; flex-shrink: 0" />

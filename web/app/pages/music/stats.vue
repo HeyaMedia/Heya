@@ -187,9 +187,13 @@ function tempoLabel(band: string) {
 }
 .ys-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--gold) 0%, #f59e0b 100%);
+  background: linear-gradient(90deg, var(--gold) 0%, var(--gold-bright, var(--gold)) 100%);
   transition: width 0.4s ease;
 }
+/* Mood profile is a second chart series, deliberately distinct from the
+   gold "Top Genres" series above so the two bar groups read as different
+   data at a glance — kept literal like a categorical chart palette (no
+   equivalent token exists for a "second series" hue). */
 .ys-bar-fill.mood {
   background: linear-gradient(90deg, #6366f1 0%, #ec4899 100%);
 }
@@ -213,7 +217,7 @@ function tempoLabel(band: string) {
 }
 .ys-tempo-bar {
   width: 100%;
-  background: linear-gradient(180deg, var(--gold) 0%, #ea580c 100%);
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-deep, var(--gold)) 100%);
   border-radius: 6px 6px 0 0;
   position: relative;
   min-height: 4px;

@@ -33,6 +33,7 @@
             <button
               class="btn"
               :class="{ active: subscribed }"
+              :aria-pressed="subscribed"
               @click="toggleSubscribe"
             >
               <Icon :name="subscribed ? 'heartfill' : 'heart'" :size="14" />
@@ -68,7 +69,11 @@
           v-for="(ep, i) in detail.episodes"
           :key="ep.guid || `${ep.audio_url}-${i}`"
           class="pd-ep"
+          role="button"
+          tabindex="0"
+          :aria-label="`Play ${ep.title}`"
           @click="actions.playEpisode(detail, ep)"
+          @keydown="onEpisodeKeydown($event, ep)"
         >
           <div class="pd-ep-num mono">{{ ep.episode_number ?? (detail.episodes.length - i) }}</div>
           <div class="pd-ep-art">
@@ -210,6 +215,16 @@ function onPhoneRowClick(i: number) {
   const ep = detail.value?.episodes[i]
   if (ep && detail.value) actions.playEpisode(detail.value, ep)
 }
+
+// Keyboard mirror of the desktop episode row's @click (playbook item 1).
+// Guarded on target===currentTarget so Enter/Space on the nested "Play"
+// button doesn't double-fire playEpisode.
+function onEpisodeKeydown(e: KeyboardEvent, ep: PodcastEpisode) {
+  if (e.target !== e.currentTarget) return
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  e.preventDefault()
+  if (detail.value) actions.playEpisode(detail.value, ep)
+}
 </script>
 
 <style scoped>
@@ -347,7 +362,8 @@ function onPhoneRowClick(i: number) {
   opacity: 0;
   transition: opacity 0.15s, transform 0.15s;
 }
-.pd-ep:hover .pd-ep-play { opacity: 1; }
+.pd-ep:hover .pd-ep-play,
+.pd-ep-play:focus-visible { opacity: 1; }
 .pd-ep-play:hover { transform: scale(1.1); }
 .mono { font-family: var(--font-mono); }
 

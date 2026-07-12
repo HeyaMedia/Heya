@@ -195,7 +195,7 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 					return fmt.Errorf("updating movie metadata: %w", err)
 				}
 			}
-		case sqlc.MediaTypeTv:
+		case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 			series, sErr := q.GetTVSeriesByMediaItemID(ctx, mediaItemID)
 			if sErr == nil {
 				status := series.Status
@@ -452,7 +452,7 @@ func (a *App) IdentifySearch(ctx context.Context, mediaItemID int64, query, year
 		switch item.MediaType {
 		case sqlc.MediaTypeMovie:
 			kind = metadata.KindMovie
-		case sqlc.MediaTypeTv:
+		case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 			kind = metadata.KindTV
 		case sqlc.MediaTypeMusic:
 			kind = metadata.KindMusic

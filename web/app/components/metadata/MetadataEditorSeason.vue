@@ -5,8 +5,8 @@
         <div class="mf-card-head">Season Info</div>
         <div class="mf-grid">
           <div class="mf-field mf-full">
-            <label class="mf-label">Title</label>
-            <input v-model="form.title" type="text" class="mf-input" />
+            <label class="mf-label" for="me-season-title">Title</label>
+            <input id="me-season-title" v-model="form.title" type="text" class="mf-input" />
           </div>
           <div class="mf-field">
             <label class="mf-label">Season #</label>
@@ -17,8 +17,8 @@
             <div class="mf-readonly">{{ (season as any)?.episodes?.length ?? season?.episode_count ?? '—' }}</div>
           </div>
           <div class="mf-field">
-            <label class="mf-label">Air Date</label>
-            <input v-model="form.air_date" type="date" class="mf-input" />
+            <label class="mf-label" for="me-season-air-date">Air Date</label>
+            <input id="me-season-air-date" v-model="form.air_date" type="date" class="mf-input" />
           </div>
         </div>
       </div>
@@ -28,7 +28,7 @@
       <div class="mf-card mf-card-fill">
         <div class="mf-card-head">Overview</div>
         <div class="mf-field mf-field-fill">
-          <textarea v-model="form.overview" class="mf-textarea mf-textarea-fill" placeholder="Season overview..." />
+          <textarea v-model="form.overview" class="mf-textarea mf-textarea-fill" aria-label="Overview" placeholder="Season overview..." />
         </div>
       </div>
     </div>

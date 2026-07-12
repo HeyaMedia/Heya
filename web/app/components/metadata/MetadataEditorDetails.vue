@@ -4,13 +4,18 @@
     <div class="mf-card">
       <div class="mf-card-head">Genres</div>
       <div class="mf-chips-wrap">
-        <span v-for="(g, i) in (form.genres as string[])" :key="g" class="mf-chip" @click="removeGenre(i)">
+        <button
+          v-for="(g, i) in (form.genres as string[])" :key="g" type="button" class="mf-chip"
+          :aria-label="`Remove ${g}`"
+          @click="removeGenre(i)"
+        >
           {{ g }} <span class="mf-chip-x">&times;</span>
-        </span>
+        </button>
         <input
           v-model="newGenre"
           type="text"
           class="mf-chip-input"
+          aria-label="Add genre"
           placeholder="Add genre..."
           @keydown.enter.prevent="addGenre"
         />
@@ -23,8 +28,8 @@
       <div class="mf-grid">
         <template v-if="mediaType === 'movie'">
           <div class="mf-field">
-            <label class="mf-label">Release Date</label>
-            <input v-model="form.release_date" type="date" class="mf-input" />
+            <label class="mf-label" for="me-release-date">Release Date</label>
+            <input id="me-release-date" v-model="form.release_date" type="date" class="mf-input" />
           </div>
           <div class="mf-field">
             <label class="mf-label">Rating</label>
@@ -46,12 +51,12 @@
             <div class="mf-readonly">{{ formatRating(detail?.tv_series?.rating) }}</div>
           </div>
           <div class="mf-field">
-            <label class="mf-label">First Air Date</label>
-            <input v-model="form.first_air_date" type="date" class="mf-input" />
+            <label class="mf-label" for="me-first-air-date">First Air Date</label>
+            <input id="me-first-air-date" v-model="form.first_air_date" type="date" class="mf-input" />
           </div>
           <div class="mf-field">
-            <label class="mf-label">Last Air Date</label>
-            <input v-model="form.last_air_date" type="date" class="mf-input" />
+            <label class="mf-label" for="me-last-air-date">Last Air Date</label>
+            <input id="me-last-air-date" v-model="form.last_air_date" type="date" class="mf-input" />
           </div>
         </template>
       </div>
@@ -61,13 +66,18 @@
     <div v-if="mediaType === 'tv'" class="mf-card">
       <div class="mf-card-head">Networks</div>
       <div class="mf-chips-wrap">
-        <span v-for="(n, i) in (form.networks as string[])" :key="n" class="mf-chip" @click="removeNetwork(i)">
+        <button
+          v-for="(n, i) in (form.networks as string[])" :key="n" type="button" class="mf-chip"
+          :aria-label="`Remove ${n}`"
+          @click="removeNetwork(i)"
+        >
           {{ n }} <span class="mf-chip-x">&times;</span>
-        </span>
+        </button>
         <input
           v-model="newNetwork"
           type="text"
           class="mf-chip-input"
+          aria-label="Add network"
           placeholder="Add network..."
           @keydown.enter.prevent="addNetwork"
         />
@@ -79,8 +89,8 @@
       <div class="mf-card-head">External IDs</div>
       <div class="mf-ids">
         <div v-for="key in ['tmdb', 'imdb', 'tvdb']" :key="key" class="mf-id-row">
-          <span class="mf-id-label">{{ key.toUpperCase() }}</span>
-          <input v-model="form.external_ids[key]" type="text" class="mf-input mf-id-input" :placeholder="`${key} ID`" />
+          <label class="mf-id-label" :for="`me-ext-id-${key}`">{{ key.toUpperCase() }}</label>
+          <input :id="`me-ext-id-${key}`" v-model="form.external_ids[key]" type="text" class="mf-input mf-id-input" :placeholder="`${key} ID`" />
         </div>
       </div>
     </div>

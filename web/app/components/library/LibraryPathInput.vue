@@ -26,32 +26,32 @@
     <div v-else class="smb-form">
       <div class="smb-row">
         <div class="smb-field" style="flex: 1">
-          <label class="smb-label">Host</label>
-          <input v-model="smb.host" class="smb-input" placeholder="192.168.1.10" @input="emitSmb" />
+          <label class="smb-label" for="smb-host">Host</label>
+          <input id="smb-host" v-model="smb.host" class="smb-input" placeholder="192.168.1.10" @input="emitSmb" />
         </div>
         <div class="smb-field" style="width: 80px">
-          <label class="smb-label">Port</label>
-          <input v-model="smb.port" class="smb-input" placeholder="445" @input="emitSmb" />
+          <label class="smb-label" for="smb-port">Port</label>
+          <input id="smb-port" v-model="smb.port" class="smb-input" placeholder="445" @input="emitSmb" />
         </div>
       </div>
       <div class="smb-row">
         <div class="smb-field" style="flex: 1">
-          <label class="smb-label">Share</label>
-          <input v-model="smb.share" class="smb-input" placeholder="media" @input="emitSmb" />
+          <label class="smb-label" for="smb-share">Share</label>
+          <input id="smb-share" v-model="smb.share" class="smb-input" placeholder="media" @input="emitSmb" />
         </div>
         <div class="smb-field" style="flex: 1">
-          <label class="smb-label">Path <span class="smb-optional">(optional)</span></label>
-          <input v-model="smb.path" class="smb-input" placeholder="Movies" @input="emitSmb" />
+          <label class="smb-label" for="smb-path">Path <span class="smb-optional">(optional)</span></label>
+          <input id="smb-path" v-model="smb.path" class="smb-input" placeholder="Movies" @input="emitSmb" />
         </div>
       </div>
       <div class="smb-row">
         <div class="smb-field" style="flex: 1">
-          <label class="smb-label">Username <span class="smb-optional">(optional)</span></label>
-          <input v-model="smb.user" class="smb-input" placeholder="guest" @input="emitSmb" />
+          <label class="smb-label" for="smb-user">Username <span class="smb-optional">(optional)</span></label>
+          <input id="smb-user" v-model="smb.user" class="smb-input" placeholder="guest" @input="emitSmb" />
         </div>
         <div class="smb-field" style="flex: 1">
-          <label class="smb-label">Password <span class="smb-optional">(optional)</span></label>
-          <input v-model="smb.pass" class="smb-input" type="password" placeholder="••••" @input="emitSmb" />
+          <label class="smb-label" for="smb-pass">Password <span class="smb-optional">(optional)</span></label>
+          <input id="smb-pass" v-model="smb.pass" class="smb-input" type="password" placeholder="••••" @input="emitSmb" />
         </div>
       </div>
       <div class="smb-preview">

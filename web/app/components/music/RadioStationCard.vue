@@ -21,6 +21,7 @@
       <button
         class="rs-fav"
         :class="{ active: favorited }"
+        :aria-pressed="favorited"
         @click.stop="$emit('toggle-favorite', station)"
         :title="favorited ? 'Remove from favorites' : 'Save to favorites'"
       >

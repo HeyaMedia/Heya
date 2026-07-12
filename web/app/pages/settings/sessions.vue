@@ -123,6 +123,7 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
               class="session-revoke"
               :disabled="s.current"
               :title="s.current ? 'You can\'t sign yourself out from here — use the avatar menu' : 'Sign out this device'"
+              :aria-label="s.current ? 'You can\'t sign yourself out from here — use the avatar menu' : 'Sign out this device'"
               @click="revoke(s)"
             >
               <Icon name="close" :size="14" />
@@ -219,6 +220,9 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
   color: var(--bad);
 }
 .session-revoke:disabled { opacity: 0.3; cursor: not-allowed; }
+@media (pointer: coarse) {
+  .session-revoke { width: 44px; height: 44px; }
+}
 
 .sv2-btn.ghost:hover {
   border-color: color-mix(in srgb, var(--bad) 30%, transparent);

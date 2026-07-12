@@ -272,22 +272,23 @@ onBeforeUnmount(() => {
       <div v-if="tasks.length === 0" class="empty-state">
         <Icon name="info" :size="14" /> No scheduled tasks found.
       </div>
-      <div v-else class="task-table">
-        <div class="task-table-head">
-          <span>Task</span>
-          <span>Status</span>
-          <span>Coverage</span>
-          <span>Last / next</span>
-          <span />
+      <div v-else class="task-table" role="table" aria-label="Scheduled tasks">
+        <div class="task-table-head" role="row">
+          <span role="columnheader">Task</span>
+          <span role="columnheader">Status</span>
+          <span role="columnheader">Coverage</span>
+          <span role="columnheader">Last / next</span>
+          <span role="columnheader" />
         </div>
 
         <div
           v-for="t in tasks"
           :key="t.id"
           class="task-row"
+          role="row"
           :class="{ running: t.state === 'running', expanded: expandedTaskId === t.id }"
         >
-          <div class="task-main">
+          <div class="task-main" role="cell">
             <div class="task-icon" :class="t.state === 'running' ? 'on' : ''">
               <Icon :name="taskIcon(t.id)" :size="15" />
             </div>
@@ -301,7 +302,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="task-status">
+          <div class="task-status" role="cell">
             <StatusBadge :state="taskBadge(t).state">{{ taskBadge(t).label }}</StatusBadge>
             <span v-if="t.state === 'running' && (t.runtime || liveTaskProgress[t.id])" class="runtime-counts">
               <template v-if="(liveTaskProgress[t.id]?.running ?? t.runtime?.running ?? 0) > 0">
@@ -314,7 +315,7 @@ onBeforeUnmount(() => {
             </span>
           </div>
 
-          <div class="task-coverage">
+          <div class="task-coverage" role="cell">
             <template v-if="t.stats && t.stats.total > 0">
               <div class="stats-track">
                 <div class="stats-seg complete" :style="{ width: (t.stats.complete / t.stats.total * 100) + '%' }" />
@@ -334,7 +335,7 @@ onBeforeUnmount(() => {
             <span v-else class="stats-label dim">No eligible items</span>
           </div>
 
-          <div class="task-times">
+          <div class="task-times" role="cell">
             <div class="time-line">
               <span class="time-key">Last</span>
               <span v-if="t.last_run_at" class="time-val">
@@ -353,7 +354,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div v-if="expandedTaskId === t.id" class="task-schedule">
+          <div v-if="expandedTaskId === t.id" class="task-schedule" role="cell">
             <span class="schedule-label">Schedule</span>
             <div class="schedule-enable" @click="toggleEnabled(t)">
               <AppSwitch
@@ -407,7 +408,7 @@ onBeforeUnmount(() => {
             </select>
           </div>
 
-          <div class="task-actions">
+          <div class="task-actions" role="cell">
             <button class="icon-btn" title="View items" aria-label="View items" @click="itemsModalTask = t.id">
               <Icon name="list" :size="13" />
             </button>

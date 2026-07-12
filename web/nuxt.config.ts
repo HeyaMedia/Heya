@@ -254,6 +254,9 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: "Heya",
+      // WCAG 3.1.1 (Language of Page): a lang on <html> lets screen readers
+      // pick the right pronunciation/voice. The app ships English strings.
+      htmlAttrs: { lang: "en" },
       meta: [
         { charset: "utf-8" },
         {

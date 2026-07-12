@@ -11,16 +11,20 @@
       </TabsList>
       <!-- Pill variant (movies/tv): overflow-gated scroll controls + expand toggle. -->
       <div v-if="variant !== 'underline' && peopleTab === 'cast' && castOverflows" class="scroll-controls">
-        <button class="scroll-ctrl-btn" @click="scrollCast('left')"><Icon name="chevleft" :size="14" /></button>
-        <button class="scroll-ctrl-btn" @click="scrollCast('right')"><Icon name="chevright" :size="14" /></button>
-        <button v-if="cast && cast.length > 8" class="scroll-ctrl-btn expand" @click="castExpanded = !castExpanded">
+        <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollCast('left')"><Icon name="chevleft" :size="14" /></button>
+        <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollCast('right')"><Icon name="chevright" :size="14" /></button>
+        <button
+          v-if="cast && cast.length > 8" class="scroll-ctrl-btn expand" aria-label="Toggle expanded view"
+          :aria-expanded="castExpanded"
+          @click="castExpanded = !castExpanded"
+        >
           <Icon name="chevdown" :size="14" :style="{ transform: castExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
         </button>
       </div>
       <!-- Underline variant (MediaDetailView): always-visible round arrows. -->
       <div v-else-if="variant === 'underline' && peopleTab === 'cast'" style="display: flex; gap: 8px">
-        <button class="scroll-arrow" @click="scrollCast('left')"><Icon name="chevleft" :size="16" /></button>
-        <button class="scroll-arrow" @click="scrollCast('right')"><Icon name="chevright" :size="16" /></button>
+        <button class="scroll-arrow" aria-label="Scroll left" @click="scrollCast('left')"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-arrow" aria-label="Scroll right" @click="scrollCast('right')"><Icon name="chevright" :size="16" /></button>
       </div>
     </div>
 

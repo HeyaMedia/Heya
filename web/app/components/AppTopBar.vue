@@ -33,7 +33,7 @@
       </NuxtLink>
     </div>
 
-    <nav class="topbar-tabs">
+    <nav class="topbar-tabs" aria-label="Primary">
       <NuxtLink
         v-for="t in tabs"
         :key="t.to"
@@ -42,6 +42,7 @@
         :class="{ active: isActive(t) }"
         :title="t.label"
         :aria-label="t.label"
+        :aria-current="isActive(t) ? 'page' : undefined"
       >
         <Icon :name="t.icon" :size="16" />
         <span>{{ t.label }}</span>
@@ -71,6 +72,13 @@
           <input
             ref="searchInput"
             v-model="search.query.value"
+            role="combobox"
+            aria-label="Search"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
+            :aria-expanded="showDropdown"
+            aria-controls="topbar-search-listbox"
+            :aria-activedescendant="activeDescendantId"
             placeholder="Search titles, artists, people…"
             @keydown.enter.prevent="onEnter"
             @keydown.escape.prevent="closeDropdown"
@@ -78,7 +86,7 @@
             @keydown.up.prevent="moveSelection(-1)"
             @focus="searchFocused = true"
           />
-          <button v-if="search.query.value" class="search-close" @click="search.reset(); searchFocused = false">
+          <button v-if="search.query.value" class="search-close" aria-label="Clear search" @click="search.reset(); searchFocused = false">
             <Icon name="close" :size="14" />
           </button>
 
@@ -86,8 +94,11 @@
           <Transition name="dropdown">
             <div
               v-if="showDropdown"
+              id="topbar-search-listbox"
               ref="searchDropdownRef"
               class="search-dropdown surface"
+              role="listbox"
+              aria-label="Search results"
               :style="{ top: searchDropdownTop + 'px', right: searchDropdownRight + 'px' }"
               @mousedown.prevent
             >
@@ -107,8 +118,11 @@
                   </div>
                   <button
                     v-for="(item, iIdx) in section.bucket.items"
+                    :id="resultId(section.key, item)"
                     :key="section.key + ':' + item.id"
                     class="search-result"
+                    role="option"
+                    :aria-selected="flatIndex(sIdx, iIdx) === selectedIdx"
                     :class="{ active: flatIndex(sIdx, iIdx) === selectedIdx }"
                     @click="goToResult(section.key, item)"
                     @mouseenter="selectedIdx = flatIndex(sIdx, iIdx)"
@@ -528,6 +542,18 @@ function selectedItem(): { sectionKey: Section['key'], item: any } | null {
   }
   return null
 }
+
+// Combobox wiring: the input's aria-activedescendant follows selectedIdx
+// (set by moveSelection()/mouseenter) so a screen reader announces the
+// highlighted result without moving real DOM focus off the input.
+function resultId(kind: Section['key'], item: any): string {
+  return `topbar-search-result-${kind}-${item.id}`
+}
+
+const activeDescendantId = computed(() => {
+  const sel = selectedItem()
+  return sel ? resultId(sel.sectionKey, sel.item) : undefined
+})
 
 function onEnter() {
   const sel = selectedItem()

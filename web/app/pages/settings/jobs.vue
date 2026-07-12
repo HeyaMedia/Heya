@@ -46,6 +46,9 @@ const total = computed(() => jobsData.data.value?.total ?? 0)
 const summary = computed(() => summaryData.data.value ?? [])
 const kindSummary = computed(() => kindsData.data.value ?? [])
 const expanded = ref<number | null>(null)
+function toggleExpanded(id: number) {
+  expanded.value = expanded.value === id ? null : id
+}
 const loading = computed(() => jobsData.isLoading.value)
 const busy = ref<'' | 'rescue' | 'completed' | 'all' | 'kind'>('')
 const { flash } = useFlash()
@@ -453,6 +456,7 @@ onMounted(() => {
           :key="s.state"
           class="filter-pill"
           :class="[s.state, { active: filter === s.state }]"
+          :aria-pressed="filter === s.state"
           @click="filter = filter === s.state ? '' : s.state"
         >
           <span class="filter-count">{{ s.count }}</span>
@@ -470,6 +474,7 @@ onMounted(() => {
           :key="k.kind"
           class="filter-pill kind"
           :class="{ active: kindFilter === k.kind }"
+          :aria-pressed="kindFilter === k.kind"
           @click="kindFilter = kindFilter === k.kind ? '' : k.kind"
         >
           <span class="filter-count">{{ k.count }}</span>
@@ -486,35 +491,41 @@ onMounted(() => {
         {{ filter || kindFilter ? `No ${[filter, kindFilter].filter(Boolean).join(' ')} jobs.` : 'Queue is empty.' }}
       </div>
 
-      <div v-else class="job-table">
-        <div class="thead">
-          <span class="col-state">State</span>
-          <span class="col-kind">Kind</span>
-          <span class="col-queue">Queue</span>
-          <span class="col-attempt">Attempt</span>
-          <span class="col-time">Created</span>
-          <span class="col-actions" />
+      <div v-else class="job-table" role="table" aria-label="Jobs">
+        <div class="thead" role="row">
+          <span class="col-state" role="columnheader">State</span>
+          <span class="col-kind" role="columnheader">Kind</span>
+          <span class="col-queue" role="columnheader">Queue</span>
+          <span class="col-attempt" role="columnheader">Attempt</span>
+          <span class="col-time" role="columnheader">Created</span>
+          <span class="col-actions" role="columnheader" />
         </div>
         <div
           v-for="j in jobs"
           :key="j.id"
           class="job-row"
+          role="row"
+          tabindex="0"
+          :aria-expanded="expanded === j.id"
           :class="{ expanded: expanded === j.id }"
-          @click="expanded = expanded === j.id ? null : j.id"
+          @click="toggleExpanded(j.id)"
+          @keydown.enter="toggleExpanded(j.id)"
+          @keydown.space.prevent="toggleExpanded(j.id)"
         >
-          <span class="col-state">
+          <span class="col-state" role="cell">
             <span class="state-dot" :class="j.state" />
             {{ j.state }}
           </span>
-          <span class="col-kind mono">{{ j.kind }}</span>
-          <span class="col-queue mono dim">{{ j.queue }}</span>
-          <span class="col-attempt mono">{{ j.attempt }}/{{ j.max_attempts }}</span>
-          <span class="col-time mono dim">{{ timeAgo(j.created_at) }}</span>
-          <span class="col-actions" @click.stop>
+          <span class="col-kind mono" role="cell">{{ j.kind }}</span>
+          <span class="col-queue mono dim" role="cell">{{ j.queue }}</span>
+          <span class="col-attempt mono" role="cell">{{ j.attempt }}/{{ j.max_attempts }}</span>
+          <span class="col-time mono dim" role="cell">{{ timeAgo(j.created_at) }}</span>
+          <span class="col-actions" role="cell" @click.stop>
             <button
               v-if="['discarded', 'cancelled', 'retryable'].includes(j.state)"
               class="row-btn"
               :title="`Retry job #${j.id}`"
+              :aria-label="`Retry job #${j.id}`"
               @click="retryJob(j.id)"
             >
               <Icon name="refresh" :size="11" />
@@ -523,6 +534,7 @@ onMounted(() => {
               v-if="['available', 'retryable', 'scheduled'].includes(j.state)"
               class="row-btn danger"
               :title="`Cancel job #${j.id}`"
+              :aria-label="`Cancel job #${j.id}`"
               @click="cancelJob(j.id)"
             >
               <Icon name="close" :size="11" />
@@ -584,7 +596,7 @@ onMounted(() => {
             <span>{{ workerSettings.workers.length }} queues</span>
             <span>Changes apply after restart</span>
           </div>
-          <div class="worker-presets" aria-label="Worker profiles">
+          <div class="worker-presets" role="group" aria-label="Worker profiles">
             <button
               v-for="preset in WORKER_PRESETS"
               :key="preset.id"

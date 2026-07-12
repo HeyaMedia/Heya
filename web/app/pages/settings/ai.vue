@@ -202,6 +202,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         <button
           v-for="m in ['off', 'local', 'external', 'claude', 'codex']" :key="m"
           class="mode-btn" :class="{ active: settings?.mode === m }"
+          :aria-pressed="settings?.mode === m"
           :disabled="saving || isLocked('ai.mode')"
           @click="setMode(m)"
         >
@@ -245,8 +246,10 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         label="Subscription token"
         description="Run `claude setup-token` on a trusted machine, then paste its output here. The token is stored server-side and never echoed back."
         :lockedBy="isLocked('ai.claude_token') ? lockTooltip('ai.claude_token') : undefined"
+        v-slot="{ fieldId }"
       >
         <input
+          :id="fieldId"
           v-model="claudeTokenDraft" type="password" class="sv2-input" autocomplete="off"
           :placeholder="settings?.claude_token_set ? `token set (${settings.claude_token_hint}) — enter to replace` : 'paste Claude setup token'"
           :disabled="saving || isLocked('ai.claude_token')"
@@ -262,9 +265,10 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         <code class="setup-command">codex -c cli_auth_credentials_store=&quot;file&quot; login --device-auth</code>
       </SettingsField>
 
-      <SettingsField label="Model" :lockedBy="isLocked(agentModelField) ? lockTooltip(agentModelField) : undefined">
+      <SettingsField label="Model" :lockedBy="isLocked(agentModelField) ? lockTooltip(agentModelField) : undefined" v-slot="{ fieldId }">
         <div class="model-row">
           <select
+            :id="fieldId"
             v-model="agentModel" class="sv2-select"
             :disabled="saving || isLocked(agentModelField)"
             @change="save"
@@ -292,8 +296,8 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         </button>
       </template>
 
-      <SettingsField label="Model" :lockedBy="isLocked('ai.local_model') ? lockTooltip('ai.local_model') : undefined">
-        <select v-model="settings!.local_model" class="sv2-select" :disabled="saving || isLocked('ai.local_model')" @change="save">
+      <SettingsField label="Model" :lockedBy="isLocked('ai.local_model') ? lockTooltip('ai.local_model') : undefined" v-slot="{ fieldId }">
+        <select :id="fieldId" v-model="settings!.local_model" class="sv2-select" :disabled="saving || isLocked('ai.local_model')" @change="save">
           <option v-for="m in localModels" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
         <p v-if="selectedLocalModel" class="field-note">
@@ -305,8 +309,9 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         label="Context window"
         description="Tokens of context per request. Bigger costs RAM (KV cache) — 16384 is plenty for Heya's own features."
         :lockedBy="isLocked('ai.context_size') ? lockTooltip('ai.context_size') : undefined"
+        v-slot="{ fieldId }"
       >
-        <select v-model.number="settings!.context_size" class="sv2-select" :disabled="saving || isLocked('ai.context_size')" @change="save">
+        <select :id="fieldId" v-model.number="settings!.context_size" class="sv2-select" :disabled="saving || isLocked('ai.context_size')" @change="save">
           <option v-for="c in [4096, 8192, 16384, 32768, 65536]" :key="c" :value="c">{{ c.toLocaleString() }}</option>
         </select>
       </SettingsField>
@@ -349,22 +354,24 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
       icon="cloud"
       description="Any OpenAI-compatible API. The key is stored server-side and never echoed back."
     >
-      <SettingsField label="Provider" :lockedBy="isLocked('ai.provider') ? lockTooltip('ai.provider') : undefined">
-        <select v-model="settings!.provider" class="sv2-select" :disabled="saving || isLocked('ai.provider')" @change="providerModels = []; save()">
+      <SettingsField label="Provider" :lockedBy="isLocked('ai.provider') ? lockTooltip('ai.provider') : undefined" v-slot="{ fieldId }">
+        <select :id="fieldId" v-model="settings!.provider" class="sv2-select" :disabled="saving || isLocked('ai.provider')" @change="providerModels = []; save()">
           <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>
       </SettingsField>
 
-      <SettingsField v-if="isCustomProvider" label="Base URL" description="OpenAI-compatible API root, e.g. http://my-box:8000/v1" :lockedBy="isLocked('ai.base_url') ? lockTooltip('ai.base_url') : undefined">
-        <input v-model="settings!.base_url" type="text" class="sv2-input" placeholder="https://…/v1" autocomplete="off" :disabled="saving || isLocked('ai.base_url')" @blur="save">
+      <SettingsField v-if="isCustomProvider" label="Base URL" description="OpenAI-compatible API root, e.g. http://my-box:8000/v1" :lockedBy="isLocked('ai.base_url') ? lockTooltip('ai.base_url') : undefined" v-slot="{ fieldId }">
+        <input :id="fieldId" v-model="settings!.base_url" type="text" class="sv2-input" placeholder="https://…/v1" autocomplete="off" :disabled="saving || isLocked('ai.base_url')" @blur="save">
       </SettingsField>
 
       <SettingsField
         v-if="selectedProvider?.needs_key || isCustomProvider"
         label="API key"
         :lockedBy="isLocked('ai.api_key') ? lockTooltip('ai.api_key') : undefined"
+        v-slot="{ fieldId }"
       >
         <input
+          :id="fieldId"
           v-model="apiKeyDraft" type="password" class="sv2-input" autocomplete="off"
           :placeholder="settings?.api_key_set ? `key set (${settings.api_key_hint}) — enter to replace` : 'paste your API key'"
           :disabled="saving || isLocked('ai.api_key')"
@@ -372,9 +379,10 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         >
       </SettingsField>
 
-      <SettingsField label="Model" :lockedBy="isLocked('ai.model') ? lockTooltip('ai.model') : undefined">
+      <SettingsField label="Model" :lockedBy="isLocked('ai.model') ? lockTooltip('ai.model') : undefined" v-slot="{ fieldId }">
         <div class="model-row">
           <input
+            :id="fieldId"
             v-model="settings!.model" type="text" class="sv2-input" list="ai-provider-models"
             placeholder="e.g. anthropic/claude-sonnet-5" autocomplete="off"
             :disabled="saving || isLocked('ai.model')"
@@ -397,15 +405,17 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
       icon="pulse"
       description="Round-trip a prompt through the active configuration. Optional context becomes the system prompt — use it to check the model actually honors instructions."
     >
-      <SettingsField label="Context (optional)">
+      <SettingsField label="Context (optional)" v-slot="{ fieldId }">
         <textarea
+          :id="fieldId"
           v-model="testSystem" class="sv2-input test-textarea" rows="2"
           placeholder="e.g. You are Heya's media assistant. The user's favorite film is Blade Runner (1982)."
         />
       </SettingsField>
-      <SettingsField label="Prompt">
+      <SettingsField label="Prompt" v-slot="{ fieldId }">
         <div class="model-row">
           <input
+            :id="fieldId"
             v-model="testPrompt" type="text" class="sv2-input"
             placeholder='e.g. "Say hello world" or "What is my favorite film?"'
             @keydown.enter="runTest"

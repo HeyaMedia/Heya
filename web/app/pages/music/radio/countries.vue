@@ -119,6 +119,10 @@ function flag(code: string) {
 .rc-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .rc-back:hover { color: var(--gold); }
 
+@media (pointer: coarse) {
+  .rc-back { min-height: 44px; padding: 10px 0; }
+}
+
 .rc-country-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

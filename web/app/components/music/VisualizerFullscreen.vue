@@ -19,6 +19,10 @@
         ref="rootRef"
         class="viz-root"
         :class="{ 'controls-hidden': !controlsVisible }"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Fullscreen visualizer"
+        tabindex="-1"
         @mousemove="poke"
       >
         <!-- Active mode fills the surface -->
@@ -65,7 +69,18 @@
           <!-- Seek -->
           <div class="viz-seek">
             <span class="viz-t">{{ formatTime(position) }}</span>
-            <div class="viz-rail" @click="onSeek">
+            <div
+              class="viz-rail"
+              role="slider"
+              tabindex="0"
+              aria-label="Seek"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="Math.round(progressPct)"
+              :aria-valuetext="`${formatTime(position)} of ${formatTime(duration)}`"
+              @click="onSeek"
+              @keydown="onSeekKeydown"
+            >
               <div class="viz-rail-fill" :style="{ width: progressPct + '%' }" />
               <div class="viz-rail-knob" :style="{ left: progressPct + '%' }" />
             </div>
@@ -290,6 +305,26 @@ function onSeek(e: MouseEvent) {
   seek(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)))
 }
 
+// Keyboard mirror of the pointer seek rail — arrow keys nudge 5%, Home/End
+// jump to the ends. stopPropagation keeps this from also triggering any
+// window-level seek hotkey while the rail has focus.
+function onSeekKeydown(e: KeyboardEvent) {
+  if (duration.value <= 0) return
+  let next = progressPct.value
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'ArrowUp': next += 5; break
+    case 'ArrowLeft':
+    case 'ArrowDown': next -= 5; break
+    case 'Home': next = 0; break
+    case 'End': next = 100; break
+    default: return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  seek(Math.max(0, Math.min(100, next)) / 100)
+}
+
 // --- Native fullscreen -----------------------------------------------------
 function toggleNativeFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
@@ -331,6 +366,21 @@ function poke() {
 watch(vis.fullscreenOpen, (open) => {
   if (open) poke()
   else if (hideTimer) { clearTimeout(hideTimer); controlsVisible.value = true }
+})
+
+// --- Dialog focus management -------------------------------------------
+// role="dialog" on the root needs focus moved in on open and returned to
+// whatever triggered it on close — the overlay otherwise leaves keyboard
+// focus stranded on a now-hidden trigger (or nowhere, for AT users).
+let lastFocused: HTMLElement | null = null
+watch(vis.fullscreenOpen, (open) => {
+  if (open) {
+    lastFocused = document.activeElement as HTMLElement | null
+    nextTick(() => rootRef.value?.focus())
+  } else {
+    lastFocused?.focus?.()
+    lastFocused = null
+  }
 })
 // Opening the browser pins the chrome; closing re-arms the idle timer.
 watch(vis.presetBrowserOpen, (o) => { if (o) { controlsVisible.value = true; if (hideTimer) clearTimeout(hideTimer) } else poke() })

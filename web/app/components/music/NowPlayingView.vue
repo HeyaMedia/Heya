@@ -7,7 +7,7 @@
         <div class="np-backdrop" :style="backdropStyle" />
         <div class="np-backdrop-tint" />
 
-        <button class="np-close" @click="$emit('close')" title="Collapse">
+        <button class="np-close" aria-label="Collapse" @click="$emit('close')" title="Collapse">
           <Icon name="chevdown" :size="22" />
         </button>
 
@@ -66,26 +66,37 @@
         <div class="np-bottom">
           <div class="np-scrubber">
             <span class="np-time">{{ formatTime(position) }}</span>
-            <div class="rail gold" @click="onSeek">
+            <div
+              class="rail gold"
+              role="slider"
+              tabindex="0"
+              aria-label="Seek"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="Math.round(scrubPct)"
+              :aria-valuetext="`${formatTime(position)} of ${formatTime(duration)}`"
+              @click="onSeek"
+              @keydown="onScrubKeydown"
+            >
               <div class="fill" :style="{ width: scrubPct + '%' }" />
               <div class="knob" :style="{ left: scrubPct + '%' }" />
             </div>
             <span class="np-time">{{ formatTime(duration) }}</span>
           </div>
           <div class="np-controls">
-            <button class="np-icon" :class="{ active: shuffled }" @click="toggleShuffle" title="Shuffle">
+            <button class="np-icon" :class="{ active: shuffled }" :aria-pressed="shuffled" aria-label="Shuffle" @click="toggleShuffle" title="Shuffle">
               <Icon name="shuffle" :size="18" />
             </button>
-            <button class="np-icon" @click="prevTrack" title="Previous">
+            <button class="np-icon" aria-label="Previous" @click="prevTrack" title="Previous">
               <Icon name="prev" :size="22" />
             </button>
-            <button class="np-play" @click="togglePlay" :title="playing ? 'Pause' : 'Play'">
+            <button class="np-play" :aria-label="playing ? 'Pause' : 'Play'" @click="togglePlay" :title="playing ? 'Pause' : 'Play'">
               <Icon :name="playing ? 'pause' : 'play'" :size="28" />
             </button>
-            <button class="np-icon" @click="nextTrack" title="Next">
+            <button class="np-icon" aria-label="Next" @click="nextTrack" title="Next">
               <Icon name="next" :size="22" />
             </button>
-            <button class="np-icon" :class="{ active: repeatMode !== 'off' }" @click="cycleRepeat" title="Repeat">
+            <button class="np-icon" :class="{ active: repeatMode !== 'off' }" :aria-pressed="repeatMode !== 'off'" aria-label="Repeat" @click="cycleRepeat" title="Repeat">
               <Icon name="repeat" :size="18" />
               <span v-if="repeatMode === 'one'" class="np-repeat-badge">1</span>
             </button>
@@ -101,6 +112,7 @@
             <button
               v-if="track"
               class="np-icon"
+              aria-label="Start radio from this track"
               @click="startTrackRadio"
               :disabled="radio.starting.value"
               title="Start radio from this track"
@@ -110,23 +122,35 @@
             <button
               v-if="track"
               class="np-icon"
+              aria-label="DJ mix (harmonically-compatible tracks)"
               @click="startDJMixHere"
               :disabled="radio.starting.value"
               title="DJ mix (harmonically-compatible tracks)"
             >
               <Icon name="shuffle" :size="18" />
             </button>
-            <button class="np-icon" @click="openVisualizer" title="Visualizer">
+            <button class="np-icon" aria-label="Visualizer" @click="openVisualizer" title="Visualizer">
               <Icon name="pulse" :size="18" />
             </button>
-            <button class="np-icon" @click="toggleQueue" title="Queue">
+            <button class="np-icon" aria-label="Queue" @click="toggleQueue" title="Queue">
               <Icon name="queue" :size="18" />
             </button>
             <div class="np-volume" @wheel.prevent="onVolumeWheel">
-              <button class="np-icon" @click="toggleMute">
+              <button class="np-icon" :aria-pressed="muted" :aria-label="muted ? 'Unmute' : 'Mute'" @click="toggleMute">
                 <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="18" />
               </button>
-              <div class="rail" style="width: 110px" @click="onVolume">
+              <div
+                class="rail"
+                style="width: 110px"
+                role="slider"
+                tabindex="0"
+                aria-label="Volume"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-valuenow="muted ? 0 : volume"
+                @click="onVolume"
+                @keydown="onVolumeKeydown"
+              >
                 <div class="fill" :style="{ width: (muted ? 0 : volume) + '%' }" />
                 <div class="knob" :style="{ left: (muted ? 0 : volume) + '%' }" />
               </div>
@@ -211,6 +235,43 @@ function onSeek(e: MouseEvent) {
 function onVolume(e: MouseEvent) {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   setVolume(Math.round(((e.clientX - rect.left) / rect.width) * 100))
+}
+
+// Keyboard mirrors of the click-to-seek/click-to-set-volume rails above.
+// stopPropagation keeps a focused rail from also triggering a window-level
+// seek/volume hotkey (same reasoning as MusicWaveform.vue).
+function onScrubKeydown(e: KeyboardEvent) {
+  if (duration.value <= 0) return
+  let nextPct = scrubPct.value
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'ArrowUp': nextPct += 5; break
+    case 'ArrowLeft':
+    case 'ArrowDown': nextPct -= 5; break
+    case 'Home': nextPct = 0; break
+    case 'End': nextPct = 100; break
+    default: return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  seek(Math.max(0, Math.min(100, nextPct)) / 100)
+}
+function onVolumeKeydown(e: KeyboardEvent) {
+  let next = muted.value ? 0 : volume.value
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'ArrowUp': next += 5; break
+    case 'ArrowLeft':
+    case 'ArrowDown': next -= 5; break
+    case 'Home': next = 0; break
+    case 'End': next = 100; break
+    default: return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  next = Math.max(0, Math.min(100, next))
+  if (muted.value && next > 0) toggleMute()
+  setVolume(next)
 }
 // Scroll over the volume control to nudge it ±5. Up = louder. Base the delta on
 // the real stored level (not the muted-display 0) so scrolling while muted
