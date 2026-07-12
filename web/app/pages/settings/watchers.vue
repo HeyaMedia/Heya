@@ -2,14 +2,15 @@
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import type { components } from '#open-fetch-schemas/heya'
-type WatcherStatus = components['schemas']['WatcherStatusBody']
-type Library      = components['schemas']['LibraryView']
+import { librariesQuery } from '~/queries/catalog'
+import { watcherStatusQuery } from '~/queries/settings'
+type Library = components['schemas']['LibraryView']
 
-const { $heya } = useNuxtApp()
-
-const status = ref<WatcherStatus | null>(null)
-const libraries = ref<Library[]>([])
-const loading = ref(true)
+const watcherData = useQuery(watcherStatusQuery())
+const librariesData = useQuery(librariesQuery())
+const status = computed(() => watcherData.data.value ?? null)
+const libraries = computed(() => (librariesData.data.value ?? []) as Library[])
+const loading = computed(() => watcherData.isLoading.value || librariesData.isLoading.value)
 const lastFetched = ref<Date | null>(null)
 const error = ref<string | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
@@ -17,22 +18,21 @@ let timer: ReturnType<typeof setInterval> | null = null
 async function load() {
   error.value = null
   try {
-    const [s, ls] = await Promise.all([
-      $heya('/api/watchers'),
-      $heya('/api/libraries'),
+    await Promise.all([
+      watcherData.refetch(),
+      librariesData.refetch(),
     ])
-    status.value = s
-    libraries.value = ls ?? []
     lastFetched.value = new Date()
   } catch (e: any) {
     error.value = e?.message ?? 'Failed to fetch watcher status.'
-  } finally {
-    loading.value = false
   }
 }
 
+watch(() => watcherData.data.value, value => {
+  if (value) lastFetched.value = new Date()
+}, { immediate: true })
+
 onMounted(() => {
-  load()
   timer = setInterval(load, 5000)
   tickTimer = setInterval(() => { tickKey.value++ }, 1000)
 })

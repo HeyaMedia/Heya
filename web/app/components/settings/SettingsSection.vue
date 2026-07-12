@@ -37,14 +37,19 @@ defineProps<{
 
 <style scoped>
 .sv2-section {
-  margin-bottom: 28px;
+  margin-bottom: 16px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: linear-gradient(145deg, var(--bg-1), color-mix(in srgb, var(--bg-2) 72%, var(--bg-1)));
+  box-shadow: 0 1px 0 rgb(var(--ink) / 0.025);
 }
 .sv2-section-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .sv2-section-titles {
   min-width: 0;
@@ -55,12 +60,12 @@ defineProps<{
   align-items: center;
   gap: 7px;
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--fg-1);
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  color: var(--fg-0);
 }
+.sv2-section-title > :deep(svg) { color: var(--gold); }
 .sv2-section-info {
   color: var(--fg-3);
   cursor: help;
@@ -81,7 +86,7 @@ defineProps<{
 }
 .sv2-section-desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--fg-3);
   text-transform: none;
   letter-spacing: 0;
@@ -94,6 +99,28 @@ defineProps<{
   gap: 8px;
   flex-shrink: 0;
 }
+.sv2-section-actions :deep(.link-arrow) {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 11.5px;
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.sv2-section-actions :deep(.link-arrow:hover) {
+  border-color: var(--border-strong);
+  background: rgb(var(--ink) / 0.045);
+  color: var(--fg-0);
+}
 .sv2-section-body { display: block; }
 
 /* Phone: every page's #actions slot (buttons, selects, search inputs) sits
@@ -102,6 +129,11 @@ defineProps<{
    actions and let actions wrap instead, one shared fix instead of a
    per-page media query. */
 @media (max-width: 720px) {
+  .sv2-section {
+    margin-bottom: 12px;
+    padding: 15px 14px 16px;
+    border-radius: var(--r-md);
+  }
   .sv2-section-head {
     flex-direction: column;
     align-items: stretch;
@@ -110,5 +142,6 @@ defineProps<{
     flex-wrap: wrap;
     width: 100%;
   }
+  .sv2-section-actions :deep(.link-arrow) { min-height: 36px; }
 }
 </style>

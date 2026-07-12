@@ -1,24 +1,14 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-const { $heya } = useNuxtApp()
+import { configSourcesQuery } from '~/queries/settings'
+import type { ConfigSourceEntry as SourceEntry } from '~/queries/settings'
 
-type SourceEntry = { source: string, env_var?: string }
-type SourcesMap = Record<string, SourceEntry>
-
-const sources = ref<SourcesMap>({})
-const loading = ref(true)
+const sourcesData = useQuery(configSourcesQuery())
+const sources = computed(() => sourcesData.data.value ?? {})
+const loading = computed(() => sourcesData.isLoading.value)
 const filterText = ref('')
 const filterSource = ref<'' | 'env' | 'db' | 'default'>('')
-
-async function load() {
-  loading.value = true
-  try {
-    sources.value = await $heya('/api/config/sources') as SourcesMap
-  } catch {} finally {
-    loading.value = false
-  }
-}
 
 const grouped = computed(() => {
   const groups: Record<string, { key: string, entry: SourceEntry }[]> = {}
@@ -69,7 +59,6 @@ async function copyKey(key: string) {
   try { await navigator.clipboard.writeText(key) } catch {}
 }
 
-onMounted(load)
 </script>
 
 <template>

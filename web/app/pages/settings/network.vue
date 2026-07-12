@@ -1,8 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type ListenersBody = components['schemas']['AdminListenersBody']
+import { adminListenersQuery } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
@@ -14,8 +13,9 @@ const {
   fetchRaw, subscribeToEvents,
 } = useTailscale()
 
-const listeners = ref<ListenersBody | null>(null)
-const loadingListeners = ref(true)
+const listenersData = useQuery(adminListenersQuery())
+const listeners = computed(() => listenersData.data.value ?? null)
+const loadingListeners = computed(() => listenersData.isLoading.value)
 const saving = ref(false)
 const loggingOut = ref(false)
 const hostnameDraft = ref('')
@@ -28,11 +28,7 @@ const { flash } = useFlash()
 let unsubscribe: (() => void) | null = null
 
 async function loadListeners() {
-  try {
-    listeners.value = await $heya('/api/admin/listeners')
-  } catch {} finally {
-    loadingListeners.value = false
-  }
+  try { await listenersData.refetch() } catch {}
 }
 
 async function onMasterToggle(on: boolean) {

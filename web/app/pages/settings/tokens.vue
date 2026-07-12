@@ -2,14 +2,16 @@
 definePageMeta({ layout: 'settings' })
 
 import type { components } from '#open-fetch-schemas/heya'
-type ApiToken = components['schemas']['ApiTokenView']
+import { myApiTokensQuery } from '~/queries/settings'
+import type { ApiToken } from '~/queries/settings'
 type CreateResult = components['schemas']['CreateApiTokenResult']
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 
-const tokens = ref<ApiToken[]>([])
-const loading = ref(true)
+const tokensData = useQuery(myApiTokensQuery())
+const tokens = computed(() => tokensData.data.value ?? [])
+const loading = computed(() => tokensData.isLoading.value)
 const { flash } = useFlash()
 
 // Create dialog state
@@ -32,13 +34,10 @@ const EXPIRY_OPTIONS = [
 ] as const
 
 async function load() {
-  loading.value = true
   try {
-    tokens.value = await $heya('/api/me/api-tokens')
+    await tokensData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load tokens.' }
-  } finally {
-    loading.value = false
   }
 }
 
@@ -59,14 +58,7 @@ async function create() {
       body: { name: draftName.value.trim(), expires_in_days: draftExpiryDays.value },
     })
     revealed.value = result
-    // Prepend the new token (without plaintext) to the list.
-    tokens.value.unshift({
-      id: result.id,
-      name: result.name,
-      created_at: result.created_at,
-      last_seen_at: result.last_seen_at,
-      expires_at: result.expires_at,
-    })
+    await load()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to mint token.' }
   } finally {
@@ -99,7 +91,7 @@ async function revoke(t: ApiToken) {
   if (!ok) return
   try {
     await $heya('/api/me/api-tokens/{id}', { method: 'DELETE', path: { id: t.id } })
-    tokens.value = tokens.value.filter(x => x.id !== t.id)
+    await load()
     flash.value = { kind: 'ok', text: 'Token revoked.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to revoke token.' }
@@ -124,7 +116,6 @@ function wasUsed(t: ApiToken): boolean {
   return new Date(t.last_seen_at).getTime() > new Date(t.created_at).getTime() + 5000
 }
 
-onMounted(load)
 </script>
 
 <template>

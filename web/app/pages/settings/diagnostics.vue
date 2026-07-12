@@ -1,15 +1,17 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type Sys      = components['schemas']['AdminSystemBody']
-type LogLevel = components['schemas']['AdminLogLevelBody']
+import { adminLogLevelQuery, adminSystemQuery } from '~/queries/admin'
+import type { AdminLogLevel } from '~/queries/admin'
 
 const { $heya } = useNuxtApp()
 
-const sys = ref<Sys | null>(null)
-const logLevel = ref<LogLevel | null>(null)
-const loading = ref(true)
+const systemData = useQuery(adminSystemQuery())
+const logLevelData = useQuery(adminLogLevelQuery())
+const sys = computed(() => systemData.data.value ?? null)
+const logLevelOverride = ref<AdminLogLevel | null>(null)
+const logLevel = computed(() => logLevelOverride.value ?? logLevelData.data.value ?? null)
+const loading = computed(() => systemData.isLoading.value || logLevelData.isLoading.value)
 const setting = ref(false)
 const bundling = ref(false)
 const { flash } = useFlash()
@@ -24,27 +26,19 @@ const tick = ref(0)
 let sysTimer: ReturnType<typeof setInterval> | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
 
-async function loadSystem() {
-  try {
-    const s = await $heya('/api/admin/system')
-    sys.value = s
+watch(() => systemData.data.value, (s) => {
+  if (s) {
     heapHistory.value.push(s.heap_inuse_bytes)
     if (heapHistory.value.length > HISTORY) heapHistory.value.shift()
     goroutineHistory.value.push(s.goroutines)
     if (goroutineHistory.value.length > HISTORY) goroutineHistory.value.shift()
-  } catch {}
-}
-
-async function loadLogLevel() {
-  try {
-    logLevel.value = await $heya('/api/admin/log-level')
-  } catch {}
-}
+  }
+}, { immediate: true })
 
 async function setLogLevel(level: string) {
   setting.value = true
   try {
-    logLevel.value = await $heya('/api/admin/log-level', {
+    logLevelOverride.value = await $heya('/api/admin/log-level', {
       method: 'PUT',
       body: { level } as any,
     })
@@ -118,10 +112,8 @@ const PPROF = [
   { name: 'Block profile',      endpoint: '/api/debug/pprof/block',   icon: 'warning' },
 ]
 
-onMounted(async () => {
-  await Promise.all([loadSystem(), loadLogLevel()])
-  loading.value = false
-  sysTimer = setInterval(loadSystem, 2000)
+onMounted(() => {
+  sysTimer = setInterval(() => { void systemData.refetch() }, 2000)
   tickTimer = setInterval(() => { tick.value++ }, 1000)
 })
 onBeforeUnmount(() => {

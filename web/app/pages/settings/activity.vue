@@ -1,5 +1,10 @@
 <script setup lang="ts">
-definePageMeta({ layout: 'settings', middleware: 'admin' })
+definePageMeta({ layout: 'settings', middleware: ['admin', 'settings-activity-redirect'] })
+
+withDefaults(defineProps<{ embedded?: boolean, showSummary?: boolean }>(), {
+  embedded: false,
+  showSummary: true,
+})
 
 import type { ActiveSession } from '~/composables/useActiveSessions'
 
@@ -129,7 +134,7 @@ async function sendMsg() {
 
 <template>
   <div>
-    <header class="sv2-page-head">
+    <header v-if="!embedded" class="sv2-page-head">
       <h2 class="sv2-page-title">Now Playing</h2>
       <p class="sv2-page-desc">
         Every live playback session across all users — what they're streaming,
@@ -139,7 +144,7 @@ async function sendMsg() {
       </p>
     </header>
 
-    <div class="tiles">
+    <div v-if="showSummary" class="tiles">
       <MetricTile label="Active streams" :value="sessions.length" icon="cast"
         :tone="sessions.length ? 'good' : 'neutral'" />
       <MetricTile label="Transcoding" :value="transcodingCount" icon="cpu"

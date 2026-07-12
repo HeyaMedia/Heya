@@ -31,7 +31,7 @@ const RATING_LOGOS: Record<string, string> = {
   trakt: '/logos/trakt.svg',
   tvdb: '/logos/tvdb.png',
   tvmaze: '/logos/tvmaze.png',
-  fanart: '/logos/fanart.svg',
+  fanart: '/logos/fanart.png',
   anidb: '/logos/anidb.png',
 }
 

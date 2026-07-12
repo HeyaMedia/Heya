@@ -3,9 +3,12 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 const { $heya } = useNuxtApp()
 const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
+import { subsonicConfigQuery, subsonicCredentialQuery } from '~/queries/settings'
 
 const enabled = ref(false)
-const loading = ref(true)
+const configData = useQuery(subsonicConfigQuery())
+const credentialData = useQuery(subsonicCredentialQuery())
+const loading = computed(() => configData.isLoading.value)
 const saving = ref(false)
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
@@ -24,17 +27,23 @@ const serverAddress = computed(() =>
 
 async function load() {
   try {
-    const res = await $heya('/api/subsonic/config')
-    enabled.value = res.enabled
-  } catch {} finally {
-    loading.value = false
-  }
+    const res = await configData.refetch()
+    if (res.data) enabled.value = res.data.enabled
+  } catch {}
   try {
-    credential.value = await $heya('/api/me/subsonic-credential') as Credential
+    const res = await credentialData.refetch()
+    credential.value = res.data as Credential
   } catch {
     credential.value = null // 404 — none minted yet
   }
 }
+
+watch(() => configData.data.value, value => {
+  if (value) enabled.value = value.enabled
+}, { immediate: true })
+watch(() => credentialData.data.value, value => {
+  if (value) credential.value = value as Credential
+}, { immediate: true })
 
 async function onToggle(on: boolean) {
   saving.value = true
@@ -118,11 +127,18 @@ function formatWhen(value?: string): string {
     : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-onMounted(() => { ensureSources(); load() })
+onMounted(() => { ensureSources() })
 </script>
 
 <template>
   <div class="settings-page">
+    <header class="sv2-page-head">
+      <h2 class="sv2-page-title">Subsonic API</h2>
+      <p class="sv2-page-desc">
+        Connect Subsonic-compatible music apps using a dedicated, revocable app password.
+      </p>
+    </header>
+
     <SettingsSection
       title="Subsonic-compatible API"
       icon="music"

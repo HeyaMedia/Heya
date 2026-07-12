@@ -2,26 +2,13 @@
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 const { $heya } = useNuxtApp()
+import { recommendationsSettingsQuery, recommendationsStatusQuery } from '~/queries/intelligence'
+import type { RecommendationsSettings } from '~/queries/intelligence'
 
-type Accel = { name: string; label: string; available: boolean; reason?: string }
-type Progress = { current_file?: string; bytes_done?: number; bytes_total?: number; files_done?: number; files_total?: number }
-type MLStatus = {
-  enabled: boolean
-  accelerator: string
-  env_locks?: { enabled?: string; accelerator?: string }
-  embedded?: number
-  total?: number
-  embedded_episodes?: number
-  total_episodes?: number
-  model?: string
-  dimensions?: number
-  accelerators?: Accel[]
-  fetcher?: { state: string; all_present?: boolean; missing_count?: number; progress?: Progress; last_error?: string }
-}
-interface MLSettings { enabled: boolean; accelerator: string }
-
-const status = ref<MLStatus | null>(null)
-const settings = ref<MLSettings | null>(null)
+const statusData = useQuery(recommendationsStatusQuery())
+const settingsData = useQuery(recommendationsSettingsQuery())
+const status = computed(() => statusData.data.value ?? null)
+const settings = ref<RecommendationsSettings | null>(null)
 const saving = ref(false)
 const enableSaving = ref(false)
 const busy = ref(false)
@@ -51,13 +38,20 @@ const fetcherLabel = computed(() => {
 })
 
 async function loadStatus() {
-  try { status.value = await $heya('/api/admin/recommendations-ml/status') as MLStatus }
+  try { await statusData.refetch() }
   catch (e: any) { flash.value = { kind: 'err', text: e?.message ?? 'Failed to load status.' } }
 }
 async function loadSettings() {
-  try { settings.value = await $heya('/api/admin/recommendations-ml/settings') as MLSettings }
+  try {
+    await settingsData.refetch()
+    if (settingsData.data.value) settings.value = structuredClone(settingsData.data.value)
+  }
   catch { settings.value = { enabled: false, accelerator: 'auto' } }
 }
+
+watch(() => settingsData.data.value, value => {
+  if (value) settings.value = structuredClone(value)
+}, { immediate: true })
 async function toggleEnabled() {
   if (!settings.value || enableSaving.value) return
   enableSaving.value = true

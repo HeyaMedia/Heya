@@ -2,14 +2,14 @@
 import { timeAgo as timeAgoBase } from '~/composables/useFormat'
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type Storage = components['schemas']['AdminStorageBody']
+import { adminStorageQuery } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 
-const storage = ref<Storage | null>(null)
-const loading = ref(true)
+const storageData = useQuery(adminStorageQuery())
+const storage = computed(() => storageData.data.value ?? null)
+const loading = computed(() => storageData.isLoading.value)
 const clearing = ref(false)
 const scanning = ref(false)
 const { flash } = useFlash()
@@ -17,13 +17,10 @@ const tick = ref(0)
 let tickTimer: ReturnType<typeof setInterval> | null = null
 
 async function load() {
-  loading.value = true
   try {
-    storage.value = await $heya('/api/admin/storage')
+    await storageData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load storage info.' }
-  } finally {
-    loading.value = false
   }
 }
 
@@ -90,7 +87,6 @@ const totalScannedBytes = computed(() =>
 )
 
 onMounted(() => {
-  load()
   tickTimer = setInterval(() => { tick.value++ }, 1000)
 })
 onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })

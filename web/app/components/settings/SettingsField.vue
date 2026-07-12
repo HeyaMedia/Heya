@@ -29,7 +29,7 @@ defineProps<{
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 14px 0;
+  padding: 15px 0;
   border-bottom: 1px solid var(--border);
 }
 .sv2-field:last-child { border-bottom: 0; }
@@ -39,9 +39,9 @@ defineProps<{
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--fg-1);
+  font-size: 12.5px;
+  font-weight: 580;
+  color: var(--fg-0);
 }
 .sv2-field-lock {
   display: inline-flex;

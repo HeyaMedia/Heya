@@ -13,6 +13,7 @@ const route = useRoute()
 const { itemByPath } = useSettingsNav()
 const { isPhone } = useViewport()
 const navOpen = ref(false)
+const dashboardWide = computed(() => route.path === '/settings/dashboard' || route.path === '/settings/activity')
 
 const currentTitle = computed(() => itemByPath.value.get(route.path)?.item.label ?? 'Settings')
 
@@ -42,7 +43,8 @@ watch(() => route.path, () => { navOpen.value = false })
               <span>Sections</span>
             </button>
           </div>
-          <div class="sv2-content">
+          <div class="sv2-content" :class="{ 'sv2-content-dashboard': dashboardWide }">
+            <SettingsPageTabs />
             <slot />
           </div>
         </main>
@@ -73,10 +75,11 @@ watch(() => route.path, () => { navOpen.value = false })
 }
 
 .sv2-content {
-  max-width: 1000px;
+  max-width: 1080px;
   margin: 0 auto;
   padding: 32px 40px 80px;
 }
+.sv2-content-dashboard { max-width: 1320px; }
 
 /* Phone-only compact header — replaces the persistent SettingsSidebar with
    a section title + a button that opens the nav sheet. Mirrors

@@ -4,63 +4,16 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 const { $heya } = useNuxtApp()
 const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
 const { flash } = useFlash()
+import { aiCatalogQuery, aiSettingsQuery, aiStatusQuery } from '~/queries/intelligence'
+import type { AIChatResponse, AISettings as AISettingsView } from '~/queries/intelligence'
 
-type AIProvider = { id: string; label: string; base_url: string; needs_key: boolean }
-type AILocalModel = { id: string; label: string; size: number; ram_hint: string; notes?: string }
-type AISettingsView = {
-  mode: string
-  provider: string
-  api_key_set: boolean
-  api_key_hint?: string
-  model: string
-  base_url: string
-  local_model: string
-  local_backend: string
-  context_size: number
-  claude_model: string
-  codex_model: string
-  claude_token_set: boolean
-  claude_token_hint?: string
-}
-type AIDownloadProgress = { current_file?: string; bytes_done: number; bytes_total: number; started_at?: string }
-type AIStatus = {
-  mode: string
-  ready: boolean
-  detail?: string
-  provider?: string
-  model?: string
-  local_model?: string
-  context_size?: number
-  local: {
-    build: string
-    server_present: boolean
-    model_present: boolean
-    running: boolean
-    running_model?: string
-    download_state: string
-    download_progress?: AIDownloadProgress
-    download_error?: string
-  }
-  agent: {
-    provider?: string
-    binary_present: boolean
-    authenticated: boolean
-    setup_hint?: string
-  }
-}
-type AIChatResponse = {
-  content: string
-  model?: string
-  mode: string
-  prompt_tokens: number
-  completion_tokens: number
-  duration_ms: number
-}
-
-const status = ref<AIStatus | null>(null)
+const statusData = useQuery(aiStatusQuery())
+const settingsData = useQuery(aiSettingsQuery())
+const catalogData = useQuery(aiCatalogQuery())
+const status = computed(() => statusData.data.value ?? null)
 const settings = ref<AISettingsView | null>(null)
-const providers = ref<AIProvider[]>([])
-const localModels = ref<AILocalModel[]>([])
+const providers = computed(() => catalogData.data.value?.providers ?? [])
+const localModels = computed(() => catalogData.data.value?.local_models ?? [])
 const providerModels = ref<string[]>([])
 
 const saving = ref(false)
@@ -105,24 +58,23 @@ const testing = ref(false)
 const testResult = ref<AIChatResponse | null>(null)
 const testError = ref('')
 
-let statusRequest = 0
 async function loadStatus() {
-  const request = ++statusRequest
   try {
-    const next = await $heya('/api/ai/status') as AIStatus
-    if (request !== statusRequest) return
-    status.value = next
-    downloading.value = next.local.download_state === 'downloading'
+    await statusData.refetch()
+    downloading.value = status.value?.local.download_state === 'downloading'
   } catch { /* transient poll failure — keep last snapshot */ }
 }
 async function loadSettings() {
-  settings.value = await $heya('/api/ai/settings') as AISettingsView
+  await settingsData.refetch()
+  if (settingsData.data.value) settings.value = structuredClone(settingsData.data.value)
 }
 async function loadCatalog() {
-  const cat = await $heya('/api/ai/catalog') as { providers: AIProvider[]; local_models: AILocalModel[] }
-  providers.value = cat.providers
-  localModels.value = cat.local_models
+  await catalogData.refetch()
 }
+
+watch(() => settingsData.data.value, value => {
+  if (value) settings.value = structuredClone(value)
+}, { immediate: true })
 
 async function save() {
   if (!settings.value || saving.value) return

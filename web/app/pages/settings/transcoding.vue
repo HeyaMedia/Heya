@@ -1,14 +1,14 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type Transcode = components['schemas']['TranscodeStatusBody']
+import { transcodeStatusQuery } from '~/queries/admin'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
 
-const status = ref<Transcode | null>(null)
+const statusData = useQuery(transcodeStatusQuery())
+const status = computed(() => statusData.data.value ?? null)
 const dirty = ref(false)
 const saving = ref(false)
 const clearing = ref(false)
@@ -45,15 +45,18 @@ const QUALITY_LADDER = [
 
 async function loadStatus() {
   try {
-    const s = await $heya('/api/transcode/status')
-    status.value = s
-    form.hwAccel = s.config_mode || 'auto'
-    form.cacheMaxGB = s.cache_max_gb || 50
-    dirty.value = false
+    await statusData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load transcoder status.' }
   }
 }
+
+watch(() => statusData.data.value, value => {
+  if (!value) return
+  form.hwAccel = value.config_mode || 'auto'
+  form.cacheMaxGB = value.cache_max_gb || 50
+  dirty.value = false
+}, { immediate: true })
 
 async function save() {
   saving.value = true
@@ -107,7 +110,7 @@ const cachePct = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadStatus(), ensureSources()])
+  await ensureSources()
 })
 </script>
 

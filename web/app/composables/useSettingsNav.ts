@@ -1,11 +1,17 @@
-// Information architecture for /settings. Single source of truth — the
-// sidebar reads this and the admin middleware uses the `adminOnly` flag to
-// gate routes. Add/move/rename items here, no other file touched.
+// Information architecture for /settings. This is the single source of truth
+// for the desktop rail, mobile sheet, page titles, and personal quick links.
 
 export type SettingsNavItem = {
   to: string
   label: string
   icon: string
+  tabs?: SettingsNavTab[]
+  aliases?: string[]
+}
+
+export type SettingsNavTab = {
+  to: string
+  label: string
 }
 
 export type SettingsNavGroup = {
@@ -18,15 +24,14 @@ export type SettingsNavGroup = {
 const ALL_GROUPS: SettingsNavGroup[] = [
   {
     id: 'you',
-    label: 'You',
+    label: 'Personal',
     items: [
-      { to: '/settings/profile',    label: 'Profile',     icon: 'user' },
-      { to: '/settings/playback',   label: 'Playback',    icon: 'eq' },
-      { to: '/settings/device',     label: 'Device',      icon: 'cpu' },
-      { to: '/settings/appearance', label: 'Appearance',  icon: 'brightness' },
-      { to: '/settings/sessions',   label: 'My sessions', icon: 'eye' },
-      { to: '/settings/lists',      label: 'My lists',    icon: 'bookmark' },
-      { to: '/settings/tokens',     label: 'API tokens',  icon: 'key' },
+      { to: '/settings/profile', label: 'Profile', icon: 'user' },
+      { to: '/settings/playback', label: 'Playback', icon: 'eq' },
+      { to: '/settings/appearance', label: 'Appearance', icon: 'brightness' },
+      { to: '/settings/device', label: 'This device', icon: 'cpu' },
+      { to: '/settings/sessions', label: 'My sessions', icon: 'eye' },
+      { to: '/settings/tokens', label: 'API tokens', icon: 'key' },
     ],
   },
   {
@@ -34,57 +39,88 @@ const ALL_GROUPS: SettingsNavGroup[] = [
     label: 'Overview',
     adminOnly: true,
     items: [
-      { to: '/settings/dashboard', label: 'Dashboard', icon: 'pulse' },
+      {
+        to: '/settings/dashboard', label: 'Dashboard', icon: 'pulse',
+        aliases: ['/settings/activity'],
+      },
     ],
   },
   {
-    id: 'activity',
-    label: 'Activity',
+    id: 'media',
+    label: 'Media',
     adminOnly: true,
     items: [
-      { to: '/settings/activity', label: 'Now Playing', icon: 'cast' },
-      { to: '/settings/jobs',     label: 'Jobs',        icon: 'list' },
-      { to: '/settings/tasks',    label: 'Tasks',       icon: 'timer' },
-      { to: '/settings/watchers', label: 'Watchers',    icon: 'eye' },
-      { to: '/settings/logs',     label: 'Logs',        icon: 'clipboard' },
+      {
+        to: '/settings/libraries', label: 'Libraries', icon: 'folder',
+        tabs: [
+          { to: '/settings/libraries', label: 'Libraries' },
+          { to: '/settings/watchers', label: 'Watchers' },
+        ],
+      },
+      {
+        to: '/settings/metadata', label: 'Metadata', icon: 'refresh',
+        tabs: [
+          { to: '/settings/metadata', label: 'Policies' },
+          { to: '/settings/providers', label: 'Providers' },
+          { to: '/settings/metadata-editor', label: 'Editor' },
+        ],
+      },
+      { to: '/settings/transcoding', label: 'Transcoding', icon: 'film' },
+      {
+        to: '/settings/recommendations', label: 'Intelligence', icon: 'sparkle',
+        tabs: [
+          { to: '/settings/recommendations', label: 'Recommendations' },
+          { to: '/settings/sonic', label: 'Sonic analysis' },
+          { to: '/settings/ai', label: 'AI providers' },
+        ],
+      },
     ],
   },
   {
-    id: 'content',
-    label: 'Content',
+    id: 'server',
+    label: 'Server',
     adminOnly: true,
     items: [
-      { to: '/settings/libraries',   label: 'Libraries',      icon: 'folder' },
-      { to: '/settings/providers',   label: 'Providers',      icon: 'database' },
-      { to: '/settings/metadata',    label: 'Metadata',       icon: 'refresh' },
-      { to: '/settings/transcoding', label: 'Transcoding',    icon: 'film' },
-      { to: '/settings/sonic',       label: 'Sonic analysis', icon: 'eq' },
-      { to: '/settings/recommendations', label: 'Recommendations', icon: 'sparkle' },
-      { to: '/settings/ai',          label: 'AI',             icon: 'sparkle' },
+      {
+        to: '/settings/jobs', label: 'Jobs & automation', icon: 'list',
+        tabs: [
+          { to: '/settings/jobs', label: 'Job queue' },
+          { to: '/settings/tasks', label: 'Scheduled tasks' },
+        ],
+      },
+      { to: '/settings/storage', label: 'Storage', icon: 'hard-drives' },
+      { to: '/settings/network', label: 'Network', icon: 'network' },
+      {
+        to: '/settings/users', label: 'Users & access', icon: 'users',
+        tabs: [
+          { to: '/settings/users', label: 'Users' },
+          { to: '/settings/all-sessions', label: 'All sessions' },
+        ],
+      },
+      {
+        to: '/settings/jellyfin', label: 'Client APIs', icon: 'cast',
+        tabs: [
+          { to: '/settings/jellyfin', label: 'Jellyfin' },
+          { to: '/settings/subsonic', label: 'Subsonic' },
+        ],
+      },
     ],
   },
   {
-    id: 'access',
-    label: 'Access',
-    adminOnly: true,
-    items: [
-      { to: '/settings/users',        label: 'Users',         icon: 'users' },
-      { to: '/settings/all-sessions', label: 'All sessions',  icon: 'eye' },
-    ],
-  },
-  {
-    id: 'system',
-    label: 'System',
+    id: 'advanced',
+    label: 'Advanced',
     adminOnly: true,
     items: [
       { to: '/settings/configuration', label: 'Configuration', icon: 'settings' },
-      { to: '/settings/network',       label: 'Network',       icon: 'network' },
-      { to: '/settings/jellyfin',      label: 'Jellyfin API',  icon: 'cast' },
-      { to: '/settings/subsonic',      label: 'Subsonic API',  icon: 'music' },
-      { to: '/settings/storage',       label: 'Storage',       icon: 'hard-drives' },
-      { to: '/settings/database',      label: 'Database',      icon: 'database' },
-      { to: '/settings/diagnostics',   label: 'Diagnostics',   icon: 'cpu' },
-      { to: '/settings/about',         label: 'About',         icon: 'info' },
+      {
+        to: '/settings/diagnostics', label: 'Diagnostics', icon: 'cpu',
+        tabs: [
+          { to: '/settings/diagnostics', label: 'Runtime' },
+          { to: '/settings/logs', label: 'Logs' },
+          { to: '/settings/database', label: 'Database' },
+        ],
+      },
+      { to: '/settings/about', label: 'About Heya', icon: 'info' },
     ],
   },
 ]
@@ -94,15 +130,36 @@ export function useSettingsNav() {
   const isAdmin = computed(() => user.value?.is_admin === true)
 
   const groups = computed(() =>
-    ALL_GROUPS.filter(g => !g.adminOnly || isAdmin.value),
+    ALL_GROUPS.filter(group => !group.adminOnly || isAdmin.value),
   )
 
-  // Flat lookup for breadcrumb / page-title resolution
+  // Every tab route resolves both to its own display label and to the stable
+  // sidebar destination that owns it.
   const itemByPath = computed(() => {
     const map = new Map<string, { group: SettingsNavGroup, item: SettingsNavItem }>()
-    for (const g of groups.value) for (const it of g.items) map.set(it.to, { group: g, item: it })
+    for (const group of groups.value) {
+      for (const item of group.items) {
+        map.set(item.to, { group, item })
+        for (const alias of item.aliases ?? []) map.set(alias, { group, item })
+        for (const tab of item.tabs ?? []) {
+          map.set(tab.to, { group, item: { ...item, to: tab.to, label: tab.label } })
+        }
+      }
+    }
     return map
   })
 
-  return { groups, isAdmin, itemByPath }
+  const sectionByPath = computed(() => {
+    const map = new Map<string, SettingsNavItem>()
+    for (const group of groups.value) {
+      for (const item of group.items) {
+        map.set(item.to, item)
+        for (const alias of item.aliases ?? []) map.set(alias, item)
+        for (const tab of item.tabs ?? []) map.set(tab.to, item)
+      }
+    }
+    return map
+  })
+
+  return { groups, isAdmin, itemByPath, sectionByPath }
 }

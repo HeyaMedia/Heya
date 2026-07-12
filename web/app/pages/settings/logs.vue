@@ -1,12 +1,10 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
 import type { LogPayload } from '~/composables/useEventBus'
+import { adminLogsQuery } from '~/queries/settings'
+import type { LogEntry as Entry } from '~/queries/settings'
 
-type Entry = components['schemas']['Entry']
-
-const { $heya } = useNuxtApp()
 const { on, connected: wsConnected } = useEventBus()
 
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const
@@ -28,13 +26,15 @@ const enabledLevels = ref<Set<Level>>(new Set(LEVELS))
 // 5k ring and still gives plenty of recent context for the eye-test case.
 const tailWindow = ref(500)
 const TAIL_OPTIONS = [200, 500, 1000, 2000]
+const logsData = useQuery(() => adminLogsQuery(tailWindow.value))
 
 const listRef = ref<HTMLElement | null>(null)
 
 async function backfill() {
   loading.value = true
   try {
-    const recent = await $heya('/api/logs', { query: { n: tailWindow.value } }) as Entry[]
+    await logsData.refetch()
+    const recent = logsData.data.value ?? []
     // Backend returns newest-first; we render oldest-first so the live tail
     // appends naturally at the bottom.
     logs.value = (recent ?? []).slice().reverse()

@@ -1,632 +1,256 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type Stats          = components['schemas']['DashboardStats']
-type Health         = components['schemas']['HealthBody']
-type Ready          = components['schemas']['ReadyBody']
-type Transcode      = components['schemas']['TranscodeStatusBody']
-type Tailscale      = components['schemas']['TailscaleStatusBody']
-type QueueStatus    = components['schemas']['MetadataQueueStatus']
-type SummaryRow     = components['schemas']['JobSummaryRow']
-type TaskResponse   = components['schemas']['TaskResponse']
-type MissingItem    = components['schemas']['MissingMediaItem']
-// Sonic status is an open-shape object on the API; treat as any here.
-type SonicLike = {
-  analyzer_version?: string
-  accelerators?: { name: string; label: string; available: boolean; reason?: string }[]
-  analyzer?: { state?: string }
-  fetcher?: {
-    state?: string
-    missing_count?: number
-    total_count?: number
-    total_size?: number
-    last_error?: string
-    progress?: { files_done?: number; files_total?: number; bytes_done?: number; bytes_total?: number }
-  }
-}
+import AdminNowPlaying from './activity.vue'
+import {
+  dashboardStatsQuery,
+  jobSummaryQuery,
+  metadataQueueQuery,
+  serverHealthQuery,
+  serverReadinessQuery,
+} from '~/queries/admin'
 
-const { $heya } = useNuxtApp()
-const { confirm } = useConfirm()
 const { on } = useEventBus()
+const { sessions } = useActiveSessions()
 
-const stats         = ref<Stats | null>(null)
-const health        = ref<Health | null>(null)
-const ready         = ref<Ready | null>(null)
-const queueStatus   = ref<QueueStatus | null>(null)
-const summary       = ref<SummaryRow[]>([])
-const transcode     = ref<Transcode | null>(null)
-const tailscale     = ref<Tailscale | null>(null)
-const sonic         = ref<SonicLike | null>(null)
-const tasks         = ref<TaskResponse[]>([])
-const missing       = ref<MissingItem[]>([])
+const statsData = useQuery(dashboardStatsQuery())
+const healthData = useQuery(serverHealthQuery())
+const readinessData = useQuery(serverReadinessQuery())
+const queueData = useQuery(metadataQueueQuery())
+const summaryData = useQuery(jobSummaryQuery())
 
-const cleaning = ref(false)
-const now = ref(Date.now())
-let nowTimer: ReturnType<typeof setInterval> | null = null
-let queuePoll: ReturnType<typeof setInterval> | null = null
+const stats = computed(() => statsData.data.value ?? null)
+const health = computed(() => healthData.data.value ?? null)
+const ready = computed(() => readinessData.data.value ?? null)
+const queueStatus = computed(() => queueData.data.value ?? null)
 
-async function loadAll() {
-  // Apply each result as soon as it arrives. Waiting to inspect a single
-  // Promise.allSettled result meant one slow optional subsystem (most often
-  // Tailscale or Sonic) held every otherwise-fast dashboard value hostage.
-  await Promise.allSettled([
-    $heya('/api/stats').then(value => { stats.value = value as Stats }),
-    $heya('/api/health').then(value => { health.value = value as Health }),
-    $heya('/api/health/ready').then(value => { ready.value = value as Ready }),
-    $heya('/api/jobs/queue/metadata').then(value => { queueStatus.value = value as QueueStatus }),
-    $heya('/api/jobs/summary').then(value => {
-      summary.value = ((value as SummaryRow[]) ?? []).filter(row => row.state !== 'completed' || row.count > 0)
-    }),
-    $heya('/api/transcode/status').then(value => { transcode.value = value as Transcode }),
-    $heya('/api/tailscale/status').then(value => { tailscale.value = value as Tailscale }),
-    $heya('/api/admin/sonicanalysis/status').then(value => { sonic.value = value as SonicLike }),
-    $heya('/api/tasks').then(value => { tasks.value = (value as TaskResponse[]) ?? [] }),
-    $heya('/api/media/missing').then(value => { missing.value = (value as MissingItem[]) ?? [] }),
-  ])
+const activeStreams = computed(() => sessions.value.filter(session => !session.paused).length)
+const transcodingStreams = computed(() => sessions.value.filter(session => session.playback_action === 'transcode').length)
+const directStreams = computed(() => sessions.value.filter(session => session.playback_action === 'direct_play' || session.playback_action === 'remux').length)
+const viewerCount = computed(() => new Set(sessions.value.map(session => session.user_id)).size)
+
+function summaryCount(state: string) {
+  return (summaryData.data.value ?? [])
+    .filter(row => row.state === state)
+    .reduce((total, row) => total + row.count, 0)
 }
 
-async function refetchQueue() {
-  try {
-    const [sum, q] = await Promise.all([
-      $heya('/api/jobs/summary'),
-      $heya('/api/jobs/queue/metadata'),
-    ])
-    summary.value = (sum as SummaryRow[] ?? []).filter(row => row.state !== 'completed' || row.count > 0)
-    queueStatus.value = q
-  } catch {}
-}
-
-async function refetchStats() {
-  try { stats.value = await $heya('/api/stats') } catch {}
-}
-
-let statsDebounce: ReturnType<typeof setTimeout> | null = null
-function debouncedRefetchStats() {
-  if (statsDebounce) clearTimeout(statsDebounce)
-  statsDebounce = setTimeout(refetchStats, 2000)
-}
-
-async function cleanupMissing() {
-  const ok = await confirm({
-    title: 'Clean up missing items?',
-    message: `Delete ${missing.value.length} missing items and all their metadata. The files have already vanished from disk — this just removes the database rows.`,
-    destructive: true,
-    confirmLabel: 'Delete rows',
-  })
-  if (!ok) return
-  cleaning.value = true
-  try {
-    await $heya('/api/media/missing', { method: 'DELETE' })
-    // Cleanup removes tracks + albums + media_items; refetch rather than
-    // guess at the deltas (res.deleted spans all three).
-    missing.value = []
-    await refetchStats()
-  } catch {} finally { cleaning.value = false }
-}
-
-const runningElapsed = computed(() => {
-  const r = queueStatus.value?.running
-  if (!r?.started_at) return ''
-  const ms = now.value - new Date(r.started_at).getTime()
-  if (ms < 0 || Number.isNaN(ms)) return ''
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  return `${m}m ${s % 60}s`
-})
+const totalQueued = computed(() =>
+  summaryCount('running')
+  + summaryCount('available')
+  + summaryCount('retryable')
+  + summaryCount('scheduled'),
+)
+const discardedJobs = computed(() => summaryCount('discarded'))
+const healthyComponents = computed(() => ready.value?.components?.filter(component => component.ok).length ?? 0)
+const unhealthyComponents = computed(() => (ready.value?.components?.length ?? 0) - healthyComponents.value)
 
 const subsystemTone = computed<'good' | 'warn' | 'bad'>(() => {
   if (!ready.value) return 'warn'
   return ready.value.status === 'ok' ? 'good' : 'bad'
 })
+const healthLabel = computed(() => {
+  if (!ready.value) return 'Checking'
+  return ready.value.status === 'ok' ? 'Healthy' : 'Degraded'
+})
 
-function fmtMB(mb?: number) {
-  if (mb == null) return '—'
-  if (mb < 1024) return `${mb} MB`
-  return `${(mb / 1024).toFixed(1)} GB`
-}
-function fmtNumber(n: number | undefined) {
-  if (n == null) return '—'
-  return n.toLocaleString()
-}
+const now = ref(Date.now())
+let nowTimer: ReturnType<typeof setInterval> | null = null
+let livePoll: ReturnType<typeof setInterval> | null = null
+let statsDebounce: ReturnType<typeof setTimeout> | null = null
 
-function componentIcon(name: string): string {
-  switch (name) {
-    case 'database':   return 'database'
-    case 'watcher':    return 'eye'
-    case 'scheduler':  return 'timer'
-    case 'transcoder': return 'film'
-    case 'tailscale':  return 'network'
-    default:           return 'pulse'
-  }
-}
+const runningElapsed = computed(() => {
+  const running = queueStatus.value?.running
+  if (!running?.started_at) return ''
+  const elapsed = now.value - new Date(running.started_at).getTime()
+  if (elapsed < 0 || Number.isNaN(elapsed)) return ''
+  const seconds = Math.floor(elapsed / 1000)
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+})
 
-const enabledTasks = computed(() => tasks.value.filter(t => t.enabled || t.state === 'running'))
-
-function taskBadge(t: TaskResponse): { state: 'ok' | 'warn' | 'error' | 'idle', label: string } {
-  if (t.state === 'running') return { state: 'ok', label: 'running' }
-  if (!t.enabled) return { state: 'idle', label: 'disabled' }
-  if (t.last_run_result === 'error') return { state: 'error', label: 'error' }
-  if ((t.stats?.failed ?? 0) > 0) return { state: 'warn', label: 'partial' }
-  return { state: 'ok', label: 'scheduled' }
+function fmtNumber(value?: number) {
+  return value == null ? '—' : value.toLocaleString()
 }
 
-const buildKv = computed(() => [
-  { key: 'Version',    value: health.value?.version ?? '—', mono: true, copy: true },
-  { key: 'Database',   value: health.value?.database ?? '—' },
-  { key: 'Status',     value: ready.value?.status ?? health.value?.status ?? '—' },
-  { key: 'Components', value: ready.value?.components?.length ?? 0 },
-])
+async function refreshLiveOverview() {
+  await Promise.allSettled([
+    queueData.refetch(),
+    summaryData.refetch(),
+    readinessData.refetch(),
+  ])
+}
 
-// Hoist event-bus subscriptions + cleanup to top-level setup. Calling
-// lifecycle hooks after an `await` inside an async `onMounted` callback
-// loses the active component instance and triggers "onUnmounted is called
-// when there is no active component instance to be associated with".
+function debouncedRefetchStats() {
+  if (statsDebounce) clearTimeout(statsDebounce)
+  statsDebounce = setTimeout(() => { void statsData.refetch() }, 1500)
+}
+
 const unsubs = [
-  on('media.added',    debouncedRefetchStats),
-  on('media.removed',  debouncedRefetchStats),
+  on('media.added', debouncedRefetchStats),
+  on('media.removed', debouncedRefetchStats),
   on('scan.completed', debouncedRefetchStats),
 ]
 
-onUnmounted(() => {
-  unsubs.forEach(fn => fn())
-  if (nowTimer) clearInterval(nowTimer)
-  if (queuePoll) clearInterval(queuePoll)
-  if (statsDebounce) clearTimeout(statsDebounce)
+onMounted(() => {
+  nowTimer = setInterval(() => { now.value = Date.now() }, 1000)
+  livePoll = setInterval(() => { void refreshLiveOverview() }, 5000)
 })
 
-onMounted(() => {
-  void loadAll()
-  nowTimer = setInterval(() => { now.value = Date.now() }, 1000)
-  queuePoll = setInterval(refetchQueue, 5000)
+onUnmounted(() => {
+  unsubs.forEach(unsubscribe => unsubscribe())
+  if (nowTimer) clearInterval(nowTimer)
+  if (livePoll) clearInterval(livePoll)
+  if (statsDebounce) clearTimeout(statsDebounce)
 })
 </script>
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Dashboard</h2>
-      <p class="sv2-page-desc">
-        Live snapshot of the server — health, library counts, what's in the
-        queue, transcoder + sonic + tailscale at a glance.
-      </p>
+    <header class="sv2-page-head dashboard-head">
+      <div>
+        <h2 class="sv2-page-title">Dashboard</h2>
+        <p class="sv2-page-desc">
+          What is happening right now—streams, system readiness, your library, and the work queue.
+        </p>
+      </div>
+      <StatusBadge :state="subsystemTone === 'good' ? 'ok' : subsystemTone === 'warn' ? 'warn' : 'error'">
+        {{ subsystemTone === 'good' ? 'All systems operational' : subsystemTone === 'warn' ? 'Checking systems' : 'Needs attention' }}
+      </StatusBadge>
     </header>
 
-    <section class="tiles tiles-wide">
-      <MetricTile label="Libraries" :value="fmtNumber(stats?.libraries)"    icon="folder" />
-      <MetricTile label="Movies"    :value="fmtNumber(stats?.media_counts?.movie ?? 0)" icon="film"  />
-      <MetricTile label="TV Shows"  :value="fmtNumber(stats?.media_counts?.tv ?? 0)"    icon="tv"    />
-      <MetricTile label="Music"     :value="fmtNumber(stats?.media_counts?.music ?? 0)" icon="music" />
-      <MetricTile label="Books"     :value="fmtNumber(stats?.media_counts?.book ?? 0)"  icon="book"  />
-      <MetricTile label="People"    :value="fmtNumber(stats?.total_people)" icon="users" />
-      <MetricTile label="Files"     :value="fmtNumber(stats?.total_files)"  icon="hard-drives" />
-      <MetricTile
-        label="Missing"
-        :value="stats?.missing_count ?? 0"
-        icon="warning"
-        :tone="(stats?.missing_count ?? 0) > 0 ? 'warn' : 'good'"
-        :sub="(stats?.missing_count ?? 0) > 0 ? 'see below' : 'none'"
-      />
-    </section>
+    <div class="dashboard-overview-grid">
+      <DashboardSummaryCard
+        title="Streams"
+        icon="cast"
+        :value="sessions.length"
+        value-label="total"
+        :tone="sessions.length ? 'good' : 'neutral'"
+      >
+        <div class="summary-row"><span>Active</span><strong>{{ activeStreams }}</strong></div>
+        <div class="summary-row"><span>Transcoding</span><strong :class="{ warn: transcodingStreams }">{{ transcodingStreams }}</strong></div>
+        <div class="summary-row"><span>Direct / remux</span><strong>{{ directStreams }}</strong></div>
+        <div class="summary-row"><span>Viewers</span><strong>{{ viewerCount }}</strong></div>
+      </DashboardSummaryCard>
 
-    <SettingsSection title="Server" icon="pulse"
-      description="Build info and per-component readiness. Use About for the full breakdown.">
-      <template #actions>
-        <StatusBadge :state="subsystemTone === 'good' ? 'ok' : subsystemTone === 'warn' ? 'warn' : 'error'">
-          {{ subsystemTone === 'good' ? 'All systems' : subsystemTone === 'warn' ? 'Loading' : 'Degraded' }}
-        </StatusBadge>
-      </template>
+      <DashboardSummaryCard
+        title="Library"
+        icon="folder"
+        :value="fmtNumber(stats?.total_media)"
+        value-label="items"
+        :alert="(stats?.missing_count ?? 0) > 0 ? stats?.missing_count : ''"
+        :alert-label="(stats?.missing_count ?? 0) > 0 ? 'missing' : ''"
+        :tone="(stats?.missing_count ?? 0) > 0 ? 'warn' : 'neutral'"
+      >
+        <div class="summary-row"><span>Movies</span><strong>{{ fmtNumber(stats?.media_counts?.movie ?? 0) }}</strong></div>
+        <div class="summary-row"><span>TV shows</span><strong>{{ fmtNumber(stats?.media_counts?.tv ?? 0) }}</strong></div>
+        <div class="summary-row"><span>Artists / music</span><strong>{{ fmtNumber(stats?.media_counts?.music ?? 0) }}</strong></div>
+        <div class="summary-row"><span>Books</span><strong>{{ fmtNumber(stats?.media_counts?.book ?? 0) }}</strong></div>
+      </DashboardSummaryCard>
 
-      <div class="two-col">
-        <KVTable :rows="buildKv" />
-        <div v-if="ready" class="comp-list">
-          <div v-for="c in ready.components" :key="c.name" class="comp-row">
-            <div class="comp-name">
-              <Icon :name="componentIcon(c.name)" :size="13" />
-              <span>{{ c.name }}</span>
+      <DashboardSummaryCard
+        title="Queue"
+        icon="layers"
+        :value="totalQueued"
+        value-label="queued"
+        :alert="discardedJobs > 0 ? discardedJobs : ''"
+        :alert-label="discardedJobs > 0 ? 'discarded' : ''"
+        :tone="discardedJobs > 0 ? 'bad' : totalQueued > 0 ? 'warn' : 'good'"
+      >
+        <div class="summary-row"><span>Metadata pending</span><strong>{{ queueStatus?.pending ?? 0 }}</strong></div>
+        <div class="summary-row"><span>Running</span><strong :class="{ good: summaryCount('running') }">{{ summaryCount('running') }}</strong></div>
+        <div class="summary-row"><span>Ready</span><strong>{{ summaryCount('available') }}</strong></div>
+        <div class="summary-row"><span>Retryable</span><strong :class="{ warn: summaryCount('retryable') }">{{ summaryCount('retryable') }}</strong></div>
+        <div class="summary-row"><span>Completed · 5 min</span><strong>{{ queueStatus?.recent.completed_5min ?? 0 }}</strong></div>
+        <template v-if="queueStatus?.running" #footer>
+          <div class="queue-current">
+            <span class="queue-pulse" />
+            <div class="queue-current-text">
+              <strong>{{ queueStatus.running.item_title || `Job #${queueStatus.running.job_id}` }}</strong>
+              <span>priority {{ queueStatus.running.priority }} · {{ runningElapsed }}</span>
             </div>
-            <div class="comp-msg">{{ c.message || (c.ok ? 'healthy' : 'check failed') }}</div>
-            <StatusBadge :state="c.ok ? 'ok' : 'error'">{{ c.ok ? 'ok' : 'down' }}</StatusBadge>
           </div>
-        </div>
-      </div>
-    </SettingsSection>
+        </template>
+      </DashboardSummaryCard>
 
-    <SettingsSection title="Metadata queue" icon="layers">
-      <template #actions>
-        <NuxtLink to="/settings/tasks" class="link-arrow">
-          Open tasks <Icon name="chevright" :size="11" />
-        </NuxtLink>
-      </template>
+      <DashboardSummaryCard
+        title="Health"
+        icon="pulse"
+        :value="healthLabel"
+        :alert="unhealthyComponents > 0 ? unhealthyComponents : ''"
+        :alert-label="unhealthyComponents > 0 ? 'unhealthy' : ''"
+        :tone="subsystemTone"
+      >
+        <div class="summary-row"><span>Server</span><strong :class="subsystemTone">{{ ready?.status ?? health?.status ?? 'checking' }}</strong></div>
+        <div class="summary-row"><span>Database</span><strong>{{ health?.database ?? '—' }}</strong></div>
+        <div class="summary-row"><span>Components</span><strong>{{ healthyComponents }} / {{ ready?.components?.length ?? 0 }}</strong></div>
+        <div class="summary-row"><span>Version</span><strong>{{ health?.version ?? '—' }}</strong></div>
+      </DashboardSummaryCard>
+    </div>
 
-      <div class="queue-row">
-        <MetricTile label="Pending"  :value="queueStatus?.pending ?? 0"
-          :tone="(queueStatus?.pending ?? 0) > 0 ? 'warn' : 'neutral'" icon="list" />
-        <MetricTile label="P1 watch/view"  :value="queueStatus?.pending_by_priority?.['1'] ?? 0" icon="lightning" />
-        <MetricTile label="P2 movies/TV"   :value="queueStatus?.pending_by_priority?.['2'] ?? 0" icon="film" />
-        <MetricTile label="P3 music/books" :value="queueStatus?.pending_by_priority?.['3'] ?? 0" icon="music" />
-        <MetricTile
-          label="Last 5 min"
-          :value="queueStatus?.recent.completed_5min ?? 0"
-          icon="check"
-          :sub="(queueStatus?.recent.avg_duration_sec ?? 0) > 0 ? `avg ${queueStatus!.recent.avg_duration_sec.toFixed(1)}s` : ''"
-        />
-      </div>
-
-      <div v-if="queueStatus?.running" class="running-card">
-        <div class="running-pulse" />
-        <div class="running-info">
-          <div class="running-label">Currently enriching · P{{ queueStatus.running.priority }}</div>
-          <div class="running-title">
-            <span v-if="queueStatus.running.item_title">{{ queueStatus.running.item_title }}</span>
-            <span v-else>job #{{ queueStatus.running.job_id }} · {{ queueStatus.running.kind }}</span>
-            <span v-if="queueStatus.running.media_type" class="running-type">· {{ queueStatus.running.media_type }}</span>
-          </div>
-        </div>
-        <div class="running-elapsed">{{ runningElapsed }}</div>
-      </div>
-
-      <div v-if="summary.length" class="pill-row">
-        <span v-for="row in summary" :key="row.state" class="state-pill" :class="row.state">
-          <span class="pill-val">{{ row.count }}</span>
-          <span class="pill-lbl">{{ row.state }}</span>
-        </span>
-      </div>
-    </SettingsSection>
-
-    <SettingsSection title="Transcoder" icon="film">
-      <template #actions>
-        <NuxtLink to="/settings/transcoding" class="link-arrow">
-          Configure <Icon name="chevright" :size="11" />
-        </NuxtLink>
-      </template>
-
-      <div v-if="!transcode?.available" class="empty-state">
-        <Icon name="info" :size="14" /> ffmpeg not available
-      </div>
-      <div v-else class="queue-row">
-        <MetricTile label="Hardware" :value="transcode.hw_accel_label || transcode.hw_accel || 'Software'" icon="cpu" />
-        <MetricTile label="Active jobs" :value="transcode.active_jobs" icon="pulse"
-          :tone="transcode.active_jobs > 0 ? 'good' : 'neutral'" />
-        <MetricTile label="H.264 encoder" :value="transcode.encoder_h264 || '—'" icon="film" />
-        <MetricTile label="HEVC encoder"  :value="transcode.encoder_hevc || '—'" icon="film" />
-        <MetricTile
-          label="Cache"
-          :value="fmtMB(transcode.cache_size_mb)"
-          icon="hard-drives"
-          :sub="`${transcode.cache_items} items · cap ${transcode.cache_max_gb} GB`"
-        />
-      </div>
-    </SettingsSection>
-
-    <SettingsSection v-if="sonic" title="Sonic analysis" icon="music">
-      <template #actions>
-        <NuxtLink to="/settings/sonic" class="link-arrow">
-          Configure <Icon name="chevright" :size="11" />
-        </NuxtLink>
-      </template>
-
-      <div class="queue-row">
-        <MetricTile
-          label="Analyzer"
-          :value="sonic.analyzer?.state || 'idle'"
-          icon="eq"
-          :sub="sonic.analyzer_version ? `v${sonic.analyzer_version}` : ''"
-        />
-        <MetricTile
-          label="Models"
-          :value="`${(sonic.fetcher?.total_count ?? 0) - (sonic.fetcher?.missing_count ?? 0)} / ${sonic.fetcher?.total_count ?? 0}`"
-          icon="database"
-          :sub="sonic.fetcher?.total_size ? fmtBytes(sonic.fetcher.total_size) : ''"
-        />
-        <MetricTile
-          label="Fetcher"
-          :value="sonic.fetcher?.state ?? '—'"
-          icon="refresh"
-          :sub="sonic.fetcher?.progress
-            ? `${sonic.fetcher.progress.files_done}/${sonic.fetcher.progress.files_total}`
-            : ''"
-          :tone="sonic.fetcher?.last_error ? 'bad' : 'neutral'"
-        />
-      </div>
-
-      <div v-if="sonic.accelerators?.length" class="accel-row">
-        <span
-          v-for="a in sonic.accelerators"
-          :key="a.name"
-          class="accel-chip"
-          :class="{ off: !a.available }"
-          :title="a.available ? `${a.label} available` : (a.reason || `${a.label} unavailable`)"
-        >
-          <span class="accel-dot" :class="{ on: a.available }" />
-          {{ a.label || a.name }}
-        </span>
-      </div>
-
-      <div v-if="sonic.fetcher?.last_error" class="empty-state err">
-        <Icon name="warning" :size="14" />
-        {{ sonic.fetcher.last_error }}
-      </div>
-    </SettingsSection>
-
-    <SettingsSection v-if="tailscale?.enabled" title="Tailscale" icon="network">
-      <template #actions>
-        <NuxtLink to="/settings/network" class="link-arrow">
-          Configure <Icon name="chevright" :size="11" />
-        </NuxtLink>
-      </template>
-
-      <KVTable :rows="[
-        { key: 'Hostname', value: tailscale.status?.hostname ?? tailscale.config?.hostname ?? '—', mono: true, copy: true },
-        { key: 'MagicDNS', value: tailscale.status?.magic_dns ?? '', mono: true },
-        { key: 'Backend',  value: tailscale.status?.backend_state ?? (tailscale.status?.running ? 'Running' : 'Stopped') },
-        { key: 'IPv4',     value: tailscale.status?.ipv4 ?? '—', mono: true, copy: true },
-        { key: 'IPv6',     value: tailscale.status?.ipv6 ?? '', mono: true, copy: true },
-        { key: 'HTTPS',    value: tailscale.status?.https_active ? 'Active' : (tailscale.config?.https ? 'Enabled' : 'Off') },
-        { key: 'Funnel',   value: tailscale.status?.funnel_active ? 'Public' : (tailscale.config?.funnel ? 'Enabled' : 'Off') },
-        { key: 'Funnel URL', value: tailscale.status?.funnel_url ?? '', mono: true, copy: true },
-        { key: 'Last error', value: tailscale.status?.last_error ?? '' },
-      ]" />
-    </SettingsSection>
-
-    <SettingsSection v-if="enabledTasks.length" title="Scheduled tasks" icon="timer">
-      <template #actions>
-        <NuxtLink to="/settings/tasks" class="link-arrow">
-          Manage <Icon name="chevright" :size="11" />
-        </NuxtLink>
-      </template>
-
-      <div class="task-list">
-        <div v-for="t in enabledTasks" :key="t.id" class="task-row">
-          <StatusBadge :state="taskBadge(t).state">{{ taskBadge(t).label }}</StatusBadge>
-          <div class="task-name">{{ t.display_name }}</div>
-          <div class="task-meta">
-            <span v-if="t.state === 'running'">running</span>
-            <span v-else-if="t.last_run_at">last {{ timeAgo(t.last_run_at) }}</span>
-            <span v-else>not yet run</span>
-            <span v-if="t.stats?.pending" class="pending">· {{ t.stats.pending }} pending</span>
-            <span v-if="t.stats?.failed"  class="failed">· {{ t.stats.failed }} failed</span>
-          </div>
-        </div>
-      </div>
-    </SettingsSection>
-
-    <SettingsSection v-if="missing.length" title="Missing media" icon="warning"
-      :description="`${missing.length} item${missing.length === 1 ? '' : 's'} no longer found on disk. Cleaning removes the DB rows; the files are already gone.`">
-      <template #actions>
-        <button class="sv2-btn danger" :disabled="cleaning" @click="cleanupMissing">
-          <Icon name="trash" :size="12" />
-          {{ cleaning ? 'Cleaning…' : 'Clean up all' }}
-        </button>
-      </template>
-
-      <div class="missing-scroll">
-        <div v-for="item in missing" :key="`${item.media_type}-${item.id}`" class="missing-tile">
-          <div class="missing-poster">
-            <NuxtImg
-              v-if="item.poster_path && !item.poster_path.startsWith('http')"
-              :src="usePosterUrl(item) ?? undefined"
-              :width="200"
-              :quality="80"
-              loading="lazy"
-            />
-            <div v-else class="missing-empty">
-              <Icon :name="item.media_type === 'movie' ? 'film' : (item.media_type === 'tv' || item.media_type === 'anime') ? 'tv' : 'music'" :size="16" />
-            </div>
-            <div class="missing-badge">Missing</div>
-          </div>
-          <div class="missing-meta">
-            <div class="missing-title">{{ item.title }}</div>
-            <div class="missing-sub">{{ item.year }} · {{ item.media_type }}</div>
-          </div>
-        </div>
-      </div>
-    </SettingsSection>
-
-    <SettingsSection title="Recent activity" icon="clipboard"
-      description="Live event feed from the WebSocket bus — scans, enrichments, additions.">
-      <div class="activity-wrap">
-        <LazyActivityFeed />
-      </div>
-    </SettingsSection>
+    <AdminNowPlaying embedded :show-summary="false" />
   </div>
 </template>
 
 <style scoped>
-.tiles {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 28px;
-}
-.tiles-wide {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+.dashboard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
 }
 
-.two-col {
+.dashboard-overview-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  align-items: start;
-}
-/* Was a stray @media 900 — folded onto the ratified phone breakpoint
-   (docs/ui.md "Responsive conventions"). Sidebar is gone by 720px, so the
-   content column has full width and doesn't need to fold earlier. */
-@media (max-width: 720px) {
-  .two-col { grid-template-columns: 1fr; }
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
 }
 
-.comp-list {
-  display: flex; flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-2);
-  overflow: hidden;
-}
-.comp-row {
-  display: grid;
-  grid-template-columns: 130px 1fr auto;
+.queue-current {
+  display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  gap: 9px;
+  min-width: 0;
 }
-.comp-row:last-child { border-bottom: 0; }
-.comp-name { display: flex; align-items: center; gap: 7px; color: var(--fg-1); font-weight: 500; }
-.comp-msg  { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.queue-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-}
-
-.running-card {
-  display: flex; align-items: center; gap: 14px;
-  background: color-mix(in srgb, var(--gold) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--gold) 25%, transparent);
-  border-radius: var(--r-md);
-  padding: 12px 16px;
-  margin-top: 10px;
-}
-.running-pulse {
-  width: 10px; height: 10px;
-  border-radius: 50%; background: var(--gold);
+.queue-pulse {
+  width: 8px;
+  height: 8px;
   flex-shrink: 0;
-  animation: dash-pulse 1.6s infinite;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: queue-pulse 1.6s infinite;
 }
-@keyframes dash-pulse {
-  0%   { box-shadow: 0 0 0 0   color-mix(in srgb, var(--gold) 60%, transparent); }
-  70%  { box-shadow: 0 0 0 12px transparent; }
-  100% { box-shadow: 0 0 0 0   transparent; }
+@keyframes queue-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 60%, transparent); }
+  70% { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
-.running-info { flex: 1; min-width: 0; }
-.running-label {
-  font-size: 10px; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--fg-3);
+.queue-current-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.running-title {
-  font-size: 13.5px; font-weight: 500; color: var(--fg-0);
-  margin-top: 4px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.running-type { color: var(--fg-3); font-weight: 400; margin-left: 4px; }
-.running-elapsed { font-family: var(--font-mono); font-size: 13px; color: var(--gold); font-variant-numeric: tabular-nums; }
-
-.pill-row {
-  display: flex; flex-wrap: wrap; gap: 6px;
-  margin-top: 10px;
-}
-.state-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border-radius: 999px;
-  font-family: var(--font-mono); font-size: 11px;
-  background: var(--bg-2); border: 1px solid var(--border);
-  text-transform: capitalize;
-}
-.pill-val { font-weight: 700; color: var(--fg-0); }
-.pill-lbl { color: var(--fg-3); }
-.state-pill.running   { border-color: color-mix(in srgb, var(--good) 30%, transparent); }
-.state-pill.available { border-color: color-mix(in srgb, var(--gold) 30%, transparent); }
-.state-pill.retryable { border-color: color-mix(in srgb, var(--gold) 30%, transparent); }
-.state-pill.discarded { border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
-
-.empty-state.err { color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, transparent); border-color: color-mix(in srgb, var(--bad) 25%, transparent); margin-top: 10px; }
-
-.accel-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.accel-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: 11px;
-  padding: 3px 10px; border-radius: 999px;
-  background: var(--bg-2); border: 1px solid var(--border);
-  color: var(--fg-1);
-}
-.accel-chip.off { color: var(--fg-3); opacity: 0.6; }
-.accel-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-4); }
-.accel-dot.on { background: var(--good); }
-
-.task-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--bg-2); }
-.task-row {
-  display: grid;
-  grid-template-columns: 110px 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
-}
-.task-row:last-child { border-bottom: 0; }
-.task-name { font-weight: 500; color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
-.task-meta .pending { color: var(--gold); }
-.task-meta .failed  { color: var(--bad); }
-
-.missing-scroll {
-  display: flex; gap: 10px;
-  overflow-x: auto; overflow-y: hidden;
-  padding-bottom: 4px;
-  scrollbar-width: none;
-}
-.missing-scroll::-webkit-scrollbar { display: none; }
-.missing-tile { width: 120px; flex-shrink: 0; opacity: 0.75; }
-.missing-poster {
-  position: relative;
-  border-radius: var(--r-md);
+.queue-current-text strong {
   overflow: hidden;
-  aspect-ratio: 2/3;
-  background: var(--bg-3);
-}
-.missing-poster img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(0.6); }
-.missing-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--fg-3); }
-.missing-badge {
-  position: absolute; top: 6px; right: 6px;
-  font-size: 8px; font-weight: 700; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  padding: 2px 6px; border-radius: 999px;
-  background: color-mix(in srgb, var(--bad) 85%, transparent); color: #fff;
-}
-.missing-meta { margin-top: 6px; }
-.missing-title { font-size: 11px; font-weight: 500; color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.missing-sub { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); }
-
-.activity-wrap {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 8px;
-}
-
-.link-arrow {
-  display: inline-flex; align-items: center; gap: 2px;
+  color: var(--fg-1);
   font-size: 11px;
-  color: var(--fg-3);
-  text-decoration: none;
+  font-weight: 580;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.link-arrow:hover { color: var(--gold); }
+.queue-current-text span { color: var(--fg-3); font-family: var(--font-mono); font-size: 9.5px; }
 
-.sv2-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 12px;
-  border-radius: var(--r-sm);
-  font-size: 11.5px; font-weight: 500;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+@media (max-width: 1180px) {
+  .dashboard-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* Phone: the "200px 1fr auto" style component/task rows are unreadably
-   cramped at 390px — reflow to a wrapped 2-line card (name on its own
-   line, message/meta + badge sharing the second) instead of a strict grid. */
 @media (max-width: 720px) {
-  .comp-row, .task-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 10px;
-  }
-  .comp-name, .task-name { flex: 1 1 100%; }
-  .comp-msg { flex: 1 1 auto; min-width: 0; white-space: normal; }
-  .task-meta { flex: 1 1 auto; justify-content: flex-start; }
+  .dashboard-head { flex-direction: column; }
+}
+
+@media (max-width: 620px) {
+  .dashboard-overview-grid { grid-template-columns: 1fr; }
 }
 </style>

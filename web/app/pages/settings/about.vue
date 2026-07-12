@@ -1,29 +1,15 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type Health = components['schemas']['HealthBody']
-type Ready  = components['schemas']['ReadyBody']
+import { serverHealthQuery, serverReadinessQuery } from '~/queries/admin'
 
-const { $heya } = useNuxtApp()
 const clientVersion = useRuntimeConfig().public.heyaVersion
 
-const health = ref<Health | null>(null)
-const ready = ref<Ready | null>(null)
-const loading = ref(true)
-
-async function load() {
-  try {
-    const [h, r] = await Promise.all([
-      $heya('/api/health'),
-      $heya('/api/health/ready'),
-    ])
-    health.value = h
-    ready.value = r
-  } catch {} finally {
-    loading.value = false
-  }
-}
+const healthData = useQuery(serverHealthQuery())
+const readinessData = useQuery(serverReadinessQuery())
+const health = computed(() => healthData.data.value ?? null)
+const ready = computed(() => readinessData.data.value ?? null)
+const loading = computed(() => healthData.isLoading.value || readinessData.isLoading.value)
 
 const overallTone = computed<'good' | 'warn' | 'bad'>(() => {
   if (!ready.value) return 'warn'
@@ -66,7 +52,6 @@ function componentIcon(name: string): string {
   }
 }
 
-onMounted(load)
 </script>
 
 <template>

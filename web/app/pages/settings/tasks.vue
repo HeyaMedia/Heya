@@ -2,15 +2,16 @@
 import { timeAgo as timeAgoBase } from '~/composables/useFormat'
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type TaskResponse = components['schemas']['TaskResponse']
-type QueueStatus  = components['schemas']['MetadataQueueStatus']
+import { adminTasksQuery, metadataQueueQuery } from '~/queries/admin'
+import type { TaskResponse } from '~/queries/admin'
 
 const { $heya } = useNuxtApp()
 const { taskProgress: liveTaskProgress } = useEventBus()
 
-const tasks = ref<TaskResponse[]>([])
-const queueStatus = ref<QueueStatus | null>(null)
+const tasksData = useQuery(adminTasksQuery())
+const queueData = useQuery(metadataQueueQuery())
+const tasks = computed(() => tasksData.data.value ?? [])
+const queueStatus = computed(() => queueData.data.value ?? null)
 const itemsModalTask = ref<string | null>(null)
 const expandedTaskId = ref<string | null>(null)
 const { flash } = useFlash()
@@ -22,16 +23,14 @@ let tickPoll: ReturnType<typeof setInterval> | null = null
 
 async function fetchTasks() {
   try {
-    tasks.value = await $heya('/api/tasks') as unknown as TaskResponse[]
+    await tasksData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load tasks.' }
   }
 }
 
 async function fetchQueueStatus() {
-  try {
-    queueStatus.value = await $heya('/api/jobs/queue/metadata')
-  } catch {}
+  try { await queueData.refetch() } catch {}
 }
 
 async function runTask(id: string) {
@@ -193,8 +192,6 @@ function bandCount(p: string): number {
 }
 
 onMounted(() => {
-  fetchTasks()
-  fetchQueueStatus()
   queuePoll = setInterval(fetchQueueStatus, 2000)
   tasksPoll = setInterval(fetchTasks, 5000)
   tickPoll = setInterval(() => { tick.value++ }, 1000)

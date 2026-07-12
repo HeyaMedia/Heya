@@ -2,15 +2,12 @@
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 const { $heya } = useNuxtApp()
-
-type OSValue = {
-  api_key?: string
-  username?: string
-  password?: string
-}
+import { openSubtitlesSettingsQuery } from '~/queries/settings'
+import type { OpenSubtitlesSettings as OSValue } from '~/queries/settings'
 
 const os = reactive<OSValue>({ api_key: '', username: '', password: '' })
-const loading = ref(true)
+const settingsData = useQuery(openSubtitlesSettingsQuery())
+const loading = computed(() => settingsData.isLoading.value)
 const saving = ref(false)
 const testing = ref(false)
 const testResult = ref<{ ok: boolean; user?: any; error?: string } | null>(null)
@@ -21,17 +18,16 @@ const canSave = computed(() => !!(os.api_key && os.username && os.password))
 
 async function load() {
   try {
-    const res = await $heya('/api/system-settings/{key}', { path: { key: 'opensubtitles' } }) as any
-    const v = res?.value as OSValue | undefined
-    if (v) {
-      os.api_key  = v.api_key  ?? ''
-      os.username = v.username ?? ''
-      os.password = v.password ?? ''
-    }
-  } catch { /* not configured yet */ } finally {
-    loading.value = false
-  }
+    await settingsData.refetch()
+  } catch { /* not configured yet */ }
 }
+
+watch(() => settingsData.data.value, value => {
+  if (!value) return
+  os.api_key = value.api_key ?? ''
+  os.username = value.username ?? ''
+  os.password = value.password ?? ''
+}, { immediate: true })
 
 async function testConnection() {
   testing.value = true
@@ -58,6 +54,7 @@ async function save() {
       path: { key: 'opensubtitles' },
       body: { value: { api_key: os.api_key, username: os.username, password: os.password } } as any,
     })
+    await load()
     flash.value = { kind: 'ok', text: 'OpenSubtitles credentials saved.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Save failed.' }
@@ -75,7 +72,6 @@ const UPSTREAM_SOURCES = [
   { name: 'OMDb',        scope: 'aggregated ratings',   icon: 'pulse' },
 ]
 
-onMounted(load)
 </script>
 
 <template>

@@ -3,9 +3,11 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 const { $heya } = useNuxtApp()
 const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
+import { jellyfinConfigQuery } from '~/queries/settings'
 
 const enabled = ref(false)
-const loading = ref(true)
+const configData = useQuery(jellyfinConfigQuery())
+const loading = computed(() => configData.isLoading.value)
 const saving = ref(false)
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
@@ -14,12 +16,15 @@ const serverAddress = computed(() =>
 
 async function load() {
   try {
-    const res = await $heya('/api/jellyfin/config')
-    enabled.value = res.enabled
-  } catch {} finally {
-    loading.value = false
-  }
+    const res = await configData.refetch()
+    if (!res.data) return
+    enabled.value = res.data.enabled
+  } catch {}
 }
+
+watch(() => configData.data.value, value => {
+  if (value) enabled.value = value.enabled
+}, { immediate: true })
 
 async function onToggle(on: boolean) {
   saving.value = true
@@ -44,11 +49,18 @@ async function onToggle(on: boolean) {
   }
 }
 
-onMounted(() => { ensureSources(); load() })
+onMounted(() => { ensureSources() })
 </script>
 
 <template>
   <div class="settings-page">
+    <header class="sv2-page-head">
+      <h2 class="sv2-page-title">Jellyfin API</h2>
+      <p class="sv2-page-desc">
+        Let Jellyfin-compatible clients discover Heya and sign in with normal Heya accounts.
+      </p>
+    </header>
+
     <SettingsSection
       title="Jellyfin-compatible API"
       icon="cast"

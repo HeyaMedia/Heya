@@ -1,38 +1,16 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type Library  = components['schemas']['LibraryView']
-type Settings = components['schemas']['LibrarySettings']
+import { metadataPoliciesQuery } from '~/queries/settings'
+import type { LibrarySettings as Settings } from '~/queries/settings'
 
-const { $heya } = useNuxtApp()
-
-const libraries = ref<Library[]>([])
-const settingsByLib = ref<Map<number, Settings>>(new Map())
-const loading = ref(true)
-const error = ref<string | null>(null)
-
-async function load() {
-  loading.value = true
-  error.value = null
-  try {
-    libraries.value = await $heya('/api/libraries') ?? []
-    const pairs = await Promise.all(
-      libraries.value.map(l =>
-        $heya('/api/libraries/{id}/settings', { path: { id: l.id } })
-          .then(r => [l.id, r.settings] as const)
-          .catch(() => [l.id, null] as const),
-      ),
-    )
-    const m = new Map<number, Settings>()
-    for (const [id, s] of pairs) if (s) m.set(id, s as Settings)
-    settingsByLib.value = m
-  } catch (e: any) {
-    error.value = e?.message ?? 'Failed to load libraries.'
-  } finally {
-    loading.value = false
-  }
-}
+const policiesData = useQuery(metadataPoliciesQuery())
+const libraries = computed(() => policiesData.data.value?.libraries ?? [])
+const settingsByLib = computed(() => new Map<number, Settings>(
+  Object.entries(policiesData.data.value?.settings ?? {}).map(([id, settings]) => [Number(id), settings]),
+))
+const loading = computed(() => policiesData.isLoading.value)
+const error = computed(() => policiesData.error.value?.message ?? null)
 
 const aggregateCounts = computed(() => {
   const total = libraries.value.length
@@ -59,7 +37,6 @@ function libraryIcon(kind: string): string {
   }
 }
 
-onMounted(load)
 </script>
 
 <template>

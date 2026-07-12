@@ -4,14 +4,18 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 import type { Library, LibrarySettings } from '~~/shared/types'
 import type { LibraryScanProgress, ScannerEventPayload } from '~/composables/useEventBus'
 import { useQueryCache } from '@pinia/colada'
+import { librariesQuery } from '~/queries/catalog'
+import { dashboardStatsQuery } from '~/queries/admin'
 
 const { $heya } = useNuxtApp()
 const queryCache = useQueryCache()
 const { confirm } = useConfirm()
 const { scanProgress, scannerEvents } = useEventBus()
 
+const librariesData = useQuery(librariesQuery())
+const statsData = useQuery(dashboardStatsQuery())
 const libraries = ref<Library[]>([])
-const loading = ref(true)
+const loading = computed(() => librariesData.isLoading.value)
 const scanning = ref<number | null>(null)
 const scanningAll = ref(false)
 const { flash } = useFlash()
@@ -189,15 +193,19 @@ function scanEventTarget(ev: ScannerEventPayload): string {
 
 async function fetchLibraries() {
   try {
-    libraries.value = await $heya('/api/libraries') ?? []
+    await librariesData.refetch()
     syncScannerFromRoute()
-    fetchLatestRuns()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load libraries.' }
-  } finally {
-    loading.value = false
   }
 }
+
+watch(() => librariesData.data.value, value => {
+  if (!value) return
+  libraries.value = structuredClone(value)
+  syncScannerFromRoute()
+  void fetchLatestRuns()
+}, { immediate: true })
 
 async function scanLib(id: number) {
   scanning.value = id
@@ -367,16 +375,11 @@ const totalByKind = computed(() => {
 
 // Missing items — media whose files were all removed from disk. The count
 // comes from the dashboard stats; cleanup hard-deletes them from the DB.
-const missingCount = ref(0)
+const missingCount = computed(() => statsData.data.value?.missing_count ?? 0)
 const cleaningUp = ref(false)
 
 async function fetchMissingCount() {
-  try {
-    const stats = await $heya('/api/stats') as { missing_count?: number }
-    missingCount.value = stats?.missing_count ?? 0
-  } catch {
-    // Non-fatal — the maintenance card just shows 0.
-  }
+  try { await statsData.refetch() } catch {}
 }
 
 async function cleanupMissing() {
@@ -401,8 +404,7 @@ async function cleanupMissing() {
 }
 
 onMounted(async () => {
-  await fetchLibraries()
-  fetchMissingCount()
+  await fetchMissingCount()
 })
 
 watch(() => route.query.library, () => syncScannerFromRoute())

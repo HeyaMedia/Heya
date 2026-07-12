@@ -1,16 +1,13 @@
 <script setup lang="ts">
-// `variant="sheet"` is used when this same component is reused inside the
-// phone AppSheet (layouts/settings.vue) instead of the persistent 240px
-// rail — see docs/responsive-plan.md W3d. No local/collapsible state here
-// (unlike MusicSidebar), so plain reuse + a sizing variant beats a parallel
-// flat link list.
 withDefaults(defineProps<{ variant?: 'sidebar' | 'sheet' }>(), { variant: 'sidebar' })
 
 const route = useRoute()
 const { groups, isAdmin } = useSettingsNav()
 
-function isActive(to: string) {
-  return route.path === to
+function isActive(item: SettingsNavItem) {
+  return route.path === item.to
+    || item.aliases?.includes(route.path) === true
+    || item.tabs?.some(tab => tab.to === route.path) === true
 }
 </script>
 
@@ -21,7 +18,6 @@ function isActive(to: string) {
     aria-label="Settings navigation"
   >
     <template v-for="(group, idx) in groups" :key="group.id">
-      <!-- Divider only between YOU and the first admin group -->
       <div v-if="idx === 1 && isAdmin" class="sv2-divider" />
 
       <div class="sv2-group">
@@ -31,7 +27,7 @@ function isActive(to: string) {
             <NuxtLink
               :to="item.to"
               class="sv2-item"
-              :class="{ active: isActive(item.to) }"
+              :class="{ active: isActive(item) }"
             >
               <Icon :name="item.icon" :size="15" class="sv2-item-icon" />
               <span class="sv2-item-label">{{ item.label }}</span>
@@ -91,15 +87,16 @@ function isActive(to: string) {
   color: var(--fg-2);
   transition: background 0.12s, color 0.12s;
 }
-.sv2-item:hover {
-  background: rgb(var(--ink) / 0.03);
-  color: var(--fg-0);
-}
-.sv2-item.active {
-  background: var(--gold-soft);
-  color: var(--gold);
-}
+.sv2-item:hover { background: rgb(var(--ink) / 0.03); color: var(--fg-0); }
+.sv2-item.active { background: var(--gold-soft); color: var(--gold); }
 .sv2-item.active .sv2-item-icon { color: var(--gold); }
+
+.sv2-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .sv2-item-icon {
   flex-shrink: 0;
@@ -111,12 +108,9 @@ function isActive(to: string) {
 .sv2-divider {
   height: 1px;
   background: var(--border);
-  margin: 12px 12px;
+  margin: 12px;
 }
 
-/* Sheet variant — same component, rendered full-width inside the phone
-   AppSheet (layouts/settings.vue) instead of the persistent rail. Only the
-   sizing/chrome differs; the rest (groups, active state, icons) is shared. */
 .sv2-sidebar.sv2-sidebar-sheet {
   width: 100%;
   height: auto;
@@ -128,8 +122,5 @@ function isActive(to: string) {
   min-height: 44px;
   padding: 0 14px;
   font-size: 15px;
-}
-.sv2-sidebar-sheet .sv2-item-icon {
-  flex-shrink: 0;
 }
 </style>

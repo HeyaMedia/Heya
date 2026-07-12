@@ -248,16 +248,20 @@ func (h *Hub) statsTicker(ctx context.Context, db *pgxpool.Pool) {
 			}
 			s := StatsPayload{MediaCounts: make(map[string]int)}
 
-			db.QueryRow(ctx, "SELECT count(*) FROM libraries").Scan(&s.Libraries)
-			for _, mt := range []string{"movie", "tv", "music", "book"} {
-				var c int
-				if db.QueryRow(ctx, "SELECT count(*) FROM media_items WHERE media_type = $1", mt).Scan(&c) == nil {
-					s.MediaCounts[mt] = c
-					s.TotalMedia += c
+			_ = db.QueryRow(ctx, "SELECT count(*) FROM libraries").Scan(&s.Libraries)
+			if rows, err := db.Query(ctx, `SELECT media_type::text, count(*) FROM media_items GROUP BY media_type`); err == nil {
+				for rows.Next() {
+					var mediaType string
+					var count int
+					if rows.Scan(&mediaType, &count) == nil {
+						s.MediaCounts[mediaType] = count
+						s.TotalMedia += count
+					}
 				}
+				rows.Close()
 			}
-			db.QueryRow(ctx, "SELECT count(*) FROM people").Scan(&s.TotalPeople)
-			db.QueryRow(ctx, "SELECT count(*) FROM library_files").Scan(&s.TotalFiles)
+			s.TotalPeople = estimatedRows(ctx, db, "public.people")
+			s.TotalFiles = estimatedRows(ctx, db, "public.library_files")
 
 			if counts, err := queueops.CountActive(ctx, db); err == nil {
 				s.QueuePending = counts.Pending
@@ -267,4 +271,15 @@ func (h *Hub) statsTicker(ctx context.Context, db *pgxpool.Pool) {
 			h.Emit(EventStatsUpdated, s)
 		}
 	}
+}
+
+func estimatedRows(ctx context.Context, db *pgxpool.Pool, table string) int {
+	var count int64
+	if err := db.QueryRow(ctx,
+		`SELECT GREATEST(COALESCE((SELECT reltuples::bigint FROM pg_class WHERE oid = to_regclass($1)), 0), 0)`,
+		table,
+	).Scan(&count); err != nil {
+		return 0
+	}
+	return int(count)
 }

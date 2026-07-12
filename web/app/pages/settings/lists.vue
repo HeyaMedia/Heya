@@ -1,26 +1,24 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type UserList = components['schemas']['UserListView']
+import { managedUserListsQuery } from '~/queries/settings'
+import type { UserListView as UserList } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 
-const lists = ref<UserList[]>([])
-const loading = ref(true)
+const listsData = useQuery(managedUserListsQuery())
+const lists = computed(() => listsData.data.value ?? [])
+const loading = computed(() => listsData.isLoading.value)
 const { flash } = useFlash()
 const editing = ref<number | null>(null)
 const draft = ref({ name: '', description: '' })
 
 async function load() {
-  loading.value = true
   try {
-    lists.value = await $heya('/api/me/lists')
+    await listsData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load lists.' }
-  } finally {
-    loading.value = false
   }
 }
 
@@ -37,7 +35,7 @@ function cancelEdit() {
 async function saveEdit(l: UserList) {
   if (!draft.value.name.trim()) return
   try {
-    const updated = await $heya('/api/me/lists/{id}', {
+    await $heya('/api/me/lists/{id}', {
       method: 'PUT',
       path: { id: l.id },
       body: {
@@ -47,8 +45,7 @@ async function saveEdit(l: UserList) {
         icon: l.icon ?? '',
       },
     })
-    const idx = lists.value.findIndex(x => x.id === l.id)
-    if (idx >= 0) lists.value[idx] = updated
+    await load()
     flash.value = { kind: 'ok', text: 'List updated.' }
     cancelEdit()
   } catch (e: any) {
@@ -66,7 +63,7 @@ async function remove(l: UserList) {
   if (!ok) return
   try {
     await $heya('/api/me/lists/{id}', { method: 'DELETE', path: { id: l.id } })
-    lists.value = lists.value.filter(x => x.id !== l.id)
+    await load()
     flash.value = { kind: 'ok', text: 'List deleted.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to delete list.' }
@@ -86,7 +83,6 @@ function mediaTypeIcon(t: string): string {
   }
 }
 
-onMounted(load)
 </script>
 
 <template>

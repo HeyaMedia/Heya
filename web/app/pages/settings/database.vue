@@ -1,23 +1,17 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type DB = components['schemas']['AdminDBBody']
+import { adminDatabaseQuery } from '~/queries/admin'
 
-const { $heya } = useNuxtApp()
-
-const db = ref<DB | null>(null)
-const loading = ref(true)
+const databaseData = useQuery(adminDatabaseQuery())
+const db = computed(() => databaseData.data.value ?? null)
+const loading = computed(() => databaseData.isLoading.value)
 const tick = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
 
 async function load() {
-  try {
-    db.value = await $heya('/api/admin/db')
-  } catch {} finally {
-    loading.value = false
-  }
+  try { await databaseData.refetch() } catch {}
 }
 
 const totalDbSize = computed(() => {

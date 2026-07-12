@@ -3,35 +3,12 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 const { $heya } = useNuxtApp()
 const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
+import { sonicSettingsQuery, sonicStatusQuery } from '~/queries/intelligence'
+import type { SonicManifestFile as ManifestFile, SonicSettings } from '~/queries/intelligence'
 
-// Status endpoint is an open-shape object on the backend; type it locally so
-// the UI stays strict without forcing a Huma schema.
-type AcceleratorAvailability = { name: string; label: string; available: boolean; reason?: string }
-type FetcherProgress = { current_file?: string; bytes_done?: number; bytes_total?: number; files_done?: number; files_total?: number; started_at?: string }
-type ManifestFile = { name: string; present: boolean; expected_size: number; actual_size: number; category: string }
-type SonicHolder = { state: string; accelerator?: string; refs?: number; idle_timeout_sec?: number; total_borrows?: number; loaded_at?: string; idle_unload_at?: string; last_borrow_at?: string }
-type SonicStatus = {
-  fetcher?: {
-    state: string
-    all_present?: boolean
-    missing_count?: number
-    total_count?: number
-    total_size?: number
-    manifest?: ManifestFile[]
-    progress?: FetcherProgress
-    last_error?: string
-  }
-  analyzer?: { state?: string }
-  holder?: SonicHolder
-  text_searcher?: { ready?: boolean }
-  accelerators?: AcceleratorAvailability[]
-  analyzer_version?: number
-  coverage?: { analyzed: number; pending: number }
-}
-
-interface SonicSettings { enabled: boolean; accelerator: string }
-
-const status = ref<SonicStatus | null>(null)
+const statusData = useQuery(sonicStatusQuery())
+const settingsData = useQuery(sonicSettingsQuery())
+const status = computed(() => statusData.data.value ?? null)
 const settings = ref<SonicSettings | null>(null)
 const saving = ref(false)
 const fetching = ref(false)
@@ -127,7 +104,7 @@ function relTimeFuture(ts?: string): string {
 
 async function loadStatus() {
   try {
-    status.value = await $heya('/api/admin/sonicanalysis/status') as SonicStatus
+    await statusData.refetch()
     fetching.value = status.value?.fetcher?.state === 'fetching'
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load sonic status.' }
@@ -135,11 +112,16 @@ async function loadStatus() {
 }
 async function loadSettings() {
   try {
-    settings.value = await $heya('/api/admin/sonicanalysis/settings') as SonicSettings
+    await settingsData.refetch()
+    if (settingsData.data.value) settings.value = structuredClone(settingsData.data.value)
   } catch {
     settings.value = { enabled: false, accelerator: 'auto' }
   }
 }
+
+watch(() => settingsData.data.value, value => {
+  if (value) settings.value = structuredClone(value)
+}, { immediate: true })
 
 async function toggleEnabled() {
   if (!settings.value || enableSaving.value) return

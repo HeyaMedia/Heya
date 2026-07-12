@@ -2,14 +2,18 @@
 definePageMeta({ layout: 'settings' })
 
 import type { components } from '#open-fetch-schemas/heya'
+import { librariesQuery } from '~/queries/catalog'
+import { userPlaybackSettingsQuery } from '~/queries/settings'
 type UserSettings = components['schemas']['UserSettings']
 type LibraryView  = components['schemas']['LibraryView']
 
 const { $heya } = useNuxtApp()
 
 const settings = ref<UserSettings | null>(null)
-const libraries = ref<LibraryView[]>([])
-const loading = ref(true)
+const settingsData = useQuery(userPlaybackSettingsQuery())
+const librariesData = useQuery(librariesQuery())
+const libraries = computed(() => (librariesData.data.value ?? []) as LibraryView[])
+const loading = computed(() => settingsData.isLoading.value || librariesData.isLoading.value)
 const saving = ref(false)
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
@@ -40,25 +44,15 @@ const SUB_PRIORITY_LABELS: Record<string, string> = {
   pgs: 'PGS (image-based)',
 }
 
-async function load() {
-  loading.value = true
-  try {
-    const [s, ls] = await Promise.all([
-      $heya('/api/me/settings'),
-      $heya('/api/libraries'),
-    ])
-    settings.value = s
-    libraries.value = ls ?? []
+watch(() => settingsData.data.value, value => {
+  if (value) {
+    settings.value = structuredClone(value)
     // Defensive: backend may omit library_overrides on a fresh account.
     if (settings.value && !settings.value.playback.library_overrides) {
       settings.value.playback.library_overrides = {}
     }
-  } catch (e: any) {
-    flash.value = { kind: 'err', text: e?.message ?? 'Failed to load settings.' }
-  } finally {
-    loading.value = false
   }
-}
+}, { immediate: true })
 
 async function save() {
   if (!settings.value) return
@@ -82,6 +76,7 @@ async function save() {
       method: 'PUT',
       body: settings.value,
     })
+    await settingsData.refetch()
     flash.value = { kind: 'ok', text: 'Playback preferences saved.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to save.' }
@@ -145,7 +140,6 @@ function libraryIcon(kind: string): string {
   }
 }
 
-onMounted(load)
 </script>
 
 <template>

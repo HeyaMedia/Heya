@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
@@ -35,22 +36,27 @@ func (a *App) GetDashboardStats(ctx context.Context) DashboardStats {
 		MediaCounts: make(map[string]int),
 	}
 
-	libs, err := a.ListLibraries(ctx)
-	if err == nil {
-		stats.Libraries = len(libs)
-	}
+	_ = a.db.QueryRow(ctx, "SELECT count(*) FROM libraries").Scan(&stats.Libraries)
 
-	for _, mt := range []string{"movie", "tv", "music", "book"} {
-		var count int
-		err := a.db.QueryRow(ctx, "SELECT count(*) FROM media_items WHERE media_type = $1", mt).Scan(&count)
-		if err == nil {
-			stats.MediaCounts[mt] = count
-			stats.TotalMedia += count
+	// One grouped pass is substantially cheaper than four independent
+	// COUNT(*) index walks as a library grows. These are user-facing catalog
+	// counts, so keep them exact; the much larger diagnostic-only tables below
+	// use PostgreSQL's planner estimates instead.
+	rows, err := a.db.Query(ctx, `SELECT media_type::text, count(*) FROM media_items GROUP BY media_type`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var mediaType string
+			var count int
+			if rows.Scan(&mediaType, &count) == nil {
+				stats.MediaCounts[mediaType] = count
+				stats.TotalMedia += count
+			}
 		}
 	}
 
-	a.db.QueryRow(ctx, "SELECT count(*) FROM people").Scan(&stats.TotalPeople)
-	a.db.QueryRow(ctx, "SELECT count(*) FROM library_files").Scan(&stats.TotalFiles)
+	stats.TotalPeople = estimatedTableRows(ctx, a.db, "public.people")
+	stats.TotalFiles = estimatedTableRows(ctx, a.db, "public.library_files")
 
 	stats.MissingCount = a.missingCountCached(ctx)
 
@@ -59,6 +65,20 @@ func (a *App) GetDashboardStats(ctx context.Context) DashboardStats {
 	stats.QueueRunning = running
 
 	return stats
+}
+
+// estimatedTableRows reads pg_class.reltuples: O(1), maintained by ANALYZE,
+// and deliberately approximate. Dashboard no longer displays these two
+// diagnostic totals, so a full scan of multi-million-row tables is wasteful.
+func estimatedTableRows(ctx context.Context, db *pgxpool.Pool, table string) int {
+	var count int64
+	if err := db.QueryRow(ctx,
+		`SELECT GREATEST(COALESCE((SELECT reltuples::bigint FROM pg_class WHERE oid = to_regclass($1)), 0), 0)`,
+		table,
+	).Scan(&count); err != nil {
+		return 0
+	}
+	return int(count)
 }
 
 // missingCountCached returns the dashboard missing_count through a short TTL

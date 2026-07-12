@@ -3,8 +3,9 @@ import { timeAgo as timeAgoBase } from '~/composables/useFormat'
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import type { components } from '#open-fetch-schemas/heya'
+import { jobSummaryQuery } from '~/queries/admin'
+import { adminJobKindsQuery, adminJobsQuery } from '~/queries/settings'
 type JobRow = components['schemas']['JobRow']
-type SummaryRow = components['schemas']['JobSummaryRow']
 type WorkerSetting = {
   kind: string
   label: string
@@ -28,18 +29,24 @@ type WorkerPreset = {
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 
-type KindRow = components['schemas']['JobKindSummaryRow']
-
-const jobs = ref<JobRow[]>([])
-const total = ref(0)
-const summary = ref<SummaryRow[]>([])
-const kindSummary = ref<KindRow[]>([])
 const filter = ref<string>('')
 const kindFilter = ref<string>('')
 const offset = ref(0)
 const limit = 50
+const jobsData = useQuery(() => adminJobsQuery({
+  state: filter.value,
+  kind: kindFilter.value,
+  offset: offset.value,
+  limit,
+}))
+const summaryData = useQuery(jobSummaryQuery())
+const kindsData = useQuery(adminJobKindsQuery())
+const jobs = computed<JobRow[]>(() => jobsData.data.value?.jobs ?? [])
+const total = computed(() => jobsData.data.value?.total ?? 0)
+const summary = computed(() => summaryData.data.value ?? [])
+const kindSummary = computed(() => kindsData.data.value ?? [])
 const expanded = ref<number | null>(null)
-const loading = ref(true)
+const loading = computed(() => jobsData.isLoading.value)
 const busy = ref<'' | 'rescue' | 'completed' | 'all' | 'kind'>('')
 const { flash } = useFlash()
 const workerSettingsOpen = ref(false)
@@ -109,27 +116,18 @@ const TURBO_WORKERS: Record<string, number> = {
 
 async function fetchJobs() {
   try {
-    const query: Record<string, any> = { limit, offset: offset.value }
-    if (filter.value) query.state = filter.value
-    if (kindFilter.value) query.kind = kindFilter.value
-    const res = await $heya('/api/jobs', { query })
-    jobs.value = res.jobs ?? []
-    total.value = res.total
+    await jobsData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load jobs.' }
   }
 }
 
 async function fetchSummary() {
-  try {
-    summary.value = await $heya('/api/jobs/summary')
-  } catch {}
+  try { await summaryData.refetch() } catch {}
 }
 
 async function fetchKinds() {
-  try {
-    kindSummary.value = await $heya('/api/jobs/kinds')
-  } catch {}
+  try { await kindsData.refetch() } catch {}
 }
 
 async function fetchWorkerSettings() {
@@ -396,7 +394,7 @@ const { connected: wsConnected } = useLiveFallback(refresh, {
 
 onMounted(() => {
   tickTimer = setInterval(() => { tick.value++ }, 1000)
-  refresh().finally(() => { loading.value = false })
+  void refresh()
 })
 </script>
 

@@ -1,15 +1,16 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type AdminUser = components['schemas']['AdminUserView']
+import { adminUsersQuery } from '~/queries/settings'
+import type { AdminUser } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 const { user: me } = useAuth()
 
-const users = ref<AdminUser[]>([])
-const loading = ref(true)
+const usersData = useQuery(adminUsersQuery())
+const users = computed(() => usersData.data.value ?? [])
+const loading = computed(() => usersData.isLoading.value)
 const { flash } = useFlash()
 
 const showCreate = ref(false)
@@ -81,13 +82,10 @@ async function copyPw(text: string, which: 'create' | 'reset') {
 }
 
 async function load() {
-  loading.value = true
   try {
-    users.value = await $heya('/api/admin/users') ?? []
+    await usersData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load users.' }
-  } finally {
-    loading.value = false
   }
 }
 
@@ -103,7 +101,7 @@ async function createUser() {
       method: 'POST',
       body: { ...newUser.value } as any,
     })
-    users.value.push(u)
+    await load()
     flash.value = { kind: 'ok', text: `Created ${u.username}.` }
     showCreate.value = false
     newUser.value = { username: '', email: '', password: '', is_admin: false }
@@ -127,13 +125,12 @@ async function toggleAdmin(u: AdminUser) {
   })
   if (!ok) return
   try {
-    const updated = await $heya('/api/admin/users/{id}/role', {
+    await $heya('/api/admin/users/{id}/role', {
       method: 'PATCH',
       path: { id: u.id },
       body: { is_admin: next } as any,
     })
-    const idx = users.value.findIndex(x => x.id === u.id)
-    if (idx >= 0) users.value[idx] = updated
+    await load()
     flash.value = { kind: 'ok', text: `Role updated for ${u.username}.` }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Role change failed.' }
@@ -151,7 +148,7 @@ async function deleteUser(u: AdminUser) {
   if (!ok) return
   try {
     await $heya('/api/admin/users/{id}', { method: 'DELETE', path: { id: u.id } })
-    users.value = users.value.filter(x => x.id !== u.id)
+    await load()
     flash.value = { kind: 'ok', text: `Deleted ${u.username}.` }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Delete failed.' }
@@ -192,7 +189,6 @@ function initials(u: { username: string }): string {
   return u.username.slice(0, 2).toUpperCase()
 }
 
-onMounted(load)
 </script>
 
 <template>

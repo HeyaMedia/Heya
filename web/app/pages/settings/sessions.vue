@@ -1,24 +1,22 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type AuthSession = components['schemas']['AuthSessionView']
+import { mySessionsQuery } from '~/queries/settings'
+import type { AuthSession } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 
-const sessions = ref<AuthSession[]>([])
-const loading = ref(true)
+const sessionsData = useQuery(mySessionsQuery())
+const sessions = computed(() => sessionsData.data.value ?? [])
+const loading = computed(() => sessionsData.isLoading.value)
 const { flash } = useFlash()
 
 async function load() {
-  loading.value = true
   try {
-    sessions.value = await $heya('/api/me/auth-sessions')
+    await sessionsData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load sessions.' }
-  } finally {
-    loading.value = false
   }
 }
 
@@ -33,7 +31,7 @@ async function revoke(s: AuthSession) {
   if (!ok) return
   try {
     await $heya('/api/me/auth-sessions/{id}', { method: 'DELETE', path: { id: s.id } })
-    sessions.value = sessions.value.filter(x => x.id !== s.id)
+    await load()
     flash.value = { kind: 'ok', text: 'Device signed out.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to sign out device.' }
@@ -52,7 +50,7 @@ async function revokeOthers() {
   if (!ok) return
   try {
     await $heya('/api/me/auth-sessions/revoke-others', { method: 'POST' })
-    sessions.value = sessions.value.filter(s => s.current)
+    await load()
     flash.value = { kind: 'ok', text: `${others} other ${others === 1 ? 'device was' : 'devices were'} signed out.` }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to sign out other devices.' }
@@ -64,7 +62,6 @@ async function revokeOthers() {
 
 const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
 
-onMounted(load)
 </script>
 
 <template>

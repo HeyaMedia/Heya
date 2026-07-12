@@ -1,26 +1,24 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
-type AdminSession = components['schemas']['AdminSessionView']
+import { adminSessionsQuery } from '~/queries/settings'
+import type { AdminSession } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 
-const sessions = ref<AdminSession[]>([])
-const loading = ref(true)
+const sessionsData = useQuery(adminSessionsQuery())
+const sessions = computed(() => sessionsData.data.value ?? [])
+const loading = computed(() => sessionsData.isLoading.value)
 const kindFilter = ref<'' | 'session' | 'api_token'>('')
 const userFilter = ref<string>('')
 const { flash } = useFlash()
 
 async function load() {
-  loading.value = true
   try {
-    sessions.value = await $heya('/api/admin/sessions') ?? []
+    await sessionsData.refetch()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Failed to load sessions.' }
-  } finally {
-    loading.value = false
   }
 }
 
@@ -36,7 +34,7 @@ async function revoke(s: AdminSession) {
   if (!ok) return
   try {
     await $heya('/api/admin/sessions/{id}', { method: 'DELETE', path: { id: s.id } })
-    sessions.value = sessions.value.filter(x => x.id !== s.id)
+    await load()
     flash.value = { kind: 'ok', text: 'Session revoked.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Revoke failed.' }
@@ -64,7 +62,6 @@ const allUsernames = computed(() =>
   Array.from(new Set(sessions.value.map(s => s.username))).sort(),
 )
 
-onMounted(load)
 </script>
 
 <template>
