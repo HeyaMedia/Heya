@@ -479,6 +479,12 @@ func resolveAlbumDirs(tracks []sqlc.Track) []string {
 // for attached art in practice; PNG is rare enough that re-encoding via
 // `-c:v copy` then trusting the .jpg extension is a fine trade for not
 // branching on the source codec).
+//
+// Copy mode also makes this immune to art blocks whose declared MIME lies
+// about the bytes (PNG tag, JPEG data) — the packet is written out without
+// ever touching the (wrong) decoder, so the true bytes land in cover.jpg.
+// The loudness/analysis pipelines need explicit -vn guards for those files;
+// this path deliberately does not.
 func extractEmbeddedCover(ctx context.Context, tracks []sqlc.Track, cacheDir string) string {
 	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return ""

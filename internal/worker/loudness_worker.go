@@ -252,6 +252,7 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 		"-nostdin", "-nostats", "-hide_banner",
 		"-f", "concat", "-safe", "0",
 		"-i", manifestPath,
+		"-vn", "-sn", "-dn", "-map", "0:a:0",
 		"-af", "ebur128=peak=true",
 		"-f", "null", "-",
 	)
@@ -312,11 +313,16 @@ type ebur128Result struct {
 
 // runEBUR128 invokes ffmpeg's ebur128 filter on a single file and parses its
 // summary output. Output lives on stderr; the null muxer eats stdout.
+//
+// -vn/-sn/-dn plus the explicit audio map keep embedded cover art out of the
+// pipeline — art blocks with a lying MIME type (PNG tag, JPEG bytes) otherwise
+// abort the whole run with "Invalid PNG signature".
 func runEBUR128(ctx context.Context, path string) (ebur128Result, error) {
 	cmd := exec.CommandContext(ctx, //nolint:gosec // path comes from library_files we control; ffmpeg binary is fixed
 		"ffmpeg",
 		"-nostdin", "-nostats", "-hide_banner",
 		"-i", path,
+		"-vn", "-sn", "-dn", "-map", "0:a:0",
 		"-af", "ebur128=peak=true",
 		"-f", "null", "-",
 	)
