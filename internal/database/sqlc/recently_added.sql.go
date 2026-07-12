@@ -186,6 +186,36 @@ func (q *Queries) ListArtistsBriefByIDs(ctx context.Context, artistIds []int64) 
 	return items, nil
 }
 
+const listMediaDescriptionsByIDs = `-- name: ListMediaDescriptionsByIDs :many
+SELECT id, description FROM media_item_cards WHERE id = ANY($1::bigint[])
+`
+
+type ListMediaDescriptionsByIDsRow struct {
+	ID          int64  `json:"id"`
+	Description string `json:"description"`
+}
+
+// Batched description lookup for the entries that survived the grouping cut.
+func (q *Queries) ListMediaDescriptionsByIDs(ctx context.Context, ids []int64) ([]ListMediaDescriptionsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listMediaDescriptionsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMediaDescriptionsByIDsRow{}
+	for rows.Next() {
+		var i ListMediaDescriptionsByIDsRow
+		if err := rows.Scan(&i.ID, &i.Description); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentlyAddedMusicFiles = `-- name: ListRecentlyAddedMusicFiles :many
 SELECT r.created_at, r.media_item_id,
        t.album_id, al.artist_id,
@@ -248,17 +278,17 @@ func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, limit int32) 
 const listRecentlyAddedTVFiles = `-- name: ListRecentlyAddedTVFiles :many
 
 SELECT r.id, r.media_item_id, r.created_at,
-       r.public_id, r.library_id, r.title, r.slug, r.description,
+       r.public_id, r.library_id, r.title, r.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        (COALESCE(r.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb))::jsonb AS episode_numbers
 FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
-         mi.public_id, mi.library_id, mi.title, mi.slug, mi.description
+         mi.public_id, mi.library_id, mi.title, mi.slug
   FROM library_files lf
   JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type IN ('tv', 'anime') AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
-  LIMIT $1
+  LIMIT NULLIF($1::bigint, 0)
 ) r
 ORDER BY r.created_at DESC
 `
@@ -271,7 +301,6 @@ type ListRecentlyAddedTVFilesRow struct {
 	LibraryID      int64              `json:"library_id"`
 	Title          string             `json:"title"`
 	Slug           string             `json:"slug"`
-	Description    string             `json:"description"`
 	SeasonNumber   int32              `json:"season_number"`
 	EpisodeNumbers []byte             `json:"episode_numbers"`
 }
@@ -286,9 +315,14 @@ type ListRecentlyAddedTVFilesRow struct {
 // Newest N live TV files with the season/episode numbers the parser
 // extracted. The derived table pins the plan to a backward
 // idx_library_files_created_at scan with a per-row media_items probe that
-// stops at LIMIT, instead of sorting every live file.
-func (q *Queries) ListRecentlyAddedTVFiles(ctx context.Context, limit int32) ([]ListRecentlyAddedTVFilesRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyAddedTVFiles, limit)
+// stops at LIMIT, instead of sorting every live file. A window of 0 lifts
+// the cap entirely (LIMIT NULL) — the deep-history pages of the infinite
+// rail group the show's full arrival timeline. Show descriptions are NOT
+// carried per file row (they'd multiply a ~1KB blob by every file in the
+// window); the service overlays them per surfaced entry via
+// ListMediaDescriptionsByIDs below.
+func (q *Queries) ListRecentlyAddedTVFiles(ctx context.Context, fileWindow int64) ([]ListRecentlyAddedTVFilesRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyAddedTVFiles, fileWindow)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +338,6 @@ func (q *Queries) ListRecentlyAddedTVFiles(ctx context.Context, limit int32) ([]
 			&i.LibraryID,
 			&i.Title,
 			&i.Slug,
-			&i.Description,
 			&i.SeasonNumber,
 			&i.EpisodeNumbers,
 		); err != nil {

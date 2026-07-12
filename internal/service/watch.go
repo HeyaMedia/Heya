@@ -144,9 +144,15 @@ func (a *App) ListContinueWatching(ctx context.Context, userID int64) ([]Continu
 	return out, nil
 }
 
-func (a *App) ListRecentlyWatched(ctx context.Context, userID int64) ([]sqlc.ListRecentlyWatchedRow, error) {
+func (a *App) ListRecentlyWatched(ctx context.Context, userID int64, limit, offset int32) ([]sqlc.ListRecentlyWatchedRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	q := sqlc.New(a.db)
-	rows, err := q.ListRecentlyWatched(ctx, userID)
+	rows, err := q.ListRecentlyWatched(ctx, sqlc.ListRecentlyWatchedParams{UserID: userID, Lim: limit, Off: offset})
 	if err != nil {
 		return rows, err
 	}
@@ -162,9 +168,15 @@ func (a *App) ListRecentlyWatched(ctx context.Context, userID int64) ([]sqlc.Lis
 // episode (not deduped to the show), each carrying its series' media item so the
 // FE paints the show poster with an "S02E03 · Title" subtitle. Series titles are
 // localized like the deduped variant.
-func (a *App) ListRecentlyWatchedEpisodes(ctx context.Context, userID int64) ([]sqlc.ListRecentlyWatchedEpisodesRow, error) {
+func (a *App) ListRecentlyWatchedEpisodes(ctx context.Context, userID int64, limit, offset int32) ([]sqlc.ListRecentlyWatchedEpisodesRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 24
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	q := sqlc.New(a.db)
-	rows, err := q.ListRecentlyWatchedEpisodes(ctx, userID)
+	rows, err := q.ListRecentlyWatchedEpisodes(ctx, sqlc.ListRecentlyWatchedEpisodesParams{UserID: userID, Lim: limit, Off: offset})
 	if err != nil {
 		return rows, err
 	}

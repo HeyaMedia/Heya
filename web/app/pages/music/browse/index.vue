@@ -1,11 +1,25 @@
 <template>
   <div class="page-pad browse-page">
-    <h1 class="bp-title">Browse</h1>
-    <p class="bp-sub">Explore your library by feel, genre, or tempo. Each tile counts what's been analyzed so far — the lists fill in as the sonic-analysis scheduler chews through your catalog.</p>
+    <MusicPageHead title="Browse">
+      <template #subtitle>
+        <span>Explore your library by feel, genre, or tempo.</span>
+        <template v-if="!loading && (moods.length || genres.length || tempo.length)">
+          <span class="dot">·</span>
+          <span>{{ moods.length }} moods · {{ genres.length }} genres · {{ tempo.length }} tempo bands</span>
+        </template>
+      </template>
+    </MusicPageHead>
+
+    <!-- Loading — skeleton tiles so the grid shape lands before the data. -->
+    <section v-if="loading" class="bp-section" aria-hidden="true">
+      <div class="bp-tiles">
+        <div v-for="i in 8" :key="i" class="bp-tile bp-skeleton" />
+      </div>
+    </section>
 
     <!-- Moods -->
     <section v-if="moods.length" class="bp-section">
-      <h2 class="section-title-lg">Moods</h2>
+      <h2 class="section-title-lg">Moods <span class="bp-count">{{ moods.length }}</span></h2>
       <div class="bp-tiles">
         <NuxtLink
           v-for="(m, i) in moods"
@@ -24,15 +38,19 @@
 
     <!-- Tempo -->
     <section v-if="tempo.length" class="bp-section">
-      <h2 class="section-title-lg">Tempo</h2>
+      <h2 class="section-title-lg">Tempo <span class="bp-count">{{ tempo.length }}</span></h2>
       <div class="bp-tiles">
         <NuxtLink
           v-for="(b, i) in tempo"
           :key="b.key"
           :to="`/music/browse/tempo/${b.key}`"
           class="bp-tile card-tile tempo"
-          :style="{ background: tempoGradient(i) }"
+          :style="{ background: tempoGradient(i), '--bpm': midBpm(b) }"
         >
+          <!-- The dot beats at the band's actual BPM — the tile demonstrates
+               its own tempo. Pure CSS; the global reduced-motion reset stills
+               it for users who've asked for that. -->
+          <span class="bp-beat" aria-hidden="true" />
           <div class="bp-tile-body">
             <div class="bp-tile-label">{{ b.label }}</div>
             <div class="bp-tile-sub">{{ b.min_bpm }}–{{ b.max_bpm }} BPM</div>
@@ -44,7 +62,7 @@
 
     <!-- Genres -->
     <section v-if="genres.length" class="bp-section">
-      <h2 class="section-title-lg">Genres</h2>
+      <h2 class="section-title-lg">Genres <span class="bp-count">{{ genres.length }}</span></h2>
       <div class="bp-tiles">
         <NuxtLink
           v-for="(g, i) in genres"
@@ -62,11 +80,15 @@
       </div>
     </section>
 
-    <div v-if="!moods.length && !genres.length && !tempo.length && !loading" class="bp-empty">
-      Nothing to browse yet — the sonic analyzer hasn't tagged any tracks. Enable it under
-      <NuxtLink to="/settings/server" class="bp-empty-link">Settings → Server</NuxtLink>
-      to start.
-    </div>
+    <MusicEmptyState
+      v-if="!moods.length && !genres.length && !tempo.length && !loading"
+      icon="pulse"
+      title="Nothing to browse yet"
+    >
+      Moods, genres, and tempo come from sonic analysis — turn it on under
+      <NuxtLink to="/settings/sonic">Settings → Intelligence</NuxtLink> and the
+      tiles fill in as your catalog is analyzed.
+    </MusicEmptyState>
   </div>
 </template>
 
@@ -105,6 +127,13 @@ const genres = computed<GenreBucket[]>(() => genresQuery.data.value ?? [])
 const tempo = computed<TempoBucket[]>(() => (tempoQuery.data.value ?? []).filter(x => x.track_count > 0))
 const loading = computed(() => moodsQuery.isPending.value || genresQuery.isPending.value || tempoQuery.isPending.value)
 
+// The beat dot's tempo — band midpoint, clamped so open-ended bands ("Fast",
+// max 999) don't strobe. Unitless: CSS divides 60s by it.
+function midBpm(b: TempoBucket) {
+  const mid = (b.min_bpm + Math.min(b.max_bpm, b.min_bpm + 60)) / 2
+  return String(Math.max(50, Math.min(190, Math.round(mid))))
+}
+
 // Tile background gradients — deterministic per-index so the rail looks
 // painted rather than random. Mood/tempo/genre each get their own palette.
 // These are fixed categorical colors (like artwork), not canvas chrome —
@@ -142,8 +171,16 @@ function genreGradient(i: number) { return GENRE_GRADIENTS[i % GENRE_GRADIENTS.l
 
 <style scoped>
 .browse-page { padding-bottom: 80px; }
-.bp-title { font-size: 30px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
-.bp-sub { color: var(--fg-3); font-size: 13px; max-width: 600px; margin-bottom: 32px; }
+
+.bp-count {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--fg-2);
+  vertical-align: 3px;
+  margin-left: 6px;
+  letter-spacing: 0.06em;
+}
 
 .bp-section { margin-bottom: 40px; }
 .bp-section .section-title-lg { margin-bottom: 16px; }
@@ -171,26 +208,45 @@ function genreGradient(i: number) { return GENRE_GRADIENTS[i % GENRE_GRADIENTS.l
   box-shadow: 0 12px 24px rgb(var(--shade) / 0.5);
 }
 .bp-tile-body { width: 100%; }
-.bp-tile-label { font-size: 17px; font-weight: 700; letter-spacing: -0.005em; }
-.bp-tile-sub { font-size: 11px; opacity: 0.85; font-family: var(--font-mono); margin-top: 3px; }
-.bp-tile-count { font-size: 11px; opacity: 0.7; margin-top: 6px; }
-
-.bp-empty {
-  color: var(--fg-3);
-  font-size: 13px;
-  padding: 40px 0;
-  max-width: 520px;
+.bp-tile-label {
+  font-size: 17px; font-weight: 700; letter-spacing: -0.005em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); /* on gradient — literal */
 }
-.bp-empty-link { color: var(--gold); text-decoration: underline; }
+.bp-tile-sub { font-size: 11px; opacity: 0.85; font-family: var(--font-mono); margin-top: 3px; }
+.bp-tile-count { font-size: 11px; opacity: 0.75; margin-top: 6px; }
+
+/* The metronome dot — one beat per its band's BPM. calc(60s / --bpm) turns
+   the band midpoint into a period; sharp attack, soft decay reads as a
+   pulse rather than a blink. Stilled by the global reduced-motion reset. */
+.bp-beat {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9); /* on gradient — literal */
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+  animation: bp-beat calc(60s / var(--bpm, 100)) ease-out infinite;
+}
+@keyframes bp-beat {
+  0% { transform: scale(1.7); opacity: 1; }
+  45% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(1); opacity: 0.55; }
+}
+
+/* Skeletons — quiet glass placeholders, no shimmer theatrics. */
+.bp-skeleton {
+  background: color-mix(in oklab, var(--bg-2) 70%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
 
 @media (max-width: 720px) {
   /* music.vue's phone header already reads "Browse" directly above this
-     page — the descriptive paragraph stays, it's not duplicated elsewhere.
-     (browse/[kind]/[key].vue's own h2 names the specific mood/genre/tempo
-     bucket, which the header can't show, so that page keeps its heading —
-     it's out of this package's scope regardless.) */
-  .bp-title { display: none; }
-  .bp-sub { margin-bottom: 24px; }
+     page — MusicPageHead's title is redundant weight; the subtitle line
+     (counts) stays. */
+  :deep(.mhd-title) { display: none; }
   .bp-tiles { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
   .page-pad { padding-left: 16px; padding-right: 16px; }
 

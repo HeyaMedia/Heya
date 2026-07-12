@@ -30,6 +30,9 @@ const previewVars: Record<Exclude<ThemeMode, 'system'>, Record<string, string>> 
 const activeAccentHex = computed(
   () => ACCENTS.find((a) => a.name === prefs.value.accent)?.hex ?? ACCENTS[0]!.hex,
 )
+const activeThemeLabel = computed(() => themes.find(theme => theme.value === prefs.value.theme)?.label ?? 'System')
+const activeAccentLabel = computed(() => ACCENTS.find(accent => accent.name === prefs.value.accent)?.label ?? 'Heya Gold')
+const visibleSectionCount = computed(() => sections.value.filter(section => !section.hidden).length)
 
 const ambientOn = computed({
   get: () => prefs.value.ambientMode !== 'off',
@@ -51,13 +54,16 @@ const isDefaultSections = computed(
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Appearance</h2>
-      <p class="sv2-page-desc">
-        Theme, accent, density, and the ambient background. Changes apply
-        instantly and follow your account across devices.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Appearance"
+      icon="brightness"
+      eyebrow="Live & synced"
+      description="Shape Heya around your screen and taste. Every change previews instantly and follows your account to other devices."
+    >
+      <div class="context-fact"><strong>{{ activeThemeLabel }}</strong><span>Theme</span></div>
+      <div class="context-fact"><strong>{{ activeAccentLabel }}</strong><span>Accent</span></div>
+      <div class="context-fact"><strong>{{ visibleSectionCount }}</strong><span>Home rows</span></div>
+    </SettingsContextHero>
 
     <SettingsSection title="Theme" icon="brightness"
       description="Dark is the Heya look. OLED trades the deep greys for true black; Light is the same design on warm paper.">
@@ -105,6 +111,7 @@ const isDefaultSections = computed(
       </div>
     </SettingsSection>
 
+    <div class="appearance-grid">
     <SettingsSection title="Accent" icon="sparkle"
       description="The color that carries selection, progress, and emphasis throughout the app.">
       <div class="accent-grid">
@@ -128,7 +135,7 @@ const isDefaultSections = computed(
     </SettingsSection>
 
     <SettingsSection title="Density" icon="grid"
-      description="Comfortable gives artwork room to breathe; Compact fits noticeably more on screen.">
+      description="Choose how much media fits on screen at once.">
       <div class="density-grid" role="radiogroup" aria-label="Density">
         <label class="density-card" :class="{ active: prefs.density === 'comfortable' }">
           <input
@@ -159,6 +166,7 @@ const isDefaultSections = computed(
         </label>
       </div>
     </SettingsSection>
+    </div>
 
     <SettingsSection title="Ambient background" icon="image"
       description="Rotates artwork from your libraries behind the app — movies on Movies, artists on Music, everything on Home.">
@@ -243,6 +251,14 @@ const isDefaultSections = computed(
 </template>
 
 <style scoped>
+.appearance-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+.appearance-grid :deep(.sv2-section) { height: calc(100% - 16px); }
+
 /* ── Theme cards ── */
 .theme-grid {
   display: grid;
@@ -293,7 +309,7 @@ const isDefaultSections = computed(
 }
 .theme-label .theme-hint {
   margin-left: auto;
-  color: var(--fg-3);
+  color: var(--fg-2);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -303,8 +319,8 @@ const isDefaultSections = computed(
 
 /* ── Accent swatches ── */
 .accent-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(76px, 1fr));
   gap: 10px;
 }
 .accent-cell {
@@ -337,7 +353,7 @@ const isDefaultSections = computed(
 .accent-cell.active .accent-cell-name { color: var(--fg-0); }
 
 /* ── Density ── */
-.density-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.density-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .density-card {
   display: flex;
   gap: 10px;
@@ -353,7 +369,7 @@ const isDefaultSections = computed(
 .density-card input { accent-color: var(--gold); margin-top: 3px; }
 .density-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .density-title { font-size: 13px; font-weight: 500; color: var(--fg-0); }
-.density-desc  { font-size: 11.5px; color: var(--fg-3); line-height: 1.4; }
+.density-desc  { font-size: 11.5px; color: var(--fg-2); line-height: 1.4; }
 .density-preview {
   margin-top: 8px;
   background: var(--bg-0);
@@ -381,7 +397,7 @@ const isDefaultSections = computed(
 .ambient-row.disabled { opacity: 0.55; }
 .ambient-row-text { flex: 1; min-width: 0; }
 .ambient-row-title { font-size: 13px; font-weight: 500; color: var(--fg-0); }
-.ambient-row-desc { font-size: 11.5px; color: var(--fg-3); margin-top: 2px; }
+.ambient-row-desc { font-size: 11.5px; color: var(--fg-2); margin-top: 2px; }
 .ambient-slider { display: flex; align-items: center; gap: 12px; width: 220px; }
 .ambient-pct { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); width: 36px; text-align: right; }
 
@@ -421,5 +437,18 @@ const isDefaultSections = computed(
 }
 .section-text { flex: 1; min-width: 0; }
 .section-name { font-size: 13px; font-weight: 500; color: var(--fg-0); }
-.section-desc { font-size: 11.5px; color: var(--fg-3); margin-top: 1px; }
+.section-desc { font-size: 11.5px; color: var(--fg-2); margin-top: 1px; }
+
+@media (max-width: 920px) {
+  .appearance-grid { grid-template-columns: 1fr; gap: 0; }
+  .appearance-grid :deep(.sv2-section) { height: auto; }
+}
+@media (max-width: 520px) {
+  .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .accent-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .accent-cell { min-width: 0; padding-inline: 6px; }
+  .ambient-row { align-items: flex-start; gap: 12px; }
+  .ambient-slider { width: 135px; }
+  .section-row { padding-inline: 10px; }
+}
 </style>

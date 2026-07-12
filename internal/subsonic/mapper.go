@@ -29,9 +29,10 @@ type starState struct {
 	artists map[int64]time.Time
 }
 
-// starStateFor pages through the loved lists (500 per page, hard cap 20
-// pages) building the timestamp maps. Errors degrade to "nothing starred"
-// — a star icon is not worth failing a browse response.
+// starStateFor pages through the hearted lists — ratings ≥ 9 in the unified
+// rating store, the same band the web app's heart reaction writes — building
+// the timestamp maps (500 per page, hard cap 20 pages). Errors degrade to
+// "nothing starred" — a star icon is not worth failing a browse response.
 func (s *Server) starStateFor(ctx context.Context, userID int64) starState {
 	st := starState{
 		tracks:  map[int64]time.Time{},
@@ -39,37 +40,38 @@ func (s *Server) starStateFor(ctx context.Context, userID int64) starState {
 		artists: map[int64]time.Time{},
 	}
 	const pageSize = 500
+	const heart = 9
 	for offset := int32(0); offset < 20*pageSize; offset += pageSize {
-		page, err := s.app.ListUserLovedTracks(ctx, userID, pageSize, offset)
+		page, err := s.app.ListUserRatedTracks(ctx, userID, heart, pageSize, offset)
 		if err != nil || page == nil {
 			break
 		}
 		for _, r := range page.Items {
-			st.tracks[r.TrackID] = r.LovedAt.Time
+			st.tracks[r.TrackID] = r.RatedAt.Time
 		}
 		if int64(offset)+int64(len(page.Items)) >= page.Total || len(page.Items) == 0 {
 			break
 		}
 	}
 	for offset := int32(0); offset < 20*pageSize; offset += pageSize {
-		page, err := s.app.ListUserLovedAlbums(ctx, userID, pageSize, offset)
+		page, err := s.app.ListUserRatedAlbums(ctx, userID, heart, pageSize, offset)
 		if err != nil || page == nil {
 			break
 		}
 		for _, r := range page.Items {
-			st.albums[r.ID] = r.LovedAt.Time
+			st.albums[r.ID] = r.RatedAt.Time
 		}
 		if int64(offset)+int64(len(page.Items)) >= page.Total || len(page.Items) == 0 {
 			break
 		}
 	}
 	for offset := int32(0); offset < 20*pageSize; offset += pageSize {
-		page, err := s.app.ListUserLovedArtists(ctx, userID, pageSize, offset)
+		page, err := s.app.ListUserRatedArtists(ctx, userID, heart, pageSize, offset)
 		if err != nil || page == nil {
 			break
 		}
 		for _, r := range page.Items {
-			st.artists[r.ID] = r.LovedAt.Time
+			st.artists[r.ID] = r.RatedAt.Time
 		}
 		if int64(offset)+int64(len(page.Items)) >= page.Total || len(page.Items) == 0 {
 			break

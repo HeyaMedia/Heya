@@ -100,26 +100,33 @@ WHERE wp.user_id = $1 AND wp.completed = false AND wp.progress_seconds > 30
 ORDER BY wp.updated_at DESC
 LIMIT 20;
 
--- Recently watched (completed items)
+-- Recently watched (completed items). DISTINCT ON dedupes to one row per
+-- media item (the newest watch); the outer ORDER BY restores recency order —
+-- DISTINCT ON forces the inner sort to lead with the distinct key, which is
+-- id order, not watch order. Recency order also makes OFFSET paging walk
+-- backwards through watch history, which is what the infinite rail wants.
 -- name: ListRecentlyWatched :many
-SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
-       wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
-       COALESCE(mi.id, ep_mi.id) AS media_item_id,
-       COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
-       COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
-       COALESCE(mi.title, ep_mi.title) AS title,
-       COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
-       COALESCE(mi.slug, ep_mi.slug) AS slug,
-       COALESCE(mi.media_type, ep_mi.media_type)::text AS media_type
-FROM user_watch_progress wp
-LEFT JOIN media_item_cards mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
-LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
-LEFT JOIN tv_seasons s ON ep.season_id = s.id
-LEFT JOIN tv_series ts ON s.series_id = ts.id
-LEFT JOIN media_item_cards ep_mi ON ts.media_item_id = ep_mi.id
-WHERE wp.user_id = $1 AND wp.completed = true
-ORDER BY COALESCE(mi.id, ep_mi.id), wp.updated_at DESC
-LIMIT 20;
+SELECT * FROM (
+  SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
+         wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
+         COALESCE(mi.id, ep_mi.id) AS media_item_id,
+         COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
+         COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
+         COALESCE(mi.title, ep_mi.title) AS title,
+         COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
+         COALESCE(mi.slug, ep_mi.slug) AS slug,
+         COALESCE(mi.media_type, ep_mi.media_type)::text AS media_type
+  FROM user_watch_progress wp
+  LEFT JOIN media_item_cards mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
+  LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
+  LEFT JOIN tv_seasons s ON ep.season_id = s.id
+  LEFT JOIN tv_series ts ON s.series_id = ts.id
+  LEFT JOIN media_item_cards ep_mi ON ts.media_item_id = ep_mi.id
+  WHERE wp.user_id = sqlc.arg(user_id) AND wp.completed = true
+  ORDER BY COALESCE(mi.id, ep_mi.id), wp.updated_at DESC
+) deduped
+ORDER BY deduped.updated_at DESC
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- Recently watched EPISODES (not deduped to the show) — the TV "Recently
 -- Watched" rail shows one tile per episode, each painted with the show's poster
@@ -140,9 +147,9 @@ JOIN tv_episodes ep ON ep.id = wp.entity_id
 JOIN tv_seasons s ON s.id = ep.season_id
 JOIN tv_series ts ON ts.id = s.series_id
 JOIN media_item_cards ep_mi ON ep_mi.id = ts.media_item_id
-WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
+WHERE wp.user_id = sqlc.arg(user_id) AND wp.entity_type = 'episode' AND wp.completed = true
 ORDER BY wp.updated_at DESC
-LIMIT 24;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- Episode progress for a specific series (for showing progress bars on episode cards)
 -- name: ListEpisodeProgressForSeries :many

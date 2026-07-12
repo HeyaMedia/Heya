@@ -35,15 +35,11 @@
 
     <div v-if="isLoading && !tracks.length" class="ms-fav-loading">Loading favorites…</div>
 
-    <div v-else-if="!tracks.length" class="ms-fav-empty">
-      <Icon name="star" :size="40" />
-      <h3>No ratings yet</h3>
-      <p>
-        Rate a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>,
-        the player, or anywhere you see <strong>★★★★★</strong>. They'll show up here
-        once they pass your threshold.
-      </p>
-    </div>
+    <MusicEmptyState v-else-if="!tracks.length" icon="star" title="No ratings yet">
+      Rate a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>,
+      the player, or anywhere you see <strong>★★★★★</strong>. They'll show up here
+      once they pass your threshold.
+    </MusicEmptyState>
 
     <TrackList
       v-else
@@ -198,15 +194,18 @@ async function playFrom(i: number) {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
   margin-bottom: 28px;
   padding: 14px 18px;
-  background: rgb(var(--ink) / 0.03);
+  background: color-mix(in oklab, var(--bg-2) 85%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-el);
 }
 .ms-fav-threshold { display: flex; align-items: center; gap: 12px; }
 .ms-fav-label {
   font-size: 11px; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.1em;
-  color: var(--fg-3);
+  color: var(--fg-2);
 }
 .ms-fav-threshold-val {
   font-family: var(--font-mono); font-size: 13px;
@@ -230,18 +229,11 @@ async function playFrom(i: number) {
 }
 .ms-fav-toggle-btn.active { background: var(--gold-soft); color: var(--gold); }
 
-.ms-fav-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
-.ms-fav-empty {
-  text-align: center;
-  padding: 80px 20px;
-  color: var(--fg-3);
+.ms-fav-loading {
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  font-size: 13px; padding: 40px 0; text-align: center;
 }
-.ms-fav-empty :deep(svg) { color: var(--fg-3); margin-bottom: 12px; }
-.ms-fav-empty h3 { font-size: 18px; color: var(--fg-1); margin-bottom: 8px; font-weight: 600; }
-.ms-fav-empty p { font-size: 13px; line-height: 1.6; max-width: 440px; margin: 0 auto; }
-.ms-fav-empty a { color: var(--gold); text-decoration: none; }
-.ms-fav-empty a:hover { text-decoration: underline; }
-.ms-fav-empty strong { color: var(--gold); font-weight: 700; }
 
 /* Deltas from TrackList's songs.vue-shaped baseline — see loved.vue for the
    same pattern. This page never had an active-row treatment (no

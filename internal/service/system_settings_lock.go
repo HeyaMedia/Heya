@@ -29,6 +29,17 @@ func (a *App) SystemSettingEnvLock(key string) (envVar string, locked bool) {
 		return a.config.HWAccel.EnvLock()
 	case transcoderKeyCacheMaxGB:
 		return a.config.TranscodeCacheMaxGB.EnvLock()
+	case "lastfm":
+		// Whole-blob lock: env key presence forces env provenance for the pair.
+		if v, locked := a.config.LastfmAPIKey.EnvLock(); locked {
+			return v, true
+		}
+		return a.config.LastfmSecret.EnvLock()
+	case "podcast_index":
+		if v, locked := a.config.PodcastIndexKey.EnvLock(); locked {
+			return v, true
+		}
+		return a.config.PodcastIndexSecret.EnvLock()
 	case sonicSettingsKey:
 		// Sonic is a multi-field blob — refuse the generic write if ANY
 		// field inside is env-locked. Caller must go through the typed

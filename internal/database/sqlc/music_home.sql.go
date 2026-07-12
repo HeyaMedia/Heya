@@ -685,6 +685,7 @@ WITH last_per_playlist AS (
 )
 SELECT up.id,
        up.name,
+       up.slug,
        up.description,
        up.cover_path,
        up.created_at,
@@ -707,6 +708,7 @@ type ListRecentUserPlaylistsParams struct {
 type ListRecentUserPlaylistsRow struct {
 	ID             int64              `json:"id"`
 	Name           string             `json:"name"`
+	Slug           string             `json:"slug"`
 	Description    string             `json:"description"`
 	CoverPath      string             `json:"cover_path"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
@@ -731,6 +733,7 @@ func (q *Queries) ListRecentUserPlaylists(ctx context.Context, arg ListRecentUse
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
+			&i.Slug,
 			&i.Description,
 			&i.CoverPath,
 			&i.CreatedAt,

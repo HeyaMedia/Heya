@@ -18,7 +18,7 @@ WHERE mi.media_type = 'movie'
   AND m.release_date <= now()::date
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY m.release_date DESC, m.popularity DESC
-LIMIT $1;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- Highly-rated films the user hasn't finished yet.
 -- name: ListTopUnwatchedMovies :many
@@ -30,10 +30,10 @@ WHERE mi.media_type = 'movie'
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
   AND NOT EXISTS (
     SELECT 1 FROM user_watch_progress wp
-    WHERE wp.user_id = $1 AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
+    WHERE wp.user_id = sqlc.arg(user_id) AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY m.rating DESC, m.popularity DESC
-LIMIT $2;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- The genres the user actually finishes, most-watched first — the seed for the
 -- personalized "More <Genre>" movie rail.
@@ -60,7 +60,7 @@ WHERE mi.media_type = 'movie'
     WHERE wp.user_id = sqlc.arg(user_id) AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY m.rating DESC, m.popularity DESC
-LIMIT sqlc.arg(lim);
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- The actors that appear most across the user's finished films (top billing
 -- only, to skip bit-part noise) — the seed for the "Starring <Actor>" rail.
@@ -88,7 +88,7 @@ WHERE mc.person_id = sqlc.arg(person_id)
     WHERE wp.user_id = sqlc.arg(user_id) AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY m.rating DESC, m.popularity DESC
-LIMIT sqlc.arg(lim);
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- ── TV ──────────────────────────────────────────────────────────────────
 
@@ -101,7 +101,7 @@ WHERE mi.media_type IN ('tv', 'anime')
   AND ts.rating > 0
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
-LIMIT $1;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- Genres the user watches most across finished episodes — seed for "More
 -- <Genre>" on TV.
@@ -126,7 +126,7 @@ WHERE mi.media_type IN ('tv', 'anime')
   AND sqlc.arg(genre)::text = ANY(ts.genres)
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
-LIMIT sqlc.arg(lim);
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- "Rediscover": shows the user watched a while ago that have since aired
 -- episodes newer than their last watch — the signature re-engagement rail.
@@ -137,7 +137,7 @@ WITH watched AS (
   JOIN tv_episodes e ON e.id = wp.entity_id
   JOIN tv_seasons se ON se.id = e.season_id
   JOIN tv_series ts ON ts.id = se.series_id
-  WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
+  WHERE wp.user_id = sqlc.arg(user_id) AND wp.entity_type = 'episode' AND wp.completed = true
   GROUP BY ts.id, ts.media_item_id
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
@@ -160,7 +160,7 @@ WHERE w.last_watched < now() - interval '30 days'
     WHERE se2.series_id = w.series_id AND e2.air_date > w.last_watched::date
   )
 ORDER BY w.last_watched DESC
-LIMIT $2;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- ── Shared: local TMDB recommendations ──────────────────────────────────
 
@@ -203,4 +203,4 @@ WHERE (
     WHERE wp.user_id = sqlc.arg(user_id) AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY agg.source_count DESC, agg.vote DESC NULLS LAST
-LIMIT sqlc.arg(lim);
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);

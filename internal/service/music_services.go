@@ -127,13 +127,39 @@ func (a *App) SetUserMusicService(ctx context.Context, userID int64, service str
 	return MusicServiceView{}, fmt.Errorf("service row vanished")
 }
 
-func (a *App) lastfmClient(sessionKey string) (*scrobble.LastFM, error) {
-	if a.config.LastfmAPIKey.Value == "" {
-		return nil, fmt.Errorf("last.fm is not configured on this server — set HEYA_LASTFM_API_KEY (and HEYA_LASTFM_SECRET for scrobbling)")
+// lastfmCredentials resolves the server-level Last.fm app key pair with the
+// usual provenance: env wins (HEYA_LASTFM_API_KEY/SECRET), else the
+// admin-managed system_settings "lastfm" blob (Settings → Providers).
+func (a *App) lastfmCredentials(ctx context.Context) (apiKey, secret string) {
+	apiKey, secret = a.config.LastfmAPIKey.Value, a.config.LastfmSecret.Value
+	if apiKey != "" {
+		return apiKey, secret
+	}
+	raw, err := a.GetSystemSetting(ctx, "lastfm")
+	if err != nil || len(raw) == 0 {
+		return apiKey, secret
+	}
+	var v struct {
+		APIKey string `json:"api_key"`
+		Secret string `json:"secret"`
+	}
+	if json.Unmarshal(raw, &v) == nil {
+		apiKey = v.APIKey
+		if secret == "" {
+			secret = v.Secret
+		}
+	}
+	return apiKey, secret
+}
+
+func (a *App) lastfmClient(ctx context.Context, sessionKey string) (*scrobble.LastFM, error) {
+	apiKey, secret := a.lastfmCredentials(ctx)
+	if apiKey == "" {
+		return nil, fmt.Errorf("last.fm is not configured on this server — add the API key in Settings → Providers (or set HEYA_LASTFM_API_KEY)")
 	}
 	return &scrobble.LastFM{
-		APIKey:     a.config.LastfmAPIKey.Value,
-		Secret:     a.config.LastfmSecret.Value,
+		APIKey:     apiKey,
+		Secret:     secret,
 		SessionKey: sessionKey,
 	}, nil
 }
@@ -141,23 +167,23 @@ func (a *App) lastfmClient(sessionKey string) (*scrobble.LastFM, error) {
 // LastfmAuthStart begins the desktop auth flow: returns the URL the user must
 // open and approve, plus the request token the FE hands back to complete.
 func (a *App) LastfmAuthStart(ctx context.Context) (authURL, token string, err error) {
-	lf, err := a.lastfmClient("")
+	lf, err := a.lastfmClient(ctx, "")
 	if err != nil {
 		return "", "", err
 	}
-	if a.config.LastfmSecret.Value == "" {
-		return "", "", fmt.Errorf("HEYA_LASTFM_SECRET is required for the Last.fm auth flow")
+	if lf.Secret == "" {
+		return "", "", fmt.Errorf("the Last.fm shared secret is required for the connect flow — add it in Settings → Providers (or set HEYA_LASTFM_SECRET)")
 	}
 	token, err = lf.GetToken(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	return "https://www.last.fm/api/auth/?api_key=" + a.config.LastfmAPIKey.Value + "&token=" + token, token, nil
+	return "https://www.last.fm/api/auth/?api_key=" + lf.APIKey + "&token=" + token, token, nil
 }
 
 // LastfmAuthComplete exchanges the approved request token for a session key.
 func (a *App) LastfmAuthComplete(ctx context.Context, userID int64, token string) (MusicServiceView, error) {
-	lf, err := a.lastfmClient("")
+	lf, err := a.lastfmClient(ctx, "")
 	if err != nil {
 		return MusicServiceView{}, err
 	}
@@ -187,8 +213,10 @@ func (a *App) StartListenImport(ctx context.Context, userID int64, service strin
 	if username == "" {
 		return fmt.Errorf("%s needs a username before importing", service)
 	}
-	if service == "lastfm" && a.config.LastfmAPIKey.Value == "" {
-		return fmt.Errorf("last.fm import needs HEYA_LASTFM_API_KEY on the server")
+	if service == "lastfm" {
+		if key, _ := a.lastfmCredentials(ctx); key == "" {
+			return fmt.Errorf("last.fm import needs the server API key — Settings → Providers (or HEYA_LASTFM_API_KEY)")
+		}
 	}
 
 	key := fmt.Sprintf("%d/%s", userID, service)
@@ -277,7 +305,7 @@ func (a *App) listenPager(service, username, token string) func(ctx context.Cont
 	default: // lastfm
 		page := 1
 		return func(ctx context.Context) ([]scrobble.Listen, bool, error) {
-			lf, err := a.lastfmClient("")
+			lf, err := a.lastfmClient(ctx, "")
 			if err != nil {
 				return nil, false, err
 			}
@@ -392,7 +420,7 @@ func (a *App) ScrobbleOutbound(userID, trackID int64, playedAt time.Time) {
 					lb := &scrobble.ListenBrainz{Token: s.token}
 					return lb.Submit(ctx, "single", []scrobble.Listen{l})
 				case "lastfm":
-					lf, err := a.lastfmClient(s.token)
+					lf, err := a.lastfmClient(ctx, s.token)
 					if err != nil {
 						return err
 					}

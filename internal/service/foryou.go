@@ -64,6 +64,7 @@ type ForYouFacets struct {
 	Keyword   string  // exact keyword/tag
 	MinRating float64 // external-rating floor
 	Limit     int32   // result size (default 20, max 100)
+	Offset    int32   // rank offset for paging (depth bounded by fyMMRPool)
 	Mode      string  // reserved for future ranking strategies
 }
 
@@ -204,7 +205,19 @@ func (a *App) ForYou(ctx context.Context, userID int64, facets ForYouFacets) (Fo
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].final > cands[j].final })
 
-	picked := a.fyDiversify(cands, idx, graphTopSeed, int(limit))
+	// Offset paging: the greedy MMR pick is deterministic, so picking
+	// offset+limit and slicing yields stable consecutive pages. Depth is
+	// bounded by fyMMRPool — past it the rail simply ends.
+	offset := facets.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	picked := a.fyDiversify(cands, idx, graphTopSeed, int(limit+offset))
+	if int(offset) >= len(picked) {
+		picked = nil
+	} else {
+		picked = picked[offset:]
+	}
 
 	// resolve person names for any cast/director reasons in the final set
 	names := a.fyResolveNames(ctx, picked)

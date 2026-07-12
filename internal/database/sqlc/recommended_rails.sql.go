@@ -17,8 +17,8 @@ WITH agg AS (
   SELECT mr.external_ids, count(*)::int AS source_count, max(mr.vote_average) AS vote
   FROM media_recommendations mr
   WHERE (
-      mr.media_type = $4::text
-      OR ($4::text = 'tv' AND mr.media_type = 'anime')
+      mr.media_type = $5::text
+      OR ($5::text = 'tv' AND mr.media_type = 'anime')
     )
     AND mr.external_ids <> '{}'
   GROUP BY mr.external_ids
@@ -47,12 +47,13 @@ WHERE (
     WHERE wp.user_id = $2 AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY agg.source_count DESC, agg.vote DESC NULLS LAST
-LIMIT $3
+LIMIT $4 OFFSET $3
 `
 
 type ListLocalRecommendationsParams struct {
 	ItemType MediaType `json:"item_type"`
 	UserID   int64     `json:"user_id"`
+	Off      int32     `json:"off"`
 	Lim      int32     `json:"lim"`
 	RecType  string    `json:"rec_type"`
 }
@@ -76,6 +77,7 @@ func (q *Queries) ListLocalRecommendations(ctx context.Context, arg ListLocalRec
 	rows, err := q.db.Query(ctx, listLocalRecommendations,
 		arg.ItemType,
 		arg.UserID,
+		arg.Off,
 		arg.Lim,
 		arg.RecType,
 	)
@@ -118,12 +120,13 @@ WHERE mc.person_id = $1
     WHERE wp.user_id = $2 AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY m.rating DESC, m.popularity DESC
-LIMIT $3
+LIMIT $4 OFFSET $3
 `
 
 type ListPersonUnseenMoviesParams struct {
 	PersonID int64 `json:"person_id"`
 	UserID   int64 `json:"user_id"`
+	Off      int32 `json:"off"`
 	Lim      int32 `json:"lim"`
 }
 
@@ -139,7 +142,12 @@ type ListPersonUnseenMoviesRow struct {
 
 // A given actor's owned, unseen films (payload for "Starring <Actor>").
 func (q *Queries) ListPersonUnseenMovies(ctx context.Context, arg ListPersonUnseenMoviesParams) ([]ListPersonUnseenMoviesRow, error) {
-	rows, err := q.db.Query(ctx, listPersonUnseenMovies, arg.PersonID, arg.UserID, arg.Lim)
+	rows, err := q.db.Query(ctx, listPersonUnseenMovies,
+		arg.PersonID,
+		arg.UserID,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -177,8 +185,13 @@ WHERE mi.media_type = 'movie'
   AND m.release_date <= now()::date
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY m.release_date DESC, m.popularity DESC
-LIMIT $1
+LIMIT $2 OFFSET $1
 `
+
+type ListRecentlyReleasedMoviesParams struct {
+	Off int32 `json:"off"`
+	Lim int32 `json:"lim"`
+}
 
 type ListRecentlyReleasedMoviesRow struct {
 	ID        int64          `json:"id"`
@@ -199,8 +212,8 @@ type ListRecentlyReleasedMoviesRow struct {
 // ── Movies ──────────────────────────────────────────────────────────────
 // Recently released films we own — ordered by the film's own release date, not
 // when the file landed (that's "Recently Added"). Only dated, already-released.
-func (q *Queries) ListRecentlyReleasedMovies(ctx context.Context, limit int32) ([]ListRecentlyReleasedMoviesRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyReleasedMovies, limit)
+func (q *Queries) ListRecentlyReleasedMovies(ctx context.Context, arg ListRecentlyReleasedMoviesParams) ([]ListRecentlyReleasedMoviesRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyReleasedMovies, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +247,7 @@ WITH watched AS (
   JOIN tv_episodes e ON e.id = wp.entity_id
   JOIN tv_seasons se ON se.id = e.season_id
   JOIN tv_series ts ON ts.id = se.series_id
-  WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
+  WHERE wp.user_id = $3 AND wp.entity_type = 'episode' AND wp.completed = true
   GROUP BY ts.id, ts.media_item_id
 )
 SELECT mi.id, mi.library_id, mi.title, mi.slug, mi.year, mi.media_type::text AS media_type
@@ -257,12 +270,13 @@ WHERE w.last_watched < now() - interval '30 days'
     WHERE se2.series_id = w.series_id AND e2.air_date > w.last_watched::date
   )
 ORDER BY w.last_watched DESC
-LIMIT $2
+LIMIT $2 OFFSET $1
 `
 
 type ListRediscoverTVParams struct {
+	Off    int32 `json:"off"`
+	Lim    int32 `json:"lim"`
 	UserID int64 `json:"user_id"`
-	Limit  int32 `json:"limit"`
 }
 
 type ListRediscoverTVRow struct {
@@ -277,7 +291,7 @@ type ListRediscoverTVRow struct {
 // "Rediscover": shows the user watched a while ago that have since aired
 // episodes newer than their last watch — the signature re-engagement rail.
 func (q *Queries) ListRediscoverTV(ctx context.Context, arg ListRediscoverTVParams) ([]ListRediscoverTVRow, error) {
-	rows, err := q.db.Query(ctx, listRediscoverTV, arg.UserID, arg.Limit)
+	rows, err := q.db.Query(ctx, listRediscoverTV, arg.Off, arg.Lim, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -315,12 +329,13 @@ WHERE mi.media_type = 'movie'
     WHERE wp.user_id = $2 AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY m.rating DESC, m.popularity DESC
-LIMIT $3
+LIMIT $4 OFFSET $3
 `
 
 type ListTopMoviesInGenreUnseenParams struct {
 	Genre  string `json:"genre"`
 	UserID int64  `json:"user_id"`
+	Off    int32  `json:"off"`
 	Lim    int32  `json:"lim"`
 }
 
@@ -336,7 +351,12 @@ type ListTopMoviesInGenreUnseenRow struct {
 
 // Top-rated unseen films in a genre (the payload for "More <Genre>").
 func (q *Queries) ListTopMoviesInGenreUnseen(ctx context.Context, arg ListTopMoviesInGenreUnseenParams) ([]ListTopMoviesInGenreUnseenRow, error) {
-	rows, err := q.db.Query(ctx, listTopMoviesInGenreUnseen, arg.Genre, arg.UserID, arg.Lim)
+	rows, err := q.db.Query(ctx, listTopMoviesInGenreUnseen,
+		arg.Genre,
+		arg.UserID,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -372,8 +392,13 @@ WHERE mi.media_type IN ('tv', 'anime')
   AND ts.rating > 0
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
-LIMIT $1
+LIMIT $2 OFFSET $1
 `
+
+type ListTopRatedTVParams struct {
+	Off int32 `json:"off"`
+	Lim int32 `json:"lim"`
+}
 
 type ListTopRatedTVRow struct {
 	ID        int64          `json:"id"`
@@ -387,8 +412,8 @@ type ListTopRatedTVRow struct {
 
 // ── TV ──────────────────────────────────────────────────────────────────
 // Highest-rated shows we own.
-func (q *Queries) ListTopRatedTV(ctx context.Context, limit int32) ([]ListTopRatedTVRow, error) {
-	rows, err := q.db.Query(ctx, listTopRatedTV, limit)
+func (q *Queries) ListTopRatedTV(ctx context.Context, arg ListTopRatedTVParams) ([]ListTopRatedTVRow, error) {
+	rows, err := q.db.Query(ctx, listTopRatedTV, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -423,11 +448,12 @@ WHERE mi.media_type IN ('tv', 'anime')
   AND $1::text = ANY(ts.genres)
   AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 ORDER BY ts.rating DESC, ts.popularity DESC
-LIMIT $2
+LIMIT $3 OFFSET $2
 `
 
 type ListTopTVInGenreParams struct {
 	Genre string `json:"genre"`
+	Off   int32  `json:"off"`
 	Lim   int32  `json:"lim"`
 }
 
@@ -443,7 +469,7 @@ type ListTopTVInGenreRow struct {
 
 // Top-rated shows in a genre (payload for TV "More <Genre>").
 func (q *Queries) ListTopTVInGenre(ctx context.Context, arg ListTopTVInGenreParams) ([]ListTopTVInGenreRow, error) {
-	rows, err := q.db.Query(ctx, listTopTVInGenre, arg.Genre, arg.Lim)
+	rows, err := q.db.Query(ctx, listTopTVInGenre, arg.Genre, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -482,12 +508,13 @@ WHERE mi.media_type = 'movie'
     WHERE wp.user_id = $1 AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
 ORDER BY m.rating DESC, m.popularity DESC
-LIMIT $2
+LIMIT $3 OFFSET $2
 `
 
 type ListTopUnwatchedMoviesParams struct {
 	UserID int64 `json:"user_id"`
-	Limit  int32 `json:"limit"`
+	Off    int32 `json:"off"`
+	Lim    int32 `json:"lim"`
 }
 
 type ListTopUnwatchedMoviesRow struct {
@@ -502,7 +529,7 @@ type ListTopUnwatchedMoviesRow struct {
 
 // Highly-rated films the user hasn't finished yet.
 func (q *Queries) ListTopUnwatchedMovies(ctx context.Context, arg ListTopUnwatchedMoviesParams) ([]ListTopUnwatchedMoviesRow, error) {
-	rows, err := q.db.Query(ctx, listTopUnwatchedMovies, arg.UserID, arg.Limit)
+	rows, err := q.db.Query(ctx, listTopUnwatchedMovies, arg.UserID, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

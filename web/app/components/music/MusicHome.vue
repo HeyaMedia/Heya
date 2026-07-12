@@ -130,10 +130,10 @@
       <AppContextMenu
         v-for="p in recentPlaylists"
         :key="`pl-${p.id}`"
-        :items="actions.forPlaylist({ id: p.id, name: p.name, track_count: p.track_count })"
+        :items="actions.forPlaylist({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })"
       >
       <NuxtLink
-        :to="`/music/playlist/${p.id}`"
+        :to="`/music/playlist/${p.slug || p.id}`"
         class="mh-card-link"
       >
         <MusicCard
@@ -348,6 +348,7 @@ interface OnThisDayRow {
 
 interface PlaylistRow {
   id: number
+  slug: string
   name: string
   cover_path: string
   track_count: number

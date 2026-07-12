@@ -46,6 +46,12 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, binaryOp(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
 		wrapStreamAs[albumCoverInput](proxiedImage(imgProxy, handleAlbumCover(app))))
 
+	// Playlist covers are custom uploads (not passively-mirrored provider
+	// artwork), so they're excluded from the passive-mode image proxy — the
+	// file only exists on whichever instance the user uploaded it to.
+	huma.Register(api, binaryOp(http.MethodGet, "/api/me/playlists/{id}/cover", "playlist-cover", "Custom playlist cover bytes", "Images"),
+		wrapStreamAs[idBinaryInput](handlePlaylistCover(app)))
+
 	// --- Video streaming (HLS + direct play) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}", "stream-direct", "Direct video stream (range-served bytes)", "Streaming"),
 		wrapStreamAs[streamFileInput](handleDirectStream(app)))

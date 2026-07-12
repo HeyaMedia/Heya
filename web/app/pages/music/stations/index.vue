@@ -254,7 +254,7 @@ async function playMix(mix: Mix) {
 }
 .ms-station-desc {
   font-size: 12px;
-  opacity: 0.75;
+  opacity: 0.85;
   margin-top: 4px;
   text-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
@@ -302,7 +302,9 @@ async function playMix(mix: Mix) {
 }
 
 .ms-loading {
-  color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center;
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  font-size: 13px; padding: 40px 0; text-align: center;
 }
 
 @media (max-width: 720px) {

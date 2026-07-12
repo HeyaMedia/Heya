@@ -2,23 +2,47 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/podcastindex"
 )
 
+// podcastIndexClient resolves the effective Podcast Index client: env keys
+// win (they built the boot client), else the admin-managed system_settings
+// "podcast_index" blob (Settings → Providers). Construction is a cheap
+// struct, so DB-configured keys are re-read per call — a settings save
+// takes effect immediately with no restart.
+func (a *App) podcastIndexClient(ctx context.Context) *podcastindex.Client {
+	if a.config.PodcastIndexKey.Value != "" {
+		return a.podcastIndex
+	}
+	raw, err := a.GetSystemSetting(ctx, "podcast_index")
+	if err != nil || len(raw) == 0 {
+		return a.podcastIndex
+	}
+	var v struct {
+		Key    string `json:"key"`
+		Secret string `json:"secret"`
+	}
+	if json.Unmarshal(raw, &v) != nil || v.Key == "" {
+		return a.podcastIndex
+	}
+	return podcastindex.New(v.Key, v.Secret)
+}
+
 // SearchPodcasts is a thin wrapper around the cached PI client.
 func (a *App) SearchPodcasts(ctx context.Context, query string, max int) ([]podcastindex.Podcast, error) {
-	return a.podcastIndex.Search(ctx, query, max)
+	return a.podcastIndexClient(ctx).Search(ctx, query, max)
 }
 
 func (a *App) TrendingPodcasts(ctx context.Context, max int, category string) ([]podcastindex.Podcast, error) {
-	return a.podcastIndex.Trending(ctx, max, category)
+	return a.podcastIndexClient(ctx).Trending(ctx, max, category)
 }
 
 func (a *App) PodcastCategories(ctx context.Context) ([]podcastindex.Category, error) {
-	return a.podcastIndex.Categories(ctx)
+	return a.podcastIndexClient(ctx).Categories(ctx)
 }
 
 func (a *App) FetchPodcastFeed(ctx context.Context, feedURL string) (*podcastindex.PodcastDetail, error) {

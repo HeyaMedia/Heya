@@ -1,8 +1,12 @@
 <template>
   <div class="page-pad">
-    <h2 class="m-h2">Albums</h2>
+    <MusicPageHead title="Albums">
+      <template #subtitle>{{ rows.length }} albums in your library</template>
+    </MusicPageHead>
     <div v-if="pending" class="m-loading">Loading…</div>
-    <div v-else-if="!rows.length" class="m-empty">No albums yet</div>
+    <MusicEmptyState v-else-if="!rows.length" icon="music" title="No albums yet">
+      Add a music library from <NuxtLink to="/settings/libraries">Settings → Libraries</NuxtLink> to start building your collection.
+    </MusicEmptyState>
     <div v-else class="grid-posters m-grid">
       <AppContextMenu
         v-for="al in rows"
@@ -11,16 +15,17 @@
       >
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
-        class="grid-tile card-tile"
+        class="grid-tile"
         style="text-decoration: none; color: inherit"
       >
-        <Poster :idx="al.id" :src="useAlbumCoverUrl(al.artist_slug, al.slug)" aspect="1/1" :class="{ 'poster--missing': al.available === false }">
-          <MediaMissingBadge v-if="al.available === false" />
-        </Poster>
-        <div class="grid-tile-meta">
-          <div class="grid-tile-title">{{ al.title }}</div>
-          <div class="grid-tile-sub">{{ al.artist_name }}{{ al.year ? ' · ' + al.year : '' }}</div>
-        </div>
+        <MusicCard
+          :src="useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined"
+          :alt="al.title"
+          :title="al.title"
+          :subtitle="al.artist_name + (al.year ? ' · ' + al.year : '')"
+          :missing="al.available === false"
+          @play="playAlbum(al)"
+        />
       </NuxtLink>
       </AppContextMenu>
     </div>
@@ -28,21 +33,51 @@
 </template>
 
 <script setup lang="ts">
+import type { MusicAlbumRow } from '~~/shared/types'
+import type { Track } from '~/composables/usePlayer'
 import { useQuery } from '@pinia/colada'
-import { musicAlbumsQuery } from '~/queries/music'
+import { musicAlbumDetailQuery, musicAlbumsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
+const { play, queue } = usePlayerBindings()
 const actions = useMusicActions()
+const loadQuery = useQueryLoader()
 const albumsQuery = useQuery(musicAlbumsQuery())
 await waitForQuery(albumsQuery)
 const pending = computed(() => albumsQuery.isPending.value)
 const rows = computed(() => albumsQuery.data.value?.items ?? [])
+
+// Mirrors playLovedAlbum in my/index.vue — load the album's tracks on demand
+// (the list row doesn't carry them) and queue+play the ones still on disk.
+async function playAlbum(al: MusicAlbumRow) {
+  try {
+    const detail = await loadQuery(musicAlbumDetailQuery({ artistSlug: al.artist_slug, albumSlug: al.slug }))
+    const playable = (detail.tracks ?? []).filter((t) => (t.files?.length ?? 0) > 0)
+    if (!playable.length) return
+    const built: Track[] = playable.map((t) => ({
+      id: t.id,
+      title: t.title,
+      artist: al.artist_name,
+      album: al.title,
+      duration: t.duration,
+      stream_url: `/api/music/tracks/${t.id}/stream`,
+      album_id: al.id,
+      artist_slug: al.artist_slug,
+      album_slug: al.slug,
+      poster: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
+      source: 'album',
+    }))
+    queue.value = built
+    await play(built[0]!)
+  } catch {
+    // fall through — outer link still navigates
+  }
+}
 </script>
 
 <style scoped>
-.m-h2 { font-size: 24px; font-weight: 600; margin-bottom: 20px; text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
-.m-loading, .m-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
+.m-loading { color: var(--fg-2); padding: 24px 0; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 /* Was inline-style grid-template-columns — moved to a scoped class so the
    phone override below can win (media queries can't beat an inline style). */
 .m-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }

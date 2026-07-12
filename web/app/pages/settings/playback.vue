@@ -10,6 +10,7 @@ type LibraryView  = components['schemas']['LibraryView']
 const { $heya } = useNuxtApp()
 
 const settings = ref<UserSettings | null>(null)
+const persistedSettings = ref('')
 const settingsData = useQuery(userPlaybackSettingsQuery())
 const librariesData = useQuery(librariesQuery())
 const libraries = computed(() => (librariesData.data.value ?? []) as LibraryView[])
@@ -51,8 +52,14 @@ watch(() => settingsData.data.value, value => {
     if (settings.value && !settings.value.playback.library_overrides) {
       settings.value.playback.library_overrides = {}
     }
+    persistedSettings.value = JSON.stringify(settings.value)
   }
 }, { immediate: true })
+
+const hasChanges = computed(() => !!settings.value && JSON.stringify(settings.value) !== persistedSettings.value)
+const activeLibrary = computed(() => libraries.value.find(library => String(library.id) === activeTab.value))
+const qualityLabel = computed(() => QUALITIES.find(quality => quality.value === settings.value?.playback.default_quality)?.label ?? 'Automatic')
+const subtitleModeLabel = computed(() => SUB_MODES.find(mode => mode.value === settings.value?.playback.subtitle_mode)?.label ?? 'Automatic')
 
 async function save() {
   if (!settings.value) return
@@ -76,6 +83,7 @@ async function save() {
       method: 'PUT',
       body: settings.value,
     })
+    persistedSettings.value = JSON.stringify(settings.value)
     await settingsData.refetch()
     flash.value = { kind: 'ok', text: 'Playback preferences saved.' }
   } catch (e: any) {
@@ -144,13 +152,16 @@ function libraryIcon(kind: string): string {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Playback</h2>
-      <p class="sv2-page-desc">
-        Default audio + subtitle behaviour. Per-library tabs override the
-        Global defaults — leave a field blank to fall back.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Playback"
+      icon="eq"
+      eyebrow="Synced to your account"
+      description="Set one reliable playback baseline, then bend the rules only for libraries that need different languages or subtitles."
+    >
+      <div class="context-fact"><strong>{{ qualityLabel }}</strong><span>Quality</span></div>
+      <div class="context-fact"><strong>{{ subtitleModeLabel }}</strong><span>Subtitles</span></div>
+      <div class="context-fact"><strong>{{ totalOverridesUsed }}</strong><span>Overrides</span></div>
+    </SettingsContextHero>
 
     <div v-if="loading" class="loading-state">
       <Icon name="spinner" :size="16" /> Loading…
@@ -158,6 +169,7 @@ function libraryIcon(kind: string): string {
 
     <template v-else-if="settings">
       <div class="tab-bar" role="tablist" aria-label="Playback settings scope">
+        <span class="tab-label">Scope</span>
         <button
           id="playback-tab-global"
           class="tab"
@@ -256,8 +268,8 @@ function libraryIcon(kind: string): string {
       <template v-else>
         <div id="playback-panel" role="tabpanel" :aria-labelledby="`playback-tab-${activeTab}`" tabindex="0">
         <SettingsSection
-          :title="`${libraries.find(l => String(l.id) === activeTab)?.name ?? 'Library'} overrides`"
-          icon="folder"
+          :title="`${activeLibrary?.name ?? 'Library'} overrides`"
+          :icon="activeLibrary ? libraryIcon(activeLibrary.media_type) : 'folder'"
           description="Each field falls back to the global default when left blank. Empty fields are stripped on save."
         >
           <template #actions>
@@ -290,13 +302,17 @@ function libraryIcon(kind: string): string {
         </div>
       </template>
 
-      <div class="save-bar">
+      <div class="save-bar" :class="{ dirty: hasChanges }">
         <div v-if="flash" class="pw-flash" :class="flash.kind">
           <Icon :name="flash.kind === 'ok' ? 'check' : 'warning'" :size="13" />
           {{ flash.text }}
         </div>
+        <div v-else class="save-state">
+          <span class="save-dot" />
+          {{ hasChanges ? 'You have unsaved playback changes' : 'Playback settings are up to date' }}
+        </div>
         <span class="save-spacer" />
-        <button class="sv2-btn primary" :disabled="saving" @click="save">
+        <button class="sv2-btn primary" :disabled="saving || !hasChanges" @click="save">
           <Icon v-if="saving" name="spinner" :size="13" />
           {{ saving ? 'Saving…' : 'Save changes' }}
         </button>
@@ -316,6 +332,16 @@ function libraryIcon(kind: string): string {
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: none;
+}
+.tab-label {
+  align-self: center;
+  padding: 0 8px 0 2px;
+  color: var(--fg-4);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 .tab-bar::-webkit-scrollbar { display: none; }
 .tab {
@@ -463,13 +489,24 @@ function libraryIcon(kind: string): string {
 .sv2-select:focus { outline: none; border-color: var(--gold); }
 
 .save-bar {
+  position: sticky;
+  z-index: 5;
+  bottom: 12px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 0 0;
-  border-top: 1px solid var(--border);
-  margin-top: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-top: 18px;
+  background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+  box-shadow: 0 10px 34px rgb(0 0 0 / 0.16);
+  backdrop-filter: blur(16px);
 }
+.save-bar.dirty { border-color: color-mix(in srgb, var(--gold) 28%, var(--border)); }
+.save-state { display: flex; align-items: center; gap: 8px; color: var(--fg-3); font-size: 11.5px; }
+.save-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
+.save-bar.dirty .save-dot { background: var(--gold); box-shadow: 0 0 9px color-mix(in srgb, var(--gold) 55%, transparent); }
 .save-spacer { flex: 1; }
 
 .pw-flash {
@@ -505,5 +542,7 @@ function libraryIcon(kind: string): string {
 
 @media (max-width: 720px) {
   .sv2-select { min-width: 0; width: 100%; }
+  .save-bar { bottom: 8px; flex-wrap: wrap; }
+  .save-state, .pw-flash { flex: 1 1 100%; }
 }
 </style>

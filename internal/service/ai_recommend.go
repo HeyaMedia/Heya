@@ -255,7 +255,7 @@ func maxFit(picks []aiRecPick) int {
 // id set used to flag candidates. Failures degrade to no personalization.
 func (a *App) aiRecHistory(ctx context.Context, userID int64) (lines []string, watched map[int64]bool) {
 	watched = map[int64]bool{}
-	rows, err := a.ListRecentlyWatched(ctx, userID)
+	rows, err := a.ListRecentlyWatched(ctx, userID, 20, 0)
 	if err != nil {
 		log.Warn().Err(err).Msg("ai recommend: watch history unavailable")
 		return nil, watched

@@ -31,9 +31,9 @@ func (q *Queries) AddTrackToPlaylist(ctx context.Context, arg AddTrackToPlaylist
 }
 
 const createUserPlaylist = `-- name: CreateUserPlaylist :one
-INSERT INTO user_playlists (user_id, name, description, cover_path)
-VALUES ($1, $2, $3, $4)
-RETURNING id, user_id, name, description, cover_path, created_at, updated_at
+INSERT INTO user_playlists (user_id, name, description, cover_path, slug)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, user_id, name, description, cover_path, created_at, updated_at, slug
 `
 
 type CreateUserPlaylistParams struct {
@@ -41,6 +41,7 @@ type CreateUserPlaylistParams struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	CoverPath   string `json:"cover_path"`
+	Slug        string `json:"slug"`
 }
 
 func (q *Queries) CreateUserPlaylist(ctx context.Context, arg CreateUserPlaylistParams) (UserPlaylist, error) {
@@ -49,6 +50,7 @@ func (q *Queries) CreateUserPlaylist(ctx context.Context, arg CreateUserPlaylist
 		arg.Name,
 		arg.Description,
 		arg.CoverPath,
+		arg.Slug,
 	)
 	var i UserPlaylist
 	err := row.Scan(
@@ -59,6 +61,7 @@ func (q *Queries) CreateUserPlaylist(ctx context.Context, arg CreateUserPlaylist
 		&i.CoverPath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Slug,
 	)
 	return i, err
 }
@@ -78,7 +81,7 @@ func (q *Queries) DeleteUserPlaylist(ctx context.Context, arg DeleteUserPlaylist
 }
 
 const getUserPlaylist = `-- name: GetUserPlaylist :one
-SELECT id, user_id, name, description, cover_path, created_at, updated_at FROM user_playlists WHERE id = $1 AND user_id = $2
+SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug FROM user_playlists WHERE id = $1 AND user_id = $2
 `
 
 type GetUserPlaylistParams struct {
@@ -97,8 +100,50 @@ func (q *Queries) GetUserPlaylist(ctx context.Context, arg GetUserPlaylistParams
 		&i.CoverPath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Slug,
 	)
 	return i, err
+}
+
+const getUserPlaylistBySlug = `-- name: GetUserPlaylistBySlug :one
+SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug FROM user_playlists WHERE slug = $1 AND user_id = $2
+`
+
+type GetUserPlaylistBySlugParams struct {
+	Slug   string `json:"slug"`
+	UserID int64  `json:"user_id"`
+}
+
+func (q *Queries) GetUserPlaylistBySlug(ctx context.Context, arg GetUserPlaylistBySlugParams) (UserPlaylist, error) {
+	row := q.db.QueryRow(ctx, getUserPlaylistBySlug, arg.Slug, arg.UserID)
+	var i UserPlaylist
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.Description,
+		&i.CoverPath,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Slug,
+	)
+	return i, err
+}
+
+const getUserPlaylistCoverPathByID = `-- name: GetUserPlaylistCoverPathByID :one
+SELECT cover_path FROM user_playlists WHERE id = $1
+`
+
+// Owner-agnostic cover_path lookup for the public image-byte GET route
+// (registered without auth in binary_huma.go, same as every other image
+// endpoint — browsers can't attach a bearer token to an <img> tag). The
+// cover bytes aren't sensitive on their own; playlist metadata stays
+// ownership-gated via GetUserPlaylist / GetUserPlaylistBySlug.
+func (q *Queries) GetUserPlaylistCoverPathByID(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRow(ctx, getUserPlaylistCoverPathByID, id)
+	var cover_path string
+	err := row.Scan(&cover_path)
+	return cover_path, err
 }
 
 const listPlaylistTracks = `-- name: ListPlaylistTracks :many
@@ -215,7 +260,7 @@ func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]L
 }
 
 const listUserPlaylists = `-- name: ListUserPlaylists :many
-SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.updated_at,
+SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.updated_at, p.slug,
        (SELECT count(*) FROM user_playlist_tracks WHERE playlist_id = p.id) AS track_count,
        COALESCE(
            (SELECT al.cover_path
@@ -225,7 +270,8 @@ SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.upd
             WHERE upt.playlist_id = p.id AND al.cover_path != ''
             ORDER BY upt.position ASC LIMIT 1),
            ''
-       ) AS auto_cover
+       ) AS auto_cover,
+       (p.cover_path != '') AS has_cover
 FROM user_playlists p
 WHERE p.user_id = $1
 ORDER BY p.created_at DESC
@@ -239,8 +285,10 @@ type ListUserPlaylistsRow struct {
 	CoverPath   string             `json:"cover_path"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Slug        string             `json:"slug"`
 	TrackCount  int64              `json:"track_count"`
 	AutoCover   interface{}        `json:"auto_cover"`
+	HasCover    bool               `json:"has_cover"`
 }
 
 // Used by the sidebar — small payload, includes a synthesized cover (first
@@ -262,8 +310,10 @@ func (q *Queries) ListUserPlaylists(ctx context.Context, userID int64) ([]ListUs
 			&i.CoverPath,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Slug,
 			&i.TrackCount,
 			&i.AutoCover,
+			&i.HasCover,
 		); err != nil {
 			return nil, err
 		}
@@ -307,7 +357,7 @@ func (q *Queries) ReorderPlaylistTrack(ctx context.Context, arg ReorderPlaylistT
 
 const updateUserPlaylist = `-- name: UpdateUserPlaylist :exec
 UPDATE user_playlists
-SET name = $3, description = $4, cover_path = $5, updated_at = now()
+SET name = $3, description = $4, cover_path = $5, slug = $6, updated_at = now()
 WHERE id = $1 AND user_id = $2
 `
 
@@ -317,6 +367,7 @@ type UpdateUserPlaylistParams struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	CoverPath   string `json:"cover_path"`
+	Slug        string `json:"slug"`
 }
 
 func (q *Queries) UpdateUserPlaylist(ctx context.Context, arg UpdateUserPlaylistParams) error {
@@ -326,6 +377,46 @@ func (q *Queries) UpdateUserPlaylist(ctx context.Context, arg UpdateUserPlaylist
 		arg.Name,
 		arg.Description,
 		arg.CoverPath,
+		arg.Slug,
 	)
 	return err
+}
+
+const updateUserPlaylistCoverPath = `-- name: UpdateUserPlaylistCoverPath :exec
+UPDATE user_playlists
+SET cover_path = $3, updated_at = now()
+WHERE id = $1 AND user_id = $2
+`
+
+type UpdateUserPlaylistCoverPathParams struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	CoverPath string `json:"cover_path"`
+}
+
+// Cover-only update — used by SetUserPlaylistCover / ClearUserPlaylistCover
+// so an upload/clear doesn't touch name/description/slug.
+func (q *Queries) UpdateUserPlaylistCoverPath(ctx context.Context, arg UpdateUserPlaylistCoverPathParams) error {
+	_, err := q.db.Exec(ctx, updateUserPlaylistCoverPath, arg.ID, arg.UserID, arg.CoverPath)
+	return err
+}
+
+const userPlaylistSlugExists = `-- name: UserPlaylistSlugExists :one
+SELECT EXISTS(SELECT 1 FROM user_playlists WHERE user_id = $1 AND slug = $2 AND id != $3) AS exists
+`
+
+type UserPlaylistSlugExistsParams struct {
+	UserID int64  `json:"user_id"`
+	Slug   string `json:"slug"`
+	ID     int64  `json:"id"`
+}
+
+// Collision check for slug.GenerateUnique — scoped per-user (playlist slugs
+// are only unique within one user's library, not globally) and excludes the
+// row being renamed so re-saving with an unchanged name doesn't self-collide.
+func (q *Queries) UserPlaylistSlugExists(ctx context.Context, arg UserPlaylistSlugExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, userPlaylistSlugExists, arg.UserID, arg.Slug, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

@@ -1,13 +1,22 @@
 <template>
   <div v-if="loading" class="page-pad m-loading">Loading…</div>
-  <div v-else-if="!detail" class="page-pad m-empty">Playlist not found.</div>
+  <div v-else-if="!detail" class="page-pad">
+    <MusicEmptyState icon="music" title="Playlist not found">
+      It may have been deleted or renamed. Your playlists live in the
+      <NuxtLink to="/music">sidebar</NuxtLink>.
+    </MusicEmptyState>
+  </div>
   <div v-else class="pl-page">
     <header class="pl-hero">
       <div class="pl-hero-bg" :style="coverStyle" />
       <div class="pl-hero-fade" />
       <div class="pl-hero-content">
+        <!-- Cover: the user's uploaded image when set; otherwise a collage
+             built from the playlist's own albums (MixCollage dedupes to 4,
+             falls back to the first album cover, then the icon tile). -->
         <div class="pl-hero-art">
-          <NuxtImg v-if="coverUrl" :src="coverUrl" :width="400" :quality="80" :alt="`${pl.name} cover`" />
+          <NuxtImg v-if="customCoverUrl" :src="customCoverUrl" :width="400" :quality="85" :alt="`${pl.name} cover`" />
+          <MixCollage v-else-if="tracks.length" :tracks="tracks" :seed-src="firstAlbumCover" :alt="`${pl.name} cover`" class="pl-hero-collage" />
           <Icon v-else name="heart" :size="48" />
         </div>
         <div class="pl-hero-meta">
@@ -20,24 +29,42 @@
             <span v-if="totalDuration > 0">{{ formatRunTime(totalDuration) }}</span>
           </div>
           <div class="m-actions">
-            <button class="btn btn-primary" :disabled="!tracks.length" @click="playAll(false)">
+            <button class="btn btn-primary" :style="heroToneStyle" :disabled="!tracks.length" @click="playAll(false)">
               <Icon name="play" :size="16" /> Play
             </button>
             <button class="btn" :disabled="!tracks.length" @click="playAll(true)">
               <Icon name="shuffle" :size="16" /> Shuffle
             </button>
-            <button class="btn btn-ghost" @click="onDelete" title="Delete playlist">
-              <Icon name="close" :size="14" />
-            </button>
+            <AppMenu trigger-class="btn-ghost pl-more" trigger-title="Playlist options" trigger-aria-label="Playlist options">
+              <template #trigger><Icon name="more" :size="16" /></template>
+              <DropdownMenuItem class="surface-item" @select="openEdit">
+                <Icon name="pencil" :size="14" class="surface-item-icon" /> Edit details…
+              </DropdownMenuItem>
+              <DropdownMenuItem class="surface-item" @select="coverInput?.click()">
+                <Icon name="image" :size="14" class="surface-item-icon" /> {{ pl.has_cover ? 'Replace cover…' : 'Set custom cover…' }}
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="pl.has_cover" class="surface-item" @select="removeCover">
+                <Icon name="undo" :size="14" class="surface-item-icon" /> Use generated cover
+              </DropdownMenuItem>
+              <div class="surface-divider" />
+              <DropdownMenuItem class="surface-item surface-item-destructive" @select="onDelete">
+                <Icon name="trash" :size="14" class="surface-item-icon" /> Delete playlist
+              </DropdownMenuItem>
+            </AppMenu>
+            <!-- Hidden picker for the custom cover (same raw-multipart flow
+                 as the metadata editor's artwork upload). -->
+            <input ref="coverInput" type="file" accept="image/*" class="pl-cover-input" @change="onCoverPicked" />
           </div>
         </div>
       </div>
     </header>
 
-    <section v-if="!tracks.length" class="page-pad m-empty-state">
-      <Icon name="music" :size="40" class="m-empty-icon" />
-      <h3>This playlist is empty</h3>
-      <p>Open any track's context menu (right-click) or use the "Add to playlist" action to add songs.</p>
+    <section v-if="!tracks.length" class="page-pad">
+      <MusicEmptyState icon="music" title="This playlist is empty" compact>
+        Right-click any track (long-press on touch) and pick
+        <strong>Add to playlist</strong> — from <NuxtLink to="/music/songs">All Songs</NuxtLink>,
+        an album, or search.
+      </MusicEmptyState>
     </section>
 
     <!-- Desktop keeps the virtualized RecycleScroller table untouched — see
@@ -82,7 +109,7 @@
               <NuxtLink :to="`/music/artist/${t.artist_slug}/${t.album_slug}`" class="pl-album-link" @click.stop>{{ t.album_title }}</NuxtLink>
             </div>
             <div class="pl-added mono">{{ formatDate(t.added_at) }}</div>
-            <button class="pl-remove" @click.stop="removeRow(t.track_id)" title="Remove from playlist">
+            <button class="pl-remove" @click.stop="removeRow(t.track_id)" title="Remove from playlist" aria-label="Remove from playlist">
               <Icon name="close" :size="14" />
             </button>
             <div class="pl-dur mono">{{ formatTime(t.duration) }}</div>
@@ -103,6 +130,23 @@
         @row-click="playFrom"
       />
     </section>
+
+    <!-- Edit details — rename regenerates the slug server-side; we re-route
+         to the new URL after saving so the address always mirrors the name. -->
+    <AppDialog v-model="editOpen" title="Edit playlist" size="sm">
+      <div class="pl-edit-form">
+        <label class="pl-edit-label" for="pl-edit-name">Name</label>
+        <input id="pl-edit-name" v-model="editName" type="text" class="pl-edit-input" maxlength="200" @keydown.enter.prevent="saveEdit" />
+        <label class="pl-edit-label" for="pl-edit-desc">Description</label>
+        <textarea id="pl-edit-desc" v-model="editDescription" class="pl-edit-input pl-edit-desc" rows="3" maxlength="1000" placeholder="Optional" />
+      </div>
+      <template #footer>
+        <button class="btn" @click="editOpen = false">Cancel</button>
+        <button class="btn btn-primary" :disabled="!editName.trim() || saving" @click="saveEdit">
+          {{ saving ? 'Saving…' : 'Save' }}
+        </button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
@@ -110,6 +154,7 @@
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 import type { ContextMenuItem } from '~~/shared/types'
+import { DropdownMenuItem } from 'reka-ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { playlistDetailQuery, type PlaylistDetailResponse, type PlaylistTrackRow } from '~/queries/music'
 
@@ -122,41 +167,105 @@ definePageMeta({ layout: 'default' })
 // playlists, not just a styling mismatch. So: desktop keeps this page's own
 // table untouched, and TrackList only takes over at phone width, where the
 // list is short enough in practice and "Remove from Playlist" moves into
-// the row's ⋯ menu (see contextItemsFor below). Note: there's no
-// drag-to-reorder anywhere in this codebase today (grepped for
-// draggable/dragstart/moveTrack — none exist), so that wasn't a factor.
+// the row's ⋯ menu (see contextItemsFor below).
 const { isPhone, isCoarse } = useViewport()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
 
 const route = useRoute()
 const router = useRouter()
-const playlistId = computed(() => Number(route.params.id))
+// Slug in canonical URLs; numeric ids still resolve (legacy links, fresh
+// creates that only know the id). Everything downstream keys on String(ref).
+const playlistRef = computed(() => String(route.params.slug ?? ''))
 
 const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 const playlists = usePlaylists()
 const queryClient = useQueryCache()
-const { $heya } = useNuxtApp()
 
-// Keyed by playlist id so each playlist gets its own cache slot. Reactive
-// key (playlistId) automatically triggers a refetch when navigating
-// between playlists via URL.
-const detailQuery = useQuery(() => playlistDetailQuery(playlistId.value))
+const detailQuery = useQuery(() => playlistDetailQuery(playlistRef.value))
 await waitForQuery(detailQuery)
 const loading = computed(() => detailQuery.isPending.value)
 const detail = computed<PlaylistDetailResponse | null>(() => detailQuery.data.value ?? null)
 
 const pl = computed(() => detail.value!.playlist)
+const playlistId = computed(() => detail.value?.playlist.id ?? 0)
 const tracks = computed(() => detail.value?.tracks ?? [])
 const totalDuration = computed(() => tracks.value.reduce((s, t) => s + (t.duration || 0), 0))
-const coverUrl = computed(() => {
-  // Playlist's own cover_path is a user-uploaded image URL (kept as-is) —
-  // synthesize from the first track's album cover otherwise so the hero
-  // isn't blank for fresh playlists.
-  if (pl.value.cover_path) return pl.value.cover_path
+
+// ── Cover ────────────────────────────────────────────────────────────
+// coverBust invalidates the <img> URL after an upload — the endpoint path
+// never changes, only the bytes behind it.
+const coverBust = ref(0)
+const customCoverUrl = computed(() =>
+  pl.value.has_cover ? `/api/me/playlists/${playlistId.value}/cover?v=${Date.parse(pl.value.updated_at) || 0}-${coverBust.value}` : null,
+)
+const firstAlbumCover = computed(() => {
   const first = tracks.value[0]
   return first ? useAlbumCoverUrl(first.artist_slug, first.album_slug) : null
 })
-const coverStyle = computed(() => coverUrl.value ? { backgroundImage: `url(${coverUrl.value})` } : {})
+// The blurred hero backdrop uses whatever the art block shows.
+const backdropSrc = computed(() => customCoverUrl.value || firstAlbumCover.value)
+const coverStyle = computed(() => backdropSrc.value ? { backgroundImage: `url(${backdropSrc.value})` } : {})
+
+// Tone-follow (same recipe as the artist hero / mixes marquee): the Play
+// button wears the cover's sampled palette. Sequence-guarded against a slow
+// sample landing after navigation.
+const heroToneStyle = ref<Record<string, string> | undefined>()
+let toneSeq = 0
+watch(backdropSrc, (src) => {
+  const seq = ++toneSeq
+  heroToneStyle.value = undefined
+  if (!src || !import.meta.client) return
+  sampleImageTone(src).then((t) => {
+    if (seq !== toneSeq) return
+    heroToneStyle.value = t ? { background: t.main, color: t.ink } : undefined
+  })
+}, { immediate: true })
+
+const coverInput = ref<HTMLInputElement>()
+async function onCoverPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  await playlists.setCover(playlistId.value, file)
+  coverBust.value++
+  detailQuery.refetch()
+}
+async function removeCover() {
+  await playlists.clearCover(playlistId.value)
+  detailQuery.refetch()
+}
+
+// ── Edit details ─────────────────────────────────────────────────────
+const editOpen = ref(false)
+const editName = ref('')
+const editDescription = ref('')
+const saving = ref(false)
+function openEdit() {
+  editName.value = pl.value.name
+  editDescription.value = pl.value.description
+  editOpen.value = true
+}
+async function saveEdit() {
+  if (!editName.value.trim() || saving.value) return
+  saving.value = true
+  try {
+    const updated = await playlists.update(playlistId.value, {
+      name: editName.value.trim(),
+      description: editDescription.value.trim(),
+    })
+    editOpen.value = false
+    // Renames regenerate the slug — keep the address bar honest. The param
+    // change re-keys detailQuery, which refetches under the new slug.
+    if (updated.slug && updated.slug !== playlistRef.value) {
+      router.replace(`/music/playlist/${updated.slug}`)
+    } else {
+      detailQuery.refetch()
+    }
+  } finally {
+    saving.value = false
+  }
+}
 
 function toPlayable(row: PlaylistTrackRow): Track {
   return {
@@ -175,9 +284,8 @@ function toPlayable(row: PlaylistTrackRow): Track {
 
 function isPlayable(row: PlaylistTrackRow) { return row.available !== false }
 
-// Keyboard mirror of the row's @click (playbook item 1). Guarded on
-// target===currentTarget so Enter/Space on the nested album link or the
-// "Remove" button doesn't also trigger playFrom.
+// Keyboard mirror of the row's @click. Guarded on target===currentTarget so
+// Enter/Space on the nested album link or "Remove" doesn't also playFrom.
 function onRowKeydown(e: KeyboardEvent, i: number, t: PlaylistTrackRow) {
   if (e.target !== e.currentTarget) return
   if (e.key !== 'Enter' && e.key !== ' ') return
@@ -186,11 +294,11 @@ function onRowKeydown(e: KeyboardEvent, i: number, t: PlaylistTrackRow) {
 }
 
 async function playAll(shuffle: boolean) {
-  let pl = tracks.value.filter(isPlayable).map(toPlayable)
-  if (shuffle) pl = [...pl].sort(() => Math.random() - 0.5)
-  if (!pl.length) return
-  queue.value = pl
-  await play(pl[0])
+  let list = tracks.value.filter(isPlayable).map(toPlayable)
+  if (shuffle) list = [...list].sort(() => Math.random() - 0.5)
+  if (!list.length) return
+  queue.value = list
+  await play(list[0])
 }
 
 async function playFrom(idx: number) {
@@ -202,14 +310,11 @@ async function playFrom(idx: number) {
 
 async function removeRow(trackId: number) {
   await playlists.removeTrack(playlistId.value, trackId)
-  // Optimistic update via the query cache so the row disappears immediately
-  // while the server reflects the same change. Avoids a refetch round-trip.
-  queryClient.setQueryData(['music', 'playlist', playlistId.value], (prev: PlaylistDetailResponse | undefined) => {
+  // Optimistic update on THIS page's cache entry (keyed by the route ref).
+  queryClient.setQueryData(['music', 'playlist', playlistRef.value], (prev: PlaylistDetailResponse | undefined) => {
     if (!prev) return prev
     return { ...prev, tracks: prev.tracks.filter(t => t.track_id !== trackId) }
   })
-  // Recent Playlists shelf on the home page derives last-played from
-  // playlist tracks; invalidate so a possible last-played change shows up.
   queryClient.invalidateQueries({ key: ['music', 'home', 'recent-playlists'] })
 }
 
@@ -224,11 +329,6 @@ const columns: TrackListColumn[] = [
   { key: 'duration', kind: 'duration' },
 ]
 
-// ListPlaylistTracksRow now carries the track's best file's format/
-// bitrate_kbps/sample_rate_hz/bit_depth (nullable — a track can have zero
-// files), same shape `formatTrackQuality` already consumes for the album
-// page's TrackView.files. TrackList treats a null `quality` as "nothing to
-// show", which also covers fileless tracks here.
 const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
   id: t.track_id,
   title: t.track_title,
@@ -287,7 +387,7 @@ function formatDate(iso: string) {
 
 <style scoped>
 .pl-page { padding-bottom: 80px; }
-.m-loading, .m-empty { color: var(--fg-3); padding: 32px 40px; font-size: 13px; }
+.m-loading { color: var(--fg-2); padding: 32px 40px; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 
 .pl-hero {
   position: relative;
@@ -308,9 +408,8 @@ function formatDate(iso: string) {
 }
 .pl-hero-fade {
   position: absolute; inset: 0;
-  /* Accent-derived decorative wash (was a hardcoded pink/purple pair that
-     ignored the user's accent) + the on-artwork black scrim, which stays
-     literal per house rule and fades to var(--bg-0) at the page canvas. */
+  /* Accent-derived decorative wash + the on-artwork black scrim (stays
+     literal per house rule), fading to var(--bg-0) at the page canvas. */
   background:
     linear-gradient(135deg,
       color-mix(in srgb, var(--gold) 30%, transparent),
@@ -337,11 +436,11 @@ function formatDate(iso: string) {
   overflow: hidden;
 }
 .pl-hero-art img { width: 100%; height: 100%; object-fit: cover; }
+/* The collage manages its own radius/shadow — flatten inside the frame. */
+.pl-hero-collage { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
 .pl-hero-meta { flex: 1; min-width: 0; }
-/* The hero backdrop is the cover blurred + darkened (brightness 0.45) in
-   BOTH themes, so hero text is on-artwork: fg tokens invert wrongly in
-   light mode (near-black on a dark field). Lock to literal light tones
-   per the house on-artwork rule. */
+/* Hero backdrop is the cover blurred + darkened in BOTH themes → hero text
+   is on-artwork: lock to literal light tones per house rule. */
 .m-kind {
   font-size: 11px; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.12em;
@@ -375,17 +474,10 @@ function formatDate(iso: string) {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 0 20px; height: 40px;
   border-radius: 999px; font-weight: 600;
+  transition: background 0.4s ease, color 0.4s ease, filter 0.15s;
 }
-.btn-ghost {
-  background: transparent;
-  /* floating button painted over the hero backdrop — stays literal */
-  border: 1px solid rgba(255,255,255,0.12);
-  color: var(--fg-2);
-  width: 40px; height: 40px;
-  border-radius: 50%;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.btn-ghost:hover { background: rgba(255,255,255,0.06); color: var(--fg-0); }
+.m-actions :deep(.btn-primary:hover) { filter: brightness(1.1); }
+.pl-cover-input { display: none; }
 
 .pl-tracks { padding-top: 24px; }
 .pl-cols {
@@ -424,20 +516,33 @@ function formatDate(iso: string) {
 .pl-remove:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 .mono { font-family: var(--font-mono); }
 
-.m-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 80px 24px;
+/* Edit dialog */
+.pl-edit-form { display: flex; flex-direction: column; gap: 6px; }
+.pl-edit-label {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--fg-2);
+  margin-top: 8px;
 }
-.m-empty-icon { color: var(--fg-3); margin-bottom: 16px; }
-.m-empty-state h3 { font-size: 18px; font-weight: 600; color: var(--fg-1); margin-bottom: 8px; }
-.m-empty-state p { font-size: 13px; max-width: 50ch; color: var(--fg-2); }
+.pl-edit-label:first-child { margin-top: 0; }
+.pl-edit-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgb(var(--shade) / 0.4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.pl-edit-input:focus { border-color: var(--gold); }
+.pl-edit-desc { resize: vertical; min-height: 70px; line-height: 1.5; }
 
-/* Phone (<=720px): stack the hero, center the cover, wrap the action row.
-   The track list itself swaps to TrackList at this width (see template). */
+/* Phone (<=720px): stack the hero, center the cover, wrap the action row. */
 @media (max-width: 720px) {
   .pl-hero { min-height: 0; }
   .pl-hero-content {
@@ -452,4 +557,23 @@ function formatDate(iso: string) {
   .pl-hero-stats { justify-content: center; }
   .m-actions { justify-content: center; flex-wrap: wrap; }
 }
+</style>
+
+<!-- AppMenu owns its trigger element — scoped selectors don't reach it
+     (docs/ui.md gotcha #2), so the round ⋯ button styles live unscoped. -->
+<style>
+.pl-more {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12); /* over the hero backdrop — literal */
+  color: rgba(255, 255, 255, 0.85); /* on darkened artwork — literal */
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.pl-more:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
 </style>

@@ -63,6 +63,37 @@ async function save() {
   }
 }
 
+// Server-level API key pairs stored in the system-settings KV (env vars
+// HEYA_LASTFM_* / HEYA_PODCAST_INDEX_* lock these when set — the PUT then
+// fails with the env-var name).
+const lastfm = reactive({ api_key: '', secret: '' })
+const podcastIndex = reactive({ key: '', secret: '' })
+const savingKV = ref(false)
+
+async function loadKV() {
+  try {
+    const r = await $heya('/api/system-settings/{key}', { path: { key: 'lastfm' } }) as any
+    if (r?.value) { lastfm.api_key = r.value.api_key ?? ''; lastfm.secret = r.value.secret ?? '' }
+  } catch { /* unset */ }
+  try {
+    const r = await $heya('/api/system-settings/{key}', { path: { key: 'podcast_index' } }) as any
+    if (r?.value) { podcastIndex.key = r.value.key ?? ''; podcastIndex.secret = r.value.secret ?? '' }
+  } catch { /* unset */ }
+}
+onMounted(loadKV)
+
+async function saveKV(key: 'lastfm' | 'podcast_index', value: Record<string, string>) {
+  savingKV.value = true
+  try {
+    await $heya('/api/system-settings/{key}', { method: 'PUT', path: { key }, body: { value } as any })
+    flash.value = { kind: 'ok', text: 'Saved.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Save failed (env-locked?).' }
+  } finally {
+    savingKV.value = false
+  }
+}
+
 const UPSTREAM_SOURCES = [
   { name: 'TMDB',        scope: 'movies + TV',          icon: 'film' },
   { name: 'TVDB',        scope: 'TV episode data',      icon: 'tv' },
@@ -171,6 +202,42 @@ const UPSTREAM_SOURCES = [
           </div>
         </div>
       </template>
+    </SettingsSection>
+
+    <SettingsSection title="Last.fm" icon="music"
+      description="Server-level application key pair used by everyone's Last.fm links (Settings → Music services). History import needs only the key; connecting accounts for scrobbling needs both. Env vars HEYA_LASTFM_API_KEY / HEYA_LASTFM_SECRET override and lock these.">
+      <template #actions>
+        <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener" class="link-arrow">Create API account <Icon name="chevright" :size="11" /></a>
+      </template>
+      <SettingsField label="API key" v-slot="{ fieldId }">
+        <input :id="fieldId" v-model="lastfm.api_key" type="text" class="sv2-input" placeholder="Last.fm API key" autocomplete="off" />
+      </SettingsField>
+      <SettingsField label="Shared secret" v-slot="{ fieldId }">
+        <input :id="fieldId" v-model="lastfm.secret" type="password" class="sv2-input" placeholder="Last.fm shared secret" autocomplete="off" />
+      </SettingsField>
+      <div class="actions-bar">
+        <button class="sv2-btn primary" :disabled="savingKV || !lastfm.api_key" @click="saveKV('lastfm', { api_key: lastfm.api_key, secret: lastfm.secret })">
+          <Icon name="check" :size="13" /> Save Last.fm keys
+        </button>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection title="Podcast Index" icon="mic"
+      description="API key pair for podcast search + trending (podcastindex.org — free). Env vars HEYA_PODCAST_INDEX_KEY / HEYA_PODCAST_INDEX_SECRET override and lock these.">
+      <template #actions>
+        <a href="https://api.podcastindex.org/signup" target="_blank" rel="noopener" class="link-arrow">Get API key <Icon name="chevright" :size="11" /></a>
+      </template>
+      <SettingsField label="API key" v-slot="{ fieldId }">
+        <input :id="fieldId" v-model="podcastIndex.key" type="text" class="sv2-input" placeholder="Podcast Index API key" autocomplete="off" />
+      </SettingsField>
+      <SettingsField label="API secret" v-slot="{ fieldId }">
+        <input :id="fieldId" v-model="podcastIndex.secret" type="password" class="sv2-input" placeholder="Podcast Index API secret" autocomplete="off" />
+      </SettingsField>
+      <div class="actions-bar">
+        <button class="sv2-btn primary" :disabled="savingKV || !podcastIndex.key" @click="saveKV('podcast_index', { key: podcastIndex.key, secret: podcastIndex.secret })">
+          <Icon name="check" :size="13" /> Save Podcast Index keys
+        </button>
+      </div>
     </SettingsSection>
 
     <SettingsFlash :flash="flash" />

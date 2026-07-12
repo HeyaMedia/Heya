@@ -108,7 +108,7 @@ export function useMusicActions() {
         if (!name) return
         const created = await playlists.create(name, '')
         await onPick(created.id)
-        navigateTo(`/music/playlist/${created.id}`)
+        navigateTo(`/music/playlist/${created.slug || created.id}`)
       },
     })
     return items
@@ -379,7 +379,7 @@ export function useMusicActions() {
           try {
             const created = await playlists.create(name, `Built from mix: ${mix.name}`)
             for (const t of mix.tracks) await playlists.addTrack(created.id, t.id)
-            navigateTo(`/music/playlist/${created.id}`)
+            navigateTo(`/music/playlist/${created.slug || created.id}`)
           } catch { /* swallow */ }
         },
       },
@@ -394,7 +394,7 @@ export function useMusicActions() {
 
   // --- Playlist tile context menu (user playlists, not the system "Loved
   // Songs" pseudo-playlist). ---
-  function forPlaylist(p: { id: number; name: string; track_count?: number }): ContextMenuItem[] {
+  function forPlaylist(p: { id: number; name: string; track_count?: number; slug?: string }): ContextMenuItem[] {
     return [
       {
         label: 'Play',
@@ -428,7 +428,7 @@ export function useMusicActions() {
       {
         label: 'Open Playlist',
         icon: 'list',
-        action: () => navigateTo(`/music/playlist/${p.id}`),
+        action: () => navigateTo(`/music/playlist/${p.slug || p.id}`),
       },
       {
         label: 'Delete',

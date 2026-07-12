@@ -63,8 +63,24 @@ func (s *Server) handleStar(loved bool) http.HandlerFunc {
 			respondError(w, r, errMissingParameter, "no id given")
 			return
 		}
+		// Stars ARE hearts: write the unified rating store (heart = 10,
+		// unstar clears) so Subsonic clients feed the same taste signal the
+		// web app's reactions do.
+		rating := int16(0)
+		if loved {
+			rating = 10
+		}
 		for _, t := range targets {
-			if _, err := s.app.SetEntityLoved(ctx, u.ID, t.entity, t.id, loved); err != nil {
+			var err error
+			switch t.entity {
+			case "track":
+				err = s.app.SetUserTrackRating(ctx, u.ID, t.id, rating)
+			case "album":
+				err = s.app.SetUserAlbumRating(ctx, u.ID, t.id, rating)
+			case "artist":
+				err = s.app.SetUserArtistRating(ctx, u.ID, t.id, rating)
+			}
+			if err != nil {
 				respondError(w, r, errGeneric, "star update failed")
 				return
 			}

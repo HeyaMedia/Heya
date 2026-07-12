@@ -30,10 +30,10 @@
       <AppContextMenu
         v-for="pl in playlists"
         :key="`pl-${pl.id}`"
-        :items="actions.forPlaylist({ id: pl.id, name: pl.name, track_count: pl.track_count })"
+        :items="actions.forPlaylist({ id: pl.id, name: pl.name, track_count: pl.track_count, slug: pl.slug })"
       >
       <NuxtLink
-        :to="`/music/playlist/${pl.id}`"
+        :to="`/music/playlist/${pl.slug || pl.id}`"
         class="ms-card-link"
       >
         <MusicCard
@@ -138,18 +138,23 @@
     </section>
 
     <!-- Empty state — nothing loved yet. -->
-    <div v-if="!isLoading && !playlists.length && !lovedArtists.length && !lovedAlbums.length && !lovedTracks.length" class="ms-empty">
-      <Icon name="heart" :size="40" />
-      <h3>Nothing here yet</h3>
-      <p>Tap the heart on artists, albums, or songs you like.<br/>They'll show up here so you can find them again.</p>
-    </div>
+    <MusicEmptyState
+      v-if="!isLoading && !playlists.length && !lovedArtists.length && !lovedAlbums.length && !lovedTracks.length"
+      icon="heart"
+      title="Nothing here yet"
+    >
+      Rate the artists, albums, and songs you like — anything 1★ and up
+      lands here. Start from <NuxtLink to="/music/songs">All Songs</NuxtLink>
+      or any artist page.
+    </MusicEmptyState>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { LovedAlbumRow } from '~/queries/music'
 import { useQuery } from '@pinia/colada'
-import { musicAlbumDetailQuery, userPlaylistsQuery } from '~/queries/music'
+import { lovedAlbumsQuery, lovedArtistsQuery, musicAlbumDetailQuery, userPlaylistsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
@@ -162,6 +167,7 @@ const loadQuery = useQueryLoader()
 
 interface PlaylistRow {
   id: number
+  slug: string
   name: string
   cover_path: string
   track_count: number
@@ -179,24 +185,6 @@ interface LovedTrackRow {
   artist_name: string
   artist_slug: string
 }
-interface LovedArtistRow {
-  id: number
-  name: string
-  slug: string
-  media_item_id: number
-  media_item_public_id?: string
-}
-interface LovedAlbumRow {
-  id: number
-  title: string
-  slug: string
-  year: string
-  album_type: string
-  cover_path: string
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-}
 interface ListBody<T> { items: T[]; total: number }
 
 // All four feeds in parallel; counts come from the `total` field of each.
@@ -210,37 +198,31 @@ const lovedTracksQuery = useQuery({
   query: async () => (await $heya('/api/me/ratings/tracks', { query: { min_rating: 1, limit: 8 } })) as unknown as ListBody<RatedTrackRow>,
   staleTime: 1000 * 30,
 })
-const lovedArtistsQuery = useQuery({
-  key: ['me', 'loved', 'artists', 'shelf'],
-  query: async () => (await $heya('/api/me/ratings/artists', { query: { min_rating: 1, limit: 12 } })) as unknown as ListBody<LovedArtistRow>,
-  staleTime: 1000 * 30,
-})
-const lovedAlbumsQuery = useQuery({
-  key: ['me', 'loved', 'albums', 'shelf'],
-  query: async () => (await $heya('/api/me/ratings/albums', { query: { min_rating: 1, limit: 12 } })) as unknown as ListBody<LovedAlbumRow>,
-  staleTime: 1000 * 30,
-})
+// Shelf preview — capped at 12, same query factory (and cache key shape) the
+// dedicated My Artists/My Albums pages use at limit 500.
+const lovedArtistsShelfQuery = useQuery(lovedArtistsQuery(12))
+const lovedAlbumsShelfQuery = useQuery(lovedAlbumsQuery(12))
 await Promise.all([
   waitForQuery(playlistsQuery),
   waitForQuery(lovedTracksQuery),
-  waitForQuery(lovedArtistsQuery),
-  waitForQuery(lovedAlbumsQuery),
+  waitForQuery(lovedArtistsShelfQuery),
+  waitForQuery(lovedAlbumsShelfQuery),
 ])
 
 const playlists = computed(() => playlistsQuery.data.value?.items ?? [])
 const lovedTracks = computed(() => lovedTracksQuery.data.value?.items ?? [])
-const lovedArtists = computed(() => lovedArtistsQuery.data.value?.items ?? [])
-const lovedAlbums = computed(() => lovedAlbumsQuery.data.value?.items ?? [])
+const lovedArtists = computed(() => lovedArtistsShelfQuery.data.value?.items ?? [])
+const lovedAlbums = computed(() => lovedAlbumsShelfQuery.data.value?.items ?? [])
 
 const lovedTracksCount = computed(() => lovedTracksQuery.data.value?.total ?? 0)
-const lovedArtistsCount = computed(() => lovedArtistsQuery.data.value?.total ?? 0)
-const lovedAlbumsCount = computed(() => lovedAlbumsQuery.data.value?.total ?? 0)
+const lovedArtistsCount = computed(() => lovedArtistsShelfQuery.data.value?.total ?? 0)
+const lovedAlbumsCount = computed(() => lovedAlbumsShelfQuery.data.value?.total ?? 0)
 
 const isLoading = computed(() =>
   playlistsQuery.isLoading.value
     || lovedTracksQuery.isLoading.value
-    || lovedArtistsQuery.isLoading.value
-    || lovedAlbumsQuery.isLoading.value,
+    || lovedArtistsShelfQuery.isLoading.value
+    || lovedAlbumsShelfQuery.isLoading.value,
 )
 
 async function playLovedAlbum(al: LovedAlbumRow) {
@@ -333,10 +315,12 @@ async function playLovedTracks(startIdx: number) {
   margin-top: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--fg-1);
+  color: var(--fg-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Sits bare on the ambient pool — needs the halo like every caption. */
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 
 .ms-section { margin-bottom: 36px; }
@@ -348,13 +332,26 @@ async function playLovedTracks(startIdx: number) {
 .ms-see-all {
   font-size: 12px;
   font-family: var(--font-mono);
-  color: var(--fg-3);
+  color: var(--fg-2);
   text-decoration: none;
   letter-spacing: 0.04em;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .ms-see-all:hover { color: var(--fg-0); }
 
-.ms-track-list { display: flex; flex-direction: column; gap: 2px; }
+/* Glass panel behind the rows — the bare list was the one block on this
+   page without a surface, and its fg-3 subs/durations vanished over bright
+   ambient art (same recipe as the shared TrackList's backing). */
+.ms-track-list {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px;
+  background: color-mix(in oklab, var(--bg-2) 80%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-el);
+}
 .ms-track-row {
   display: grid;
   grid-template-columns: 44px 1fr auto;
@@ -401,15 +398,6 @@ async function playLovedTracks(startIdx: number) {
   color: var(--fg-3);
   letter-spacing: 0.04em;
 }
-
-.ms-empty {
-  text-align: center;
-  padding: 80px 20px;
-  color: var(--fg-3);
-}
-.ms-empty :deep(svg) { color: var(--fg-3); margin-bottom: 12px; }
-.ms-empty h3 { font-size: 18px; color: var(--fg-1); margin-bottom: 8px; font-weight: 600; }
-.ms-empty p { font-size: 13px; line-height: 1.6; max-width: 400px; margin: 0 auto; }
 
 @media (max-width: 720px) {
   /* music.vue's phone section header already reads "My Music" directly

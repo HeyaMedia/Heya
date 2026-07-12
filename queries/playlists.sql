@@ -1,10 +1,19 @@
 -- name: CreateUserPlaylist :one
-INSERT INTO user_playlists (user_id, name, description, cover_path)
-VALUES ($1, $2, $3, $4)
+INSERT INTO user_playlists (user_id, name, description, cover_path, slug)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetUserPlaylist :one
 SELECT * FROM user_playlists WHERE id = $1 AND user_id = $2;
+
+-- name: GetUserPlaylistBySlug :one
+SELECT * FROM user_playlists WHERE slug = $1 AND user_id = $2;
+
+-- name: UserPlaylistSlugExists :one
+-- Collision check for slug.GenerateUnique — scoped per-user (playlist slugs
+-- are only unique within one user's library, not globally) and excludes the
+-- row being renamed so re-saving with an unchanged name doesn't self-collide.
+SELECT EXISTS(SELECT 1 FROM user_playlists WHERE user_id = $1 AND slug = $2 AND id != $3) AS exists;
 
 -- name: ListUserPlaylists :many
 -- Used by the sidebar — small payload, includes a synthesized cover (first
@@ -19,15 +28,31 @@ SELECT p.*,
             WHERE upt.playlist_id = p.id AND al.cover_path != ''
             ORDER BY upt.position ASC LIMIT 1),
            ''
-       ) AS auto_cover
+       ) AS auto_cover,
+       (p.cover_path != '') AS has_cover
 FROM user_playlists p
 WHERE p.user_id = $1
 ORDER BY p.created_at DESC;
 
 -- name: UpdateUserPlaylist :exec
 UPDATE user_playlists
-SET name = $3, description = $4, cover_path = $5, updated_at = now()
+SET name = $3, description = $4, cover_path = $5, slug = $6, updated_at = now()
 WHERE id = $1 AND user_id = $2;
+
+-- name: UpdateUserPlaylistCoverPath :exec
+-- Cover-only update — used by SetUserPlaylistCover / ClearUserPlaylistCover
+-- so an upload/clear doesn't touch name/description/slug.
+UPDATE user_playlists
+SET cover_path = $3, updated_at = now()
+WHERE id = $1 AND user_id = $2;
+
+-- name: GetUserPlaylistCoverPathByID :one
+-- Owner-agnostic cover_path lookup for the public image-byte GET route
+-- (registered without auth in binary_huma.go, same as every other image
+-- endpoint — browsers can't attach a bearer token to an <img> tag). The
+-- cover bytes aren't sensitive on their own; playlist metadata stays
+-- ownership-gated via GetUserPlaylist / GetUserPlaylistBySlug.
+SELECT cover_path FROM user_playlists WHERE id = $1;
 
 -- name: DeleteUserPlaylist :exec
 DELETE FROM user_playlists WHERE id = $1 AND user_id = $2;

@@ -10,21 +10,30 @@
 -- Newest N live TV files with the season/episode numbers the parser
 -- extracted. The derived table pins the plan to a backward
 -- idx_library_files_created_at scan with a per-row media_items probe that
--- stops at LIMIT, instead of sorting every live file.
+-- stops at LIMIT, instead of sorting every live file. A window of 0 lifts
+-- the cap entirely (LIMIT NULL) — the deep-history pages of the infinite
+-- rail group the show's full arrival timeline. Show descriptions are NOT
+-- carried per file row (they'd multiply a ~1KB blob by every file in the
+-- window); the service overlays them per surfaced entry via
+-- ListMediaDescriptionsByIDs below.
 SELECT r.id, r.media_item_id, r.created_at,
-       r.public_id, r.library_id, r.title, r.slug, r.description,
+       r.public_id, r.library_id, r.title, r.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        (COALESCE(r.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb))::jsonb AS episode_numbers
 FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
-         mi.public_id, mi.library_id, mi.title, mi.slug, mi.description
+         mi.public_id, mi.library_id, mi.title, mi.slug
   FROM library_files lf
   JOIN media_item_cards mi ON mi.id = lf.media_item_id
   WHERE mi.media_type IN ('tv', 'anime') AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
-  LIMIT $1
+  LIMIT NULLIF(sqlc.arg(file_window)::bigint, 0)
 ) r
 ORDER BY r.created_at DESC;
+
+-- name: ListMediaDescriptionsByIDs :many
+-- Batched description lookup for the entries that survived the grouping cut.
+SELECT id, description FROM media_item_cards WHERE id = ANY(@ids::bigint[]);
 
 -- name: ListTVEpisodeFirstAdded :many
 -- Per-(show, season, episode) earliest file arrival for the given shows.

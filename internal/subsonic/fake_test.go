@@ -26,7 +26,6 @@ type fakeBackend struct {
 	files   map[int64]service.SubsonicTrackFileInfo
 
 	playQueue    *service.SubsonicPlayQueue
-	lovedTracks  map[int64]bool
 	scrobbles    []service.PlaybackEvent
 	ratedTracks  map[int64]int16
 	ratedAlbums  map[int64]int16
@@ -60,7 +59,6 @@ func newFakeBackend() *fakeBackend {
 			100: {TrackID: 100, TrackFileID: 1000, LibraryFileID: 2000, Format: "flac", BitrateKbps: 1000, SizeBytes: 42_000_000, Duration: 342, Path: "/music/prodigy/01.flac"},
 			101: {TrackID: 101, TrackFileID: 1001, LibraryFileID: 2001, Format: "mp3", BitrateKbps: 320, SizeBytes: 8_000_000, Duration: 336, Path: "/music/prodigy/02.mp3"},
 		},
-		lovedTracks:  map[int64]bool{},
 		ratedTracks:  map[int64]int16{},
 		ratedAlbums:  map[int64]int16{},
 		ratedArtists: map[int64]int16{},
@@ -213,33 +211,37 @@ func emptyPage[T any]() (*service.MusicListPage[T], error) {
 	return &service.MusicListPage[T]{Items: []T{}}, nil
 }
 
-func (f *fakeBackend) ListUserLovedTrackIDs(_ context.Context, _ int64) ([]int64, error) {
-	return nil, nil
-}
-func (f *fakeBackend) ListUserLovedArtistIDs(_ context.Context, _ int64) ([]int64, error) {
-	return nil, nil
-}
-func (f *fakeBackend) ListUserLovedAlbumIDs(_ context.Context, _ int64) ([]int64, error) {
-	return nil, nil
-}
-
-func (f *fakeBackend) ListUserLovedTracks(_ context.Context, _ int64, _, _ int32) (*service.MusicListPage[sqlc.ListUserLovedTracksRow], error) {
-	return emptyPage[sqlc.ListUserLovedTracksRow]()
-}
-
-func (f *fakeBackend) ListUserLovedArtists(_ context.Context, _ int64, _, _ int32) (*service.MusicListPage[sqlc.ListUserLovedArtistsRow], error) {
-	return emptyPage[sqlc.ListUserLovedArtistsRow]()
-}
-
-func (f *fakeBackend) ListUserLovedAlbums(_ context.Context, _ int64, _, _ int32) (*service.MusicListPage[sqlc.ListUserLovedAlbumsRow], error) {
-	return emptyPage[sqlc.ListUserLovedAlbumsRow]()
-}
-
-func (f *fakeBackend) SetEntityLoved(_ context.Context, _ int64, entityType string, id int64, loved bool) (bool, error) {
-	if entityType == "track" {
-		f.lovedTracks[id] = loved
+func (f *fakeBackend) ListUserRatedTracks(_ context.Context, _ int64, minRating int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedTracksRow], error) {
+	page, _ := emptyPage[sqlc.ListUserRatedTracksRow]()
+	for id, r := range f.ratedTracks {
+		if r >= minRating {
+			page.Items = append(page.Items, sqlc.ListUserRatedTracksRow{TrackID: id, Rating: r})
+		}
 	}
-	return loved, nil
+	page.Total = int64(len(page.Items))
+	return page, nil
+}
+
+func (f *fakeBackend) ListUserRatedArtists(_ context.Context, _ int64, minRating int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedArtistsRow], error) {
+	page, _ := emptyPage[sqlc.ListUserRatedArtistsRow]()
+	for id, r := range f.ratedArtists {
+		if r >= minRating {
+			page.Items = append(page.Items, sqlc.ListUserRatedArtistsRow{ID: id, Rating: r})
+		}
+	}
+	page.Total = int64(len(page.Items))
+	return page, nil
+}
+
+func (f *fakeBackend) ListUserRatedAlbums(_ context.Context, _ int64, minRating int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedAlbumsRow], error) {
+	page, _ := emptyPage[sqlc.ListUserRatedAlbumsRow]()
+	for id, r := range f.ratedAlbums {
+		if r >= minRating {
+			page.Items = append(page.Items, sqlc.ListUserRatedAlbumsRow{ID: id, Rating_2: r})
+		}
+	}
+	page.Total = int64(len(page.Items))
+	return page, nil
 }
 
 func (f *fakeBackend) RatingsForTracks(_ context.Context, _ int64, ids []int64) (map[int64]int16, error) {

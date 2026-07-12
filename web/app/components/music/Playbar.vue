@@ -429,7 +429,7 @@ async function createPlaylistFromCurrent() {
   try {
     const created = await playlistsApi.create(name, '')
     await playlistsApi.addTrack(created.id, t.id)
-    navigateTo(`/music/playlist/${created.id}`)
+    navigateTo(`/music/playlist/${created.slug || created.id}`)
   } catch { /* swallow */ }
 }
 

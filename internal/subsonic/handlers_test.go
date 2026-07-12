@@ -170,13 +170,14 @@ func TestStarAndRating(t *testing.T) {
 	s := newTestServer(t)
 	fake := s.app.(*fakeBackend)
 
+	// Stars write the unified rating store: star = heart (10), unstar clears.
 	doJSON(t, s, "star", "id=tr-100")
-	if !fake.lovedTracks[100] {
-		t.Fatal("star did not set loved state")
+	if fake.ratedTracks[100] != 10 {
+		t.Fatalf("star must write heart rating 10, got %d", fake.ratedTracks[100])
 	}
 	doJSON(t, s, "unstar", "id=tr-100")
-	if fake.lovedTracks[100] {
-		t.Fatal("unstar did not clear loved state")
+	if fake.ratedTracks[100] != 0 {
+		t.Fatalf("unstar must clear the rating, got %d", fake.ratedTracks[100])
 	}
 
 	doJSON(t, s, "setRating", "id=tr-100&rating=4")

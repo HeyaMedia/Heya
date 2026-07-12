@@ -37,6 +37,15 @@ const prefetchChoice = computed<string>({
   set: (v) => update({ prefetchCount: Number(v) }),
 })
 
+const wifiOnlyChoice = computed({
+  get: () => settings.value.wifiOnlyPrefetch,
+  set: (value: boolean) => update({ wifiOnlyPrefetch: value }),
+})
+
+const qualityLabel = computed(() => QUALITY_OPTIONS.find(option => option.value === settings.value.streamQuality)?.label.split(' (')[0] ?? 'Original')
+const storedBytes = computed(() => storage.value?.totalBytes == null ? '—' : fmtBytes(storage.value.totalBytes))
+const prefetchedTracks = computed(() => storage.value?.audio.entries ?? 0)
+
 // forceDirectEngine is boolean|null — <select> only speaks strings, so this
 // round-trips null <-> 'auto' at the edge and nowhere else.
 type EngineChoice = 'auto' | 'on' | 'off'
@@ -46,10 +55,6 @@ const engineChoice = computed<EngineChoice>({
     : 'auto',
   set: (v) => update({ forceDirectEngine: v === 'auto' ? null : v === 'on' }),
 })
-
-function onWifiOnlyChange(e: Event) {
-  update({ wifiOnlyPrefetch: (e.target as HTMLInputElement).checked })
-}
 
 const storageLoading = ref(true)
 const clearing = ref<DeviceStorageArea | null>(null)
@@ -91,39 +96,42 @@ onMounted(loadStorage)
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Device</h2>
-      <p class="sv2-page-desc">
-        These apply to this browser/device only — they live in local storage,
-        never sync to your account, and won't follow you to another device.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="This device"
+      icon="cpu"
+      eyebrow="Stored only in this browser"
+      tone="local"
+      description="Tune Heya for this screen, connection, and browser. Changes apply immediately and never alter your other devices."
+    >
+      <div class="context-fact"><strong>{{ qualityLabel }}</strong><span>Audio</span></div>
+      <div class="context-fact"><strong>{{ settings.prefetchCount }}</strong><span>Prefetch</span></div>
+      <div class="context-fact"><strong>{{ storedBytes }}</strong><span>Storage</span></div>
+    </SettingsContextHero>
 
-    <SettingsSection title="Streaming quality" icon="vol"
-      description="Lower tiers ask the server to transcode down for less bandwidth. Takes effect on the next track.">
-      <SettingsField label="Quality" v-slot="{ fieldId }">
-        <select :id="fieldId" class="sv2-select" v-model="qualityChoice">
-          <option v-for="q in QUALITY_OPTIONS" :key="q.value" :value="q.value">{{ q.label }}</option>
-        </select>
-      </SettingsField>
-    </SettingsSection>
+    <div class="device-grid">
+      <SettingsSection title="Streaming quality" icon="vol"
+        description="Choose the bandwidth and quality balance for music played on this device.">
+        <SettingsField label="Quality" description="Takes effect when the next track starts." v-slot="{ fieldId }">
+          <select :id="fieldId" class="sv2-select" v-model="qualityChoice">
+            <option v-for="q in QUALITY_OPTIONS" :key="q.value" :value="q.value">{{ q.label }}</option>
+          </select>
+        </SettingsField>
+      </SettingsSection>
 
-    <SettingsSection title="Prefetch" icon="cloud-download"
-      description="Cache upcoming queue tracks ahead of playback so transitions feel instant.">
-      <SettingsField label="Upcoming tracks" description="Upcoming songs downloaded ahead of playback." v-slot="{ fieldId }">
-        <select :id="fieldId" class="sv2-select" v-model="prefetchChoice">
-          <option v-for="n in PREFETCH_OPTIONS" :key="n" :value="String(n)">{{ n === 0 ? 'Off' : n }}</option>
-        </select>
-      </SettingsField>
-      <SettingsField label="Only prefetch on Wi-Fi"
-        hint="Best-effort — only Android/Chrome expose the connection type. iOS doesn't, so prefetch always runs there regardless of this setting."
-        v-slot="{ fieldId, hintId }">
-        <label class="dev-switch">
-          <input :id="fieldId" type="checkbox" :aria-describedby="hintId" aria-label="Only prefetch on Wi-Fi" :checked="settings.wifiOnlyPrefetch" @change="onWifiOnlyChange" />
-          <span class="dev-slider" />
-        </label>
-      </SettingsField>
-    </SettingsSection>
+      <SettingsSection title="Queue prefetch" icon="cloud-download"
+        description="Keep upcoming music ready locally so track changes feel instant.">
+        <SettingsField label="Upcoming tracks" description="Songs downloaded ahead of playback." v-slot="{ fieldId }">
+          <select :id="fieldId" class="sv2-select" v-model="prefetchChoice">
+            <option v-for="n in PREFETCH_OPTIONS" :key="n" :value="String(n)">{{ n === 0 ? 'Off' : n }}</option>
+          </select>
+        </SettingsField>
+        <SettingsField label="Only prefetch on Wi-Fi"
+          hint="Best-effort — Android and Chromium expose connection type; iOS does not."
+          v-slot="{ fieldId, hintId }">
+          <AppSwitch v-model="wifiOnlyChoice" :id="fieldId" :aria-describedby="hintId" size="md" aria-label="Only prefetch on Wi-Fi" />
+        </SettingsField>
+      </SettingsSection>
+    </div>
 
     <SettingsSection title="Storage" icon="hard-drives"
       description="Data kept on this device for instant and offline use. Clearing it never touches your server library or account.">
@@ -154,7 +162,7 @@ onMounted(loadStorage)
             label="Prefetched audio"
             icon="download"
             :value="fmtBytes(storage.audio.bytes)"
-            :sub="areaSub(storage.audio, 'track')"
+            :sub="`${prefetchedTracks.toLocaleString()} ready · ${areaSub(storage.audio, 'track')}`"
           />
           <MetricTile
             label="Artwork"
@@ -204,6 +212,13 @@ onMounted(loadStorage)
 </template>
 
 <style scoped>
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.device-grid :deep(.sv2-section) { height: calc(100% - 16px); }
 .sv2-select {
   padding: 9px 12px;
   background: var(--bg-0);
@@ -242,52 +257,12 @@ onMounted(loadStorage)
 }
 .storage-note {
   margin: 10px 2px 0;
-  color: var(--fg-4);
+  color: var(--fg-2);
   font-size: 11.5px;
 }
 
-/* Checkbox-pill, cloned from settings/jellyfin.vue's .jf-switch/.jf-slider —
-   this page owns the element outright (not portaled), so a scoped block is
-   fine here. */
-.dev-switch {
-  position: relative;
-  display: inline-block;
-  width: 42px;
-  height: 24px;
-  flex: none;
-}
-.dev-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.dev-slider {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--text) 18%, transparent);
-  transition: background 0.15s ease;
-  cursor: pointer;
-}
-.dev-slider::before {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--surface-0, #fff);
-  transition: transform 0.15s ease;
-}
-.dev-switch input:checked + .dev-slider {
-  background: var(--accent);
-}
-.dev-switch input:checked + .dev-slider::before {
-  transform: translateX(18px);
-}
-
 @media (max-width: 720px) {
+  .device-grid { grid-template-columns: 1fr; gap: 0; }
   .sv2-select { min-width: 0; width: 100%; }
 }
 </style>

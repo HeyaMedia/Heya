@@ -18,6 +18,14 @@ export type UserListView = components['schemas']['UserListView']
 export type LogEntry = components['schemas']['Entry']
 export type JobListResult = components['schemas']['JobListResult']
 export type JobKindSummary = components['schemas']['JobKindSummaryRow']
+export type MusicServiceImportState = { status?: string, imported?: number, matched?: number, unmatched?: number, scanned?: number, error?: string }
+export type MusicService = {
+  service: 'listenbrainz' | 'lastfm'
+  username: string
+  token_set: boolean
+  scrobble_enabled: boolean
+  import_state: MusicServiceImportState
+}
 
 export type ConfigSourceEntry = { source: string, env_var?: string }
 export type ConfigSources = Record<string, ConfigSourceEntry>
@@ -56,6 +64,17 @@ export const userPlaybackSettingsQuery = defineQueryOptions(() => ({
     return await $heya('/api/me/settings') as UserSettings
   },
   staleTime: 1000 * 30,
+  meta: privateSettings,
+}))
+
+export const musicServicesQuery = defineQueryOptions(() => ({
+  key: ['me', 'music-services'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    const response = await $heya('/api/me/music-services') as { services?: MusicService[] }
+    return response.services ?? []
+  },
+  staleTime: 1000 * 15,
   meta: privateSettings,
 }))
 

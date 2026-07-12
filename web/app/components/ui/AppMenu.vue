@@ -19,6 +19,7 @@
       class="app-menu-trigger"
       :class="triggerClass"
       :title="triggerTitle"
+      :aria-label="triggerAriaLabel ?? triggerTitle"
     >
       <slot name="trigger" :open="open" />
     </DropdownMenuTrigger>
@@ -45,6 +46,9 @@ withDefaults(defineProps<{
   width?: number | string
   triggerClass?: string | string[] | Record<string, boolean>
   triggerTitle?: string
+  /** Explicit accessible name for icon-only triggers; falls back to
+   *  triggerTitle (title-as-accname works but is the fragile path). */
+  triggerAriaLabel?: string
   contentClass?: string | string[] | Record<string, boolean>
 }>(), {
   sideOffset: 8,

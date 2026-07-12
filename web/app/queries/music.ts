@@ -29,8 +29,10 @@ export interface PlaylistDetailResponse {
     id: number
     user_id: number
     name: string
+    slug: string
     description: string
     cover_path: string
+    has_cover: boolean
     created_at: string
     updated_at: string
   }
@@ -41,8 +43,10 @@ export interface UserPlaylistRow {
   id: number
   user_id: number
   name: string
+  slug: string
   description: string
   cover_path: string
+  has_cover: boolean
   created_at: string
   updated_at: string
   track_count: number
@@ -116,11 +120,15 @@ export const musicAlbumDetailQuery = defineQueryOptions((target: { artistSlug: s
   meta: intentMeta,
 }))
 
-export const playlistDetailQuery = defineQueryOptions((id: number) => ({
-  key: ['music', 'playlist', id],
+// `ref` is a slug (canonical URLs) or a numeric id (internal callers holding
+// only the id; legacy links) — the endpoint resolves both. Key is the
+// stringified ref, so callers that mutate by id must invalidate/patch the
+// String(id) entry; slug-keyed entries refresh on their 30s staleTime.
+export const playlistDetailQuery = defineQueryOptions((ref: string | number) => ({
+  key: ['music', 'playlist', String(ref)],
   query: async () => {
     const { $heya } = useNuxtApp()
-    return await $heya('/api/me/playlists/{id}', { path: { id } }) as unknown as PlaylistDetailResponse
+    return await $heya('/api/me/playlists/{id}', { path: { id: String(ref) as never } }) as unknown as PlaylistDetailResponse
   },
   staleTime: 1000 * 30,
   meta: {
@@ -172,6 +180,53 @@ export const musicArtistsQuery = defineQueryOptions(() => ({
     return await $heya('/api/music/artists', { query: { limit: 500 } }) as unknown as MusicListPage<MusicArtistRow>
   },
   staleTime: 1000 * 60,
+}))
+
+// Rows returned by /api/me/ratings/artists|albums — mirrors sqlc's
+// ListUserRatedArtistsRow/ListUserRatedAlbumsRow (only the fields the FE
+// actually renders). Artist rows carry album/track counts pre-aggregated by
+// the query so list pages don't need a follow-up fetch per row.
+export interface LovedArtistRow {
+  id: number
+  name: string
+  slug: string
+  media_item_id: number
+  media_item_public_id?: string
+  album_count: number
+  track_count: number
+}
+
+export interface LovedAlbumRow {
+  id: number
+  title: string
+  slug: string
+  year: string
+  album_type: string
+  cover_path: string
+  artist_id: number
+  artist_name: string
+  artist_slug: string
+}
+
+// Shared by the My Music shelf (limit 12) and the My Artists/My Albums list
+// pages (limit 500) — same key shape so the shelf's cache entry gets reused
+// wholesale when a page happens to request the same limit.
+export const lovedArtistsQuery = defineQueryOptions((limit: number) => ({
+  key: ['me', 'loved', 'artists', { limit }],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/me/ratings/artists', { query: { min_rating: 1, limit } }) as unknown as MusicListPage<LovedArtistRow>
+  },
+  staleTime: 1000 * 30,
+}))
+
+export const lovedAlbumsQuery = defineQueryOptions((limit: number) => ({
+  key: ['me', 'loved', 'albums', { limit }],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/me/ratings/albums', { query: { min_rating: 1, limit } }) as unknown as MusicListPage<LovedAlbumRow>
+  },
+  staleTime: 1000 * 30,
 }))
 
 export const trackLyricsQuery = defineQueryOptions((trackId: number) => ({

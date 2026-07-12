@@ -2,7 +2,11 @@ package server
 
 import (
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,4 +89,42 @@ func proxyRemoteImage(w http.ResponseWriter, r *http.Request, url string) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 32<<20))
+}
+
+// handlePlaylistCover serves a user playlist's custom cover file. Registered
+// unauthenticated (see binary_huma.go's registerBinaryRoutes and
+// GetUserPlaylistCoverPath's doc comment) so a plain <img src> works the same
+// way it does for every other image endpoint in the app. Unlike the
+// resized/cached media images, this is a small, rarely-resized custom upload
+// — served as-is (no imageserve.Resizer) with a short private Cache-Control
+// so a re-upload is picked up quickly instead of riding the resizer's
+// week-long immutable cache.
+func handlePlaylistCover(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		path, err := app.GetUserPlaylistCoverPath(r.Context(), 0, id)
+		if err != nil || path == "" {
+			http.NotFound(w, r)
+			return
+		}
+		f, openErr := os.Open(path) //nolint:gosec // path is DataDir-joined, not user-controlled
+		if openErr != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer func() { _ = f.Close() }()
+		stat, _ := f.Stat()
+
+		ct := mime.TypeByExtension(filepath.Ext(path))
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Cache-Control", "private, max-age=300")
+		http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
+	}
 }

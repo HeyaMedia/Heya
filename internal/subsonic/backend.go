@@ -42,13 +42,9 @@ type Backend interface {
 	SubsonicTrackIDsByGenre(ctx context.Context, genre string, limit, offset int32) ([]int64, error)
 
 	// Per-user state.
-	ListUserLovedTrackIDs(ctx context.Context, userID int64) ([]int64, error)
-	ListUserLovedArtistIDs(ctx context.Context, userID int64) ([]int64, error)
-	ListUserLovedAlbumIDs(ctx context.Context, userID int64) ([]int64, error)
-	ListUserLovedTracks(ctx context.Context, userID int64, limit, offset int32) (*service.MusicListPage[sqlc.ListUserLovedTracksRow], error)
-	ListUserLovedArtists(ctx context.Context, userID int64, limit, offset int32) (*service.MusicListPage[sqlc.ListUserLovedArtistsRow], error)
-	ListUserLovedAlbums(ctx context.Context, userID int64, limit, offset int32) (*service.MusicListPage[sqlc.ListUserLovedAlbumsRow], error)
-	SetEntityLoved(ctx context.Context, userID int64, entityType string, entityID int64, loved bool) (bool, error)
+	ListUserRatedTracks(ctx context.Context, userID int64, minRating int16, limit, offset int32) (*service.MusicListPage[sqlc.ListUserRatedTracksRow], error)
+	ListUserRatedArtists(ctx context.Context, userID int64, minRating int16, limit, offset int32) (*service.MusicListPage[sqlc.ListUserRatedArtistsRow], error)
+	ListUserRatedAlbums(ctx context.Context, userID int64, minRating int16, limit, offset int32) (*service.MusicListPage[sqlc.ListUserRatedAlbumsRow], error)
 	SetUserTrackRating(ctx context.Context, userID, trackID int64, rating int16) error
 	SetUserAlbumRating(ctx context.Context, userID, albumID int64, rating int16) error
 	SetUserArtistRating(ctx context.Context, userID, artistID int64, rating int16) error

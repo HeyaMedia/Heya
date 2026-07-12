@@ -561,7 +561,7 @@ async function onSaveAsPlaylist() {
     for (const t of builtTracks.value) {
       await playlistsApi.addTrack(created.id, t.track_id)
     }
-    navigateTo(`/music/playlist/${created.id}`)
+    navigateTo(`/music/playlist/${created.slug || created.id}`)
   } catch {
     buildError.value = 'Could not save playlist.'
   }

@@ -21,9 +21,12 @@
         subtitle="Ranked by your taste"
         :items="forYouItems"
         :context-items="contextItemsFor"
-        more="See all"
+        :has-more="forYouQuery.hasNextPage.value || forYouQuery.asyncStatus.value === 'loading'"
+        :loading-more="forYouQuery.asyncStatus.value === 'loading'"
+        more="Show all"
         @tile="go"
         @more="navigateTo(section === 'movie' ? '/movies/recommendations' : '/tv/recommendations')"
+        @load-more="loadMoreForYou"
       />
 
       <ContentRow
@@ -32,7 +35,13 @@
         :subtitle="section === 'tv' ? 'New shows, seasons & episodes' : 'Across all libraries'"
         :items="recentAdded"
         :context-items="contextItemsFor"
+        :has-more="recentAddedHasMore"
+        :loading-more="recentAddedLoading"
+        show-added
+        more="Show all"
         @tile="go"
+        @more="navigateTo(section === 'movie' ? '/movies/all?sort=added' : '/tv/all?sort=added')"
+        @load-more="loadMoreRecentAdded"
       />
 
       <ContentRow
@@ -41,15 +50,17 @@
         subtitle="Pick up where you left off"
         :items="recentWatched"
         :context-items="contextItemsFor"
+        :has-more="recentWatchedHasMore"
+        :loading-more="recentWatchedLoading"
         @tile="go"
+        @load-more="loadMoreRecentWatched"
       />
 
-      <ContentRow
+      <DiscoveryRail
         v-for="rail in rails"
         :key="rail.key"
-        :title="rail.title"
-        :subtitle="rail.subtitle"
-        :items="toRow(rail.items)"
+        :section="section"
+        :rail="rail"
         :context-items="contextItemsFor"
         @tile="go"
       />
@@ -65,9 +76,20 @@
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { continueWatchingQuery } from '~/queries/activity'
+import {
+  forYouInfinite,
+  recentEpisodesInfinite,
+  recentMediaInfinite,
+  recentTVInfinite,
+  recentWatchedInfinite,
+  type Rail,
+  type RailItem,
+  type RecentEpisodeRow,
+  type RecentTVEntry,
+} from '~/queries/rails'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
@@ -77,19 +99,8 @@ const invalidateContinueWatching = useInvalidateContinueWatching()
 const { buildItems: buildCardCtxItems } = useCardContextItems()
 
 // Server-ranked discovery rails (genre/actor affinity, top-unwatched,
-// rediscover, local TMDB recs). One typed shape mirroring service.RecRailItem.
-interface RailItem {
-  id: number
-  title: string
-  slug: string
-  year?: string
-  sub?: string
-  media_type: string
-  rating?: number
-  available: boolean
-}
-interface Rail { key: string; title: string; subtitle?: string; items: RailItem[] }
-
+// rediscover, local TMDB recs). The bundle gives each rail its 24-item head;
+// DiscoveryRail pages the rest on demand.
 const railsQuery = useQuery({
   key: () => ['recommended', props.section],
   query: async () => (await $heya('/api/me/recommended/{section}', {
@@ -99,50 +110,36 @@ const railsQuery = useQuery({
 })
 const rails = computed<Rail[]>(() => railsQuery.data.value?.rails ?? [])
 
-// Personalized "For You" — the taste-vector + TMDB-graph engine, section-scoped.
-const forYouQuery = useQuery({
-  key: () => ['for-you', props.section],
-  query: async () => (await $heya('/api/me/recommendations', {
-    query: { type: props.section, limit: 20 },
-  })) as { items: RailItem[]; has_signal: boolean },
-  staleTime: 1000 * 60 * 5,
-})
-const forYouItems = computed<MediaItem[]>(() => toRow(forYouQuery.data.value?.items ?? []))
+// Personalized "For You" — the taste-vector + TMDB-graph engine, section-scoped
+// and offset-paged (depth ends at the engine's re-rank pool).
+const forYouQuery = useInfiniteQuery(() => forYouInfinite(props.section))
+const forYouItems = computed<MediaItem[]>(() =>
+  toRow((forYouQuery.data.value?.pages ?? []).flatMap(p => p.items as RailItem[])))
+const loadMoreForYou = railLoadMore(forYouQuery)
 
 // ── Recently Added ────────────────────────────────────────────────────────
 // The TV rail is Plex-style grouped file arrivals (new show / season / episode);
-// movies are a flat newest-first list. Shares query keys with the home page so
-// the caches are warm across navigation.
-interface RecentTVEntry {
-  media_item_id: number
-  title: string
-  slug: string
-  kind: 'series' | 'season' | 'episodes' | 'episode'
-  season_number: number
-  episode_number: number
-  episode_title?: string
-  season_count: number
-  episode_count: number
-  added_at: string
-}
-
-const recentMoviesQuery = useQuery({
-  key: ['media', 'recent', 'movie'],
-  query: async () => (await $heya('/api/media', { query: { type: 'movie', sort: 'added', limit: 24 } })) as MediaItem[],
-  staleTime: 1000 * 60,
+// movies are a flat newest-first list. Both infinite: page 0 is the cheap
+// recent window, deeper pages walk the full arrival history. Query keys are
+// shared with the home page so caches stay warm across navigation.
+const recentMoviesQuery = useInfiniteQuery(() => ({
+  ...recentMediaInfinite('movie'),
   enabled: props.section === 'movie',
-})
-const recentTVQuery = useQuery({
-  key: ['media', 'recent', 'tv'],
-  query: async () => (await $heya('/api/media/tv/recently-added', { query: { limit: 24 } })) as RecentTVEntry[],
-  staleTime: 1000 * 60,
+}))
+const recentTVQuery = useInfiniteQuery(() => ({
+  ...recentTVInfinite(),
   enabled: props.section === 'tv',
-})
+}))
+const recentAddedHasMore = computed(() => (props.section === 'movie' ? recentMoviesQuery : recentTVQuery).hasNextPage.value)
+const recentAddedLoading = computed(() => (props.section === 'movie' ? recentMoviesQuery : recentTVQuery).asyncStatus.value === 'loading')
 
 const recentAdded = computed<MediaItem[]>(() => {
-  if (props.section === 'movie') return recentMoviesQuery.data.value ?? []
-  return (recentTVQuery.data.value ?? []).map(tvEntryToRowItem)
+  if (props.section === 'movie') return (recentMoviesQuery.data.value?.pages ?? []).flat()
+  return (recentTVQuery.data.value?.pages ?? []).flat().map(tvEntryToRowItem)
 })
+const loadMoreRecentMovies = railLoadMore(recentMoviesQuery)
+const loadMoreRecentTV = railLoadMore(recentTVQuery)
+const loadMoreRecentAdded = () => (props.section === 'movie' ? loadMoreRecentMovies() : loadMoreRecentTV())
 
 // ── Continue Watching / Recently Watched ──────────────────────────────────
 const continueQuery = useQuery(continueWatchingQuery())
@@ -150,42 +147,31 @@ const continueItems = computed<ContinueWatchingItem[]>(() =>
   (continueQuery.data.value ?? []).filter(i => mediaTypeInSection(i.media_type, props.section)),
 )
 
-// Movies: one tile per watched movie (/watch/recent, deduped to the item).
-const recentMoviesWatchedQuery = useQuery({
-  key: ['me', 'watch', 'recent'],
-  query: async () => (await $heya('/api/me/watch/recent')) as Array<{
-    media_item_id: number; title: string; slug: string; media_type: string
-  }>,
-  staleTime: 1000 * 30,
+// Movies: one tile per watched movie (deduped to the item). TV: one tile per
+// watched EPISODE, each painted with the show's poster and an "S02E03 · Title"
+// subtitle. Both page back through the full watch history.
+const recentMoviesWatchedQuery = useInfiniteQuery(() => ({
+  ...recentWatchedInfinite(),
   enabled: props.section === 'movie',
-})
-
-// TV: one tile per watched EPISODE (not deduped to the show), each painted with
-// the show's poster and an "S02E03 · Title" subtitle.
-interface RecentEpisode {
-  episode_id: number
-  media_item_id: number
-  series_title: string
-  series_slug: string
-  season_number: number
-  episode_number: number
-  episode_title: string
-}
-const recentEpisodesQuery = useQuery({
-  key: ['me', 'watch', 'recent-episodes'],
-  query: async () => (await $heya('/api/me/watch/recent-episodes')) as RecentEpisode[],
-  staleTime: 1000 * 30,
+}))
+const recentEpisodesQuery = useInfiniteQuery(() => ({
+  ...recentEpisodesInfinite(),
   enabled: props.section === 'tv',
-})
+}))
+const recentWatchedHasMore = computed(() => (props.section === 'movie' ? recentMoviesWatchedQuery : recentEpisodesQuery).hasNextPage.value)
+const recentWatchedLoading = computed(() => (props.section === 'movie' ? recentMoviesWatchedQuery : recentEpisodesQuery).asyncStatus.value === 'loading')
 
 const recentWatched = computed<MediaItem[]>(() => {
   if (props.section === 'movie') {
-    return (recentMoviesWatchedQuery.data.value ?? [])
+    return (recentMoviesWatchedQuery.data.value?.pages ?? []).flat()
       .filter(r => r.media_type === 'movie')
       .map(r => ({ id: r.media_item_id, title: r.title, slug: r.slug, media_type: r.media_type, available: true } as unknown as MediaItem))
   }
-  return (recentEpisodesQuery.data.value ?? []).map(episodeToRowItem)
+  return (recentEpisodesQuery.data.value?.pages ?? []).flat().map(episodeToRowItem)
 })
+const loadMoreWatchedMovies = railLoadMore(recentMoviesWatchedQuery)
+const loadMoreWatchedEpisodes = railLoadMore(recentEpisodesQuery)
+const loadMoreRecentWatched = () => (props.section === 'movie' ? loadMoreWatchedMovies() : loadMoreWatchedEpisodes())
 
 const userListsQuery = useQuery(userListsOptions())
 const moviesStateQuery = useQuery(() => ({ ...movieUserStateQuery(), enabled: props.section === 'movie' }))
@@ -253,7 +239,7 @@ function contextItemsFor(item: MediaItem) {
 
 // Watched episode → rail card: show poster (media_item_id) + episode subtitle;
 // `key` is the episode id so the same show can appear once per watched episode.
-function episodeToRowItem(e: RecentEpisode): MediaItem {
+function episodeToRowItem(e: RecentEpisodeRow): MediaItem {
   const code = `S${String(e.season_number).padStart(2, '0')}E${String(e.episode_number).padStart(2, '0')}`
   return {
     id: e.media_item_id,
@@ -269,7 +255,7 @@ function episodeToRowItem(e: RecentEpisode): MediaItem {
 
 const loading = computed(() =>
   railsQuery.isPending.value
-  || (props.section === 'movie' ? recentMoviesQuery.isPending.value : recentTVQuery.isPending.value),
+  || (props.section === 'movie' ? recentMoviesQuery : recentTVQuery).isPending.value,
 )
 const isEmpty = computed(() =>
   !continueItems.value.length && !upNextItems.value.length && !recentAdded.value.length
@@ -281,7 +267,7 @@ const isEmpty = computed(() =>
 // useUpNext dedupes to unique series internally, so several watched episodes of
 // one show still yield a single Up Next tile.
 const { upNextItems } = useUpNext(() => props.section === 'tv'
-  ? (recentEpisodesQuery.data.value ?? []).map(e => ({
+  ? (recentEpisodesQuery.data.value?.pages ?? []).flat().map(e => ({
     media_item_id: e.media_item_id, title: e.series_title, slug: e.series_slug, media_type: 'tv',
   }))
   : [])
@@ -299,7 +285,8 @@ function go(item: MediaItem | RailItem) {
 }
 
 // Grouped TV event → rail card. Poster is the show's; the subtitle carries the
-// event; `key` keeps v-for happy when one show has two event cards.
+// event; `key` keeps v-for happy when one show has two event cards. added_at
+// feeds the "3d ago" corner chip on the Recently Added rail.
 function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
   return {
     id: e.media_item_id,
@@ -309,6 +296,7 @@ function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
     sub: tvEntrySub(e),
     media_type: 'tv',
     slug: e.slug,
+    added_at: e.added_at,
     available: true,
   } as unknown as MediaItem
 }

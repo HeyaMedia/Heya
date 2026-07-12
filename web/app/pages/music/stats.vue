@@ -1,6 +1,6 @@
 <template>
   <div class="page-pad ys-page">
-    <MusicPageHead title="Your Sound">
+    <MusicPageHead title="My Sound">
       <template #subtitle>
         <span>A picture of your listening, derived by joining every scrobble against the sonic-analysis facets.</span>
         <template v-if="stats">
@@ -12,11 +12,9 @@
 
     <div v-if="loading" class="m-loading">Loading…</div>
 
-    <div v-else-if="!stats || stats.total_plays === 0" class="ys-empty">
-      <Icon name="music" :size="40" class="m-empty-icon" />
-      <h3>No listening data yet</h3>
-      <p>Play a few tracks for at least 30 seconds each and this page will fill in. Stats refresh once a minute.</p>
-    </div>
+    <MusicEmptyState v-else-if="!stats || stats.total_plays === 0" icon="chart" title="No listening data yet">
+      Play a few tracks for at least 30 seconds each and this page will fill in. Stats refresh once a minute.
+    </MusicEmptyState>
 
     <div v-else class="ys-grid">
       <!-- Top genres — horizontal bars ranked by play count -->
@@ -130,17 +128,11 @@ function tempoLabel(band: string) {
 <style scoped>
 .ys-page { padding-bottom: 80px; max-width: 1100px; }
 .dot { opacity: 0.4; }
-.m-loading { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
-
-.ys-empty {
-  display: flex; flex-direction: column; align-items: center;
-  text-align: center; padding: 80px 0;
+.m-loading {
   color: var(--fg-2);
-  gap: 8px;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  padding: 24px 0; font-size: 13px;
 }
-.ys-empty h3 { font-size: 18px; font-weight: 600; color: var(--fg-1); margin-top: 8px; }
-.ys-empty p { font-size: 13px; max-width: 420px; color: var(--fg-3); }
-.m-empty-icon { color: var(--fg-3); }
 
 .ys-grid {
   display: grid;

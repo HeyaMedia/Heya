@@ -75,7 +75,7 @@ async function onSaveAsPlaylist() {
     for (const t of props.tracks) {
       await playlistsApi.addTrack(created.id, t.track_id)
     }
-    navigateTo(`/music/playlist/${created.id}`)
+    navigateTo(`/music/playlist/${created.slug || created.id}`)
   } catch {
     saveError.value = 'Could not save playlist.'
   }

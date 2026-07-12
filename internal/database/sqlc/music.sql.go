@@ -2596,15 +2596,23 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
-       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available
+       EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available,
+       -- When the album's files actually landed (albums carry no created_at
+       -- of their own) — feeds the "3d ago" chip on the Recently Added rail.
+       (SELECT MIN(lf.created_at) FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id)::timestamptz AS added_at
 FROM (
-  SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits FROM albums ORDER BY id DESC LIMIT $1
+  SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits FROM albums ORDER BY id DESC LIMIT $2 OFFSET $1
 ) al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.media_type = 'music'
 ORDER BY al.id DESC
 `
+
+type ListRecentlyAddedAlbumsParams struct {
+	Off int32 `json:"off"`
+	Lim int32 `json:"lim"`
+}
 
 type ListRecentlyAddedAlbumsRow struct {
 	ID                 int64              `json:"id"`
@@ -2646,6 +2654,7 @@ type ListRecentlyAddedAlbumsRow struct {
 	ArtistSlug         string             `json:"artist_slug"`
 	TrackCount         int64              `json:"track_count"`
 	Available          bool               `json:"available"`
+	AddedAt            pgtype.Timestamptz `json:"added_at"`
 }
 
 // Newest albums across every music library. Newest = highest album id since
@@ -2654,8 +2663,8 @@ type ListRecentlyAddedAlbumsRow struct {
 // EXISTS below a cheap per-row probe — without it the planner hashes the
 // entire track_files x library_files join (measured 1.26s vs 1.9ms). Keep the
 // outer ORDER BY: plan-order preservation through the joins is not guaranteed.
-func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, limit int32) ([]ListRecentlyAddedAlbumsRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyAddedAlbums, limit)
+func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, arg ListRecentlyAddedAlbumsParams) ([]ListRecentlyAddedAlbumsRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyAddedAlbums, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -2703,6 +2712,7 @@ func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, limit int32) ([]L
 			&i.ArtistSlug,
 			&i.TrackCount,
 			&i.Available,
+			&i.AddedAt,
 		); err != nil {
 			return nil, err
 		}

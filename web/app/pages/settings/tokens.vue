@@ -118,6 +118,21 @@ function wasUsed(t: ApiToken): boolean {
   return new Date(t.last_seen_at).getTime() > new Date(t.created_at).getTime() + 5000
 }
 
+function expiresWithin(t: ApiToken, days: number): boolean {
+  if (!t.expires_at) return false
+  const remaining = new Date(t.expires_at).getTime() - Date.now()
+  return remaining > 0 && remaining <= days * 86400000
+}
+
+function isExpired(t: ApiToken): boolean {
+  return !!t.expires_at && new Date(t.expires_at).getTime() <= Date.now()
+}
+
+const usedCount = computed(() => tokens.value.filter(wasUsed).length)
+const neverExpiresCount = computed(() => tokens.value.filter(token => !token.expires_at).length)
+const expiringSoonCount = computed(() => tokens.value.filter(token => expiresWithin(token, 30)).length)
+const expiredCount = computed(() => tokens.value.filter(isExpired).length)
+
 </script>
 
 <template>
@@ -131,7 +146,20 @@ function wasUsed(t: ApiToken): boolean {
       </p>
     </header>
 
-    <SettingsSection title="Active tokens" icon="key">
+    <div class="token-summary-grid">
+      <MetricTile label="Active tokens" :value="tokens.length" icon="key" :tone="tokens.length ? 'neutral' : 'good'" />
+      <MetricTile label="Used" :value="usedCount" icon="pulse" :sub="tokens.length ? `${tokens.length - usedCount} never used` : 'none'" />
+      <MetricTile label="Never expires" :value="neverExpiresCount" icon="timer" :tone="neverExpiresCount > 3 ? 'warn' : 'neutral'" />
+      <MetricTile
+        label="Expiring soon"
+        :value="expiringSoonCount"
+        icon="warning"
+        :tone="expiredCount ? 'bad' : expiringSoonCount ? 'warn' : 'good'"
+        :sub="expiredCount ? `${expiredCount} already expired` : 'within 30 days'"
+      />
+    </div>
+
+    <SettingsSection title="Credentials" icon="key" description="Tokens inherit your current account permissions. Use a separate token for each app so it can be revoked independently.">
       <template #actions>
         <button class="sv2-btn primary" @click="openCreate">
           <Icon name="plus" :size="13" />
@@ -152,7 +180,12 @@ function wasUsed(t: ApiToken): boolean {
         <div v-for="t in tokens" :key="t.id" class="token-card">
           <div class="token-icon"><Icon name="key" :size="16" /></div>
           <div class="token-body">
-            <div class="token-name">{{ t.name }}</div>
+            <div class="token-name-row">
+              <span class="token-name">{{ t.name }}</span>
+              <StatusBadge :state="isExpired(t) ? 'error' : wasUsed(t) ? 'ok' : 'idle'">
+                {{ isExpired(t) ? 'expired' : wasUsed(t) ? 'active' : 'unused' }}
+              </StatusBadge>
+            </div>
             <div class="token-meta">
               <span>Created {{ timeAgo(t.created_at) }}</span>
               <span v-if="wasUsed(t)">· last used {{ timeAgo(t.last_seen_at) }}</span>
@@ -232,6 +265,12 @@ function wasUsed(t: ApiToken): boolean {
 </template>
 
 <style scoped>
+.token-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
 .empty-state {
   display: flex; align-items: center; gap: 8px;
   color: var(--fg-3); font-size: 13px;
@@ -259,8 +298,9 @@ function wasUsed(t: ApiToken): boolean {
   flex-shrink: 0;
 }
 .token-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.token-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .token-name { font-size: 14px; font-weight: 500; color: var(--fg-0); }
-.token-meta { font-size: 11.5px; color: var(--fg-3); display: flex; flex-wrap: wrap; gap: 6px; }
+.token-meta { font-size: 11.5px; color: var(--fg-2); display: flex; flex-wrap: wrap; gap: 6px; }
 
 .token-revoke {
   width: 28px; height: 28px;
@@ -342,5 +382,14 @@ function wasUsed(t: ApiToken): boolean {
   transition: border-color 0.12s;
 }
 .sv2-input:focus { outline: none; border-color: var(--gold); background: var(--bg-1); }
+
+@media (max-width: 900px) {
+  .token-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .token-card { padding: 13px 12px; }
+  .token-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .token-icon { display: none; }
+}
 
 </style>

@@ -269,25 +269,34 @@ func (q *Queries) ListFavoritedMediaItemIDs(ctx context.Context, userID int64) (
 }
 
 const listRecentlyWatched = `-- name: ListRecentlyWatched :many
-SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
-       wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
-       COALESCE(mi.id, ep_mi.id) AS media_item_id,
-       COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
-       COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
-       COALESCE(mi.title, ep_mi.title) AS title,
-       COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
-       COALESCE(mi.slug, ep_mi.slug) AS slug,
-       COALESCE(mi.media_type, ep_mi.media_type)::text AS media_type
-FROM user_watch_progress wp
-LEFT JOIN media_item_cards mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
-LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
-LEFT JOIN tv_seasons s ON ep.season_id = s.id
-LEFT JOIN tv_series ts ON s.series_id = ts.id
-LEFT JOIN media_item_cards ep_mi ON ts.media_item_id = ep_mi.id
-WHERE wp.user_id = $1 AND wp.completed = true
-ORDER BY COALESCE(mi.id, ep_mi.id), wp.updated_at DESC
-LIMIT 20
+SELECT id, entity_type, entity_id, updated_at, media_item_id, media_item_public_id, library_id, title, poster_path, slug, media_type FROM (
+  SELECT DISTINCT ON (COALESCE(mi.id, ep_mi.id))
+         wp.id, wp.entity_type, wp.entity_id, wp.updated_at,
+         COALESCE(mi.id, ep_mi.id) AS media_item_id,
+         COALESCE(mi.public_id, ep_mi.public_id) AS media_item_public_id,
+         COALESCE(mi.library_id, ep_mi.library_id) AS library_id,
+         COALESCE(mi.title, ep_mi.title) AS title,
+         COALESCE(mi.poster_path, ep_mi.poster_path) AS poster_path,
+         COALESCE(mi.slug, ep_mi.slug) AS slug,
+         COALESCE(mi.media_type, ep_mi.media_type)::text AS media_type
+  FROM user_watch_progress wp
+  LEFT JOIN media_item_cards mi ON wp.entity_type = 'movie' AND mi.id = wp.entity_id
+  LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
+  LEFT JOIN tv_seasons s ON ep.season_id = s.id
+  LEFT JOIN tv_series ts ON s.series_id = ts.id
+  LEFT JOIN media_item_cards ep_mi ON ts.media_item_id = ep_mi.id
+  WHERE wp.user_id = $1 AND wp.completed = true
+  ORDER BY COALESCE(mi.id, ep_mi.id), wp.updated_at DESC
+) deduped
+ORDER BY deduped.updated_at DESC
+LIMIT $3 OFFSET $2
 `
+
+type ListRecentlyWatchedParams struct {
+	UserID int64 `json:"user_id"`
+	Off    int32 `json:"off"`
+	Lim    int32 `json:"lim"`
+}
 
 type ListRecentlyWatchedRow struct {
 	ID                int64              `json:"id"`
@@ -303,9 +312,13 @@ type ListRecentlyWatchedRow struct {
 	MediaType         string             `json:"media_type"`
 }
 
-// Recently watched (completed items)
-func (q *Queries) ListRecentlyWatched(ctx context.Context, userID int64) ([]ListRecentlyWatchedRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyWatched, userID)
+// Recently watched (completed items). DISTINCT ON dedupes to one row per
+// media item (the newest watch); the outer ORDER BY restores recency order —
+// DISTINCT ON forces the inner sort to lead with the distinct key, which is
+// id order, not watch order. Recency order also makes OFFSET paging walk
+// backwards through watch history, which is what the infinite rail wants.
+func (q *Queries) ListRecentlyWatched(ctx context.Context, arg ListRecentlyWatchedParams) ([]ListRecentlyWatchedRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyWatched, arg.UserID, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -353,8 +366,14 @@ JOIN tv_series ts ON ts.id = s.series_id
 JOIN media_item_cards ep_mi ON ep_mi.id = ts.media_item_id
 WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND wp.completed = true
 ORDER BY wp.updated_at DESC
-LIMIT 24
+LIMIT $3 OFFSET $2
 `
+
+type ListRecentlyWatchedEpisodesParams struct {
+	UserID int64 `json:"user_id"`
+	Off    int32 `json:"off"`
+	Lim    int32 `json:"lim"`
+}
 
 type ListRecentlyWatchedEpisodesRow struct {
 	EpisodeID         int64              `json:"episode_id"`
@@ -373,8 +392,8 @@ type ListRecentlyWatchedEpisodesRow struct {
 // Watched" rail shows one tile per episode, each painted with the show's poster
 // (media_item_id) and an "S02E03 · Title" subtitle. Distinct from
 // ListRecentlyWatched, which collapses to one row per media item.
-func (q *Queries) ListRecentlyWatchedEpisodes(ctx context.Context, userID int64) ([]ListRecentlyWatchedEpisodesRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyWatchedEpisodes, userID)
+func (q *Queries) ListRecentlyWatchedEpisodes(ctx context.Context, arg ListRecentlyWatchedEpisodesParams) ([]ListRecentlyWatchedEpisodesRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyWatchedEpisodes, arg.UserID, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

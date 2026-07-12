@@ -1,10 +1,12 @@
 <template>
   <div class="page-pad">
-    <MusicPageHead title="My Albums" />
+    <MusicPageHead title="My Albums">
+      <template #subtitle>{{ rows.length }} albums you've rated</template>
+    </MusicPageHead>
     <div v-if="pending" class="m-loading">Loading…</div>
-    <div v-else-if="!rows.length" class="m-empty">
-      No favorited albums yet — tap the heart on an album page to add it here.
-    </div>
+    <MusicEmptyState v-else-if="!rows.length" icon="heart" title="No rated albums yet">
+      Tap the stars on an album page — anything 1★+ lands here. Start from <NuxtLink to="/music/albums">Albums</NuxtLink>.
+    </MusicEmptyState>
     <div v-else class="grid-posters m-grid">
       <AppContextMenu
         v-for="al in rows"
@@ -13,14 +15,16 @@
       >
       <NuxtLink
         :to="`/music/artist/${al.artist_slug}/${al.slug}`"
-        class="grid-tile card-tile"
+        class="grid-tile"
         style="text-decoration: none; color: inherit"
       >
-        <Poster :idx="al.id" :src="useAlbumCoverUrl(al.artist_slug, al.slug)" aspect="1/1" />
-        <div class="grid-tile-meta">
-          <div class="grid-tile-title">{{ al.title }}</div>
-          <div class="grid-tile-sub">{{ al.artist_name }}{{ al.year ? ' · ' + al.year : '' }}</div>
-        </div>
+        <MusicCard
+          :src="useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined"
+          :alt="al.title"
+          :title="al.title"
+          :subtitle="al.artist_name + (al.year ? ' · ' + al.year : '')"
+          @play="playAlbum(al)"
+        />
       </NuxtLink>
       </AppContextMenu>
     </div>
@@ -28,27 +32,51 @@
 </template>
 
 <script setup lang="ts">
-import type { MusicAlbumRow, MusicListPage } from '~~/shared/types'
+import type { Track } from '~/composables/usePlayer'
+import type { LovedAlbumRow } from '~/queries/music'
 import { useQuery } from '@pinia/colada'
+import { lovedAlbumsQuery, musicAlbumDetailQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
-interface LovedAlbumRow extends MusicAlbumRow { loved_at: string }
-
-const { $heya } = useNuxtApp()
+const { play, queue } = usePlayerBindings()
 const actions = useMusicActions()
-const myAlbumsQuery = useQuery({
-  key: ['me', 'loved', 'albums', { limit: 500 }],
-  query: async () => (await $heya('/api/me/ratings/albums', { query: { min_rating: 1, limit: 500 } })) as unknown as MusicListPage<LovedAlbumRow>,
-  staleTime: 1000 * 30,
-})
+const loadQuery = useQueryLoader()
+const myAlbumsQuery = useQuery(lovedAlbumsQuery(500))
 await waitForQuery(myAlbumsQuery)
 const pending = computed(() => myAlbumsQuery.isPending.value)
 const rows = computed(() => myAlbumsQuery.data.value?.items ?? [])
+
+// Mirrors playLovedAlbum in my/index.vue — load the album's tracks on demand
+// (the list row doesn't carry them) and queue+play the ones still on disk.
+async function playAlbum(al: LovedAlbumRow) {
+  try {
+    const detail = await loadQuery(musicAlbumDetailQuery({ artistSlug: al.artist_slug, albumSlug: al.slug }))
+    const playable = (detail.tracks ?? []).filter((t) => (t.files?.length ?? 0) > 0)
+    if (!playable.length) return
+    const built: Track[] = playable.map((t) => ({
+      id: t.id,
+      title: t.title,
+      artist: al.artist_name,
+      album: al.title,
+      duration: t.duration,
+      stream_url: `/api/music/tracks/${t.id}/stream`,
+      album_id: al.id,
+      artist_slug: al.artist_slug,
+      album_slug: al.slug,
+      poster: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
+      source: 'my-music',
+    }))
+    queue.value = built
+    await play(built[0]!)
+  } catch {
+    // fall through — outer link still navigates
+  }
+}
 </script>
 
 <style scoped>
-.m-loading, .m-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; max-width: 480px; }
+.m-loading { color: var(--fg-2); padding: 24px 0; font-size: 13px; max-width: 480px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 /* Was inline-style grid-template-columns — moved to a scoped class so the
    phone override below can win (media queries can't beat an inline style). */
 .m-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }

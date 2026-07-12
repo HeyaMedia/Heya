@@ -18,6 +18,9 @@ withDefaults(defineProps<{
   badgeTr?: string
   /** Highlight badgeTr in gold (default true). Pass `false` for neutral. */
   badgeTrGold?: boolean
+  /** Bottom-right chip painted on the art (e.g. "3d ago" on Recently Added
+   *  rails). The title/subtitle overlay pads away from it (see .has-br). */
+  badgeBr?: string
   aspect?: string
   /** Width hint forwarded to the NuxtImg densities resolver. */
   width?: number
@@ -37,6 +40,7 @@ withDefaults(defineProps<{
   badgeTl: '',
   badgeTr: '',
   badgeTrGold: true,
+  badgeBr: '',
   aspect: '2/3',
   width: 200,
   progressPct: 0,
@@ -55,11 +59,12 @@ withDefaults(defineProps<{
 
       <div v-if="badgeTl" class="mediac-badge mediac-badge-tl">{{ badgeTl }}</div>
       <div v-if="badgeTr" class="mediac-badge mediac-badge-tr" :class="{ 'mediac-badge-gold': badgeTrGold }">{{ badgeTr }}</div>
+      <div v-if="badgeBr" class="mediac-badge mediac-badge-br">{{ badgeBr }}</div>
       <MediaMissingBadge v-if="missing" />
 
       <slot name="badges" />
 
-      <div class="mediac-info">
+      <div class="mediac-info" :class="{ 'has-br': !!badgeBr }">
         <NuxtLink v-if="titleTo" :to="titleTo" class="mediac-title mediac-title-link" @click.stop>{{ title }}</NuxtLink>
         <div v-else class="mediac-title">{{ title }}</div>
         <div v-if="subtitle" class="mediac-sub">{{ subtitle }}</div>
@@ -104,6 +109,7 @@ withDefaults(defineProps<{
 }
 .mediac-badge-tl { top: 8px; left: 8px; }
 .mediac-badge-tr { top: 8px; right: 8px; }
+.mediac-badge-br { bottom: 10px; right: 8px; }
 /* On artwork — raw accent, not the theme-adjusted --gold alias */
 .mediac-badge-gold { color: var(--accent); }
 
@@ -112,6 +118,8 @@ withDefaults(defineProps<{
   padding: 10px 12px 12px;
   pointer-events: none;
 }
+/* Keep the title/sub text clear of the bottom-right chip. */
+.mediac-info.has-br { padding-right: 60px; }
 .mediac-title {
   font-size: 14px; font-weight: 700; line-height: 1.25;
   color: #fff;

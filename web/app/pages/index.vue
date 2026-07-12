@@ -7,7 +7,7 @@
       :play-info="heroPlayInfo"
       :trailers="heroTrailers"
       :up-next-items="upNextItems"
-      :tv-entries="tvQuery.data.value ?? []"
+      :tv-entries="tvEntries"
       :albums="recentAlbums"
       :artists="recentArtists"
       :pinned-mode="pinnedHeroMode"
@@ -40,10 +40,13 @@
         subtitle="From what you've watched & loved"
         :items="recommendedItems"
         :context-items="homeMediaContextItems"
-        more="See all"
+        :has-more="forYouQuery.hasNextPage.value"
+        :loading-more="forYouQuery.asyncStatus.value === 'loading'"
+        more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @intent="prefetchMediaIntent"
         @more="navigateTo('/movies/recommendations')"
+        @load-more="loadMoreForYou"
       />
 
       <ContentRow
@@ -53,10 +56,14 @@
         subtitle="Across all libraries"
         :items="recentMovies"
         :context-items="homeMediaContextItems"
-        more="See all"
+        :has-more="moviesQuery.hasNextPage.value"
+        :loading-more="moviesQuery.asyncStatus.value === 'loading'"
+        show-added
+        more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @intent="prefetchMediaIntent"
-        @more="navigateTo('/movies')"
+        @more="navigateTo('/movies/all?sort=added')"
+        @load-more="loadMoreMovies"
       />
 
       <ContentRow
@@ -66,10 +73,14 @@
         subtitle="New shows, seasons & episodes"
         :items="recentTVItems"
         :context-items="homeMediaContextItems"
-        more="See all"
+        :has-more="tvQuery.hasNextPage.value"
+        :loading-more="tvQuery.asyncStatus.value === 'loading'"
+        show-added
+        more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @intent="prefetchMediaIntent"
-        @more="navigateTo('/tv')"
+        @more="navigateTo('/tv/all?sort=added')"
+        @load-more="loadMoreTV"
       />
 
       <ContentRow
@@ -81,9 +92,13 @@
         :context-items="homeAlbumContextItems"
         :aspect="'1/1'"
         :tile-width="168"
-        more="See all"
+        :has-more="albumsQuery.hasNextPage.value"
+        :loading-more="albumsQuery.asyncStatus.value === 'loading'"
+        show-added
+        more="Show all"
         @tile="(item) => navigateTo(albumUrl(item))"
         @more="navigateTo('/music/albums')"
+        @load-more="loadMoreAlbums"
       />
 
       <ContentRow
@@ -95,7 +110,8 @@
         :context-items="homeArtistContextItems"
         :aspect="'1/1'"
         :tile-width="168"
-        more="See all"
+        show-added
+        more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @intent="prefetchMediaIntent"
         @more="navigateTo('/music/artists')"
@@ -108,10 +124,14 @@
         subtitle="Across all libraries"
         :items="recentBooks"
         :context-items="homeBookContextItems"
-        more="See all"
+        :has-more="booksQuery.hasNextPage.value"
+        :loading-more="booksQuery.asyncStatus.value === 'loading'"
+        show-added
+        more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @intent="prefetchMediaIntent"
-        @more="navigateTo('/books')"
+        @more="navigateTo('/books?sort=added')"
+        @load-more="loadMoreBooks"
       />
 
       <div v-if="!loading && !hasContent" class="empty-home">
@@ -130,11 +150,19 @@
 import type { ContextMenuItem, MediaItem, MediaDetail, Movie } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
 import { mediaUserStateQuery, movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { mediaDetailQuery, mediaDetailTarget } from '~/queries/media'
 import { continueWatchingQuery as continueWatchingOptions } from '~/queries/activity'
+import {
+  forYouInfinite,
+  recentAlbumsInfinite,
+  recentMediaInfinite,
+  recentTVInfinite,
+  type RecentAlbumRow,
+  type RecentTVEntry,
+} from '~/queries/rails'
 
 const { $heya } = useNuxtApp()
 const queryClient = useQueryCache()
@@ -156,23 +184,8 @@ type ArtistRowItem = MediaItem & { artist_id: number }
 // The TV rail is Plex-style grouped file arrivals, not bare shows: a brand-new
 // show is one "New show" card, a season drop one "New season" card, and a
 // lone episode an episode card. The backend derives the grouping; the FE only
-// formats subtitles.
-interface RecentTVEntry {
-  media_item_id: number
-  media_item_public_id?: string
-  title: string
-  slug: string
-  kind: 'series' | 'season' | 'episodes' | 'episode'
-  season_number: number
-  episode_number: number
-  episode_title?: string
-  season_count: number
-  episode_count: number
-  added_at: string
-  // Kind-resolved: show desc for series/episodes, season overview for
-  // season, episode overview for episode (server falls back to show desc).
-  description?: string
-}
+// formats subtitles. (RecentTVEntry lives in queries/rails.ts, shared with
+// the TV browse landing.)
 
 interface RecentArtistEntry {
   id: number
@@ -189,36 +202,28 @@ interface RecentArtistEntry {
   added_at: string
 }
 
-// One Pinia Colada per rail. Each caches independently so cross-page navigation
-// returns instantly. Event-bus listeners below invalidate by key to refresh.
-const moviesQuery = useQuery({
-  key: ['media', 'recent', 'movie'],
-  query: async () => (await $heya('/api/media', { query: { type: 'movie', sort: 'added', limit: 20 } })) as MediaItem[],
-  staleTime: 1000 * 60,
-})
-const tvQuery = useQuery({
-  key: ['media', 'recent', 'tv'],
-  query: async () => (await $heya('/api/media/tv/recently-added', { query: { limit: 20 } })) as RecentTVEntry[],
-  staleTime: 1000 * 60,
-})
-const booksQuery = useQuery({
-  key: ['media', 'recent', 'book'],
-  query: async () => (await $heya('/api/media', { query: { type: 'book', sort: 'added', limit: 20 } })) as MediaItem[],
-  staleTime: 1000 * 60,
-})
+// One Pinia Colada per rail — infinite where the backend pages (the rail
+// keeps loading as you scroll right), plain where it doesn't (artists, whose
+// grouped events are window-bound). Each caches independently so cross-page
+// navigation returns instantly; event-bus listeners below invalidate by key.
+const moviesQuery = useInfiniteQuery(() => recentMediaInfinite('movie'))
+const tvQuery = useInfiniteQuery(() => recentTVInfinite())
+const booksQuery = useInfiniteQuery(() => recentMediaInfinite('book'))
+const albumsQuery = useInfiniteQuery(() => recentAlbumsInfinite())
+const loadMoreMovies = railLoadMore(moviesQuery)
+const loadMoreTV = railLoadMore(tvQuery)
+const loadMoreBooks = railLoadMore(booksQuery)
+const loadMoreAlbums = railLoadMore(albumsQuery)
+
+// Artists still ride /api/music/home — the grouped new/updated events have
+// no offset semantics (finite rail).
 const musicHomeQuery = useQuery({
-  key: ['home', 'recent-albums'],
+  key: ['home', 'recent-artists'],
   query: async () => {
     const home = await $heya('/api/music/home', { query: { limit: 20 } }) as {
-      recent_albums: Array<{
-        id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string; available?: boolean
-      }>
       recent_artists: RecentArtistEntry[]
     }
-    return {
-      albums: (home.recent_albums ?? []).map(albumToRowItem),
-      artists: (home.recent_artists ?? []).map(artistToRowItem),
-    }
+    return (home.recent_artists ?? []).map(artistToRowItem)
   },
   staleTime: 1000 * 60,
 })
@@ -232,33 +237,31 @@ const recentWatchedQuery = useQuery({
 })
 // Personalized "For You" — the taste-vector + TMDB-graph engine. Excludes
 // seeds (hearts / watched) server-side, so no client-side filtering needed.
-const forYouQuery = useQuery({
-  key: ['for-you', { limit: 20 }],
-  query: async () => (await $heya('/api/me/recommendations', { query: { limit: 20 } })) as {
-    items: { id: number; public_id?: string; title: string; slug: string; year?: string; media_type: string; reason?: string; available: boolean }[]
-    has_signal: boolean
-  },
-  staleTime: 1000 * 60 * 10,
-})
+const forYouQuery = useInfiniteQuery(() => forYouInfinite('all'))
+const loadMoreForYou = railLoadMore(forYouQuery)
 
 const userListsQuery = useQuery(userListsOptions())
 const movieStateQuery = useQuery(movieUserStateQuery())
 const seriesStateQuery = useQuery(seriesUserStateQuery())
 const mediaStateQuery = useQuery(mediaUserStateQuery())
 
-const recentMovies = computed<MediaItem[]>(() => moviesQuery.data.value ?? [])
-const recentBooks = computed<MediaItem[]>(() => booksQuery.data.value ?? [])
-const recentAlbums = computed<AlbumRowItem[]>(() => musicHomeQuery.data.value?.albums ?? [])
-const recentArtists = computed<ArtistRowItem[]>(() => musicHomeQuery.data.value?.artists ?? [])
+const recentMovies = computed<MediaItem[]>(() => (moviesQuery.data.value?.pages ?? []).flat())
+const recentBooks = computed<MediaItem[]>(() => (booksQuery.data.value?.pages ?? []).flat())
+const recentAlbums = computed<AlbumRowItem[]>(() => (albumsQuery.data.value?.pages ?? []).flat().map(albumToRowItem))
+const recentArtists = computed<ArtistRowItem[]>(() => musicHomeQuery.data.value ?? [])
+
+// Flattened grouped-TV events across loaded pages — rail, hero and chips all
+// derive from this one list.
+const tvEntries = computed<RecentTVEntry[]>(() => (tvQuery.data.value?.pages ?? []).flat())
 
 // Rail items: one card per grouped TV event (a show may appear twice).
-const recentTVItems = computed<MediaItem[]>(() => (tvQuery.data.value ?? []).map(tvEntryToRowItem))
+const recentTVItems = computed<MediaItem[]>(() => tvEntries.value.map(tvEntryToRowItem))
 // Deduped MediaItem-ish shows for hero / favorites / recommendations, which
 // think in shows, not events.
 const recentTVShows = computed<MediaItem[]>(() => {
   const seen = new Set<number>()
   const out: MediaItem[] = []
-  for (const e of tvQuery.data.value ?? []) {
+  for (const e of tvEntries.value) {
     if (seen.has(e.media_item_id)) continue
     seen.add(e.media_item_id)
     out.push({
@@ -310,11 +313,9 @@ async function onPinHeroMode(mode: string) {
   } catch { /* localStorage mirror still holds it for this device */ }
 }
 
-// No longer rendered as its own row — kept only so Recommended For You can
-// exclude titles the user already favorited (the Loved sidebar views cover
-// browsing favorites).
+// The home For You rail, flattened across loaded pages.
 const recommendedItems = computed<MediaItem[]>(() =>
-  (forYouQuery.data.value?.items ?? []).map(it => ({
+  (forYouQuery.data.value?.pages ?? []).flatMap(p => p.items).map(it => ({
     id: it.id,
     public_id: it.public_id,
     title: it.title,
@@ -326,14 +327,15 @@ const recommendedItems = computed<MediaItem[]>(() =>
 )
 
 const loading = computed(() =>
-  moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value || musicHomeQuery.isPending.value
+  moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value
+  || albumsQuery.isPending.value || musicHomeQuery.isPending.value
 )
 
 // Chip per TV show: what the newest grouped event for that show was, so the
 // hero slide can say WHY it's featured ("New season", "New episode", …).
 const tvChipByShow = computed<Record<number, string>>(() => {
   const out: Record<number, string> = {}
-  for (const e of tvQuery.data.value ?? []) {
+  for (const e of tvEntries.value) {
     if (out[e.media_item_id]) continue
     out[e.media_item_id]
       = e.kind === 'series' ? 'New show'
@@ -370,10 +372,8 @@ function albumUrl(item: AlbumRowItem | MediaItem) {
 // Normalize a raw recent-album row into the ContentRow item shape. The
 // double cast through unknown is intentional — AlbumRowItem extends MediaItem
 // which has a wide field surface (library_id, sort_title, …) we don't have or
-// need for the rail.
-function albumToRowItem(al: {
-  id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string; available?: boolean
-}): AlbumRowItem {
+// need for the rail. added_at (min file arrival) feeds the corner chip.
+function albumToRowItem(al: RecentAlbumRow): AlbumRowItem {
   return {
     id: al.id,
     title: al.title,
@@ -385,6 +385,7 @@ function albumToRowItem(al: {
     album_slug: al.slug,
     artist_name: al.artist_name,
     available: al.available,
+    added_at: al.added_at,
     poster_src: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
   } as unknown as AlbumRowItem
 }
@@ -404,6 +405,7 @@ function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
     media_type: 'tv',
     slug: e.slug,
     created_at: e.added_at,
+    added_at: e.added_at,
     available: true,
   } as unknown as MediaItem
 }
@@ -441,6 +443,7 @@ function artistToRowItem(ar: RecentArtistEntry): ArtistRowItem {
     media_type: 'music',
     slug: ar.slug,
     artist_id: ar.id,
+    added_at: ar.added_at,
     available: true,
   } as unknown as ArtistRowItem
 }
@@ -629,7 +632,7 @@ useLiveRefresh([
   { events: ['media.added', 'media.updated'], filter: byMediaType('movie'), keys: [['media', 'recent', 'movie']] },
   { events: ['media.added', 'media.updated'], filter: byMediaType('tv', 'anime'), keys: [['media', 'recent', 'tv']] },
   { events: ['media.added', 'media.updated'], filter: byMediaType('book'), keys: [['media', 'recent', 'book']] },
-  { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['home', 'recent-albums']] },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['home', 'recent-albums'], ['home', 'recent-artists']] },
   { events: ['media.watched'], keys: [['me', 'state'], ['me', 'media-state'], ['me', 'watch', 'continue'], ['me', 'watch', 'recent']] },
 ])
 </script>

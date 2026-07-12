@@ -513,7 +513,7 @@ func TestRecommendedTVRailsIncludeAnime(t *testing.T) {
 		t.Fatalf("creating tv recommendation: %v", err)
 	}
 
-	topRated, err := qtx.ListTopRatedTV(ctx, 10)
+	topRated, err := qtx.ListTopRatedTV(ctx, sqlc.ListTopRatedTVParams{Lim: 10})
 	if err != nil {
 		t.Fatalf("listing top rated tv: %v", err)
 	}

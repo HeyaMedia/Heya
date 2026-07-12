@@ -68,6 +68,7 @@ WITH last_per_playlist AS (
 )
 SELECT up.id,
        up.name,
+       up.slug,
        up.description,
        up.cover_path,
        up.created_at,

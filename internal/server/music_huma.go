@@ -261,9 +261,9 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[sqlc.UserPlaylist]{Body: pl}, nil
 		})
 
-	huma.Register(api, secured(op(http.MethodGet, "/api/me/playlists/{id}", "get-playlist", "Playlist detail with tracks", "Me")),
-		func(ctx context.Context, in *IDPath) (*JSONOutput[*service.PlaylistDetail], error) {
-			detail, err := app.GetUserPlaylistDetail(ctx, userFrom(ctx).ID, in.ID)
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/playlists/{id}", "get-playlist", "Playlist detail with tracks (numeric ID or slug)", "Me")),
+		func(ctx context.Context, in *SlugOrIDPath) (*JSONOutput[*service.PlaylistDetail], error) {
+			detail, err := app.GetUserPlaylistDetailByRef(ctx, userFrom(ctx).ID, in.ID)
 			if err != nil {
 				return nil, huma.Error404NotFound(err.Error())
 			}
@@ -287,6 +287,35 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return nil, nil
+		})
+
+	// Cover upload/clear are mutations, so they stay owner-scoped under the
+	// normal /api/me bearer wrapper. The matching GET (raw image bytes) is
+	// registered unauthenticated in binary_huma.go instead — see
+	// GetUserPlaylistCoverPath's doc comment for why.
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/playlists/{id}/cover", "upload-playlist-cover", "Upload a custom playlist cover", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			RawBody huma.MultipartFormFiles[playlistCoverUploadForm]
+		}) (*StatusOutput, error) {
+			data := in.RawBody.Data()
+			if !data.File.IsSet {
+				return nil, huma.Error400BadRequest("file field required")
+			}
+			defer func() { _ = data.File.Close() }()
+
+			if err := app.SetUserPlaylistCover(ctx, userFrom(ctx).ID, in.ID, data.File, data.File.Filename); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("uploaded"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodDelete, "/api/me/playlists/{id}/cover", "clear-playlist-cover", "Remove the custom playlist cover", "Me")),
+		func(ctx context.Context, in *IDPath) (*StatusOutput, error) {
+			if err := app.ClearUserPlaylistCover(ctx, userFrom(ctx).ID, in.ID); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return statusOK("cleared"), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodPost, "/api/me/playlists/{id}/tracks/{track_id}", "add-playlist-track", "Append a track to a playlist", "Me")),

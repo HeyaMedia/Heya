@@ -3,40 +3,50 @@
     <SectionHeader :title="title" :subtitle="subtitle">
       <template #actions>
         <button v-if="more" class="more" @click="$emit('more')">{{ more }}</button>
-        <button class="scroll-btn" aria-label="Scroll left" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
-        <button class="scroll-btn" aria-label="Scroll right" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll left" @click="scrollByDir(-1)"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll right" @click="scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
-    <div class="row-scroll" ref="scrollEl">
-      <AppContextMenu
-        v-for="(item, i) in items"
-        :key="item.key ?? item.id"
-        :items="contextMenuItems(item)"
-        :disabled="!contextItems || contextMenuItems(item).length === 0"
-      >
-        <div
-          class="card-tile"
-          :class="{ unavailable: item.available === false }"
-          :style="{ width: `${tileWidth || 168}px`, flexShrink: 0 }"
-          @click="item.available !== false && $emit('tile', item)"
-          @keydown.enter.prevent="item.available !== false && $emit('tile', item)"
-          @pointerenter="scheduleIntent(item)"
-          @pointerleave="cancelIntent"
-          @focus="signalIntent(item)"
-          @pointerdown="signalIntent(item)"
-          :tabindex="item.available === false ? -1 : 0"
-          role="link"
+    <div ref="scrollEl" class="row-scroll" @scroll.passive="onScroll">
+      <!-- Virtualized track: only the tiles inside the viewport (± overscan)
+           exist in the DOM; each is absolutely positioned at its slot. The
+           track's fixed width keeps the scrollbar honest for the full item
+           count, so a 2000-deep rail scrubs like a plain overflow row. -->
+      <div class="row-track" :style="{ width: `${trackWidth}px`, height: `${tileHeight}px` }">
+        <AppContextMenu
+          v-for="v in visibleTiles"
+          :key="v.item.key ?? v.item.id"
+          :items="contextMenuItems(v.item)"
+          :disabled="!contextItems || contextMenuItems(v.item).length === 0"
         >
-          <MediaCard
-            :idx="i"
-            :src="item.poster_src ?? usePosterUrl(item)"
-            :title="item.title"
-            :subtitle="item.year || item.sub"
-            :aspect="aspect || '2/3'"
-            :missing="item.available === false"
-          />
+          <div
+            class="card-tile"
+            :class="{ unavailable: v.item.available === false }"
+            :style="{ left: `${v.left}px`, width: `${tileW}px` }"
+            :tabindex="v.item.available === false ? -1 : 0"
+            role="link"
+            @click="v.item.available !== false && $emit('tile', v.item)"
+            @keydown.enter.prevent="v.item.available !== false && $emit('tile', v.item)"
+            @pointerenter="scheduleIntent(v.item)"
+            @pointerleave="cancelIntent"
+            @focus="signalIntent(v.item)"
+            @pointerdown="signalIntent(v.item)"
+          >
+            <MediaCard
+              :idx="v.index"
+              :src="v.item.poster_src ?? usePosterUrl(v.item)"
+              :title="v.item.title"
+              :subtitle="v.item.year || v.item.sub"
+              :aspect="aspect || '2/3'"
+              :missing="v.item.available === false"
+              :badge-br="showAdded ? timeAgoShort(v.item.added_at ?? v.item.created_at) : ''"
+            />
+          </div>
+        </AppContextMenu>
+        <div v-if="hasMore" class="rail-tail" :style="{ left: `${items.length * stride}px` }" aria-hidden="true">
+          <span class="rail-tail-spin" />
         </div>
-      </AppContextMenu>
+      </div>
     </div>
   </section>
 </template>
@@ -44,7 +54,13 @@
 <script setup lang="ts">
 import type { ContextMenuItem, MediaItem } from '~~/shared/types'
 
-type RowItem = MediaItem & { sub?: string; poster_src?: string; key?: string }
+type RowItem = MediaItem & {
+  sub?: string
+  poster_src?: string
+  key?: string
+  // ISO string (service-formatted) or pgtype.Timestamptz object (raw sqlc rows)
+  added_at?: string | { Time?: string; Valid?: boolean }
+}
 
 const props = defineProps<{
   title: string
@@ -58,15 +74,86 @@ const props = defineProps<{
   aspect?: string
   more?: string
   contextItems?: (item: RowItem) => ContextMenuItem[]
+  /** More pages exist — show the tail spinner and emit `load-more` as the
+   *  user nears the right edge. */
+  hasMore?: boolean
+  /** A page fetch is in flight; suppresses further load-more emits. */
+  loadingMore?: boolean
+  /** Paint a "3d ago" chip (added_at ?? created_at) on each poster. */
+  showAdded?: boolean
 }>()
 
 const emit = defineEmits<{
   tile: [item: MediaItem]
   more: []
   intent: [item: MediaItem]
+  'load-more': []
 }>()
 
+const { isPhone } = useViewport()
+
+// Tile geometry is the whole virtualization contract: fixed width + gap →
+// slot i lives at i*stride, and the visible range is pure arithmetic on
+// scrollLeft. Phone tiles collapse to 140px (used to be a CSS !important
+// override — the JS math has to know the real width, so it lives here now).
+const tileW = computed(() => (isPhone.value ? 140 : props.tileWidth || 168))
+const gap = computed(() => (isPhone.value ? 12 : 18))
+const stride = computed(() => tileW.value + gap.value)
+const tileHeight = computed(() => {
+  const [w, h] = (props.aspect || '2/3').split('/').map(Number)
+  return Math.round(tileW.value * ((h || 3) / (w || 2)))
+})
+const trackWidth = computed(() =>
+  props.items.length * stride.value - (props.items.length ? gap.value : 0)
+  + (props.hasMore ? stride.value : 0))
+
 const scrollEl = ref<HTMLElement>()
+const scrollLeft = ref(0)
+const viewportW = ref(0)
+
+const OVERSCAN = 4
+const visibleTiles = computed(() => {
+  const s = stride.value
+  const start = Math.max(0, Math.floor(scrollLeft.value / s) - OVERSCAN)
+  const end = Math.min(props.items.length, Math.ceil((scrollLeft.value + viewportW.value) / s) + OVERSCAN)
+  const out: { item: RowItem; index: number; left: number }[] = []
+  for (let i = start; i < end; i++) {
+    out.push({ item: props.items[i]!, index: i, left: i * s })
+  }
+  return out
+})
+
+let ro: ResizeObserver | null = null
+onMounted(() => {
+  if (!scrollEl.value) return
+  viewportW.value = scrollEl.value.clientWidth
+  ro = new ResizeObserver(() => {
+    if (scrollEl.value) viewportW.value = scrollEl.value.clientWidth
+  })
+  ro.observe(scrollEl.value)
+})
+onBeforeUnmount(() => ro?.disconnect())
+
+// Ask for the next page while the user still has ~8 tiles of runway, so the
+// rail keeps flowing instead of hitting a wall. The watchEffect also covers
+// the "first page doesn't even fill the viewport" case with no scroll at all.
+const LOAD_AHEAD_TILES = 8
+function maybeLoadMore() {
+  if (!props.hasMore || props.loadingMore) return
+  const remaining = trackWidth.value - (scrollLeft.value + viewportW.value)
+  if (remaining < stride.value * LOAD_AHEAD_TILES) emit('load-more')
+}
+function onScroll() {
+  if (scrollEl.value) scrollLeft.value = scrollEl.value.scrollLeft
+  maybeLoadMore()
+}
+watchEffect(() => {
+  // touch the reactive deps so a new page / resize / prop change re-checks
+  void props.items.length
+  void viewportW.value
+  maybeLoadMore()
+})
+
 let intentTimer: ReturnType<typeof setTimeout> | null = null
 
 function cancelIntent() {
@@ -91,7 +178,7 @@ function contextMenuItems(item: RowItem): ContextMenuItem[] {
   return props.contextItems?.(item) ?? []
 }
 
-function scrollBy(dir: number) {
+function scrollByDir(dir: number) {
   if (!scrollEl.value) return
   scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
 }
@@ -100,14 +187,9 @@ function scrollBy(dir: number) {
 <style scoped>
 .content-row { margin-bottom: 40px; }
 
-
 .row-scroll {
-  display: flex;
-  gap: 18px;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  scroll-padding-left: 48px; /* snap to the content edge, not the shadow-room padding */
   /* Padding/negative-margin pair: layout-neutral, but moves the clip edge
      outward so card drop shadows (--shadow-card) aren't cut off. */
   padding: 12px 48px 72px;
@@ -115,7 +197,31 @@ function scrollBy(dir: number) {
   scrollbar-width: none;
 }
 .row-scroll::-webkit-scrollbar { display: none; }
-.row-scroll > * { scroll-snap-align: start; }
+
+.row-track { position: relative; }
+.row-track > .card-tile,
+.row-track :deep(.card-tile) { position: absolute; top: 0; }
+
+.rail-tail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rail-tail-spin {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgb(var(--ink) / 0.15);
+  border-top-color: var(--gold);
+  animation: rail-spin 0.8s linear infinite;
+}
+@keyframes rail-spin {
+  to { transform: rotate(360deg); }
+}
 
 .scroll-btn {
   width: 32px;
@@ -138,13 +244,5 @@ function scrollBy(dir: number) {
 /* Touch: swipe replaces the mouse-only scroll arrows. */
 @media (pointer: coarse) {
   .scroll-btn { display: none; }
-}
-
-/* Phone: 168px desktop tiles (both 2/3 posters and 1/1 covers) are too wide
-   for a 390px screen — collapse to ~140px. tileWidth is a literal inline
-   style so this needs !important to win. */
-@media (max-width: 720px) {
-  .row-scroll { gap: 12px; }
-  .card-tile { width: 140px !important; }
 }
 </style>

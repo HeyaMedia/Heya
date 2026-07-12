@@ -171,6 +171,17 @@ func (a *App) JFUserVideoSets(ctx context.Context, userID int64) (watchedMovies,
 // JFFavoriteIDs returns the favorited entity-id set for one entity type
 // ("episode", "track", "album", ... — "media_item" comes via JFUserVideoSets).
 func (a *App) JFFavoriteIDs(ctx context.Context, userID int64, entityType string) (map[int64]bool, error) {
+	// Music favorites live in the unified rating store (heart band ≥9), the
+	// same signal the web reactions and Subsonic stars write — not in the
+	// boolean user_favorites rows video uses.
+	switch entityType {
+	case "track":
+		ids, err := a.HeartedTrackIDs(ctx, userID)
+		return idSet(ids), err
+	case "album":
+		ids, err := a.HeartedAlbumIDs(ctx, userID)
+		return idSet(ids), err
+	}
 	ids, err := sqlc.New(a.db).ListFavoritedIDs(ctx, sqlc.ListFavoritedIDsParams{UserID: userID, EntityType: entityType})
 	if err != nil {
 		return nil, err
@@ -178,6 +189,15 @@ func (a *App) JFFavoriteIDs(ctx context.Context, userID int64, entityType string
 	out := make(map[int64]bool, len(ids))
 	for _, id := range ids {
 		out[id] = true
+	}
+	if entityType == "media_item" {
+		// Jellyfin addresses music artists as media_items; overlay their
+		// hearts so MusicArtist DTOs show favorite state from the rating store.
+		if artistItems, err := a.HeartedArtistMediaItemIDs(ctx, userID); err == nil {
+			for _, id := range artistItems {
+				out[id] = true
+			}
+		}
 	}
 	return out, nil
 }
@@ -380,4 +400,12 @@ func emptyNotNil[T any](s []T) []T {
 		return []T{}
 	}
 	return s
+}
+
+func idSet(ids []int64) map[int64]bool {
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out
 }

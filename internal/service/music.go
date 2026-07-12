@@ -407,11 +407,24 @@ func (a *App) GetMusicHome(ctx context.Context, limit int32) (*MusicHomeData, er
 	if err != nil {
 		return nil, fmt.Errorf("recent artists: %w", err)
 	}
-	albums, err := q.ListRecentlyAddedAlbums(ctx, limit)
+	albums, err := q.ListRecentlyAddedAlbums(ctx, sqlc.ListRecentlyAddedAlbumsParams{Lim: limit})
 	if err != nil {
 		return nil, fmt.Errorf("recent albums: %w", err)
 	}
 	return &MusicHomeData{RecentArtists: artists, RecentAlbums: albums}, nil
+}
+
+// ListRecentlyAddedAlbumsPage is the offset-paged albums-only slice of
+// GetMusicHome — the infinite Recently Added Albums rail pages through this
+// without dragging the artist-event grouping along on every fetch.
+func (a *App) ListRecentlyAddedAlbumsPage(ctx context.Context, limit, offset int32) ([]sqlc.ListRecentlyAddedAlbumsRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 24
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return sqlc.New(a.db).ListRecentlyAddedAlbums(ctx, sqlc.ListRecentlyAddedAlbumsParams{Lim: limit, Off: offset})
 }
 
 // SetEntityLoved flips the user's love state for a polymorphic entity

@@ -1140,6 +1140,17 @@ type UserListItem struct {
 	AddedAt     pgtype.Timestamptz `json:"added_at"`
 }
 
+type UserMusicService struct {
+	UserID          int64              `json:"user_id"`
+	Service         string             `json:"service"`
+	Username        string             `json:"username"`
+	Token           string             `json:"token"`
+	ScrobbleEnabled bool               `json:"scrobble_enabled"`
+	ImportState     []byte             `json:"import_state"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type UserPlaybackPreference struct {
 	ID               int64              `json:"id"`
 	UserID           int64              `json:"user_id"`
@@ -1158,6 +1169,7 @@ type UserPlaylist struct {
 	CoverPath   string             `json:"cover_path"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Slug        string             `json:"slug"`
 }
 
 type UserPlaylistTrack struct {

@@ -58,13 +58,14 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 	// payload.
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home/recently-added", "music-home-recently-added", "Newest album/EP/single additions", "MusicHome")),
 		func(ctx context.Context, in *struct {
-			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"24"`
+			Limit  int32 `query:"limit" minimum:"1" maximum:"100" default:"24"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
 		}) (*JSONOutput[recentAlbumsBody], error) {
-			data, err := app.GetMusicHome(ctx, in.Limit)
+			items, err := app.ListRecentlyAddedAlbumsPage(ctx, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return cachedJSON(recentAlbumsBody{Items: data.RecentAlbums}, 60), nil
+			return cachedJSON(recentAlbumsBody{Items: items}, 60), nil
 		})
 
 	// 3. Recently Played Artists (artist-grain, deduped).

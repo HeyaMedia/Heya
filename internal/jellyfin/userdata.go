@@ -46,7 +46,31 @@ func (s *Server) handleSetFavorite(loved bool) handlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		if _, err := s.app.SetEntityLoved(r.Context(), u.ID, entityType, id, loved); err != nil {
+		ctx := r.Context()
+		// Music favorites ARE hearts: they write the unified rating store
+		// (heart = 10, unfavorite clears), the same signal the web app's
+		// reactions and Subsonic stars feed. Jellyfin addresses music artists
+		// as media_items, so those resolve to the artists row first. Video
+		// keeps boolean user_favorites.
+		rating := int16(0)
+		if loved {
+			rating = 10
+		}
+		switch {
+		case kind == KindTrack:
+			err = s.app.SetUserTrackRating(ctx, u.ID, id, rating)
+		case kind == KindAlbum:
+			err = s.app.SetUserAlbumRating(ctx, u.ID, id, rating)
+		case kind == KindItem:
+			if artistID, isArtist := s.app.ArtistIDForMediaItem(ctx, id); isArtist {
+				err = s.app.SetUserArtistRating(ctx, u.ID, artistID, rating)
+			} else {
+				_, err = s.app.SetEntityLoved(ctx, u.ID, entityType, id, loved)
+			}
+		default:
+			_, err = s.app.SetEntityLoved(ctx, u.ID, entityType, id, loved)
+		}
+		if err != nil {
 			log.Warn().Err(err).Str("component", "jellyfin").Msg("favorite toggle failed")
 			w.WriteHeader(http.StatusInternalServerError)
 			return

@@ -52,8 +52,11 @@ func registerMeRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/watch/recent", "recently-watched", "Recently-watched activity", "Me")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListRecentlyWatchedRow], error) {
-			items, err := app.ListRecentlyWatched(ctx, userFrom(ctx).ID)
+		func(ctx context.Context, in *struct {
+			Limit  int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
+		}) (*JSONOutput[[]sqlc.ListRecentlyWatchedRow], error) {
+			items, err := app.ListRecentlyWatched(ctx, userFrom(ctx).ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -61,8 +64,11 @@ func registerMeRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/watch/recent-episodes", "recently-watched-episodes", "Recently-watched TV episodes (one row per episode)", "Me")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]sqlc.ListRecentlyWatchedEpisodesRow], error) {
-			items, err := app.ListRecentlyWatchedEpisodes(ctx, userFrom(ctx).ID)
+		func(ctx context.Context, in *struct {
+			Limit  int32 `query:"limit" minimum:"1" maximum:"100" default:"24"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
+		}) (*JSONOutput[[]sqlc.ListRecentlyWatchedEpisodesRow], error) {
+			items, err := app.ListRecentlyWatchedEpisodes(ctx, userFrom(ctx).ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -84,6 +90,25 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(result), nil
 		})
 
+	// Offset-paged continuation of a single discovery rail — the infinite
+	// horizontal scroll behind the bundle above. key/baseline/baseline_id come
+	// back verbatim from the RecRail being extended.
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/recommended/{section}/rail", "recommended-rail-page", "One more page of a single discovery rail", "Me")),
+		func(ctx context.Context, in *struct {
+			Section    string `path:"section" enum:"movie,tv"`
+			Key        string `query:"key" enum:"recently-released,top-unwatched,by-actor,more-genre,recommended,top-rated,rediscover" doc:"RecRail.key of the rail being paged"`
+			Baseline   string `query:"baseline" maxLength:"128" doc:"RecRail.baseline (genre name) where the rail has one"`
+			BaselineID int64  `query:"baseline_id" minimum:"0" doc:"RecRail.baseline_id (person id) where the rail has one"`
+			Limit      int32  `query:"limit" minimum:"1" maximum:"100" default:"24"`
+			Offset     int32  `query:"offset" minimum:"0" default:"0"`
+		}) (*JSONOutput[railPageBody], error) {
+			items, err := app.RecommendedRailPage(ctx, userFrom(ctx).ID, in.Section, in.Key, in.Baseline, in.BaselineID, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(railPageBody{Items: items, HasMore: len(items) == int(in.Limit)}), nil
+		})
+
 	// Personalized "For You" — the taste-vector + TMDB-graph engine (non-ML).
 	// Facets hard-filter the candidate pool and the engine ranks by taste WITHIN
 	// it (e.g. genre="Horror" for a horror binge). Distinct from
@@ -97,10 +122,11 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			Keyword   string  `query:"keyword" maxLength:"128" doc:"Only titles carrying this keyword/tag"`
 			MinRating float64 `query:"min_rating" minimum:"0" maximum:"10" doc:"Minimum external rating"`
 			Limit     int32   `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Number of results"`
+			Offset    int32   `query:"offset" minimum:"0" maximum:"200" default:"0" doc:"Rank offset for paging (the engine re-ranks at most its top 200)"`
 		}) (*JSONOutput[service.ForYouResult], error) {
 			result, err := app.ForYou(ctx, userFrom(ctx).ID, service.ForYouFacets{
 				Type: in.Type, Genre: in.Genre, Keyword: in.Keyword,
-				MinRating: in.MinRating, Limit: in.Limit,
+				MinRating: in.MinRating, Limit: in.Limit, Offset: in.Offset,
 			})
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
@@ -512,6 +538,13 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			langs, _ := app.GetMediaLanguages(ctx, in.ID)
 			return cachedJSON(langs, 60), nil
 		})
+}
+
+// railPageBody is one page of a discovery rail. HasMore is the len==limit
+// heuristic — a short page means the rail ran dry.
+type railPageBody struct {
+	Items   []service.RecRailItem `json:"items"`
+	HasMore bool                  `json:"has_more"`
 }
 
 type favoritedBody struct {

@@ -58,14 +58,27 @@ type recentTVFile struct {
 	episodes  []seasonEpisode
 }
 
-// ListRecentlyAddedTV builds the grouped TV rail.
-func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyAddedTVEntry, error) {
+// ListRecentlyAddedTV builds the grouped TV rail. offset is in entry space
+// (grouped events, not files): page 0 stays on the cheap recentFileWindow
+// top-N scan, while any deeper page regroups the FULL arrival history
+// (window 0 = uncapped) so the rail can scroll back to the first file ever
+// added. The full scan is heavier but only runs once a user actually digs,
+// and the per-file rows are lean — descriptions land in a per-entry batch
+// overlay after the cut.
+func (a *App) ListRecentlyAddedTV(ctx context.Context, limit, offset int32) ([]RecentlyAddedTVEntry, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	if offset < 0 {
+		offset = 0
+	}
 	q := sqlc.New(a.db)
 
-	rows, err := q.ListRecentlyAddedTVFiles(ctx, recentFileWindow)
+	window := int64(recentFileWindow)
+	if offset > 0 {
+		window = 0 // uncapped — deep pages group the whole history
+	}
+	rows, err := q.ListRecentlyAddedTVFiles(ctx, window)
 	if err != nil {
 		return nil, fmt.Errorf("recent tv files: %w", err)
 	}
@@ -74,12 +87,11 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 	}
 
 	type showInfo struct {
-		libraryID   int64
-		publicID    string
-		title       string
-		slug        string
-		description string
-		files       []recentTVFile
+		libraryID int64
+		publicID  string
+		title     string
+		slug      string
+		files     []recentTVFile
 	}
 	shows := map[int64]*showInfo{}
 	showIDs := []int64{}
@@ -94,7 +106,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 		id := r.MediaItemID.Int64
 		s := shows[id]
 		if s == nil {
-			s = &showInfo{libraryID: r.LibraryID, publicID: r.PublicID.String(), title: r.Title, slug: r.Slug, description: r.Description}
+			s = &showInfo{libraryID: r.LibraryID, publicID: r.PublicID.String(), title: r.Title, slug: r.Slug}
 			shows[id] = s
 			showIDs = append(showIDs, id)
 		}
@@ -173,7 +185,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 				entries = append(entries, RecentlyAddedTVEntry{
 					MediaItemID: id, MediaItemPublicID: show.publicID, Title: show.title, Slug: show.slug,
 					Kind: "series", SeasonCount: int32(len(seasons)), EpisodeCount: int32(len(newEps)),
-					AddedAt: newest, Description: show.description,
+					AddedAt: newest,
 				})
 				continue
 			}
@@ -192,9 +204,6 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 					MediaItemID: id, MediaItemPublicID: show.publicID, Title: show.title, Slug: show.slug,
 					SeasonNumber: season, EpisodeCount: int32(len(eps)),
 					AddedAt: newestBySeason[season],
-					// Show description as the baseline; season/episode kinds
-					// upgrade to their own overview in the post-cut loop.
-					Description: show.description,
 				}
 				switch {
 				case seasonFirst[id][season].After(threshold):
@@ -211,8 +220,32 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit int32) ([]RecentlyA
 	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].AddedAt.After(entries[j].AddedAt) })
+	if int(offset) >= len(entries) {
+		return []RecentlyAddedTVEntry{}, nil
+	}
+	entries = entries[offset:]
 	if len(entries) > int(limit) {
 		entries = entries[:limit]
+	}
+
+	// Show-description baseline for the surfaced page only — the per-file
+	// window query deliberately doesn't carry descriptions (see the SQL).
+	descIDs := make([]int64, 0, len(entries))
+	seenDesc := map[int64]bool{}
+	for _, e := range entries {
+		if !seenDesc[e.MediaItemID] {
+			seenDesc[e.MediaItemID] = true
+			descIDs = append(descIDs, e.MediaItemID)
+		}
+	}
+	if descRows, err := q.ListMediaDescriptionsByIDs(ctx, descIDs); err == nil {
+		descByID := make(map[int64]string, len(descRows))
+		for _, d := range descRows {
+			descByID[d.ID] = d.Description
+		}
+		for i := range entries {
+			entries[i].Description = descByID[entries[i].MediaItemID]
+		}
 	}
 
 	// Episode titles/overviews + season overviews only for the cards that

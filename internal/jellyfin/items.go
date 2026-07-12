@@ -398,7 +398,7 @@ func (s *Server) handleNextUp(w http.ResponseWriter, r *http.Request, p Params) 
 		}
 		seriesIDs = []int64{id}
 	} else {
-		recents, err := s.app.ListRecentlyWatched(ctx, u.ID)
+		recents, err := s.app.ListRecentlyWatched(ctx, u.ID, 20, 0)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return

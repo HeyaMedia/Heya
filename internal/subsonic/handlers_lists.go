@@ -64,7 +64,7 @@ func (s *Server) albumList2(w http.ResponseWriter, r *http.Request) ([]AlbumID3,
 	case "starred", "highest":
 		// "highest" (community rating) has no Heya equivalent; starred is
 		// the least-wrong neighbor and keeps clients' rails populated.
-		page, err := s.app.ListUserLovedAlbums(ctx, u.ID, size, offset)
+		page, err := s.app.ListUserRatedAlbums(ctx, u.ID, 9, size, offset)
 		if err != nil || page == nil {
 			respondError(w, r, errGeneric, "listing starred albums failed")
 			return nil, false
@@ -171,21 +171,21 @@ func (s *Server) starred2Payload(r *http.Request, key string) *Starred2 {
 
 	stars := s.starStateFor(ctx, u.ID)
 
-	if page, err := s.app.ListUserLovedArtists(ctx, u.ID, 500, 0); err == nil && page != nil {
+	if page, err := s.app.ListUserRatedArtists(ctx, u.ID, 9, 500, 0); err == nil && page != nil {
 		for _, it := range page.Items {
 			if ar, err := s.app.SubsonicArtistByID(ctx, it.ID); err == nil {
 				out.Artists = append(out.Artists, artistID3From(ar, stars))
 			}
 		}
 	}
-	if page, err := s.app.ListUserLovedAlbums(ctx, u.ID, 500, 0); err == nil && page != nil {
+	if page, err := s.app.ListUserRatedAlbums(ctx, u.ID, 9, 500, 0); err == nil && page != nil {
 		ids := make([]int64, 0, len(page.Items))
 		for _, it := range page.Items {
 			ids = append(ids, it.ID)
 		}
 		out.Albums = s.albumsByIDs(ctx, u.ID, ids)
 	}
-	if page, err := s.app.ListUserLovedTracks(ctx, u.ID, 500, 0); err == nil && page != nil {
+	if page, err := s.app.ListUserRatedTracks(ctx, u.ID, 9, 500, 0); err == nil && page != nil {
 		ids := make([]int64, 0, len(page.Items))
 		for _, it := range page.Items {
 			ids = append(ids, it.TrackID)

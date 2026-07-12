@@ -54,7 +54,8 @@
 import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogClose } from 'reka-ui'
 
 const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ close: []; created: [id: number] }>()
+// `created` carries id + slug — consumers route by slug (canonical URLs).
+const emit = defineEmits<{ close: []; created: [row: { id: number; slug: string }] }>()
 
 const { create } = usePlaylists()
 
@@ -90,7 +91,7 @@ async function submit() {
   error.value = ''
   try {
     const pl = await create(name.value.trim(), description.value.trim())
-    emit('created', pl.id)
+    emit('created', { id: pl.id, slug: pl.slug })
     emit('close')
   } catch (e: any) {
     error.value = e?.message ?? 'Failed to create playlist'

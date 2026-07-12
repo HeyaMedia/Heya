@@ -61,6 +61,8 @@ async function revokeOthers() {
 // timeAgo from useFormat.ts — all auto-imported.
 
 const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
+const currentSession = computed(() => sessions.value.find(session => session.current) ?? null)
+const otherSessions = computed(() => sessions.value.filter(session => !session.current))
 
 </script>
 
@@ -79,29 +81,58 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
     </div>
 
     <template v-else>
-      <SettingsSection title="Active devices" icon="eye">
+      <div class="session-summary">
+        <div class="session-summary-copy">
+          <span class="session-summary-icon"><Icon name="shield" :size="18" /></span>
+          <div>
+            <strong>{{ sessions.length }} active {{ sessions.length === 1 ? 'session' : 'sessions' }}</strong>
+            <p>{{ otherCount ? `${otherCount} other ${otherCount === 1 ? 'device can' : 'devices can'} access your account.` : 'Only this device is signed in.' }}</p>
+          </div>
+        </div>
+        <StatusBadge :state="otherCount > 4 ? 'warn' : 'ok'">{{ otherCount > 4 ? 'Review access' : 'Looks good' }}</StatusBadge>
+      </div>
+
+      <SettingsSection v-if="currentSession" title="This device" icon="cpu" description="The browser session you are using right now.">
+        <div class="session-card current featured">
+          <div class="session-icon"><Icon :name="agentIcon(currentSession.user_agent ?? '')" :size="18" /></div>
+          <div class="session-info">
+            <div class="session-name">
+              {{ describeAgent(currentSession.user_agent ?? '') }}
+              <StatusBadge state="ok">Current</StatusBadge>
+            </div>
+            <div class="session-ua">{{ currentSession.user_agent || 'No User-Agent recorded' }}</div>
+            <div class="session-meta">
+              <span>Last seen {{ timeAgo(currentSession.last_seen_at) }}</span>
+              <span v-if="currentSession.ip">· {{ currentSession.ip }}</span>
+              <span>· signed in {{ timeAgo(currentSession.created_at) }}</span>
+              <span>· {{ formatExpiry(currentSession.expires_at) }}</span>
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Other devices" icon="eye" :description="otherCount ? 'Revoke anything you no longer recognise or use.' : 'No other browsers or devices are signed in.'">
         <template #actions>
           <button
             v-if="otherCount > 0"
-            class="sv2-btn ghost"
+            class="sv2-btn danger"
             @click="revokeOthers"
           >
             <Icon name="sign-out" :size="13" />
-            Sign out other devices ({{ otherCount }})
+            Sign out all ({{ otherCount }})
           </button>
         </template>
 
-        <div v-if="sessions.length === 0" class="empty-state">
-          <Icon name="info" :size="14" />
-          No active sessions — that's unusual, you'd be signed out.
+        <div v-if="otherSessions.length === 0" class="empty-state good-empty">
+          <Icon name="check" :size="15" />
+          No other devices have access to this account.
         </div>
 
         <div v-else class="session-list">
           <div
-            v-for="s in sessions"
+            v-for="s in otherSessions"
             :key="s.id"
             class="session-card"
-            :class="{ current: s.current }"
           >
             <div class="session-icon">
               <Icon :name="agentIcon(s.user_agent ?? '')" :size="18" />
@@ -109,7 +140,6 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
             <div class="session-info">
               <div class="session-name">
                 {{ describeAgent(s.user_agent ?? '') }}
-                <StatusBadge v-if="s.current" state="ok">This device</StatusBadge>
               </div>
               <div class="session-ua">{{ s.user_agent || 'No User-Agent recorded' }}</div>
               <div class="session-meta">
@@ -121,9 +151,8 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
             </div>
             <button
               class="session-revoke"
-              :disabled="s.current"
-              :title="s.current ? 'You can\'t sign yourself out from here — use the avatar menu' : 'Sign out this device'"
-              :aria-label="s.current ? 'You can\'t sign yourself out from here — use the avatar menu' : 'Sign out this device'"
+              title="Sign out this device"
+              aria-label="Sign out this device"
               @click="revoke(s)"
             >
               <Icon name="close" :size="14" />
@@ -149,6 +178,23 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
+.empty-state.good-empty { color: var(--good); border-color: color-mix(in srgb, var(--good) 22%, var(--border)); background: color-mix(in srgb, var(--good) 5%, var(--bg-2)); }
+
+.session-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 15px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: linear-gradient(145deg, var(--bg-1), var(--bg-2));
+}
+.session-summary-copy { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.session-summary-icon { width: 38px; height: 38px; display: grid; place-items: center; flex-shrink: 0; border-radius: var(--r-sm); background: color-mix(in srgb, var(--good) 10%, transparent); color: var(--good); }
+.session-summary-copy strong { color: var(--fg-0); font-size: 13px; font-weight: 620; }
+.session-summary-copy p { margin: 3px 0 0; color: var(--fg-2); font-size: 11.5px; }
 
 .session-list { display: flex; flex-direction: column; gap: 8px; }
 .session-card {
@@ -165,6 +211,7 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
   border-color: color-mix(in srgb, var(--good) 30%, transparent);
   background: color-mix(in srgb, var(--good) 4%, transparent);
 }
+.session-card.featured { padding: 16px 17px; }
 
 .session-icon {
   width: 36px;
@@ -191,14 +238,14 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
 .session-ua {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--fg-4);
+  color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .session-meta {
   font-size: 11.5px;
-  color: var(--fg-3);
+  color: var(--fg-2);
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -224,8 +271,10 @@ const otherCount = computed(() => sessions.value.filter(s => !s.current).length)
   .session-revoke { width: 44px; height: 44px; }
 }
 
-.sv2-btn.ghost:hover {
-  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
-  color: var(--bad);
+@media (max-width: 620px) {
+  .session-summary { align-items: flex-start; }
+  .session-summary > :last-child { display: none; }
+  .session-card { padding: 13px 12px; }
+  .session-meta { gap: 3px 6px; }
 }
 </style>

@@ -47,9 +47,10 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 	// it must register before /api/media/{id} can swallow it as a slug.
 	huma.Register(api, secured(op(http.MethodGet, "/api/media/tv/recently-added", "recently-added-tv", "Grouped recently-added TV entries", "Media")),
 		func(ctx context.Context, in *struct {
-			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
+			Limit  int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
+			Offset int32 `query:"offset" minimum:"0" default:"0" doc:"Entry offset — deeper pages regroup the full arrival history"`
 		}) (*JSONOutput[[]service.RecentlyAddedTVEntry], error) {
-			entries, err := app.ListRecentlyAddedTV(ctx, in.Limit)
+			entries, err := app.ListRecentlyAddedTV(ctx, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

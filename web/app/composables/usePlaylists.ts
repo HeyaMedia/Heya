@@ -9,6 +9,7 @@ export type { UserPlaylistRow } from '~/queries/music'
 
 export interface SidebarPlaylist {
   id: number
+  slug: string
   name: string
   count: number
   cover_path: string
@@ -34,10 +35,16 @@ export function usePlaylists() {
     }))
   }
 
-  function invalidatePlaylistCaches(playlistId?: number) {
+  function invalidatePlaylistCaches(playlistId?: number, slug?: string) {
     if (import.meta.server) return
+    // Detail entries are keyed by String(ref) — a playlist can sit in the
+    // cache under its slug (canonical URL visits) and/or its id (internal
+    // callers); invalidate whichever we know about.
     if (playlistId != null) {
-      queryCache.invalidateQueries({ key: ['music', 'playlist', playlistId] })
+      queryCache.invalidateQueries({ key: ['music', 'playlist', String(playlistId)] })
+    }
+    if (slug) {
+      queryCache.invalidateQueries({ key: ['music', 'playlist', slug] })
     }
     queryCache.invalidateQueries({ key: ['music', 'home', 'recent-playlists'] })
   }
@@ -85,9 +92,47 @@ export function usePlaylists() {
     invalidatePlaylistCaches(playlistId)
   }
 
+  // Rename / re-describe. Renaming REGENERATES the slug server-side (URLs
+  // track names during dev — no legacy-slug shims), so the caller gets the
+  // fresh row back to re-route with.
+  async function update(id: number, patch: { name: string; description: string }) {
+    const { $heya } = useNuxtApp()
+    const updated = await $heya('/api/me/playlists/{id}', {
+      method: 'PUT',
+      path: { id },
+      body: { name: patch.name, description: patch.description },
+    }) as unknown as UserPlaylistRow
+    updateList(rows => rows.map(p => (p.id === id ? { ...p, ...updated } : p)))
+    invalidatePlaylistCaches(id, updated.slug)
+    return updated
+  }
+
+  // Custom cover upload. Multipart stays on raw $fetch — $heya/openapi-fetch
+  // insist on JSON bodies (same reasoning as MetadataEditorImages.vue).
+  async function setCover(id: number, file: File) {
+    const { token } = useAuth()
+    const form = new FormData()
+    form.append('file', file)
+    await $fetch(`/api/me/playlists/${id}/cover`, {
+      method: 'POST',
+      body: form,
+      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+    })
+    updateList(rows => rows.map(p => (p.id === id ? { ...p, has_cover: true } : p)))
+    invalidatePlaylistCaches(id)
+  }
+
+  async function clearCover(id: number) {
+    const { $heya } = useNuxtApp()
+    await $heya('/api/me/playlists/{id}/cover' as never, { method: 'DELETE', path: { id } } as never)
+    updateList(rows => rows.map(p => (p.id === id ? { ...p, has_cover: false } : p)))
+    invalidatePlaylistCaches(id)
+  }
+
   const sidebarRows = computed<SidebarPlaylist[]>(() =>
     playlists.value.map(p => ({
       id: p.id,
+      slug: p.slug,
       name: p.name,
       count: p.track_count,
       cover_path: p.cover_path || p.auto_cover,
@@ -101,7 +146,10 @@ export function usePlaylists() {
     ensureLoaded,
     create,
     remove,
+    update,
     addTrack,
     removeTrack,
+    setCover,
+    clearCover,
   }
 }

@@ -87,7 +87,7 @@ defineProps<{
 .sv2-section-desc {
   margin: 4px 0 0;
   font-size: 12.5px;
-  color: var(--fg-3);
+  color: var(--fg-2);
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;

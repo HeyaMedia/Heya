@@ -136,6 +136,19 @@ export function useBrowseState(page: string, opts: { browseDefault?: boolean } =
     return browseDefault ? `${base}/all` : base
   }
 
+  // Deep-link seeding: "Show all" on a rail lands on the grid with
+  // `?sort=added` (and optionally `?watched=unwatched`). Query params only
+  // ever OVERRIDE the persisted prefs when present — a bare /movies/all
+  // keeps whatever the user last used.
+  function applyQuerySeed() {
+    const sort = route.query.sort
+    if (typeof sort === 'string' && BROWSE_SORTS.has(sort)) s.sort = sort
+    const watched = route.query.watched
+    if (watched === 'watched' || watched === 'unwatched' || watched === 'all') {
+      s.filters = { ...s.filters, watched }
+    }
+  }
+
   // Reconcile the store from the URL up front — synchronous and before the
   // watchers below register, so the first render already matches the address
   // bar (no stale-selection flash) without minting a history entry.
@@ -144,6 +157,7 @@ export function useBrowseState(page: string, opts: { browseDefault?: boolean } =
     if (sel) {
       s.activeLib = sel.activeLib
       s.activeView = sel.activeView
+      applyQuerySeed()
     }
   }
 
@@ -163,11 +177,14 @@ export function useBrowseState(page: string, opts: { browseDefault?: boolean } =
   )
 
   // URL → store: back/forward (or a deep link / shared URL) re-applies it.
+  // fullPath, not path, so an in-page "Show all" navigation that only changes
+  // the query (?sort=added) still seeds the grid prefs.
   watch(
-    () => route.path,
+    () => route.fullPath,
     () => {
       const sel = selectionFromRoute()
       if (!sel) return
+      applyQuerySeed()
       if (sel.activeLib === s.activeLib && sel.activeView === s.activeView) return
       s.activeLib = sel.activeLib
       s.activeView = sel.activeView

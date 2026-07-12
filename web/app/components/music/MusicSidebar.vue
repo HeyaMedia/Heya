@@ -9,12 +9,9 @@
         </NuxtLink>
       </li>
 
-      <li>
-        <NuxtLink to="/music/search" class="ms-nav-item" :class="{ active: section === 'search' }" :aria-current="section === 'search' ? 'page' : undefined">
-          <Icon name="search" :size="20" />
-          <span>Search</span>
-        </NuxtLink>
-      </li>
+      <!-- No Search item: music search is the app-wide spotlight in the top
+           bar — a per-section search page was just a second, worse door to
+           the same thing (removed 2026-07-12). -->
 
       <!-- Library — the full catalog. Clicking the row opens the Library
            hub; the chevron toggles direct access to Artists / Albums / Songs. -->
@@ -145,10 +142,10 @@
       </li>
       <li v-for="(pl, i) in playlists" :key="pl.id">
         <NuxtLink
-          :to="`/music/playlist/${pl.id}`"
+          :to="`/music/playlist/${pl.slug || pl.id}`"
           class="ms-pl-item"
-          :class="{ active: section === 'playlist-' + pl.id, 'drop-target': !isCoarse && dragDrop.dragState.overPlaylistId === pl.id }"
-          :aria-current="section === 'playlist-' + pl.id ? 'page' : undefined"
+          :class="{ active: section === 'playlist-' + (pl.slug || pl.id), 'drop-target': !isCoarse && dragDrop.dragState.overPlaylistId === pl.id }"
+          :aria-current="section === 'playlist-' + (pl.slug || pl.id) ? 'page' : undefined"
           @dragover="!isCoarse && dragDrop.onPlaylistDragOver($event, pl.id)"
           @dragleave="!isCoarse && dragDrop.onPlaylistDragLeave()"
           @drop="!isCoarse && dragDrop.onPlaylistDrop($event, pl.id, pl.name)"

@@ -87,7 +87,6 @@ const currentSection = computed(() => {
     case 'loved':
     case 'podcasts':
     case 'radio':
-    case 'search':
     case 'stats':
     case 'library':
       return second
@@ -121,7 +120,6 @@ const sidebarPlaylists = playlistsApi.sidebarRows
 // name from sidebarPlaylists since the key only carries the id.
 const SECTION_TITLES: Record<string, string> = {
   home: 'Home',
-  search: 'Search',
   library: 'Library',
   artists: 'Artists',
   albums: 'Albums',
@@ -143,15 +141,16 @@ const phoneSectionTitle = computed(() => {
   if (s in SECTION_TITLES) return SECTION_TITLES[s]
   if (s?.startsWith('browse')) return 'Browse'
   if (s?.startsWith('playlist-')) {
-    const id = Number(s.slice('playlist-'.length))
-    return sidebarPlaylists.value.find((p) => p.id === id)?.name ?? 'Playlist'
+    // URL segment is the slug now (numeric id still resolves for old links).
+    const ref = s.slice('playlist-'.length)
+    return sidebarPlaylists.value.find((p) => p.slug === ref || String(p.id) === ref)?.name ?? 'Playlist'
   }
   return 'Music'
 })
 
-function onCreated(id: number) {
+function onCreated(row: { id: number; slug: string }) {
   // Jump to the new playlist so the user lands on something concrete.
-  router.push(`/music/playlist/${id}`)
+  router.push(`/music/playlist/${row.slug || row.id}`)
 }
 </script>
 

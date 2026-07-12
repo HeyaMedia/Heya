@@ -70,6 +70,30 @@ export function formatDateTime(d: string): string {
   return new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })
 }
 
+// Compact relative age for poster-corner chips: "now", "5m ago", "3h ago",
+// "5d ago", "2w ago", "6mo ago", "1y ago". Empty string (chip hidden) for
+// missing/invalid input. Accepts ISO strings or pgtype.Timestamptz-shaped
+// {Time, Valid} objects, like timeAgo. Not reactive.
+export function timeAgoShort(ts?: string | { Time?: string, Valid?: boolean } | null): string {
+  const raw = typeof ts === 'string' ? ts : ts?.Valid === false ? undefined : ts?.Time
+  if (!raw) return ''
+  const t = new Date(raw).getTime()
+  if (Number.isNaN(t)) return ''
+  const sec = Math.floor((Date.now() - t) / 1000)
+  if (sec < 60) return 'now'
+  const m = Math.floor(sec / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 7) return `${d}d ago`
+  const w = Math.floor(d / 7)
+  if (w < 5) return `${w}w ago`
+  const mo = Math.floor(d / 30.44)
+  if (mo < 12) return `${mo}mo ago`
+  return `${Math.floor(d / 365.25)}y ago`
+}
+
 // Relative time: "just now" under a minute, then "5m ago" / "3h ago" /
 // "12d ago", falling back to a locale date past 30 days. Accepts plain ISO
 // strings or pgtype.Timestamptz-shaped {Time, Valid} objects (lists carry

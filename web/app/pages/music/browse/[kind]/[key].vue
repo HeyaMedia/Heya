@@ -1,9 +1,10 @@
 <template>
   <div v-if="loading" class="page-pad m-loading">Loading…</div>
-  <div v-else-if="!rows.length" class="page-pad m-empty">
-    <h2 class="bd-h2">{{ heading }}</h2>
-    <p>No tracks in this bucket yet.</p>
-    <NuxtLink to="/music/browse" class="bd-back">← Back to Browse</NuxtLink>
+  <div v-else-if="!rows.length" class="page-pad">
+    <MusicEmptyState icon="pulse" :title="`No tracks in ${heading} yet`">
+      This bucket doesn't have any matches right now.
+      <NuxtLink to="/music/browse">← Back to Browse</NuxtLink>
+    </MusicEmptyState>
   </div>
   <div v-else class="bd-page">
     <header class="bd-hero" :style="heroStyle">
@@ -174,9 +175,11 @@ async function playFrom(idx: number) {
 </script>
 
 <style scoped>
-.m-loading, .m-empty { color: var(--fg-3); padding: 32px 40px; font-size: 13px; }
-.bd-h2 { font-size: 24px; font-weight: 600; margin-bottom: 8px; color: var(--fg-0); }
-.bd-back { color: var(--gold); text-decoration: underline; font-size: 12px; display: inline-block; margin-top: 12px; }
+.m-loading {
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  padding: 32px 40px; font-size: 13px;
+}
 
 .bd-page { padding-bottom: 80px; }
 

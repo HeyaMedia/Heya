@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 )
@@ -28,13 +29,21 @@ type idsBody struct {
 }
 
 type playlistsListBody struct {
-	Items any `json:"items"`
+	Items []sqlc.ListUserPlaylistsRow `json:"items"`
 }
 
 type playlistMutation struct {
 	Name        string `json:"name" minLength:"1" maxLength:"128" example:"Friday focus"`
 	Description string `json:"description" maxLength:"2000" example:"Deep work soundtrack"`
 	Cover       string `json:"cover_path" maxLength:"512" doc:"Optional path/URL to a custom cover image"`
+}
+
+// playlistCoverUploadForm declares the multipart/form-data schema for the
+// playlist-cover upload endpoint — mirrors uploadAssetForm's `file` field
+// (metadata_editor_huma.go). No extra fields: unlike media assets, a
+// playlist has exactly one cover slot, so there's no asset_type to select.
+type playlistCoverUploadForm struct {
+	File huma.FormFile `form:"file" contentType:"image/*" required:"true"`
 }
 
 type waveformBody struct {

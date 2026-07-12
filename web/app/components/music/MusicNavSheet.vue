@@ -19,9 +19,7 @@
     <NuxtLink to="/music" class="mnav-item" :class="{ active: currentSection === 'home' }" :aria-current="currentSection === 'home' ? 'page' : undefined" @click="emit('navigate')">
       <Icon name="home" :size="18" /> <span>Home</span>
     </NuxtLink>
-    <NuxtLink to="/music/search" class="mnav-item" :class="{ active: currentSection === 'search' }" :aria-current="currentSection === 'search' ? 'page' : undefined" @click="emit('navigate')">
-      <Icon name="search" :size="18" /> <span>Search</span>
-    </NuxtLink>
+    <!-- No Search item — music search is the app-wide spotlight (topbar). -->
 
     <div class="mnav-group-label">Library</div>
     <NuxtLink to="/music/library" class="mnav-item" :class="{ active: currentSection === 'library' }" :aria-current="currentSection === 'library' ? 'page' : undefined" @click="emit('navigate')">
@@ -62,10 +60,10 @@
     <NuxtLink
       v-for="pl in playlists"
       :key="pl.id"
-      :to="`/music/playlist/${pl.id}`"
+      :to="`/music/playlist/${pl.slug || pl.id}`"
       class="mnav-item mnav-sub"
-      :class="{ active: currentSection === 'playlist-' + pl.id }"
-      :aria-current="currentSection === 'playlist-' + pl.id ? 'page' : undefined"
+      :class="{ active: currentSection === 'playlist-' + (pl.slug || pl.id) }"
+      :aria-current="currentSection === 'playlist-' + (pl.slug || pl.id) ? 'page' : undefined"
       @click="emit('navigate')"
     >{{ pl.name }}</NuxtLink>
     <button type="button" class="mnav-item mnav-create" @click="emit('navigate'); emit('create-playlist')">
