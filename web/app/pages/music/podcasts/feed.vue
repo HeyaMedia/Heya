@@ -98,6 +98,9 @@
           </button>
         </article>
       </div>
+      <!-- Big feeds (daily shows run to thousands of episodes) window their
+           rows; the data is already fully parsed from the RSS, so the
+           scrollbar spans the whole feed either way. -->
       <TrackList
         v-else
         :tracks="tlRows"
@@ -106,6 +109,7 @@
         :show-header="false"
         :context-items="contextItemsFor"
         :duration-formatter="formatDuration"
+        :virtualized="tlRows.length > 150"
         @row-click="onPhoneRowClick"
       />
     </section>

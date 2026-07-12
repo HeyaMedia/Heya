@@ -7,27 +7,38 @@
       <MusicPageHead title="Browse by Tag" subtitle="Genres, formats, eras, moods — pick anything to drill into stations." />
     </header>
 
-    <!-- Drilldown view: stations tagged with the selected tag. -->
+    <!-- Drilldown view: stations tagged with the selected tag — a full-length
+         virtual grid sized by the tag's stationcount, paged through
+         /api/radio/search offsets (the old 60-station cap is gone). -->
     <template v-if="selectedTag">
       <div class="rt-drill-head">
         <button class="rt-drill-back" @click="clearSelection">
           <Icon name="chevleft" :size="16" /> All tags
         </button>
         <h2 class="section-title-lg rt-drill-title">#{{ selectedTag }}</h2>
+        <span v-if="stationsTotal" class="rt-drill-count mono">{{ stationsTotal.toLocaleString() }} stations</span>
       </div>
-      <div v-if="stationsLoading" class="rt-loading">Loading stations…</div>
-      <div v-else-if="!stations.length" class="rt-empty">No stations for this tag.</div>
-      <div v-else class="rt-grid">
-        <RadioStationCard
-          v-for="s in stations"
-          :key="s.stationuuid"
-          :station="s"
-          :favorited="radio.isFavorited(s.stationuuid)"
-          :loading="radio.loadingStationUUID.value === s.stationuuid"
-          @play="radio.playStation"
-          @toggle-favorite="radio.toggleFavorite"
-        />
-      </div>
+      <div v-if="stationsPending" class="rt-loading">Loading stations…</div>
+      <div v-else-if="!stationsTotal" class="rt-empty">No stations for this tag.</div>
+      <VirtualPosterGrid
+        v-else
+        :total="stationsTotal"
+        :item-at="stationAt"
+        :aspect="1"
+        :meta-height="64"
+        :min-card="170"
+        @range="ensureStations"
+      >
+        <template #default="{ item: s }">
+          <RadioStationCard
+            :station="s"
+            :favorited="radio.isFavorited(s.stationuuid)"
+            :loading="radio.loadingStationUUID.value === s.stationuuid"
+            @play="radio.playStation"
+            @toggle-favorite="radio.toggleFavorite"
+          />
+        </template>
+      </VirtualPosterGrid>
     </template>
 
     <!-- Tag wall. -->
@@ -74,14 +85,26 @@ const tags = computed<TagRow[]>(() => tagsQuery.data.value ?? [])
 
 const selectedTag = computed(() => (route.query.tag as string | undefined) ?? '')
 
-const stationsQuery = useQuery({
-  key: () => ['radio', 'search', { tag: selectedTag.value }],
-  query: async () => ((await $heya('/api/radio/search', { query: { tag: selectedTag.value, limit: 60 } })) as { items: RadioStationView[] }).items ?? [],
-  enabled: () => selectedTag.value.length > 0,
-  staleTime: 1000 * 60 * 5,
-})
-const stations = computed<RadioStationView[]>(() => stationsQuery.data.value ?? [])
-const stationsLoading = computed(() => stationsQuery.isLoading.value)
+// Random-access station catalog per tag. radio-browser's search has offset
+// paging but returns no total, so the total is seeded from the tag wall's
+// stationcount; when the count drifts from what search actually yields, the
+// catalog's short-page rule shrinks to the real end. Deep-linked tags
+// missing from the top-200 wall start with one page and grow a page ahead
+// while full pages keep coming.
+const { total: stationsTotal, pending: stationsPending, itemAt: stationAt, ensureRange: ensureStations }
+  = useVirtualCatalog<RadioStationView>(() => ({
+    key: `radio:tag:${selectedTag.value}`,
+    pageSize: 100,
+    fetch: async (offset, limit) => {
+      if (!selectedTag.value) return { items: [], total: 0 }
+      const items = ((await $heya('/api/radio/search', {
+        query: { tag: selectedTag.value, limit, offset },
+      })) as { items: RadioStationView[] }).items ?? []
+      const known = tags.value.find(t => t.name === selectedTag.value)?.stationcount
+      const total = known ?? (offset + items.length + (items.length === limit ? limit : 0))
+      return { items, total }
+    },
+  }))
 
 function selectTag(name: string) {
   router.replace({ query: { tag: name } })
@@ -154,6 +177,7 @@ function tagSize(count: number) {
 }
 .rt-drill-back:hover { color: var(--gold); background: color-mix(in srgb, var(--gold) 6%, transparent); }
 .rt-drill-title { margin: 0; text-transform: capitalize; }
+.rt-drill-count { font-size: 11px; color: var(--fg-3); }
 
 .rt-loading, .rt-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
 

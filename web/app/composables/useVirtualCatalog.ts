@@ -74,12 +74,21 @@ export function useVirtualCatalog<T>(source: MaybeRefOrGetter<VirtualCatalogSour
     if (pageIdx < 0 || s.pages.has(pageIdx) || s.inflight.has(pageIdx)) return
     s.inflight.add(pageIdx)
     try {
-      const res = await src.fetch(pageIdx * src.pageSize, src.pageSize)
+      const offset = pageIdx * src.pageSize
+      const res = await src.fetch(offset, src.pageSize)
       // The source key may have moved on (sort/filter change) mid-flight —
       // a late page must not pollute the new store.
       if (toValue(source).key !== src.key) return
       s.pages.set(pageIdx, res.items)
-      s.total = res.total
+      // Total handling tolerates upstreams whose advertised counts drift
+      // (radio-browser tag counts vs its search results): grow monotonically
+      // on full pages, but a SHORT page is authoritative — the list really
+      // ends there, so shrink to it rather than leaving eternal skeletons.
+      if (res.items.length < src.pageSize) {
+        s.total = offset + res.items.length
+      } else {
+        s.total = Math.max(s.total ?? 0, res.total)
+      }
       s.fetchedAt = Date.now()
       version.value++
     } catch {

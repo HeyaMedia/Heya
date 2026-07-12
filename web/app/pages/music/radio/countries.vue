@@ -18,19 +18,29 @@
           {{ selectedName }}
         </h2>
       </div>
-      <div v-if="stationsLoading" class="rc-loading">Loading stations…</div>
-      <div v-else-if="!stations.length" class="rc-empty">No stations for this country.</div>
-      <div v-else class="rc-grid">
-        <RadioStationCard
-          v-for="s in stations"
-          :key="s.stationuuid"
-          :station="s"
-          :favorited="radio.isFavorited(s.stationuuid)"
-          :loading="radio.loadingStationUUID.value === s.stationuuid"
-          @play="radio.playStation"
-          @toggle-favorite="radio.toggleFavorite"
-        />
-      </div>
+      <div v-if="stationsPending" class="rc-loading">Loading stations…</div>
+      <div v-else-if="!stationsTotal" class="rc-empty">No stations for this country.</div>
+      <!-- Full-length virtual grid sized by the country's stationcount,
+           paged through /api/radio/search offsets (old 50-station cap gone). -->
+      <VirtualPosterGrid
+        v-else
+        :total="stationsTotal"
+        :item-at="stationAt"
+        :aspect="1"
+        :meta-height="64"
+        :min-card="170"
+        @range="ensureStations"
+      >
+        <template #default="{ item: s }">
+          <RadioStationCard
+            :station="s"
+            :favorited="radio.isFavorited(s.stationuuid)"
+            :loading="radio.loadingStationUUID.value === s.stationuuid"
+            @play="radio.playStation"
+            @toggle-favorite="radio.toggleFavorite"
+          />
+        </template>
+      </VirtualPosterGrid>
     </template>
 
     <!-- Country picker grid. -->
@@ -81,14 +91,23 @@ const selectedCode = computed(() => (route.query.code as string | undefined) ?? 
 const selectedName = computed(() => countries.value.find((c) => c.iso_3166_1 === selectedCode.value)?.name ?? '')
 const selectedFlag = computed(() => flag(selectedCode.value))
 
-const stationsQuery = useQuery({
-  key: () => ['radio', 'search', { countrycode: selectedCode.value }],
-  query: async () => ((await $heya('/api/radio/search', { query: { countrycode: selectedCode.value, limit: 50 } })) as { items: RadioStationView[] }).items ?? [],
-  enabled: () => selectedCode.value.length > 0,
-  staleTime: 1000 * 60 * 5,
-})
-const stations = computed<RadioStationView[]>(() => stationsQuery.data.value ?? [])
-const stationsLoading = computed(() => stationsQuery.isLoading.value)
+// Random-access station catalog per country — total seeded from the country
+// list's stationcount; the catalog's short-page rule shrinks to the real end
+// when radio-browser's advertised count drifts from its search results.
+const { total: stationsTotal, pending: stationsPending, itemAt: stationAt, ensureRange: ensureStations }
+  = useVirtualCatalog<RadioStationView>(() => ({
+    key: `radio:country:${selectedCode.value}`,
+    pageSize: 100,
+    fetch: async (offset, limit) => {
+      if (!selectedCode.value) return { items: [], total: 0 }
+      const items = ((await $heya('/api/radio/search', {
+        query: { countrycode: selectedCode.value, limit, offset },
+      })) as { items: RadioStationView[] }).items ?? []
+      const known = countries.value.find((c) => c.iso_3166_1 === selectedCode.value)?.stationcount
+      const total = known ?? (offset + items.length + (items.length === limit ? limit : 0))
+      return { items, total }
+    },
+  }))
 
 async function selectCountry(c: CountryRow) {
   router.replace({ query: { code: c.iso_3166_1 } })
