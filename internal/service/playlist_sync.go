@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/playlistsync"
@@ -16,6 +18,10 @@ import (
 )
 
 const lastFMPlaylistUnavailable = "Last.fm retired its playlist API; the remaining endpoints are deprecated and no longer supported"
+const (
+	playlistSyncTwoWay   = "two_way"
+	playlistSyncPullOnly = "pull_only"
+)
 
 type PlaylistSyncView struct {
 	Service      string     `json:"service"`
@@ -23,6 +29,7 @@ type PlaylistSyncView struct {
 	ExternalURL  string     `json:"external_url,omitempty"`
 	LastSyncedAt *time.Time `json:"last_synced_at,omitempty"`
 	LastError    string     `json:"last_error,omitempty"`
+	SyncMode     string     `json:"sync_mode"`
 }
 
 type ExternalPlaylistView struct {
@@ -33,12 +40,22 @@ type ExternalPlaylistView struct {
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 	TrackCount    int        `json:"track_count"`
 	LocalPlaylist *int64     `json:"local_playlist_id,omitempty"`
+	SyncMode      string     `json:"sync_mode,omitempty"`
+}
+
+type PlaylistCollectionView struct {
+	Key         string                 `json:"key"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	AutoSync    bool                   `json:"auto_sync"`
+	Playlists   []ExternalPlaylistView `json:"playlists"`
 }
 
 type PlaylistServiceCatalog struct {
 	Service      string                    `json:"service"`
 	Capabilities playlistsync.Capabilities `json:"capabilities"`
 	Playlists    []ExternalPlaylistView    `json:"playlists"`
+	Collections  []PlaylistCollectionView  `json:"collections"`
 }
 
 type playlistSyncLink struct {
@@ -47,6 +64,8 @@ type playlistSyncLink struct {
 	Service      string
 	ExternalID   string
 	Snapshot     []string
+	Unmatched    []string
+	SyncMode     string
 	LastSyncedAt *time.Time
 }
 
@@ -85,7 +104,7 @@ func (a *App) playlistSyncProvider(ctx context.Context, userID int64, service st
 
 func (a *App) ListPlaylistSyncs(ctx context.Context, userID, playlistID int64) ([]PlaylistSyncView, error) {
 	rows, err := a.db.Query(ctx, `
-		SELECT service, external_id, last_synced_at, last_error
+		SELECT service, external_id, last_synced_at, last_error, sync_mode
 		FROM user_playlist_syncs
 		WHERE user_id = $1 AND playlist_id = $2
 		ORDER BY service`, userID, playlistID)
@@ -96,7 +115,7 @@ func (a *App) ListPlaylistSyncs(ctx context.Context, userID, playlistID int64) (
 	out := []PlaylistSyncView{}
 	for rows.Next() {
 		var v PlaylistSyncView
-		if err := rows.Scan(&v.Service, &v.ExternalID, &v.LastSyncedAt, &v.LastError); err != nil {
+		if err := rows.Scan(&v.Service, &v.ExternalID, &v.LastSyncedAt, &v.LastError, &v.SyncMode); err != nil {
 			return nil, err
 		}
 		if v.Service == "listenbrainz" {
@@ -109,7 +128,7 @@ func (a *App) ListPlaylistSyncs(ctx context.Context, userID, playlistID int64) (
 
 func (a *App) ListExternalPlaylists(ctx context.Context, userID int64, service string) (PlaylistServiceCatalog, error) {
 	capabilities := playlistSyncCapabilities(service)
-	catalog := PlaylistServiceCatalog{Service: service, Capabilities: capabilities, Playlists: []ExternalPlaylistView{}}
+	catalog := PlaylistServiceCatalog{Service: service, Capabilities: capabilities, Playlists: []ExternalPlaylistView{}, Collections: []PlaylistCollectionView{}}
 	if !capabilities.Available {
 		return catalog, nil
 	}
@@ -121,9 +140,13 @@ func (a *App) ListExternalPlaylists(ctx context.Context, userID int64, service s
 	if err != nil {
 		return catalog, err
 	}
-	links := map[string]int64{}
+	type linkedPlaylist struct {
+		id   int64
+		mode string
+	}
+	links := map[string]linkedPlaylist{}
 	rows, err := a.db.Query(ctx, `
-		SELECT external_id, playlist_id FROM user_playlist_syncs
+		SELECT external_id, playlist_id, sync_mode FROM user_playlist_syncs
 		WHERE user_id = $1 AND service = $2`, userID, service)
 	if err != nil {
 		return catalog, err
@@ -131,8 +154,9 @@ func (a *App) ListExternalPlaylists(ctx context.Context, userID int64, service s
 	for rows.Next() {
 		var externalID string
 		var playlistID int64
-		if rows.Scan(&externalID, &playlistID) == nil {
-			links[externalID] = playlistID
+		var mode string
+		if rows.Scan(&externalID, &playlistID, &mode) == nil {
+			links[externalID] = linkedPlaylist{id: playlistID, mode: mode}
 		}
 	}
 	rows.Close()
@@ -145,12 +169,117 @@ func (a *App) ListExternalPlaylists(ctx context.Context, userID int64, service s
 			updated := p.UpdatedAt
 			v.UpdatedAt = &updated
 		}
-		if id, ok := links[p.ExternalID]; ok {
+		if link, ok := links[p.ExternalID]; ok {
+			id := link.id
 			v.LocalPlaylist = &id
+			v.SyncMode = link.mode
 		}
 		catalog.Playlists = append(catalog.Playlists, v)
 	}
+	if collectionProvider, ok := provider.(playlistsync.CollectionProvider); ok {
+		for _, collection := range collectionProvider.Collections() {
+			remote, err := collectionProvider.ListCollection(ctx, collection.Key)
+			if err != nil {
+				return catalog, err
+			}
+			view := PlaylistCollectionView{Key: collection.Key, Name: collection.Name, Description: collection.Description, Playlists: []ExternalPlaylistView{}}
+			_ = a.db.QueryRow(ctx, `
+				SELECT enabled FROM user_playlist_sync_policies
+				WHERE user_id = $1 AND service = $2 AND collection = $3`, userID, service, collection.Key).Scan(&view.AutoSync)
+			for _, p := range remote {
+				item := ExternalPlaylistView{ExternalID: p.ExternalID, Name: p.Name, Description: p.Description, URL: p.URL, TrackCount: len(p.Tracks)}
+				if !p.UpdatedAt.IsZero() {
+					updated := p.UpdatedAt
+					item.UpdatedAt = &updated
+				}
+				if link, ok := links[p.ExternalID]; ok {
+					id := link.id
+					item.LocalPlaylist = &id
+					item.SyncMode = link.mode
+				}
+				view.Playlists = append(view.Playlists, item)
+			}
+			catalog.Collections = append(catalog.Collections, view)
+		}
+	}
 	return catalog, nil
+}
+
+func (a *App) SetPlaylistCollectionPolicy(ctx context.Context, userID int64, service, collection string, enabled bool) error {
+	provider, err := a.playlistSyncProvider(ctx, userID, service)
+	if err != nil {
+		return err
+	}
+	collectionProvider, ok := provider.(playlistsync.CollectionProvider)
+	if !ok {
+		return fmt.Errorf("%s does not expose generated playlist collections", service)
+	}
+	valid := false
+	for _, candidate := range collectionProvider.Collections() {
+		if candidate.Key == collection {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("unknown %s playlist collection %q", service, collection)
+	}
+	_, err = a.db.Exec(ctx, `
+		INSERT INTO user_playlist_sync_policies (user_id, service, collection, enabled)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, service, collection) DO UPDATE SET
+			enabled = EXCLUDED.enabled, updated_at = now()`, userID, service, collection, enabled)
+	if err != nil || !enabled {
+		return err
+	}
+	return a.reconcilePlaylistCollection(ctx, userID, service, collection)
+}
+
+func (a *App) reconcilePlaylistCollection(ctx context.Context, userID int64, service, collection string) error {
+	provider, err := a.playlistSyncProvider(ctx, userID, service)
+	if err != nil {
+		return err
+	}
+	collectionProvider, ok := provider.(playlistsync.CollectionProvider)
+	if !ok {
+		return fmt.Errorf("%s does not expose generated playlist collections", service)
+	}
+	remote, err := collectionProvider.ListCollection(ctx, collection)
+	if err != nil {
+		return err
+	}
+	for _, playlist := range remote {
+		if _, err := a.EnableExternalPlaylistSync(ctx, userID, service, playlist.ExternalID, true, playlistSyncPullOnly); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) reconcileEnabledPlaylistCollections(ctx context.Context) {
+	rows, err := a.db.Query(ctx, `
+		SELECT user_id, service, collection
+		FROM user_playlist_sync_policies WHERE enabled = true`)
+	if err != nil {
+		return
+	}
+	type policy struct {
+		userID              int64
+		service, collection string
+	}
+	var policies []policy
+	for rows.Next() {
+		var p policy
+		if rows.Scan(&p.userID, &p.service, &p.collection) == nil {
+			policies = append(policies, p)
+		}
+	}
+	rows.Close()
+	for _, p := range policies {
+		if err := a.reconcilePlaylistCollection(ctx, p.userID, p.service, p.collection); err != nil {
+			log.Debug().Err(err).Str("service", p.service).Str("collection", p.collection).Msg("playlist collection reconciliation failed")
+		}
+	}
 }
 
 // EnableLocalPlaylistSync creates a provider playlist from a local playlist.
@@ -160,6 +289,17 @@ func (a *App) EnableLocalPlaylistSync(ctx context.Context, userID, playlistID in
 		_, err := a.db.Exec(ctx, `DELETE FROM user_playlist_syncs WHERE user_id = $1 AND playlist_id = $2 AND service = $3`, userID, playlistID, service)
 		return err
 	}
+	var alreadyLinked bool
+	if err := a.db.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM user_playlist_syncs
+			WHERE user_id = $1 AND playlist_id = $2 AND service = $3
+		)`, userID, playlistID, service).Scan(&alreadyLinked); err != nil {
+		return err
+	}
+	if alreadyLinked {
+		return nil
+	}
 	capabilities := playlistSyncCapabilities(service)
 	if !capabilities.Write {
 		return fmt.Errorf("%s", capabilities.Reason)
@@ -168,7 +308,7 @@ func (a *App) EnableLocalPlaylistSync(ctx context.Context, userID, playlistID in
 	if err != nil {
 		return err
 	}
-	pl, _, err := a.localPlaylistForSync(ctx, userID, playlistID)
+	pl, _, err := a.localPlaylistForSync(ctx, userID, playlistID, provider)
 	if err != nil {
 		return err
 	}
@@ -179,15 +319,21 @@ func (a *App) EnableLocalPlaylistSync(ctx context.Context, userID, playlistID in
 	snapshot, _ := json.Marshal(trackIDs(pl.Tracks))
 	_, err = a.db.Exec(ctx, `
 		INSERT INTO user_playlist_syncs
-			(user_id, playlist_id, service, external_id, snapshot_track_ids, last_synced_at)
-		VALUES ($1, $2, $3, $4, $5, now())
+			(user_id, playlist_id, service, external_id, snapshot_track_ids, sync_mode, last_synced_at)
+		VALUES ($1, $2, $3, $4, $5, 'two_way', now())
 		ON CONFLICT (playlist_id, service) DO NOTHING`, userID, playlistID, service, externalID, snapshot)
 	return err
 }
 
 // EnableExternalPlaylistSync imports a provider playlist into Heya and links
 // it. Re-selecting an already linked playlist is idempotent.
-func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, service, externalID string, enabled bool) (int64, error) {
+func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, service, externalID string, enabled bool, mode string) (int64, error) {
+	if mode == "" {
+		mode = playlistSyncTwoWay
+	}
+	if mode != playlistSyncTwoWay && mode != playlistSyncPullOnly {
+		return 0, fmt.Errorf("invalid playlist sync mode %q", mode)
+	}
 	var existing int64
 	err := a.db.QueryRow(ctx, `
 		SELECT playlist_id FROM user_playlist_syncs
@@ -195,14 +341,19 @@ func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, serv
 	if err == nil {
 		if !enabled {
 			_, err = a.db.Exec(ctx, `DELETE FROM user_playlist_syncs WHERE user_id = $1 AND service = $2 AND external_id = $3`, userID, service, externalID)
+		} else {
+			_, err = a.db.Exec(ctx, `UPDATE user_playlist_syncs SET sync_mode = $4, updated_at = now() WHERE user_id = $1 AND service = $2 AND external_id = $3`, userID, service, externalID, mode)
 		}
 		return existing, err
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
 	}
 	if !enabled {
 		return 0, nil
 	}
 	capabilities := playlistSyncCapabilities(service)
-	if !capabilities.Read || !capabilities.Write {
+	if !capabilities.Read || (mode == playlistSyncTwoWay && !capabilities.Write) {
 		return 0, fmt.Errorf("%s", capabilities.Reason)
 	}
 	provider, err := a.playlistSyncProvider(ctx, userID, service)
@@ -226,7 +377,7 @@ func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, serv
 		VALUES ($1, $2, $3, '', $4) RETURNING id`, userID, remote.Name, remote.Description, newSlug).Scan(&playlistID); err != nil {
 		return 0, err
 	}
-	trackIDs, _, err := a.resolveProviderTracks(ctx, remote.Tracks)
+	trackIDs, matched, err := a.resolveProviderTracks(ctx, provider, remote.Tracks)
 	if err != nil {
 		return 0, err
 	}
@@ -234,10 +385,11 @@ func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, serv
 		return 0, err
 	}
 	snapshot, _ := json.Marshal(trackIDsFromProvider(remote.Tracks))
+	unmatched, _ := json.Marshal(unmatchedTrackIDs(remote.Tracks, matched))
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_playlist_syncs
-			(user_id, playlist_id, service, external_id, snapshot_track_ids, last_synced_at)
-		VALUES ($1, $2, $3, $4, $5, now())`, userID, playlistID, service, externalID, snapshot); err != nil {
+			(user_id, playlist_id, service, external_id, snapshot_track_ids, unmatched_track_ids, sync_mode, last_synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())`, userID, playlistID, service, externalID, snapshot, unmatched, mode); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -248,16 +400,17 @@ func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, serv
 
 func (a *App) loadPlaylistSyncLink(ctx context.Context, userID, playlistID int64, service string) (playlistSyncLink, error) {
 	var link playlistSyncLink
-	var raw []byte
+	var raw, unmatchedRaw []byte
 	err := a.db.QueryRow(ctx, `
-		SELECT user_id, playlist_id, service, external_id, snapshot_track_ids, last_synced_at
+		SELECT user_id, playlist_id, service, external_id, snapshot_track_ids, unmatched_track_ids, sync_mode, last_synced_at
 		FROM user_playlist_syncs
 		WHERE user_id = $1 AND playlist_id = $2 AND service = $3`, userID, playlistID, service).
-		Scan(&link.UserID, &link.PlaylistID, &link.Service, &link.ExternalID, &raw, &link.LastSyncedAt)
+		Scan(&link.UserID, &link.PlaylistID, &link.Service, &link.ExternalID, &raw, &unmatchedRaw, &link.SyncMode, &link.LastSyncedAt)
 	if err != nil {
 		return link, fmt.Errorf("playlist is not synced to %s", service)
 	}
 	_ = json.Unmarshal(raw, &link.Snapshot)
+	_ = json.Unmarshal(unmatchedRaw, &link.Unmatched)
 	return link, nil
 }
 
@@ -280,51 +433,48 @@ func (a *App) SyncPlaylist(ctx context.Context, userID, playlistID int64, servic
 	if err != nil {
 		return a.recordPlaylistSyncError(ctx, link, err)
 	}
-	local, localUpdated, err := a.localPlaylistForSync(ctx, userID, playlistID)
-	if err != nil {
-		return a.recordPlaylistSyncError(ctx, link, err)
-	}
-
-	// Provider tracks that cannot exist locally are carried through the local
-	// side of the merge so a later pass does not interpret them as deletions.
-	localIDs := trackIDs(local.Tracks)
-	_, matchableBase, err := a.resolveProviderTracks(ctx, providerTracks(link.Snapshot))
-	if err != nil {
-		return a.recordPlaylistSyncError(ctx, link, err)
-	}
-	for _, id := range link.Snapshot {
-		if !matchableBase[id] {
-			localIDs = append(localIDs, id)
-		}
-	}
 	remoteIDs := trackIDs(remote.Tracks)
-	mergedIDs := playlistsync.MergeTrackIDs(link.Snapshot, localIDs, remoteIDs)
-
-	localMetaChanged := link.LastSyncedAt == nil || localUpdated.After(*link.LastSyncedAt)
-	remoteMetaChanged := link.LastSyncedAt == nil || (!remote.UpdatedAt.IsZero() && remote.UpdatedAt.After(*link.LastSyncedAt))
-	mergedName, mergedDescription := local.Name, local.Description
-	if remoteMetaChanged && !localMetaChanged {
-		mergedName, mergedDescription = remote.Name, remote.Description
-	}
-	merged := playlistsync.Playlist{Name: mergedName, Description: mergedDescription, Tracks: providerTracks(mergedIDs)}
-
-	if !sameStrings(mergedIDs, remoteIDs) || mergedName != remote.Name || mergedDescription != remote.Description {
-		if err := provider.Replace(ctx, link.ExternalID, merged); err != nil {
+	mergedIDs := remoteIDs
+	mergedName, mergedDescription := remote.Name, remote.Description
+	merged := remote
+	if link.SyncMode != playlistSyncPullOnly {
+		local, localUpdated, err := a.localPlaylistForSync(ctx, userID, playlistID, provider)
+		if err != nil {
 			return a.recordPlaylistSyncError(ctx, link, err)
 		}
+
+		// Provider tracks that could not exist locally at the last pass are carried
+		// through the local side so absence isn't mistaken for a user deletion.
+		localIDs := append(trackIDs(local.Tracks), link.Unmatched...)
+		mergedIDs = playlistsync.MergeTrackIDs(link.Snapshot, localIDs, remoteIDs)
+		localMetaChanged := link.LastSyncedAt == nil || localUpdated.After(*link.LastSyncedAt)
+		remoteMetaChanged := link.LastSyncedAt == nil || (!remote.UpdatedAt.IsZero() && remote.UpdatedAt.After(*link.LastSyncedAt))
+		mergedName, mergedDescription = local.Name, local.Description
+		if remoteMetaChanged && !localMetaChanged {
+			mergedName, mergedDescription = remote.Name, remote.Description
+		}
+		merged = playlistsync.Playlist{Name: mergedName, Description: mergedDescription, Tracks: providerTracks(mergedIDs)}
+
+		if !sameStrings(mergedIDs, remoteIDs) || mergedName != remote.Name || mergedDescription != remote.Description {
+			if err := provider.Replace(ctx, link.ExternalID, merged); err != nil {
+				return a.recordPlaylistSyncError(ctx, link, err)
+			}
+		}
 	}
-	resolved, _, err := a.resolveProviderTracks(ctx, merged.Tracks)
+	resolved, matched, err := a.resolveProviderTracks(ctx, provider, merged.Tracks)
 	if err != nil {
 		return a.recordPlaylistSyncError(ctx, link, err)
 	}
-	if err := a.applySyncedPlaylist(ctx, userID, playlistID, mergedName, mergedDescription, resolved); err != nil {
+	if err := a.applySyncedPlaylist(ctx, userID, playlistID, provider, mergedName, mergedDescription, resolved); err != nil {
 		return a.recordPlaylistSyncError(ctx, link, err)
 	}
 	snapshot, _ := json.Marshal(mergedIDs)
+	unmatched, _ := json.Marshal(unmatchedTrackIDs(merged.Tracks, matched))
 	_, err = a.db.Exec(ctx, `
 		UPDATE user_playlist_syncs
-		SET snapshot_track_ids = $4, last_synced_at = now(), last_error = '', updated_at = now()
-		WHERE user_id = $1 AND playlist_id = $2 AND service = $3`, userID, playlistID, service, snapshot)
+		SET snapshot_track_ids = $4, unmatched_track_ids = $5,
+			last_synced_at = now(), last_error = '', updated_at = now()
+		WHERE user_id = $1 AND playlist_id = $2 AND service = $3`, userID, playlistID, service, snapshot, unmatched)
 	return err
 }
 
@@ -335,7 +485,7 @@ func (a *App) recordPlaylistSyncError(ctx context.Context, link playlistSyncLink
 	return syncErr
 }
 
-func (a *App) localPlaylistForSync(ctx context.Context, userID, playlistID int64) (playlistsync.Playlist, time.Time, error) {
+func (a *App) localPlaylistForSync(ctx context.Context, userID, playlistID int64, provider playlistsync.Provider) (playlistsync.Playlist, time.Time, error) {
 	var pl playlistsync.Playlist
 	var updated time.Time
 	if err := a.db.QueryRow(ctx, `
@@ -343,14 +493,24 @@ func (a *App) localPlaylistForSync(ctx context.Context, userID, playlistID int64
 		WHERE id = $1 AND user_id = $2`, playlistID, userID).Scan(&pl.Name, &pl.Description, &updated); err != nil {
 		return pl, updated, fmt.Errorf("playlist not found: %w", err)
 	}
-	rows, err := a.db.Query(ctx, `
-		SELECT t.recording_mbid, t.title, ar.name
+	identityExpr := "t.recording_mbid"
+	identityArgs := []any{playlistID}
+	switch provider.IdentityKind() {
+	case playlistsync.IdentityISRC:
+		identityExpr = "t.isrc"
+	case playlistsync.IdentityServiceID:
+		identityExpr = "COALESCE(t.external_ids::jsonb ->> $2, '')"
+		identityArgs = append(identityArgs, provider.Service())
+	}
+	query := fmt.Sprintf(`
+		SELECT %s, t.title, ar.name
 		FROM user_playlist_tracks upt
 		JOIN tracks t ON t.id = upt.track_id
 		JOIN albums al ON al.id = t.album_id
 		JOIN artists ar ON ar.id = al.artist_id
-		WHERE upt.playlist_id = $1 AND t.recording_mbid <> ''
-		ORDER BY upt.position, t.id`, playlistID)
+		WHERE upt.playlist_id = $1 AND %s <> ''
+		ORDER BY upt.position, t.id`, identityExpr, identityExpr)
+	rows, err := a.db.Query(ctx, query, identityArgs...)
 	if err != nil {
 		return pl, updated, err
 	}
@@ -365,14 +525,29 @@ func (a *App) localPlaylistForSync(ctx context.Context, userID, playlistID int64
 	return pl, updated, rows.Err()
 }
 
-func (a *App) resolveProviderTracks(ctx context.Context, tracks []playlistsync.Track) ([]int64, map[string]bool, error) {
+func (a *App) resolveProviderTracks(ctx context.Context, provider playlistsync.Provider, tracks []playlistsync.Track) ([]int64, map[string]bool, error) {
 	ids := make([]int64, 0, len(tracks))
 	matched := map[string]bool{}
 	seen := map[int64]bool{}
 	for _, track := range tracks {
-		id, _, ok := a.matchListen(ctx, scrobble.Listen{
-			RecordingMBID: track.ProviderID, TrackName: track.Title, ArtistName: track.Artist,
-		})
+		var id int64
+		var ok bool
+		switch provider.IdentityKind() {
+		case playlistsync.IdentityRecordingMBID:
+			id, _, ok = a.matchListen(ctx, scrobble.Listen{
+				RecordingMBID: track.ProviderID, TrackName: track.Title, ArtistName: track.Artist,
+			})
+		case playlistsync.IdentityISRC:
+			ok = a.db.QueryRow(ctx, `SELECT id FROM tracks WHERE isrc = $1 ORDER BY id LIMIT 1`, track.ProviderID).Scan(&id) == nil
+		case playlistsync.IdentityServiceID:
+			ok = a.db.QueryRow(ctx, `
+				SELECT id FROM tracks
+				WHERE external_ids::jsonb ->> $1 = $2
+				ORDER BY id LIMIT 1`, provider.Service(), track.ProviderID).Scan(&id) == nil
+		}
+		if !ok && track.Title != "" && track.Artist != "" {
+			id, _, ok = a.matchListen(ctx, scrobble.Listen{TrackName: track.Title, ArtistName: track.Artist})
+		}
 		if !ok {
 			continue
 		}
@@ -405,7 +580,7 @@ func replaceLocalPlaylistTracks(ctx context.Context, tx execTx, playlistID int64
 	return nil
 }
 
-func (a *App) applySyncedPlaylist(ctx context.Context, userID, playlistID int64, name, description string, trackIDs []int64) error {
+func (a *App) applySyncedPlaylist(ctx context.Context, userID, playlistID int64, provider playlistsync.Provider, name, description string, trackIDs []int64) error {
 	q := sqlc.New(a.db)
 	existing, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID})
 	if err != nil {
@@ -415,6 +590,34 @@ func (a *App) applySyncedPlaylist(ctx context.Context, userID, playlistID int64,
 	if name != existing.Name {
 		newSlug = slug.GenerateUnique(ctx, name, "", playlistID, userPlaylistSlugExists(q, userID))
 	}
+	// ListenBrainz can only represent recordings with an MBID. Keep local-only
+	// tracks in Heya (appended after the synchronized sequence) rather than
+	// silently deleting them on the first remote pull.
+	identityExpr := "t.recording_mbid"
+	identityArgs := []any{playlistID}
+	switch provider.IdentityKind() {
+	case playlistsync.IdentityISRC:
+		identityExpr = "t.isrc"
+	case playlistsync.IdentityServiceID:
+		identityExpr = "COALESCE(t.external_ids::jsonb ->> $2, '')"
+		identityArgs = append(identityArgs, provider.Service())
+	}
+	rows, err := a.db.Query(ctx, fmt.Sprintf(`
+		SELECT t.id
+		FROM user_playlist_tracks upt
+		JOIN tracks t ON t.id = upt.track_id
+		WHERE upt.playlist_id = $1 AND %s = ''
+		ORDER BY upt.position, t.id`, identityExpr), identityArgs...)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var trackID int64
+		if rows.Scan(&trackID) == nil {
+			trackIDs = append(trackIDs, trackID)
+		}
+	}
+	rows.Close()
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -462,6 +665,7 @@ func (a *App) runPlaylistSyncLoop() {
 		case <-a.LifetimeContext().Done():
 			return
 		case <-ticker.C:
+			a.reconcileEnabledPlaylistCollections(a.LifetimeContext())
 			rows, err := a.db.Query(a.LifetimeContext(), `SELECT user_id, playlist_id, service FROM user_playlist_syncs ORDER BY last_synced_at NULLS FIRST`)
 			if err != nil {
 				continue
@@ -501,6 +705,15 @@ func providerTracks(ids []string) []playlistsync.Track {
 	out := make([]playlistsync.Track, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, playlistsync.Track{ProviderID: id})
+	}
+	return out
+}
+func unmatchedTrackIDs(tracks []playlistsync.Track, matched map[string]bool) []string {
+	out := make([]string, 0)
+	for _, track := range tracks {
+		if track.ProviderID != "" && !matched[track.ProviderID] {
+			out = append(out, track.ProviderID)
+		}
 	}
 	return out
 }

@@ -15,6 +15,14 @@ type Capabilities struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+type IdentityKind string
+
+const (
+	IdentityRecordingMBID IdentityKind = "recording_mbid"
+	IdentityServiceID     IdentityKind = "service_id"
+	IdentityISRC          IdentityKind = "isrc"
+)
+
 type Track struct {
 	ProviderID string `json:"provider_id"`
 	Title      string `json:"title,omitempty"`
@@ -32,11 +40,26 @@ type Playlist struct {
 
 type Provider interface {
 	Service() string
+	IdentityKind() IdentityKind
 	Capabilities() Capabilities
 	List(ctx context.Context) ([]Playlist, error)
 	Get(ctx context.Context, externalID string) (Playlist, error)
 	Create(ctx context.Context, playlist Playlist) (string, error)
 	Replace(ctx context.Context, externalID string, playlist Playlist) error
+}
+
+// CollectionProvider is implemented by services which expose provider-owned
+// playlist feeds in addition to normal user-owned playlists. These feeds are
+// always linked pull-only.
+type CollectionProvider interface {
+	Collections() []Collection
+	ListCollection(ctx context.Context, key string) ([]Playlist, error)
+}
+
+type Collection struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // MergeTrackIDs performs a three-way set/sequence merge. Deleting a track on

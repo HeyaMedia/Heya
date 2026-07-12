@@ -44,6 +44,7 @@ export interface PlaylistDetailResponse {
     external_url?: string
     last_synced_at?: string
     last_error?: string
+    sync_mode: 'two_way' | 'pull_only'
   }>
 }
 

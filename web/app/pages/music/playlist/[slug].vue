@@ -21,7 +21,10 @@
              falls back to the first album cover, then the icon tile). -->
         <div class="pl-hero-art">
           <NuxtImg v-if="customCoverUrl" :src="customCoverUrl" :width="400" :quality="85" :alt="`${pl.name} cover`" />
-          <MixCollage v-else-if="tracks.length" :tracks="tracks" :seed-src="firstAlbumCover" :alt="`${pl.name} cover`" class="pl-hero-collage" />
+          <!-- @art reports the image the collage ACTUALLY rendered (post
+               error-cascade) — the tone sampler follows it, never a
+               candidate URL that may 404. -->
+          <MixCollage v-else-if="tracks.length" :tracks="tracks" :seed-src="firstAlbumCover" :alt="`${pl.name} cover`" class="pl-hero-collage" @art="collageArt = $event" />
           <Icon v-else name="heart" :size="48" />
         </div>
         <div class="pl-hero-meta">
@@ -37,10 +40,13 @@
             <button class="btn btn-primary" :style="heroToneStyle" :disabled="!tracks.length" @click="playAll(false)">
               <Icon name="play" :size="16" /> Play
             </button>
-            <button class="btn" :disabled="!tracks.length" @click="playAll(true)">
+            <button class="btn" :style="heroAltStyle" :disabled="!tracks.length" @click="playAll(true)">
               <Icon name="shuffle" :size="16" /> Shuffle
             </button>
-            <AppMenu trigger-class="btn-ghost pl-more" trigger-title="Playlist options" trigger-aria-label="Playlist options">
+            <button class="btn" :style="heroAltStyle" :disabled="syncBusy" @click="playlistSyncAction">
+              <Icon :name="listenBrainzSync ? 'refresh' : 'globe'" :size="15" /> {{ playlistSyncActionLabel }}
+            </button>
+            <AppMenu trigger-class="btn-ghost pl-more" trigger-title="Playlist options" trigger-aria-label="Playlist options" :trigger-style="heroAltStyle">
               <template #trigger><Icon name="more" :size="16" /></template>
               <DropdownMenuItem class="surface-item" @select="openEdit">
                 <Icon name="pencil" :size="14" class="surface-item-icon" /> Edit details…
@@ -72,68 +78,40 @@
       </MusicEmptyState>
     </section>
 
-    <!-- Desktop keeps the virtualized RecycleScroller table untouched — see
-         script comment for why TrackList only takes over at phone width. -->
-    <section v-else-if="!isPhone" class="page-pad pl-tracks">
-      <div class="list-rows">
-        <div class="list-row list-row-head pl-cols">
-          <div>#</div><div>Title</div><div>Album</div><div>Added</div><div></div><div style="text-align: right">Duration</div>
-        </div>
-        <RecycleScroller
-          :items="tracks"
-          :item-size="62"
-          key-field="track_id"
-          page-mode
-          v-slot="{ item: t, index: i }"
-        >
-          <div
-            class="list-row pl-cols"
-            :class="{ 'pl-missing': t.available === false }"
-            :draggable="!isCoarse"
-            :role="t.available === false ? undefined : 'button'"
-            :tabindex="t.available === false ? -1 : 0"
-            :aria-label="t.available === false ? undefined : `Play ${t.track_title}`"
-            @click="t.available !== false && playFrom(i)"
-            @keydown="onRowKeydown($event, i, t)"
-            @dragstart="onDragStart($event, { kind: 'track', track: { id: t.track_id, title: t.track_title } })"
-            @dragend="onDragEnd"
-          >
-            <div class="pl-num mono">{{ i + 1 }}</div>
-            <div class="pl-title-cell">
-              <VuMeter v-if="currentTrack?.id === t.track_id" :playing="playing" />
-              <Poster v-else :idx="t.track_id" :src="useAlbumCoverUrl(t.artist_slug, t.album_slug)" aspect="1/1" class="pl-thumb" :class="{ 'poster--missing': t.available === false }" />
-              <div class="pl-title-text">
-                <div class="pl-title" :style="currentTrack?.id === t.track_id ? { color: 'var(--gold)' } : {}">
-                  {{ t.track_title }}
-                  <Icon v-if="t.available === false" name="trash" :size="11" class="pl-missing-icon" />
-                </div>
-                <div class="pl-artist">{{ t.artist_name }}</div>
-              </div>
-            </div>
-            <div class="pl-album">
-              <NuxtLink :to="`/music/artist/${t.artist_slug}/${t.album_slug}`" class="pl-album-link" @click.stop>{{ t.album_title }}</NuxtLink>
-            </div>
-            <div class="pl-added mono">{{ formatDate(t.added_at) }}</div>
-            <button class="pl-remove" @click.stop="removeRow(t.track_id)" title="Remove from playlist" aria-label="Remove from playlist">
-              <Icon name="close" :size="14" />
-            </button>
-            <div class="pl-dur mono">{{ formatTime(t.duration) }}</div>
-          </div>
-        </RecycleScroller>
-      </div>
-    </section>
-
+    <!-- One TrackList for every width — the shared component brings the
+         glass panel, phone layout, virtualization (page-mode RecycleScroller
+         for thousand-track playlists), drag, and the context/action sheet.
+         The playlist extras (Added date, per-row remove) ride the
+         kind:'custom' cell slots; on phone those columns don't render and
+         Remove lives in the row's ⋯ sheet via contextItemsFor. -->
     <section v-else class="page-pad pl-tracks">
       <TrackList
         :tracks="tlRows"
         :columns="columns"
-        grid-template-columns="40px 2fr 1.2fr 100px 36px 70px"
-        :show-header="false"
+        grid-template-columns="48px 56px 1fr minmax(160px, 1.2fr) 110px 36px 70px"
         :context-items="contextItemsFor"
         :active-track-id="currentTrack?.id ?? null"
+        :playing="playing"
+        vu-meter-in="art"
         :duration-formatter="formatTime"
+        :virtualized="tlRows.length > 200"
         @row-click="playFrom"
-      />
+      >
+        <template #cell-added="{ index }">
+          <span class="pl-added">{{ formatDate(tracks[index]!.added_at) }}</span>
+        </template>
+        <template #cell-remove="{ index }">
+          <button
+            type="button"
+            class="pl-remove"
+            :aria-label="`Remove ${tracks[index]!.track_title} from playlist`"
+            title="Remove from playlist"
+            @click.stop="removeRow(tracks[index]!.track_id)"
+          >
+            <Icon name="close" :size="14" />
+          </button>
+        </template>
+      </TrackList>
     </section>
 
     <!-- Edit details — rename regenerates the slug server-side; we re-route
@@ -148,7 +126,7 @@
         <div class="pl-sync-service">
           <div>
             <strong>ListenBrainz</strong>
-            <span v-if="listenBrainzConnected">{{ listenBrainzSync ? (listenBrainzSync.last_error || 'Two-way sync is active') : 'Keep this playlist synchronized in both directions' }}</span>
+            <span v-if="listenBrainzConnected">{{ listenBrainzSync ? (listenBrainzSync.last_error || (listenBrainzSync.sync_mode === 'pull_only' ? 'Pull-only sync is active — ListenBrainz controls this playlist' : 'Two-way sync is active')) : 'Keep this playlist synchronized in both directions' }}</span>
             <span v-else>Connect ListenBrainz in Settings → Music services first</span>
           </div>
           <div class="pl-sync-actions">
@@ -160,12 +138,6 @@
               aria-label="Synchronize this playlist with ListenBrainz"
               @update:model-value="togglePlaylistSync('listenbrainz', $event)"
             />
-          </div>
-        </div>
-        <div class="pl-sync-service unavailable">
-          <div>
-            <strong>Last.fm</strong>
-            <span>Last.fm retired its playlist API, so playlist synchronization is unavailable.</span>
           </div>
         </div>
       </div>
@@ -183,6 +155,7 @@
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
 import type { ContextMenuItem } from '~~/shared/types'
+import type { ImageTone } from '~/composables/useImageTone'
 import { DropdownMenuItem } from 'reka-ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { playlistDetailQuery, type PlaylistDetailResponse, type PlaylistTrackRow } from '~/queries/music'
@@ -190,17 +163,10 @@ import { musicServicesQuery } from '~/queries/settings'
 
 definePageMeta({ layout: 'default' })
 
-// This page's desktop table drives a virtualized RecycleScroller (playlists
-// can run to thousands of tracks) plus a per-row hover "remove" button.
-// TrackList has no virtualization and no matching column kind for that
-// button — forcing it onto desktop would be a real perf regression for long
-// playlists, not just a styling mismatch. So: desktop keeps this page's own
-// table untouched, and TrackList only takes over at phone width, where the
-// list is short enough in practice and "Remove from Playlist" moves into
-// the row's ⋯ menu (see contextItemsFor below).
-const { isPhone, isCoarse } = useViewport()
-const { onDragStart, onDragEnd } = useMusicDragDrop()
-
+// One shared TrackList at every width (the old hand-rolled desktop table's
+// rationale — "TrackList has no virtualization" — went stale when TrackList
+// gained the `virtualized` prop; the per-row remove button and Added date
+// ride kind:'custom' cell slots).
 const route = useRoute()
 const router = useRouter()
 // Slug in canonical URLs; numeric ids still resolve (legacy links, fresh
@@ -225,6 +191,12 @@ const musicServices = useQuery(musicServicesQuery())
 const listenBrainzConnected = computed(() => musicServices.data.value?.find(s => s.service === 'listenbrainz')?.token_set ?? false)
 const listenBrainzSync = computed(() => detail.value?.syncs?.find(s => s.service === 'listenbrainz'))
 const syncBusy = ref(false)
+const playlistSyncActionLabel = computed(() => {
+  if (!listenBrainzConnected.value) return 'Connect ListenBrainz'
+  if (listenBrainzSync.value?.sync_mode === 'pull_only') return 'Refresh from ListenBrainz'
+  if (listenBrainzSync.value) return 'Sync ListenBrainz'
+  return 'Sync to ListenBrainz'
+})
 const totalDuration = computed(() => tracks.value.reduce((s, t) => s + (t.duration || 0), 0))
 
 // ── Cover ────────────────────────────────────────────────────────────
@@ -239,24 +211,51 @@ const firstAlbumCover = computed(() => {
   const first = tracks.value[0]
   return first ? useAlbumCoverUrl(first.artist_slug, first.album_slug) : null
 })
-// The blurred hero backdrop uses whatever the art block shows.
-const backdropSrc = computed(() => customCoverUrl.value || firstAlbumCover.value)
+// What MixCollage ACTUALLY rendered (post error-cascade) — null until its
+// first image lands or when it fell through to the icon tile.
+const collageArt = ref<string | null>(null)
+// The blurred hero backdrop (ambient-off mode) follows the healed art too.
+const backdropSrc = computed(() => customCoverUrl.value || collageArt.value || firstAlbumCover.value)
 const coverStyle = computed(() => backdropSrc.value ? { backgroundImage: `url(${backdropSrc.value})` } : {})
 
-// Tone-follow (same recipe as the artist hero / mixes marquee): the Play
-// button wears the cover's sampled palette. Sequence-guarded against a slow
-// sample landing after navigation.
-const heroToneStyle = ref<Record<string, string> | undefined>()
+// ── Tone-follow ──────────────────────────────────────────────────────
+// Sample the image the hero actually shows: the custom cover, else the
+// collage's healed pick (never a candidate that may 404). Play wears the
+// main tone; Shuffle and the ⋯ menu wear the complement — the palette's
+// "other" color — so the action row reads as one family with a lead voice.
+const heroTone = ref<ImageTone | null>(null)
 let toneSeq = 0
-watch(backdropSrc, (src) => {
+watch(() => customCoverUrl.value || collageArt.value, (src) => {
   const seq = ++toneSeq
-  heroToneStyle.value = undefined
+  heroTone.value = null
   if (!src || !import.meta.client) return
   sampleImageTone(src).then((t) => {
-    if (seq !== toneSeq) return
-    heroToneStyle.value = t ? { background: t.main, color: t.ink } : undefined
+    if (seq === toneSeq) heroTone.value = t
   })
 }, { immediate: true })
+
+// Luminance-picked ink for the complement fill (same crossover the sampler
+// uses for `main` — it only precomputes ink for that one).
+function inkFor(triplet: string): string {
+  const [r = 0, g = 0, b = 0] = triplet.split(' ').map(Number)
+  const lin = (v: number) => {
+    v /= 255
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  }
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  return L > 0.2 ? '#16130d' : '#ffffff'
+}
+
+const heroToneStyle = computed(() =>
+  heroTone.value ? { background: heroTone.value.main, color: heroTone.value.ink } : undefined)
+const heroAltStyle = computed(() =>
+  heroTone.value
+    ? {
+        background: `rgb(${heroTone.value.complementTriplet} / 0.85)`,
+        borderColor: 'transparent',
+        color: inkFor(heroTone.value.complementTriplet),
+      }
+    : undefined)
 
 // ── Ambient backdrop — the playlist's artists ────────────────────────
 // With ambient on, this page claims the background layer and walks it
@@ -363,6 +362,18 @@ async function togglePlaylistSync(service: 'listenbrainz' | 'lastfm', enabled: b
   }
 }
 
+async function playlistSyncAction() {
+  if (!listenBrainzConnected.value) {
+    await navigateTo('/settings/services')
+    return
+  }
+  if (listenBrainzSync.value) {
+    await syncNow('listenbrainz')
+    return
+  }
+  await togglePlaylistSync('listenbrainz', true)
+}
+
 async function syncNow(service: 'listenbrainz' | 'lastfm') {
   if (syncBusy.value) return
   syncBusy.value = true
@@ -397,15 +408,6 @@ function toPlayable(row: PlaylistTrackRow): Track {
 
 function isPlayable(row: PlaylistTrackRow) { return row.available !== false }
 
-// Keyboard mirror of the row's @click. Guarded on target===currentTarget so
-// Enter/Space on the nested album link or "Remove" doesn't also playFrom.
-function onRowKeydown(e: KeyboardEvent, i: number, t: PlaylistTrackRow) {
-  if (e.target !== e.currentTarget) return
-  if (e.key !== 'Enter' && e.key !== ' ') return
-  e.preventDefault()
-  if (t.available !== false) playFrom(i)
-}
-
 async function playAll(shuffle: boolean) {
   let list = tracks.value.filter(isPlayable).map(toPlayable)
   if (shuffle) list = [...list].sort(() => Math.random() - 0.5)
@@ -431,15 +433,17 @@ async function removeRow(trackId: number) {
   queryClient.invalidateQueries({ key: ['music', 'home', 'recent-playlists'] })
 }
 
-// Phone-only TrackList render (see script-top comment).
+// Shared TrackList wiring (see script-top comment).
 const actions = useMusicActions()
 
 const columns: TrackListColumn[] = [
-  { key: 'idx', kind: 'index' },
+  { key: 'idx', kind: 'index', label: '#' },
   { key: 'art', kind: 'art' },
-  { key: 'title', kind: 'title', subtitle: 'artist-plain' },
-  { key: 'album', kind: 'album' },
-  { key: 'duration', kind: 'duration' },
+  { key: 'title', kind: 'title', label: 'Title', subtitle: 'artist-plain' },
+  { key: 'album', kind: 'album', label: 'Album' },
+  { key: 'added', kind: 'custom', label: 'Added' },
+  { key: 'remove', kind: 'custom' },
+  { key: 'duration', kind: 'duration', headerIcon: 'clock' },
 ]
 
 const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
@@ -623,40 +627,19 @@ function formatDate(iso: string) {
   transition: background 0.4s ease, color 0.4s ease, filter 0.15s;
 }
 .m-actions :deep(.btn-primary:hover) { filter: brightness(1.1); }
+/* Shuffle wears the complement tint (heroAltStyle) — glide with the art. */
+.m-actions .btn { transition: background 0.4s ease, color 0.4s ease, border-color 0.4s ease; }
 .pl-cover-input { display: none; }
 
 .pl-tracks { padding-top: 24px; }
-/* Same glass coat as the shared TrackList (.tl) — this page's desktop table
-   is a hand-rolled RecycleScroller (virtualization TrackList doesn't have),
-   but it sits over the same ambient art, now the playlist's rotating artist
-   portraits: bare rows were unreadable over a bright face. Keep the two
-   recipes in lockstep with TrackList.vue's. */
-.pl-tracks .list-rows {
-  background: color-mix(in oklab, var(--bg-2) 76%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-el);
-  padding: 4px 10px 8px;
+/* Playlist-specific cells inside the shared TrackList — the glass panel,
+   grid, and row chrome all come from TrackList itself. Scoped rules reach
+   this content because it renders through OUR cell-slot templates. */
+.pl-added {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
 }
-.pl-cols {
-  grid-template-columns: 40px 2fr 1.2fr 100px 36px 70px !important;
-  /* Inside the glass panel now — no halo needed, quiet like .tl-head. */
-  color: var(--fg-2);
-}
-.pl-num { text-align: right; color: var(--fg-3); }
-.pl-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.pl-thumb { width: 40px; height: 40px; border-radius: 4px; flex-shrink: 0; }
-.pl-title-text { min-width: 0; }
-.pl-title { font-size: 14px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.pl-missing { opacity: 0.5; cursor: default; }
-.pl-missing-icon { color: var(--bad); vertical-align: -1px; margin-left: 4px; }
-.pl-artist { font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pl-album { font-size: 13px; color: var(--fg-2); overflow: hidden; }
-.pl-album-link { color: inherit; text-decoration: none; }
-.pl-album-link:hover { color: var(--gold); }
-.pl-added { font-size: 11px; color: var(--fg-3); }
-.pl-dur { font-size: 12px; color: var(--fg-3); text-align: right; }
 .pl-remove {
   background: transparent;
   border: 0;
@@ -667,10 +650,9 @@ function formatDate(iso: string) {
   opacity: 0;
   transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
-.list-row:hover .pl-remove,
+:deep(.tl-track:hover) .pl-remove,
 .pl-remove:focus-visible { opacity: 1; }
 .pl-remove:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
-.mono { font-family: var(--font-mono); }
 
 /* Edit dialog */
 .pl-edit-form { display: flex; flex-direction: column; gap: 6px; }
@@ -729,9 +711,10 @@ function formatDate(iso: string) {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  /* 0.4s so the complement tint (trigger-style) glides in with the art. */
+  transition: background 0.4s ease, color 0.4s ease, border-color 0.4s ease;
 }
-.pl-more:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.pl-more:hover { filter: brightness(1.1); }
 
 /* Ambient-extended: the ⋯ button sits on the theme wash, not a darkened
    hero — swap the literal-white ghost coat for theme glass. */

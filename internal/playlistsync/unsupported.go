@@ -10,7 +10,8 @@ type Unsupported struct {
 	Reason string
 }
 
-func (p Unsupported) Service() string { return p.Name }
+func (p Unsupported) Service() string            { return p.Name }
+func (p Unsupported) IdentityKind() IdentityKind { return IdentityServiceID }
 func (p Unsupported) Capabilities() Capabilities {
 	return Capabilities{Reason: p.Reason}
 }

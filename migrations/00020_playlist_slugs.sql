@@ -40,3 +40,7 @@ CREATE UNIQUE INDEX user_playlists_user_id_slug_idx ON public.user_playlists (us
 
 DROP INDEX IF EXISTS public.user_playlists_user_id_slug_idx;
 ALTER TABLE public.user_playlists DROP COLUMN IF EXISTS slug;
+
+-- (touched to trigger an air rebuild after clearing a stale goose row
+-- for version 22 — a different, since-renumbered migration had burned
+-- that number hours earlier; content-inert, this file was already applied.)

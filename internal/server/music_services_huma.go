@@ -63,11 +63,23 @@ func registerMusicServicesRoutes(api huma.API, app *service.App) {
 			ExternalID string `path:"external_id" minLength:"1" maxLength:"256"`
 			Body       playlistSyncToggle
 		}) (*JSONOutput[externalPlaylistSyncBody], error) {
-			playlistID, err := app.EnableExternalPlaylistSync(ctx, userFrom(ctx).ID, in.Service, in.ExternalID, in.Body.Enabled)
+			playlistID, err := app.EnableExternalPlaylistSync(ctx, userFrom(ctx).ID, in.Service, in.ExternalID, in.Body.Enabled, in.Body.Mode)
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
 			return noStoreJSON(externalPlaylistSyncBody{PlaylistID: playlistID, Enabled: in.Body.Enabled}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/music-services/{service}/playlist-collections/{collection}", "set-playlist-collection-policy", "Automatically synchronize a provider playlist collection", "Me")),
+		func(ctx context.Context, in *struct {
+			Service    string `path:"service" enum:"listenbrainz,lastfm"`
+			Collection string `path:"collection" minLength:"1" maxLength:"64"`
+			Body       playlistSyncToggle
+		}) (*StatusOutput, error) {
+			if err := app.SetPlaylistCollectionPolicy(ctx, userFrom(ctx).ID, in.Service, in.Collection, in.Body.Enabled); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return statusOK("saved"), nil
 		})
 
 	// Opt a Heya playlist into a provider from the playlist itself. This path
@@ -128,7 +140,8 @@ type lastfmAuthStartBody struct {
 }
 
 type playlistSyncToggle struct {
-	Enabled bool `json:"enabled"`
+	Enabled bool   `json:"enabled"`
+	Mode    string `json:"mode,omitempty" enum:"two_way,pull_only"`
 }
 
 type externalPlaylistSyncBody struct {

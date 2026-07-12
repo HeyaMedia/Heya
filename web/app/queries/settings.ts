@@ -38,6 +38,23 @@ export type PlaylistServiceCatalog = {
     updated_at?: string
     track_count: number
     local_playlist_id?: number
+    sync_mode?: 'two_way' | 'pull_only'
+  }>
+  collections: Array<{
+    key: string
+    name: string
+    description?: string
+    auto_sync: boolean
+    playlists: Array<{
+      external_id: string
+      name: string
+      description?: string
+      url?: string
+      updated_at?: string
+      track_count: number
+      local_playlist_id?: number
+      sync_mode?: 'two_way' | 'pull_only'
+    }>
   }>
 }
 
