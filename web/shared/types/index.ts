@@ -166,6 +166,9 @@ export interface ArtistMember {
   mbid?: string
   begin_year?: number
   end_year?: number
+  /** Set when the member/group is themselves a library artist — the FE
+   *  links the chip to their page and shows their portrait. */
+  local_slug?: string
 }
 
 // Mirrors service.ArtistView (the FE-facing artist envelope). Fields tagged

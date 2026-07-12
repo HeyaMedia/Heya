@@ -357,34 +357,7 @@ func (a *App) GetSimilarArtists(ctx context.Context, artistID int64) ([]SimilarA
 	// Index our local artists once for cheap MBID + name lookups. The pool
 	// of artists is small (hundreds at most) so an in-memory map beats N
 	// per-hit queries.
-	type localRef struct {
-		artistID int64
-		slug     string
-	}
-	byMBID := map[string]localRef{}
-	byName := map[string]localRef{}
-	rows, err := a.db.Query(ctx, `
-		SELECT a.id, a.name, a.musicbrainz_id, mi.slug
-		FROM artists a
-		JOIN media_item_cards mi ON mi.id = a.media_item_id
-		JOIN libraries   l  ON l.id  = mi.library_id
-		WHERE l.media_type = 'music'
-	`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id int64
-			var name, mbid, slug string
-			if err := rows.Scan(&id, &name, &mbid, &slug); err != nil {
-				continue
-			}
-			ref := localRef{artistID: id, slug: slug}
-			if mbid != "" {
-				byMBID[mbid] = ref
-			}
-			byName[strings.ToLower(strings.TrimSpace(name))] = ref
-		}
-	}
+	byMBID, byName := a.localArtistIndex(ctx)
 
 	out := make([]SimilarArtistRow, 0, len(hits))
 	for _, h := range hits {

@@ -20,13 +20,58 @@ type ArtistURL struct {
 }
 
 // ArtistMember is one entry in the band-membership graph. heya.media's
-// member rows carry begin/end years when the person joined/left, which
-// is enough for the FE to print "1990-1995" next to the chip.
+// member rows carry begin/end dates when the person joined/left, which
+// is enough for the FE to print "1990-1995" next to the chip. LocalSlug
+// is filled by matchArtistMembersLocal when the member is themselves a
+// library artist — the FE then links the chip and shows their portrait.
 type ArtistMember struct {
 	Name      string `json:"name"`
 	MBID      string `json:"mbid,omitempty"`
 	BeginYear int    `json:"begin_year,omitempty"`
 	EndYear   int    `json:"end_year,omitempty"`
+	LocalSlug string `json:"local_slug,omitempty"`
+}
+
+// artistRelationBlob is the shape actually stored in artists.members /
+// artists.groups jsonb — it's metadata.ArtistRelationEntry marshaled
+// verbatim at apply time. Reading it as ArtistMember silently dropped the
+// tenure dates (begin/end vs begin_year/end_year key mismatch), which is
+// why member year ranges never rendered.
+type artistRelationBlob struct {
+	Name  string `json:"name"`
+	MBID  string `json:"mbid"`
+	Begin string `json:"begin"`
+	End   string `json:"end"`
+}
+
+func parseArtistMembers(raw []byte) []ArtistMember {
+	var blobs []artistRelationBlob
+	if err := json.Unmarshal(raw, &blobs); err != nil {
+		return nil
+	}
+	out := make([]ArtistMember, 0, len(blobs))
+	for _, b := range blobs {
+		out = append(out, ArtistMember{
+			Name:      b.Name,
+			MBID:      b.MBID,
+			BeginYear: yearOf(b.Begin),
+			EndYear:   yearOf(b.End),
+		})
+	}
+	return out
+}
+
+// yearOf extracts the year from a MusicBrainz partial date ("1993",
+// "1993-01-03", ...). Zero when absent/garbled.
+func yearOf(date string) int {
+	if len(date) < 4 {
+		return 0
+	}
+	var y int
+	if _, err := fmt.Sscanf(date[:4], "%d", &y); err != nil {
+		return 0
+	}
+	return y
 }
 
 // ArtistView is the JSON-clean envelope that ships to the FE in
@@ -113,16 +158,10 @@ func BuildArtistView(a sqlc.Artist) ArtistView {
 		}
 	}
 	if len(a.Groups) > 0 {
-		var groups []ArtistMember
-		if err := json.Unmarshal(a.Groups, &groups); err == nil {
-			v.Groups = groups
-		}
+		v.Groups = parseArtistMembers(a.Groups)
 	}
 	if len(a.Members) > 0 {
-		var members []ArtistMember
-		if err := json.Unmarshal(a.Members, &members); err == nil {
-			v.Members = members
-		}
+		v.Members = parseArtistMembers(a.Members)
 	}
 	if a.DiscographyEnrichedAt.Valid {
 		ts := a.DiscographyEnrichedAt.Time.Format("2006-01-02T15:04:05Z07:00")
@@ -140,6 +179,75 @@ func nonNilStrings(s []string) []string {
 		return nil
 	}
 	return s
+}
+
+// localArtistRef points an external artist mention (similar-artist hit,
+// band member) at the library artist it matches.
+type localArtistRef struct {
+	artistID int64
+	slug     string
+}
+
+// localArtistIndex loads the whole music-artist catalog into MBID + name
+// lookup maps. The pool is small (hundreds at most) so one query + two
+// maps beats N per-mention queries. Errors degrade to empty maps — a
+// failed index just means no local linking, not a failed page.
+func (a *App) localArtistIndex(ctx context.Context) (byMBID, byName map[string]localArtistRef) {
+	byMBID = map[string]localArtistRef{}
+	byName = map[string]localArtistRef{}
+	rows, err := a.db.Query(ctx, `
+		SELECT a.id, a.name, a.musicbrainz_id, mi.slug
+		FROM artists a
+		JOIN media_item_cards mi ON mi.id = a.media_item_id
+		JOIN libraries   l  ON l.id  = mi.library_id
+		WHERE l.media_type = 'music'
+	`)
+	if err != nil {
+		return byMBID, byName
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var name, mbid, slug string
+		if err := rows.Scan(&id, &name, &mbid, &slug); err != nil {
+			continue
+		}
+		ref := localArtistRef{artistID: id, slug: slug}
+		if mbid != "" {
+			byMBID[mbid] = ref
+		}
+		byName[strings.ToLower(strings.TrimSpace(name))] = ref
+	}
+	return byMBID, byName
+}
+
+// matchArtistMembersLocal fills Members/Groups LocalSlug where the person
+// (or band) is themselves a library artist — MBID first, case-fold name
+// as fallback, same policy as GetSimilarArtists.
+func (a *App) matchArtistMembersLocal(ctx context.Context, v *ArtistView) {
+	if len(v.Members) == 0 && len(v.Groups) == 0 {
+		return
+	}
+	byMBID, byName := a.localArtistIndex(ctx)
+	if len(byMBID) == 0 && len(byName) == 0 {
+		return
+	}
+	link := func(list []ArtistMember) {
+		for i := range list {
+			m := &list[i]
+			if m.MBID != "" {
+				if ref, ok := byMBID[m.MBID]; ok {
+					m.LocalSlug = ref.slug
+					continue
+				}
+			}
+			if ref, ok := byName[strings.ToLower(strings.TrimSpace(m.Name))]; ok {
+				m.LocalSlug = ref.slug
+			}
+		}
+	}
+	link(v.Members)
+	link(v.Groups)
 }
 
 // ArtistTopTrackRow is one row of the artist's "Popular" rail. When

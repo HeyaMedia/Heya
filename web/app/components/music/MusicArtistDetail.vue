@@ -8,13 +8,82 @@
     <section class="hero" :class="{ 'ambient-extended': ambientEnabled }">
       <div class="hero-backdrop" :style="backdropStyle" />
       <div class="hero-fade" />
+      <!-- "Around the web" dropdown — ONE instance serving both layouts:
+           desktop pins it to the hero's top-right (absolute), phone leaves
+           it in flow, where the hero's column layout renders it as a
+           full-width bar across the top. -->
+      <div v-if="linkGroups.length" class="hero-atw">
+        <AppMenu :width="320" trigger-class="atw-trigger" trigger-title="Around the web">
+          <template #trigger>
+            <Icon name="link" :size="12" />
+            <span>Around the web</span>
+            <span class="atw-count">{{ linkTotal }}</span>
+            <Icon name="chevdown" :size="10" />
+          </template>
+          <div class="atw-scroll">
+            <template v-for="group in linkGroups" :key="group.label">
+              <div class="surface-section-label">{{ group.label }}</div>
+              <DropdownMenuItem
+                v-for="(l, i) in group.links"
+                :key="`${group.label}-${i}`"
+                class="surface-item atw-item"
+                as-child
+              >
+                <a :href="l.url" target="_blank" rel="noopener">
+                  <span class="atw-host">{{ l.label }}</span>
+                  <span v-if="l.sub" class="atw-type">{{ l.sub }}</span>
+                </a>
+              </DropdownMenuItem>
+            </template>
+          </div>
+        </AppMenu>
+      </div>
+      <!-- Desktop identity block: the logotype (or name) + aliases float
+           on the hero's right flank, clearing the left column for bio and
+           stats. Phone keeps the title in the meta flow below. -->
+      <div v-if="!brandInFlow" class="hero-brand">
+        <h1 v-if="logoUrl && !logoFailed" class="hero-title hero-title-logo">
+          <NuxtImg
+            :src="logoUrl"
+            :alt="artist.name"
+            class="hero-logo"
+            :width="640"
+            @error="logoFailed = true"
+          />
+        </h1>
+        <h1 v-else class="hero-title">{{ artist.name }}</h1>
+        <div
+          v-if="heroAliases"
+          class="hero-aka"
+          :title="`Also known as: ${artist.aliases!.join(', ')}`"
+        >
+          <span class="hero-aka-label">a.k.a.</span> {{ heroAliases }}
+        </div>
+      </div>
       <div class="hero-content">
         <div class="hero-left">
           <Poster :idx="artist.id" :src="artistPosterUrl" aspect="1/1" class="hero-poster" :width="320" />
         </div>
         <div class="hero-meta">
-          <div class="hero-kind">{{ heroKindLabel }}</div>
-          <h1 class="hero-title">{{ artist.name }}</h1>
+          <template v-if="brandInFlow">
+            <h1 v-if="logoUrl && !logoFailed" class="hero-title hero-title-logo">
+              <NuxtImg
+                :src="logoUrl"
+                :alt="artist.name"
+                class="hero-logo"
+                :width="640"
+                @error="logoFailed = true"
+              />
+            </h1>
+            <h1 v-else class="hero-title">{{ artist.name }}</h1>
+            <div
+              v-if="heroAliases"
+              class="hero-aka"
+              :title="`Also known as: ${artist.aliases!.join(', ')}`"
+            >
+              <span class="hero-aka-label">a.k.a.</span> {{ heroAliases }}
+            </div>
+          </template>
           <div v-if="(artist.tags?.length ?? 0) > 0" class="tag-row">
             <NuxtLink
               v-for="tag in (artist.tags ?? []).slice(0, 8)"
@@ -113,8 +182,13 @@
           :key="`tt-${t.local_track_id}-${idx}`"
           :items="ttMenuItems(t)"
         >
+        <!-- role="button": reka wrappers pointer-capture taps on plain
+             elements and retarget the click away from the row (same gotcha
+             as the drawer rows — see LibrarySidebar) — button/a/[role=button]
+             targets are exempt. Also honest a11y: the row IS a play button. -->
         <li
           class="tt-row"
+          role="button"
           :class="{ 'tt-row-missing': !isTopTrackPlayable(t), 'tt-row-active': isTopTrackActive(t) }"
           :draggable="!isCoarse && !!t.local_track_id"
           @click="onTtRowTap(t)"
@@ -141,11 +215,19 @@
             </button>
           </div>
           <div class="tt-meta">
-            <span class="tt-title">{{ t.title }}</span>
+            <!-- Row = play, words = navigate: both the song title and the
+                 album name link to the album page (.stop so the row's own
+                 play handler doesn't also fire). Titles without a local
+                 album stay plain text. -->
+            <NuxtLink
+              v-if="t.local_album_slug"
+              :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
+              class="tt-title tt-title-link"
+              @click.stop
+            >{{ t.title }}</NuxtLink>
+            <span v-else class="tt-title">{{ t.title }}</span>
             <template v-if="t.local_album_title">
               <span class="tt-album-sep">·</span>
-              <!-- .stop: the row itself plays on phone tap — without it, a
-                   tap on the album link would navigate AND start playback. -->
               <NuxtLink
                 :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
                 class="tt-album"
@@ -178,19 +260,32 @@
       </button>
     </section>
 
-    <!-- Band lifecycle: members of this group / groups this person plays in -->
+    <!-- Band lifecycle: members of this group / groups this person plays
+         in. Chips link to the member's own page (with portrait) when they
+         are themselves a library artist — matched server-side by MBID or
+         name (matchArtistMembersLocal). -->
     <section v-if="(artist.members?.length ?? 0) > 0" class="members artist-section">
       <div class="section-row-head">
         <h2 class="section-title-lg">Members</h2>
         <span class="more">{{ artist.members!.length }}</span>
       </div>
       <div class="member-grid">
-        <div v-for="m in artist.members" :key="`mem-${m.name}`" class="member-chip">
-          <div class="member-name">{{ m.name }}</div>
-          <div v-if="m.begin_year || m.end_year" class="member-years">
-            {{ m.begin_year || '?' }}–{{ m.end_year || 'present' }}
+        <component
+          :is="m.local_slug ? 'NuxtLink' : 'div'"
+          v-for="m in artist.members"
+          :key="`mem-${m.name}`"
+          :to="m.local_slug ? `/music/artist/${m.local_slug}` : undefined"
+          class="member-chip"
+          :class="{ 'member-linked': !!m.local_slug }"
+        >
+          <Poster v-if="m.local_slug" :idx="0" :src="`/api/media/${m.local_slug}/image/poster`" aspect="1/1" :width="80" class="member-avatar" />
+          <div class="member-text">
+            <div class="member-name">{{ m.name }}</div>
+            <div v-if="m.begin_year || m.end_year" class="member-years">
+              {{ m.begin_year || '?' }}–{{ m.end_year || 'present' }}
+            </div>
           </div>
-        </div>
+        </component>
       </div>
     </section>
 
@@ -200,12 +295,22 @@
         <span class="more">{{ artist.groups!.length }}</span>
       </div>
       <div class="member-grid">
-        <div v-for="g in artist.groups" :key="`grp-${g.name}`" class="member-chip">
-          <div class="member-name">{{ g.name }}</div>
-          <div v-if="g.begin_year || g.end_year" class="member-years">
-            {{ g.begin_year || '?' }}–{{ g.end_year || 'present' }}
+        <component
+          :is="g.local_slug ? 'NuxtLink' : 'div'"
+          v-for="g in artist.groups"
+          :key="`grp-${g.name}`"
+          :to="g.local_slug ? `/music/artist/${g.local_slug}` : undefined"
+          class="member-chip"
+          :class="{ 'member-linked': !!g.local_slug }"
+        >
+          <Poster v-if="g.local_slug" :idx="0" :src="`/api/media/${g.local_slug}/image/poster`" aspect="1/1" :width="80" class="member-avatar" />
+          <div class="member-text">
+            <div class="member-name">{{ g.name }}</div>
+            <div v-if="g.begin_year || g.end_year" class="member-years">
+              {{ g.begin_year || '?' }}–{{ g.end_year || 'present' }}
+            </div>
           </div>
-        </div>
+        </component>
       </div>
     </section>
 
@@ -276,69 +381,39 @@
       </div>
     </section>
 
-    <!-- Similar artists — Last.fm + ListenBrainz via heya.media -->
-    <section v-if="similar.length" class="similar artist-section">
+    <!-- Similar artists — Last.fm + ListenBrainz via heya.media. Gated by
+         the same Appearance switch as movie/TV recommendations: with
+         "show unavailable" off, only artists we can reliably link (in the
+         library) render. Local rows use the library portrait — the
+         upstream image URLs are mostly dead (Last.fm stopped shipping
+         them), which left a row of placeholder stars. -->
+    <section v-if="visibleSimilar.length" class="similar artist-section">
       <div class="section-row-head">
         <h2 class="section-title-lg">Similar Artists</h2>
-        <span class="more">{{ similar.length }}</span>
+        <span class="more">{{ visibleSimilar.length }}</span>
       </div>
       <div class="similar-row">
         <component
           :is="row.local_slug ? 'NuxtLink' : 'div'"
-          v-for="(row, i) in similar"
+          v-for="(row, i) in visibleSimilar"
           :key="row.name + i"
           :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
           class="similar-tile card-tile"
           :class="{ 'similar-external': !row.local_slug }"
           :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
         >
-          <Poster :idx="i" :src="row.image" aspect="1/1" :width="200" style="border-radius: 50%" />
+          <Poster
+            :idx="i"
+            :src="row.local_slug ? `/api/media/${row.local_slug}/image/poster` : row.image"
+            aspect="1/1"
+            :width="200"
+            style="border-radius: 50%"
+          />
           <div class="similar-tile-name">{{ row.name }}</div>
           <div class="similar-tile-source">{{ row.source }}</div>
         </component>
       </div>
     </section>
-
-    <!-- External links + Wikipedia -->
-    <section v-if="externalLinks.length || wikipediaLinks.length" class="links artist-section">
-      <div class="section-row-head">
-        <h2 class="section-title-lg">Around the web</h2>
-      </div>
-      <div v-if="externalLinks.length" class="link-grid">
-        <a
-          v-for="(l, i) in externalLinks"
-          :key="`url-${i}`"
-          :href="l.url"
-          target="_blank"
-          rel="noopener"
-          class="link-chip"
-        >
-          <Icon name="link" :size="12" />
-          <span>{{ l.type }}</span>
-        </a>
-      </div>
-      <details v-if="wikipediaLinks.length" class="wiki-details">
-        <summary class="wiki-summary">Wikipedia ({{ wikipediaLinks.length }} languages)</summary>
-        <div class="link-grid wiki-grid">
-          <a
-            v-for="w in wikipediaLinks"
-            :key="`wiki-${w.lang}`"
-            :href="w.url"
-            target="_blank"
-            rel="noopener"
-            class="link-chip"
-          >
-            <Icon name="link" :size="12" />
-            <span>{{ w.lang }}</span>
-          </a>
-        </div>
-      </details>
-    </section>
-
-    <div v-if="(artist.aliases?.length ?? 0) > 0" class="alias-row artist-section">
-      <span class="alias-label">Also known as</span>
-      <span class="alias-list">{{ artist.aliases!.join(' · ') }}</span>
-    </div>
 
     <MetadataEditorModal
       v-if="detail"
@@ -360,6 +435,7 @@
 import type { AlbumView, Artist, ArtistTopTrackRow, MediaDetail, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
 import type { DragAlbumPayload } from '~/composables/useMusicDragDrop'
+import { DropdownMenuItem } from 'reka-ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { mediaDetailQuery } from '~/queries/media'
 
@@ -385,7 +461,12 @@ function isAlbumActive(al: AlbumView) {
   const albumId = currentTrack.value?.album_id
   return albumId != null && albumId > 0 && albumId === al.id
 }
-const { isPhone, isCoarse } = useViewport()
+const { isPhone, isCompact, isCoarse } = useViewport()
+
+// The right-flank identity block is a WIDE-desktop composition: on the
+// compact band (721-1200px) a long bio would run underneath the absolute
+// overlay, so tablets keep the in-flow title like phones do.
+const brandInFlow = computed(() => isPhone.value || isCompact.value)
 const { onDragStart, onDragEnd } = useMusicDragDrop()
 // Popular Tracks context/⋯ items — the phone rows hide the star widget, so
 // this menu (Rate lives in it) is the rating path there.
@@ -534,6 +615,15 @@ const artistPosterUrl = computed(() => {
   if (!detail.value?.media_item) return null
   return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/poster`
 })
+// Logotype instead of the name when the artist has a logo asset — the
+// assets list in the detail payload says so up front (no probing).
+const logoFailed = ref(false)
+const logoUrl = computed(() => {
+  if (!detail.value?.media_item) return null
+  if (!detail.value.assets?.some((as) => as.asset_type === 'logo')) return null
+  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/logo`
+})
+watch(logoUrl, () => { logoFailed.value = false })
 const backdropUrl = computed(() => {
   if (!detail.value?.media_item) return null
   return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/backdrop`
@@ -545,7 +635,24 @@ const backdropStyle = computed(() => (backdropUrl.value ? { backgroundImage: `ur
 // page) — the local `.hero-backdrop` hides via .ambient-extended and only
 // the softened fade stays for text legibility. Off = classic scoped hero,
 // untouched.
-const { ambientEnabled } = useAppearance()
+const { ambientEnabled, prefs } = useAppearance()
+
+// Similar Artists honors the same Appearance switch as the movie/TV
+// recommendation rails: off = only artists we can link into the library.
+// Deduped by identity — Last.fm and ListenBrainz often both suggest the
+// same artist and the raw feed rendered them twice.
+const visibleSimilar = computed(() => {
+  const rows = prefs.value.showUnavailableRecs
+    ? similar.value
+    : similar.value.filter((r) => r.local_slug)
+  const seen = new Set<string>()
+  return rows.filter((r) => {
+    const key = r.local_slug || r.mbid || r.name.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
 const background = useBackground()
 watch([backdropUrl, ambientEnabled], ([url, on]) => {
   if (on && url) background.set(url)
@@ -570,14 +677,17 @@ watch(() => backdropUrl.value || artistPosterUrl.value, (src) => {
 const totalAlbums = computed(() => albums.value.length)
 const totalTracks = computed(() => albums.value.reduce((sum, al) => sum + al.tracks.length, 0))
 
-const heroKindLabel = computed(() => {
-  const t = artist.value?.artist_type ?? ''
-  if (t === 'Group') return 'BAND'
-  if (t === 'Person') return 'ARTIST'
-  if (t === 'Character') return 'CHARACTER'
-  if (t) return t.toUpperCase()
-  return 'ARTIST'
+// Hero aside: the first few aliases, deduped against the display name
+// (MusicBrainz often lists the name itself as an alias). Full list lives
+// in the tooltip.
+const heroAliases = computed(() => {
+  const name = artist.value?.name?.toLowerCase()
+  const list = (artist.value?.aliases ?? []).filter((a) => a.toLowerCase() !== name)
+  if (!list.length) return ''
+  const shown = list.slice(0, 3).join(' · ')
+  return list.length > 3 ? `${shown} +${list.length - 3}` : shown
 })
+
 
 const KIND_ORDER = ['album', 'ep', 'single', 'compilation', 'live', 'soundtrack', 'remix', 'demo', 'other']
 const KIND_LABEL: Record<string, string> = {
@@ -636,24 +746,69 @@ const lifecycleLabel = computed(() => {
   return start
 })
 
-const externalLinks = computed(() => {
+// ── "Around the web" dropdown ───────────────────────────────────────────
+// The MusicBrainz url-rel list is a long tail (60+ links, half of them
+// labeled "other databases" / "purchase for download"). Grouped into a
+// hero dropdown: rows are labeled by SITE (hostname), with the rel type
+// as a muted suffix only where it adds meaning.
+
+interface AtwLink { label: string; sub?: string; url: string }
+
+function linkCategory(type: string): string {
+  const t = type.toLowerCase()
+  if (t.includes('official') || t.includes('fanpage') || t.includes('bbc') || t.includes('discography') || t === 'blog' || t === 'image') return 'Official'
+  if (t.includes('streaming') || t.includes('purchase') || t.includes('soundcloud') || t.includes('youtube music')) return 'Listen & Buy'
+  if (t.includes('social') || t === 'myspace' || t.includes('video channel') || t === 'youtube' || t.includes('online community')) return 'Social'
+  if (t === 'bandsintown' || t === 'songkick' || t === 'setlistfm') return 'Live'
+  return 'Reference'
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+// Types that describe the link better than the bare hostname does.
+const ATW_MEANINGFUL_TYPES = new Set([
+  'official homepage', 'fanpage', 'discography page', 'lyrics', 'image',
+  'purchase for download', 'purchase for mail-order', 'free streaming', 'streaming',
+])
+
+const CATEGORY_ORDER = ['Official', 'Listen & Buy', 'Social', 'Live', 'Reference', 'Wikipedia']
+
+const linkGroups = computed(() => {
+  const buckets = new Map<string, AtwLink[]>()
   const seen = new Set<string>()
-  const out: { type: string; url: string }[] = []
   for (const l of (artist.value?.urls ?? [])) {
     if (!l.url || seen.has(l.url)) continue
     seen.add(l.url)
-    out.push({ type: l.type || 'link', url: l.url })
+    const type = l.type || 'link'
+    const cat = linkCategory(type)
+    const entry: AtwLink = {
+      label: hostOf(l.url),
+      sub: ATW_MEANINGFUL_TYPES.has(type.toLowerCase()) ? type : undefined,
+      url: l.url,
+    }
+    if (!buckets.has(cat)) buckets.set(cat, [])
+    buckets.get(cat)!.push(entry)
   }
-  out.sort((a, b) => a.type.localeCompare(b.type))
-  return out
+  const wiki = Object.entries(artist.value?.wikipedia_links ?? {})
+    .map(([lang, url]) => ({ label: lang.toUpperCase(), sub: 'wikipedia', url }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  if (wiki.length) buckets.set('Wikipedia', wiki)
+
+  return CATEGORY_ORDER
+    .filter((c) => buckets.has(c))
+    .map((c) => ({
+      label: c,
+      links: buckets.get(c)!.sort((a, b) => a.label.localeCompare(b.label)),
+    }))
 })
 
-const wikipediaLinks = computed(() => {
-  const links = artist.value?.wikipedia_links ?? {}
-  return Object.entries(links)
-    .map(([lang, url]) => ({ lang, url }))
-    .sort((a, b) => a.lang.localeCompare(b.lang))
-})
+const linkTotal = computed(() => linkGroups.value.reduce((n, g) => n + g.links.length, 0))
 
 function formatBigInt(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`
@@ -754,11 +909,10 @@ function openTtSheet(t: ArtistTopTrackRow) {
   ttSheetOpen.value = true
 }
 
-// Phone rows have no hover-play, so the row itself plays. Desktop keeps its
-// existing affordances (hover play button) — a bare row click stays inert
-// there to avoid changing behavior.
+// Row click = play, everywhere. The interactive children (title/album
+// links, stars, hover-play, the phone ⋯) all @click.stop, so a click that
+// reaches the row really did land on empty row space.
 function onTtRowTap(t: ArtistTopTrackRow) {
-  if (!isPhone.value) return
   if (isTopTrackPlayable(t)) void playTopTrack(t)
 }
 
@@ -842,6 +996,27 @@ if (import.meta.client) {
    (legibility over the photo) stays put. */
 .hero.ambient-extended .hero-backdrop { display: none; }
 .hero.ambient-extended .hero-fade { display: none; }
+/* Without a local hero image, the 460px band is mostly empty air pushing
+   the content down — the ambient layer carries the art full-page anyway,
+   so let the content start higher. Hero mode (ambient off) keeps the full
+   stage for its backdrop. */
+.hero.ambient-extended { min-height: 340px; }
+/* Ambient desktop: top-align the whole stage on one line — the left
+   column (pills/bio/stats) and the right identity block (logo/name) both
+   start at 56px, just under the corner dropdown. Hero mode keeps the
+   classic bottom-anchored-over-photo composition. */
+@media (min-width: 720.02px) {
+  /* flex-start on .hero itself too — its base align-items: flex-end would
+     otherwise keep bottom-anchoring the content block and the two columns
+     would top out ~30px apart. */
+  .hero.ambient-extended { align-items: flex-start; }
+  .hero.ambient-extended .hero-content {
+    align-items: flex-start;
+    padding-top: 56px;
+  }
+  .hero.ambient-extended .hero-left { align-self: flex-start; }
+  .hero.ambient-extended .hero-brand { top: 56px; bottom: auto; }
+}
 .hero-content {
   position: relative;
   z-index: 2;
@@ -859,15 +1034,6 @@ if (import.meta.client) {
   box-shadow: 0 22px 48px rgb(var(--shade) / 0.7), 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .hero-meta { flex: 1; min-width: 0; }
-.hero-kind {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--fg-1);
-  opacity: 0.9;
-  margin-bottom: 4px;
-}
 .hero-title {
   font-size: clamp(44px, 6.6vw, 76px);
   font-weight: 800;
@@ -876,6 +1042,19 @@ if (import.meta.client) {
   margin-bottom: 10px;
   letter-spacing: -0.025em;
   text-shadow: 0 2px 24px rgba(0,0,0,0.55); /* legibility shadow over hero photo — stays literal */
+}
+/* Logotype variant — the image IS the title. Height-capped so wide logos
+   don't dwarf the meta column; drop-shadow stands in for the text halo
+   (logos are transparent PNGs over arbitrary art). */
+.hero-title-logo { text-shadow: none; }
+.hero-logo {
+  display: block;
+  max-height: 120px;
+  max-width: min(520px, 90%);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 12px rgb(var(--shade) / 0.6));
 }
 .tag-row {
   display: flex;
@@ -949,6 +1128,32 @@ if (import.meta.client) {
 .stat-dot { color: var(--fg-3); }
 .stat { color: var(--fg-1); }
 .hero-ext { margin-top: 10px; }
+
+/* "Around the web" dropdown anchor — desktop: hero top-right corner.
+   Phone flips it to an in-flow full-width bar (media block below). */
+.hero-atw {
+  position: absolute;
+  top: 18px;
+  right: 24px;
+  z-index: 4;
+}
+
+/* Desktop identity block — logotype/name on the hero's right flank,
+   holding clear of the floating action cluster at the bottom-right.
+   Right-aligned so it reads as a brand mark, not a second column. */
+.hero-brand {
+  position: absolute;
+  right: 32px;
+  bottom: 110px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  max-width: min(460px, 38%);
+}
+.hero-brand .hero-title { margin-bottom: 4px; }
+.hero-brand .hero-aka { margin: 0; max-width: 100%; }
 
 .hero-floating-actions {
   position: absolute;
@@ -1089,11 +1294,31 @@ if (import.meta.client) {
 
 /* Popular Tracks ================================================== */
 .top-tracks {}
-.section-row-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-/* Section titles sit over the ambient-extended wash — halo them. */
+/* Home-rail header shape: title leads, count and actions huddle up next
+   to it (flex-start beats heya.css's global space-between, which spread
+   Play mid-page, Shuffle far-right, and left the count orphaned at the
+   edge). */
+.section-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+/* Section titles sit over the ambient-extended wash — home's title
+   treatment: 700 weight + the triple halo, readable on any art. */
 .artist-section :deep(.section-title-lg),
 .artist-section .section-title-lg {
+  font-weight: 700;
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
+/* Inline count chip beside the title (was pushed to the far edge by the
+   global space-between — read as a stray number). */
+.artist-section .section-row-head .more {
+  margin-left: 0;
+  font-size: 11px;
+  color: var(--fg-1);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .section-row-head .more {
   font-size: 11px;
@@ -1151,6 +1376,7 @@ if (import.meta.client) {
   padding: 5px 10px;
   border-radius: var(--r-sm);
   transition: background 0.12s;
+  cursor: pointer; /* whole row plays (onTtRowTap) */
   min-height: 32px;
 }
 .tt-row:hover { background: rgb(var(--ink) / 0.04); }
@@ -1219,6 +1445,8 @@ if (import.meta.client) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tt-title-link { text-decoration: none; }
+.tt-title-link:hover { color: var(--gold); text-decoration: underline; }
 .tt-album-sep { color: var(--fg-3); font-size: 11px; }
 .tt-album {
   font-size: 12px;
@@ -1253,13 +1481,32 @@ if (import.meta.client) {
 /* Members / Groups ================================================ */
 .member-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .member-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 7px 12px;
   border-radius: var(--r-sm);
-  background: rgb(var(--ink) / 0.04);
+  /* Glass, not ink-tint — the chips sit over the ambient art. */
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
   min-width: 140px;
+  text-decoration: none;
+  color: inherit;
 }
-.member-name { font-size: 13px; color: var(--fg-0); font-weight: 600; }
+.member-linked { transition: background 0.15s, border-color 0.15s; }
+.member-linked:hover { background: var(--bg-3); border-color: var(--border-strong); }
+.member-linked:hover .member-name { color: var(--gold); }
+.member-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.member-text { min-width: 0; }
+.member-name { font-size: 13px; color: var(--fg-0); font-weight: 600; transition: color 0.15s; }
 .member-years {
   font-size: 10px;
   font-family: var(--font-mono);
@@ -1370,56 +1617,27 @@ if (import.meta.client) {
   color: var(--fg-3);
 }
 
-/* External + Wikipedia ============================================ */
-.link-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-.link-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 11px;
-  border-radius: 999px;
-  background: rgb(var(--ink) / 0.05);
-  border: 1px solid var(--border);
-  font-size: 11px;
+/* Aliases — hero aside, hanging slightly off the title's left edge like
+   a signature line. */
+.hero-aka {
+  margin: -4px 0 10px 3ch;
+  font-size: 12px;
+  font-style: italic;
   color: var(--fg-1);
-  text-decoration: none;
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hero-aka-label {
   font-family: var(--font-mono);
-  letter-spacing: 0.04em;
-  transition: all 0.12s;
-}
-.link-chip:hover {
-  background: var(--gold-soft);
-  color: var(--gold);
-  border-color: var(--gold-soft);
-}
-.link-chip :deep(svg) { color: currentColor; opacity: 0.7; }
-
-.wiki-details { margin-top: 10px; }
-.wiki-summary {
-  font-size: 11px;
-  color: var(--fg-3);
-  cursor: pointer;
-  user-select: none;
-  font-family: var(--font-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-.wiki-summary:hover { color: var(--fg-1); }
-.wiki-grid { margin-top: 6px; }
-
-/* Aliases ========================================================= */
-.alias-row {
-  font-size: 11px;
-  color: var(--fg-3);
-}
-.alias-label {
-  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  margin-right: 8px;
+  color: var(--fg-2);
+  margin-right: 4px;
 }
-.alias-list { color: var(--fg-2); }
 
 /* Responsive: stack hero poster + meta on narrow screens. Aligned to the
    720px phone convention (docs/ui.md "Responsive conventions") — was 700px.
@@ -1431,9 +1649,19 @@ if (import.meta.client) {
      needs to switch to a column too, or the actions float beside the
      content instead of wrapping below it. */
   .hero { min-height: 0; flex-direction: column; }
+  /* Dropdown becomes an in-flow bar across the top of the hero. */
+  .hero-atw {
+    position: static;
+    width: 100%;
+    padding: 14px 20px 0;
+    display: flex;
+  }
   .hero-content { flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 20px 20px 22px; }
   .hero-left { align-self: center; }
   .hero-poster { width: 120px; height: 120px; }
+  /* Centered phone hero: the aka signature indent reads as misalignment. */
+  .hero-aka { margin-left: 0; }
+  .hero-logo { margin: 0 auto; }
   .hero-meta { width: 100%; }
   .tag-row { justify-content: center; }
   .hero-stats { justify-content: center; }
@@ -1500,5 +1728,70 @@ if (import.meta.client) {
      390px phone — drop to the same dense-grid convention as `.grid-posters`
      (docs/ui.md / heya.css) so multiple album tiles fit per row. */
   .discog-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+}
+</style>
+
+<!-- "Around the web" dropdown — the AppMenu content is portaled to <body>
+     and the trigger renders inside the AppMenu child component, so none of
+     these rules can live in the scoped block (docs/ui.md gotcha #2). -->
+<style>
+.atw-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--fg-1);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.atw-trigger:hover,
+.atw-trigger[data-state="open"] { background: var(--bg-3); color: var(--fg-0); }
+.atw-count {
+  font-size: 10px;
+  color: var(--fg-2);
+}
+
+/* Long list — scroll inside the surface. */
+.atw-scroll {
+  max-height: min(55vh, 480px);
+  overflow-y: auto;
+}
+.atw-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.atw-host {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.atw-type {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  letter-spacing: 0.04em;
+}
+
+/* Phone: the hero-atw wrapper is a full-width in-flow bar — stretch the
+   trigger across it. (Unscoped like the rest: the trigger element is
+   rendered by AppMenu, out of scoped-CSS reach.) */
+@media (max-width: 720px) {
+  .hero-atw .atw-trigger {
+    width: 100%;
+    justify-content: center;
+  }
 }
 </style>

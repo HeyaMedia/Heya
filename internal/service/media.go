@@ -417,7 +417,11 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 	case sqlc.MediaTypeMusic:
 		artist, artistErr := q.GetArtistByMediaItemID(ctx, item.ID)
 		if artistErr == nil {
-			result["artist"] = BuildArtistView(artist)
+			av := BuildArtistView(artist)
+			// Link band members / groups to their own library pages when
+			// the person is also a library artist.
+			a.matchArtistMembersLocal(ctx, &av)
+			result["artist"] = av
 			result["albums"] = buildAlbumViews(ctx, q, artist.ID)
 		}
 	case sqlc.MediaTypeBook:
