@@ -119,8 +119,11 @@ func (c *LastFM) GetToken(ctx context.Context) (string, error) {
 }
 
 // RecentTracks fetches one page of a user's scrobble history (newest first).
-// Page is 1-based; returns listens plus total pages.
-func (c *LastFM) RecentTracks(ctx context.Context, user string, page, limit int) ([]Listen, int, error) {
+// Page is 1-based. to (unix seconds, 0 = none) bounds results to scrobbles at
+// or before that instant — the resume cursor for deep-history imports, which
+// keeps every request on a shallow page instead of paginating hundreds deep
+// (where Last.fm's API reliably starts failing with transient code 8).
+func (c *LastFM) RecentTracks(ctx context.Context, user string, page, limit int, to int64) ([]Listen, int, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
@@ -128,6 +131,9 @@ func (c *LastFM) RecentTracks(ctx context.Context, user string, page, limit int)
 		"user":  {user},
 		"page":  {strconv.Itoa(page)},
 		"limit": {strconv.Itoa(limit)},
+	}
+	if to > 0 {
+		params.Set("to", strconv.FormatInt(to, 10))
 	}
 	var out struct {
 		RecentTracks struct {
@@ -174,6 +180,48 @@ func (c *LastFM) RecentTracks(ctx context.Context, user string, page, limit int)
 		})
 	}
 	return listens, totalPages, nil
+}
+
+// LovedTracks fetches one page of the user's loved tracks (api_key only,
+// public data). Page is 1-based; returns loves plus total pages.
+func (c *LastFM) LovedTracks(ctx context.Context, user string, page int) ([]Listen, int, error) {
+	params := url.Values{
+		"user":  {user},
+		"page":  {strconv.Itoa(page)},
+		"limit": {"200"},
+	}
+	var out struct {
+		LovedTracks struct {
+			Attr struct {
+				TotalPages string `json:"totalPages"`
+			} `json:"@attr"`
+			Track []struct {
+				Name   string `json:"name"`
+				MBID   string `json:"mbid"`
+				Artist struct {
+					Name string `json:"name"`
+				} `json:"artist"`
+				Date struct {
+					UTS string `json:"uts"`
+				} `json:"date"`
+			} `json:"track"`
+		} `json:"lovedtracks"`
+	}
+	if err := c.call(ctx, "user.getLovedTracks", params, false, &out); err != nil {
+		return nil, 0, err
+	}
+	totalPages, _ := strconv.Atoi(out.LovedTracks.Attr.TotalPages)
+	loves := make([]Listen, 0, len(out.LovedTracks.Track))
+	for _, t := range out.LovedTracks.Track {
+		uts, _ := strconv.ParseInt(t.Date.UTS, 10, 64)
+		loves = append(loves, Listen{
+			ArtistName:    t.Artist.Name,
+			TrackName:     t.Name,
+			RecordingMBID: t.MBID,
+			ListenedAt:    time.Unix(uts, 0).UTC(),
+		})
+	}
+	return loves, totalPages, nil
 }
 
 // Scrobble submits up to 50 listens with the user's session key.

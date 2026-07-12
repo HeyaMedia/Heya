@@ -60,6 +60,9 @@ type Config struct {
 	// (kickoff_embed_recommendations). Same no-import-of-service
 	// indirection as SonicEnabled; nil-safe (worker no-ops).
 	EmbedBackfill EmbedBackfillFn
+	// LastfmCreds resolves the server-level Last.fm app credentials for the
+	// listen-import workers (env or admin-configured). Nil-safe.
+	LastfmCreds LastfmCredsFn
 	// Watcher receives Pause/Resume during library scans so fsnotify
 	// doesn't race the scanner's bulk writes. nil during tests + the
 	// `heya queue process` CLI which runs without watchers.
@@ -158,6 +161,8 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &KickoffSonicAnalysisWorker{DB: cfg.DB, Enabled: cfg.SonicEnabled, Progress: cfg.Progress})
 	river.AddWorker(workers, &CleanupScannerArtifactsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &KickoffEmbedRecommendationsWorker{DB: cfg.DB, EmbedBackfill: cfg.EmbedBackfill, Progress: cfg.Progress})
+	river.AddWorker(workers, &KickoffListenImportWorker{DB: cfg.DB, LastfmCreds: cfg.LastfmCreds, Progress: cfg.Progress})
+	river.AddWorker(workers, &ImportListensBatchWorker{DB: cfg.DB, Progress: cfg.Progress})
 
 	// Debounce sweep — owns its own queue and fires every 10s via the
 	// periodic-jobs entry below.
@@ -249,6 +254,8 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"kickoff_sonic_analysis":        {MaxWorkers: queueWorkers(cfg, "kickoff_sonic_analysis", 1)},
 			"cleanup_scanner_artifacts":     {MaxWorkers: queueWorkers(cfg, "cleanup_scanner_artifacts", 1)},
 			"kickoff_embed_recommendations": {MaxWorkers: queueWorkers(cfg, "kickoff_embed_recommendations", 1)},
+			"kickoff_listen_import": {MaxWorkers: queueWorkers(cfg, "kickoff_listen_import", 1)},
+			"import_listens_batch":  {MaxWorkers: queueWorkers(cfg, "import_listens_batch", 4)},
 
 			// Misc.
 			"soft_delete":      {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},

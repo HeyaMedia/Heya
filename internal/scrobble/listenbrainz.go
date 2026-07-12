@@ -156,6 +156,60 @@ func (c *ListenBrainz) Listens(ctx context.Context, user string, maxTS time.Time
 	return listens, oldest, nil
 }
 
+// Feedback fetches one page of the user's recording feedback: score +1
+// (love) and -1 (hate), with track metadata resolved server-side. Returns
+// loves, hates, and the total feedback count for paging (offset-based).
+func (c *ListenBrainz) Feedback(ctx context.Context, user string, offset, count int) (loves, hates []Listen, total int, err error) {
+	if count <= 0 || count > 100 {
+		count = 100
+	}
+	q := url.Values{}
+	q.Set("metadata", "true")
+	q.Set("count", fmt.Sprintf("%d", count))
+	q.Set("offset", fmt.Sprintf("%d", offset))
+	req, err := c.req(ctx, http.MethodGet, "/feedback/user/"+url.PathEscape(user)+"/get-feedback?"+q.Encode(), nil)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return nil, nil, 0, fmt.Errorf("listenbrainz feedback: HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+	var out struct {
+		TotalCount int `json:"total_count"`
+		Feedback   []struct {
+			RecordingMBID string `json:"recording_mbid"`
+			Score         int    `json:"score"`
+			TrackMetadata *struct {
+				ArtistName string `json:"artist_name"`
+				TrackName  string `json:"track_name"`
+			} `json:"track_metadata"`
+		} `json:"feedback"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, nil, 0, fmt.Errorf("listenbrainz feedback: %w", err)
+	}
+	for _, f := range out.Feedback {
+		l := Listen{RecordingMBID: f.RecordingMBID}
+		if f.TrackMetadata != nil {
+			l.ArtistName = f.TrackMetadata.ArtistName
+			l.TrackName = f.TrackMetadata.TrackName
+		}
+		switch f.Score {
+		case 1:
+			loves = append(loves, l)
+		case -1:
+			hates = append(hates, l)
+		}
+	}
+	return loves, hates, out.TotalCount, nil
+}
+
 // Submit sends listens to ListenBrainz. listenType is "single" for live
 // scrobbles or "import" for backfills; ListenBrainz caps batches, so callers
 // should keep len(listens) modest (≤50).

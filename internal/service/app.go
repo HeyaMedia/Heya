@@ -218,6 +218,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	var watcherPauser worker.WatcherPauser        // assigned after watcher.NewManager
 	var sonicEnabledFn func(context.Context) bool // assigned after App construction
 	var embedBackfillFn worker.EmbedBackfillFn    // assigned after App construction
+	var lastfmCredsFn worker.LastfmCredsFn        // assigned after App construction
 
 	progress := worker.NewTaskProgressBroadcaster(hub)
 
@@ -243,6 +244,12 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 				return 0, 0, nil
 			}
 			return embedBackfillFn(ctx, force)
+		},
+		LastfmCreds: func(ctx context.Context) (string, string) {
+			if lastfmCredsFn == nil {
+				return "", ""
+			}
+			return lastfmCredsFn(ctx)
 		},
 		Watcher:      lazyWatcher{ptr: &watcherPauser},
 		Progress:     progress,
@@ -333,6 +340,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// any kickoff fires.
 	sonicEnabledFn = app.SonicAnalysisEnabled
 	embedBackfillFn = app.backfillEmbeddingsForTask
+	lastfmCredsFn = app.lastfmCredentials
 
 	// Cast scrobbles route through the same RecordPlayback dispatch the
 	// HTTP endpoint uses; wired post-construction like SonicEnabled.

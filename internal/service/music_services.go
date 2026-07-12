@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/karbowiak/heya/internal/scrobble"
+	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
 
@@ -42,12 +42,13 @@ type listenImportState struct {
 	Matched   int    `json:"matched"`
 	Unmatched int    `json:"unmatched"`
 	Scanned   int    `json:"scanned"`
+	// Cursor is the unix timestamp of the oldest listen reached so far — a
+	// failed or interrupted import resumes below it instead of re-walking
+	// the whole history from the newest listen.
+	Cursor    int64  `json:"cursor,omitempty"`
 	Error     string `json:"error,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
-
-// importRunning guards one import per (user, service) per process.
-var importRunning sync.Map
 
 func musicServiceValid(service string) bool {
 	return service == "listenbrainz" || service == "lastfm"
@@ -219,135 +220,31 @@ func (a *App) StartListenImport(ctx context.Context, userID int64, service strin
 		}
 	}
 
-	key := fmt.Sprintf("%d/%s", userID, service)
-	if _, loaded := importRunning.LoadOrStore(key, true); loaded {
+	// A completed import restarts from scratch; a failed/interrupted one
+	// resumes from its cursor (the kickoff worker reads it from the state).
+	if _, err := a.db.Exec(ctx, `
+		UPDATE user_music_services
+		SET import_state = CASE WHEN import_state->>'status' = 'done' THEN '{}'::jsonb ELSE import_state END
+		WHERE user_id = $1 AND service = $2`, userID, service); err != nil {
+		return err
+	}
+
+	// Durable queue work from here: the kickoff job pages the external
+	// history and fans out match/insert batches — it survives restarts and
+	// is deduplicated while active (uniqueWhileActive on the args).
+	res, err := a.river.Insert(ctx, worker.KickoffListenImportArgs{UserID: userID, Service: service}, nil)
+	if err != nil {
+		return fmt.Errorf("enqueue import: %w", err)
+	}
+	if res.UniqueSkippedAsDuplicate {
 		return fmt.Errorf("an import for %s is already running", service)
 	}
-	go func() {
-		defer importRunning.Delete(key)
-		a.runListenImport(a.LifetimeContext(), userID, service, username, token)
-	}()
 	return nil
 }
 
-func (a *App) setImportState(ctx context.Context, userID int64, service string, st listenImportState) {
-	st.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	raw, _ := json.Marshal(st)
-	if _, err := a.db.Exec(ctx,
-		`UPDATE user_music_services SET import_state = $3, updated_at = now() WHERE user_id = $1 AND service = $2`,
-		userID, service, raw); err != nil {
-		log.Warn().Err(err).Msg("music services: import state write failed")
-	}
-}
-
-// runListenImport pages through the service's full history (newest → oldest),
-// matches each listen to a library track (recording MBID first, normalized
-// artist+title fallback), and inserts play_events rows for matches.
-func (a *App) runListenImport(ctx context.Context, userID int64, service, username, token string) {
-	st := listenImportState{Status: "running"}
-	a.setImportState(ctx, userID, service, st)
-	fail := func(err error) {
-		st.Status = "failed"
-		st.Error = err.Error()
-		a.setImportState(ctx, userID, service, st)
-		log.Warn().Err(err).Str("service", service).Int64("user", userID).Msg("listen import failed")
-	}
-
-	fetchPage := a.listenPager(service, username, token)
-	for {
-		if ctx.Err() != nil {
-			fail(ctx.Err())
-			return
-		}
-		listens, done, err := fetchPage(ctx)
-		if err != nil {
-			fail(err)
-			return
-		}
-		st.Scanned += len(listens)
-		matched, imported, err := a.importListenBatch(ctx, userID, service, listens)
-		if err != nil {
-			fail(err)
-			return
-		}
-		st.Matched += matched
-		st.Unmatched += len(listens) - matched
-		st.Imported += imported
-		a.setImportState(ctx, userID, service, st)
-		if done {
-			break
-		}
-	}
-	st.Status = "done"
-	a.setImportState(ctx, userID, service, st)
-	log.Info().Str("service", service).Int64("user", userID).
-		Int("scanned", st.Scanned).Int("matched", st.Matched).Int("imported", st.Imported).
-		Msg("listen import complete")
-}
-
-// listenPager returns a closure that yields successive history pages.
-func (a *App) listenPager(service, username, token string) func(ctx context.Context) ([]scrobble.Listen, bool, error) {
-	switch service {
-	case "listenbrainz":
-		lb := &scrobble.ListenBrainz{Token: token}
-		cursor := time.Now().Add(time.Hour)
-		return func(ctx context.Context) ([]scrobble.Listen, bool, error) {
-			listens, next, err := lb.Listens(ctx, username, cursor, 100)
-			if err != nil {
-				return nil, false, err
-			}
-			if next.IsZero() || !next.Before(cursor) {
-				return listens, true, nil
-			}
-			cursor = next
-			return listens, false, nil
-		}
-	default: // lastfm
-		page := 1
-		return func(ctx context.Context) ([]scrobble.Listen, bool, error) {
-			lf, err := a.lastfmClient(ctx, "")
-			if err != nil {
-				return nil, false, err
-			}
-			listens, totalPages, err := lf.RecentTracks(ctx, username, page, 200)
-			if err != nil {
-				return nil, false, err
-			}
-			done := page >= totalPages || len(listens) == 0
-			page++
-			return listens, done, nil
-		}
-	}
-}
-
-// importListenBatch matches one page of listens and inserts the new ones.
-func (a *App) importListenBatch(ctx context.Context, userID int64, source string, listens []scrobble.Listen) (matched, imported int, err error) {
-	for _, l := range listens {
-		trackID, duration, ok := a.matchListen(ctx, l)
-		if !ok {
-			continue
-		}
-		matched++
-		listened := l.DurationSec
-		if listened == 0 {
-			listened = int(duration)
-		}
-		tag, err := a.db.Exec(ctx, `
-			INSERT INTO play_events (user_id, track_id, played_at, listened_seconds, completed, source)
-			SELECT $1, $2, $3, $4, true, $5
-			WHERE NOT EXISTS (
-				SELECT 1 FROM play_events WHERE user_id = $1 AND track_id = $2 AND played_at = $3
-			)`, userID, trackID, l.ListenedAt, listened, source)
-		if err != nil {
-			return matched, imported, err
-		}
-		imported += int(tag.RowsAffected())
-	}
-	return matched, imported, nil
-}
-
 // matchListen resolves an external listen to a library track: exact recording
-// MBID first, then normalized (artist, title).
+// MBID first, then normalized (artist, title). Shared with playlist sync; the
+// import workers carry their own copy (worker/ cannot import service/).
 func (a *App) matchListen(ctx context.Context, l scrobble.Listen) (trackID int64, duration int32, ok bool) {
 	if l.RecordingMBID != "" {
 		err := a.db.QueryRow(ctx,
