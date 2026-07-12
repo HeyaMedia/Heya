@@ -1,6 +1,6 @@
 <template>
-  <div v-if="loading" class="page-pad m-loading">Loading…</div>
-  <div v-else-if="!rows.length" class="page-pad">
+  <div v-if="pending" class="page-pad m-loading">Loading…</div>
+  <div v-else-if="!total" class="page-pad">
     <MusicEmptyState icon="pulse" :title="`No tracks in ${heading} yet`">
       This bucket doesn't have any matches right now.
       <NuxtLink to="/music/browse">← Back to Browse</NuxtLink>
@@ -16,21 +16,23 @@
         <div class="bd-kind">{{ kindLabel }}</div>
         <h1 class="bd-title">{{ heading }}</h1>
         <div class="bd-stats">
-          <span>{{ rows.length }} tracks</span>
+          <span>{{ total.toLocaleString() }} tracks</span>
           <span v-if="totalDuration > 0" class="dot">·</span>
           <span v-if="totalDuration > 0">{{ formatRunTime(totalDuration) }}</span>
         </div>
         <div class="bd-actions">
-          <button class="btn btn-primary" :disabled="!rows.length" @click="playAll(false)">
+          <button class="btn btn-primary" @click="playAll(false)">
             <Icon name="play" :size="16" /> Play
           </button>
-          <button class="btn" :disabled="!rows.length" @click="playAll(true)">
+          <button class="btn" @click="playAll(true)">
             <Icon name="shuffle" :size="16" /> Shuffle
           </button>
         </div>
       </div>
     </header>
 
+    <!-- Sparse full-length list — the scrollbar spans the bucket's full
+         track count; pages stream in as skeleton rows when the user scrubs. -->
     <section class="bd-tracks page-pad">
       <TrackList
         :tracks="tlRows"
@@ -41,7 +43,9 @@
         :playing="playing"
         vu-meter-in="title"
         :duration-formatter="formatTime"
+        virtualized
         @row-click="playFrom"
+        @range="ensureRange"
       />
     </section>
   </div>
@@ -50,8 +54,7 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@pinia/colada'
-import { musicBrowseTracksQuery, type MusicBrowseKind, type MusicBrowseTrack } from '~/queries/music'
+import type { MusicBrowseKind, MusicBrowseTrack } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
@@ -67,40 +70,81 @@ const columns: TrackListColumn[] = [
 //   genre  → /api/music/browse/genres/{key}/tracks  (key is URL-encoded)
 //   tempo  → /api/music/browse/tempo/{key}/tracks
 //
-// All three return the rich track-row shape, so the list rendering is shared.
+// All three return {items, total}, so the random-access catalog + sparse
+// TrackList rendering is shared.
 const route = useRoute()
 const kind = computed(() => route.params.kind as MusicBrowseKind)
 const bucketKey = computed(() => route.params.key as string)
 
+const { $heya } = useNuxtApp()
 const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 const actions = useMusicActions()
 
-const tracksQuery = useQuery(() => musicBrowseTracksQuery({ kind: kind.value, key: bucketKey.value }))
-const rows = computed<MusicBrowseTrack[]>(() => tracksQuery.data.value ?? [])
-const loading = computed(() => tracksQuery.isPending.value)
+const PAGE = 100
+
+const { total, pending, itemAt, ensureRange, loadedItems } = useVirtualCatalog<MusicBrowseTrack>(() => ({
+  key: `music:browse:${kind.value}:${bucketKey.value}`,
+  pageSize: PAGE,
+  fetch: async (offset, limit) => {
+    const query = { limit, offset }
+    let res: { items: MusicBrowseTrack[]; total: number }
+    if (kind.value === 'mood') {
+      res = await $heya('/api/music/browse/moods/{mood}/tracks', {
+        path: { mood: bucketKey.value }, query,
+      }) as { items: MusicBrowseTrack[]; total: number }
+    } else if (kind.value === 'genre') {
+      res = await $heya('/api/music/browse/genres/{name}/tracks', {
+        path: { name: bucketKey.value }, query,
+      }) as { items: MusicBrowseTrack[]; total: number }
+    } else {
+      res = await $heya('/api/music/browse/tempo/{band}/tracks', {
+        path: { band: bucketKey.value }, query,
+      }) as { items: MusicBrowseTrack[]; total: number }
+    }
+    return { items: res.items ?? [], total: res.total ?? 0 }
+  },
+}))
 
 // MusicBrowseTrack has no `available` field (the browse endpoints don't
 // report it) — tlRows/contextItemsFor both omit it, which TrackList
 // treats as always-available, matching today's unconditional playFrom/menu.
-const tlRows = computed<TrackListRow[]>(() => rows.value.map((t) => ({
-  id: t.track_id,
-  title: t.track_title,
-  artist: t.artist_name,
-  artist_slug: t.artist_slug,
-  album: t.album_title,
-  album_slug: t.album_slug,
-  duration: t.duration,
-  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
-})))
+// Unloaded stretches become pending skeleton rows.
+const tlRows = computed<TrackListRow[]>(() => {
+  const n = total.value ?? 0
+  const out: TrackListRow[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const t = itemAt(i)
+    out[i] = t
+      ? {
+          id: t.track_id,
+          title: t.track_title,
+          artist: t.artist_name,
+          artist_slug: t.artist_slug,
+          album: t.album_title,
+          album_slug: t.album_slug,
+          duration: t.duration,
+          poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+        }
+      : { id: -(i + 1), pending: true, title: '', artist: '', album: '', duration: 0 }
+  }
+  return out
+})
 
 function contextItemsFor(_track: TrackListRow, i: number) {
-  const t = rows.value[i]!
+  const t = itemAt(i)
+  if (!t) return []
   return actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug })
 }
 
 const activeTrackId = computed(() => currentTrack.value?.id ?? null)
 
-const totalDuration = computed(() => rows.value.reduce((s, r) => s + (r.duration || 0), 0))
+// Only honest once everything's loaded — a partial sum under-reports and
+// the old page's number was silently capped at 500 anyway.
+const totalDuration = computed(() => {
+  const loaded = loadedItems()
+  if (total.value === null || loaded.length < total.value) return 0
+  return loaded.reduce((s, { item }) => s + (item.duration || 0), 0)
+})
 
 const kindLabel = computed(() => ({
   mood:  'Mood',
@@ -157,8 +201,10 @@ function rowToTrack(r: MusicBrowseTrack): Track {
   }
 }
 
+// Queues every LOADED track in list order — with the sparse list that's the
+// pages the user has actually seen, mirroring the old capped-fetch behavior.
 async function playAll(shuffle: boolean) {
-  let list = rows.value.map(rowToTrack)
+  let list = loadedItems().map(({ item }) => rowToTrack(item))
   if (shuffle) list = [...list].sort(() => Math.random() - 0.5)
   if (!list.length) return
   queue.value = list
@@ -166,9 +212,9 @@ async function playAll(shuffle: boolean) {
 }
 
 async function playFrom(idx: number) {
-  queue.value = rows.value.map(rowToTrack)
-  const target = rows.value[idx]
+  const target = itemAt(idx)
   if (!target) return
+  queue.value = loadedItems().map(({ item }) => rowToTrack(item))
   await play(rowToTrack(target))
 }
 

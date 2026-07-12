@@ -128,6 +128,18 @@
       </AppContextMenu>
     </div>
 
+    <!-- Endless steer grid: crossing this sentinel appends the next page of
+         picks until the engine's pool runs dry. Hidden for semantic/AI
+         results, which are one-shot lists. -->
+    <div
+      v-if="!searching && !aiShowing && recsQuery.hasNextPage.value"
+      ref="recsSentinel"
+      class="rb-sentinel"
+      aria-hidden="true"
+    >
+      <span class="rb-sentinel-spin" />
+    </div>
+
     <div v-else-if="!(searching && !mlReady)" class="rb-empty">
       {{ aiShowing ? 'The AI found nothing in the library that fits — try rewording the ask.'
         : searching ? 'No matches for that description.'
@@ -139,8 +151,9 @@
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
 import { DropdownMenuItem } from 'reka-ui'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
+import { forYouInfinite } from '~/queries/rails'
 
 const props = defineProps<{ section: 'movie' | 'tv' }>()
 
@@ -176,23 +189,27 @@ const genreOptions = computed(() =>
   [...(genresQuery.data.value ?? [])].sort((a, b) => b.count - a.count).map(g => g.genre).slice(0, 30),
 )
 
-// Reactive key — changing genre/minRating refetches with the new steer.
-const recsQuery = useQuery({
-  key: () => ['for-you-browse', props.section, genre.value, minRating.value],
-  query: async () => (await $heya('/api/me/recommendations', {
-    query: {
-      type: props.section,
-      genre: genre.value || undefined,
-      min_rating: minRating.value || undefined,
-      limit: 60,
-    },
-  })) as { items: RecItem[]; has_signal: boolean },
-  staleTime: 1000 * 60 * 5,
-})
+// Reactive key — changing genre/minRating pages a fresh steer. Infinite:
+// scrolling the grid appends deeper picks until the engine's re-rank pool
+// (~200) runs dry.
+const recsQuery = useInfiniteQuery(() => forYouInfinite({
+  section: props.section,
+  genre: genre.value || undefined,
+  minRating: minRating.value || undefined,
+}))
+const loadMoreRecs = railLoadMore(recsQuery)
 
-const items = computed(() => recsQuery.data.value?.items ?? [])
-const hasSignal = computed(() => recsQuery.data.value?.has_signal ?? true)
+const items = computed<RecItem[]>(() =>
+  (recsQuery.data.value?.pages ?? []).flatMap(p => p.items as RecItem[]))
+const hasSignal = computed(() => recsQuery.data.value?.pages[0]?.has_signal ?? true)
 const loading = computed(() => recsQuery.isPending.value)
+
+// Sentinel-driven append: only the plain recs grid pages (semantic + AI
+// results are single-shot lists).
+const recsSentinel = ref<HTMLElement | null>(null)
+useIntersectionObserver(recsSentinel, ([entry]) => {
+  if (entry?.isIntersecting) loadMoreRecs()
+}, { rootMargin: '600px' })
 
 // Natural-language "vibe" search (ML engine). When a query is active it replaces
 // the facet-ranked grid with semantic KNN hits.
@@ -544,6 +561,23 @@ function reset() {
 }
 .rb-link { color: var(--gold); text-decoration: none; }
 .rb-link:hover { text-decoration: underline; }
+
+.rb-sentinel {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 8px;
+}
+.rb-sentinel-spin {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgb(var(--ink) / 0.15);
+  border-top-color: var(--gold);
+  animation: rb-spin 0.8s linear infinite;
+}
+@keyframes rb-spin {
+  to { transform: rotate(360deg); }
+}
 
 @media (max-width: 720px) {
   .page-pad { padding: 20px 16px 60px; }

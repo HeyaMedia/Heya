@@ -187,15 +187,24 @@ export const recentEpisodesInfinite = defineInfiniteQueryOptions(() => ({
   staleTime: 1000 * 30,
 }))
 
-/** For You — taste-ranked, steerable by section; depth-capped by the engine. */
-export const forYouInfinite = defineInfiniteQueryOptions((section: 'movie' | 'tv' | 'all') => ({
-  key: ['for-you', section, 'inf'],
+export interface ForYouParams {
+  section: 'movie' | 'tv' | 'all'
+  /** Steer facets (RecsBrowse) — each combination pages its own cache entry. */
+  genre?: string
+  minRating?: number
+}
+
+/** For You — taste-ranked, steerable by section+facets; depth-capped by the engine. */
+export const forYouInfinite = defineInfiniteQueryOptions((p: ForYouParams) => ({
+  key: ['for-you', p.section, 'inf', p.genre ?? '', String(p.minRating ?? 0)],
   initialPageParam: 0,
   query: async ({ pageParam }): Promise<ForYouPage> => {
     const { $heya } = useNuxtApp()
     return (await $heya('/api/me/recommendations', {
       query: {
-        type: section === 'all' ? undefined : section,
+        type: p.section === 'all' ? undefined : p.section,
+        genre: p.genre || undefined,
+        min_rating: p.minRating || undefined,
         limit: FORYOU_PAGE,
         offset: pageParam,
       },

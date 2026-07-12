@@ -6,33 +6,31 @@
   *look* instead: MediaCard poster tiles, plus a lightweight control row with
   a media-type segment (only when the set is mixed) and a sort menu.
 
-  Rendering is a plain responsive CSS grid (`.grid-posters`), NOT the
-  RecycleScroller + usePosterGrid path the library pages use. That virtualized
-  path measures the container width in JS and chunks rows off it; before the
-  first ResizeObserver tick the width reads 0 and `cols` falls back to 6, so
-  for a beat the grid lays out 6 oversized tiles per row while the scroller's
-  fixed item-size lets rows overlap — the "unpredictable" blown-up posters the
-  old genre page showed. The browser's own auto-fill grid has no such race.
-  These lists are a few hundred items at most (the endpoint caps low), so the
-  DOM cost of skipping virtualization is fine.
+  Data is random-access paged (useVirtualCatalog + VirtualPosterGrid): the
+  grid is sized to the server total up front so the page scrollbar spans the
+  entire genre — grab it and jump anywhere and that page fetches on demand.
+  Sorting and the type filter therefore run SERVER-side (the client never
+  holds the full list); each sort/filter combination pages its own cache.
+  Segment counts come from the response's type_counts, so they're exact even
+  before any deep page has loaded.
 -->
 <template>
   <div class="scroll page-pad" style="height: 100%">
     <header class="tb-head">
       <div class="tb-eyebrow">{{ eyebrow }}</div>
       <h1 class="tb-title">{{ displayName }}</h1>
-      <div v-if="!loading" class="tb-meta">
-        {{ total.toLocaleString() }} title<span v-if="total !== 1">s</span>
+      <div v-if="!pending" class="tb-meta">
+        {{ (total ?? 0).toLocaleString() }} title<span v-if="total !== 1">s</span>
       </div>
     </header>
 
-    <div v-if="loading" class="grid-posters">
+    <div v-if="pending" class="grid-posters">
       <div v-for="i in 12" :key="i" class="grid-tile">
         <div class="poster" style="aspect-ratio: 2/3; background: var(--bg-3); animation: pulse 1.5s infinite" />
       </div>
     </div>
 
-    <template v-else-if="items.length">
+    <template v-else-if="(total ?? 0) > 0 || mediaFilter !== 'all'">
       <div class="tb-controls">
         <div v-if="typeSegments.length > 1" class="tb-seg">
           <button
@@ -65,29 +63,26 @@
         </AppMenu>
       </div>
 
-      <div v-if="visible.length" class="grid-posters">
-        <NuxtLink
-          v-for="(item, i) in visible"
-          :key="item.id"
-          :to="mediaUrl(item)"
-          class="grid-tile card-tile"
-        >
-          <MediaCard
-            :idx="i"
-            :src="usePosterUrl(item)"
-            aspect="2/3"
-            :title="item.title"
-            :subtitle="subtitleFor(item)"
-          />
-        </NuxtLink>
-      </div>
+      <VirtualPosterGrid
+        v-if="(total ?? 0) > 0"
+        :total="total ?? 0"
+        :item-at="itemAt"
+        :aspect="1.5"
+        @range="ensureRange"
+      >
+        <template #default="{ item, index }">
+          <NuxtLink :to="mediaUrl(item)" class="grid-tile card-tile">
+            <MediaCard
+              :idx="index"
+              :src="usePosterUrl(item)"
+              aspect="2/3"
+              :title="item.title"
+              :subtitle="subtitleFor(item)"
+            />
+          </NuxtLink>
+        </template>
+      </VirtualPosterGrid>
       <div v-else class="tb-empty">Nothing matches this filter.</div>
-
-      <div v-if="hasMore" class="tb-more">
-        <button class="btn btn-secondary" :disabled="loadingMore" @click="loadMore()">
-          {{ loadingMore ? 'Loading…' : `Show more (${(total - items.length).toLocaleString()} more)` }}
-        </button>
-      </div>
     </template>
 
     <div v-else class="tb-empty tb-empty-lg">
@@ -114,18 +109,13 @@ const { $heya } = useNuxtApp()
 // text at the very top; the open home scrim is too raw there).
 useBackground().pool('movie', 'tv')
 
-const PAGE = 200        // API caps `limit` at 200
-const BATCH = 1500      // items pulled per initial load and per "Show more" —
-                        // bounds how many un-virtualized tiles mount at once
-                        // without dead-ending: the rest is one click away.
+const PAGE = 100 // rows per random-access page (API caps limit at 200)
 
-const items = ref<MediaItem[]>([])
-const total = ref(0)
-const loading = ref(true)       // first paint
-const loadingMore = ref(false)  // a "Show more" fetch is in flight
-const cursor = ref(0)           // server offset for the next fetch
 const mediaFilter = ref<'all' | string>('all')
 const sortMode = ref<'title' | 'year-desc' | 'year-asc'>('title')
+// Unfiltered per-type breakdown from the last response — segment labels stay
+// exact regardless of which pages have loaded.
+const typeCounts = ref<Record<string, number>>({})
 
 // Genre/keyword names are used verbatim — the FE links via
 // encodeURIComponent(exactName) and the API matches the exact string, so a
@@ -134,7 +124,6 @@ const sortMode = ref<'title' | 'year-desc' | 'year-asc'>('title')
 // (a literal '%' in a name would make decodeURIComponent throw).
 const displayName = computed(() => props.rawName)
 const eyebrow = computed(() => props.kind === 'genre' ? 'Genre' : 'Keyword')
-const hasMore = computed(() => items.value.length < total.value)
 
 const sortOptions = [
   { label: 'Title A→Z', value: 'title' as const },
@@ -143,33 +132,48 @@ const sortOptions = [
 ]
 const sortLabel = computed(() => sortOptions.find(o => o.value === sortMode.value)?.label || 'Sort')
 
+// Random-access catalog: each (tag, filter, sort) combination pages its own
+// store, so flipping a control repaints from cache when it's been seen.
+const { total, pending, itemAt, ensureRange } = useVirtualCatalog<MediaItem>(() => ({
+  key: `tag:${props.kind}:${props.rawName}:${mediaFilter.value}:${sortMode.value}`,
+  pageSize: PAGE,
+  fetch: async (offset, limit) => {
+    const query = {
+      limit,
+      offset,
+      sort: sortMode.value,
+      // mediaFilter's non-'all' values come from the server's type_counts
+      // keys, which are always real media types — assert to the spec enum
+      // (regenerated client tightened `type` from string).
+      type: mediaFilter.value === 'all' ? undefined : mediaFilter.value as 'movie' | 'tv' | 'anime' | 'music' | 'book' | 'comic',
+    }
+    // Split by kind so each call keeps a literal path — the typed $heya
+    // client can't infer params from a dynamic path string.
+    const res = props.kind === 'genre'
+      ? await $heya('/api/genres/{name}', { path: { name: props.rawName }, query }) as
+        { items: MediaItem[]; total: number; type_counts?: Record<string, number> }
+      : await $heya('/api/keywords/{name}', { path: { name: props.rawName }, query }) as
+        { items: MediaItem[]; total: number; type_counts?: Record<string, number> }
+    typeCounts.value = res.type_counts ?? {}
+    return { items: res.items ?? [], total: res.total ?? 0 }
+  },
+}))
+
 // One segment per media_type actually present, plus "All" — hidden entirely
 // (via the >1 guard in the template) when the list is single-type.
 const TYPE_PLURALS: Record<string, string> = { movie: 'Movies', tv: 'TV Shows', anime: 'Anime', book: 'Books', music: 'Music' }
 const typeSegments = computed(() => {
-  const counts: Record<string, number> = {}
-  for (const it of items.value) counts[it.media_type] = (counts[it.media_type] || 0) + 1
+  const counts = typeCounts.value
   const present = Object.keys(counts).sort()
   if (present.length <= 1) return []
+  const all = present.reduce((s, t) => s + (counts[t] ?? 0), 0)
   return [
-    { value: 'all', label: 'All', count: items.value.length },
+    { value: 'all', label: 'All', count: all },
     ...present.map(t => ({ value: t, label: TYPE_PLURALS[t] || mediaTypeLabel(t), count: counts[t]! })),
   ]
 })
 
 const mixedTypes = computed(() => typeSegments.value.length > 1)
-
-const visible = computed(() => {
-  let list = items.value
-  if (mediaFilter.value !== 'all') list = list.filter(i => i.media_type === mediaFilter.value)
-  const out = [...list]
-  switch (sortMode.value) {
-    case 'year-desc': out.sort((a, b) => (b.year || '').localeCompare(a.year || '')); break
-    case 'year-asc': out.sort((a, b) => (a.year || '').localeCompare(b.year || '')); break
-    default: out.sort((a, b) => (a.sort_title || a.title).localeCompare(b.sort_title || b.title))
-  }
-  return out
-})
 
 function subtitleFor(item: MediaItem): string {
   // On a mixed-type list the type disambiguates; on a single-type list the
@@ -177,52 +181,11 @@ function subtitleFor(item: MediaItem): string {
   return mixedTypes.value ? `${item.year} · ${mediaTypeLabel(item.media_type)}` : item.year
 }
 
-async function fetchPage(offset: number): Promise<{ items: MediaItem[]; total: number }> {
-  // Split by kind so each call keeps a literal path — the typed $heya client
-  // can't infer params from a dynamic path string.
-  if (props.kind === 'genre') {
-    return await $heya('/api/genres/{name}', {
-      path: { name: props.rawName }, query: { limit: PAGE, offset },
-    }) as { items: MediaItem[]; total: number }
-  }
-  return await $heya('/api/keywords/{name}', {
-    path: { name: props.rawName }, query: { limit: PAGE, offset },
-  }) as { items: MediaItem[]; total: number }
-}
-
-// Loads up to BATCH more items from the current cursor, appending as it goes.
-// `reset` starts a fresh tag (initial mount / route change); otherwise it's a
-// "Show more" continuation that extends the list rather than capping it.
-async function loadMore(reset = false) {
-  if (reset) {
-    loading.value = true
-    items.value = []
-    cursor.value = 0
-    total.value = 0
-    mediaFilter.value = 'all'
-  } else {
-    loadingMore.value = true
-  }
-  const target = items.value.length + BATCH
-  try {
-    for (;;) {
-      const res = await fetchPage(cursor.value)
-      const batch = res.items || []
-      items.value = items.value.concat(batch)
-      total.value = res.total || 0
-      cursor.value += batch.length
-      if (batch.length < PAGE || items.value.length >= total.value || items.value.length >= target) break
-    }
-  } catch {
-    // Keep whatever we've accumulated rather than blanking on a mid-load hiccup;
-    // hasMore stays true so the user can retry via "Show more".
-  }
-  loading.value = false
-  loadingMore.value = false
-}
-
-onMounted(() => loadMore(true))
-watch(() => [props.kind, props.rawName], () => loadMore(true))
+// A new tag starts clean — the filter belongs to the tag being browsed.
+watch(() => [props.kind, props.rawName], () => {
+  mediaFilter.value = 'all'
+  typeCounts.value = {}
+})
 </script>
 
 <style scoped>

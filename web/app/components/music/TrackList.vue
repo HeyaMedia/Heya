@@ -98,6 +98,7 @@
       :buffer="610"
       key-field="id"
       page-mode
+      emit-update
       @update="onScrollerUpdate"
       v-slot="{ item: t, index: i }"
     >

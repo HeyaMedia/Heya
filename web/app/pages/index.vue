@@ -237,7 +237,7 @@ const recentWatchedQuery = useQuery({
 })
 // Personalized "For You" — the taste-vector + TMDB-graph engine. Excludes
 // seeds (hearts / watched) server-side, so no client-side filtering needed.
-const forYouQuery = useInfiniteQuery(() => forYouInfinite('all'))
+const forYouQuery = useInfiniteQuery(() => forYouInfinite({ section: 'all' }))
 const loadMoreForYou = railLoadMore(forYouQuery)
 
 const userListsQuery = useQuery(userListsOptions())

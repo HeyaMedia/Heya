@@ -24,6 +24,7 @@
       key-field="key"
       page-mode
       :buffer="600"
+      emit-update
       @update="onUpdate"
       v-slot="{ item: row }"
     >

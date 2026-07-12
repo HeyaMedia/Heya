@@ -2,45 +2,28 @@
   <div class="ms-songs page-pad">
     <MusicPageHead title="All Songs">
       <template #subtitle>
-        <span v-if="total > 0">{{ total.toLocaleString() }} tracks</span>
-        <span v-else-if="loading">Loading…</span>
-        <span v-else>—</span>
-        <span class="dot">·</span>
-        <span>Page {{ page }} of {{ totalPages }}</span>
+        <span v-if="total !== null">{{ total.toLocaleString() }} tracks</span>
+        <span v-else>Loading…</span>
       </template>
-      <button
-        class="ms-page-btn steer-glass"
-        :disabled="page <= 1 || loading"
-        @click="goPage(page - 1)"
-        aria-label="Previous page"
-      >
-        <Icon name="chevleft" :size="14" />
-        <span>Prev</span>
-      </button>
-      <button
-        class="ms-page-btn steer-glass"
-        :disabled="page >= totalPages || loading"
-        @click="goPage(page + 1)"
-        aria-label="Next page"
-      >
-        <span>Next</span>
-        <Icon name="chevright" :size="14" />
-      </button>
     </MusicPageHead>
 
-    <div v-if="loading && !rows.length" class="ms-loading">Loading songs…</div>
+    <div v-if="pending" class="ms-loading">Loading songs…</div>
 
+    <!-- Sparse full-length list: TrackList's scroller is sized to the total
+         track count, so the scrollbar spans the whole library — drag it to
+         any point and the pages covering that window stream in as skeleton
+         rows fill. Replaces the old Prev/Next 1000-per-page buttons. -->
     <TrackList
-      v-else-if="tlRows.length"
+      v-else-if="(total ?? 0) > 0"
       :tracks="tlRows"
       :columns="columns"
       grid-template-columns="48px 56px 1fr minmax(160px, 1.5fr) 70px 120px 60px"
       :context-items="contextItemsFor"
       :active-track-id="activeTrackId"
-      :display-index="globalIndex"
       :on-rating-change="onRatingChange"
-      :virtualized="tlRows.length > 200"
+      virtualized
       @row-click="playFrom"
+      @range="ensureRange"
     />
 
     <div v-else class="ms-empty">
@@ -48,42 +31,12 @@
       <h3>Your library is empty</h3>
       <p>Scan a music library from <NuxtLink to="/settings/libraries">Settings → Libraries</NuxtLink>.</p>
     </div>
-
-    <!-- Pagination footer -->
-    <div v-if="totalPages > 1" class="ms-pagination">
-      <button
-        class="ms-page-btn steer-glass"
-        :disabled="page <= 1 || loading"
-        @click="goPage(1)"
-      >First</button>
-      <button
-        class="ms-page-btn steer-glass"
-        :disabled="page <= 1 || loading"
-        @click="goPage(page - 1)"
-      >
-        <Icon name="chevleft" :size="14" />
-      </button>
-      <span class="ms-page-info">Page {{ page }} of {{ totalPages }}</span>
-      <button
-        class="ms-page-btn steer-glass"
-        :disabled="page >= totalPages || loading"
-        @click="goPage(page + 1)"
-      >
-        <Icon name="chevright" :size="14" />
-      </button>
-      <button
-        class="ms-page-btn steer-glass"
-        :disabled="page >= totalPages || loading"
-        @click="goPage(totalPages)"
-      >Last</button>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -97,10 +50,6 @@ const columns: TrackListColumn[] = [
   { key: 'duration', kind: 'duration', headerIcon: 'clock' },
 ]
 
-const PAGE_SIZE = 1000
-
-const route = useRoute()
-const router = useRouter()
 const { play, queue, currentTrack } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const trackRatings = useTrackRatings()
@@ -145,89 +94,63 @@ interface TrackRow {
   available?: boolean
 }
 
-interface PageBody {
-  items: TrackRow[]
-  total: number
-  limit: number
-  offset: number
-}
-
-const page = computed({
-  get: () => {
-    const p = parseInt((route.query.page as string | undefined) ?? '1', 10)
-    return Number.isFinite(p) && p > 0 ? p : 1
-  },
-  set: (n: number) => {
-    router.replace({ query: { ...route.query, page: n > 1 ? String(n) : undefined } })
-  },
-})
-const offset = computed(() => (page.value - 1) * PAGE_SIZE)
-
-const songsQuery = useQuery({
-  key: () => ['music', 'songs', offset.value],
-  query: async () => {
+const { total, pending, itemAt, ensureRange, loadedItems } = useVirtualCatalog<TrackRow>(() => ({
+  key: 'music:songs:list',
+  pageSize: 200,
+  fetch: async (offset, limit) => {
     const res = await $heya('/api/music/tracks', {
-      query: { limit: PAGE_SIZE, offset: offset.value },
-    }) as unknown as PageBody
-    return res
+      query: { limit, offset },
+    }) as unknown as { items: TrackRow[]; total: number }
+    const items = res.items ?? []
+    // Prime ratings per landed page — one round-trip per 200 tracks, same
+    // batching the paged version had.
+    if (items.length) void trackRatings.primeBulk(items.map((t) => t.track_id))
+    return { items, total: res.total ?? 0 }
   },
-  staleTime: 1000 * 30,
-  placeholderData: (prev) => prev,
+}))
+
+// Full-length sparse rows: loaded indexes map to real rows, everything else
+// is a pending placeholder (unique negative id for the v-for key) that
+// TrackList renders as a skeleton.
+const tlRows = computed<TrackListRow[]>(() => {
+  const n = total.value ?? 0
+  const out: TrackListRow[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const t = itemAt(i)
+    out[i] = t
+      ? {
+          id: t.track_id,
+          title: t.track_title,
+          artist: t.artist_name,
+          artist_slug: t.artist_slug,
+          album: t.album_title,
+          album_slug: t.album_slug,
+          album_year: t.album_year,
+          duration: t.duration,
+          available: t.available,
+          poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+          rating: ratings.value.get(t.track_id) ?? 0,
+        }
+      : { id: -(i + 1), pending: true, title: '', artist: '', album: '', duration: 0 }
+  }
+  return out
 })
-await waitForQuery(songsQuery)
-
-const rows = computed<TrackRow[]>(() => songsQuery.data.value?.items ?? [])
-
-// Normalized shape for TrackList — visual fields only. Business logic
-// (contextItemsFor/playFrom/onRatingChange) still closes over `rows` by
-// index, so it keeps the richer album_id/artist_id fields TrackList itself
-// never needs.
-const tlRows = computed<TrackListRow[]>(() => rows.value.map((t) => ({
-  id: t.track_id,
-  title: t.track_title,
-  artist: t.artist_name,
-  artist_slug: t.artist_slug,
-  album: t.album_title,
-  album_slug: t.album_slug,
-  album_year: t.album_year,
-  duration: t.duration,
-  available: t.available,
-  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
-  rating: ratings.value.get(t.track_id) ?? 0,
-})))
 
 function contextItemsFor(_track: TrackListRow, i: number) {
-  return actions.forTrack(rowToTrackEntity(rows.value[i]!))
+  const t = itemAt(i)
+  return t ? actions.forTrack(rowToTrackEntity(t)) : []
 }
-
-// Bulk-prime ratings for every visible track in one round-trip.
-watch(rows, async (list) => {
-  if (!list.length) return
-  await trackRatings.primeBulk(list.map((t) => t.track_id))
-}, { immediate: true })
-const total = computed(() => songsQuery.data.value?.total ?? 0)
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
-const loading = computed(() => songsQuery.isLoading.value)
 
 const activeTrackId = computed(() => currentTrack.value?.id ?? null)
 
-function globalIndex(i: number) {
-  return offset.value + i + 1
-}
-
-function goPage(n: number) {
-  const clamped = Math.min(Math.max(1, n), totalPages.value)
-  if (clamped === page.value) return
-  page.value = clamped
-  // Scroll back to the top so the user can see they're on a new page.
-  if (import.meta.client) document.querySelector('.music-main')?.scrollTo({ top: 0, behavior: 'auto' })
-}
-
 async function playFrom(startIdx: number) {
-  const clicked = rows.value[startIdx]
+  const clicked = itemAt(startIdx)
   if (!clicked || clicked.available === false) return
-  // Queue only playable tracks; a removed-on-disk file can't enter the queue.
-  const built: Track[] = rows.value
+  // Queue every LOADED playable track in library order — with a sparse list
+  // that's the pages the user has actually scrolled through, which mirrors
+  // the old behavior of queueing the visible page.
+  const built: Track[] = loadedItems()
+    .map(({ item }) => item)
     .filter((t) => t.available !== false)
     .map((t) => ({
       id: t.track_id,
@@ -253,21 +176,6 @@ async function playFrom(startIdx: number) {
 <style scoped>
 .ms-songs { max-width: 1400px; }
 
-.dot { opacity: 0.4; }
-
-/* Layout only — the glass coat comes from the shared .steer-glass class. */
-.ms-page-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 8px 12px;
-  border-radius: var(--r-sm);
-  color: var(--fg-1);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.ms-page-btn:disabled { opacity: 0.35; cursor: default; background: color-mix(in oklab, var(--bg-2) 82%, transparent); color: var(--fg-1); }
-
 .ms-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
 
 .ms-empty {
@@ -279,17 +187,4 @@ async function playFrom(startIdx: number) {
 .ms-empty h3 { font-size: 16px; color: var(--fg-1); margin-bottom: 8px; font-weight: 600; }
 .ms-empty a { color: var(--gold); text-decoration: none; }
 .ms-empty a:hover { text-decoration: underline; }
-
-.ms-pagination {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  margin-top: 32px;
-  padding: 16px 0;
-}
-.ms-page-info {
-  margin: 0 8px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--fg-3);
-  letter-spacing: 0.04em;
-}
 </style>

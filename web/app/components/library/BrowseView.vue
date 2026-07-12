@@ -112,7 +112,7 @@ const rails = computed<Rail[]>(() => railsQuery.data.value?.rails ?? [])
 
 // Personalized "For You" — the taste-vector + TMDB-graph engine, section-scoped
 // and offset-paged (depth ends at the engine's re-rank pool).
-const forYouQuery = useInfiniteQuery(() => forYouInfinite(props.section))
+const forYouQuery = useInfiniteQuery(() => forYouInfinite({ section: props.section }))
 const forYouItems = computed<MediaItem[]>(() =>
   toRow((forYouQuery.data.value?.pages ?? []).flatMap(p => p.items as RailItem[])))
 const loadMoreForYou = railLoadMore(forYouQuery)

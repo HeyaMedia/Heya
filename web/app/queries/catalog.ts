@@ -89,7 +89,9 @@ export const booksCatalogQuery = defineQueryOptions(() => ({
   key: ['media', 'catalog', 'book'],
   query: async () => {
     const { $heya } = useNuxtApp()
-    return await $heya('/api/media', { query: { type: 'book', limit: 500 } }) as MediaItem[]
+    // Endpoint max — the books grid (like movies/tv) eager-loads the whole
+    // catalog for client-side filters and virtualizes only the rendering.
+    return await $heya('/api/media', { query: { type: 'book', limit: 1000 } }) as MediaItem[]
   },
   staleTime: 1000 * 60 * 5,
   meta: {
