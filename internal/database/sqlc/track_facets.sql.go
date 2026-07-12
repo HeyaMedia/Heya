@@ -51,6 +51,31 @@ func (q *Queries) CountPendingAnalysis(ctx context.Context, arg CountPendingAnal
 	return column_1, err
 }
 
+const countTracksByGenre = `-- name: CountTracksByGenre :one
+SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+WHERE (elem->>'name') = $1::text
+  AND (elem->>'score')::real >= $2::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+`
+
+type CountTracksByGenreParams struct {
+	GenreName string  `json:"genre_name"`
+	MinScore  float32 `json:"min_score"`
+}
+
+// Distinct-recording count matching ListTracksByGenre's WHERE — sizes the
+// browse drilldown's virtual scroll track.
+func (q *Queries) CountTracksByGenre(ctx context.Context, arg CountTracksByGenreParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTracksByGenre, arg.GenreName, arg.MinScore)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countTracksByMood = `-- name: CountTracksByMood :one
 
 SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint

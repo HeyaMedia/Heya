@@ -9,34 +9,74 @@ import (
 	"context"
 )
 
-const countMediaByGenre = `-- name: CountMediaByGenre :one
-SELECT count(*)
+const countMediaByGenreByType = `-- name: CountMediaByGenreByType :many
+SELECT mi.media_type::text AS media_type, count(*)::bigint AS count
 FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres))
+GROUP BY mi.media_type
 `
 
-func (q *Queries) CountMediaByGenre(ctx context.Context, dollar_1 string) (int64, error) {
-	row := q.db.QueryRow(ctx, countMediaByGenre, dollar_1)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+type CountMediaByGenreByTypeRow struct {
+	MediaType string `json:"media_type"`
+	Count     int64  `json:"count"`
 }
 
-const countMediaByKeyword = `-- name: CountMediaByKeyword :one
-SELECT count(*)
+// Per-media_type counts for one genre — feeds both the type-filter segment
+// labels and (summed / picked) the paging total.
+func (q *Queries) CountMediaByGenreByType(ctx context.Context, genre string) ([]CountMediaByGenreByTypeRow, error) {
+	rows, err := q.db.Query(ctx, countMediaByGenreByType, genre)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountMediaByGenreByTypeRow{}
+	for rows.Next() {
+		var i CountMediaByGenreByTypeRow
+		if err := rows.Scan(&i.MediaType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countMediaByKeywordByType = `-- name: CountMediaByKeywordByType :many
+SELECT mi.media_type::text AS media_type, count(*)::bigint AS count
 FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower($1::text)
+GROUP BY mi.media_type
 `
 
-func (q *Queries) CountMediaByKeyword(ctx context.Context, dollar_1 string) (int64, error) {
-	row := q.db.QueryRow(ctx, countMediaByKeyword, dollar_1)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+type CountMediaByKeywordByTypeRow struct {
+	MediaType string `json:"media_type"`
+	Count     int64  `json:"count"`
+}
+
+func (q *Queries) CountMediaByKeywordByType(ctx context.Context, keyword string) ([]CountMediaByKeywordByTypeRow, error) {
+	rows, err := q.db.Query(ctx, countMediaByKeywordByType, keyword)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountMediaByKeywordByTypeRow{}
+	for rows.Next() {
+		var i CountMediaByKeywordByTypeRow
+		if err := rows.Scan(&i.MediaType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAllGenres = `-- name: ListAllGenres :many
@@ -75,23 +115,41 @@ func (q *Queries) ListAllGenres(ctx context.Context) ([]ListAllGenresRow, error)
 }
 
 const listMediaByGenre = `-- name: ListMediaByGenre :many
+
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked, mi.public_id
 FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres))
-ORDER BY mi.sort_title ASC, mi.title ASC
-LIMIT $2 OFFSET $3
+  AND ($2::text = '' OR mi.media_type::text = $2::text)
+ORDER BY
+  CASE WHEN $3::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
+  CASE WHEN $3::text = 'year-asc'  THEN NULLIF(mi.year, '') END ASC NULLS LAST,
+  mi.sort_title ASC, mi.title ASC
+LIMIT $5 OFFSET $4
 `
 
 type ListMediaByGenreParams struct {
-	Column1 string `json:"column_1"`
-	Limit   int32  `json:"limit"`
-	Offset  int32  `json:"offset"`
+	Genre     string `json:"genre"`
+	MediaType string `json:"media_type"`
+	Sort      string `json:"sort"`
+	Off       int32  `json:"off"`
+	Lim       int32  `json:"lim"`
 }
 
+// Genre/keyword drilldowns are random-access paged (the browse grid sizes
+// its scroll track to the total and fetches whatever page the scrollbar
+// lands on), so sorting and type-filtering MUST happen server-side — the
+// client never holds the full list. Sort keys mirror the browse UI: title
+// (default), year-desc, year-asc; empty years always sink to the bottom.
 func (q *Queries) ListMediaByGenre(ctx context.Context, arg ListMediaByGenreParams) ([]MediaItemCard, error) {
-	rows, err := q.db.Query(ctx, listMediaByGenre, arg.Column1, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listMediaByGenre,
+		arg.Genre,
+		arg.MediaType,
+		arg.Sort,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -153,18 +211,30 @@ FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower($1::text)
-ORDER BY mi.sort_title ASC, mi.title ASC
-LIMIT $2 OFFSET $3
+  AND ($2::text = '' OR mi.media_type::text = $2::text)
+ORDER BY
+  CASE WHEN $3::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
+  CASE WHEN $3::text = 'year-asc'  THEN NULLIF(mi.year, '') END ASC NULLS LAST,
+  mi.sort_title ASC, mi.title ASC
+LIMIT $5 OFFSET $4
 `
 
 type ListMediaByKeywordParams struct {
-	Column1 string `json:"column_1"`
-	Limit   int32  `json:"limit"`
-	Offset  int32  `json:"offset"`
+	Keyword   string `json:"keyword"`
+	MediaType string `json:"media_type"`
+	Sort      string `json:"sort"`
+	Off       int32  `json:"off"`
+	Lim       int32  `json:"lim"`
 }
 
 func (q *Queries) ListMediaByKeyword(ctx context.Context, arg ListMediaByKeywordParams) ([]MediaItemCard, error) {
-	rows, err := q.db.Query(ctx, listMediaByKeyword, arg.Column1, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listMediaByKeyword,
+		arg.Keyword,
+		arg.MediaType,
+		arg.Sort,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

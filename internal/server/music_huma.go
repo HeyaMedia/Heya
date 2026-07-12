@@ -459,7 +459,11 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
-			return cachedJSON(moodTracksBody{Items: rows}, 60), nil
+			total, err := app.CountTracksForMood(ctx, in.Mood)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return cachedJSON(moodTracksBody{Items: rows, Total: total}, 60), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/genres", "browse-music-genres", "Genre-tile buckets ranked by track count", "Music")),
@@ -480,7 +484,11 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
-			return cachedJSON(genreTracksBody{Items: rows}, 60), nil
+			total, err := app.CountTracksForGenre(ctx, in.Name)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return cachedJSON(genreTracksBody{Items: rows, Total: total}, 60), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/tempo", "browse-music-tempo", "BPM-band tile buckets", "Music")),
@@ -505,7 +513,11 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return cachedJSON(tempoTracksBody{Items: rows}, 60), nil
+			total, err := app.CountTracksForTempoBand(ctx, minBPM, maxBPM)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return cachedJSON(tempoTracksBody{Items: rows, Total: total}, 60), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodPost, "/api/music/radio", "build-music-radio", "Build an Instant Radio queue from a seed", "Music")),

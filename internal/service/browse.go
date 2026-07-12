@@ -14,14 +14,20 @@ import (
 type GenreResult struct {
 	Genre string               `json:"genre"`
 	Items []sqlc.MediaItemCard `json:"items"`
-	Total int64                `json:"total"`
+	// Total counts the rows matching the CURRENT type filter — it sizes the
+	// virtual scroll track, so it must match what paging can actually reach.
+	Total int64 `json:"total"`
+	// TypeCounts is the unfiltered per-media_type breakdown (movie/tv/anime/…)
+	// for the browse page's type-segment labels.
+	TypeCounts map[string]int64 `json:"type_counts,omitempty"`
 }
 
 // KeywordResult holds a keyword name, its matching media items, and a total count.
 type KeywordResult struct {
-	Keyword string               `json:"keyword"`
-	Items   []sqlc.MediaItemCard `json:"items"`
-	Total   int64                `json:"total"`
+	Keyword    string               `json:"keyword"`
+	Items      []sqlc.MediaItemCard `json:"items"`
+	Total      int64                `json:"total"`
+	TypeCounts map[string]int64     `json:"type_counts,omitempty"`
 }
 
 // CollectionResult holds a collection, its local movies, and the full
@@ -64,48 +70,90 @@ func (a *App) ListGenres(ctx context.Context) ([]sqlc.ListAllGenresRow, error) {
 	return q.ListAllGenres(ctx)
 }
 
-// GetGenre returns media items matching a genre name, paginated.
-func (a *App) GetGenre(ctx context.Context, name string, limit, offset int32) (GenreResult, error) {
+// GetGenre returns media items matching a genre name, paginated. Sort
+// (title | year-desc | year-asc) and the optional media-type filter run
+// server-side: the browse grid is random-access virtualized, so the client
+// never holds the full list to sort/filter itself. Total reflects the
+// FILTERED count (it sizes the scroll track); TypeCounts always carries the
+// unfiltered per-type breakdown for the segment labels.
+func (a *App) GetGenre(ctx context.Context, name, mediaType, sort string, limit, offset int32) (GenreResult, error) {
 	q := sqlc.New(a.db)
 
 	items, err := q.ListMediaByGenre(ctx, sqlc.ListMediaByGenreParams{
-		Column1: name,
-		Limit:   limit,
-		Offset:  offset,
+		Genre:     name,
+		MediaType: mediaType,
+		Sort:      sort,
+		Lim:       limit,
+		Off:       offset,
 	})
 	if err != nil {
 		return GenreResult{}, err
 	}
 
-	total, _ := q.CountMediaByGenre(ctx, name)
+	counts, _ := q.CountMediaByGenreByType(ctx, name)
+	typeCounts, total := typeCountsAndTotal(counts, mediaType)
 
 	return GenreResult{
-		Genre: name,
-		Items: items,
-		Total: total,
+		Genre:      name,
+		Items:      items,
+		Total:      total,
+		TypeCounts: typeCounts,
 	}, nil
 }
 
-// GetKeyword returns media items matching a keyword name, paginated.
-func (a *App) GetKeyword(ctx context.Context, name string, limit, offset int32) (KeywordResult, error) {
+// GetKeyword returns media items matching a keyword name, paginated — same
+// server-side sort/filter contract as GetGenre.
+func (a *App) GetKeyword(ctx context.Context, name, mediaType, sort string, limit, offset int32) (KeywordResult, error) {
 	q := sqlc.New(a.db)
 
 	items, err := q.ListMediaByKeyword(ctx, sqlc.ListMediaByKeywordParams{
-		Column1: name,
-		Limit:   limit,
-		Offset:  offset,
+		Keyword:   name,
+		MediaType: mediaType,
+		Sort:      sort,
+		Lim:       limit,
+		Off:       offset,
 	})
 	if err != nil {
 		return KeywordResult{}, err
 	}
 
-	total, _ := q.CountMediaByKeyword(ctx, name)
+	counts, _ := q.CountMediaByKeywordByType(ctx, name)
+	typeCounts, total := keywordTypeCountsAndTotal(counts, mediaType)
 
 	return KeywordResult{
-		Keyword: name,
-		Items:   items,
-		Total:   total,
+		Keyword:    name,
+		Items:      items,
+		Total:      total,
+		TypeCounts: typeCounts,
 	}, nil
+}
+
+// typeCountsAndTotal folds per-type count rows into a map and derives the
+// paging total: the filtered type's count when a filter is set, else the sum.
+func typeCountsAndTotal(rows []sqlc.CountMediaByGenreByTypeRow, mediaType string) (map[string]int64, int64) {
+	counts := make(map[string]int64, len(rows))
+	var sum int64
+	for _, r := range rows {
+		counts[r.MediaType] = r.Count
+		sum += r.Count
+	}
+	if mediaType != "" {
+		return counts, counts[mediaType]
+	}
+	return counts, sum
+}
+
+func keywordTypeCountsAndTotal(rows []sqlc.CountMediaByKeywordByTypeRow, mediaType string) (map[string]int64, int64) {
+	counts := make(map[string]int64, len(rows))
+	var sum int64
+	for _, r := range rows {
+		counts[r.MediaType] = r.Count
+		sum += r.Count
+	}
+	if mediaType != "" {
+		return counts, counts[mediaType]
+	}
+	return counts, sum
 }
 
 // ListCollections returns a paginated list of all collections with movie counts.

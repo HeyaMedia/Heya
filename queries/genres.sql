@@ -7,34 +7,52 @@ SELECT genre, count(*) AS count FROM (
 GROUP BY genre
 ORDER BY genre;
 
+-- Genre/keyword drilldowns are random-access paged (the browse grid sizes
+-- its scroll track to the total and fetches whatever page the scrollbar
+-- lands on), so sorting and type-filtering MUST happen server-side — the
+-- client never holds the full list. Sort keys mirror the browse UI: title
+-- (default), year-desc, year-asc; empty years always sink to the bottom.
+
 -- name: ListMediaByGenre :many
 SELECT mi.*
 FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres))
-ORDER BY mi.sort_title ASC, mi.title ASC
-LIMIT $2 OFFSET $3;
+WHERE (sqlc.arg(genre)::text = ANY(m.genres) OR sqlc.arg(genre)::text = ANY(ts.genres))
+  AND (sqlc.arg(media_type)::text = '' OR mi.media_type::text = sqlc.arg(media_type)::text)
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
+  CASE WHEN sqlc.arg(sort)::text = 'year-asc'  THEN NULLIF(mi.year, '') END ASC NULLS LAST,
+  mi.sort_title ASC, mi.title ASC
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
--- name: CountMediaByGenre :one
-SELECT count(*)
+-- name: CountMediaByGenreByType :many
+-- Per-media_type counts for one genre — feeds both the type-filter segment
+-- labels and (summed / picked) the paging total.
+SELECT mi.media_type::text AS media_type, count(*)::bigint AS count
 FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
-WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres));
+WHERE (sqlc.arg(genre)::text = ANY(m.genres) OR sqlc.arg(genre)::text = ANY(ts.genres))
+GROUP BY mi.media_type;
 
 -- name: ListMediaByKeyword :many
 SELECT mi.*
 FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
-WHERE lower(k.name) = lower($1::text)
-ORDER BY mi.sort_title ASC, mi.title ASC
-LIMIT $2 OFFSET $3;
+WHERE lower(k.name) = lower(sqlc.arg(keyword)::text)
+  AND (sqlc.arg(media_type)::text = '' OR mi.media_type::text = sqlc.arg(media_type)::text)
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
+  CASE WHEN sqlc.arg(sort)::text = 'year-asc'  THEN NULLIF(mi.year, '') END ASC NULLS LAST,
+  mi.sort_title ASC, mi.title ASC
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
--- name: CountMediaByKeyword :one
-SELECT count(*)
+-- name: CountMediaByKeywordByType :many
+SELECT mi.media_type::text AS media_type, count(*)::bigint AS count
 FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
-WHERE lower(k.name) = lower($1::text);
+WHERE lower(k.name) = lower(sqlc.arg(keyword)::text)
+GROUP BY mi.media_type;

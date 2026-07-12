@@ -137,6 +137,37 @@ func (a *App) ListTracksByMood(ctx context.Context, moodKey string, limit, offse
 	return rows, nil
 }
 
+// CountTracksForMood returns the total distinct recordings above the mood
+// threshold — sizes the drilldown's virtual scroll track.
+func (a *App) CountTracksForMood(ctx context.Context, moodKey string) (int64, error) {
+	if _, ok := moodLabel[sonicanalysis.MoodTagName(moodKey)]; !ok {
+		return 0, fmt.Errorf("unknown mood %q", moodKey)
+	}
+	return sqlc.New(a.db).CountTracksByMood(ctx, sqlc.CountTracksByMoodParams{
+		MoodKey:   moodKey,
+		Threshold: moodThreshold,
+	})
+}
+
+// CountTracksForGenre is the total-count counterpart of ListTracksByGenre.
+func (a *App) CountTracksForGenre(ctx context.Context, genre string) (int64, error) {
+	if genre == "" {
+		return 0, fmt.Errorf("genre is required")
+	}
+	return sqlc.New(a.db).CountTracksByGenre(ctx, sqlc.CountTracksByGenreParams{
+		GenreName: genre,
+		MinScore:  genreScoreFloor,
+	})
+}
+
+// CountTracksForTempoBand is the total-count counterpart of ListTracksByTempoBand.
+func (a *App) CountTracksForTempoBand(ctx context.Context, min, max float32) (int64, error) {
+	return sqlc.New(a.db).CountTracksByTempoBand(ctx, sqlc.CountTracksByTempoBandParams{
+		MinBpm: min,
+		MaxBpm: max,
+	})
+}
+
 // ListGenreBuckets returns the top-N hierarchical genres present in the
 // library, sorted by track count.
 func (a *App) ListGenreBuckets(ctx context.Context) ([]GenreBucket, error) {

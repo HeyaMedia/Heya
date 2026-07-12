@@ -4581,6 +4581,13 @@
           "total": {
             "format": "int64",
             "type": "integer"
+          },
+          "type_counts": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
           }
         },
         "required": [
@@ -4627,10 +4634,15 @@
               "array",
               "null"
             ]
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "type": "object"
       },
@@ -5351,6 +5363,13 @@
           "total": {
             "format": "int64",
             "type": "integer"
+          },
+          "type_counts": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
           }
         },
         "required": [
@@ -7470,6 +7489,8 @@
       "ListRecentUserPlaylistsRow": {
         "additionalProperties": false,
         "properties": {
+          "auto_album_slug": {},
+          "auto_artist_slug": {},
           "cover_path": {
             "type": "string"
           },
@@ -7478,6 +7499,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "has_cover": {
+            "type": "boolean"
           },
           "id": {
             "format": "int64",
@@ -7509,7 +7533,10 @@
           "updated_at",
           "last_activity_at",
           "last_played_at",
-          "track_count"
+          "track_count",
+          "has_cover",
+          "auto_album_slug",
+          "auto_artist_slug"
         ],
         "type": "object"
       },
@@ -8672,7 +8699,8 @@
       "ListUserPlaylistsRow": {
         "additionalProperties": false,
         "properties": {
-          "auto_cover": {},
+          "auto_album_slug": {},
+          "auto_artist_slug": {},
           "cover_path": {
             "type": "string"
           },
@@ -8717,7 +8745,8 @@
           "updated_at",
           "slug",
           "track_count",
-          "auto_cover",
+          "auto_album_slug",
+          "auto_artist_slug",
           "has_cover"
         ],
         "type": "object"
@@ -10441,10 +10470,15 @@
               "array",
               "null"
             ]
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "type": "object"
       },
@@ -15997,10 +16031,15 @@
               "array",
               "null"
             ]
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "type": "object"
       },
@@ -20809,6 +20848,40 @@
             }
           },
           {
+            "description": "Restrict to one media type; empty = all",
+            "explode": false,
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "description": "Restrict to one media type; empty = all",
+              "enum": [
+                "movie",
+                "tv",
+                "anime",
+                "book",
+                "music",
+                "comic"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Server-side sort — the browse grid is random-access paged",
+            "explode": false,
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "default": "title",
+              "description": "Server-side sort — the browse grid is random-access paged",
+              "enum": [
+                "title",
+                "year-desc",
+                "year-asc"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "description": "Max results",
             "explode": false,
             "in": "query",
@@ -21747,6 +21820,40 @@
                 "Sci-Fi \u0026 Fantasy"
               ],
               "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Restrict to one media type; empty = all",
+            "explode": false,
+            "in": "query",
+            "name": "type",
+            "schema": {
+              "description": "Restrict to one media type; empty = all",
+              "enum": [
+                "movie",
+                "tv",
+                "anime",
+                "book",
+                "music",
+                "comic"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Server-side sort — the browse grid is random-access paged",
+            "explode": false,
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "default": "title",
+              "description": "Server-side sort — the browse grid is random-access paged",
+              "enum": [
+                "title",
+                "year-desc",
+                "year-asc"
+              ],
               "type": "string"
             }
           },

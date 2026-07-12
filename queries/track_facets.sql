@@ -357,6 +357,18 @@ SELECT * FROM (
 ORDER BY score DESC, track_id ASC
 LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
 
+-- name: CountTracksByGenre :one
+-- Distinct-recording count matching ListTracksByGenre's WHERE — sizes the
+-- browse drilldown's virtual scroll track.
+SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+WHERE (elem->>'name') = sqlc.arg(genre_name)::text
+  AND (elem->>'score')::real >= sqlc.arg(min_score)::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL);
+
 -- name: CountTracksByTempoBand :one
 -- Count tracks whose BPM falls in [min, max). Half-open so adjacent bands
 -- partition cleanly with no double-counting. Distinct-recording counting for
