@@ -114,23 +114,23 @@ export function useMusicActions() {
     return items
   }
 
-  // --- Rating submenu — six rows (0 + ½★ × 5 in whole-star increments) ---
+  // --- Reaction submenu — Heart / Thumbs Up / Thumbs Down / Clear.
+  // Values are sentinels on the stored 1–10 rating scale (heart=10, up=7,
+  // down=1); the active check reads BANDS so ratings arriving from Subsonic
+  // clients (1–5 stars ×2) mark the matching reaction. Tapping the active
+  // reaction clears — same contract as ReactionControl.
   function ratingSubmenu(currentValue: number, onPick: (rating: number) => Promise<void>): ContextMenuItem[] {
-    const opts: { label: string; v: number }[] = [
-      { label: '★★★★★ (5)', v: 10 },
-      { label: '★★★★½',     v: 9 },
-      { label: '★★★★',      v: 8 },
-      { label: '★★★½',      v: 7 },
-      { label: '★★★',       v: 6 },
-      { label: '★★½',       v: 5 },
-      { label: '★★',        v: 4 },
-      { label: '★½',        v: 3 },
-      { label: '★',         v: 2 },
-      { label: '½',         v: 1 },
-      { label: 'Clear',     v: 0 },
+    const heart = currentValue >= 9
+    const up = currentValue >= 6 && currentValue <= 8
+    const down = currentValue >= 1 && currentValue <= 3
+    const opts: { label: string; icon: string; active: boolean; v: number }[] = [
+      { label: 'Love', icon: 'heart', active: heart, v: heart ? 0 : 10 },
+      { label: 'Like', icon: 'thumbsup', active: up, v: up ? 0 : 7 },
+      { label: 'Not for me', icon: 'thumbsdown', active: down, v: down ? 0 : 1 },
     ]
     return opts.map((o) => ({
-      label: (o.v === currentValue ? '• ' : '') + o.label,
+      label: (o.active ? '• ' : '') + o.label,
+      icon: o.icon,
       action: () => onPick(o.v),
     }))
   }
@@ -171,8 +171,8 @@ export function useMusicActions() {
     }
     items.push(
       {
-        label: 'Rate',
-        icon: 'star',
+        label: 'React',
+        icon: 'heart',
         submenu: ratingSubmenu(trackRatings.get(track.id), async (v) => { await trackRatings.set(track.id, v) }),
       },
       { label: '', separator: true },
@@ -265,8 +265,8 @@ export function useMusicActions() {
     }
     items.push(
       {
-        label: 'Rate Album',
-        icon: 'star',
+        label: 'React to Album',
+        icon: 'heart',
         submenu: ratingSubmenu(albumRatings.get(album.id), async (v) => { await albumRatings.set(album.id, v) }),
       },
       { label: '', separator: true },
@@ -330,8 +330,8 @@ export function useMusicActions() {
     }
     items.push(
       {
-        label: 'Rate Artist',
-        icon: 'star',
+        label: 'React to Artist',
+        icon: 'heart',
         submenu: ratingSubmenu(artistRatings.get(artist.id), async (v) => { await artistRatings.set(artist.id, v) }),
       },
       { label: '', separator: true },

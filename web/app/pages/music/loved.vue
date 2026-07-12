@@ -2,7 +2,7 @@
   <div class="ml page-pad">
     <MusicPageHead title="Loved Songs">
       <template #subtitle>
-        <span>Every track you've rated, sorted by score. Rate ½★ to add — clear the rating to remove.</span>
+        <span>Every track you've hearted. Tap the heart on any track to add it — tap again to remove.</span>
         <span class="dot">·</span>
         <span>{{ total.toLocaleString() }} tracks</span>
       </template>
@@ -13,7 +13,7 @@
     <div v-else-if="!rows.length" class="ml-empty">
       <Icon name="star" :size="40" />
       <h3>No rated tracks yet</h3>
-      <p>Rate a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you give it any rating.</p>
+      <p>Heart a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you love something.</p>
     </div>
 
     <TrackList
@@ -74,7 +74,7 @@ const actions = useMusicActions()
 const lovedQuery = useQuery({
   key: ['me', 'ratings', 'loved-list'],
   query: async () => {
-    const r = await $heya('/api/me/ratings/tracks', { query: { min_rating: 1, limit: 500 } }) as unknown as { items: RatedTrackRow[]; total: number }
+    const r = await $heya('/api/me/ratings/tracks', { query: { min_rating: 9, limit: 500 } }) as unknown as { items: RatedTrackRow[]; total: number }
     trackRatings.primeMany(r.items.map((t) => [t.track_id, t.rating] as [number, number]))
     return r
   },

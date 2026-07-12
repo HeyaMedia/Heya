@@ -103,7 +103,7 @@
           </div>
           <div class="np-sidekicks">
             <div v-if="track" class="np-rate" @click.stop>
-              <StarRating
+              <ReactionControl
                 :model-value="ratings.get(track.id) ?? 0"
                 size="md"
                 @update:model-value="(v) => onRate(track!.id, v)"

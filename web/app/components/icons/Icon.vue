@@ -45,6 +45,8 @@ import {
   PhHardDrives,
   PhHash,
   PhHeart,
+  PhThumbsUp,
+  PhThumbsDown,
   PhHouse,
   PhImage,
   PhInfo,
@@ -133,6 +135,10 @@ const nameMap: Record<string, string> = {
   queue: 'queue',
   heart: 'heart',
   heartfill: 'heart',
+  thumbsup: 'thumbs-up',
+  thumbsupfill: 'thumbs-up',
+  thumbsdown: 'thumbs-down',
+  thumbsdownfill: 'thumbs-down',
   plus: 'plus',
   more: 'dots-three',
   star: 'star',
@@ -243,6 +249,8 @@ const iconComponents: Record<string, Component> = {
   'speaker-x': PhSpeakerX,
   queue: PhQueue,
   heart: PhHeart,
+  'thumbs-up': PhThumbsUp,
+  'thumbs-down': PhThumbsDown,
   plus: PhPlus,
   'dots-three': PhDotsThree,
   star: PhStar,
@@ -334,6 +342,7 @@ const phosphorIcon = computed(() => {
 const iconWeight = computed(() => {
   if (props.weight) return props.weight
   if (props.name === 'heartfill') return 'fill'
+  if (props.name === 'thumbsupfill' || props.name === 'thumbsdownfill') return 'fill'
   return 'regular'
 })
 </script>

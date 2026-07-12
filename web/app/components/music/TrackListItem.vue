@@ -73,7 +73,7 @@
           <template v-else-if="col.kind === 'year'">{{ track.album_year || '—' }}</template>
 
           <template v-else-if="col.kind === 'rating'">
-            <StarRating :model-value="track.rating ?? 0" size="sm" @update:model-value="(v) => onRatingChange?.(track.id, v)" />
+            <ReactionControl :model-value="track.rating ?? 0" size="sm" @update:model-value="(v) => onRatingChange?.(track.id, v)" />
           </template>
 
           <template v-else-if="col.kind === 'duration'">{{ durationFormatter(track.duration) }}</template>

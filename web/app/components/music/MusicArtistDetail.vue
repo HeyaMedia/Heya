@@ -100,7 +100,7 @@
           </button>
           <div class="hero-stats">
             <div class="hero-stats-stars" @click.stop>
-              <StarRating
+              <ReactionControl
                 :model-value="artistRatings.get(artist.id) ?? 0"
                 size="sm"
                 @update:model-value="(v) => onRateArtist(artist!.id, v)"
@@ -236,7 +236,7 @@
             </template>
           </div>
           <div class="tt-stars" @click.stop>
-            <StarRating
+            <ReactionControl
               :model-value="trackRatings.get(t.local_track_id!) ?? 0"
               size="sm"
               @update:model-value="(v) => onRateTrack(t.local_track_id!, v)"

@@ -75,7 +75,7 @@
              the flex flow) so the play button stays dead-centered — muscle
              memory. Mirrors the quality readout that floats to the right. -->
         <div v-if="currentTrack && !isCompact" class="pb-rate-slot" @click.stop>
-          <StarRating
+          <ReactionControl
             :model-value="ratings.get(currentTrack.id) ?? 0"
             size="sm"
             @update:model-value="(v) => onRate(currentTrack!.id, v)"

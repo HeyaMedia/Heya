@@ -338,7 +338,7 @@ function playFromIndex(i: number) {
           <Icon name="shuffle" :size="18" />
         </button>
         <div class="hero-rate" @click.stop>
-          <StarRating
+          <ReactionControl
             :model-value="albumRatings.get(album.id) ?? 0"
             size="md"
             @update:model-value="(v) => onRateAlbum(album!.id, v)"
