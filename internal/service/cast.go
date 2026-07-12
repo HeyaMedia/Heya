@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/karbowiak/heya/internal/cast"
 	"github.com/karbowiak/heya/internal/config"
@@ -52,11 +53,24 @@ func (a *App) StartCast(ctx context.Context) {
 	if a.castMgr == nil || !a.CastEnabled() {
 		return
 	}
+	a.castMgr.SetStaticDevices(splitCastDevices(a.config.Cast.Devices.Value))
 	if err := a.castMgr.Start(a.lifetimeCtx); err != nil {
 		// Extraction/spawn problems shouldn't kill the server; devices
 		// simply won't appear and the API reports the empty list.
 		log.Error().Err(err).Msg("cast: manager start failed")
 	}
+}
+
+// splitCastDevices parses the HEYA_CAST_DEVICES comma list into clean
+// addresses (IP or ip:port), dropping empties from trailing commas.
+func splitCastDevices(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if addr := strings.TrimSpace(part); addr != "" {
+			out = append(out, addr)
+		}
+	}
+	return out
 }
 
 // Cast exposes the manager for handlers/CLI. Nil when the App was built

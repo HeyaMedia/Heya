@@ -35,6 +35,11 @@ type Manager struct {
 
 	playbackSink PlaybackSink
 
+	// staticAddrs are receiver addresses resolved by unicast mDNS instead
+	// of multicast browse — deployments where multicast can't reach us
+	// (containers, cross-VLAN receivers). Set before Start.
+	staticAddrs []string
+
 	mu        sync.RWMutex
 	providers map[string]Provider
 	devices   map[string]Device
@@ -62,6 +67,14 @@ func New(dataDir string) *Manager {
 func (m *Manager) SetHub(hub *eventhub.Hub)        { m.hub = hub }
 func (m *Manager) SetPlaybackSink(fn PlaybackSink) { m.playbackSink = fn }
 
+// SetStaticDevices installs the unicast-resolved receiver list (comma
+// list from HEYA_CAST_DEVICES, already split). Takes effect on Start.
+func (m *Manager) SetStaticDevices(addrs []string) {
+	m.mu.Lock()
+	m.staticAddrs = addrs
+	m.mu.Unlock()
+}
+
 // Start extracts helper binaries, registers providers, and launches the
 // discovery loops. Idempotent; ctx should be the app lifetime.
 func (m *Manager) Start(ctx context.Context) error {
@@ -84,7 +97,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	for _, p := range m.providers {
 		providers = append(providers, p)
 	}
+	staticAddrs := m.staticAddrs
 	m.mu.Unlock()
+
+	if len(staticAddrs) > 0 {
+		go m.resolveStaticLoop(browseCtx, staticAddrs)
+	}
 
 	for _, p := range providers {
 		go func(p Provider) {

@@ -190,6 +190,35 @@ layers it onto prebuilt runtime images. Runtime images are built by
 `.github/workflows/runtime.yml` every Saturday and can be run manually when
 ffmpeg, ONNX Runtime, CUDA, or OpenVINO dependencies change.
 
+## Casting from containers (mDNS reality check)
+
+Cast discovery is a **pure-Go multicast mDNS browse** — no avahi needed in
+the image — but multicast never crosses a container/pod network boundary,
+and it never crosses subnets/VLANs at all (it's link-local). Two knobs fix
+the two failure layers:
+
+1. **Unicast reachability** (required for streaming, period): the server
+   must reach the receiver's `:7000` (RTSP) + UDP with replies routing
+   back. On Kubernetes that usually means `hostNetwork: true` (+
+   `dnsPolicy: ClusterFirstWithHostNet`) on the pod, or CNI egress that
+   SNATs to the node address for LAN destinations. Verify from inside the
+   container: `ffmpeg -v error -i tcp://<receiver>:7000?timeout=3000000 -f null -`
+   — a fast "Connection refused" is *good* (routable), a timeout is not.
+2. **Discovery**: when the multicast browse can't hear the receivers
+   (container isolation, receivers on another VLAN), list them explicitly:
+
+   ```bash
+   HEYA_CAST_DEVICES=192.168.1.216,192.168.1.242
+   ```
+
+   Each address is resolved by a **direct unicast mDNS query** to the
+   device on `:5353` (AirPlay receivers answer these; RFC 6762 legacy
+   unicast) — the full verbatim TXT record the sender needs comes back in
+   one round trip, re-resolved every minute so renames surface. This works
+   across VLANs anywhere unicast routes, with no mDNS reflector on the
+   router and no host networking *for discovery* (streaming still needs
+   knob 1).
+
 ## Version lockstep (maintainers)
 
 The one heya binary must agree on an ONNX Runtime C-API version with **every**

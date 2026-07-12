@@ -97,6 +97,12 @@ type SubsonicConfig struct {
 // Jellyfin/Subsonic, checked live so UI flips need no restart.
 type CastConfig struct {
 	Enabled Field[bool]
+	// Devices is a comma-separated list of receiver addresses (IP or
+	// ip:port) resolved by direct UNICAST mDNS query instead of multicast
+	// discovery. For deployments where multicast can't reach the server:
+	// containers behind a CNI, receivers on another VLAN, no mDNS
+	// reflector on the router.
+	Devices Field[string]
 }
 
 type JobsConfig struct {
@@ -152,6 +158,7 @@ func Load() *Config {
 		},
 		Cast: CastConfig{
 			Enabled: envBool("HEYA_CAST_ENABLED", true),
+			Devices: envString("HEYA_CAST_DEVICES", ""),
 		},
 		Jobs: JobsConfig{
 			Workers: loadJobWorkerFields(),
@@ -326,6 +333,7 @@ var sourceFields = []sourceField{
 	{"jellyfin.enabled", func(c *Config) SourceEntry { return c.Jellyfin.Enabled.Entry() }},
 	{"subsonic.enabled", func(c *Config) SourceEntry { return c.Subsonic.Enabled.Entry() }},
 	{"cast.enabled", func(c *Config) SourceEntry { return c.Cast.Enabled.Entry() }},
+	{"cast.devices", func(c *Config) SourceEntry { return c.Cast.Devices.Entry() }},
 	{"tailscale.enabled", func(c *Config) SourceEntry { return c.Tailscale.Enabled.Entry() }},
 	{"tailscale.hostname", func(c *Config) SourceEntry { return c.Tailscale.Hostname.Entry() }},
 	{"tailscale.state_dir", func(c *Config) SourceEntry { return c.Tailscale.StateDir.Entry() }},

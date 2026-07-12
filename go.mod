@@ -32,10 +32,12 @@ require (
 	tailscale.com v1.100.0
 )
 
-require github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+require (
+	github.com/libp2p/zeroconf/v2 v2.2.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+)
 
 require (
-	github.com/libp2p/zeroconf/v2 v2.2.0 // indirect
 	github.com/miekg/dns v1.1.58 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
@@ -140,7 +142,7 @@ require (
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/image v0.43.0
-	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/net v0.55.0
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0
 	golang.org/x/term v0.44.0 // indirect
