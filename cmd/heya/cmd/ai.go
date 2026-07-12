@@ -232,6 +232,47 @@ var aiRecommendCmd = &cobra.Command{
 	},
 }
 
+var aiMixLimit int
+
+var aiMixCmd = &cobra.Command{
+	Use:   "mix <brief...>",
+	Short: "AI music mix: a narrative brief becomes a grounded, sequenced playlist",
+	Long: "The model translates the brief into acoustic CLAP probes (and picks a title +\n" +
+		"energy arc); retrieval, selection, diversity, and arc sequencing are code. In\n" +
+		"local mode no second model call is spent on picking tracks.",
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withApp(func(ctx context.Context, app *service.App) error {
+			res, err := app.AIMusicMix(ctx, service.AIMusicMixRequest{
+				Query: strings.Join(args, " "),
+				Limit: aiMixLimit,
+			})
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(res)
+			}
+			fmt.Printf("%s — %s\n", res.Title, res.Summary)
+			if len(res.Probes) > 0 {
+				fmt.Printf("searched: %s\n", strings.Join(res.Probes, " · "))
+			}
+			fmt.Println()
+			if len(res.Tracks) == 0 {
+				ui.Warn("No tracks matched the brief (is sonic analysis populated?).")
+			} else {
+				t := ui.NewTable("#", "ARTIST", "TRACK", "WHY")
+				for i, track := range res.Tracks {
+					t.AddRow(fmt.Sprintf("%d", i+1), track.ArtistName, track.TrackTitle, track.Reason)
+				}
+				fmt.Println(t.Render())
+			}
+			fmt.Printf("\n[%s · %s · %.1fs]\n", res.Mode, res.Model, float64(res.DurationMs)/1000)
+			return nil
+		})
+	},
+}
+
 var aiProvidersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List provider presets",
@@ -252,6 +293,7 @@ func init() {
 	aiChatCmd.Flags().IntVar(&aiChatMaxTokens, "max-tokens", 0, "cap completion length")
 	aiRecommendCmd.Flags().StringVar(&aiRecommendType, "type", "", "restrict to movie, tv, or anime")
 	aiRecommendCmd.Flags().IntVar(&aiRecommendLimit, "limit", 0, "max picks (default 12, cap 20)")
-	aiCmd.AddCommand(aiStatusCmd, aiChatCmd, aiTestCmd, aiModelsCmd, aiDownloadCmd, aiStopCmd, aiProvidersCmd, aiRecommendCmd)
+	aiMixCmd.Flags().IntVar(&aiMixLimit, "limit", 0, "track count (default 30, cap 60)")
+	aiCmd.AddCommand(aiStatusCmd, aiChatCmd, aiTestCmd, aiModelsCmd, aiDownloadCmd, aiStopCmd, aiProvidersCmd, aiRecommendCmd, aiMixCmd)
 	rootCmd.AddCommand(aiCmd)
 }

@@ -72,7 +72,7 @@ var aiMusicPlanSchema = []byte(`{
 		"arc": { "type": "string", "enum": ["steady", "rising", "waves", "cinematic"] },
 		"probes": {
 			"type": "array", "minItems": 2, "maxItems": 5,
-			"items": { "type": "string", "minLength": 3, "maxLength": 180 }
+			"items": { "type": "string", "minLength": 3, "maxLength": 120 }
 		}
 	},
 	"required": ["title", "summary", "arc", "probes"],
@@ -177,36 +177,43 @@ func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixR
 		return result, nil
 	}
 
-	var selected struct {
-		Picks []aiMusicPick `json:"picks"`
-	}
-	curationStarted := time.Now()
-	err = client.CompleteJSON(ctx, llm.Request{
-		Model:       model,
-		Temperature: &aiMusicTemp,
-		MaxTokens:   max(700, limit*24),
-		Messages: []llm.Message{
-			{Role: "system", Content: aiMusicCuratorSystem(limit)},
-			{Role: "user", Content: aiMusicCuratorUser(query, plan, candidates, limit)},
-		},
-	}, "music_mix_picks", aiMusicPicksSchema, &selected)
+	// The plan is the model's whole job in local mode: a 4B generating 30
+	// picks with reasons is ~40s of tokens on low-power hardware, while its
+	// per-track judgment adds little over CLAP's ranking — and code sequences
+	// an arc better than a small model does (it has the actual BPMs). Big
+	// external models keep the curator turn: their tokens are fast and their
+	// track sense is real.
+	var curationDuration time.Duration
 	if settings.Mode == "local" {
-		a.llmLocal.Touch()
-	}
-	curationDuration := time.Since(curationStarted)
-	if err != nil {
-		// Retrieval already did the expensive semantic work. A weak JSON turn
-		// from a small local model should degrade to the ranked CLAP pool, not
-		// throw the whole mix away.
-		log.Warn().Err(err).
-			Int("candidates", len(candidates)).
-			Dur("plan", planDuration).
-			Dur("retrieval", retrievalDuration).
-			Dur("curation", curationDuration).
-			Msg("ai music mix: curation failed — using CLAP-ranked fallback")
+		result.Tracks = aiMusicDeterministicMix(candidates, plan.Arc, limit)
+	} else {
+		var selected struct {
+			Picks []aiMusicPick `json:"picks"`
+		}
+		curationStarted := time.Now()
+		err = client.CompleteJSON(ctx, llm.Request{
+			Model:       model,
+			Temperature: &aiMusicTemp,
+			MaxTokens:   max(700, limit*24),
+			Messages: []llm.Message{
+				{Role: "system", Content: aiMusicCuratorSystem(limit)},
+				{Role: "user", Content: aiMusicCuratorUser(query, plan, candidates, limit)},
+			},
+		}, "music_mix_picks", aiMusicPicksSchema, &selected)
+		curationDuration = time.Since(curationStarted)
+		if err != nil {
+			// Retrieval already did the expensive semantic work. A weak JSON turn
+			// should degrade to the ranked CLAP pool, not throw the whole mix away.
+			log.Warn().Err(err).
+				Int("candidates", len(candidates)).
+				Dur("plan", planDuration).
+				Dur("retrieval", retrievalDuration).
+				Dur("curation", curationDuration).
+				Msg("ai music mix: curation failed — using CLAP-ranked fallback")
+		}
+		result.Tracks = disposeAIMusicPicks(candidates, selected.Picks, limit)
 	}
 
-	result.Tracks = disposeAIMusicPicks(candidates, selected.Picks, limit)
 	result.DurationMs = time.Since(start).Milliseconds()
 	log.Info().
 		Str("mode", settings.Mode).
@@ -220,12 +227,229 @@ func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixR
 	return result, nil
 }
 
+// aiMusicDeterministicMix is the local-mode DJ: select the strongest diverse
+// candidates from the CLAP ranking, sequence them to the requested energy arc
+// by BPM, and derive each reason from the track's own moods/genres. Zero
+// model tokens.
+func aiMusicDeterministicMix(candidates []aiMusicCandidate, arc string, limit int) []AIMusicMixTrack {
+	selected := selectAIMusicCandidates(candidates, limit)
+	sequenced := aiMusicSequenceByArc(selected, arc)
+	tracks := make([]AIMusicMixTrack, 0, len(sequenced))
+	for _, candidate := range sequenced {
+		tracks = append(tracks, aiMusicTrackFromCandidate(candidate, aiMusicDerivedReason(candidate)))
+	}
+	return tracks
+}
+
+// aiMusicDistanceMargin is the junk-tail cut for the deterministic path: a
+// candidate whose best CLAP distance is this far past the pool's best is a
+// weak sonic match (the tail the LLM curator used to filter). Soft — the
+// fill passes relax it rather than under-fill the mix.
+const aiMusicDistanceMargin = 0.12
+
+// selectAIMusicCandidates applies the dispose diversity rules (dedup, artist
+// cap) plus a relative distance cutoff to the ranked pool without an LLM pick
+// list. Same-artist adjacency is NOT enforced here — the arc sequencer
+// reorders, so adjacency is fixed after.
+func selectAIMusicCandidates(candidates []aiMusicCandidate, limit int) []aiMusicCandidate {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	best := candidates[0].BestDistance
+	for _, candidate := range candidates {
+		if candidate.BestDistance < best {
+			best = candidate.BestDistance
+		}
+	}
+	cutoff := best + aiMusicDistanceMargin
+	artistCap := max(2, int(math.Ceil(float64(limit)/8)))
+	seenRecording := map[string]bool{}
+	seenSong := map[string]bool{}
+	artistCounts := map[int64]int{}
+	out := make([]aiMusicCandidate, 0, limit)
+	passes := []struct{ enforceCap, enforceCutoff bool }{
+		{true, true},   // ideal: strong matches, diverse artists
+		{true, false},  // narrow sonic slice — admit weaker matches
+		{false, false}, // narrow library — relax the artist cap too
+	}
+	for _, pass := range passes {
+		for _, candidate := range candidates {
+			r := candidate.Row
+			if seenRecording[aiMusicRecordingKey(r)] {
+				continue
+			}
+			// One version per song: "X (Original Mix)" and "X (Club Remix)"
+			// share a base title — the LLM curator used to filter these.
+			if seenSong[aiMusicSongKey(r)] {
+				continue
+			}
+			if pass.enforceCutoff && candidate.BestDistance > cutoff {
+				continue
+			}
+			if pass.enforceCap && artistCounts[r.ArtistID] >= artistCap {
+				continue
+			}
+			seenRecording[aiMusicRecordingKey(r)] = true
+			seenSong[aiMusicSongKey(r)] = true
+			artistCounts[r.ArtistID]++
+			out = append(out, candidate)
+			if len(out) >= limit {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+// aiMusicSongKey identifies a song across versions: artist + the title before
+// any parenthetical/bracketed mix suffix.
+func aiMusicSongKey(row sqlc.SimilarTracksByTextRichRow) string {
+	title := strings.ToLower(strings.TrimSpace(row.TrackTitle))
+	for _, sep := range []string{" (", " ["} {
+		if i := strings.Index(title, sep); i > 0 {
+			title = title[:i]
+		}
+	}
+	return fmt.Sprintf("%d|%s", row.ArtistID, strings.TrimSpace(title))
+}
+
+// aiMusicSequenceByArc orders the selected tracks into the plan's energy arc
+// using BPM as the energy proxy (missing BPM sorts to the middle), then
+// breaks up same-artist adjacency with forward swaps.
+func aiMusicSequenceByArc(tracks []aiMusicCandidate, arc string) []aiMusicCandidate {
+	if len(tracks) < 3 {
+		return tracks
+	}
+	byBPM := func(items []aiMusicCandidate) {
+		median := aiMusicMedianBPM(items)
+		sort.SliceStable(items, func(i, j int) bool {
+			return aiMusicEnergy(items[i], median) < aiMusicEnergy(items[j], median)
+		})
+	}
+	out := append([]aiMusicCandidate{}, tracks...)
+	switch arc {
+	case "rising":
+		byBPM(out)
+	case "waves":
+		// Three passes: up, down, up — each roughly a third of the set.
+		byBPM(out)
+		third := len(out) / 3
+		reverseMusicChunk(out[third : 2*third])
+	case "cinematic":
+		// Rise to a peak around two-thirds in, then wind down: even indices
+		// ascend to the peak, odd indices descend after it.
+		byBPM(out)
+		asc := make([]aiMusicCandidate, 0, (len(out)+1)/2)
+		desc := make([]aiMusicCandidate, 0, len(out)/2)
+		for i, candidate := range out {
+			if i%2 == 0 {
+				asc = append(asc, candidate)
+			} else {
+				desc = append(desc, candidate)
+			}
+		}
+		reverseMusicChunk(desc)
+		seq := make([]aiMusicCandidate, 0, len(out))
+		seq = append(seq, asc...)
+		seq = append(seq, desc...)
+		out = seq
+	default: // "steady" — keep the CLAP-affinity ranking as the flow
+	}
+	// Same-artist adjacency fix-up: swap the offender forward with the next
+	// track by a different artist.
+	for i := 1; i < len(out); i++ {
+		if out[i].Row.ArtistID != out[i-1].Row.ArtistID {
+			continue
+		}
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Row.ArtistID != out[i-1].Row.ArtistID {
+				out[i], out[j] = out[j], out[i]
+				break
+			}
+		}
+	}
+	return out
+}
+
+func aiMusicEnergy(candidate aiMusicCandidate, median float64) float64 {
+	if candidate.BPM != nil {
+		return float64(*candidate.BPM)
+	}
+	return median
+}
+
+func aiMusicMedianBPM(tracks []aiMusicCandidate) float64 {
+	bpms := make([]float64, 0, len(tracks))
+	for _, candidate := range tracks {
+		if candidate.BPM != nil {
+			bpms = append(bpms, float64(*candidate.BPM))
+		}
+	}
+	if len(bpms) == 0 {
+		return 0
+	}
+	sort.Float64s(bpms)
+	return bpms[len(bpms)/2]
+}
+
+func reverseMusicChunk(chunk []aiMusicCandidate) {
+	for i, j := 0, len(chunk)-1; i < j; i, j = i+1, j-1 {
+		chunk[i], chunk[j] = chunk[j], chunk[i]
+	}
+}
+
+// aiMusicDerivedReason builds the per-track line from the track's own sonic
+// tags — free, honest, and no model tokens spent on 30 reason strings.
+func aiMusicDerivedReason(candidate aiMusicCandidate) string {
+	parts := make([]string, 0, 3)
+	seen := map[string]bool{}
+	push := func(tag string) {
+		if tag == "" || seen[strings.ToLower(tag)] || len(parts) >= 3 {
+			return
+		}
+		seen[strings.ToLower(tag)] = true
+		parts = append(parts, tag)
+	}
+	for _, mood := range candidate.Moods {
+		push(cleanMusicMoodTag(mood))
+	}
+	for _, genre := range candidate.Genres {
+		push(cleanMusicGenreTag(genre))
+	}
+	if len(parts) == 0 {
+		return "Strong sonic match"
+	}
+	return strings.Join(parts, " · ")
+}
+
+// cleanMusicMoodTag turns classifier tag slugs into display words:
+// "mood_happy" → "happy", "danceability" → "danceable".
+func cleanMusicMoodTag(tag string) string {
+	tag = strings.TrimPrefix(strings.TrimSpace(tag), "mood_")
+	switch tag {
+	case "danceability":
+		return "danceable"
+	case "voice":
+		return "vocal"
+	}
+	return tag
+}
+
+// cleanMusicGenreTag keeps the most specific segment of a hierarchical
+// Discogs genre: "Electronic---Trance" → "Trance".
+func cleanMusicGenreTag(tag string) string {
+	if i := strings.LastIndex(tag, "---"); i >= 0 {
+		tag = tag[i+3:]
+	}
+	return strings.TrimSpace(tag)
+}
+
 func (a *App) aiMusicMakePlan(ctx context.Context, client llm.Completer, model, query string) aiMusicPlan {
 	var plan aiMusicPlan
 	err := client.CompleteJSON(ctx, llm.Request{
 		Model:       model,
 		Temperature: &aiMusicTemp,
-		MaxTokens:   320,
+		MaxTokens:   256,
 		Messages: []llm.Message{
 			{Role: "system", Content: aiMusicPlannerSystem()},
 			{Role: "user", Content: "Mix brief:\n" + query},
@@ -253,7 +477,7 @@ func aiMusicPlannerSystem() string {
 	return "You are a music supervisor translating an imaginative scene into acoustic search language for a CLAP text-to-audio index. " +
 		"The index understands how music sounds: instrumentation, genre, intensity, rhythm, production, vocals, atmosphere, and emotional energy. " +
 		"Translate lore and narrative into sound. Example: a Starfleet crew fighting the Borg with a Doom reference means punishing industrial metal, djent riffs, martial percussion, ominous sci-fi synths, and escalating battle energy — not songs whose titles literally mention space. " +
-		"Write 3-5 distinct probes that cover the core sound plus useful adjacent angles. Reference a known soundtrack, artist, or game only when it clarifies the sound, and always include descriptive acoustic terms. " +
+		"Write 3-5 distinct probes of 6-14 words each that cover the core sound plus useful adjacent angles. Reference a known soundtrack, artist, or game only when it clarifies the sound, and always include descriptive acoustic terms. " +
 		"The title should feel like a real mixtape title. The summary is one short sentence. Choose an arc: steady, rising, waves, or cinematic."
 }
 
