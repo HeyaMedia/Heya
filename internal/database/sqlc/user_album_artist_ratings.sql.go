@@ -14,16 +14,19 @@ import (
 
 const countUserRatedAlbums = `-- name: CountUserRatedAlbums :one
 SELECT count(*) FROM user_album_ratings
-WHERE user_id = $1 AND rating >= $2
+WHERE user_id = $1
+  AND rating >= $2
+  AND rating <= $3
 `
 
 type CountUserRatedAlbumsParams struct {
-	UserID int64 `json:"user_id"`
-	Rating int16 `json:"rating"`
+	UserID    int64 `json:"user_id"`
+	MinRating int16 `json:"min_rating"`
+	MaxRating int16 `json:"max_rating"`
 }
 
 func (q *Queries) CountUserRatedAlbums(ctx context.Context, arg CountUserRatedAlbumsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countUserRatedAlbums, arg.UserID, arg.Rating)
+	row := q.db.QueryRow(ctx, countUserRatedAlbums, arg.UserID, arg.MinRating, arg.MaxRating)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -31,16 +34,19 @@ func (q *Queries) CountUserRatedAlbums(ctx context.Context, arg CountUserRatedAl
 
 const countUserRatedArtists = `-- name: CountUserRatedArtists :one
 SELECT count(*) FROM user_artist_ratings
-WHERE user_id = $1 AND rating >= $2
+WHERE user_id = $1
+  AND rating >= $2
+  AND rating <= $3
 `
 
 type CountUserRatedArtistsParams struct {
-	UserID int64 `json:"user_id"`
-	Rating int16 `json:"rating"`
+	UserID    int64 `json:"user_id"`
+	MinRating int16 `json:"min_rating"`
+	MaxRating int16 `json:"max_rating"`
 }
 
 func (q *Queries) CountUserRatedArtists(ctx context.Context, arg CountUserRatedArtistsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countUserRatedArtists, arg.UserID, arg.Rating)
+	row := q.db.QueryRow(ctx, countUserRatedArtists, arg.UserID, arg.MinRating, arg.MaxRating)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -194,13 +200,15 @@ JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = $1
   AND uar.rating  >= $2
+  AND uar.rating  <= $3
 ORDER BY uar.rating DESC, uar.updated_at DESC
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListUserRatedAlbumsParams struct {
 	UserID     int64 `json:"user_id"`
 	MinRating  int16 `json:"min_rating"`
+	MaxRating  int16 `json:"max_rating"`
 	Offset     int32 `json:"offset_"`
 	AlbumLimit int32 `json:"album_limit"`
 }
@@ -253,6 +261,7 @@ func (q *Queries) ListUserRatedAlbums(ctx context.Context, arg ListUserRatedAlbu
 	rows, err := q.db.Query(ctx, listUserRatedAlbums,
 		arg.UserID,
 		arg.MinRating,
+		arg.MaxRating,
 		arg.Offset,
 		arg.AlbumLimit,
 	)
@@ -328,13 +337,15 @@ JOIN artists     a  ON a.id  = uar.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = $1
   AND uar.rating  >= $2
+  AND uar.rating  <= $3
 ORDER BY uar.rating DESC, uar.updated_at DESC
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListUserRatedArtistsParams struct {
 	UserID      int64 `json:"user_id"`
 	MinRating   int16 `json:"min_rating"`
+	MaxRating   int16 `json:"max_rating"`
 	Offset      int32 `json:"offset_"`
 	ArtistLimit int32 `json:"artist_limit"`
 }
@@ -383,6 +394,7 @@ func (q *Queries) ListUserRatedArtists(ctx context.Context, arg ListUserRatedArt
 	rows, err := q.db.Query(ctx, listUserRatedArtists,
 		arg.UserID,
 		arg.MinRating,
+		arg.MaxRating,
 		arg.Offset,
 		arg.ArtistLimit,
 	)

@@ -13,16 +13,19 @@ import (
 
 const countUserRatedTracks = `-- name: CountUserRatedTracks :one
 SELECT count(*) FROM user_track_ratings
-WHERE user_id = $1 AND rating >= $2
+WHERE user_id = $1
+  AND rating >= $2
+  AND rating <= $3
 `
 
 type CountUserRatedTracksParams struct {
-	UserID int64 `json:"user_id"`
-	Rating int16 `json:"rating"`
+	UserID    int64 `json:"user_id"`
+	MinRating int16 `json:"min_rating"`
+	MaxRating int16 `json:"max_rating"`
 }
 
 func (q *Queries) CountUserRatedTracks(ctx context.Context, arg CountUserRatedTracksParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countUserRatedTracks, arg.UserID, arg.Rating)
+	row := q.db.QueryRow(ctx, countUserRatedTracks, arg.UserID, arg.MinRating, arg.MaxRating)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -133,13 +136,15 @@ JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE utr.user_id = $1
   AND utr.rating  >= $2
+  AND utr.rating  <= $3
 ORDER BY utr.rating DESC, utr.updated_at DESC
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListUserRatedTracksParams struct {
 	UserID     int64 `json:"user_id"`
 	MinRating  int16 `json:"min_rating"`
+	MaxRating  int16 `json:"max_rating"`
 	Offset     int32 `json:"offset_"`
 	TrackLimit int32 `json:"track_limit"`
 }
@@ -170,6 +175,7 @@ func (q *Queries) ListUserRatedTracks(ctx context.Context, arg ListUserRatedTrac
 	rows, err := q.db.Query(ctx, listUserRatedTracks,
 		arg.UserID,
 		arg.MinRating,
+		arg.MaxRating,
 		arg.Offset,
 		arg.TrackLimit,
 	)
@@ -224,6 +230,10 @@ type SetUserTrackRatingParams struct {
 
 // Per-user track ratings. UI displays 5 stars in half-step increments;
 // the column stores 1..10 so half-stars round-trip cleanly.
+//
+// List/Count take a [min_rating, max_rating] band (not just a floor): the
+// Favorites page's reaction bands (down 1-3, liked 6-8, loved 9-10) page
+// server-side through the same random-access catalog as everything else.
 // Upsert: writes a rating or replaces the existing one. Touch updated_at
 // on conflict so "recently rated" ordering reflects last edit.
 func (q *Queries) SetUserTrackRating(ctx context.Context, arg SetUserTrackRatingParams) error {

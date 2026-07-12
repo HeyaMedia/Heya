@@ -1,5 +1,9 @@
 -- Per-user track ratings. UI displays 5 stars in half-step increments;
 -- the column stores 1..10 so half-stars round-trip cleanly.
+--
+-- List/Count take a [min_rating, max_rating] band (not just a floor): the
+-- Favorites page's reaction bands (down 1-3, liked 6-8, loved 9-10) page
+-- server-side through the same random-access catalog as everything else.
 
 -- name: SetUserTrackRating :exec
 -- Upsert: writes a rating or replaces the existing one. Touch updated_at
@@ -53,12 +57,15 @@ JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE utr.user_id = sqlc.arg(user_id)
   AND utr.rating  >= sqlc.arg(min_rating)
+  AND utr.rating  <= sqlc.arg(max_rating)
 ORDER BY utr.rating DESC, utr.updated_at DESC
 LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(offset_);
 
 -- name: CountUserRatedTracks :one
 SELECT count(*) FROM user_track_ratings
-WHERE user_id = $1 AND rating >= $2;
+WHERE user_id = sqlc.arg(user_id)
+  AND rating >= sqlc.arg(min_rating)
+  AND rating <= sqlc.arg(max_rating);
 
 -- name: GetUserFavoritesThreshold :one
 SELECT favorites_threshold FROM users WHERE id = $1;

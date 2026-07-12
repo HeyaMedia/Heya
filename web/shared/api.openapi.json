@@ -4171,6 +4171,9 @@
           "name": {
             "type": "string"
           },
+          "sync_mode": {
+            "type": "string"
+          },
           "track_count": {
             "format": "int64",
             "type": "integer"
@@ -12030,6 +12033,39 @@
         ],
         "type": "object"
       },
+      "PlaylistCollectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_sync": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "playlists": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalPlaylistView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "auto_sync",
+          "playlists"
+        ],
+        "type": "object"
+      },
       "PlaylistDetail": {
         "additionalProperties": false,
         "properties": {
@@ -12130,6 +12166,15 @@
           "capabilities": {
             "$ref": "#/components/schemas/Capabilities"
           },
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistCollectionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "playlists": {
             "items": {
               "$ref": "#/components/schemas/ExternalPlaylistView"
@@ -12146,7 +12191,8 @@
         "required": [
           "service",
           "capabilities",
-          "playlists"
+          "playlists",
+          "collections"
         ],
         "type": "object"
       },
@@ -12164,6 +12210,13 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "mode": {
+            "enum": [
+              "two_way",
+              "pull_only"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -12189,11 +12242,15 @@
           },
           "service": {
             "type": "string"
+          },
+          "sync_mode": {
+            "type": "string"
           }
         },
         "required": [
           "service",
-          "external_id"
+          "external_id",
+          "sync_mode"
         ],
         "type": "object"
       },
@@ -25980,6 +26037,76 @@
         ]
       }
     },
+    "/api/me/music-services/{service}/playlist-collections/{collection}": {
+      "put": {
+        "operationId": "set-playlist-collection-policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "listenbrainz",
+                "lastfm"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaylistSyncToggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Automatically synchronize a provider playlist collection",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
     "/api/me/music-services/{service}/playlists": {
       "get": {
         "operationId": "list-external-playlists",
@@ -27538,6 +27665,20 @@
             }
           },
           {
+            "description": "Filter to ratings at or below N — [min,max] bands back the Favorites reaction tabs",
+            "explode": false,
+            "in": "query",
+            "name": "max_rating",
+            "schema": {
+              "default": 10,
+              "description": "Filter to ratings at or below N — [min,max] bands back the Favorites reaction tabs",
+              "format": "int32",
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
             "description": "Max results",
             "explode": false,
             "in": "query",
@@ -27794,6 +27935,20 @@
             "schema": {
               "default": 1,
               "description": "Filter to ratings at or above N (1..10)",
+              "format": "int32",
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter to ratings at or below N — [min,max] bands back the Favorites reaction tabs",
+            "explode": false,
+            "in": "query",
+            "name": "max_rating",
+            "schema": {
+              "default": 10,
+              "description": "Filter to ratings at or below N — [min,max] bands back the Favorites reaction tabs",
               "format": "int32",
               "maximum": 10,
               "minimum": 1,
@@ -28151,6 +28306,20 @@
             "schema": {
               "default": 1,
               "description": "Filter to ratings at or above N (1..10)",
+              "format": "int32",
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter to ratings at or below N — [min,max] bands back the Favorites reaction tabs",
+            "explode": false,
+            "in": "query",
+            "name": "max_rating",
+            "schema": {
+              "default": 10,
+              "description": "Filter to ratings at or below N — [min,max] bands back the Favorites reaction tabs",
               "format": "int32",
               "maximum": 10,
               "minimum": 1,

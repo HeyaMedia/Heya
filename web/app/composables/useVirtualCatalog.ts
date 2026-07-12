@@ -116,6 +116,14 @@ export function useVirtualCatalog<T>(source: MaybeRefOrGetter<VirtualCatalogSour
     return out
   }
 
+  /** Drop the current key's store and refetch page 0 — for mutations that
+   *  remove/move rows (unloving a track, changing a reaction band). */
+  function reset() {
+    catalogStores.delete(toValue(source).key)
+    version.value++
+    ensureRange(0, toValue(source).pageSize - 1)
+  }
+
   // Prime page 0 (learns the total) on mount and whenever the key changes.
   watch(() => toValue(source).key, () => {
     version.value++
@@ -123,5 +131,5 @@ export function useVirtualCatalog<T>(source: MaybeRefOrGetter<VirtualCatalogSour
   })
   onMounted(() => ensureRange(0, toValue(source).pageSize - 1))
 
-  return { total, pending, itemAt, ensureRange, loadedItems }
+  return { total, pending, itemAt, ensureRange, loadedItems, reset }
 }

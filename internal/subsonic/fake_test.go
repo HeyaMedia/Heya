@@ -211,7 +211,7 @@ func emptyPage[T any]() (*service.MusicListPage[T], error) {
 	return &service.MusicListPage[T]{Items: []T{}}, nil
 }
 
-func (f *fakeBackend) ListUserRatedTracks(_ context.Context, _ int64, minRating int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedTracksRow], error) {
+func (f *fakeBackend) ListUserRatedTracks(_ context.Context, _ int64, minRating, _ int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedTracksRow], error) {
 	page, _ := emptyPage[sqlc.ListUserRatedTracksRow]()
 	for id, r := range f.ratedTracks {
 		if r >= minRating {
@@ -222,7 +222,7 @@ func (f *fakeBackend) ListUserRatedTracks(_ context.Context, _ int64, minRating 
 	return page, nil
 }
 
-func (f *fakeBackend) ListUserRatedArtists(_ context.Context, _ int64, minRating int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedArtistsRow], error) {
+func (f *fakeBackend) ListUserRatedArtists(_ context.Context, _ int64, minRating, _ int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedArtistsRow], error) {
 	page, _ := emptyPage[sqlc.ListUserRatedArtistsRow]()
 	for id, r := range f.ratedArtists {
 		if r >= minRating {
@@ -233,7 +233,7 @@ func (f *fakeBackend) ListUserRatedArtists(_ context.Context, _ int64, minRating
 	return page, nil
 }
 
-func (f *fakeBackend) ListUserRatedAlbums(_ context.Context, _ int64, minRating int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedAlbumsRow], error) {
+func (f *fakeBackend) ListUserRatedAlbums(_ context.Context, _ int64, minRating, _ int16, _, _ int32) (*service.MusicListPage[sqlc.ListUserRatedAlbumsRow], error) {
 	page, _ := emptyPage[sqlc.ListUserRatedAlbumsRow]()
 	for id, r := range f.ratedAlbums {
 		if r >= minRating {

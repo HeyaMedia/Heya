@@ -4,18 +4,20 @@
       <template #subtitle>
         <span>Every track you've hearted. Tap the heart on any track to add it — tap again to remove.</span>
         <span class="dot">·</span>
-        <span>{{ total.toLocaleString() }} tracks</span>
+        <span>{{ (total ?? 0).toLocaleString() }} tracks</span>
       </template>
     </MusicPageHead>
 
-    <div v-if="pending && !rows.length" class="ml-loading">Loading…</div>
+    <div v-if="pending" class="ml-loading">Loading…</div>
 
-    <div v-else-if="!rows.length" class="ml-empty">
+    <div v-else-if="!total" class="ml-empty">
       <Icon name="star" :size="40" />
       <h3>No rated tracks yet</h3>
       <p>Heart a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you love something.</p>
     </div>
 
+    <!-- Sparse full-length list — the scrollbar spans every loved track;
+         pages stream in wherever it's dragged (500-cap gone). -->
     <TrackList
       v-else
       :tracks="tlRows"
@@ -29,7 +31,9 @@
       :art-play-icon-size="13"
       :duration-formatter="formatTime"
       :on-rating-change="onRatingChange"
+      virtualized
       @row-click="playFrom"
+      @range="ensureRange"
     />
   </div>
 </template>
@@ -37,7 +41,6 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -71,36 +74,47 @@ const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
 const actions = useMusicActions()
 
-const lovedQuery = useQuery({
-  key: ['me', 'ratings', 'loved-list'],
-  query: async () => {
-    const r = await $heya('/api/me/ratings/tracks', { query: { min_rating: 9, limit: 500 } }) as unknown as { items: RatedTrackRow[]; total: number }
-    trackRatings.primeMany(r.items.map((t) => [t.track_id, t.rating] as [number, number]))
-    return r
+const { total, pending, itemAt, ensureRange, loadedItems, reset } = useVirtualCatalog<RatedTrackRow>(() => ({
+  key: 'me:rated:tracks:loved',
+  pageSize: 100,
+  fetch: async (offset, limit) => {
+    const r = await $heya('/api/me/ratings/tracks', {
+      query: { min_rating: 9, limit, offset },
+    }) as unknown as { items: RatedTrackRow[]; total: number }
+    const items = r.items ?? []
+    trackRatings.primeMany(items.map((t) => [t.track_id, t.rating] as [number, number]))
+    return { items, total: r.total ?? 0 }
   },
-  staleTime: 1000 * 30,
-})
-await waitForQuery(lovedQuery)
-const pending = computed(() => lovedQuery.isPending.value)
-const rows = computed(() => lovedQuery.data.value?.items ?? [])
-const total = computed(() => lovedQuery.data.value?.total ?? 0)
+}))
 
-const tlRows = computed<TrackListRow[]>(() => rows.value.map((t) => ({
-  id: t.track_id,
-  title: t.track_title,
-  artist: t.artist_name,
-  artist_slug: t.artist_slug,
-  album: t.album_title,
-  album_slug: t.album_slug,
-  album_year: t.album_year,
-  duration: t.duration,
-  available: t.available,
-  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
-  rating: ratings.value.get(t.track_id) ?? t.rating,
-})))
+// Sparse full-length rows — unloaded stretches render as skeletons.
+const tlRows = computed<TrackListRow[]>(() => {
+  const n = total.value ?? 0
+  const out: TrackListRow[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const t = itemAt(i)
+    out[i] = t
+      ? {
+          id: t.track_id,
+          title: t.track_title,
+          artist: t.artist_name,
+          artist_slug: t.artist_slug,
+          album: t.album_title,
+          album_slug: t.album_slug,
+          album_year: t.album_year,
+          duration: t.duration,
+          available: t.available,
+          poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+          rating: ratings.value.get(t.track_id) ?? t.rating,
+        }
+      : { id: -(i + 1), pending: true, title: '', artist: '', album: '', duration: 0 }
+  }
+  return out
+})
 
 function contextItemsFor(_track: TrackListRow, i: number) {
-  const t = rows.value[i]!
+  const t = itemAt(i)
+  if (!t) return []
   return actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })
 }
 
@@ -109,9 +123,9 @@ const activeTrackId = computed(() => currentTrack.value?.id ?? null)
 async function onRatingChange(trackId: number, v: number) {
   try {
     await trackRatings.set(trackId, v)
-    // Clearing the rating drops the track out of this view; refetch so the
-    // row disappears rather than lingering with empty stars.
-    if (v === 0) lovedQuery.refetch()
+    // Dropping below the loved band removes the row — reset the catalog so
+    // indexes/total stay honest rather than leaving a hole.
+    if (v < 9) reset()
   } catch {
     // optimistic rollback handled by composable
   }
@@ -134,9 +148,14 @@ function toPlayable(row: RatedTrackRow): Track {
 }
 
 async function playFrom(i: number) {
-  const clicked = rows.value[i]
+  const clicked = itemAt(i)
   if (!clicked || clicked.available === false) return
-  const built = rows.value.filter((r) => r.available !== false).map(toPlayable)
+  // Queue every LOADED playable track in list order — the pages the user has
+  // actually scrolled through.
+  const built = loadedItems()
+    .map(({ item }) => item)
+    .filter((r) => r.available !== false)
+    .map(toPlayable)
   if (!built.length) return
   queue.value = built
   await play(built.find((b) => b.id === clicked.track_id) ?? built[0]!)

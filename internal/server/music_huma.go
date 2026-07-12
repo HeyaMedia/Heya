@@ -692,7 +692,7 @@ func registerRatingRoutes[B any, T any](api huma.API, plural, singular string,
 	get func(context.Context, int64, int64) (int16, error),
 	set func(context.Context, int64, int64, int16) error,
 	batch func(context.Context, int64, []int64) (map[int64]int16, error),
-	list func(context.Context, int64, int16, int32, int32) (*service.MusicListPage[T], error),
+	list func(context.Context, int64, int16, int16, int32, int32) (*service.MusicListPage[T], error),
 	idsOf func(B) []int64,
 ) {
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/"+plural+"/{id}", "get-"+singular+"-rating", "Get user's rating for a "+singular+" (0 when unrated)", "Me")),
@@ -733,10 +733,11 @@ func registerRatingRoutes[B any, T any](api huma.API, plural, singular string,
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/"+plural, "list-rated-"+plural, "Paginated rated "+plural, "Me")),
 		func(ctx context.Context, in *struct {
 			MinRating int16 `query:"min_rating" minimum:"1" maximum:"10" default:"1" doc:"Filter to ratings at or above N (1..10)"`
+			MaxRating int16 `query:"max_rating" minimum:"1" maximum:"10" default:"10" doc:"Filter to ratings at or below N — [min,max] bands back the Favorites reaction tabs"`
 			Pagination
 		}) (*JSONOutput[*service.MusicListPage[T]], error) {
 			limit := defaultPositive(in.Limit, 100)
-			page, err := list(ctx, userFrom(ctx).ID, in.MinRating, limit, in.Offset)
+			page, err := list(ctx, userFrom(ctx).ID, in.MinRating, in.MaxRating, limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

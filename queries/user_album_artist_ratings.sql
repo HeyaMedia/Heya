@@ -38,12 +38,15 @@ JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = sqlc.arg(user_id)
   AND uar.rating  >= sqlc.arg(min_rating)
+  AND uar.rating  <= sqlc.arg(max_rating)
 ORDER BY uar.rating DESC, uar.updated_at DESC
 LIMIT sqlc.arg(album_limit) OFFSET sqlc.arg(offset_);
 
 -- name: CountUserRatedAlbums :one
 SELECT count(*) FROM user_album_ratings
-WHERE user_id = $1 AND rating >= $2;
+WHERE user_id = sqlc.arg(user_id)
+  AND rating >= sqlc.arg(min_rating)
+  AND rating <= sqlc.arg(max_rating);
 
 -- ============== Artists ==============
 
@@ -83,9 +86,12 @@ JOIN artists     a  ON a.id  = uar.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE uar.user_id = sqlc.arg(user_id)
   AND uar.rating  >= sqlc.arg(min_rating)
+  AND uar.rating  <= sqlc.arg(max_rating)
 ORDER BY uar.rating DESC, uar.updated_at DESC
 LIMIT sqlc.arg(artist_limit) OFFSET sqlc.arg(offset_);
 
 -- name: CountUserRatedArtists :one
 SELECT count(*) FROM user_artist_ratings
-WHERE user_id = $1 AND rating >= $2;
+WHERE user_id = sqlc.arg(user_id)
+  AND rating >= sqlc.arg(min_rating)
+  AND rating <= sqlc.arg(max_rating);

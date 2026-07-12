@@ -54,9 +54,9 @@ func ratingsByID[R any](rows []R, err error, key func(R) (int64, int16)) (map[in
 // ratedPage clamps paging + minRating and assembles the shared envelope.
 // minRating filters to "favorites only" when set to the user's
 // favorites_threshold; pass 1 to get every rated item regardless of score.
-func ratedPage[T any](minRating int16, limit, offset int32,
-	list func(int16, int32, int32) ([]T, error),
-	count func(int16) (int64, error),
+func ratedPage[T any](minRating, maxRating int16, limit, offset int32,
+	list func(minR, maxR int16, limit, offset int32) ([]T, error),
+	count func(minR, maxR int16) (int64, error),
 ) (*MusicListPage[T], error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -64,11 +64,14 @@ func ratedPage[T any](minRating int16, limit, offset int32,
 	if minRating < 1 {
 		minRating = 1
 	}
-	items, err := list(minRating, limit, offset)
+	if maxRating < minRating || maxRating > 10 {
+		maxRating = 10
+	}
+	items, err := list(minRating, maxRating, limit, offset)
 	if err != nil {
 		return nil, err
 	}
-	total, err := count(minRating)
+	total, err := count(minRating, maxRating)
 	if err != nil {
 		return nil, err
 	}
@@ -106,16 +109,16 @@ func (a *App) RatingsForTracks(ctx context.Context, userID int64, trackIDs []int
 	})
 }
 
-func (a *App) ListUserRatedTracks(ctx context.Context, userID int64, minRating int16, limit, offset int32) (*MusicListPage[sqlc.ListUserRatedTracksRow], error) {
+func (a *App) ListUserRatedTracks(ctx context.Context, userID int64, minRating, maxRating int16, limit, offset int32) (*MusicListPage[sqlc.ListUserRatedTracksRow], error) {
 	q := sqlc.New(a.db)
-	return ratedPage(minRating, limit, offset,
-		func(minRating int16, limit, offset int32) ([]sqlc.ListUserRatedTracksRow, error) {
+	return ratedPage(minRating, maxRating, limit, offset,
+		func(minR, maxR int16, limit, offset int32) ([]sqlc.ListUserRatedTracksRow, error) {
 			return q.ListUserRatedTracks(ctx, sqlc.ListUserRatedTracksParams{
-				UserID: userID, MinRating: minRating, TrackLimit: limit, Offset: offset,
+				UserID: userID, MinRating: minR, MaxRating: maxR, TrackLimit: limit, Offset: offset,
 			})
 		},
-		func(minRating int16) (int64, error) {
-			return q.CountUserRatedTracks(ctx, sqlc.CountUserRatedTracksParams{UserID: userID, Rating: minRating})
+		func(minR, maxR int16) (int64, error) {
+			return q.CountUserRatedTracks(ctx, sqlc.CountUserRatedTracksParams{UserID: userID, MinRating: minR, MaxRating: maxR})
 		})
 }
 
@@ -150,16 +153,16 @@ func (a *App) RatingsForAlbums(ctx context.Context, userID int64, albumIDs []int
 	})
 }
 
-func (a *App) ListUserRatedAlbums(ctx context.Context, userID int64, minRating int16, limit, offset int32) (*MusicListPage[sqlc.ListUserRatedAlbumsRow], error) {
+func (a *App) ListUserRatedAlbums(ctx context.Context, userID int64, minRating, maxRating int16, limit, offset int32) (*MusicListPage[sqlc.ListUserRatedAlbumsRow], error) {
 	q := sqlc.New(a.db)
-	return ratedPage(minRating, limit, offset,
-		func(minRating int16, limit, offset int32) ([]sqlc.ListUserRatedAlbumsRow, error) {
+	return ratedPage(minRating, maxRating, limit, offset,
+		func(minR, maxR int16, limit, offset int32) ([]sqlc.ListUserRatedAlbumsRow, error) {
 			return q.ListUserRatedAlbums(ctx, sqlc.ListUserRatedAlbumsParams{
-				UserID: userID, MinRating: minRating, AlbumLimit: limit, Offset: offset,
+				UserID: userID, MinRating: minR, MaxRating: maxR, AlbumLimit: limit, Offset: offset,
 			})
 		},
-		func(minRating int16) (int64, error) {
-			return q.CountUserRatedAlbums(ctx, sqlc.CountUserRatedAlbumsParams{UserID: userID, Rating: minRating})
+		func(minR, maxR int16) (int64, error) {
+			return q.CountUserRatedAlbums(ctx, sqlc.CountUserRatedAlbumsParams{UserID: userID, MinRating: minR, MaxRating: maxR})
 		})
 }
 
@@ -194,16 +197,16 @@ func (a *App) RatingsForArtists(ctx context.Context, userID int64, artistIDs []i
 	})
 }
 
-func (a *App) ListUserRatedArtists(ctx context.Context, userID int64, minRating int16, limit, offset int32) (*MusicListPage[sqlc.ListUserRatedArtistsRow], error) {
+func (a *App) ListUserRatedArtists(ctx context.Context, userID int64, minRating, maxRating int16, limit, offset int32) (*MusicListPage[sqlc.ListUserRatedArtistsRow], error) {
 	q := sqlc.New(a.db)
-	return ratedPage(minRating, limit, offset,
-		func(minRating int16, limit, offset int32) ([]sqlc.ListUserRatedArtistsRow, error) {
+	return ratedPage(minRating, maxRating, limit, offset,
+		func(minR, maxR int16, limit, offset int32) ([]sqlc.ListUserRatedArtistsRow, error) {
 			return q.ListUserRatedArtists(ctx, sqlc.ListUserRatedArtistsParams{
-				UserID: userID, MinRating: minRating, ArtistLimit: limit, Offset: offset,
+				UserID: userID, MinRating: minR, MaxRating: maxR, ArtistLimit: limit, Offset: offset,
 			})
 		},
-		func(minRating int16) (int64, error) {
-			return q.CountUserRatedArtists(ctx, sqlc.CountUserRatedArtistsParams{UserID: userID, Rating: minRating})
+		func(minR, maxR int16) (int64, error) {
+			return q.CountUserRatedArtists(ctx, sqlc.CountUserRatedArtistsParams{UserID: userID, MinRating: minR, MaxRating: maxR})
 		})
 }
 

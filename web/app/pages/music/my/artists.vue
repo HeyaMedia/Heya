@@ -1,50 +1,69 @@
 <template>
   <div class="page-pad">
     <MusicPageHead title="My Artists">
-      <template #subtitle>{{ rows.length }} artists you've rated</template>
+      <template #subtitle>
+        <span v-if="total !== null">{{ total.toLocaleString() }} artists you've rated</span>
+        <span v-else>Loading…</span>
+      </template>
     </MusicPageHead>
     <div v-if="pending" class="m-loading">Loading…</div>
-    <MusicEmptyState v-else-if="!rows.length" icon="star" title="No rated artists yet">
+    <MusicEmptyState v-else-if="!total" icon="star" title="No rated artists yet">
       Rate an artist from their page — anything 1★+ lands here. Start from <NuxtLink to="/music/artists">Artists</NuxtLink>.
     </MusicEmptyState>
-    <div v-else class="grid-posters m-grid">
-      <AppContextMenu
-        v-for="a in rows"
-        :key="a.id"
-        :items="actions.forArtist({ id: a.id, name: a.name, slug: a.slug, media_item_id: a.media_item_id })"
-      >
-      <NuxtLink
-        :to="`/music/artist/${a.slug}`"
-        class="grid-tile"
-        style="text-align: center; text-decoration: none; color: inherit"
-      >
-        <MusicCard
-          variant="circle"
-          :src="artistPosterUrl(a) ?? undefined"
-          :alt="a.name"
-          :title="a.name"
-          no-play
-        />
-        <div class="ms-circle-label">{{ a.name }}</div>
-        <div class="ms-circle-sub">{{ a.album_count }} {{ a.album_count === 1 ? 'album' : 'albums' }} · {{ a.track_count }} {{ a.track_count === 1 ? 'track' : 'tracks' }}</div>
-      </NuxtLink>
-      </AppContextMenu>
-    </div>
+    <!-- Random-access virtual grid — scrollbar spans every rated artist,
+         pages fetch wherever it lands (500-cap gone). -->
+    <VirtualPosterGrid
+      v-else
+      :total="total ?? 0"
+      :item-at="itemAt"
+      :aspect="1"
+      :meta-height="48"
+      :min-card="160"
+      @range="ensureRange"
+    >
+      <template #default="{ item: a }">
+        <AppContextMenu
+          :items="actions.forArtist({ id: a.id, name: a.name, slug: a.slug, media_item_id: a.media_item_id })"
+        >
+          <NuxtLink
+            :to="`/music/artist/${a.slug}`"
+            class="grid-tile"
+            style="text-align: center; text-decoration: none; color: inherit"
+          >
+            <MusicCard
+              variant="circle"
+              :src="artistPosterUrl(a) ?? undefined"
+              :alt="a.name"
+              :title="a.name"
+              no-play
+            />
+            <div class="ms-circle-label">{{ a.name }}</div>
+            <div class="ms-circle-sub">{{ a.album_count }} {{ a.album_count === 1 ? 'album' : 'albums' }} · {{ a.track_count }} {{ a.track_count === 1 ? 'track' : 'tracks' }}</div>
+          </NuxtLink>
+        </AppContextMenu>
+      </template>
+    </VirtualPosterGrid>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { LovedArtistRow } from '~/queries/music'
-import { useQuery } from '@pinia/colada'
-import { lovedArtistsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
+const { $heya } = useNuxtApp()
 const actions = useMusicActions()
-const myArtistsQuery = useQuery(lovedArtistsQuery(500))
-await waitForQuery(myArtistsQuery)
-const pending = computed(() => myArtistsQuery.isPending.value)
-const rows = computed(() => myArtistsQuery.data.value?.items ?? [])
+
+const { total, pending, itemAt, ensureRange } = useVirtualCatalog<LovedArtistRow>(() => ({
+  key: 'me:rated:artists',
+  pageSize: 120,
+  fetch: async (offset, limit) => {
+    const res = await $heya('/api/me/ratings/artists', {
+      query: { min_rating: 1, limit, offset },
+    }) as unknown as { items: LovedArtistRow[]; total: number }
+    return { items: res.items ?? [], total: res.total ?? 0 }
+  },
+}))
 
 // See MusicHome.vue — endpoint falls back through media_assets when
 // media_items.poster_path is empty.
@@ -75,17 +94,13 @@ const artistPosterUrl = (a: LovedArtistRow) => usePosterUrl({ id: a.media_item_i
   text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 
-/* Was inline-style grid-template-columns — moved to a scoped class so the
-   phone override below can win (media queries can't beat an inline style). */
-.m-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-
 /* MusicCard's root is height:100% (built for uniform card grids). Here the
-   grid stretches every item in a row to the tallest, the card then fills
-   that stretched cell, and the name/count labels below it overflow into the
-   next row. Let the card size to its art instead. */
-.m-grid :deep(.mc) { height: auto; }
+   virtual row stretches cells to the row height, the card would fill that
+   stretched cell, and the name/count labels below it would overflow. Let
+   the card size to its art instead. */
+:deep(.mc) { height: auto; }
+
 @media (max-width: 720px) {
-  .m-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
   /* heya.css's .page-pad is 24px a side at this width — with 12px grid gaps
      that leaves room for exactly 2×165px tracks, not the 3 columns a phone
      grid should land. Tighten this page's own padding instance (not the

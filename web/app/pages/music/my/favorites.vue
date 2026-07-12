@@ -4,7 +4,7 @@
       <template #subtitle>
         <span>Everything you've reacted to. Tap 👍 or ❤️ anywhere — it shows up here.</span>
         <span class="dot">·</span>
-        <span>{{ tracks.length.toLocaleString() }} tracks</span>
+        <span>{{ (total ?? 0).toLocaleString() }} tracks</span>
       </template>
     </MusicPageHead>
 
@@ -26,13 +26,16 @@
       </div>
     </div>
 
-    <div v-if="isLoading && !tracks.length" class="ms-fav-loading">Loading…</div>
+    <div v-if="isLoading" class="ms-fav-loading">Loading…</div>
 
-    <MusicEmptyState v-else-if="!tracks.length" icon="heart" :title="emptyTitle">
+    <MusicEmptyState v-else-if="!total" icon="heart" :title="emptyTitle">
       {{ emptyBody }} React from the <NuxtLink to="/music/songs">Songs page</NuxtLink>,
       the player, or anywhere you see the reactions.
     </MusicEmptyState>
 
+    <!-- Sparse full-length list per reaction band — each band pages its own
+         random-access catalog server-side (min/max rating), so the scrollbar
+         spans the whole band and the 500-cap is gone. -->
     <TrackList
       v-else
       :tracks="tlRows"
@@ -42,7 +45,9 @@
       :context-items="contextItemsFor"
       :art-play-icon-size="13"
       :on-rating-change="onRatingChange"
+      virtualized
       @row-click="playFrom"
+      @range="ensureRange"
     />
   </div>
 </template>
@@ -50,7 +55,6 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
-import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
 
@@ -86,38 +90,30 @@ interface ListBody { items: RatedTrackRow[]; total: number }
 
 // Reaction bands over the stored 1–10 ratings — same cuts ReactionControl
 // renders: down ≤3, up 6–8, heart ≥9. Default view = thumbs up and higher.
+// Each band is a [min, max] the SERVER filters on: the list is random-access
+// paged, so band membership can't be computed client-side any more.
 type BandKey = 'positive' | 'heart' | 'up' | 'down'
-const BANDS: { key: BandKey; label: string; icon: string; match: (r: number) => boolean }[] = [
-  { key: 'positive', label: 'Liked & loved', icon: 'thumbsup', match: (r) => r >= 6 },
-  { key: 'heart', label: 'Loved', icon: 'heart', match: (r) => r >= 9 },
-  { key: 'up', label: 'Liked', icon: 'thumbsup', match: (r) => r >= 6 && r <= 8 },
-  { key: 'down', label: 'Not for me', icon: 'thumbsdown', match: (r) => r >= 1 && r <= 3 },
+const BANDS: { key: BandKey; label: string; icon: string; min: number; max: number }[] = [
+  { key: 'positive', label: 'Liked & loved', icon: 'thumbsup', min: 6, max: 10 },
+  { key: 'heart', label: 'Loved', icon: 'heart', min: 9, max: 10 },
+  { key: 'up', label: 'Liked', icon: 'thumbsup', min: 6, max: 8 },
+  { key: 'down', label: 'Not for me', icon: 'thumbsdown', min: 1, max: 3 },
 ]
 const view = ref<BandKey>('positive')
 const activeBand = computed(() => BANDS.find((b) => b.key === view.value)!)
 
-// One fetch of everything rated; band filtering is client-side (the list is
-// capped at 500 — plenty until real pagination is warranted).
-const ratedQuery = useQuery({
-  key: ['me', 'ratings', 'reactions-list'],
-  query: async () => {
+const { total, pending: isLoading, itemAt, ensureRange, loadedItems, reset } = useVirtualCatalog<RatedTrackRow>(() => ({
+  key: `me:rated:tracks:${activeBand.value.min}-${activeBand.value.max}`,
+  pageSize: 100,
+  fetch: async (offset, limit) => {
     const r = await $heya('/api/me/ratings/tracks', {
-      query: { min_rating: 1, limit: 500 },
+      query: { min_rating: activeBand.value.min, max_rating: activeBand.value.max, limit, offset },
     }) as unknown as ListBody
-    trackRatings.primeMany(r.items.map((it) => [it.track_id, it.rating] as [number, number]))
-    return r
+    const items = r.items ?? []
+    trackRatings.primeMany(items.map((it) => [it.track_id, it.rating] as [number, number]))
+    return { items, total: r.total ?? 0 }
   },
-  staleTime: 1000 * 30,
-})
-await waitForQuery(ratedQuery)
-
-const allRated = computed<RatedTrackRow[]>(() => ratedQuery.data.value?.items ?? [])
-const isLoading = computed(() => ratedQuery.isLoading.value)
-
-// Live-filter through the shared ratings cache so a reaction change moves the
-// row between bands without a refetch.
-const tracks = computed<RatedTrackRow[]>(() =>
-  allRated.value.filter((t) => activeBand.value.match(ratings.value.get(t.track_id) ?? t.rating)))
+}))
 
 const emptyTitle = computed(() => {
   switch (view.value) {
@@ -132,47 +128,64 @@ const emptyBody = computed(() =>
     ? 'Thumbs-down anything you never want mixed in again.'
     : 'Like or love a few tracks and your taste profile starts learning.')
 
-const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
-  id: t.track_id,
-  title: t.track_title,
-  artist: t.artist_name,
-  artist_slug: t.artist_slug,
-  album: t.album_title,
-  album_slug: t.album_slug,
-  album_year: t.album_year,
-  duration: t.duration,
-  available: t.available,
-  poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
-  rating: ratings.value.get(t.track_id) ?? t.rating,
-})))
+// Sparse full-length rows — unloaded stretches render as skeletons.
+const tlRows = computed<TrackListRow[]>(() => {
+  const n = total.value ?? 0
+  const out: TrackListRow[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const t = itemAt(i)
+    out[i] = t
+      ? {
+          id: t.track_id,
+          title: t.track_title,
+          artist: t.artist_name,
+          artist_slug: t.artist_slug,
+          album: t.album_title,
+          album_slug: t.album_slug,
+          album_year: t.album_year,
+          duration: t.duration,
+          available: t.available,
+          poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+          rating: ratings.value.get(t.track_id) ?? t.rating,
+        }
+      : { id: -(i + 1), pending: true, title: '', artist: '', album: '', duration: 0 }
+  }
+  return out
+})
 
 function contextItemsFor(_track: TrackListRow, i: number) {
-  const t = tracks.value[i]!
+  const t = itemAt(i)
+  if (!t) return []
   return actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })
 }
 
 async function onRatingChange(trackId: number, v: number) {
   try {
     await trackRatings.set(trackId, v)
-    if (v > 0 && !allRated.value.some((t) => t.track_id === trackId)) {
-      ratedQuery.refetch() // newly rated — pull it into the base list
-    }
+    // Any reaction change can move the row out of the current band — reset
+    // the band's catalog so indexes/total stay honest.
+    reset()
   } catch {
     // optimistic rollback already happened in useTrackRatings
   }
 }
 
 async function playFrom(i: number) {
-  const clicked = tracks.value[i]
+  const clicked = itemAt(i)
   if (!clicked || clicked.available === false) return
-  const built: Track[] = tracks.value.filter((t) => t.available !== false).map((t) => ({
-    id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration,
-    stream_url: `/api/music/tracks/${t.track_id}/stream`,
-    album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug,
-    poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
-    source: 'favorites',
-    available: t.available,
-  }))
+  // Queue every LOADED playable track in band order — the pages the user has
+  // actually scrolled through.
+  const built: Track[] = loadedItems()
+    .map(({ item }) => item)
+    .filter((t) => t.available !== false)
+    .map((t) => ({
+      id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration,
+      stream_url: `/api/music/tracks/${t.track_id}/stream`,
+      album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug,
+      poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
+      source: 'favorites',
+      available: t.available,
+    }))
   if (!built.length) return
   queue.value = built
   await play(built.find((b) => b.id === clicked.track_id) ?? built[0]!)

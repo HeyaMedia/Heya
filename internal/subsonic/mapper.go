@@ -42,7 +42,7 @@ func (s *Server) starStateFor(ctx context.Context, userID int64) starState {
 	const pageSize = 500
 	const heart = 9
 	for offset := int32(0); offset < 20*pageSize; offset += pageSize {
-		page, err := s.app.ListUserRatedTracks(ctx, userID, heart, pageSize, offset)
+		page, err := s.app.ListUserRatedTracks(ctx, userID, heart, 10, pageSize, offset)
 		if err != nil || page == nil {
 			break
 		}
@@ -54,7 +54,7 @@ func (s *Server) starStateFor(ctx context.Context, userID int64) starState {
 		}
 	}
 	for offset := int32(0); offset < 20*pageSize; offset += pageSize {
-		page, err := s.app.ListUserRatedAlbums(ctx, userID, heart, pageSize, offset)
+		page, err := s.app.ListUserRatedAlbums(ctx, userID, heart, 10, pageSize, offset)
 		if err != nil || page == nil {
 			break
 		}
@@ -66,7 +66,7 @@ func (s *Server) starStateFor(ctx context.Context, userID int64) starState {
 		}
 	}
 	for offset := int32(0); offset < 20*pageSize; offset += pageSize {
-		page, err := s.app.ListUserRatedArtists(ctx, userID, heart, pageSize, offset)
+		page, err := s.app.ListUserRatedArtists(ctx, userID, heart, 10, pageSize, offset)
 		if err != nil || page == nil {
 			break
 		}
