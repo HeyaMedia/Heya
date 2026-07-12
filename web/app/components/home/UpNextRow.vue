@@ -6,7 +6,7 @@
         <button class="scroll-btn" aria-label="Scroll right" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
-    <div class="row-scroll" ref="scrollEl">
+    <div class="row-scroll" ref="scrollEl" data-scroll-memory="up-next">
       <!-- Mouse-click plays the next episode; the title deep-links to the
            series detail page (same interaction model as Continue Watching) so
            you can reach the show without starting playback. `title-to`

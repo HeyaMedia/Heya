@@ -6,7 +6,7 @@
         <button class="scroll-btn" aria-label="Scroll right" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
-    <div class="row-scroll" ref="scrollEl">
+    <div class="row-scroll" ref="scrollEl" data-scroll-memory="continue-watching">
       <div
         v-for="(item, i) in items"
         :key="item.id"

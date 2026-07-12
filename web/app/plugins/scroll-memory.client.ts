@@ -1,94 +1,136 @@
-// Scroll-position memory for SPA navigations. The app's scroll container
-// isn't `window` — the music shell uses `<main class="music-main scroll">`
-// with `overflow-y: auto`, so Vue Router's built-in `savedPosition` (which
-// addresses window scroll only) always returns {top: 0}. We need to track
-// the inner element's scrollTop ourselves and restore it on back/forward.
-//
-// How it works:
-//   1. `popstate` listener flips a flag so we know the next route change is
-//      back/forward (not a fresh push).
-//   2. `router.beforeEach` snapshots the *outgoing* route's scrollTop into
-//      a Map keyed by fullPath.
-//   3. `router.afterEach` schedules a restoration: on a pop nav we restore
-//      the saved scrollTop for the *incoming* route; on a fresh push we
-//      reset to 0 (top of the new page, matches standard SPA expectations).
-//
-// The nextTick + double-rAF is intentional. Pinia Colada hands us cached data
-// synchronously on remount, so the new page typically renders in one frame
-// — but image loads and async children can grow the content height across
-// a few more frames. Double-rAF lets the layout settle before we set
-// scrollTop, avoiding the "scroll clamped to short page height" bug.
-//
-// Scoped to `<main class="scroll">` — the HTML semantic element + the
-// project's standard scroll class together uniquely identify the main
-// content scroll container in any layout. The sidebar and other panels
-// also use `.scroll`, so matching on the class alone picks the wrong
-// element (and never restores anything useful).
+// Browser-history scroll restoration for the app's nested scroll containers.
+// The document never scrolls: pages put their own overflow element below
+// #main-content, and media rails add independent horizontal overflow elements.
 
-function findScrollContainer(): HTMLElement | null {
-  // Prefer the main content area. Falls back to any visible
-  // `<main>` element if the .scroll class is missing on a future layout.
-  const candidates: NodeListOf<HTMLElement> = document.querySelectorAll('main.scroll, main')
-  for (const el of candidates) {
-    if (el.offsetParent !== null && el.clientHeight > 0) return el
-  }
-  return null
+type ScrollSnapshot = {
+  top: number
+  rails: Record<string, number>
 }
 
-export default defineNuxtPlugin((nuxtApp) => {
-  const router = useRouter()
-  const scrollMap = new Map<string, number>()
+function visible(el: HTMLElement) {
+  return el.offsetParent !== null && el.clientWidth > 0 && el.clientHeight > 0
+}
 
-  // popstate fires before router.beforeEach for back/forward, so flipping
-  // the flag here means the next nav cycle sees it as a pop.
-  let isPopNav = false
-  window.addEventListener('popstate', () => {
-    isPopNav = true
-  })
+function pageScroller(): HTMLElement | null {
+  const main = document.querySelector<HTMLElement>('#main-content')
+  if (!main) return null
 
-  router.beforeEach((to, from) => {
-    if (from.fullPath) {
-      const el = findScrollContainer()
-      if (el) scrollMap.set(from.fullPath, el.scrollTop)
+  // Pick the largest visible vertical overflow region inside the content
+  // shell. This deliberately ignores sidebars, dialogs, and horizontal rails.
+  const candidates = [main, ...main.querySelectorAll<HTMLElement>('.scroll')]
+    .filter((el) => {
+      if (!visible(el)) return false
+      const overflow = getComputedStyle(el).overflowY
+      return overflow === 'auto' || overflow === 'scroll'
+    })
+  return candidates.sort((a, b) =>
+    b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0] ?? null
+}
+
+function railElements(): Array<[string, HTMLElement]> {
+  const counts = new Map<string, number>()
+  return [...document.querySelectorAll<HTMLElement>('[data-scroll-memory]')]
+    .filter(visible)
+    .map((el) => {
+      const base = el.dataset.scrollMemory || 'rail'
+      const n = counts.get(base) ?? 0
+      counts.set(base, n + 1)
+      return [n ? `${base}:${n}` : base, el]
+    })
+}
+
+function entryKey(fullPath: string): string {
+  const state = history.state as { position?: number; key?: string } | null
+  // Vue Router assigns a distinct position to every history entry. The
+  // fallback keeps restoration working in browsers which omit that field.
+  return state?.position != null
+    ? `position:${state.position}`
+    : state?.key
+      ? `key:${state.key}`
+      : `path:${fullPath}`
+}
+
+function capture(): ScrollSnapshot {
+  const rails: Record<string, number> = {}
+  for (const [key, el] of railElements()) rails[key] = el.scrollLeft
+  return { top: pageScroller()?.scrollTop ?? 0, rails }
+}
+
+let restorationGeneration = 0
+
+function restore(snapshot: ScrollSnapshot, generation: number) {
+  let tries = 0
+  const attempt = () => {
+    if (generation !== restorationGeneration) return
+    const vertical = pageScroller()
+    if (vertical) vertical.scrollTop = snapshot.top
+
+    const rails = railElements()
+    for (const [key, el] of rails) {
+      const left = snapshot.rails[key]
+      if (left != null) el.scrollLeft = left
     }
+
+    const verticalReady = snapshot.top === 0
+      || (!!vertical && Math.abs(vertical.scrollTop - snapshot.top) < 2)
+    const railsReady = Object.entries(snapshot.rails).every(([key, left]) => {
+      if (left === 0) return true
+      const el = rails.find(([candidate]) => candidate === key)?.[1]
+      return !!el && Math.abs(el.scrollLeft - left) < 2
+    })
+
+    // Queries, virtualized tracks, and responsive measurements can grow the
+    // scroll ranges after mount. Keep applying for roughly half a second.
+    if ((!verticalReady || !railsReady) && ++tries < 40) requestAnimationFrame(attempt)
+  }
+  requestAnimationFrame(attempt)
+}
+
+export default defineNuxtPlugin(() => {
+  const router = useRouter()
+  const positions = new Map<string, ScrollSnapshot>()
+  const pathFallback = new Map<string, ScrollSnapshot>()
+  let isHistoryNavigation = false
+  // On popstate, history.state already describes the incoming entry while the
+  // DOM still belongs to the outgoing route. Retain the last settled key so
+  // beforeEach never files the outgoing snapshot under the destination.
+  let currentEntryKey = entryKey(router.currentRoute.value.fullPath)
+
+  window.addEventListener('popstate', () => { isHistoryNavigation = true })
+
+  router.beforeEach((_to, from) => {
+    if (!from.fullPath) return
+    const snapshot = capture()
+    positions.set(currentEntryKey, snapshot)
+    pathFallback.set(from.fullPath, snapshot)
   })
 
   router.afterEach((to) => {
-    const wasPop = isPopNav
-    isPopNav = false
+    const generation = ++restorationGeneration
+    const wasHistoryNavigation = isHistoryNavigation
+    isHistoryNavigation = false
+    const incomingEntryKey = entryKey(to.fullPath)
+    currentEntryKey = incomingEntryKey
 
     nextTick(() => {
-      // Double-rAF: lets the new page's first paint settle (content
-      // height stabilizes) before we set scrollTop, otherwise the
-      // browser clamps a large saved value down to the current
-      // (smaller) scrollable range.
+      if (wasHistoryNavigation) {
+        const snapshot = positions.get(incomingEntryKey) ?? pathFallback.get(to.fullPath)
+        if (snapshot) restore(snapshot, generation)
+        return
+      }
+      // A new destination starts at the top. Its rails are newly mounted and
+      // naturally begin at zero; shared route components need the explicit Y reset.
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const el = findScrollContainer()
-          if (!el) return
-          if (wasPop) {
-            const saved = scrollMap.get(to.fullPath)
-            if (saved != null) {
-              el.scrollTop = saved
-              return
-            }
-          }
-          // Fresh push or no saved position — scroll to top of the new page.
-          el.scrollTop = 0
-        })
+        const vertical = pageScroller()
+        if (vertical) vertical.scrollTop = 0
       })
     })
-  })
 
-  // Garbage-collection: cap the map size so it doesn't grow unboundedly
-  // across long sessions. 200 entries × ~30 bytes/key is negligible RAM,
-  // but past that we trim oldest 50 to keep things tidy.
-  router.afterEach(() => {
-    if (scrollMap.size > 200) {
-      const keys = Array.from(scrollMap.keys()).slice(0, 50)
-      for (const k of keys) scrollMap.delete(k)
+    if (positions.size > 200) {
+      for (const key of [...positions.keys()].slice(0, 50)) positions.delete(key)
+    }
+    if (pathFallback.size > 200) {
+      for (const key of [...pathFallback.keys()].slice(0, 50)) pathFallback.delete(key)
     }
   })
-
-  void nuxtApp
 })

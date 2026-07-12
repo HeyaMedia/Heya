@@ -49,6 +49,7 @@
       v-else
       ref="scroller"
       class="msr-scroller"
+      :data-scroll-memory="memoryKey || title"
     >
       <slot />
     </div>
@@ -58,6 +59,7 @@
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
   title: string
+  memoryKey?: string
   titleHref?: string
   cardSize?: number
   onPlayAll?: () => void

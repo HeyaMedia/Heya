@@ -7,7 +7,7 @@
         <button class="scroll-btn" aria-label="Scroll right" @click="scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
-    <div ref="scrollEl" class="row-scroll" @scroll.passive="onScroll">
+    <div ref="scrollEl" class="row-scroll" :data-scroll-memory="memoryKey || title" @scroll.passive="onScroll">
       <!-- Virtualized track: only the tiles inside the viewport (± overscan)
            exist in the DOM; each is absolutely positioned at its slot. The
            track's fixed width keeps the scrollbar honest for the full item
@@ -64,6 +64,8 @@ type RowItem = MediaItem & {
 
 const props = defineProps<{
   title: string
+  /** Stable history-restoration identity. Defaults to the visible title. */
+  memoryKey?: string
   subtitle?: string
   // `poster_src` overrides the default `/api/media/{id}/image/poster` lookup —
   // needed for album rows whose covers live under a different endpoint.

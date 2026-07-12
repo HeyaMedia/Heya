@@ -8,6 +8,7 @@
 <template>
   <ContentRow
     :title="rail.title"
+    :memory-key="rail.key"
     :subtitle="rail.subtitle"
     :items="allItems"
     :context-items="contextItems"
