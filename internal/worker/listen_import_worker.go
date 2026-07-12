@@ -27,10 +27,13 @@ import (
 // worker package importing service/ (same indirection as SonicEnabledFn).
 type LastfmCredsFn func(ctx context.Context) (apiKey, secret string)
 
-// KickoffListenImportArgs starts one import run.
+// KickoffListenImportArgs starts one import run. SinceTS > 0 makes the run
+// incremental: paging stops once listens older than the bound are reached and
+// the full-import resume cursor is left untouched.
 type KickoffListenImportArgs struct {
 	UserID  int64  `json:"user_id"`
 	Service string `json:"service"`
+	SinceTS int64  `json:"since_ts,omitempty"`
 }
 
 func (KickoffListenImportArgs) Kind() string { return "kickoff_listen_import" }
@@ -82,6 +85,9 @@ func (w *KickoffListenImportWorker) Work(ctx context.Context, job *river.Job[Kic
 		userID, svc).Scan(&username, &token, &cursor); err != nil {
 		return fmt.Errorf("service link missing: %w", err)
 	}
+	if job.Args.SinceTS > 0 {
+		cursor = 0 // incremental runs page from the newest listen down to SinceTS
+	}
 
 	w.stateMerge(ctx, userID, svc, map[string]any{
 		"status": "running", "error": "", "paging_done": false,
@@ -112,7 +118,15 @@ func (w *KickoffListenImportWorker) Work(ctx context.Context, job *river.Job[Kic
 				}
 			}
 			w.stateArithmetic(ctx, userID, svc, len(listens), 0, 0, 0, +1)
-			w.stateMerge(ctx, userID, svc, map[string]any{"cursor": oldest})
+			if job.Args.SinceTS == 0 {
+				// Only full imports own the resume cursor — an incremental
+				// run reaching "now-24h" must not clobber a failed full
+				// import's deep-history position.
+				w.stateMerge(ctx, userID, svc, map[string]any{"cursor": oldest})
+			}
+			if job.Args.SinceTS > 0 && oldest <= job.Args.SinceTS {
+				break // incremental bound reached
+			}
 		}
 		if done {
 			break
@@ -191,10 +205,23 @@ func (w *KickoffListenImportWorker) pager(svc, username, token string, cursor in
 // writes them as ratings. Failures log and skip — reactions must not fail an
 // otherwise-good history import.
 func (w *KickoffListenImportWorker) importReactions(ctx context.Context, userID int64, svc, username, token string) (loved, hated int) {
-	apply := func(items []scrobble.Listen, rating int16) int {
+	apply := func(items []scrobble.Listen, kind string, rating int16) int {
 		n := 0
 		for _, l := range items {
 			trackID, _, ok := matchListenToTrack(ctx, w.DB, l)
+			var matchedID any
+			if ok {
+				matchedID = trackID
+			}
+			at := l.ListenedAt
+			if at.IsZero() {
+				at = time.Now().UTC()
+			}
+			_, _ = w.DB.Exec(ctx, `
+				INSERT INTO external_listens (user_id, service, kind, artist_name, track_name, recording_mbid, listened_at, matched_track_id)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+				ON CONFLICT ON CONSTRAINT external_listens_dedupe_key DO NOTHING`,
+				userID, svc, kind, l.ArtistName, l.TrackName, l.RecordingMBID, at, matchedID)
 			if !ok {
 				continue
 			}
@@ -218,8 +245,8 @@ func (w *KickoffListenImportWorker) importReactions(ctx context.Context, userID 
 				log.Warn().Err(err).Msg("listen import: feedback fetch failed — skipping reactions")
 				break
 			}
-			loved += apply(loves, 10)
-			hated += apply(hates, 1)
+			loved += apply(loves, "love", 10)
+			hated += apply(hates, "hate", 1)
 			if offset+100 >= total || (len(loves) == 0 && len(hates) == 0) {
 				break
 			}
@@ -236,7 +263,7 @@ func (w *KickoffListenImportWorker) importReactions(ctx context.Context, userID 
 				log.Warn().Err(err).Msg("listen import: loved tracks fetch failed — skipping reactions")
 				break
 			}
-			loved += apply(loves, 10)
+			loved += apply(loves, "love", 10)
 			if page >= totalPages || len(loves) == 0 {
 				break
 			}
@@ -275,6 +302,20 @@ func (w *ImportListensBatchWorker) Work(ctx context.Context, job *river.Job[Impo
 	matched, imported := 0, 0
 	for _, l := range job.Args.Listens {
 		trackID, duration, ok := matchListenToTrack(ctx, w.DB, l)
+		// Every listen lands in external_listens whether it matched or not —
+		// unmatched rows retro-match later as the library grows, and double
+		// as the "most-listened music you don't own" signal.
+		var matchedID any
+		if ok {
+			matchedID = trackID
+		}
+		if _, err := w.DB.Exec(ctx, `
+			INSERT INTO external_listens (user_id, service, kind, artist_name, track_name, release_name, recording_mbid, listened_at, duration_seconds, matched_track_id)
+			VALUES ($1, $2, 'listen', $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT ON CONSTRAINT external_listens_dedupe_key DO NOTHING`,
+			userID, svc, l.ArtistName, l.TrackName, l.ReleaseName, l.RecordingMBID, l.ListenedAt, l.DurationSec, matchedID); err != nil {
+			return err
+		}
 		if !ok {
 			continue
 		}
@@ -318,18 +359,55 @@ func matchListenToTrack(ctx context.Context, db *pgxpool.Pool, l scrobble.Listen
 	if l.ArtistName == "" || l.TrackName == "" {
 		return 0, 0, false
 	}
-	err := db.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 		SELECT t.id, t.duration
 		FROM tracks t
 		JOIN albums al ON al.id = t.album_id
 		JOIN artists ar ON ar.id = al.artist_id
 		WHERE lower(t.title) = lower($1) AND lower(ar.name) = lower($2)
 		ORDER BY t.id
-		LIMIT 1`, strings.TrimSpace(l.TrackName), strings.TrimSpace(l.ArtistName)).Scan(&trackID, &duration)
+		LIMIT 1`, strings.TrimSpace(l.TrackName), strings.TrimSpace(l.ArtistName)).Scan(&trackID, &duration); err == nil {
+		return trackID, duration, true
+	}
+	// Tier 3 — normalized: strip "(Remastered)" / "[Live]"-style suffixes from
+	// the title and "feat./ft. …" tails from the artist, then compare against
+	// the expression-indexed normalized track title.
+	err := db.QueryRow(ctx, `
+		SELECT t.id, t.duration
+		FROM tracks t
+		JOIN albums al ON al.id = t.album_id
+		JOIN artists ar ON ar.id = al.artist_id
+		WHERE lower(regexp_replace(t.title, '\s*[\(\[].*$', '')) = $1 AND lower(ar.name) = $2
+		ORDER BY t.id
+		LIMIT 1`, normalizeListenTitle(l.TrackName), normalizeListenArtist(l.ArtistName)).Scan(&trackID, &duration)
 	if err != nil {
 		return 0, 0, false
 	}
 	return trackID, duration, true
+}
+
+// normalizeListenTitle lowercases and strips parenthetical/bracket suffixes:
+// "Song (Remastered 2011)" → "song".
+func normalizeListenTitle(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, sep := range []string{" (", " ["} {
+		if i := strings.Index(s, sep); i > 0 {
+			s = s[:i]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+// normalizeListenArtist lowercases and strips featuring credits:
+// "Artist feat. Guest" → "artist".
+func normalizeListenArtist(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, sep := range []string{" feat.", " feat ", " ft.", " ft ", " featuring "} {
+		if i := strings.Index(s, sep); i > 0 {
+			s = s[:i]
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 // fetchWithRetry retries one page fetch through transient upstream failures

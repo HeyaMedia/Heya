@@ -26,6 +26,7 @@ var definitions = []Definition{
 	{ID: "analyze_music_facets", KickoffKind: "kickoff_sonic_analysis", WorkKinds: []string{"analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"}, Pump: true},
 	{ID: "cleanup_scanner_artifacts", KickoffKind: "cleanup_scanner_artifacts"},
 	{ID: "embed_recommendations", KickoffKind: "kickoff_embed_recommendations"},
+	{ID: "sync_music_services", KickoffKind: "kickoff_music_services_sync", WorkKinds: []string{"kickoff_listen_import", "import_listens_batch"}},
 
 	{ID: "transcoding", WorkKinds: []string{"transcode"}, Synthetic: true},
 	{ID: "artwork", WorkKinds: []string{"download_image", "fetch_artwork", "save_images"}, Synthetic: true},
