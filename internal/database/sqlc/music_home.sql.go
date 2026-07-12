@@ -692,7 +692,30 @@ SELECT up.id,
        up.updated_at,
        coalesce(lpp.last_played_at, up.updated_at)                 AS last_activity_at,
        lpp.last_played_at                                          AS last_played_at,
-       (SELECT count(*) FROM user_playlist_tracks WHERE playlist_id = up.id)::bigint AS track_count
+       (SELECT count(*) FROM user_playlist_tracks WHERE playlist_id = up.id)::bigint AS track_count,
+       (up.cover_path != '') AS has_cover,
+       -- First track's addressing pair — FE builds the canonical album-cover
+       -- URL (no cover_path filter; image URLs are unconditional).
+       COALESCE(
+           (SELECT al.slug
+            FROM user_playlist_tracks upt
+            JOIN tracks t ON t.id = upt.track_id
+            JOIN albums al ON al.id = t.album_id
+            WHERE upt.playlist_id = up.id
+            ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
+           ''
+       ) AS auto_album_slug,
+       COALESCE(
+           (SELECT mi.slug
+            FROM user_playlist_tracks upt
+            JOIN tracks t ON t.id = upt.track_id
+            JOIN albums al ON al.id = t.album_id
+            JOIN artists a ON a.id = al.artist_id
+            JOIN media_item_cards mi ON mi.id = a.media_item_id
+            WHERE upt.playlist_id = up.id
+            ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
+           ''
+       ) AS auto_artist_slug
 FROM user_playlists up
 LEFT JOIN last_per_playlist lpp ON lpp.playlist_id = up.id
 WHERE up.user_id = $1
@@ -716,6 +739,9 @@ type ListRecentUserPlaylistsRow struct {
 	LastActivityAt interface{}        `json:"last_activity_at"`
 	LastPlayedAt   interface{}        `json:"last_played_at"`
 	TrackCount     int64              `json:"track_count"`
+	HasCover       bool               `json:"has_cover"`
+	AutoAlbumSlug  interface{}        `json:"auto_album_slug"`
+	AutoArtistSlug interface{}        `json:"auto_artist_slug"`
 }
 
 // Playlists ordered by the most recent play of any of their tracks (derived
@@ -741,6 +767,9 @@ func (q *Queries) ListRecentUserPlaylists(ctx context.Context, arg ListRecentUse
 			&i.LastActivityAt,
 			&i.LastPlayedAt,
 			&i.TrackCount,
+			&i.HasCover,
+			&i.AutoAlbumSlug,
+			&i.AutoArtistSlug,
 		); err != nil {
 			return nil, err
 		}

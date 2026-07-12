@@ -75,7 +75,7 @@
 <script setup lang="ts">
 defineProps<{
   currentSection: string
-  playlists: Array<{ id: number; name: string; count?: number; cover_path?: string }>
+  playlists: Array<{ id: number; slug: string; name: string; count?: number; cover_path?: string }>
 }>()
 
 const emit = defineEmits<{

@@ -49,13 +49,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Database</h2>
-      <p class="sv2-page-desc">
-        Postgres state — version, on-disk size, the largest tables, and the
-        pgxpool's connection accounting. Polls every 5 seconds.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Database"
+      icon="database"
+      eyebrow="Advanced · PostgreSQL"
+      description="Follow database size, large tables, PostgreSQL version, and pgxpool connection pressure with a lightweight live refresh."
+    />
 
     <div v-if="loading && !db" class="loading-state">
       <Icon name="spinner" :size="16" /> Probing database…

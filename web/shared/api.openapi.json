@@ -2326,6 +2326,29 @@
         ],
         "type": "object"
       },
+      "Capabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "write": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "read",
+          "write"
+        ],
+        "type": "object"
+      },
       "Cast-playRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4105,6 +4128,66 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ExternalPlaylistSyncBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ExternalPlaylistSyncBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "playlist_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "ExternalPlaylistView": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "local_playlist_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "track_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_id",
+          "name",
+          "track_count"
+        ],
         "type": "object"
       },
       "FacetsView": {
@@ -11965,6 +12048,15 @@
           "playlist": {
             "$ref": "#/components/schemas/UserPlaylist"
           },
+          "syncs": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistSyncView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "tracks": {
             "items": {
               "$ref": "#/components/schemas/ListPlaylistTracksRow"
@@ -11978,7 +12070,8 @@
         "required": [
           "playlist",
           "tracks",
-          "has_cover"
+          "has_cover",
+          "syncs"
         ],
         "type": "object"
       },
@@ -12019,6 +12112,88 @@
           "name",
           "description",
           "cover_path"
+        ],
+        "type": "object"
+      },
+      "PlaylistServiceCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PlaylistServiceCatalog.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities"
+          },
+          "playlists": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalPlaylistView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "capabilities",
+          "playlists"
+        ],
+        "type": "object"
+      },
+      "PlaylistSyncToggle": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PlaylistSyncToggle.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "PlaylistSyncView": {
+        "additionalProperties": false,
+        "properties": {
+          "external_id": {
+            "type": "string"
+          },
+          "external_url": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "last_synced_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "external_id"
         ],
         "type": "object"
       },
@@ -25805,6 +25980,140 @@
         ]
       }
     },
+    "/api/me/music-services/{service}/playlists": {
+      "get": {
+        "operationId": "list-external-playlists",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "listenbrainz",
+                "lastfm"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistServiceCatalog"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "List playlists available for synchronization",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
+    "/api/me/music-services/{service}/playlists/{external_id}/sync": {
+      "put": {
+        "operationId": "set-external-playlist-sync",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "listenbrainz",
+                "lastfm"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaylistSyncToggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalPlaylistSyncBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Link or unlink an external playlist",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
     "/api/me/password": {
       "put": {
         "operationId": "change-password",
@@ -26441,6 +26750,144 @@
           }
         ],
         "summary": "Upload a custom playlist cover",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
+    "/api/me/playlists/{id}/sync/{service}": {
+      "post": {
+        "operationId": "sync-playlist-now",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "listenbrainz",
+                "lastfm"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Run a two-way playlist synchronization now",
+        "tags": [
+          "Me"
+        ]
+      },
+      "put": {
+        "operationId": "set-local-playlist-sync",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "listenbrainz",
+                "lastfm"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaylistSyncToggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Enable or disable playlist synchronization",
         "tags": [
           "Me"
         ]

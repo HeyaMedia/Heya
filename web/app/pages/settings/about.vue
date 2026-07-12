@@ -56,13 +56,12 @@ function componentIcon(name: string): string {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">About Heya</h2>
-      <p class="sv2-page-desc">
-        Build info, supported media, upstream data sources, and what the
-        server is made of.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="About Heya"
+      icon="info"
+      eyebrow="Advanced · Build & capabilities"
+      description="See the running release, supported media, upstream data sources, and the components that make this server work."
+    />
 
     <section class="about-hero">
       <div class="hero-logo">

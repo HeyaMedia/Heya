@@ -1,0 +1,229 @@
+package playlistsync
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	listenBrainzAPI       = "https://api.listenbrainz.org/1"
+	jspfPlaylistExtension = "https://musicbrainz.org/doc/jspf#playlist"
+	recordingURI          = "https://musicbrainz.org/recording/"
+	playlistURI           = "https://listenbrainz.org/playlist/"
+)
+
+type ListenBrainz struct {
+	Token    string
+	Username string
+	HTTP     *http.Client
+	BaseURL  string
+}
+
+func (c *ListenBrainz) Service() string { return "listenbrainz" }
+
+func (c *ListenBrainz) Capabilities() Capabilities {
+	return Capabilities{Available: true, Read: true, Write: true}
+}
+
+func (c *ListenBrainz) http() *http.Client {
+	if c.HTTP != nil {
+		return c.HTTP
+	}
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
+func (c *ListenBrainz) base() string {
+	if c.BaseURL != "" {
+		return strings.TrimRight(c.BaseURL, "/")
+	}
+	return listenBrainzAPI
+}
+
+func (c *ListenBrainz) request(ctx context.Context, method, path string, body any, out any) error {
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base()+path, reader)
+	if err != nil {
+		return err
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Token "+c.Token)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("listenbrainz playlist %s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("listenbrainz playlist response: %w", err)
+		}
+	}
+	return nil
+}
+
+type jspfDocument struct {
+	Playlist jspfPlaylist `json:"playlist"`
+}
+
+type jspfPlaylist struct {
+	Creator    string                   `json:"creator,omitempty"`
+	Title      string                   `json:"title"`
+	Identifier string                   `json:"identifier,omitempty"`
+	Annotation string                   `json:"annotation,omitempty"`
+	Extension  map[string]jspfExtension `json:"extension,omitempty"`
+	Tracks     []jspfTrack              `json:"track,omitempty"`
+}
+
+type jspfExtension struct {
+	Public         bool     `json:"public"`
+	Creator        string   `json:"creator,omitempty"`
+	Collaborators  []string `json:"collaborators,omitempty"`
+	LastModifiedAt string   `json:"last_modified_at,omitempty"`
+}
+
+type jspfTrack struct {
+	Identifier []string `json:"identifier"`
+	Title      string   `json:"title,omitempty"`
+	Creator    string   `json:"creator,omitempty"`
+}
+
+func (c *ListenBrainz) List(ctx context.Context) ([]Playlist, error) {
+	if c.Username == "" {
+		return nil, fmt.Errorf("listenbrainz username is missing")
+	}
+	const pageSize = 100
+	all := []Playlist{}
+	for offset := 0; ; offset += pageSize {
+		var out struct {
+			Playlists     []jspfDocument `json:"playlists"`
+			PlaylistCount int            `json:"playlist_count"`
+		}
+		path := "/user/" + url.PathEscape(c.Username) + "/playlists?count=" + strconv.Itoa(pageSize) + "&offset=" + strconv.Itoa(offset)
+		if err := c.request(ctx, http.MethodGet, path, nil, &out); err != nil {
+			return nil, err
+		}
+		for _, doc := range out.Playlists {
+			all = append(all, fromJSPF(doc))
+		}
+		if len(out.Playlists) == 0 || len(all) >= out.PlaylistCount {
+			break
+		}
+	}
+	return all, nil
+}
+
+func (c *ListenBrainz) Get(ctx context.Context, externalID string) (Playlist, error) {
+	var doc jspfDocument
+	if err := c.request(ctx, http.MethodGet, "/playlist/"+url.PathEscape(externalID), nil, &doc); err != nil {
+		return Playlist{}, err
+	}
+	return fromJSPF(doc), nil
+}
+
+func (c *ListenBrainz) Create(ctx context.Context, playlist Playlist) (string, error) {
+	doc := toJSPF(playlist, true)
+	var out struct {
+		PlaylistMBID string `json:"playlist_mbid"`
+	}
+	if err := c.request(ctx, http.MethodPost, "/playlist/create", doc, &out); err != nil {
+		return "", err
+	}
+	if out.PlaylistMBID == "" {
+		return "", fmt.Errorf("listenbrainz create returned no playlist id")
+	}
+	return out.PlaylistMBID, nil
+}
+
+// Replace uses the provider's supported edit/delete/add operations. The API
+// limits adds to 100 recordings per request.
+func (c *ListenBrainz) Replace(ctx context.Context, externalID string, playlist Playlist) error {
+	current, err := c.Get(ctx, externalID)
+	if err != nil {
+		return err
+	}
+	meta := toJSPF(Playlist{Name: playlist.Name, Description: playlist.Description}, true)
+	if err := c.request(ctx, http.MethodPost, "/playlist/edit/"+url.PathEscape(externalID), meta, nil); err != nil {
+		return err
+	}
+	if len(current.Tracks) > 0 {
+		body := map[string]int{"index": 0, "count": len(current.Tracks)}
+		if err := c.request(ctx, http.MethodPost, "/playlist/"+url.PathEscape(externalID)+"/item/delete", body, nil); err != nil {
+			return err
+		}
+	}
+	for start := 0; start < len(playlist.Tracks); start += 100 {
+		end := min(start+100, len(playlist.Tracks))
+		doc := toJSPF(Playlist{Name: playlist.Name, Tracks: playlist.Tracks[start:end]}, false)
+		if err := c.request(ctx, http.MethodPost, "/playlist/"+url.PathEscape(externalID)+"/item/add", doc, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func toJSPF(playlist Playlist, metadata bool) jspfDocument {
+	pl := jspfPlaylist{Title: playlist.Name}
+	if metadata {
+		pl.Annotation = playlist.Description
+		pl.Extension = map[string]jspfExtension{jspfPlaylistExtension: {Public: false}}
+	}
+	for _, track := range playlist.Tracks {
+		if track.ProviderID == "" {
+			continue
+		}
+		pl.Tracks = append(pl.Tracks, jspfTrack{
+			Identifier: []string{recordingURI + track.ProviderID},
+			Title:      track.Title,
+			Creator:    track.Artist,
+		})
+	}
+	return jspfDocument{Playlist: pl}
+}
+
+func fromJSPF(doc jspfDocument) Playlist {
+	pl := doc.Playlist
+	out := Playlist{
+		ExternalID:  strings.TrimPrefix(pl.Identifier, playlistURI),
+		Name:        pl.Title,
+		Description: pl.Annotation,
+		URL:         pl.Identifier,
+	}
+	if ext, ok := pl.Extension[jspfPlaylistExtension]; ok && ext.LastModifiedAt != "" {
+		out.UpdatedAt, _ = time.Parse(time.RFC3339, ext.LastModifiedAt)
+	}
+	for _, track := range pl.Tracks {
+		for _, identifier := range track.Identifier {
+			if strings.HasPrefix(identifier, recordingURI) {
+				out.Tracks = append(out.Tracks, Track{
+					ProviderID: strings.TrimPrefix(identifier, recordingURI),
+					Title:      track.Title,
+					Artist:     track.Creator,
+				})
+				break
+			}
+		}
+	}
+	return out
+}

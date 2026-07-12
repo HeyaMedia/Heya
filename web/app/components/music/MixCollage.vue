@@ -14,6 +14,33 @@ const props = defineProps<{
   alt?: string
 }>()
 
+// `art` reports the first image that ACTUALLY rendered (post error-cascade),
+// or null when the collage fell through to the icon tile — so consumers that
+// tone-sample (the playlist hero's Play button) follow the healed image
+// instead of probing a candidate that may 404. Optional to listen to.
+const emit = defineEmits<{ art: [src: string | null] }>()
+let announced: string | null | undefined
+function announce(src: string | null) {
+  if (src === announced) return
+  announced = src
+  emit('art', src)
+}
+function onImgLoad(src: string) { announce(src) }
+
+// Image URLs are unconditional (they can 404 when an album genuinely has no
+// art anywhere) — so every candidate is disposable: a failed load drops the
+// URL and the collage recomputes with what's left, cascading grid → single →
+// icon tile. Without this, one dead cover rendered as a blank box showing
+// its alt text (mirror of Poster.vue's imgError handling).
+const failed = ref(new Set<string>())
+watch(() => [props.tracks, props.seedSrc] as const, () => { failed.value = new Set() })
+function onImgError(src: string) {
+  if (failed.value.has(src)) return
+  const next = new Set(failed.value)
+  next.add(src)
+  failed.value = next
+}
+
 const covers = computed(() => {
   const seen = new Set<string>()
   const urls: string[] = []
@@ -23,19 +50,24 @@ const covers = computed(() => {
     if (seen.has(key)) continue
     seen.add(key)
     const url = useAlbumCoverUrl(t.artist_slug, t.album_slug)
-    if (url) urls.push(url)
+    if (url && !failed.value.has(url)) urls.push(url)
     if (urls.length === 4) break
   }
   return urls
 })
 
+const seedOk = computed(() => !!props.seedSrc && !failed.value.has(props.seedSrc))
+
 const mode = computed<'grid' | 'single' | 'fallback'>(() => {
   if (covers.value.length >= 4) return 'grid'
-  if (props.seedSrc || covers.value.length > 0) return 'single'
+  if (seedOk.value || covers.value.length > 0) return 'single'
   return 'fallback'
 })
 
-const singleSrc = computed(() => props.seedSrc || covers.value[0] || '')
+const singleSrc = computed(() => (seedOk.value ? props.seedSrc! : covers.value[0] || ''))
+
+// Declared AFTER `mode` — an immediate watch reads it at setup (TDZ).
+watch(mode, (m) => { if (m === 'fallback') announce(null) }, { immediate: true })
 </script>
 
 <template>
@@ -55,10 +87,13 @@ const singleSrc = computed(() => props.seedSrc || covers.value[0] || '')
         densities="1x 2x"
         loading="lazy"
         class="mcg-cell"
+        @load="onImgLoad(src)"
+        @error="onImgError(src)"
       />
     </template>
     <NuxtImg
       v-else-if="mode === 'single'"
+      :key="singleSrc"
       :src="singleSrc"
       :alt="alt ?? ''"
       :width="320"
@@ -66,6 +101,8 @@ const singleSrc = computed(() => props.seedSrc || covers.value[0] || '')
       densities="1x 2x"
       loading="lazy"
       class="mcg-single"
+      @load="onImgLoad(singleSrc)"
+      @error="onImgError(singleSrc)"
     />
     <div v-else class="mcg-fallback"><Icon name="sparkle" :size="36" /></div>
     <slot />

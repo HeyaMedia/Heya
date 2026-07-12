@@ -44,6 +44,57 @@ func registerMusicServicesRoutes(api huma.API, app *service.App) {
 			return statusOK("importing"), nil
 		})
 
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/music-services/{service}/playlists", "list-external-playlists", "List playlists available for synchronization", "Me")),
+		func(ctx context.Context, in *struct {
+			Service string `path:"service" enum:"listenbrainz,lastfm"`
+		}) (*JSONOutput[service.PlaylistServiceCatalog], error) {
+			catalog, err := app.ListExternalPlaylists(ctx, userFrom(ctx).ID, in.Service)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(catalog), nil
+		})
+
+	// Select an existing provider playlist from Settings. Enabling imports a
+	// local copy and establishes the link; disabling keeps both copies.
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/music-services/{service}/playlists/{external_id}/sync", "set-external-playlist-sync", "Link or unlink an external playlist", "Me")),
+		func(ctx context.Context, in *struct {
+			Service    string `path:"service" enum:"listenbrainz,lastfm"`
+			ExternalID string `path:"external_id" minLength:"1" maxLength:"256"`
+			Body       playlistSyncToggle
+		}) (*JSONOutput[externalPlaylistSyncBody], error) {
+			playlistID, err := app.EnableExternalPlaylistSync(ctx, userFrom(ctx).ID, in.Service, in.ExternalID, in.Body.Enabled)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return noStoreJSON(externalPlaylistSyncBody{PlaylistID: playlistID, Enabled: in.Body.Enabled}), nil
+		})
+
+	// Opt a Heya playlist into a provider from the playlist itself. This path
+	// creates the provider-side copy on first enable.
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/playlists/{id}/sync/{service}", "set-local-playlist-sync", "Enable or disable playlist synchronization", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Service string `path:"service" enum:"listenbrainz,lastfm"`
+			Body    playlistSyncToggle
+		}) (*StatusOutput, error) {
+			if err := app.EnableLocalPlaylistSync(ctx, userFrom(ctx).ID, in.ID, in.Service, in.Body.Enabled); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return statusOK("saved"), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/playlists/{id}/sync/{service}", "sync-playlist-now", "Run a two-way playlist synchronization now", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Service string `path:"service" enum:"listenbrainz,lastfm"`
+		}) (*StatusOutput, error) {
+			if err := app.SyncPlaylist(ctx, userFrom(ctx).ID, in.ID, in.Service); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return statusOK("synced"), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodPost, "/api/me/music-services/lastfm/auth-start", "lastfm-auth-start", "Begin the Last.fm connect flow", "Me")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[lastfmAuthStartBody], error) {
 			authURL, token, err := app.LastfmAuthStart(ctx)
@@ -74,4 +125,13 @@ type musicServicesBody struct {
 type lastfmAuthStartBody struct {
 	AuthURL string `json:"auth_url"`
 	Token   string `json:"token"`
+}
+
+type playlistSyncToggle struct {
+	Enabled bool `json:"enabled"`
+}
+
+type externalPlaylistSyncBody struct {
+	PlaylistID int64 `json:"playlist_id,omitempty"`
+	Enabled    bool  `json:"enabled"`
 }

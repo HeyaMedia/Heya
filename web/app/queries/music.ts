@@ -32,11 +32,19 @@ export interface PlaylistDetailResponse {
     slug: string
     description: string
     cover_path: string
-    has_cover: boolean
     created_at: string
     updated_at: string
   }
   tracks: PlaylistTrackRow[]
+  /** Top-level (not nested in playlist) — mirrors the server's PlaylistDetail. */
+  has_cover: boolean
+  syncs: Array<{
+    service: string
+    external_id: string
+    external_url?: string
+    last_synced_at?: string
+    last_error?: string
+  }>
 }
 
 export interface UserPlaylistRow {
@@ -50,7 +58,10 @@ export interface UserPlaylistRow {
   created_at: string
   updated_at: string
   track_count: number
-  auto_cover: string
+  /** First track's addressing pair — feed playlistCoverSrc(), never render
+   *  cover_path directly (it's the custom cover's disk path). */
+  auto_artist_slug: string
+  auto_album_slug: string
 }
 
 export interface UserPlaylistsResponse {

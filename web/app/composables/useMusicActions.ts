@@ -404,7 +404,7 @@ export function useMusicActions() {
             // The playlist-detail endpoint returns ListPlaylistTracksRow, whose
             // JSON keys are track_id/track_title (not id/title). Build from the
             // correct fields and drop tracks whose file was removed from disk.
-            const r = await $heya('/api/me/playlists/{id}', { path: { id: p.id } }) as unknown as { tracks?: Array<{ track_id: number; track_title: string; artist_name?: string; album_title?: string; duration: number; album_id?: number; artist_id?: number; artist_slug?: string; album_slug?: string; available?: boolean }> }
+            const r = await $heya('/api/me/playlists/{id}', { path: { id: String(p.id) } }) as unknown as { tracks?: Array<{ track_id: number; track_title: string; artist_name?: string; album_title?: string; duration: number; album_id?: number; artist_id?: number; artist_slug?: string; album_slug?: string; available?: boolean }> }
             const list = (r.tracks ?? []).filter((t) => t.available !== false)
             if (!list.length) return
             const ts: Track[] = list.map((t) => ({

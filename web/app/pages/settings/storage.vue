@@ -94,15 +94,12 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Storage</h2>
-      <p class="sv2-page-desc">
-        Where your data lives. Filesystem totals are <code>statfs</code> stats
-        (same numbers <code>df</code> would show) — Heya doesn't walk your
-        library folders for size because that can take minutes on multi-TB
-        collections.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Storage"
+      icon="hard-drives"
+      eyebrow="Server · Data footprint"
+      description="See where Heya stores its database, cache, models, and media roots without walking enormous libraries just to calculate usage."
+    />
 
     <div v-if="loading && !storage" class="loading-state">
       <Icon name="spinner" :size="16" /> Probing filesystems…
@@ -327,5 +324,12 @@ onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
   font-size: 11px; color: var(--fg-3); text-decoration: none;
 }
 .link-arrow:hover { color: var(--gold); }
+
+@media (max-width: 520px) {
+  .tiles { grid-template-columns: 1fr; }
+  .lib-card { padding: 12px; }
+  .lib-path { white-space: normal; overflow-wrap: anywhere; }
+  .lib-usage { align-items: flex-start; flex-wrap: wrap; }
+}
 
 </style>

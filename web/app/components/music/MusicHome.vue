@@ -137,7 +137,7 @@
         class="mh-card-link"
       >
         <MusicCard
-          :src="p.cover_path || null"
+          :src="playlistCoverSrc(p)"
           :alt="p.name"
           :title="p.name"
           :subtitle="`${p.track_count} tracks`"
@@ -352,6 +352,10 @@ interface PlaylistRow {
   name: string
   cover_path: string
   track_count: number
+  has_cover?: boolean
+  updated_at?: string
+  auto_artist_slug?: string
+  auto_album_slug?: string
 }
 
 interface ShelfAlbum {
@@ -679,7 +683,8 @@ async function playArtist(slug: string, artistName: string) {
 async function playPlaylist(id: number, name: string) {
   try {
     const res = await $heya('/api/me/playlists/{id}', {
-      path: { id },
+      // The detail route takes slug-or-id; the spec types the param as string.
+      path: { id: String(id) },
     }) as { tracks: { id: number; title: string; duration: number; album_id: number; album_title: string; album_slug: string; artist_id: number; artist_name: string; artist_slug: string }[] }
     const tracks: Track[] = (res.tracks ?? []).map(t => ({
       id: t.id,

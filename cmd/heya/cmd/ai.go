@@ -243,7 +243,7 @@ var aiMixCmd = &cobra.Command{
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withApp(func(ctx context.Context, app *service.App) error {
-			res, err := app.AIMusicMix(ctx, service.AIMusicMixRequest{
+			res, err := app.AIMusicMix(ctx, 0, service.AIMusicMixRequest{
 				Query: strings.Join(args, " "),
 				Limit: aiMixLimit,
 			})

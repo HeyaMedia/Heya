@@ -107,14 +107,12 @@ const UPSTREAM_SOURCES = [
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Providers</h2>
-      <p class="sv2-page-desc">
-        External metadata + subtitle services. The Heya Media aggregator
-        fronts everything except subtitles, which still need a per-user
-        OpenSubtitles account.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Metadata providers"
+      icon="globe"
+      eyebrow="Media · External services"
+      description="See where metadata comes from and configure credentials for services that require a direct account."
+    />
 
     <SettingsSection title="Heya Media aggregator" icon="database"
       description="The upstream metadata router. All movie / TV / music / book metadata reaches Heya through it — there are no direct outbound clients in this binary."
@@ -324,5 +322,13 @@ const UPSTREAM_SOURCES = [
   font-size: 11px; color: var(--fg-3); text-decoration: none;
 }
 .link-arrow:hover { color: var(--gold); }
+
+@media (max-width: 520px) {
+  .actions-bar { align-items: stretch; flex-direction: column; }
+  .actions-spacer { display: none; }
+  .actions-bar .sv2-btn { justify-content: center; }
+  .test-row { align-items: flex-start; flex-direction: column; gap: 3px; padding: 7px 0; }
+  .test-key { width: auto; }
+}
 
 </style>

@@ -262,15 +262,30 @@ func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]L
 const listUserPlaylists = `-- name: ListUserPlaylists :many
 SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.updated_at, p.slug,
        (SELECT count(*) FROM user_playlist_tracks WHERE playlist_id = p.id) AS track_count,
+       -- First track's addressing pair — the FE builds the canonical
+       -- /api album-cover URL from these (image URLs are unconditional:
+       -- filtering on al.cover_path here re-created the documented
+       -- empty-column-means-no-image bug, so no cover filter).
        COALESCE(
-           (SELECT al.cover_path
+           (SELECT al.slug
             FROM user_playlist_tracks upt
             JOIN tracks t ON t.id = upt.track_id
             JOIN albums al ON al.id = t.album_id
-            WHERE upt.playlist_id = p.id AND al.cover_path != ''
-            ORDER BY upt.position ASC LIMIT 1),
+            WHERE upt.playlist_id = p.id
+            ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
            ''
-       ) AS auto_cover,
+       ) AS auto_album_slug,
+       COALESCE(
+           (SELECT mi.slug
+            FROM user_playlist_tracks upt
+            JOIN tracks t ON t.id = upt.track_id
+            JOIN albums al ON al.id = t.album_id
+            JOIN artists a ON a.id = al.artist_id
+            JOIN media_item_cards mi ON mi.id = a.media_item_id
+            WHERE upt.playlist_id = p.id
+            ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
+           ''
+       ) AS auto_artist_slug,
        (p.cover_path != '') AS has_cover
 FROM user_playlists p
 WHERE p.user_id = $1
@@ -278,17 +293,18 @@ ORDER BY p.created_at DESC
 `
 
 type ListUserPlaylistsRow struct {
-	ID          int64              `json:"id"`
-	UserID      int64              `json:"user_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CoverPath   string             `json:"cover_path"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Slug        string             `json:"slug"`
-	TrackCount  int64              `json:"track_count"`
-	AutoCover   interface{}        `json:"auto_cover"`
-	HasCover    bool               `json:"has_cover"`
+	ID             int64              `json:"id"`
+	UserID         int64              `json:"user_id"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	CoverPath      string             `json:"cover_path"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Slug           string             `json:"slug"`
+	TrackCount     int64              `json:"track_count"`
+	AutoAlbumSlug  interface{}        `json:"auto_album_slug"`
+	AutoArtistSlug interface{}        `json:"auto_artist_slug"`
+	HasCover       bool               `json:"has_cover"`
 }
 
 // Used by the sidebar — small payload, includes a synthesized cover (first
@@ -312,7 +328,8 @@ func (q *Queries) ListUserPlaylists(ctx context.Context, userID int64) ([]ListUs
 			&i.UpdatedAt,
 			&i.Slug,
 			&i.TrackCount,
-			&i.AutoCover,
+			&i.AutoAlbumSlug,
+			&i.AutoArtistSlug,
 			&i.HasCover,
 		); err != nil {
 			return nil, err

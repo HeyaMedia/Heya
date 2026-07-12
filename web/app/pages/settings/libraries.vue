@@ -419,14 +419,12 @@ watch(() => route.query.library, () => syncScannerFromRoute())
       @back="closeScanner"
     />
     <template v-else>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Libraries</h2>
-      <p class="sv2-page-desc">
-        Your media folders. Each library has its own metadata defaults
-        (NFO, images, refresh window, trickplay). Env-locked libraries
-        carry a key badge and can't be deleted from the UI.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Libraries"
+      icon="folder"
+      eyebrow="Media · Library sources"
+      description="Connect media folders, tune each library's scanner and metadata policy, and see live scan coverage from one place."
+    />
 
     <div class="tiles">
       <MetricTile label="Total" :value="libraries.length" icon="folder" />
@@ -737,7 +735,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
 <style scoped>
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
   margin-bottom: 28px;
 }

@@ -123,12 +123,12 @@ defineProps<{
 }
 .sv2-section-body { display: block; }
 
-/* Phone: every page's #actions slot (buttons, selects, search inputs) sits
-   in this same flex row with flex-shrink:0 — on a 390px viewport that
-   overflows horizontally for nearly every admin page. Stack title above
-   actions and let actions wrap instead, one shared fix instead of a
-   per-page media query. */
-@media (max-width: 720px) {
+/* Narrow desktop/tablet: every page's #actions slot (buttons, selects,
+   search inputs) sits in this same flex row with flex-shrink:0 — once the
+   settings rail leaves less than ~650px for content that row can overflow.
+   Stack title above actions and let actions wrap instead, one shared fix
+   instead of a per-page media query. */
+@media (max-width: 900px) {
   .sv2-section {
     margin-bottom: 12px;
     padding: 15px 14px 16px;

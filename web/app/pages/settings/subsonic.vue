@@ -132,12 +132,12 @@ onMounted(() => { ensureSources() })
 
 <template>
   <div class="settings-page">
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Subsonic API</h2>
-      <p class="sv2-page-desc">
-        Connect Subsonic-compatible music apps using a dedicated, revocable app password.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Subsonic API"
+      icon="music"
+      eyebrow="Server · Music clients"
+      description="Connect dedicated music apps with a separate revocable credential, without exposing your normal account password."
+    />
 
     <SettingsSection
       title="Subsonic-compatible API"
@@ -278,7 +278,7 @@ onMounted(() => { ensureSources() })
 .ss-hint {
   margin-top: 12px;
   font-size: 13px;
-  opacity: 0.75;
+  color: var(--fg-2);
   line-height: 1.55;
 }
 .ss-hint code {
@@ -326,5 +326,11 @@ onMounted(() => { ensureSources() })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .ss-secret-row { align-items: stretch; flex-wrap: wrap; }
+  .ss-secret { flex-basis: 100%; }
+  .ss-secret-row .ss-btn { flex: 1; }
 }
 </style>

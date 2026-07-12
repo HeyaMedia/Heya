@@ -98,9 +98,17 @@
       :buffer="610"
       key-field="id"
       page-mode
+      @update="onScrollerUpdate"
       v-slot="{ item: t, index: i }"
     >
+      <!-- Sparse (random-access paged) lists hand down placeholder rows for
+           the stretches the scrollbar hasn't visited yet — hold the row
+           footprint with a shimmer instead of mounting a dead TrackListItem. -->
+      <div v-if="t.pending" class="tl-row tl-track tl-pending" :style="!isPhone ? { gridTemplateColumns } : undefined">
+        <div class="tl-skel-bar" />
+      </div>
       <TrackListItem
+        v-else
         :track="t"
         :index="i"
         :columns="columns"
@@ -158,6 +166,9 @@ export interface TrackListRow {
   /** Phone-only quality label ("FLAC 24/96", "MP3 320") — see utils/trackQuality.ts.
    *  Rendered under the duration in the phone row; omitted entirely when absent. */
   quality?: string | null
+  /** Placeholder row in a sparse (random-access paged) list — renders as a
+   *  skeleton. Give placeholders unique negative ids for the v-for key. */
+  pending?: boolean
 }
 
 export type TrackListColumnKind =
@@ -218,10 +229,19 @@ const props = withDefaults(defineProps<{
   virtualized: false,
 })
 
-const emit = defineEmits<{ 'row-click': [index: number] }>()
+const emit = defineEmits<{
+  'row-click': [index: number]
+  /** Rendered row range (buffer included) from the virtualized scroller —
+   *  sparse pages wire this to useVirtualCatalog.ensureRange. */
+  'range': [start: number, end: number]
+}>()
 
 const { isPhone, isCoarse } = useViewport()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
+
+function onScrollerUpdate(start: number, end: number) {
+  emit('range', start, end)
+}
 
 const hasArt = computed(() => props.columns.some((c) => c.kind === 'art' || (c.kind === 'title' && c.inlineArt)))
 
@@ -302,6 +322,21 @@ padding: 4px 6px 8px;
 .tl-track.tl-active .tl-c-index { color: var(--gold); }
 .tl-track.tl-missing { opacity: 0.5; cursor: default; }
 .tl-track.tl-missing:hover { background: transparent; }
+
+/* Sparse-list placeholder row: one shimmer bar holding the title slot. */
+.tl-pending { cursor: default; display: flex; align-items: center; height: 100%; }
+.tl-pending:hover { background: transparent; }
+.tl-skel-bar {
+  height: 12px;
+  width: min(46%, 320px);
+  border-radius: 6px;
+  background: rgb(var(--ink) / 0.08);
+  animation: tl-skel-pulse 1.5s ease-in-out infinite;
+}
+@keyframes tl-skel-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
 
 /* Drag affordance — fine-pointer only, doesn't touch the resting cursor on
    touch devices (which don't drag; long-press opens the context menu). */

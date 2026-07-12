@@ -190,14 +190,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Sonic analysis</h2>
-      <p class="sv2-page-desc">
-        ML/DSP pipeline that gives you similarity, audio-vibe search, BPM, key,
-        mood, danceability, loudness, and waveforms. Off by default — turning
-        it on triggers a ~720 MB model download.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Sonic analysis"
+      icon="eq"
+      eyebrow="Media intelligence · Audio understanding"
+      description="Analyze the sound itself to unlock similarity, vibe search, BPM, key, mood, danceability, loudness, and waveforms."
+    />
 
     <SettingsSection
       title="Master switch"

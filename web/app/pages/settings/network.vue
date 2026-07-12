@@ -137,14 +137,12 @@ watch(cfg, (next) => {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Network</h2>
-      <p class="sv2-page-desc">
-        How the world reaches Heya. LAN listener is always on; Tailscale
-        joins your tailnet without port forwarding; Funnel optionally
-        publishes to the open internet (auth still applies).
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Network"
+      icon="network"
+      eyebrow="Server · Connectivity"
+      description="Understand every route into Heya—from the local listener to Tailscale and optional Funnel access—with authentication preserved throughout."
+    />
 
     <SettingsSection title="Active listeners" icon="network">
       <template #actions>

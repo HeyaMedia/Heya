@@ -25,6 +25,26 @@ func (a *App) HeartedArtistIDs(ctx context.Context, userID int64) ([]int64, erro
 	return a.heartedIDs(ctx, userID, `SELECT artist_id FROM user_artist_ratings WHERE user_id = $1 AND rating >= $2`)
 }
 
+// DislikedTrackIDs is the hard-veto set (rating ≤3): generated contexts
+// (mixes, radio, AI mixes) must never queue these.
+func (a *App) DislikedTrackIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := a.db.Query(ctx,
+		`SELECT track_id FROM user_track_ratings WHERE user_id = $1 AND rating <= 3`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // HeartedArtistMediaItemIDs is the Jellyfin-shaped variant: music artists are
 // media_items rows in Jellyfin's id scheme, so the favorite decoration for
 // MusicArtist DTOs needs media_item ids.

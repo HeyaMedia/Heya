@@ -58,7 +58,7 @@ watch(() => settingsData.data.value, value => {
 
 const hasChanges = computed(() => !!settings.value && JSON.stringify(settings.value) !== persistedSettings.value)
 const activeLibrary = computed(() => libraries.value.find(library => String(library.id) === activeTab.value))
-const qualityLabel = computed(() => QUALITIES.find(quality => quality.value === settings.value?.playback.default_quality)?.label ?? 'Automatic')
+const qualityLabel = computed(() => (QUALITIES.find(quality => quality.value === settings.value?.playback.default_quality)?.label ?? 'Automatic').replace(' (recommended)', ''))
 const subtitleModeLabel = computed(() => SUB_MODES.find(mode => mode.value === settings.value?.playback.subtitle_mode)?.label ?? 'Automatic')
 
 async function save() {
@@ -491,7 +491,7 @@ function libraryIcon(kind: string): string {
 .save-bar {
   position: sticky;
   z-index: 5;
-  bottom: 12px;
+  bottom: 56px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -542,7 +542,7 @@ function libraryIcon(kind: string): string {
 
 @media (max-width: 720px) {
   .sv2-select { min-width: 0; width: 100%; }
-  .save-bar { bottom: 8px; flex-wrap: wrap; }
+  .save-bar { position: static; bottom: auto; flex-wrap: wrap; box-shadow: none; }
   .save-state, .pw-flash { flex: 1 1 100%; }
 }
 </style>

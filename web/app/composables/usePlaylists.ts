@@ -55,7 +55,7 @@ export function usePlaylists() {
       method: 'POST',
       body: { name, description, cover_path: coverPath },
     }) as UserPlaylistRow
-    const row = { ...created, track_count: 0, auto_cover: '' } as UserPlaylistRow
+    const row = { ...created, track_count: 0, auto_artist_slug: '', auto_album_slug: '' } as UserPlaylistRow
     updateList(rows => [row, ...rows])
     invalidatePlaylistCaches()
     return created
@@ -97,10 +97,14 @@ export function usePlaylists() {
   // fresh row back to re-route with.
   async function update(id: number, patch: { name: string; description: string }) {
     const { $heya } = useNuxtApp()
+    // cover_path is required by the PUT body and stores the custom cover's
+    // disk path — pass the current value through so a rename never clears
+    // an uploaded cover.
+    const current = playlists.value.find(p => p.id === id)
     const updated = await $heya('/api/me/playlists/{id}', {
       method: 'PUT',
       path: { id },
-      body: { name: patch.name, description: patch.description },
+      body: { name: patch.name, description: patch.description, cover_path: current?.cover_path ?? '' },
     }) as unknown as UserPlaylistRow
     updateList(rows => rows.map(p => (p.id === id ? { ...p, ...updated } : p)))
     invalidatePlaylistCaches(id, updated.slug)
@@ -135,7 +139,9 @@ export function usePlaylists() {
       slug: p.slug,
       name: p.name,
       count: p.track_count,
-      cover_path: p.cover_path || p.auto_cover,
+      // Resolved, renderable URL (custom-cover endpoint or first album's
+      // canonical cover) — raw cover_path is a disk path, never usable.
+      cover_path: playlistCoverSrc(p) ?? '',
     })),
   )
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/rs/zerolog/log"
 )
 
 // Music smart-home shelves. Each method returns one section of the landing
@@ -63,6 +64,15 @@ func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, 
 	}
 	if tracksPerMix <= 0 || tracksPerMix > 100 {
 		tracksPerMix = 30
+	}
+
+	// Taste-driven path first: affinity-scored seeds, liked-track centroids,
+	// track-level KNN, exploration share (music_mixes_taste.go). Falls back
+	// to the legacy top-played/artist-centroid generator on cold start.
+	if mixes, err := a.generateTasteMixes(ctx, userID, maxMixes, tracksPerMix); err != nil {
+		log.Warn().Err(err).Msg("taste mixes failed — using legacy generator")
+	} else if len(mixes) > 0 {
+		return mixes, nil
 	}
 
 	q := sqlc.New(a.db)

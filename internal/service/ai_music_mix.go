@@ -128,7 +128,7 @@ type aiMusicCandidate struct {
 //  3. LLM selects and sequences only ids from that pool.
 //  4. Code validates, de-duplicates, diversifies, and fills to the requested
 //     length if the small model returns too few picks.
-func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixResult, error) {
+func (a *App) AIMusicMix(ctx context.Context, userID int64, in AIMusicMixRequest) (AIMusicMixResult, error) {
 	query := strings.TrimSpace(in.Query)
 	if len(query) < 2 {
 		return AIMusicMixResult{}, fmt.Errorf("mix brief is empty")
@@ -158,6 +158,20 @@ func (a *App) AIMusicMix(ctx context.Context, in AIMusicMixRequest) (AIMusicMixR
 	candidates, err := a.aiMusicCandidatePool(ctx, plan.Probes, limit)
 	if err != nil {
 		return AIMusicMixResult{}, err
+	}
+	// Dislikes are law: drop thumbs-downed tracks before anything selects.
+	if vetoed, err := a.DislikedTrackIDs(ctx, userID); err == nil && len(vetoed) > 0 {
+		vetoSet := make(map[int64]bool, len(vetoed))
+		for _, id := range vetoed {
+			vetoSet[id] = true
+		}
+		kept := candidates[:0]
+		for _, c := range candidates {
+			if !vetoSet[c.Row.TrackID] {
+				kept = append(kept, c)
+			}
+		}
+		candidates = kept
 	}
 	retrievalDuration := time.Since(retrievalStarted)
 

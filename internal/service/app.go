@@ -366,6 +366,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		if err := app.BootstrapLibrariesFromEnv(ctx); err != nil {
 			log.Warn().Err(err).Msg("HEYA_LIBRARY_* bootstrap failed")
 		}
+		go app.runPlaylistSyncLoop()
 	}
 
 	return app, nil

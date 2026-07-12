@@ -49,7 +49,10 @@ const expanded = ref<number | null>(null)
 function toggleExpanded(id: number) {
   expanded.value = expanded.value === id ? null : id
 }
-const loading = computed(() => jobsData.isLoading.value)
+// Pinia Colada marks a background refetch as loading as well. Keep the last
+// successful snapshot painted while queue events refresh it; otherwise the
+// entire table is replaced by the loading row for a frame on every update.
+const loading = computed(() => jobsData.isLoading.value && !jobsData.data.value)
 const busy = ref<'' | 'rescue' | 'completed' | 'all' | 'kind'>('')
 const { flash } = useFlash()
 const workerSettingsOpen = ref(false)
@@ -403,13 +406,12 @@ onMounted(() => {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Jobs</h2>
-      <p class="sv2-page-desc">
-        River background queue — every scan, ffprobe, image fetch and analyse
-        runs through here. Auto-refreshes on queue events.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Job queue"
+      icon="queue"
+      eyebrow="Server · Background work"
+      description="Follow every scan, probe, metadata fetch, and analysis job moving through River, including failures and retries."
+    />
 
     <div class="tiles">
       <MetricTile label="Running"    :value="summaryCount('running')"    icon="pulse"   :tone="tileTones.running" />

@@ -1,7 +1,12 @@
 # Mixes for You — Rule Engine Plan
 
-Status: **design** (2026-07-12). Research into why the current mixes feel
-rigid and a rule-block architecture to replace them. No code yet.
+Status: **phases 1+2 shipped** (2026-07-12) — affinity CTE (plays w/
+completion/skip/decay + reaction bands, dislike = hard veto), liked-track
+taste centroids per artist, track-level KNN expansion, personal-affinity
+core, day-seeded exploration share, version dedup; dislike veto also
+enforced in instant radio + AI mix builder. Legacy generator remains the
+cold-start fallback. Remaining: archetype slate (phase 3), mood/BPM arcs +
+serving memory (phase 4), scrobble import UI polish.
 
 ## Why mixes feel rigid today
 

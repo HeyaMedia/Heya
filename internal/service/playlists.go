@@ -22,6 +22,7 @@ type PlaylistDetail struct {
 	Playlist sqlc.UserPlaylist            `json:"playlist"`
 	Tracks   []sqlc.ListPlaylistTracksRow `json:"tracks"`
 	HasCover bool                         `json:"has_cover"`
+	Syncs    []PlaylistSyncView           `json:"syncs"`
 }
 
 // userPlaylistSlugExists adapts UserPlaylistSlugExists to slug.ExistsFunc —
@@ -77,7 +78,11 @@ func (a *App) GetUserPlaylistDetail(ctx context.Context, userID, playlistID int6
 	if err != nil {
 		return nil, fmt.Errorf("playlist not found: %w", err)
 	}
-	return buildPlaylistDetail(ctx, q, pl)
+	detail, err := buildPlaylistDetail(ctx, q, pl)
+	if err == nil {
+		detail.Syncs, err = a.ListPlaylistSyncs(ctx, userID, pl.ID)
+	}
+	return detail, err
 }
 
 // GetUserPlaylistDetailByRef resolves the {id} path param on the playlist
@@ -96,7 +101,11 @@ func (a *App) GetUserPlaylistDetailByRef(ctx context.Context, userID int64, ref 
 	if err != nil {
 		return nil, fmt.Errorf("playlist not found: %w", err)
 	}
-	return buildPlaylistDetail(ctx, q, pl)
+	detail, err := buildPlaylistDetail(ctx, q, pl)
+	if err == nil {
+		detail.Syncs, err = a.ListPlaylistSyncs(ctx, userID, pl.ID)
+	}
+	return detail, err
 }
 
 // buildPlaylistDetail fetches the ordered tracklist for an already-resolved,
@@ -106,7 +115,7 @@ func buildPlaylistDetail(ctx context.Context, q *sqlc.Queries, pl sqlc.UserPlayl
 	if tracks == nil {
 		tracks = []sqlc.ListPlaylistTracksRow{}
 	}
-	return &PlaylistDetail{Playlist: pl, Tracks: tracks, HasCover: pl.CoverPath != ""}, nil
+	return &PlaylistDetail{Playlist: pl, Tracks: tracks, HasCover: pl.CoverPath != "", Syncs: []PlaylistSyncView{}}, nil
 }
 
 // AddTrackToPlaylist appends a track to the end of the playlist (idempotent
@@ -117,7 +126,11 @@ func (a *App) AddTrackToPlaylist(ctx context.Context, userID, playlistID, trackI
 	if _, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID}); err != nil {
 		return fmt.Errorf("playlist not found: %w", err)
 	}
-	return q.AddTrackToPlaylist(ctx, sqlc.AddTrackToPlaylistParams{PlaylistID: playlistID, TrackID: trackID})
+	if err := q.AddTrackToPlaylist(ctx, sqlc.AddTrackToPlaylistParams{PlaylistID: playlistID, TrackID: trackID}); err != nil {
+		return err
+	}
+	a.TriggerPlaylistSync(userID, playlistID)
+	return nil
 }
 
 // RemoveTrackFromPlaylist removes a track from a playlist.
@@ -126,7 +139,11 @@ func (a *App) RemoveTrackFromPlaylist(ctx context.Context, userID, playlistID, t
 	if _, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID}); err != nil {
 		return fmt.Errorf("playlist not found: %w", err)
 	}
-	return q.RemoveTrackFromPlaylist(ctx, sqlc.RemoveTrackFromPlaylistParams{PlaylistID: playlistID, TrackID: trackID})
+	if err := q.RemoveTrackFromPlaylist(ctx, sqlc.RemoveTrackFromPlaylistParams{PlaylistID: playlistID, TrackID: trackID}); err != nil {
+		return err
+	}
+	a.TriggerPlaylistSync(userID, playlistID)
+	return nil
 }
 
 // DeleteUserPlaylist drops a playlist and its tracks (cascade).
@@ -148,14 +165,18 @@ func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, 
 	if name != existing.Name {
 		newSlug = slug.GenerateUnique(ctx, name, "", playlistID, userPlaylistSlugExists(q, userID))
 	}
-	return q.UpdateUserPlaylist(ctx, sqlc.UpdateUserPlaylistParams{
+	if err := q.UpdateUserPlaylist(ctx, sqlc.UpdateUserPlaylistParams{
 		ID:          playlistID,
 		UserID:      userID,
 		Name:        name,
 		Description: description,
 		CoverPath:   cover,
 		Slug:        newSlug,
-	})
+	}); err != nil {
+		return err
+	}
+	a.TriggerPlaylistSync(userID, playlistID)
+	return nil
 }
 
 // SetUserPlaylistCover saves an uploaded cover image for a playlist, replacing

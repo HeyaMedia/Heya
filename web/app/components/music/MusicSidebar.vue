@@ -169,7 +169,7 @@ import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui
 
 const props = defineProps<{
   section: string
-  playlists: Array<{ id: number; name: string; count: number; cover_path?: string }>
+  playlists: Array<{ id: number; slug: string; name: string; count: number; cover_path?: string }>
 }>()
 
 defineEmits<{ 'create-playlist': [] }>()

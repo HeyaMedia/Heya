@@ -95,13 +95,12 @@ function lastFetchedText(): string {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Filesystem watchers</h2>
-      <p class="sv2-page-desc">
-        One fsnotify watcher per library path. New files trigger an immediate
-        scan; without a watcher you depend on the periodic rescan task.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Filesystem watchers"
+      icon="eye"
+      eyebrow="Media · Live discovery"
+      description="Watch library roots for changes in real time. Paths without coverage safely fall back to scheduled rescans."
+    />
 
     <div v-if="loading && !status" class="loading-state">
       <Icon name="spinner" :size="16" /> Loading…

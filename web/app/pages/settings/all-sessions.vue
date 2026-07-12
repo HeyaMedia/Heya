@@ -66,14 +66,12 @@ const allUsernames = computed(() =>
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">All sessions</h2>
-      <p class="sv2-page-desc">
-        Browser sessions and API tokens across every user. Admin-only —
-        you can sign anyone out, but a revoked browser session just kicks
-        the user back to login.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="All sessions"
+      icon="fingerprint"
+      eyebrow="Server · Active credentials"
+      description="Audit browser sessions and API tokens across every account, then revoke access immediately when something looks unfamiliar."
+    />
 
     <div class="tiles">
       <MetricTile label="Total" :value="counts.total" icon="eye" />

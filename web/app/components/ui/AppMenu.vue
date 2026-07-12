@@ -20,6 +20,7 @@
       :class="triggerClass"
       :title="triggerTitle"
       :aria-label="triggerAriaLabel ?? triggerTitle"
+      :style="triggerStyle"
     >
       <slot name="trigger" :open="open" />
     </DropdownMenuTrigger>
@@ -49,6 +50,8 @@ withDefaults(defineProps<{
   /** Explicit accessible name for icon-only triggers; falls back to
    *  triggerTitle (title-as-accname works but is the fragile path). */
   triggerAriaLabel?: string
+  /** Inline style for the trigger — artwork-adaptive tints etc. */
+  triggerStyle?: Record<string, string>
   contentClass?: string | string[] | Record<string, boolean>
 }>(), {
   sideOffset: 8,

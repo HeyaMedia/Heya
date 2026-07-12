@@ -37,7 +37,7 @@
         class="ms-card-link"
       >
         <MusicCard
-          :src="pl.cover_path || null"
+          :src="playlistCoverSrc(pl)"
           :alt="pl.name"
           :title="pl.name"
           :subtitle="`${pl.track_count} ${pl.track_count === 1 ? 'track' : 'tracks'}`"

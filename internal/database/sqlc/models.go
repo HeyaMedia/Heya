@@ -1172,6 +1172,18 @@ type UserPlaylist struct {
 	Slug        string             `json:"slug"`
 }
 
+type UserPlaylistSync struct {
+	UserID           int64              `json:"user_id"`
+	PlaylistID       int64              `json:"playlist_id"`
+	Service          string             `json:"service"`
+	ExternalID       string             `json:"external_id"`
+	SnapshotTrackIds []byte             `json:"snapshot_track_ids"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastError        string             `json:"last_error"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type UserPlaylistTrack struct {
 	PlaylistID int64              `json:"playlist_id"`
 	TrackID    int64              `json:"track_id"`

@@ -183,15 +183,12 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">AI</h2>
-      <p class="sv2-page-desc">
-        Optional language-model subsystem powering smart collections, playlist
-        generation, and recommendations. Run a small model locally, bring an
-        API key, or use a Claude/Codex subscription. Off by default —
-        nothing runs and nothing phones home until you enable it.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="AI providers"
+      icon="wand"
+      eyebrow="Media intelligence · Language models"
+      description="Choose a private local model, an external API, or an authenticated subscription for smart collections, playlists, and recommendations."
+    />
 
     <SettingsSection
       title="Mode"
@@ -594,4 +591,22 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .sv2-select:hover:not(:disabled) { border-color: var(--fg-4); }
 .sv2-select:focus { border-color: var(--gold); background: var(--bg-1); }
 .sv2-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  .mode-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+  .artifact-card { align-items: flex-start; flex-direction: column; }
+  .artifact-info { flex-wrap: wrap; }
+}
+
+@media (max-width: 520px) {
+  .mode-row { grid-template-columns: 1fr; }
+  .mode-btn { padding: 12px 13px; }
+  .mode-status, .test-meta { align-items: flex-start; flex-wrap: wrap; }
+  .model-row { align-items: stretch; flex-direction: column; }
+  .model-row .sv2-btn { justify-content: center; }
+  .sv2-input, .sv2-select { width: 100%; min-width: 0; max-width: none; }
+}
 </style>

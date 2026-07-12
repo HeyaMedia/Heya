@@ -41,16 +41,12 @@ function libraryIcon(kind: string): string {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Metadata</h2>
-      <p class="sv2-page-desc">
-        How aggressively Heya re-fetches metadata, whether it writes
-        sidecars (NFO + image files) back to disk, and how it handles
-        collection grouping. Per-library — tune individually on the
-        <NuxtLink to="/settings/libraries" class="inline-link">Libraries</NuxtLink>
-        page.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Metadata policies"
+      icon="refresh"
+      eyebrow="Media · Enrichment"
+      description="Review how every library refreshes metadata, writes sidecars and artwork, fetches ratings, and groups collections."
+    />
 
     <div class="tiles">
       <MetricTile
@@ -178,7 +174,7 @@ function libraryIcon(kind: string): string {
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   margin-bottom: 28px;
 }
@@ -275,7 +271,7 @@ function libraryIcon(kind: string): string {
    header row that normally supplies the column meaning is hidden, so each
    badge grows a small inline label), refresh/locale trail on their own
    line. .col-label only exists for this breakpoint. */
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .lib-head { display: none; }
   .lib-row {
     display: flex;

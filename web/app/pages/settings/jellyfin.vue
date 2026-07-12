@@ -54,12 +54,12 @@ onMounted(() => { ensureSources() })
 
 <template>
   <div class="settings-page">
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Jellyfin API</h2>
-      <p class="sv2-page-desc">
-        Let Jellyfin-compatible clients discover Heya and sign in with normal Heya accounts.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Jellyfin API"
+      icon="cast"
+      eyebrow="Server · Client compatibility"
+      description="Let compatible television, desktop, and mobile clients discover Heya and authenticate with normal Heya accounts."
+    />
 
     <SettingsSection
       title="Jellyfin-compatible API"
@@ -164,7 +164,7 @@ onMounted(() => { ensureSources() })
 .jf-hint {
   margin-top: 12px;
   font-size: 13px;
-  opacity: 0.75;
+  color: var(--fg-2);
   line-height: 1.55;
 }
 .jf-hint code {

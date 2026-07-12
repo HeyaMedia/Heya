@@ -48,7 +48,7 @@ var ErrNoRadioSeed = errors.New("no analyzed track available for the given seed"
 // every resolved seed into one centroid and KNN around it — the queue then
 // reflects the joint space of every input. Diversifies the result so we
 // don't slam back-to-back tracks from the same artist.
-func (a *App) BuildRadio(ctx context.Context, req RadioRequest) (*RadioResponse, error) {
+func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*RadioResponse, error) {
 	if req.Limit <= 0 || req.Limit > 200 {
 		req.Limit = 50
 	}
@@ -100,6 +100,10 @@ func (a *App) BuildRadio(ctx context.Context, req RadioRequest) (*RadioResponse,
 	centroid := averageEmbeddings(embeddings)
 
 	exclude := append(append([]int64{}, seedIDs...), req.ExcludeTrackIDs...)
+	// Dislikes are law: a thumbs-downed track never enters a generated queue.
+	if vetoed, err := a.DislikedTrackIDs(ctx, userID); err == nil {
+		exclude = append(exclude, vetoed...)
+	}
 
 	// Over-fetch so diversification has room to drop same-artist runs.
 	// 2.5× is a heuristic; sonic-similar pools tend to cluster by artist.

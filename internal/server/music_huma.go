@@ -524,7 +524,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			Body service.RadioRequest
 		}) (*JSONOutput[*service.RadioResponse], error) {
-			resp, err := app.BuildRadio(ctx, in.Body)
+			resp, err := app.BuildRadio(ctx, userFrom(ctx).ID, in.Body)
 			if err != nil {
 				if errors.Is(err, service.ErrNoRadioSeed) {
 					return nil, huma.Error404NotFound("no analyzed track available for that seed yet")
@@ -550,7 +550,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			Body service.AIMusicMixRequest
 		}) (*JSONOutput[service.AIMusicMixResult], error) {
-			resp, err := app.AIMusicMix(ctx, in.Body)
+			resp, err := app.AIMusicMix(ctx, userFrom(ctx).ID, in.Body)
 			if err != nil {
 				if errors.Is(err, sonicanalysis.ErrTextSearcherUnavailable) {
 					return nil, huma.Error503ServiceUnavailable("AI Mix Builder needs the CLAP text model — enable Sonic Analysis and let its models finish downloading")

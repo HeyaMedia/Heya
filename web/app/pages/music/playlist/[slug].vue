@@ -7,7 +7,12 @@
     </MusicEmptyState>
   </div>
   <div v-else class="pl-page">
-    <header class="pl-hero">
+    <!-- Ambient-extended (house hero convention, same as artist/movie/TV):
+         with ambient backdrops ON, the layer behind the app rotates through
+         this playlist's artists and the hero paints NOTHING of its own — a
+         local band would seam against the full-page art. Only with ambient
+         OFF does the hero paint its blurred-cover backdrop inside itself. -->
+    <header class="pl-hero" :class="{ 'ambient-extended': ambientEnabled }">
       <div class="pl-hero-bg" :style="coverStyle" />
       <div class="pl-hero-fade" />
       <div class="pl-hero-content">
@@ -41,9 +46,9 @@
                 <Icon name="pencil" :size="14" class="surface-item-icon" /> Edit details…
               </DropdownMenuItem>
               <DropdownMenuItem class="surface-item" @select="coverInput?.click()">
-                <Icon name="image" :size="14" class="surface-item-icon" /> {{ pl.has_cover ? 'Replace cover…' : 'Set custom cover…' }}
+                <Icon name="image" :size="14" class="surface-item-icon" /> {{ hasCover ? 'Replace cover…' : 'Set custom cover…' }}
               </DropdownMenuItem>
-              <DropdownMenuItem v-if="pl.has_cover" class="surface-item" @select="removeCover">
+              <DropdownMenuItem v-if="hasCover" class="surface-item" @select="removeCover">
                 <Icon name="undo" :size="14" class="surface-item-icon" /> Use generated cover
               </DropdownMenuItem>
               <div class="surface-divider" />
@@ -139,6 +144,30 @@
         <input id="pl-edit-name" v-model="editName" type="text" class="pl-edit-input" maxlength="200" @keydown.enter.prevent="saveEdit" />
         <label class="pl-edit-label" for="pl-edit-desc">Description</label>
         <textarea id="pl-edit-desc" v-model="editDescription" class="pl-edit-input pl-edit-desc" rows="3" maxlength="1000" placeholder="Optional" />
+        <div class="pl-sync-heading">Playlist sync</div>
+        <div class="pl-sync-service">
+          <div>
+            <strong>ListenBrainz</strong>
+            <span v-if="listenBrainzConnected">{{ listenBrainzSync ? (listenBrainzSync.last_error || 'Two-way sync is active') : 'Keep this playlist synchronized in both directions' }}</span>
+            <span v-else>Connect ListenBrainz in Settings → Music services first</span>
+          </div>
+          <div class="pl-sync-actions">
+            <button v-if="listenBrainzSync" class="btn btn-sm" :disabled="syncBusy" @click="syncNow('listenbrainz')">Sync now</button>
+            <AppSwitch
+              :model-value="!!listenBrainzSync"
+              :disabled="!listenBrainzConnected || syncBusy"
+              size="md"
+              aria-label="Synchronize this playlist with ListenBrainz"
+              @update:model-value="togglePlaylistSync('listenbrainz', $event)"
+            />
+          </div>
+        </div>
+        <div class="pl-sync-service unavailable">
+          <div>
+            <strong>Last.fm</strong>
+            <span>Last.fm retired its playlist API, so playlist synchronization is unavailable.</span>
+          </div>
+        </div>
       </div>
       <template #footer>
         <button class="btn" @click="editOpen = false">Cancel</button>
@@ -157,6 +186,7 @@ import type { ContextMenuItem } from '~~/shared/types'
 import { DropdownMenuItem } from 'reka-ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { playlistDetailQuery, type PlaylistDetailResponse, type PlaylistTrackRow } from '~/queries/music'
+import { musicServicesQuery } from '~/queries/settings'
 
 definePageMeta({ layout: 'default' })
 
@@ -180,6 +210,8 @@ const playlistRef = computed(() => String(route.params.slug ?? ''))
 const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
 const playlists = usePlaylists()
 const queryClient = useQueryCache()
+const { $heya } = useNuxtApp()
+const { flash } = useFlash()
 
 const detailQuery = useQuery(() => playlistDetailQuery(playlistRef.value))
 await waitForQuery(detailQuery)
@@ -189,14 +221,19 @@ const detail = computed<PlaylistDetailResponse | null>(() => detailQuery.data.va
 const pl = computed(() => detail.value!.playlist)
 const playlistId = computed(() => detail.value?.playlist.id ?? 0)
 const tracks = computed(() => detail.value?.tracks ?? [])
+const musicServices = useQuery(musicServicesQuery())
+const listenBrainzConnected = computed(() => musicServices.data.value?.find(s => s.service === 'listenbrainz')?.token_set ?? false)
+const listenBrainzSync = computed(() => detail.value?.syncs?.find(s => s.service === 'listenbrainz'))
+const syncBusy = ref(false)
 const totalDuration = computed(() => tracks.value.reduce((s, t) => s + (t.duration || 0), 0))
 
 // ── Cover ────────────────────────────────────────────────────────────
 // coverBust invalidates the <img> URL after an upload — the endpoint path
 // never changes, only the bytes behind it.
 const coverBust = ref(0)
+const hasCover = computed(() => detail.value?.has_cover ?? false)
 const customCoverUrl = computed(() =>
-  pl.value.has_cover ? `/api/me/playlists/${playlistId.value}/cover?v=${Date.parse(pl.value.updated_at) || 0}-${coverBust.value}` : null,
+  hasCover.value ? `/api/me/playlists/${playlistId.value}/cover?v=${Date.parse(pl.value.updated_at) || 0}-${coverBust.value}` : null,
 )
 const firstAlbumCover = computed(() => {
   const first = tracks.value[0]
@@ -220,6 +257,47 @@ watch(backdropSrc, (src) => {
     heroToneStyle.value = t ? { background: t.main, color: t.ink } : undefined
   })
 }, { immediate: true })
+
+// ── Ambient backdrop — the playlist's artists ────────────────────────
+// With ambient on, this page claims the background layer and walks it
+// through the distinct artists in the playlist (their portraits — posters
+// fall back through media_assets, so they're the reliable image; backdrops
+// are spotty for artists). set() replaces the claim in place, so this is
+// the pool experience with page-owned content; BG_ROTATE_MS keeps cadence
+// identical to the library pools.
+const { ambientEnabled } = useAppearance()
+const background = useBackground()
+const bgTools = useBackgroundImageTools()
+
+const artistArtUrls = computed(() => {
+  const seen = new Set<string>()
+  const urls: string[] = []
+  for (const t of tracks.value) {
+    if (!t.artist_slug || seen.has(t.artist_slug)) continue
+    seen.add(t.artist_slug)
+    urls.push(`/api/media/${t.artist_slug}/image/poster`)
+    if (urls.length === 12) break
+  }
+  return urls
+})
+
+let bgTimer: ReturnType<typeof setInterval> | undefined
+let bgIdx = 0
+watch([artistArtUrls, ambientEnabled], ([urls, on]) => {
+  if (bgTimer) { clearInterval(bgTimer); bgTimer = undefined }
+  if (!on || !urls.length) { background.clear(); return }
+  bgIdx = 0
+  background.set(urls[0])
+  if (urls.length > 1) {
+    bgTools.warm(urls[1]!)
+    bgTimer = setInterval(() => {
+      bgIdx = (bgIdx + 1) % urls.length
+      background.set(urls[bgIdx])
+      bgTools.warm(urls[(bgIdx + 1) % urls.length]!)
+    }, BG_ROTATE_MS)
+  }
+}, { immediate: true })
+onBeforeUnmount(() => { if (bgTimer) clearInterval(bgTimer) })
 
 const coverInput = ref<HTMLInputElement>()
 async function onCoverPicked(e: Event) {
@@ -264,6 +342,41 @@ async function saveEdit() {
     }
   } finally {
     saving.value = false
+  }
+}
+
+async function togglePlaylistSync(service: 'listenbrainz' | 'lastfm', enabled: boolean) {
+  if (syncBusy.value) return
+  syncBusy.value = true
+  try {
+    await $heya('/api/me/playlists/{id}/sync/{service}', {
+      method: 'PUT',
+      path: { id: playlistId.value, service },
+      body: { enabled },
+    })
+    await detailQuery.refetch()
+    flash.value = { kind: 'ok', text: enabled ? 'Playlist sync enabled' : 'Playlist sync disabled' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail || 'Could not update playlist sync' }
+  } finally {
+    syncBusy.value = false
+  }
+}
+
+async function syncNow(service: 'listenbrainz' | 'lastfm') {
+  if (syncBusy.value) return
+  syncBusy.value = true
+  try {
+    await $heya('/api/me/playlists/{id}/sync/{service}', {
+      method: 'POST',
+      path: { id: playlistId.value, service },
+    })
+    await detailQuery.refetch()
+    flash.value = { kind: 'ok', text: 'Playlist synchronized' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail || 'Playlist sync failed' }
+  } finally {
+    syncBusy.value = false
   }
 }
 
@@ -387,6 +500,13 @@ function formatDate(iso: string) {
 
 <style scoped>
 .pl-page { padding-bottom: 80px; }
+.pl-sync-heading { margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--fg-0); font-size: 12px; font-weight: 650; }
+.pl-sync-service { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 11px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-2); }
+.pl-sync-service > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pl-sync-service strong { color: var(--fg-0); font-size: 12px; }
+.pl-sync-service span { color: var(--fg-3); font-size: 10.5px; line-height: 1.35; }
+.pl-sync-service.unavailable { opacity: .62; }
+.pl-sync-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .m-loading { color: var(--fg-2); padding: 32px 40px; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 
 .pl-hero {
@@ -397,6 +517,32 @@ function formatDate(iso: string) {
   overflow: hidden;
   border-radius: 0 0 var(--r-md) var(--r-md);
 }
+
+/* Ambient-extended: the layer behind the app owns the art (this playlist's
+   artists) — the hero paints nothing, or its local band would seam against
+   the continuing full-page artwork. Text flips from on-artwork literals to
+   theme tokens + --bg-1 halos because the ambient scrim is theme-aware
+   (paper in light mode, where literal white would vanish). */
+.pl-hero.ambient-extended { min-height: 0; overflow: visible; }
+.pl-hero.ambient-extended .pl-hero-bg,
+.pl-hero.ambient-extended .pl-hero-fade { display: none; }
+.pl-hero.ambient-extended .m-kind {
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.pl-hero.ambient-extended .m-title {
+  color: var(--fg-0);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
+.pl-hero.ambient-extended .m-sub {
+  color: var(--fg-1);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.pl-hero.ambient-extended .pl-hero-stats {
+  color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+}
+.pl-hero.ambient-extended .pl-hero-stats .dot { color: var(--fg-3); }
 .pl-hero-bg {
   position: absolute; inset: 0;
   background-size: cover;
@@ -480,13 +626,23 @@ function formatDate(iso: string) {
 .pl-cover-input { display: none; }
 
 .pl-tracks { padding-top: 24px; }
+/* Same glass coat as the shared TrackList (.tl) — this page's desktop table
+   is a hand-rolled RecycleScroller (virtualization TrackList doesn't have),
+   but it sits over the same ambient art, now the playlist's rotating artist
+   portraits: bare rows were unreadable over a bright face. Keep the two
+   recipes in lockstep with TrackList.vue's. */
+.pl-tracks .list-rows {
+  background: color-mix(in oklab, var(--bg-2) 76%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-el);
+  padding: 4px 10px 8px;
+}
 .pl-cols {
   grid-template-columns: 40px 2fr 1.2fr 100px 36px 70px !important;
-  /* Renders outside TrackList's glass panel, over the ambient art —
-     fg-2 + halo instead of the global head's fg-3. */
+  /* Inside the glass panel now — no halo needed, quiet like .tl-head. */
   color: var(--fg-2);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
-  border-bottom: 0;
 }
 .pl-num { text-align: right; color: var(--fg-3); }
 .pl-title-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -576,4 +732,13 @@ function formatDate(iso: string) {
   transition: background 0.15s, color 0.15s;
 }
 .pl-more:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+
+/* Ambient-extended: the ⋯ button sits on the theme wash, not a darkened
+   hero — swap the literal-white ghost coat for theme glass. */
+.pl-hero.ambient-extended .pl-more {
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  border-color: var(--border);
+  color: var(--fg-1);
+}
+.pl-hero.ambient-extended .pl-more:hover { background: var(--bg-3); color: var(--fg-0); }
 </style>

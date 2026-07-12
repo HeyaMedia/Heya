@@ -193,13 +193,12 @@ function initials(u: { username: string }): string {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Users</h2>
-      <p class="sv2-page-desc">
-        Accounts that can sign in to this server. Admin users see every
-        settings page; non-admin users only see the <em>You</em> group.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Users"
+      icon="users"
+      eyebrow="Server · Accounts & roles"
+      description="Create and manage the people who can sign in, promote trusted administrators, and keep personal access clearly separated."
+    />
 
     <div class="tiles">
       <MetricTile label="Total users" :value="users.length" icon="users" />

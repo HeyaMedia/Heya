@@ -208,15 +208,12 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
 
 <template>
   <div class="logs-page">
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Logs</h2>
-      <p class="sv2-page-desc">
-        Live tail of the in-process ring buffer. Filter by level, search across
-        messages and fields, pause to inspect, or export the current view as
-        JSON. Adjust the runtime log level on
-        <NuxtLink to="/settings/diagnostics" class="inline-link">Diagnostics</NuxtLink>.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Logs"
+      icon="clipboard"
+      eyebrow="Advanced · Live server events"
+      description="Filter and search the in-process log stream, pause it for inspection, or export the current view as structured JSON."
+    />
 
     <div class="tiles">
       <MetricTile label="Buffered" :value="totalBuffered" icon="clipboard"

@@ -27,6 +27,20 @@ export type MusicService = {
   import_state: MusicServiceImportState
 }
 
+export type PlaylistServiceCatalog = {
+  service: 'listenbrainz' | 'lastfm'
+  capabilities: { available: boolean, read: boolean, write: boolean, reason?: string }
+  playlists: Array<{
+    external_id: string
+    name: string
+    description?: string
+    url?: string
+    updated_at?: string
+    track_count: number
+    local_playlist_id?: number
+  }>
+}
+
 export type ConfigSourceEntry = { source: string, env_var?: string }
 export type ConfigSources = Record<string, ConfigSourceEntry>
 export type OpenSubtitlesSettings = { api_key?: string, username?: string, password?: string }

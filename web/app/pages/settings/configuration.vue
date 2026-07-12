@@ -70,15 +70,12 @@ async function copyKey(key: string) {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Configuration</h2>
-      <p class="sv2-page-desc">
-        Every operational knob and where its current value came from.
-        <strong>env</strong> beats the UI; <strong>db</strong> is what the
-        Settings UI wrote; <strong>default</strong> is the built-in fallback.
-        Set the matching env var to lock a knob.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Configuration"
+      icon="settings"
+      eyebrow="Advanced · Effective values"
+      description="Inspect every operational value and its source. Environment variables override database settings, which override built-in defaults."
+    />
 
     <div class="tiles">
       <MetricTile label="Tracked knobs" :value="counts.total" icon="settings" />

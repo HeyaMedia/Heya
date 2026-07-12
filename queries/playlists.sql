@@ -20,15 +20,30 @@ SELECT EXISTS(SELECT 1 FROM user_playlists WHERE user_id = $1 AND slug = $2 AND 
 -- track's album cover) and track count so the UI doesn't need follow-up calls.
 SELECT p.*,
        (SELECT count(*) FROM user_playlist_tracks WHERE playlist_id = p.id) AS track_count,
+       -- First track's addressing pair — the FE builds the canonical
+       -- /api album-cover URL from these (image URLs are unconditional:
+       -- filtering on al.cover_path here re-created the documented
+       -- empty-column-means-no-image bug, so no cover filter).
        COALESCE(
-           (SELECT al.cover_path
+           (SELECT al.slug
             FROM user_playlist_tracks upt
             JOIN tracks t ON t.id = upt.track_id
             JOIN albums al ON al.id = t.album_id
-            WHERE upt.playlist_id = p.id AND al.cover_path != ''
-            ORDER BY upt.position ASC LIMIT 1),
+            WHERE upt.playlist_id = p.id
+            ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
            ''
-       ) AS auto_cover,
+       ) AS auto_album_slug,
+       COALESCE(
+           (SELECT mi.slug
+            FROM user_playlist_tracks upt
+            JOIN tracks t ON t.id = upt.track_id
+            JOIN albums al ON al.id = t.album_id
+            JOIN artists a ON a.id = al.artist_id
+            JOIN media_item_cards mi ON mi.id = a.media_item_id
+            WHERE upt.playlist_id = p.id
+            ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
+           ''
+       ) AS auto_artist_slug,
        (p.cover_path != '') AS has_cover
 FROM user_playlists p
 WHERE p.user_id = $1

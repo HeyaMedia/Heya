@@ -116,13 +116,12 @@ onMounted(async () => {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Transcoding</h2>
-      <p class="sv2-page-desc">
-        Hardware acceleration, HLS quality ladder, and the segment cache.
-        Hardware changes need a server restart to take effect.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Transcoding"
+      icon="film"
+      eyebrow="Media · Delivery pipeline"
+      description="Control hardware acceleration, the HLS quality ladder, and temporary segment storage used when clients cannot direct play."
+    />
 
     <div v-if="!status" class="loading-state"><Icon name="spinner" :size="14" /> Probing ffmpeg…</div>
 

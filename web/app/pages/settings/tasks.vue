@@ -205,13 +205,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Scheduled tasks</h2>
-      <p class="sv2-page-desc">
-        Time-windowed automation. Each task can be enabled, scheduled within
-        a daily window, capped to a max runtime, and triggered manually.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Scheduled tasks"
+      icon="timer"
+      eyebrow="Server · Automation"
+      description="Control when recurring maintenance runs, how long each task may work, and trigger individual routines on demand."
+    />
 
     <SettingsSection title="Metadata queue" icon="refresh"
       description="The unified enrich queue, fed by every scan and the refresh task. Polls every 2 seconds.">

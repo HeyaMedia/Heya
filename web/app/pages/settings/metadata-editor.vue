@@ -10,14 +10,12 @@ const { isPhone } = useViewport()
 
 <template>
   <div class="me-page">
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Metadata editor</h2>
-      <p class="sv2-page-desc">
-        Split-pane workspace for rewriting metadata by hand. Browse on the
-        left, edit on the right. Refresh policies and per-library defaults
-        live on <NuxtLink to="/settings/metadata" class="inline-link">Metadata</NuxtLink>.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Metadata editor"
+      icon="pencil"
+      eyebrow="Media · Manual corrections"
+      description="Browse the library and correct titles, descriptions, dates, artwork references, and provider matches by hand."
+    />
 
     <div v-if="isPhone" class="me-phone-notice">
       <Icon name="info" :size="28" />

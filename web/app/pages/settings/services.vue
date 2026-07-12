@@ -1,17 +1,23 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings' })
 
-import { musicServicesQuery, type MusicServiceImportState } from '~/queries/settings'
+import { musicServicesQuery, type MusicServiceImportState, type PlaylistServiceCatalog } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { flash } = useFlash()
 
 const servicesData = useQuery(musicServicesQuery())
 const services = computed(() => servicesData.data.value ?? [])
+const servicesLoading = computed(() => servicesData.isLoading.value && !servicesData.data.value)
 const lbToken = ref('')
 const lfUsername = ref('')
 const busy = ref(false)
 const lfAuthToken = ref('') // in-flight Last.fm connect handshake
+const playlistCatalogs = reactive<Partial<Record<'listenbrainz' | 'lastfm', PlaylistServiceCatalog>>>({})
+const playlistCatalogLoading = reactive<Record<'listenbrainz' | 'lastfm', boolean>>({ listenbrainz: false, lastfm: false })
+const playlistCatalogError = reactive<Record<'listenbrainz' | 'lastfm', string>>({ listenbrainz: '', lastfm: '' })
+const playlistSyncBusy = ref('')
+const queryCache = useQueryCache()
 
 const lb = computed(() => services.value.find(s => s.service === 'listenbrainz'))
 const lf = computed(() => services.value.find(s => s.service === 'lastfm'))
@@ -36,7 +42,58 @@ watch(importing, (active) => {
 watch(lf, value => {
   if (!lfUsername.value && value?.username) lfUsername.value = value.username
 }, { immediate: true })
+watch(() => lb.value?.token_set, (connected) => {
+  if (connected) loadPlaylistCatalog('listenbrainz')
+}, { immediate: true })
+onMounted(() => loadPlaylistCatalog('lastfm'))
 onUnmounted(() => { if (timer) clearInterval(timer) })
+
+async function loadPlaylistCatalog(service: 'listenbrainz' | 'lastfm') {
+  playlistCatalogLoading[service] = true
+  playlistCatalogError[service] = ''
+  try {
+    playlistCatalogs[service] = await $heya('/api/me/music-services/{service}/playlists', {
+      path: { service },
+    }) as PlaylistServiceCatalog
+  } catch (e: any) {
+    playlistCatalogError[service] = e?.data?.detail || 'Could not load playlists'
+  } finally {
+    playlistCatalogLoading[service] = false
+  }
+}
+
+async function setExternalPlaylistSync(service: 'listenbrainz' | 'lastfm', externalId: string, enabled: boolean) {
+  playlistSyncBusy.value = `${service}:${externalId}`
+  try {
+    await $heya('/api/me/music-services/{service}/playlists/{external_id}/sync', {
+      method: 'PUT',
+      path: { service, external_id: externalId },
+      body: { enabled },
+    })
+    await loadPlaylistCatalog(service)
+    queryCache.invalidateQueries({ key: ['me', 'playlists'] })
+    queryCache.invalidateQueries({ key: ['music', 'home', 'recent-playlists'] })
+    flash.value = { kind: 'ok', text: enabled ? 'Playlist imported and two-way sync enabled' : 'Playlist sync disabled' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail || 'Could not update playlist sync' }
+  } finally {
+    playlistSyncBusy.value = ''
+  }
+}
+
+async function syncExternalNow(service: 'listenbrainz' | 'lastfm', externalId: string, playlistId: number) {
+  playlistSyncBusy.value = `${service}:${externalId}`
+  try {
+    await $heya('/api/me/playlists/{id}/sync/{service}', { method: 'POST', path: { id: playlistId, service } })
+    await loadPlaylistCatalog(service)
+    queryCache.invalidateQueries({ key: ['me', 'playlists'] })
+    flash.value = { kind: 'ok', text: 'Playlist synchronized' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail || 'Playlist sync failed' }
+  } finally {
+    playlistSyncBusy.value = ''
+  }
+}
 
 async function saveService(service: 'listenbrainz' | 'lastfm', body: Record<string, unknown>) {
   busy.value = true
@@ -116,7 +173,7 @@ function importSummary(st?: MusicServiceImportState): string {
       <div class="context-fact"><strong>{{ importing ? 'Active' : historySourceCount }}</strong><span>{{ importing ? 'Import' : 'Imported' }}</span></div>
     </SettingsContextHero>
 
-    <div v-if="servicesData.isLoading.value" class="svc-loading">
+    <div v-if="servicesLoading" class="svc-loading">
       <Icon name="spinner" :size="15" /> Checking connected services…
     </div>
 
@@ -148,6 +205,34 @@ function importSummary(st?: MusicServiceImportState): string {
           </button>
         </div>
         <p v-if="importSummary(lb?.import_state)" class="svc-import-state" :class="{ error: lb?.import_state?.status === 'failed' }">{{ importSummary(lb?.import_state) }}</p>
+        <div v-if="lb?.token_set" class="playlist-sync-block">
+          <div class="playlist-sync-title">
+            <div><strong>Playlists</strong><span>Select a playlist to import it into Heya and keep both copies synchronized.</span></div>
+            <button class="sv2-btn ghost" :disabled="playlistCatalogLoading.listenbrainz" @click="loadPlaylistCatalog('listenbrainz')"><Icon name="refresh" :size="12" /> Refresh</button>
+          </div>
+          <div v-if="playlistCatalogLoading.listenbrainz && !playlistCatalogs.listenbrainz" class="playlist-sync-empty"><Icon name="spinner" :size="13" /> Loading playlists…</div>
+          <div v-else-if="playlistCatalogError.listenbrainz" class="playlist-sync-empty error">{{ playlistCatalogError.listenbrainz }}</div>
+          <div v-else-if="!playlistCatalogs.listenbrainz?.playlists.length" class="playlist-sync-empty">No ListenBrainz playlists found.</div>
+          <div v-else class="playlist-sync-list">
+            <div v-for="playlist in playlistCatalogs.listenbrainz.playlists" :key="playlist.external_id" class="playlist-sync-row">
+              <div class="playlist-sync-meta">
+                <a v-if="playlist.url" :href="playlist.url" target="_blank" rel="noopener">{{ playlist.name }}</a>
+                <strong v-else>{{ playlist.name }}</strong>
+                <span>{{ playlist.description || (playlist.local_playlist_id ? 'Two-way sync enabled' : 'Not synced') }}</span>
+              </div>
+              <div class="playlist-sync-actions">
+                <button v-if="playlist.local_playlist_id" class="sv2-btn ghost" :disabled="!!playlistSyncBusy" @click="syncExternalNow('listenbrainz', playlist.external_id, playlist.local_playlist_id)">Sync now</button>
+                <AppSwitch
+                  :model-value="!!playlist.local_playlist_id"
+                  :disabled="!!playlistSyncBusy"
+                  size="md"
+                  :aria-label="`Synchronize ${playlist.name}`"
+                  @update:model-value="setExternalPlaylistSync('listenbrainz', playlist.external_id, $event)"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Last.fm" icon="radio" description="Import a public profile, then connect your account to scrobble new plays.">
@@ -179,6 +264,9 @@ function importSummary(st?: MusicServiceImportState): string {
           </button>
         </div>
         <p v-if="importSummary(lf?.import_state)" class="svc-import-state" :class="{ error: lf?.import_state?.status === 'failed' }">{{ importSummary(lf?.import_state) }}</p>
+        <div class="playlist-sync-block unavailable">
+          <div class="playlist-sync-title"><div><strong>Playlists</strong><span>{{ playlistCatalogs.lastfm?.capabilities.reason || 'Last.fm retired its playlist API; playlist synchronization is unavailable.' }}</span></div></div>
+        </div>
       </SettingsSection>
     </div>
 
@@ -212,6 +300,21 @@ function importSummary(st?: MusicServiceImportState): string {
 .svc-toggle { display: inline-flex; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); font-size: 12px; color: var(--fg-1); }
 .svc-import-state { margin: 10px 0 0; font-size: 11px; line-height: 1.5; font-family: var(--font-mono); color: var(--fg-2); }
 .svc-import-state.error { color: var(--bad); }
+.playlist-sync-block { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.playlist-sync-block.unavailable { opacity: .72; }
+.playlist-sync-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.playlist-sync-title > div { display: flex; flex-direction: column; gap: 2px; }
+.playlist-sync-title strong { color: var(--fg-0); font-size: 12px; }
+.playlist-sync-title span { color: var(--fg-3); font-size: 10.5px; line-height: 1.4; }
+.playlist-sync-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow: auto; }
+.playlist-sync-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); }
+.playlist-sync-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.playlist-sync-meta a, .playlist-sync-meta strong { overflow: hidden; color: var(--fg-0); font-size: 11.5px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-sync-meta a:hover { color: var(--gold); }
+.playlist-sync-meta span { overflow: hidden; color: var(--fg-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-sync-actions { display: flex; align-items: center; gap: 7px; flex: none; }
+.playlist-sync-empty { display: flex; align-items: center; gap: 7px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--r-sm); color: var(--fg-3); font-size: 11px; }
+.playlist-sync-empty.error { color: var(--bad); }
 .history-note { display: flex; align-items: flex-start; gap: 12px; padding: 15px 17px; border: 1px solid color-mix(in srgb, var(--gold) 20%, var(--border)); border-radius: var(--r-md); background: color-mix(in srgb, var(--gold) 5%, var(--bg-1)); }
 .history-note-icon { width: 34px; height: 34px; display: grid; place-items: center; flex: none; border-radius: 10px; background: var(--gold-soft); color: var(--gold); }
 .history-note strong { color: var(--fg-0); font-size: 12.5px; }

@@ -97,15 +97,12 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Recommendations</h2>
-      <p class="sv2-page-desc">
-        Optional embedding engine (BGE-large-en). Off by default — turning it on
-        downloads a ~340 MB model, embeds your library, and unlocks
-        natural-language search plus deeper "For You" discovery. The non-ML
-        recommender keeps working regardless.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Recommendations"
+      icon="sparkle"
+      eyebrow="Media intelligence · Semantic discovery"
+      description="Add semantic search and deeper discovery with local embeddings. Heya's standard recommendation engine keeps working when this is off."
+    />
 
     <SettingsSection title="Master switch" icon="power"
       :lockedBy="enabledLocked ? `Locked by ${status?.env_locks?.enabled}` : undefined">

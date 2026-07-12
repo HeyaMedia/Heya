@@ -124,13 +124,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <header class="sv2-page-head">
-      <h2 class="sv2-page-title">Diagnostics</h2>
-      <p class="sv2-page-desc">
-        Process runtime — uptime, memory, goroutines, GC. Adjust the log
-        level on the fly, or grab a pprof profile.
-      </p>
-    </header>
+    <SettingsContextHero
+      title="Runtime diagnostics"
+      icon="cpu"
+      eyebrow="Advanced · Process health"
+      description="Inspect uptime, memory, goroutines, and garbage collection; adjust runtime logging or capture a pprof profile when needed."
+    />
 
     <SettingsSection title="Support bundle" icon="clipboard"
       description="Everything a maintainer needs in one file — app version, config (with provenance, secrets redacted), database health, library path checks, ffmpeg/ffprobe, queue counts, and storage. Read-only; safe to paste into a bug report.">
