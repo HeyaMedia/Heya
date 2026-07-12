@@ -224,6 +224,17 @@ func (c *LastFM) LovedTracks(ctx context.Context, user string, page int) ([]List
 	return loves, totalPages, nil
 }
 
+// Love / Unlove sync a track reaction to the user's Last.fm profile
+// (signed; session key required). Last.fm has no dislike concept — a Heya
+// thumbs-down maps to Unlove at most.
+func (c *LastFM) Love(ctx context.Context, artist, track string) error {
+	return c.call(ctx, "track.love", url.Values{"artist": {artist}, "track": {track}, "sk": {c.SessionKey}}, true, nil)
+}
+
+func (c *LastFM) Unlove(ctx context.Context, artist, track string) error {
+	return c.call(ctx, "track.unlove", url.Values{"artist": {artist}, "track": {track}, "sk": {c.SessionKey}}, true, nil)
+}
+
 // Scrobble submits up to 50 listens with the user's session key.
 func (c *LastFM) Scrobble(ctx context.Context, listens []Listen) error {
 	if len(listens) == 0 {

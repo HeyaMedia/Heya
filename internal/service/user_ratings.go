@@ -82,13 +82,21 @@ func ratedPage[T any](minRating, maxRating int16, limit, offset int32,
 
 func (a *App) SetUserTrackRating(ctx context.Context, userID, trackID int64, rating int16) error {
 	q := sqlc.New(a.db)
-	return writeRating(rating,
+	old, _ := a.GetUserTrackRating(ctx, userID, trackID)
+	err := writeRating(rating,
 		func() error {
 			return q.DeleteUserTrackRating(ctx, sqlc.DeleteUserTrackRatingParams{UserID: userID, TrackID: trackID})
 		},
 		func() error {
 			return q.SetUserTrackRating(ctx, sqlc.SetUserTrackRatingParams{UserID: userID, TrackID: trackID, Rating: rating})
 		})
+	if err == nil {
+		// Reactions sync outbound to linked services (fire-and-forget) when
+		// the rating crossed a band boundary — hearts become loves,
+		// thumbs-downs become ListenBrainz hates, clears clear.
+		a.ReactionOutbound(userID, trackID, old, rating)
+	}
+	return err
 }
 
 func (a *App) GetUserTrackRating(ctx context.Context, userID, trackID int64) (int16, error) {

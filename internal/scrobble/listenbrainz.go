@@ -210,6 +210,32 @@ func (c *ListenBrainz) Feedback(ctx context.Context, user string, offset, count 
 	return loves, hates, out.TotalCount, nil
 }
 
+// SubmitFeedback syncs a track reaction: score 1 = love, -1 = hate,
+// 0 = clear. ListenBrainz keys feedback by recording MBID.
+func (c *ListenBrainz) SubmitFeedback(ctx context.Context, recordingMBID string, score int) error {
+	if recordingMBID == "" {
+		return fmt.Errorf("recording mbid required for feedback")
+	}
+	raw, err := json.Marshal(map[string]any{"recording_mbid": recordingMBID, "score": score})
+	if err != nil {
+		return err
+	}
+	req, err := c.req(ctx, http.MethodPost, "/feedback/recording-feedback", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return fmt.Errorf("listenbrainz feedback submit: HTTP %d: %s", resp.StatusCode, string(msg))
+	}
+	return nil
+}
+
 // Submit sends listens to ListenBrainz. listenType is "single" for live
 // scrobbles or "import" for backfills; ListenBrainz caps batches, so callers
 // should keep len(listens) modest (≤50).

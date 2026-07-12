@@ -258,6 +258,93 @@ func (a *App) matchListen(ctx context.Context, l scrobble.Listen) (trackID int64
 	return trackID, duration, true
 }
 
+// reactionBand maps a rating onto the outbound sync band: 1 = love,
+// -1 = hate, 0 = neutral/clear.
+func reactionBand(rating int16) int {
+	switch {
+	case rating >= 9:
+		return 1
+	case rating >= 1 && rating <= 3:
+		return -1
+	default:
+		return 0
+	}
+}
+
+// ReactionOutbound syncs a track reaction to every service the user has
+// scrobbling enabled on, when the reaction band actually changed. Heart →
+// love, thumbs-down → ListenBrainz hate (Last.fm has no dislike), leaving
+// the band → clear. Fire-and-forget with one retry.
+func (a *App) ReactionOutbound(userID, trackID int64, oldRating, newRating int16) {
+	oldBand, newBand := reactionBand(oldRating), reactionBand(newRating)
+	if oldBand == newBand {
+		return
+	}
+	ctx := a.LifetimeContext()
+	go func() {
+		rows, err := a.db.Query(ctx, `
+			SELECT service, token FROM user_music_services
+			WHERE user_id = $1 AND scrobble_enabled = true AND token <> ''`, userID)
+		if err != nil {
+			return
+		}
+		type svc struct{ service, token string }
+		var services []svc
+		for rows.Next() {
+			var s svc
+			if rows.Scan(&s.service, &s.token) == nil {
+				services = append(services, s)
+			}
+		}
+		rows.Close()
+		if len(services) == 0 {
+			return
+		}
+
+		var artist, track, mbid string
+		if err := a.db.QueryRow(ctx, `
+			SELECT ar.name, t.title, t.recording_mbid
+			FROM tracks t
+			JOIN albums al ON al.id = t.album_id
+			JOIN artists ar ON ar.id = al.artist_id
+			WHERE t.id = $1`, trackID).Scan(&artist, &track, &mbid); err != nil {
+			return
+		}
+
+		for _, s := range services {
+			submit := func() error {
+				switch s.service {
+				case "listenbrainz":
+					if mbid == "" {
+						return nil // LB feedback is MBID-keyed; nothing to send
+					}
+					lb := &scrobble.ListenBrainz{Token: s.token}
+					return lb.SubmitFeedback(ctx, mbid, newBand)
+				case "lastfm":
+					lf, err := a.lastfmClient(ctx, s.token)
+					if err != nil {
+						return err
+					}
+					if newBand == 1 {
+						return lf.Love(ctx, artist, track)
+					}
+					if oldBand == 1 {
+						return lf.Unlove(ctx, artist, track) // left the heart band
+					}
+					return nil // last.fm has no dislike to sync
+				}
+				return nil
+			}
+			if err := submit(); err != nil {
+				time.Sleep(5 * time.Second)
+				if err := submit(); err != nil {
+					log.Warn().Err(err).Str("service", s.service).Msg("outbound reaction sync failed")
+				}
+			}
+		}
+	}()
+}
+
 // ScrobbleOutbound pushes one completed Heya play to every service the user
 // has scrobbling enabled on. Fire-and-forget with one retry — a missed
 // scrobble must never fail the playback path.
