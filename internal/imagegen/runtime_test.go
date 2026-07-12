@@ -18,6 +18,14 @@ func TestCatalogDefaultsToZImage(t *testing.T) {
 	require.Equal(t, int64(6696835812), m.DownloadSize())
 }
 
+func TestAutoBackendInheritsRuntimeImageBackend(t *testing.T) {
+	t.Setenv("HEYA_IMAGE_BACKEND", "")
+	t.Setenv("HEYA_AI_LOCAL_BACKEND", BackendVulkan)
+	require.Equal(t, BackendVulkan, ResolveBackend(BackendAuto))
+	t.Setenv("HEYA_IMAGE_BACKEND", BackendROCm)
+	require.Equal(t, BackendROCm, ResolveBackend(BackendAuto))
+}
+
 func TestReusesExactLLMArtifact(t *testing.T) {
 	data := t.TempDir()
 	r := NewRuntime(filepath.Join(data, "imagegen"))

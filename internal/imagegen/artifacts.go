@@ -2,6 +2,7 @@ package imagegen
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 )
 
@@ -41,6 +42,15 @@ var runtimeArtifacts = map[string]Artifact{
 func ResolveBackend(backend string) string {
 	if backend != "" && backend != BackendAuto {
 		return backend
+	}
+	// Runtime images advertise their accelerator explicitly. Prefer the
+	// image-specific override, then inherit the llama.cpp choice so the
+	// OpenVINO image's existing Vulkan selection also drives sd.cpp.
+	if configured := os.Getenv("HEYA_IMAGE_BACKEND"); configured != "" && configured != BackendAuto {
+		return configured
+	}
+	if configured := os.Getenv("HEYA_AI_LOCAL_BACKEND"); configured != "" && configured != BackendAuto {
+		return configured
 	}
 	if runtime.GOOS == "darwin" {
 		return BackendMetal
