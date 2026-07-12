@@ -14,12 +14,13 @@ import (
 
 // AI-curated recommendations: the LLM never invents titles — it proposes over
 // candidates the embedding engine retrieved from the library ("AI proposes,
-// code disposes"). Flow: (1) the model turns the viewer's ask + recent watch
-// history into a few doc-styled search probes, (2) each probe runs through the
-// existing SemanticSearch KNN and the hits merge into one candidate pool,
-// (3) the model re-ranks the pool by small candidate key with a short reason
-// each, dropping
-// retrieval noise — the junk tail a raw KNN leaves behind.
+// code disposes"). Latency-first shape: the raw ask KNNs immediately
+// (milliseconds) and ONE model call grades that pool — the common case pays a
+// single LLM round-trip. The same call may request up to three follow-up
+// search probes (the model's one "tool use"); code runs them ONLY when the
+// first round's strong picks came up short, grading just the new candidates
+// in a second call. Worst case is the old two-call latency; typical asks
+// halve it.
 
 // AIRecommendRequest is one "find me something to watch" ask.
 type AIRecommendRequest struct {
@@ -40,26 +41,14 @@ type AIRecommendResult struct {
 }
 
 const (
-	aiRecDefaultLimit = 12
-	aiRecMaxLimit     = 20
-	aiRecPoolSize     = 48 // candidates offered to the re-ranker
-	aiRecPerProbe     = 24 // KNN hits fetched per probe
-	aiRecHistoryLines = 12 // recent watches shown to the model
+	aiRecDefaultLimit      = 12
+	aiRecMaxLimit          = 20
+	aiRecPoolSize          = 32 // round-1 candidates from the raw ask
+	aiRecFollowupPerProbe  = 16 // KNN hits fetched per follow-up probe
+	aiRecFollowupPool      = 20 // new candidates a follow-up round may add
+	aiRecHistoryLines      = 12 // recent watches shown to the model
+	aiRecFollowupThreshold = 3  // strong (fit ≥4) picks below this allow a follow-up
 )
-
-var aiRecProbesSchema = []byte(`{
-	"type": "object",
-	"properties": {
-		"probes": {
-			"type": "array",
-			"minItems": 1,
-			"maxItems": 4,
-			"items": { "type": "string", "minLength": 3, "maxLength": 200 }
-		}
-	},
-	"required": ["probes"],
-	"additionalProperties": false
-}`)
 
 var aiRecPicksSchema = []byte(`{
 	"type": "object",
@@ -72,16 +61,21 @@ var aiRecPicksSchema = []byte(`{
 				"properties": {
 					"key": { "type": "integer", "minimum": 1, "maximum": 48 },
 					"title": { "type": "string", "minLength": 1, "maxLength": 200 },
-					"reason": { "type": "string", "maxLength": 90 },
+					"reason": { "type": "string", "maxLength": 60 },
 					"fit": { "type": "integer", "minimum": 1, "maximum": 5 }
 				},
 				"required": ["key", "title", "reason", "fit"],
 				"additionalProperties": false
 			}
 		},
-		"note": { "type": "string", "minLength": 1, "maxLength": 600 }
+		"note": { "type": "string", "minLength": 1, "maxLength": 600 },
+		"more_probes": {
+			"type": "array",
+			"maxItems": 3,
+			"items": { "type": "string", "minLength": 3, "maxLength": 160 }
+		}
 	},
-	"required": ["picks", "note"],
+	"required": ["picks", "note", "more_probes"],
 	"additionalProperties": false
 }`)
 
@@ -135,18 +129,16 @@ func (a *App) AIRecommend(ctx context.Context, userID int64, in AIRecommendReque
 	// Personalization context — optional, recommendations still work without it.
 	history, watched := a.aiRecHistory(ctx, userID)
 
-	// Stage 1: ask → embedding probes. A generation failure here degrades to
-	// searching with the raw ask instead of failing the whole request.
-	probes := a.aiRecProbes(ctx, client, model, query, in.Type, history)
-
-	// Stage 2: pool candidates via the existing KNN, best similarity wins dupes.
-	pool, err := a.aiRecPool(ctx, probes, in.Type)
+	// Round 1: KNN the raw ask directly (milliseconds) and grade that pool in
+	// ONE model call. Since episode embeddings landed, raw-ask retrieval finds
+	// the right candidates for most asks — no up-front probe call needed.
+	pool, err := a.aiRecSearch(ctx, []string{query}, in.Type, nil, aiRecPoolSize)
 	if err != nil {
 		return AIRecommendResult{}, err
 	}
 	result := AIRecommendResult{
 		Items:  []ForYouItem{},
-		Probes: probes,
+		Probes: []string{query},
 		Mode:   s.Mode,
 		Model:  model,
 	}
@@ -158,32 +150,105 @@ func (a *App) AIRecommend(ctx context.Context, userID int64, in AIRecommendReque
 		return result, nil
 	}
 
-	// Stage 3: re-rank. The model only picks keys from the pool; anything else
-	// is dropped in disposePicks.
-	blurbs := a.aiRecBlurbs(ctx, pool)
-	var picked struct {
-		Picks []aiRecPick `json:"picks"`
-		Note  string      `json:"note"`
+	picked, err := a.aiRecCurate(ctx, client, model, s.Mode, query, in.Type, pool, watched, history, nil)
+	if err != nil {
+		return AIRecommendResult{}, fmt.Errorf("curate: %w", err)
 	}
-	err = client.CompleteJSON(ctx, llm.Request{
+	graded := picked.Picks
+	note := picked.Note
+	round1Ms := time.Since(start).Milliseconds()
+
+	// Follow-up: the grade call may have requested extra probes — its one
+	// "tool use". Code decides whether to spend the second round: only when
+	// the first round's strong picks came up short.
+	if len(picked.MoreProbes) > 0 && countStrongPicks(picked.Picks) < aiRecFollowupThreshold {
+		have := map[int64]bool{}
+		for _, it := range pool {
+			have[it.ID] = true
+		}
+		probes := capN(picked.MoreProbes, 3)
+		extra, err := a.aiRecSearch(ctx, probes, in.Type, have, aiRecFollowupPool)
+		if err != nil {
+			return AIRecommendResult{}, err
+		}
+		if len(extra) > 0 {
+			picked2, err := a.aiRecCurate(ctx, client, model, s.Mode, query, in.Type, extra, watched, history, probes)
+			if err != nil {
+				return AIRecommendResult{}, fmt.Errorf("curate follow-up: %w", err)
+			}
+			// Re-key the follow-up picks into the combined pool so one dispose
+			// pass orders both rounds together.
+			offset := len(pool)
+			for _, p := range picked2.Picks {
+				p.Key += offset
+				graded = append(graded, p)
+			}
+			pool = append(pool, extra...)
+			result.Probes = append(result.Probes, probes...)
+			// The follow-up note explains the deeper find — prefer it when the
+			// second round actually found something stronger.
+			if maxFit(picked2.Picks) > maxFit(picked.Picks) && strings.TrimSpace(picked2.Note) != "" {
+				note = picked2.Note
+			}
+			log.Debug().Int64("round1_ms", round1Ms).Int64("total_ms", time.Since(start).Milliseconds()).
+				Strs("probes", probes).Int("extra_candidates", len(extra)).Msg("ai recommend: follow-up round used")
+		}
+	}
+
+	result.Items = disposePicks(pool, graded, limit)
+	result.Note = strings.TrimSpace(note)
+	result.DurationMs = time.Since(start).Milliseconds()
+	return result, nil
+}
+
+// aiRecCurated is one grading response: graded picks, the viewer-facing note,
+// and optionally the model's request for a deeper search.
+type aiRecCurated struct {
+	Picks      []aiRecPick `json:"picks"`
+	Note       string      `json:"note"`
+	MoreProbes []string    `json:"more_probes"`
+}
+
+// aiRecCurate runs one grading call over a candidate pool. followupProbes is
+// nil for round 1; for round 2 it carries the probes that produced the pool so
+// the prompt can frame the candidates as additions.
+func (a *App) aiRecCurate(ctx context.Context, client llm.Completer, model, mode, query, mediaType string, pool []ForYouItem, watched map[int64]bool, history, followupProbes []string) (aiRecCurated, error) {
+	blurbs := a.aiRecBlurbs(ctx, pool)
+	var picked aiRecCurated
+	err := client.CompleteJSON(ctx, llm.Request{
 		Model:       model,
 		Temperature: &aiRecTemp,
 		Messages: []llm.Message{
 			{Role: "system", Content: aiRecCurateSystem()},
-			{Role: "user", Content: aiRecCurateUser(query, in.Type, pool, blurbs, watched, history)},
+			{Role: "user", Content: aiRecCurateUser(query, mediaType, pool, blurbs, watched, history, followupProbes)},
 		},
 	}, "curated_picks", aiRecPicksSchema, &picked)
-	if s.Mode == "local" {
+	if mode == "local" {
 		a.llmLocal.Touch()
 	}
-	if err != nil {
-		return AIRecommendResult{}, fmt.Errorf("curate: %w", err)
-	}
+	return picked, err
+}
 
-	result.Items = disposePicks(pool, picked.Picks, limit)
-	result.Note = strings.TrimSpace(picked.Note)
-	result.DurationMs = time.Since(start).Milliseconds()
-	return result, nil
+// countStrongPicks counts grades ≥4 — the "did round 1 already answer this?"
+// signal that gates the follow-up round.
+func countStrongPicks(picks []aiRecPick) int {
+	n := 0
+	for _, p := range picks {
+		if p.Fit >= 4 {
+			n++
+		}
+	}
+	return n
+}
+
+func maxFit(picks []aiRecPick) int {
+	best := 0
+	for _, p := range picks {
+		if p.Fit > best {
+			best = p.Fit
+		}
+	}
+	return best
 }
 
 // aiRecHistory returns the prompt-ready recent-watch lines plus the watched
@@ -204,63 +269,28 @@ func (a *App) aiRecHistory(ctx context.Context, userID int64) (lines []string, w
 	return lines, watched
 }
 
-// aiRecProbes turns the ask into 1–4 embedding probes. The raw ask is always
-// probe zero; the model's paraphrases diversify the candidate pool.
-func (a *App) aiRecProbes(ctx context.Context, client llm.Completer, model, query, mediaType string, history []string) []string {
-	sys := "You write search probes for a media library's semantic search engine. " +
-		"Each library item is embedded as text shaped like: \"Title. Genres: <genres>. Themes: <keywords>. Starring: <cast>. <plot summary>\" " +
-		"and a probe retrieves its nearest neighbors by embedding similarity. " +
-		"Given a viewer's request, write 2-4 diverse probes that surface fitting titles: mood words, genres, themes, plot elements — " +
-		"each covering a different interpretation or angle of the request. Do not repeat the request verbatim; it is already searched. " +
-		"If the request describes a specific title you recognize (a plot point, a character, an oblique reference), name that title " +
-		"in a probe — descriptions in the index avoid spoilers, but the title itself is always indexed. Write probes entirely in English."
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "Viewer request: %s\n", query)
-	fmt.Fprintf(&b, "Scope: %s\n", aiRecScope(mediaType))
-	if len(history) > 0 {
-		fmt.Fprintf(&b, "Recently watched (newest first): %s\n", strings.Join(history, "; "))
+// aiRecSearch runs each probe through SemanticSearch and merges the hits,
+// keeping each item's best similarity, skipping ids in exclude (already
+// graded in a prior round), capped to the strongest `cap` candidates.
+func (a *App) aiRecSearch(ctx context.Context, probes []string, mediaType string, exclude map[int64]bool, poolCap int) ([]ForYouItem, error) {
+	perProbe := aiRecPoolSize
+	if len(probes) > 1 || exclude != nil {
+		perProbe = aiRecFollowupPerProbe
 	}
-	fmt.Fprintf(&b, "Today: %s (use the season/holidays only if the request implies it)", time.Now().Format("2006-01-02"))
-
-	var out struct {
-		Probes []string `json:"probes"`
-	}
-	err := client.CompleteJSON(ctx, llm.Request{
-		Model:       model,
-		Temperature: &aiRecTemp,
-		Messages: []llm.Message{
-			{Role: "system", Content: sys},
-			{Role: "user", Content: b.String()},
-		},
-	}, "search_probes", aiRecProbesSchema, &out)
-	if err != nil {
-		log.Warn().Err(err).Msg("ai recommend: probe generation failed — searching with the raw ask only")
-	}
-
-	probes := []string{query}
-	seen := map[string]bool{strings.ToLower(query): true}
-	for _, p := range out.Probes {
-		p = strings.TrimSpace(p)
-		if p == "" || seen[strings.ToLower(p)] || len(probes) >= 5 {
-			continue
-		}
-		seen[strings.ToLower(p)] = true
-		probes = append(probes, p)
-	}
-	return probes
-}
-
-// aiRecPool runs every probe through SemanticSearch and merges the hits,
-// keeping each item's best similarity, capped to the strongest aiRecPoolSize.
-func (a *App) aiRecPool(ctx context.Context, probes []string, mediaType string) ([]ForYouItem, error) {
 	byID := map[int64]ForYouItem{}
 	for _, probe := range probes {
-		hits, err := a.SemanticSearch(ctx, probe, ForYouFacets{Type: mediaType, Limit: aiRecPerProbe})
+		probe = strings.TrimSpace(probe)
+		if probe == "" {
+			continue
+		}
+		hits, err := a.SemanticSearch(ctx, probe, ForYouFacets{Type: mediaType, Limit: int32(perProbe)})
 		if err != nil {
 			return nil, fmt.Errorf("search %q: %w", probe, err)
 		}
 		for _, h := range hits {
+			if exclude[h.ID] {
+				continue
+			}
 			if prev, ok := byID[h.ID]; !ok || h.Score > prev.Score {
 				byID[h.ID] = h
 			}
@@ -271,8 +301,8 @@ func (a *App) aiRecPool(ctx context.Context, probes []string, mediaType string) 
 		pool = append(pool, it)
 	}
 	sort.Slice(pool, func(i, j int) bool { return pool[i].Score > pool[j].Score })
-	if len(pool) > aiRecPoolSize {
-		pool = pool[:aiRecPoolSize]
+	if len(pool) > poolCap {
+		pool = pool[:poolCap]
 	}
 	return pool, nil
 }
@@ -303,8 +333,8 @@ func (a *App) aiRecBlurbs(ctx context.Context, pool []ForYouItem) map[int64]stri
 		if err := rows.Scan(&id, &desc, &genres); err != nil {
 			return out
 		}
-		if len(desc) > 220 {
-			desc = desc[:220] + "…"
+		if len(desc) > 160 {
+			desc = desc[:160] + "…"
 		}
 		desc = strings.ReplaceAll(desc, "\n", " ")
 		parts := []string{}
@@ -345,8 +375,8 @@ func (a *App) aiRecBlurbs(ctx context.Context, pool []ForYouItem) map[int64]stri
 		if err := epRows.Scan(&id, &ov); err != nil {
 			return out
 		}
-		if len(ov) > 240 {
-			ov = ov[:240] + "…"
+		if len(ov) > 180 {
+			ov = ov[:180] + "…"
 		}
 		epOverviews[id] = strings.ReplaceAll(ov, "\n", " ")
 	}
@@ -384,15 +414,23 @@ func aiRecCurateSystem() string {
 		"note = 1-2 sentences speaking directly to the viewer as \"you\", explaining how you read the request and why the picks fit overall " +
 		"(e.g. \"I looked for … — these fit because …\"). If nothing fits, use the note to say what you looked for and why nothing matched. " +
 		"If you recognized a specific title the request was hinting at, name it in the note. Never mention ids, grades, or \"the viewer\" in the note. " +
-		"Write reasons and the note entirely in English."
+		"Write reasons and the note entirely in English. " +
+		"more_probes = almost always an empty array. Only when the candidates cover the request poorly (few or no strong fits) may you request ONE deeper search: " +
+		"1-3 new probes for the library's semantic index — different phrasings, moods, themes, or plot elements than the original request, in English. " +
+		"If the request hints at a specific title you recognize, put that title's name in a probe: titles are always indexed even though descriptions avoid spoilers. " +
+		"Never request probes when strong candidates already exist."
 }
 
-func aiRecCurateUser(query, mediaType string, pool []ForYouItem, blurbs map[int64]string, watched map[int64]bool, history []string) string {
+func aiRecCurateUser(query, mediaType string, pool []ForYouItem, blurbs map[int64]string, watched map[int64]bool, history, followupProbes []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Viewer request: %s\n", query)
 	fmt.Fprintf(&b, "Scope: %s\n", aiRecScope(mediaType))
 	if len(history) > 0 {
 		fmt.Fprintf(&b, "Recently watched (newest first): %s\n", strings.Join(history, "; "))
+	}
+	if len(followupProbes) > 0 {
+		fmt.Fprintf(&b, "These are ADDITIONAL candidates from the deeper search you requested (probes: %s). "+
+			"Grade them for the same request; do not request further probes.\n", strings.Join(followupProbes, " · "))
 	}
 	b.WriteString("\nCandidates:\n")
 	for i, it := range pool {
