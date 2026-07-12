@@ -164,9 +164,10 @@
           </Teleport>
         </template>
       </div>
-      <AppTooltip label="Cast">
-        <button class="btn-icon topbar-cast-btn"><Icon name="cast" :size="18" /></button>
-      </AppTooltip>
+      <!-- Cast output picker — self-hides until discovery finds a device.
+           Its phone-band hide rule lives in CastButton.vue (scoped rules
+           here wouldn't reach the child's trigger). -->
+      <CastButton />
 
       <!-- Activity indicator -->
       <AppMenu
@@ -1156,9 +1157,8 @@ watch(() => route.fullPath, () => { closeDropdown() })
        search-wrap below has real space to expand into. */
     justify-self: stretch;
   }
-  /* The currently inert cast button isn't part of the required phone set
-     (brand/search/avatar) — hide it so search gets the width instead. */
-  .topbar-cast-btn { display: none; }
+  /* (The cast button's phone hide rule moved into CastButton.vue — scoped
+     rules here don't reach the child component's trigger.) */
   .search-wrap.open {
     flex: 1;
     width: auto;

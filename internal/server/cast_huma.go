@@ -33,12 +33,13 @@ func registerCastRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodPost, "/api/cast/sessions", "cast-play", "Start (or retarget) a cast session", "Cast")),
 		func(ctx context.Context, in *struct {
 			Body struct {
-				DeviceID string `json:"device_id" minLength:"1"      doc:"Target device (from /api/cast/devices)"`
-				TrackID  int64  `json:"track_id"  minimum:"1"        doc:"Music track to play"`
-				Volume   int    `json:"volume"    minimum:"0" maximum:"100" default:"30" doc:"Initial device volume (ignored when retargeting an existing session)"`
+				DeviceID     string `json:"device_id" minLength:"1"      doc:"Target device (from /api/cast/devices)"`
+				TrackID      int64  `json:"track_id"  minimum:"1"        doc:"Music track to play"`
+				Volume       int    `json:"volume"    minimum:"0" maximum:"100" default:"30" doc:"Initial device volume (ignored when retargeting an existing session)"`
+				StartSeconds int    `json:"start_seconds,omitempty" minimum:"0" doc:"Start position in the track — lets a client hand off mid-track playback"`
 			}
 		}) (*JSONOutput[cast.SessionSnapshot], error) {
-			snap, err := app.CastPlayTrack(ctx, userFrom(ctx).ID, in.Body.DeviceID, in.Body.TrackID, in.Body.Volume)
+			snap, err := app.CastPlayTrack(ctx, userFrom(ctx).ID, in.Body.DeviceID, in.Body.TrackID, in.Body.Volume, in.Body.StartSeconds)
 			if err != nil {
 				return nil, huma.Error422UnprocessableEntity(err.Error())
 			}

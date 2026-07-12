@@ -143,7 +143,37 @@ commence-wedge, EOF-before-commence, RTSP-close — all in the scratchpad
 transcripts, copy the interesting lines into testdata). Live smoke =
 the CLI against Anlæg.
 
-## Phase 2 — API + UI hookup
+## Phase 2 — API + UI hookup ✅ SHIPPED 2026-07-13
+
+Built as planned with three deviations found during implementation:
+
+- **Transport routing lives in `usePlayer`, not a third engine variant.**
+  The audio engine is a module singleton and `usePlayer` wires its
+  callbacks/watches exactly once (`engineWired`) — swapping engine
+  instances at runtime would strand that wiring. Instead the player's
+  transport actions (`play/pause/seek/setVolume/stop/prev`) check
+  `useCastStore().engaged` and become `/api/cast/*` calls; the queue,
+  shuffle, repeat, and advance logic runs unchanged on top. Deck arming
+  and prefetch are skipped while engaged.
+- **The picker is the global topbar button** (the placeholder
+  `topbar-cast-btn` became `CastButton.vue`), not a playbar control —
+  casting is app-wide, the playbar is music-only. The playbar just hides
+  the browser-quality readout while the output is remote.
+- **`POST /api/cast/sessions` gained `start_seconds`** so engaging a
+  device mid-track hands playback off at the current position (and
+  disconnect hands it back the same way via a local cold-load handoff).
+
+Also of note: `plugins/cast-live.client.ts` defers its boot fetches to
+`app:mounted` — plugins load alphabetically, so a `$heya` call during
+setup would run before `heyaApi.client.ts` registers the bearer-token
+hook and 401-logout the user. Sessions are per-track server-side, so the
+FE keeps a separate `engagedDeviceId` that survives between sessions;
+new sessions reuse the last known device volume (first engage caps at
+30). Advance ownership: only the tab that started the current play
+drives the queue on natural end. WS reconnect re-adopts the session
+snapshot. Verified: vue-tsc clean, cast unit tests green, Eye-driven
+picker → engage → disconnect against live discovery (Yamaha RX-V6A +
+AppleTVs found).
 
 **Deliverable: Cast button in the web player; controls stay in sync
 across every open client.**

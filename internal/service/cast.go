@@ -67,7 +67,7 @@ func (a *App) Cast() *cast.Manager { return a.castMgr }
 // retargets) a session on the device. The primary (highest
 // quality_score) file feeds the PCM decoder — the receiver gets full
 // quality regardless of what browsers would direct-play.
-func (a *App) CastPlayTrack(ctx context.Context, userID int64, deviceID string, trackID int64, volume int) (cast.SessionSnapshot, error) {
+func (a *App) CastPlayTrack(ctx context.Context, userID int64, deviceID string, trackID int64, volume, startSeconds int) (cast.SessionSnapshot, error) {
 	if a.castMgr == nil {
 		return cast.SessionSnapshot{}, fmt.Errorf("casting unavailable")
 	}
@@ -77,6 +77,14 @@ func (a *App) CastPlayTrack(ctx context.Context, userID int64, deviceID string, 
 	track, err := a.castTrackInfo(ctx, trackID)
 	if err != nil {
 		return cast.SessionSnapshot{}, err
+	}
+	// Mid-track handoff: a client transferring local playback passes its
+	// position. Same clamp as Session.Seek — never start past the end.
+	if startSeconds > 0 {
+		if track.Duration > 0 && startSeconds >= track.Duration {
+			startSeconds = track.Duration - 1
+		}
+		track.StartAt = startSeconds
 	}
 	// Note: the request ctx bounds only the DB reads above. The session
 	// itself runs on the cast manager's lifetime.

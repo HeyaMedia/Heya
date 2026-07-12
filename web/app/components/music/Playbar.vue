@@ -117,7 +117,9 @@
         </AppTooltip>
         <!-- Quality readout floats to the right of the transport so the play
              button stays dead-centered (absolute → out of the flex flow). -->
-        <div v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0 && !isCompact" class="pb-quality-slot">
+        <!-- Hidden while casting: it describes the BROWSER stream tier, and
+             the cast path feeds the receiver full-quality PCM server-side. -->
+        <div v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0 && !isCompact && !cast.engaged" class="pb-quality-slot">
           <PlaybarQuality :key="currentTrack.id" :track-id="currentTrack.id" />
         </div>
       </div>
@@ -195,7 +197,7 @@
 
         <!-- Tech-info pill that otherwise floats off the transport controls
              on the wide layout. Nested popover-in-menu verified in Eye. -->
-        <template v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0">
+        <template v-if="currentTrack && !currentTrack.isStream && currentTrack.id > 0 && !cast.engaged">
           <div class="surface-section-label pb-more-label">Quality</div>
           <div class="pb-more-row" @click.stop>
             <PlaybarQuality :key="currentTrack.id" :track-id="currentTrack.id" />
@@ -297,6 +299,10 @@ const {
   cycleRepeat, nextTrack, prevTrack, stop, pause,
   toggleQueue, toggleLyrics, formatTime,
 } = usePlayerBindings()
+
+// The cast picker lives in the topbar (<CastButton/>); the playbar only
+// needs to know whether the output is remote to hide the quality readout.
+const cast = useCastStore()
 
 // Visualizer overlay toggle (fullscreen host is mounted at the shell level).
 const vis = useVisualizer()

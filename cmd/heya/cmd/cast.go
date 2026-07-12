@@ -24,6 +24,8 @@ import (
 // "CLI linking the service layer".
 
 var castVolumeFlag int
+
+var castStartFlag int
 var castToFlag string
 
 var castCmd = &cobra.Command{
@@ -68,7 +70,7 @@ var castPlayCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		body := map[string]any{"device_id": dev.ID, "track_id": trackID, "volume": castVolumeFlag}
+		body := map[string]any{"device_id": dev.ID, "track_id": trackID, "volume": castVolumeFlag, "start_seconds": castStartFlag}
 		var snap castSessionJSON
 		if err := castAPI(cmd.Context(), http.MethodPost, "/api/cast/sessions", body, &snap); err != nil {
 			return err
@@ -173,6 +175,7 @@ var castVolCmd = &cobra.Command{
 
 func init() {
 	castPlayCmd.Flags().IntVar(&castVolumeFlag, "volume", 30, "Initial device volume (0-100)")
+	castPlayCmd.Flags().IntVar(&castStartFlag, "start", 0, "Start position in seconds")
 	castCmd.PersistentFlags().StringVar(&castToFlag, "to", "", "Device name (substring) or device ID")
 	castCmd.AddCommand(castDevicesCmd, castPlayCmd, castStatusCmd, castSeekCmd, castVolCmd,
 		castControlCmd("pause", "Pause playback"),

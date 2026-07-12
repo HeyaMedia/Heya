@@ -71,6 +71,10 @@ let lastTickTime = 0
 // analysis fetch so a stale request that resolves late can detect it's been
 // superseded by a newer one and bail instead of clobbering the active deck.
 let playGeneration = 0
+// Set by stopCasting(): the local engine has nothing loaded (or something
+// stale), so the next resume must cold-load the track and seek to where the
+// cast session left off instead of resuming a dead deck.
+let localHandoff: { trackId: number, position: number } | null = null
 
 // Debounces prefetchManager.sync() calls triggered by a `watch(upcomingTracks)`
 // (registered once in ensureEngine, below) — covers track advance, add/
@@ -89,6 +93,9 @@ function schedulePrefetchSync(upcoming: Track[], current: Track | null) {
   if (prefetchSyncTimer) clearTimeout(prefetchSyncTimer)
   prefetchSyncTimer = setTimeout(() => {
     prefetchSyncTimer = null
+    // Remote output: the server feeds the receiver directly — warming the
+    // browser cache would just download tracks nobody here will play.
+    if (useCastStore().engaged) return
     const { settings: deviceSettings } = useDeviceSettings()
     void prefetchManager.sync(upcoming.slice(0, deviceSettings.value.prefetchCount), current)
   }, PREFETCH_SYNC_DEBOUNCE_MS)
@@ -416,6 +423,14 @@ export const usePlayerStore = defineStore('player', () => {
   // settings change, and re-run by ensureAnalysisAndArm once analysis lands.
   function armSync() {
     if (!import.meta.client || !engineWired.value) return
+    // Remote output: no local decks to arm — transitions are API calls
+    // driven by castTrackEnded(), not the scheduler.
+    if (useCastStore().engaged) {
+      pendingNext = null
+      pendingPlan = null
+      prefetchedTrackId = null
+      return
+    }
     const e = ensureEngine() as EngineWithScheduler
     pendingNext = null
     pendingMode = 'gapless'
@@ -513,6 +528,9 @@ export const usePlayerStore = defineStore('player', () => {
 
   // Arm immediately from known data, then fetch any missing analysis and re-arm.
   function prepareTransition() {
+    // Remote output: skip entirely — ensureAnalysisAndArm would otherwise
+    // spin up an AudioContext (via ensureEngine) that nothing will play on.
+    if (import.meta.client && useCastStore().engaged) return
     armSync()
     void ensureAnalysisAndArm()
   }
@@ -582,6 +600,12 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   async function play(track?: Track) {
+    // Remote output: the queue/track state stays client-side (Phase 2),
+    // but the audio path is an API call — never touch the local engine.
+    if (import.meta.client && useCastStore().engaged) {
+      await playViaCast(track)
+      return
+    }
     const e = ensureEngine()
     if (track) {
       // Never play a track whose file was removed from disk.
@@ -628,6 +652,21 @@ export const usePlayerStore = defineStore('player', () => {
     }
     // No track passed — resume current
     if (!currentTrack.value) return
+    // Coming back from a cast session: the deck holds nothing (or a stale
+    // buffer from before the handoff) — cold-load and jump to where the
+    // receiver left off.
+    if (localHandoff && localHandoff.trackId === currentTrack.value.id) {
+      const h = localHandoff
+      localHandoff = null
+      const t = currentTrack.value
+      await play(t)
+      if (engineWired.value && h.position > 0) {
+        ensureEngine().seek(h.position)
+        position.value = h.position
+        lastTickTime = h.position
+      }
+      return
+    }
     try {
       await e.resume()
     } catch {
@@ -635,7 +674,58 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  // The cast-mode half of play(): same queue bookkeeping, remote transport.
+  async function playViaCast(track?: Track) {
+    const cast = useCastStore()
+    if (track) {
+      if (track.available === false) return
+      if (track.isStream || track.id <= 0) {
+        useToast().toast.err('Radio streams can\'t be cast yet')
+        return
+      }
+      transitioning = false
+      prefetchedTrackId = null
+      pendingNext = null
+      currentTrack.value = track
+      position.value = 0
+      scrobbledTrackId.value = null
+      listenedSeconds = 0
+      lastTickTime = 0
+      if (track.duration && Number.isFinite(track.duration)) duration.value = track.duration
+      playing.value = true // optimistic; the WS mirror confirms
+      alog('player', `cast play "${track.title}" #${track.id} → ${cast.deviceName}`)
+      try {
+        await cast.playTrack(track.id, volume.value)
+      } catch {
+        playing.value = false
+        useToast().toast.err(`Couldn't cast to ${cast.deviceName || 'device'}`)
+      }
+      return
+    }
+    // Resume. A live session resumes in place; without one (the server
+    // drops sessions between tracks) re-cast the current track from the
+    // frozen position.
+    const cur = currentTrack.value
+    if (!cur) return
+    playing.value = true
+    try {
+      if (cast.session) await cast.resume()
+      else if (cur.id > 0 && !cur.isStream) await cast.playTrack(cur.id, volume.value, position.value)
+      else playing.value = false
+    } catch {
+      playing.value = false
+    }
+  }
+
   function pause() {
+    if (import.meta.client) {
+      const cast = useCastStore()
+      if (cast.engaged) {
+        playing.value = false // optimistic; WS mirror confirms
+        void cast.pause().catch(() => { /* session already gone */ })
+        return
+      }
+    }
     if (!engineWired.value) return
     ensureEngine().pause()
   }
@@ -648,7 +738,13 @@ export const usePlayerStore = defineStore('player', () => {
   // seek takes a 0-1 fraction (legacy API the UI uses).
   function seek(pct: number) {
     const target = Math.max(0, Math.min(1, pct)) * (duration.value || 0)
-    if (engineWired.value) ensureEngine().seek(target)
+    if (import.meta.client && useCastStore().engaged) {
+      // While paused between tracks (no session) this still moves the
+      // frozen position — the next re-cast starts from it.
+      void useCastStore().seekTo(target).catch(() => { /* WS restores truth */ })
+    } else if (engineWired.value) {
+      ensureEngine().seek(target)
+    }
     position.value = target
     lastTickTime = target
   }
@@ -663,12 +759,25 @@ export const usePlayerStore = defineStore('player', () => {
     if (muted.value && clamped === 0) return
     volume.value = clamped
     if (clamped > 0) muted.value = false
+    if (import.meta.client && useCastStore().engaged) {
+      // The slider is the DEVICE stream volume while casting. Deliberately
+      // not persisted — localStorage keeps the local listening level for
+      // when the output comes back.
+      useCastStore().setVolume(clamped)
+      return
+    }
     if (engineWired.value) ensureEngine().setVolume(muted.value ? 0 : clamped / 100)
     persistVolumePrefs(volume.value, muted.value)
   }
 
   function toggleMute() {
     muted.value = !muted.value
+    if (import.meta.client && useCastStore().engaged) {
+      // No mute verb on the receiver — drive the stream volume to 0 and
+      // back. `muted` stays a local flag so unmute knows the level.
+      useCastStore().setVolume(muted.value ? 0 : volume.value)
+      return
+    }
     if (engineWired.value) ensureEngine().setVolume(muted.value ? 0 : volume.value / 100)
     persistVolumePrefs(volume.value, muted.value)
   }
@@ -767,7 +876,11 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function prevTrack() {
     if (position.value > 3) {
-      if (engineWired.value) ensureEngine().seek(0)
+      if (import.meta.client && useCastStore().engaged) {
+        void useCastStore().seekTo(0).catch(() => { /* WS restores truth */ })
+      } else if (engineWired.value) {
+        ensureEngine().seek(0)
+      }
       position.value = 0
       lastTickTime = 0
       return
@@ -953,7 +1066,12 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // stop unloads the engine + clears state. Used by the playbar long-press.
+  // While casting it also ends the remote session (the device stays engaged
+  // — the next play targets it again). Engaged-only: a tab merely watching
+  // someone else's cast must not kill it by clearing its own local queue.
   function stop() {
+    if (import.meta.client && useCastStore().engaged) void useCastStore().stopSession()
+    localHandoff = null
     if (engineWired.value) ensureEngine().stop()
     playing.value = false
     currentTrack.value = null
@@ -968,6 +1086,88 @@ export const usePlayerStore = defineStore('player', () => {
     lastTickTime = 0
   }
 
+  // --- Cast output orchestration (docs/cast-plan.md Phase 2) ----------------
+  // The queue, shuffle, repeat, and track-advance logic above stays the
+  // owner of WHAT plays; these switch WHERE it plays.
+
+  // Engage a device and hand the current playback off to it mid-track.
+  async function startCastTo(deviceId: string) {
+    const cast = useCastStore()
+    const track = currentTrack.value
+    const pos = position.value
+    const wasPlaying = playing.value
+    // One session per device server-side — switching receivers must stop
+    // the old one first or both keep playing.
+    if (cast.session && cast.session.device_id !== deviceId) await cast.stopSession()
+    cast.engagedDeviceId = deviceId
+    localHandoff = null
+    // Silence the local engine; queue + position state stay put. Also
+    // drops any armed pending deck so a later "next" can't cold-swap to it.
+    transitioning = false
+    prefetchedTrackId = null
+    pendingNext = null
+    if (engineWired.value) ensureEngine().pause()
+    if (wasPlaying && track && track.id > 0 && !track.isStream) {
+      playing.value = true // optimistic through the ~2s establishment
+      try {
+        await cast.playTrack(track.id, volume.value, pos)
+      } catch {
+        playing.value = false
+        cast.engagedDeviceId = null
+        useToast().toast.err(`Couldn't cast to ${cast.deviceName || 'device'}`)
+      }
+    }
+  }
+
+  // Disconnect: release the device, freeze position where the receiver
+  // was, and set up the local resume handoff. Playback does NOT auto-blast
+  // out of the laptop speakers — the user presses play to bring it back.
+  async function stopCasting() {
+    const cast = useCastStore()
+    const track = currentTrack.value
+    const pos = cast.session ? cast.livePositionSec() : position.value
+    await cast.disconnect()
+    playing.value = false
+    position.value = pos
+    lastTickTime = pos
+    if (track && track.id > 0 && !track.isStream) {
+      localHandoff = { trackId: track.id, position: pos }
+    }
+    // The slider was mirroring the device volume — restore the local pref.
+    if (import.meta.client) {
+      try {
+        const raw = localStorage.getItem(VOLUME_STORAGE_KEY)
+        if (raw) {
+          const p = JSON.parse(raw) as { volume?: number, muted?: boolean }
+          if (typeof p.volume === 'number' && Number.isFinite(p.volume)) {
+            volume.value = Math.max(0, Math.min(100, p.volume))
+          }
+        }
+      } catch { /* keep whatever's shown */ }
+    }
+  }
+
+  // Fired by the cast WS mirror when a track this tab started finishes on
+  // the receiver. The server already scrobbled it (source "cast") — this
+  // only advances the queue. Client-driven advance is the accepted Phase 2
+  // limitation: the tab must stay open (Phase 3 moves the queue server-side).
+  async function castTrackEnded() {
+    if (sleepAtTrackEnd.value) {
+      sleepAtTrackEnd.value = false
+      playing.value = false
+      alog('player', 'sleep timer: stopped at end of cast track')
+      return
+    }
+    const next = peekNextTrack() // queue order; returns current for repeat-one
+    if (!next) {
+      alog('player', 'cast queue ended')
+      playing.value = false
+      return
+    }
+    alog('player', `cast advance → "${next.title}"`)
+    await play(next)
+  }
+
   return {
     playing, currentTrack, position, duration, volume, muted,
     shuffled, repeatMode, queue, originalOrder, queueOpen, sideTab,
@@ -979,6 +1179,7 @@ export const usePlayerStore = defineStore('player', () => {
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
     jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
     addToQueue, playNext,
+    startCastTo, stopCasting, castTrackEnded,
   }
 })
 
@@ -1012,6 +1213,9 @@ export function usePlayerBindings() {
     clearUpcoming: store.clearUpcoming,
     addToQueue: store.addToQueue,
     playNext: store.playNext,
+    startCastTo: store.startCastTo,
+    stopCasting: store.stopCasting,
+    castTrackEnded: store.castTrackEnded,
   }
 }
 
