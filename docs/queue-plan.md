@@ -1,0 +1,170 @@
+# Server-owned play queue
+
+Build plan for moving the music queue out of the browser and into the
+server, with every client live-mirroring it over the WS bus. Companion to
+[docs/cast-plan.md](cast-plan.md) — cast Phase 3 (server-side auto-advance,
+gapless) lands *on top of* this queue rather than growing a session-private
+one.
+
+## Why
+
+- **Client shuffle is a lie.** `usePlayer.toggleShuffle` shuffles whatever
+  page of tracks the client happened to load — "shuffle this genre" over a
+  10k-track tag is random over the first fetch, not the set. True random
+  needs the server.
+- **Queues with thousands of tracks can't live in a Pinia array** (or cross
+  the wire on every play click).
+- **The queue should survive the client.** Start music on the phone, lock
+  it, open any client 45 minutes later → see where the queue is, edit it.
+- **Cast needs it anyway**: close-the-laptop auto-advance (cast Phase 3)
+  requires the server to know what's next.
+
+## Decisions (made)
+
+| Decision | Choice | Why |
+| --- | --- | --- |
+| Queue scope | **One queue per user** (`play_queues.user_id UNIQUE`) | The "reconnect anywhere and see it" story only has a clean answer with a single queue; household = per-user is enough isolation |
+| Player model | **One active output per user** (Spotify Connect semantics) | Two tabs advancing one pointer is chaos. A second tab becomes a mirror/remote; its play button = "play here" (transfer) |
+| Queue storage | **Materialize fully**, windowed reads | 10k rows is nothing for PG (`INSERT … SELECT … ORDER BY random()`); stable order makes repeat/reorder/up-next well-defined. No sampling/virtual queue in v1 |
+| Client view | **Window around the pointer** (current ± ~50, paged) | Clients never hold the full queue; fixes the 10k-array problem outright |
+| Live sync | **WS, per-user scoped** (`hub.PublishToUser`) | Plumbing already exists; cast events are household-global, queue events are personal |
+| Event shape | Thin `queue.changed` + `version` counter; refetch window on version gap | Live Interactivity pattern — lean invalidate+refetch, no CRDT ambitions |
+| Cutover | **Full swap, no dual path** | Client-queue and server-queue side by side is permanent complexity. Local playback consumes the server queue too |
+| Sequencing | **Queue swap first, cast binds after** | Prove the model with the daily-driver (local playback) before rewiring cast advance |
+| Playlists | Same WS treatment (version + `playlist.changed` → invalidate) | Multi-client collab for the same user now; cross-user sharing is a later phase on the same rails |
+
+## Data model
+
+```sql
+CREATE TABLE play_queues (
+  id               BIGSERIAL PRIMARY KEY,
+  user_id          BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  version          BIGINT NOT NULL DEFAULT 0,       -- bumped on EVERY mutation
+  current_item_id  BIGINT,                          -- pointer into items
+  position_seconds REAL NOT NULL DEFAULT 0,         -- coarse, heartbeat-fed
+  playing          BOOLEAN NOT NULL DEFAULT false,
+  repeat_mode      TEXT NOT NULL DEFAULT 'off',     -- off | all | one
+  shuffled         BOOLEAN NOT NULL DEFAULT false,
+  source           JSONB,                           -- {kind, id, shuffle} provenance
+  active_output    TEXT,                            -- 'local:<client_id>' | 'cast:<device_id>' | NULL
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE play_queue_items (
+  id        BIGSERIAL PRIMARY KEY,
+  queue_id  BIGINT NOT NULL REFERENCES play_queues(id) ON DELETE CASCADE,
+  ord       BIGINT NOT NULL,                        -- sparse: n*1024, renumber lazily
+  track_id  BIGINT NOT NULL,
+  UNIQUE (queue_id, ord)
+);
+```
+
+- **Sparse `ord` keys** (gap 1024): reorder = one-row UPDATE into the gap;
+  renumber the tail only when a gap exhausts. No 10k-row shifts per drag.
+- **History stays in the table** — the pointer moves past played items, so
+  "Played" and prev-track work naturally. Prune history beyond ~200 items
+  on advance.
+- `version` is the concurrency spine: every mutation bumps it inside the
+  same transaction; WS events carry it; a client that sees a gap (or is
+  reconnecting) refetches its window. Mutations may carry
+  `expected_version` for optimistic concurrency where it matters (reorder).
+- **Sources materialize server-side**: album / artist / playlist / mix /
+  genre-tag / explicit track list — each reuses the SQL its list endpoint
+  already has, `ORDER BY random()` when shuffled. Re-shuffle = re-materialize
+  the un-played remainder. The `source` column is provenance for
+  "re-shuffle", "append more like this", and later radio mode.
+
+## API (`/api/me/queue` — the queue is personal, so it lives in the `me` namespace)
+
+| Route | Purpose |
+| --- | --- |
+| `GET    /api/me/queue?around=current\|<ord>&limit=100` | Meta (version, pointer, position, transport, total, source) + item window |
+| `POST   /api/me/queue` | Replace: `{source \| track_ids, start_track_id?, shuffle?}` → materialize + point + play |
+| `POST   /api/me/queue/items` | Append / play-next: `{track_ids, at: 'end'\|'next'}` |
+| `DELETE /api/me/queue/items/{id}` | Remove one upcoming item |
+| `POST   /api/me/queue/items/{id}/move` | `{after_item_id \| first}` — sparse-key reorder |
+| `POST   /api/me/queue/jump` | `{item_id}` — pointer jump |
+| `POST   /api/me/queue/advance` | `{from_item_id, reason: 'ended'\|'skip'\|'prev'}` — renderer reports; idempotent (from guards double-fires) |
+| `POST   /api/me/queue/shuffle` / `…/repeat` | Mode flips; shuffle reshuffles/restores the upcoming slice server-side |
+| `POST   /api/me/queue/heartbeat` | `{client_id, position_seconds, playing}` — coarse position + renderer liveness (~15s while playing) |
+| `POST   /api/me/queue/claim` | `{output: 'local:<client_id>' \| 'cast:<device_id>'}` — become the active output; everyone else drops to mirror |
+| `DELETE /api/me/queue` | Clear |
+
+WS: one per-user event, `queue.changed {version, kind: 'replaced'|'items'|'pointer'|'transport'|'output', current_item_id, position_seconds, playing, active_output}`.
+Common cases (pointer move, transport flip) apply straight from the
+payload; anything structural (`replaced`, `items`) triggers a window
+refetch. CLI mutations reach the serve process's hub via the existing
+LISTEN/NOTIFY relay — CLI goes over HTTP anyway (same rule as cast).
+
+## Phase A — queue service + API
+
+`internal/service/queue.go` (+ sqlc queries, migration): materialization
+from sources, window reads, sparse-key mutations, advance/jump/heartbeat,
+version bumps + `PublishToUser` emits. Unit tests over the mutation
+semantics (advance idempotency, reorder around the pointer, reshuffle
+preserving played head, history pruning). No FE yet — verifiable via
+`heya api` + a `heya queue` CLI subcommand (CLI-first).
+
+## Phase B — the FE swap (the big lift)
+
+Replace `usePlayer`'s `queue`/`originalOrder` arrays with a windowed
+server mirror. This is the riskiest chunk — the array is load-bearing for
+QueuePanel/QueuePane, drag-reorder, played/upcoming computeds, prefetch,
+and transition arming.
+
+- New `useQueue` store: window + meta + version, optimistic mutations with
+  rollback, WS reconcile, window paging as the user scrolls the panel
+  (virtualized — vue-virtual-scroller is already a dep).
+- `usePlayer` transport keeps its shape; `peekNextTrack()` reads
+  `window[current+1]`, so deck preloading / gapless / crossfade machinery
+  is untouched. `handleEnded` → optimistic pointer move + `POST advance`.
+- **Call-site sweep**: every "play this" context (album, artist, playlist,
+  mix, tag/genre, track list) stops shipping arrays and posts a source
+  descriptor + start track. This is the wide-but-shallow part.
+- Multi-tab: tabs get a `client_id`; a non-active tab renders the mirror
+  with a "Playing on <output> — play here" affordance; play-here = claim +
+  local render from the server position. Claimed-away tabs pause their
+  engine on the `output` event.
+- Scrobbling stays renderer-side (existing `/api/me/playback` path) for
+  local output.
+
+## Phase C — cast binds to the queue
+
+Cast Phase 3, reshaped: `CastSession` consumes the user queue
+server-internally (advance on feeder EOF), replacing Phase 2's
+client-driven `castTrackEnded` advance. Gapless continuous-stdin feed
+(next ffmpeg into the same cliap2 stdin + SENDMETA metadata flush) —
+**validate with a two-track harness first**; fall back to
+respawn-per-track if the boundary glitches. `startCastTo` becomes
+`claim('cast:<device>')`; disconnect claims back to local with the
+handoff position the server already knows. Kills `localHandoff` and the
+FE advance-ownership machinery from cast Phase 2.
+
+## Phase D — playlists go live-collab
+
+Same rails, much smaller: playlist mutations already run through the
+service layer — add `version` + emit per-user `playlist.changed`, FE
+invalidates the Pinia Colada playlist queries (pattern:
+`cache-invalidation.client.ts`). That gives same-user multi-client sync
+now. Cross-user sharing later = `playlist_members` ACL + emitting to each
+member (the event fan-out is the easy half; the UI/permissions model is
+the real work, deliberately deferred).
+
+## Later / out of scope for now
+
+- Radio / endless mode (source descriptor + sampler that tops up the tail)
+- Cross-user shared playlists (Phase D groundwork)
+- Multiple named queues per user (explicitly not doing this)
+- Jellyfin/Subsonic compat queues (their clients own playback; untouched)
+
+## Risks
+
+- **Every transport mutation becomes a round trip.** LAN/tailnet is fine;
+  optimistic UI hides the rest. Offline PWA queue editing degrades —
+  accepted, Heya is server-centric.
+- **The Phase B sweep touches most play sites.** Mitigate by landing the
+  `useQueue` store + one context (album page) first, then sweeping.
+- **Two-tab races** (both post advance): `from_item_id` idempotency guard
+  + single active output make double-fires no-ops.
+- **Migration numbering races** with parallel sessions (known gotcha) —
+  claim the migration number at branch start.
