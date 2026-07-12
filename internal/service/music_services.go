@@ -36,19 +36,6 @@ type MusicServiceUpdate struct {
 	ScrobbleEnabled *bool  `json:"scrobble_enabled,omitempty"`
 }
 
-type listenImportState struct {
-	Status    string `json:"status"` // idle | running | done | failed
-	Imported  int    `json:"imported"`
-	Matched   int    `json:"matched"`
-	Unmatched int    `json:"unmatched"`
-	Scanned   int    `json:"scanned"`
-	// Cursor is the unix timestamp of the oldest listen reached so far — a
-	// failed or interrupted import resumes below it instead of re-walking
-	// the whole history from the newest listen.
-	Cursor    int64  `json:"cursor,omitempty"`
-	Error     string `json:"error,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-}
 
 func musicServiceValid(service string) bool {
 	return service == "listenbrainz" || service == "lastfm"
