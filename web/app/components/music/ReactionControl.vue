@@ -90,7 +90,9 @@ const iconSize = computed(() => (props.size === 'sm' ? 14 : 17))
 .reaction--sm .reaction-btn { padding: 3px; }
 .reaction-btn:hover { color: var(--fg-0); background: rgba(255, 255, 255, 0.06); }
 .reaction-btn:active { transform: scale(0.9); }
-.reaction-down.active { color: #e06c5c; }
-.reaction-up.active { color: #6fbf73; }
-.reaction-heart.active { color: var(--gold-bright, #e0b45c); }
+/* Hollow by default (outline glyphs); active = filled. Thumbs light up
+   bright, the heart goes red. */
+.reaction-down.active { color: var(--fg-0); }
+.reaction-up.active { color: var(--fg-0); }
+.reaction-heart.active { color: #e5484d; }
 </style>

@@ -71,16 +71,6 @@
     <!-- Center: controls + scrubber -->
     <div class="pb-center">
       <div class="pb-controls">
-        <!-- Rating floats to the LEFT of the transport cluster (absolute, out of
-             the flex flow) so the play button stays dead-centered — muscle
-             memory. Mirrors the quality readout that floats to the right. -->
-        <div v-if="currentTrack && !isCompact" class="pb-rate-slot" @click.stop>
-          <ReactionControl
-            :model-value="ratings.get(currentTrack.id) ?? 0"
-            size="sm"
-            @update:model-value="(v) => onRate(currentTrack!.id, v)"
-          />
-        </div>
         <AppTooltip :label="shuffled ? 'Shuffle on' : 'Shuffle'">
           <button class="btn-icon" :class="{ active: shuffled }" :aria-pressed="shuffled" @click="toggleShuffle">
             <Icon name="shuffle" :size="16" />
@@ -150,6 +140,13 @@
          mounted side effects (SleepTimer's 1Hz interval, PlaybarQuality's
          popover state) never double-mount. -->
     <div v-if="!isCompact" class="pb-right">
+      <ReactionControl
+        v-if="currentTrack"
+        :model-value="ratings.get(currentTrack.id) ?? 0"
+        size="sm"
+        class="pb-reactions"
+        @update:model-value="(v) => onRate(currentTrack!.id, v)"
+      />
       <AppTooltip label="Lyrics">
         <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'lyrics' }" :aria-pressed="queueOpen && sideTab === 'lyrics'" @click="toggleLyrics"><Icon name="lyrics" :size="16" /></button>
       </AppTooltip>
@@ -622,7 +619,7 @@ onScopeDispose(() => {
 .pb-quality-slot { position: absolute; left: 100%; margin-left: 14px; top: 50%; transform: translateY(-50%); }
 /* Rating floats left of the centered transport cluster so the play button
    never moves. Mirror of .pb-quality-slot on the right. */
-.pb-rate-slot { position: absolute; right: 100%; margin-right: 14px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; white-space: nowrap; }
+.pb-reactions { margin-right: 6px; padding-right: 8px; border-right: 1px solid var(--border); }
 /* Idle scrubber: keep it visible but inert (no cursor, no hover ghost, no seek). */
 .pb-scrubber-idle :deep(.wf-wrap) { pointer-events: none; cursor: default; }
 .pb-play {
