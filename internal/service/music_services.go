@@ -36,7 +36,6 @@ type MusicServiceUpdate struct {
 	ScrobbleEnabled *bool  `json:"scrobble_enabled,omitempty"`
 }
 
-
 func musicServiceValid(service string) bool {
 	return service == "listenbrainz" || service == "lastfm"
 }
