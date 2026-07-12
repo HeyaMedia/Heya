@@ -20112,11 +20112,6 @@
             "description": "Error"
           }
         },
-        "security": [
-          {
-            "bearer": null
-          }
-        ],
         "summary": "Generated AI image bytes",
         "tags": [
           "AI"

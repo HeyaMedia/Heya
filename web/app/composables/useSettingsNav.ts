@@ -73,6 +73,7 @@ const ALL_GROUPS: SettingsNavGroup[] = [
           { to: '/settings/recommendations', label: 'Recommendations' },
           { to: '/settings/sonic', label: 'Sonic analysis' },
           { to: '/settings/ai', label: 'AI providers' },
+          { to: '/settings/images', label: 'Image generation' },
         ],
       },
     ],

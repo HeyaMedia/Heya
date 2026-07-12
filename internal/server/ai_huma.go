@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/imagegen"
 	"github.com/karbowiak/heya/internal/llm"
 	"github.com/karbowiak/heya/internal/service"
 )
@@ -73,6 +75,24 @@ func registerAIRoutes(api huma.API, app *service.App) {
 			return statusOK("stopped"), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/ai/images/status", "get-ai-image-status", "Local image-generation status", "AI")),
+		func(_ context.Context, _ *struct{}) (*JSONOutput[service.ImageStatus], error) {
+			return noStoreJSON(app.ImageStatus(imagegen.DefaultModel, imagegen.BackendAuto)), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/ai/images/catalog", "get-ai-image-catalog", "Curated image model catalog", "AI")),
+		func(_ context.Context, _ *struct{}) (*JSONOutput[imageCatalogBody], error) {
+			return cachedJSON(imageCatalogBody{Models: app.ImageModels()}, 300), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/ai/images/fetch", "post-ai-image-fetch", "Explicitly fetch image runtime and model", "AI")),
+		func(_ context.Context, in *struct{ Body imageFetchBody }) (*StatusOutput, error) {
+			if err := app.ImageDownload(in.Body.Model, in.Body.Backend); err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return statusOK("downloading"), nil
+		})
+
 	// --- User-facing AI features (secured, not admin) ---
 
 	// Capability probe for the FE: is there any point offering AI affordances?
@@ -81,6 +101,16 @@ func registerAIRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[aiReadyBody], error) {
 			st := app.AIStatus(ctx)
 			return noStoreJSON(aiReadyBody{Ready: st.Ready, Mode: st.Mode}), nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPost, "/api/ai/images/generate", "post-ai-image-generate", "Generate an image locally", "AI")),
+		func(ctx context.Context, in *struct{ Body imagegen.Request }) (*JSONOutput[imageGenerateBody], error) {
+			res, err := app.ImageGenerate(ctx, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusConflict)
+			}
+			name := filepath.Base(res.Path)
+			return noStoreJSON(imageGenerateBody{URL: "/api/ai/images/" + name, Model: res.Model, Seed: res.Seed, DurationMs: res.DurationMs}), nil
 		})
 
 	// AI-curated recommendations: LLM probes → embedding KNN pool → LLM
@@ -113,6 +143,20 @@ type aiCatalogBody struct {
 
 type aiModelsBody struct {
 	Models []string `json:"models"`
+}
+
+type imageCatalogBody struct {
+	Models []imagegen.Model `json:"models"`
+}
+type imageFetchBody struct {
+	Model   string `json:"model,omitempty"`
+	Backend string `json:"backend,omitempty"`
+}
+type imageGenerateBody struct {
+	URL        string `json:"url"`
+	Model      string `json:"model"`
+	Seed       int64  `json:"seed"`
+	DurationMs int64  `json:"duration_ms"`
 }
 
 // aiError maps AI-subsystem failures onto helpful HTTP statuses: disabled /

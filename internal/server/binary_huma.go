@@ -52,6 +52,20 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, binaryOp(http.MethodGet, "/api/me/playlists/{id}/cover", "playlist-cover", "Custom playlist cover bytes", "Images"),
 		wrapStreamAs[idBinaryInput](handlePlaylistCover(app)))
 
+	// Browser <img> requests cannot attach Heya's bearer token. Generated
+	// filenames are high-entropy and carry no library path information, so
+	// serve them like the other public image byte endpoints.
+	huma.Register(api, binaryOp(http.MethodGet, "/api/ai/images/{filename}", "ai-generated-image", "Generated AI image bytes", "AI"),
+		wrapStreamAs[generatedImageInput](func(w http.ResponseWriter, r *http.Request) {
+			path, ok := app.ImageOutputPath(r.PathValue("filename"))
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Cache-Control", "private, max-age=86400")
+			http.ServeFile(w, r, path)
+		}))
+
 	// --- Video streaming (HLS + direct play) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/stream/{file_id}", "stream-direct", "Direct video stream (range-served bytes)", "Streaming"),
 		wrapStreamAs[streamFileInput](handleDirectStream(app)))
@@ -148,6 +162,10 @@ func streamResponse(h http.HandlerFunc) *huma.StreamResponse {
 
 type idBinaryInput struct {
 	ID int64 `path:"id" minimum:"1"`
+}
+
+type generatedImageInput struct {
+	Filename string `path:"filename" pattern:"^[A-Za-z0-9._-]+\\.png$" maxLength:"128"`
 }
 
 type extraBinaryInput struct {

@@ -156,3 +156,56 @@ export const aiCatalogQuery = defineQueryOptions(() => ({
   staleTime: 1000 * 60 * 5,
   meta: privateRuntime,
 }))
+
+export type ImageArtifactStatus = { role: string, name: string, size: number, present: boolean, shared: boolean }
+export type ImageModel = {
+  id: string
+  label: string
+  license: string
+  ram_hint: string
+  default_width: number
+  default_height: number
+  default_steps: number
+  default_cfg: number
+  artifacts: Array<{ role: string, name: string, size: number }>
+}
+export type ImageGenerationStatus = {
+  build: string
+  backend: string
+  model: string
+  runtime_present: boolean
+  model_present: boolean
+  download_state: string
+  progress?: AIDownloadProgress
+  download_error?: string
+  artifacts: ImageArtifactStatus[]
+  download_bytes: number
+}
+export type ImageGenerateRequest = { prompt: string, negative_prompt?: string, width?: number, height?: number, steps?: number, cfg?: number, seed?: number, model_id?: string, backend?: string }
+export type ImageGenerateResult = { url: string, model: string, seed: number, duration_ms: number }
+
+export const imageGenerationStatusQuery = defineQueryOptions(() => ({
+  key: ['admin', 'intelligence', 'images', 'status'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/ai/images/status') as ImageGenerationStatus
+  },
+  staleTime: 1000 * 3,
+  meta: privateRuntime,
+}))
+
+export const imageGenerationCatalogQuery = defineQueryOptions(() => ({
+  key: ['admin', 'intelligence', 'images', 'catalog'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/ai/images/catalog') as { models: ImageModel[] }
+  },
+  staleTime: 1000 * 60 * 5,
+  meta: privateRuntime,
+}))
+
+// Shared frontend entry point for playlist/collection artwork and settings QA.
+export async function generateLocalImage(request: ImageGenerateRequest): Promise<ImageGenerateResult> {
+  const { $heya } = useNuxtApp()
+  return await $heya('/api/ai/images/generate', { method: 'POST', body: request as any }) as ImageGenerateResult
+}

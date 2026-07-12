@@ -71,7 +71,6 @@ async function loadSettings() {
 async function loadCatalog() {
   await catalogData.refetch()
 }
-
 watch(() => settingsData.data.value, value => {
   if (value) settings.value = structuredClone(value)
 }, { immediate: true })
@@ -503,6 +502,17 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .artifact-text { font-size: 12px; color: var(--fg-2); font-family: var(--font-mono); }
 .dl-error { margin: 10px 0 0; font-size: 12px; color: var(--bad, #e5484d); }
 
+.image-artifacts { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.image-artifact-row { display: grid; grid-template-columns: 80px minmax(0, 1fr) 72px auto; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-2); border-bottom: 1px solid var(--border); }
+.image-artifact-row:last-child { border-bottom: 0; }
+.artifact-role { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-3); }
+.artifact-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--font-mono); color: var(--fg-1); }
+.artifact-size { text-align: right; font: 11px var(--font-mono); color: var(--fg-3); }
+.image-test-card { display: grid; gap: 10px; margin-top: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-2); }
+.image-test-card .sv2-btn { justify-self: start; }
+.generated-preview { display: grid; gap: 8px; color: var(--fg-3); font: 11px var(--font-mono); }
+.generated-preview img { width: min(100%, 512px); aspect-ratio: 1; object-fit: contain; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--bg-0); }
+
 .fetch-progress { margin-top: 14px; }
 .prog-track { height: 6px; border-radius: 3px; background: var(--bg-0); overflow: hidden; }
 .prog-fill { height: 100%; background: var(--gold); transition: width 0.3s ease; }
@@ -608,5 +618,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   .model-row { align-items: stretch; flex-direction: column; }
   .model-row .sv2-btn { justify-content: center; }
   .sv2-input, .sv2-select { width: 100%; min-width: 0; max-width: none; }
+  .image-artifact-row { grid-template-columns: 64px minmax(0, 1fr); }
+  .image-artifact-row .artifact-size { text-align: left; }
 }
 </style>

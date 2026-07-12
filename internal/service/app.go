@@ -15,6 +15,7 @@ import (
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/imagegen"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/imageserve"
 	"github.com/karbowiak/heya/internal/llm"
@@ -71,6 +72,7 @@ type App struct {
 	podcastIndex  *podcastindex.Client
 	sessions      *sessions.Store
 	llmLocal      *llm.LocalRuntime
+	imageRuntime  *imagegen.Runtime
 	castMgr       *cast.Manager
 
 	// Lifetime context cancelled by Close(). Used for fire-and-forget
@@ -299,6 +301,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// nothing until first use; artifacts live under DataDir/llm.
 	llmLocal := llm.NewLocalRuntime(cfg.DataDir.Value + "/llm")
 	llmLocal.Bind(lifetimeCtx)
+	imageRuntime := imagegen.NewRuntime(cfg.DataDir.Value + "/imagegen")
 
 	// Server-side cast manager. Constructed always (accessors stay
 	// nil-safe); discovery only starts via StartCast when cast.enabled.
@@ -328,6 +331,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		podcastIndex:   podcastindex.New(cfg.PodcastIndexKey.Value, cfg.PodcastIndexSecret.Value),
 		sessions:       sessions.New(lifetimeCtx, hub),
 		llmLocal:       llmLocal,
+		imageRuntime:   imageRuntime,
 		castMgr:        castMgr,
 		lifetimeCtx:    lifetimeCtx,
 		lifetimeCancel: lifetimeCancel,
