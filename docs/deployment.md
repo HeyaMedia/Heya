@@ -193,31 +193,38 @@ ffmpeg, ONNX Runtime, CUDA, or OpenVINO dependencies change.
 ## Casting from containers (mDNS reality check)
 
 Cast discovery is a **pure-Go multicast mDNS browse** — no avahi needed in
-the image — but multicast never crosses a container/pod network boundary,
-and it never crosses subnets/VLANs at all (it's link-local). Two knobs fix
-the two failure layers:
+the image — and multicast discovery is the intended, zero-config path.
+But multicast never crosses a container/pod network boundary, and it
+never crosses subnets/VLANs at all (it's link-local). **The fix is to
+give the container a real network presence on the receivers' L2**, not to
+configure devices by hand:
 
-1. **Unicast reachability** (required for streaming, period): the server
-   must reach the receiver's `:7000` (RTSP) + UDP with replies routing
-   back. On Kubernetes that usually means `hostNetwork: true` (+
-   `dnsPolicy: ClusterFirstWithHostNet`) on the pod, or CNI egress that
-   SNATs to the node address for LAN destinations. Verify from inside the
-   container: `ffmpeg -v error -i tcp://<receiver>:7000?timeout=3000000 -f null -`
-   — a fast "Connection refused" is *good* (routable), a timeout is not.
-2. **Discovery**: when the multicast browse can't hear the receivers
-   (container isolation, receivers on another VLAN), list them explicitly:
+- `hostNetwork: true` (+ `dnsPolicy: ClusterFirstWithHostNet`) when the
+  node itself sits on the receivers' subnet, or
+- a **macvlan/ipvlan attachment** (Multus on k8s, `docker network create
+  -d macvlan …` elsewhere) giving the container an IP on the receivers'
+  VLAN, or
+- an **mDNS reflector on the router** (UniFi "Multicast DNS",
+  avahi-reflector) when server and receivers must stay on separate VLANs.
 
-   ```bash
-   HEYA_CAST_DEVICES=192.168.1.216,192.168.1.242
-   ```
+The browse loop re-enumerates interfaces every cycle, so an attached leg
+starts discovering within a minute — no restart, no config. Diagnose all
+of this in **Settings → Casting**: it lists the server's network legs
+next to the discovered receivers, so a subnet mismatch is visible at a
+glance.
 
-   Each address is resolved by a **direct unicast mDNS query** to the
-   device on `:5353` (AirPlay receivers answer these; RFC 6762 legacy
-   unicast) — the full verbatim TXT record the sender needs comes back in
-   one round trip, re-resolved every minute so renames surface. This works
-   across VLANs anywhere unicast routes, with no mDNS reflector on the
-   router and no host networking *for discovery* (streaming still needs
-   knob 1).
+Streaming additionally needs plain unicast reachability to the receiver
+(`:7000` RTSP + UDP, replies routing back). Verify from inside the
+container: `ffmpeg -v error -i tcp://<receiver>:7000?timeout=3000000 -f null -`
+— a fast "Connection refused" is *good* (routable), a timeout is not.
+
+**Last resort — pinned receivers.** For networks that filter multicast
+(some switches/APs do) there's `HEYA_CAST_DEVICES=192.168.1.216,…` (or
+the editable field in Settings → Casting): each address is resolved by a
+direct unicast mDNS query on `:5353`. Receivers enforce RFC 6762's
+source-address check and only answer unicast from their **own subnet**,
+so this cannot cross VLANs — it is not a substitute for the options
+above.
 
 ## Version lockstep (maintainers)
 
