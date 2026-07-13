@@ -55,6 +55,7 @@ watch(() => route.path, () => { navOpen.value = false })
       <!-- Same phone player mount as layouts/default.vue — music keeps
            playing while the user pokes at Settings, so the bar follows. -->
       <MobilePlayerHost />
+      <DesktopPlayerHost />
 
       <AppSheet v-if="isPhone" v-model:open="navOpen" title="Settings" size="full">
         <SettingsSidebar variant="sheet" />

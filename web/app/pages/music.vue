@@ -25,12 +25,8 @@
            same as desktop. -->
       <QueuePanel v-if="!isPhone" />
     </div>
-    <Playbar v-if="!isPhone" />
     <MusicBigCover v-if="!isPhone" />
-    <EQPanel v-if="!isPhone" :open="eqOpen" @close="eqOpen = false" />
     <CreatePlaylistModal :open="createOpen" @close="createOpen = false" @created="onCreated" />
-    <VisualizerFullscreen v-if="!isPhone" />
-    <HotkeyHelp v-if="!isPhone" />
 
     <!-- Section nav left drawer — phone (<=720px) and the compact band
          (720.02-1200px) both open it from AppTopBar's burger
@@ -68,7 +64,6 @@ const router = useRouter()
 
 const { isPhone, isCompact } = useViewport()
 
-const eqOpen = useState('music_eq_open', () => false)
 const createOpen = useState('music_create_playlist_open', () => false)
 // Section-nav left drawer (phone + compact band), opened by AppTopBar's
 // burger — shared singleton state (module-level ref), see useSectionSidebar.ts.

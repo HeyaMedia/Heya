@@ -367,6 +367,13 @@ a { color: inherit; text-decoration: none; }
   position: relative;
 }
 
+/* DesktopPlayerHost is an in-flow third row. It only renders on desktop when
+   a track exists (and always on /music), so ordinary pages keep their full
+   height until the persistent playbar is actually needed. */
+.app:has(.global-playbar-host) {
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--playbar-h);
+}
+
 .app.music-mode { grid-template-rows: var(--topbar-h) 1fr; }
 
 /* Ambient reveal (AmbientControls' eye button): everything except the
@@ -385,10 +392,10 @@ a { color: inherit; text-decoration: none; }
   transition: opacity 0.6s ease, visibility 0s linear 0.6s;
 }
 
-/* Music shell: the Playbar owns the bottom strip — whatever corner controls
-   do render under /music (the art-mode eye on artist/album detail; the pool
-   cluster hides itself entirely there, see AmbientControls) ride above it. */
-.app:has(.music-shell) .ambient-ctls {
+/* Whenever the desktop Playbar owns the bottom strip, lift any ambient corner
+   controls above it. (On /music the pool cluster may hide itself; detail-page
+   controls still use this offset.) */
+.app:has(.global-playbar-host) .ambient-ctls {
   bottom: calc(var(--playbar-h) + 14px);
 }
 

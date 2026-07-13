@@ -28,8 +28,8 @@ const route = useRoute()
 const { ready, isAuthenticated } = useAuth()
 
 // Bridge OS media keys / lock-screen transport to the player. Mounted here
-// (not Playbar) so the bridge is always active regardless of route —
-// Playbar only exists under /music and is hidden entirely on phone. No-op
+// (not Playbar) so the bridge is always active regardless of route or which
+// responsive player host is visible. No-op
 // on SSR and on browsers without the Media Session API (guards itself).
 useMediaSession()
 

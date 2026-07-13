@@ -35,6 +35,7 @@
         .app:has(.global-miniplayer-dock) — no class bookkeeping here.
       -->
       <MobilePlayerHost />
+      <DesktopPlayerHost />
     </div>
   </TooltipProvider>
 </template>
