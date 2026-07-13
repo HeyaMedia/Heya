@@ -160,7 +160,7 @@ function coverFor(p: PlaylistRow) {
 // shelf, and My Music); its invalidation prefix-hits this page's
 // ['me','playlists','full'] query, so the grid re-sorts on pin/rename/etc.
 function menuFor(p: PlaylistRow): ContextMenuItem[] {
-  return playlistMenu.menuFor({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })
+  return playlistMenu.menuFor({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug }, { surface: 'page' })
 }
 </script>
 

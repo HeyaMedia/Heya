@@ -170,7 +170,7 @@
           'reorder-source': reorderId === pl.id,
         }"
       >
-        <AppContextMenu :items="playlistMenu.menuFor({ id: pl.id, name: pl.name, slug: pl.slug, track_count: pl.count })">
+        <AppContextMenu :items="playlistMenu.menuFor({ id: pl.id, name: pl.name, slug: pl.slug, track_count: pl.count }, { surface: 'sidebar' })">
           <NuxtLink
             :to="`/music/playlist/${pl.slug || pl.id}`"
             class="ms-pl-item"

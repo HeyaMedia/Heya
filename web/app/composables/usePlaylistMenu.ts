@@ -12,33 +12,41 @@ export function usePlaylistMenu() {
   const playlistsApi = usePlaylists()
   const { toast } = useToast()
 
-  function menuFor(p: { id: number; name: string; slug?: string; track_count?: number }): ContextMenuItem[] {
+  // `surface` keeps the two pin scopes from bleeding into each other: the
+  // sidebar's menu shows a single "Pin" that only touches sidebar_pinned,
+  // the playlists page's only touches pinned, and neutral surfaces (home
+  // shelf, My Music) spell both out. A plain "Pin" in the sidebar acting on
+  // the page scope is exactly the confusion this avoids.
+  function menuFor(
+    p: { id: number; name: string; slug?: string; track_count?: number },
+    opts: { surface?: 'sidebar' | 'page' } = {},
+  ): ContextMenuItem[] {
     const row = playlistsApi.playlists.value.find(r => r.id === p.id)
     const pinned = row?.pinned ?? false
     const sidebarPinned = row?.sidebar_pinned ?? false
     const name = row?.name ?? p.name
 
+    const togglePin = (scope: 'page' | 'sidebar', next: boolean): ContextMenuItem['action'] =>
+      async () => {
+        try {
+          await playlistsApi.setPin(p.id, scope, next)
+        } catch { toast.err('Pin failed') }
+      }
+
+    const pinItems: ContextMenuItem[] =
+      opts.surface === 'sidebar'
+        ? [{ label: sidebarPinned ? 'Unpin' : 'Pin', icon: 'pin', action: togglePin('sidebar', !sidebarPinned) }]
+        : opts.surface === 'page'
+          ? [{ label: pinned ? 'Unpin' : 'Pin to top', icon: 'pin', action: togglePin('page', !pinned) }]
+          : [
+              { label: pinned ? 'Unpin from Playlists page' : 'Pin on Playlists page', icon: 'pin', action: togglePin('page', !pinned) },
+              { label: sidebarPinned ? 'Unpin from sidebar' : 'Pin in sidebar', icon: 'pin', action: togglePin('sidebar', !sidebarPinned) },
+            ]
+
     const items = actions.forPlaylist(p)
     items.push(
       { label: '', separator: true },
-      {
-        label: pinned ? 'Unpin' : 'Pin to top',
-        icon: 'pin',
-        action: async () => {
-          try {
-            await playlistsApi.setPin(p.id, 'page', !pinned)
-          } catch { toast.err('Pin failed') }
-        },
-      },
-      {
-        label: sidebarPinned ? 'Unpin from sidebar' : 'Pin to sidebar',
-        icon: 'pin',
-        action: async () => {
-          try {
-            await playlistsApi.setPin(p.id, 'sidebar', !sidebarPinned)
-          } catch { toast.err('Pin failed') }
-        },
-      },
+      ...pinItems,
       { label: '', separator: true },
       {
         label: 'Rename…',
