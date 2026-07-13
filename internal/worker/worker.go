@@ -258,8 +258,8 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"kickoff_embed_recommendations": {MaxWorkers: queueWorkers(cfg, "kickoff_embed_recommendations", 1)},
 			"kickoff_listen_import":         {MaxWorkers: queueWorkers(cfg, "kickoff_listen_import", 1)},
 			"import_listens_batch":          {MaxWorkers: queueWorkers(cfg, "import_listens_batch", 4)},
-			"kickoff_music_services_sync": {MaxWorkers: queueWorkers(cfg, "kickoff_music_services_sync", 1)},
-			"sync_reactions_out":          {MaxWorkers: queueWorkers(cfg, "sync_reactions_out", 1)},
+			"kickoff_music_services_sync":   {MaxWorkers: queueWorkers(cfg, "kickoff_music_services_sync", 1)},
+			"sync_reactions_out":            {MaxWorkers: queueWorkers(cfg, "sync_reactions_out", 1)},
 
 			// Misc.
 			"soft_delete":      {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},
