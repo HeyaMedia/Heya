@@ -32,6 +32,8 @@ const videoEl = ref<HTMLVideoElement>()
 const { state: localState, controls: localControls, loadSource, destroyHLS } = useHeyaPlayer(videoEl)
 const cast = useCastStore()
 const musicPlayer = usePlayerStore()
+const videoRenderer = useVideoRenderer()
+const { isPhone } = useViewport()
 const showCastMenu = ref(false)
 const videoCastPending = ref(false)
 const videoCastSessionID = ref<string | null>(null)
@@ -41,8 +43,11 @@ const lastRemotePosition = ref(0)
 const remoteSeekTick = ref(0)
 const castClockTick = ref(0)
 const deliberatelyStoppedCastSessions = new Set<string>()
+let preserveRemoteSessionOnUnmount = false
 
 const castDevices = computed(() => cast.devices.filter(d => d.capabilities?.includes('video')))
+const selectedVideoOutput = computed(() => cast.devices.find(device =>
+  device.id === cast.engagedDeviceId && device.capabilities?.includes('video')) ?? null)
 const videoCastSession = computed(() => {
   const s = cast.session
   if (!s || s.media_kind !== 'video') return null
@@ -261,13 +266,17 @@ function castDeviceSub(device: { manufacturer?: string, model?: string, provider
   return model ? `${device.provider} · ${model}` : device.provider
 }
 
-async function pickVideoCastDevice(deviceID: string) {
+async function pickVideoCastDevice(deviceID: string, startPosition = state.currentTime, reuseExisting = false) {
   showCastMenu.value = false
   if (videoCastSession.value?.device_id === deviceID) {
+    if (reuseExisting) {
+      handoffToMobileRemote()
+      return true
+    }
     await stopVideoCast(true)
-    return
+    return false
   }
-  const position = state.currentTime
+  const position = startPosition
   const wasPlaying = state.playing
   try {
     if (cast.session) await cast.stopSession()
@@ -281,6 +290,7 @@ async function pickVideoCastDevice(deviceID: string) {
     musicPlayer.playing = false
     const snap = await cast.playVideo({
       fileId: props.fileId,
+      mediaItemId: props.mediaItemId ?? undefined,
       entityType: (props.entityType === 'episode' ? 'episode' : 'movie'),
       entityId: props.entityId || props.mediaItemId || 0,
       title: props.title,
@@ -292,14 +302,24 @@ async function pickVideoCastDevice(deviceID: string) {
     })
     videoCastSessionID.value = snap.id
     lastRemotePosition.value = snap.position_sec
+    if (isPhone.value) handoffToMobileRemote()
+    return true
   } catch (error) {
     cast.engagedDeviceId = null
     videoCastSessionID.value = null
     if (wasPlaying) localControls.play()
     toast.err(error instanceof Error ? error.message : 'Could not cast this video')
+    return false
   } finally {
     videoCastPending.value = false
   }
+}
+
+function handoffToMobileRemote() {
+  preserveRemoteSessionOnUnmount = true
+  cast.videoRemoteOpen = true
+  localControls.pause()
+  emit('close')
 }
 
 async function restartVideoCast() {
@@ -310,6 +330,7 @@ async function restartVideoCast() {
   try {
     const snap = await cast.playVideo({
       fileId: props.fileId,
+      mediaItemId: props.mediaItemId ?? undefined,
       entityType: (props.entityType === 'episode' ? 'episode' : 'movie'),
       entityId: props.entityId || props.mediaItemId || 0,
       title: props.title,
@@ -511,6 +532,15 @@ async function init() {
   // the user picks — that way no frame of video plays under the modal.
   // The user's pick decides what startTime we honor when we finally load.
   await checkResume()
+
+  // A phone with a video-capable output already selected should never flash
+  // into local playback. Start on that renderer at the resolved resume point,
+  // then return to the normal app layout where the global remote sheet lives.
+  const selectedOutput = selectedVideoOutput.value
+  if (isPhone.value && selectedOutput) {
+    const handedOff = await pickVideoCastDevice(selectedOutput.id, pendingSeekTo.value, true)
+    if (handedOff) return
+  }
 
   startPlayback()
 }
@@ -1013,6 +1043,15 @@ async function checkResume(): Promise<void> {
     return
   }
 
+  // A preselected mobile renderer should go straight to its controller, not
+  // stop in the local-player resume dialog first. Resume is the least
+  // surprising default here; explicit ?t= and Start Over entry points still
+  // retain their chosen position.
+  if (isPhone.value && selectedVideoOutput.value) {
+    pendingSeekTo.value = entry.progress_seconds
+    return
+  }
+
   resumePosition.value = entry.progress_seconds
   resumeOpen.value = true
   // Block init until the user picks. resumePickResolver fires from
@@ -1056,6 +1095,51 @@ function handleClose() {
   if (document.fullscreenElement) document.exitFullscreen()
   emit('close')
 }
+
+// Register local browser playback as a HeyaConnect video renderer. Other
+// clients receive this normalized snapshot through device.state and send the
+// same transport/track commands used by the Chromecast remote. A player that
+// is itself only proxying Chromecast stays out of the device inventory — the
+// server-owned Cast session is already visible directly to every client.
+let detachVideoRenderer: (() => void) | null = null
+onMounted(() => {
+  detachVideoRenderer = videoRenderer.attach({
+    snapshot: () => {
+      if (videoCastActive.value) return null
+      return {
+        session_id: nowPlaying.sessionId,
+        media_kind: 'video',
+        // Keep an ended episode attachable during the local 10-second Up Next
+        // countdown; unmounting the player removes the renderer altogether.
+        state: localState.loading ? 'starting' : localState.playing ? 'playing' : 'paused',
+        file_id: String(props.fileId),
+        media_item_id: props.mediaItemId ?? undefined,
+        entity_type: props.entityType === 'episode' ? 'episode' : 'movie',
+        entity_id: props.entityId || props.mediaItemId || 0,
+        title: props.title || 'Video',
+        audio_track: activeAudioIdx.value,
+        subtitle_track: activeSubIdx.value >= 0 ? activeSubIdx.value : undefined,
+        quality: activeQuality.value,
+        position_sec: localState.currentTime,
+        duration_sec: knownDuration.value,
+        volume: Math.round(localState.volume * 100),
+      }
+    },
+    pause: () => controls.pause(),
+    resume: () => controls.play(),
+    seek: seconds => controls.seek(seconds),
+    volume: level => controls.setVolume(Math.max(0, Math.min(100, level)) / 100),
+    audio: track => selectAudio(track),
+    subtitle: track => track == null ? disableSubs() : selectSub(track),
+    quality: quality => selectQuality(quality),
+    next: () => playNextEpisode(),
+    stop: () => handleClose(),
+  })
+})
+onUnmounted(() => {
+  detachVideoRenderer?.()
+  detachVideoRenderer = null
+})
 
 function showCtrl() {
   controlsVisible.value = true
@@ -1133,7 +1217,7 @@ onMounted(() => {
   void cast.refreshDevices()
 })
 onUnmounted(() => {
-  if (videoCastSession.value && !videoCastStopping.value) void stopVideoCast(false)
+  if (!preserveRemoteSessionOnUnmount && videoCastSession.value && !videoCastStopping.value) void stopVideoCast(false)
   if (castClockTimer) clearInterval(castClockTimer)
   destroySubtitles()
   cancelUpNext()

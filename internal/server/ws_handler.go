@@ -100,6 +100,7 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 				if message.Type == "device.hello" && message.Device != nil {
 					registeredDeviceID.Store(message.Device.ID)
 					hub.UpsertDevice(resolved.User.ID, *message.Device)
+					hub.EmitToUser(resolved.User.ID, eventhub.EventDeviceState, *message.Device)
 					continue
 				}
 				if message.Type == "device.heartbeat" && message.DeviceID == registeredDeviceID.Load().(string) && message.DeviceID != "" {
@@ -108,6 +109,7 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 						if d.ID == message.DeviceID {
 							d.State = message.State
 							hub.UpsertDevice(resolved.User.ID, d)
+							hub.EmitToUser(resolved.User.ID, eventhub.EventDeviceState, d)
 							break
 						}
 					}

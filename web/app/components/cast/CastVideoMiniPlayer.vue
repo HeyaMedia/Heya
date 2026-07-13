@@ -4,7 +4,7 @@
     <div class="cvm-art" :style="artworkStyle"><Icon name="television-simple" :size="20" /></div>
     <div class="cvm-info">
       <strong>{{ session.title || 'Video' }}</strong>
-      <span><Icon name="cast" :size="11" /> {{ session.device_name }}</span>
+      <span><Icon name="cast" :size="11" /> {{ transportLabel }} · {{ session.device_name }}</span>
     </div>
     <div class="cvm-controls">
       <button type="button" :aria-label="playing ? 'Pause' : 'Play'" @click.stop="togglePlayback">
@@ -22,6 +22,7 @@ const { toast } = useToast()
 const session = computed(() => cast.session?.media_kind === 'video' ? cast.session : null)
 const playing = computed(() => session.value?.state === 'playing' || session.value?.state === 'starting')
 const busy = computed(() => cast.connecting || session.value?.state === 'starting')
+const transportLabel = computed(() => cast.isClientDevice ? 'HeyaConnect' : 'Chromecast')
 const tick = ref(0)
 const progress = computed(() => {
   tick.value
@@ -41,12 +42,12 @@ async function togglePlayback() {
     if (playing.value) await cast.pause()
     else await cast.resume()
   } catch (error) {
-    toast.err(error instanceof Error ? error.message : 'Could not control Chromecast playback')
+    toast.err(error instanceof Error ? error.message : 'Could not control remote playback')
   }
 }
 function skipForward() {
   const duration = session.value?.duration_sec ?? Number.MAX_SAFE_INTEGER
-  void cast.seekTo(Math.min(duration, cast.livePositionSec() + 10)).catch(() => toast.err('Could not seek Chromecast playback'))
+  void cast.seekTo(Math.min(duration, cast.livePositionSec() + 10)).catch(() => toast.err('Could not seek remote playback'))
 }
 </script>
 

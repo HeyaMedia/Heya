@@ -14,10 +14,10 @@
 <template>
   <template v-if="isPhone && (currentTrack || videoCastSession)">
     <div class="global-miniplayer-dock">
-      <CastVideoMiniPlayer v-if="videoCastSession" @expand="npOpen = true" />
+      <CastVideoMiniPlayer v-if="videoCastSession" @expand="cast.videoRemoteOpen = true" />
       <MiniPlayer v-else @expand="npOpen = true" />
     </div>
-    <CastVideoRemoteSheet v-if="videoCastSession" v-model:open="npOpen" />
+    <CastVideoRemoteSheet v-if="videoCastSession" v-model:open="cast.videoRemoteOpen" />
     <NowPlayingSheet v-else v-model:open="npOpen" />
   </template>
 </template>

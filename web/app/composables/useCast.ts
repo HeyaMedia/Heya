@@ -1,5 +1,5 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import type { StreamInfoResponse } from '~~/shared/types'
+import type { MediaDetail, StreamInfoResponse } from '~~/shared/types'
 
 // Server-side casting (docs/cast-plan.md Phase 2). The SERVER is the player:
 // it pushes or exposes scoped media to the receiver and owns the session; this store is the
@@ -19,7 +19,7 @@ import type { StreamInfoResponse } from '~~/shared/types'
 export interface CastDevice {
   id: string
   provider: string
-  capabilities?: Array<'audio' | 'video'>
+  capabilities?: string[]
   name: string
   model?: string
   manufacturer?: string
@@ -29,6 +29,17 @@ export interface CastDevice {
   media_origin?: string
   last_seen?: string
   kind?: string
+  state?: Record<string, unknown>
+}
+
+export interface VideoQueueItem {
+  fileId: string
+  mediaItemId: number
+  entityType: 'episode'
+  entityId: number
+  title: string
+  episodeLabel: string
+  runtimeSeconds: number
 }
 
 export interface CastSession {
@@ -94,7 +105,13 @@ export const useCastStore = defineStore('cast', () => {
   const videoStreamInfoFileID = ref('')
   const videoStreamInfoLoading = ref(false)
   const videoStreamInfoError = ref('')
+  const videoRemoteOpen = ref(false)
+  const videoQueue = ref<VideoQueueItem[]>([])
+  const videoQueueLoading = ref(false)
   let videoInfoRequest = 0
+  let videoQueueRequest = 0
+  let videoQueueKey = ''
+  let lastVideoSession: CastSession | null = null
 
   const engaged = computed(() => engagedDeviceId.value !== null)
   const deviceName = computed(() => {
@@ -177,23 +194,104 @@ export const useCastStore = defineStore('cast', () => {
     // cast allowlist never hides the user's own Heya clients.
     const [castResult, clientResult] = await Promise.allSettled([
       $heya('/api/cast/devices') as Promise<{ items?: CastDevice[] | null }>,
-      ($heya as any)('/api/me/devices') as Promise<{ items?: Array<{ id: string, name: string, kind: string, last_seen: string }> }>,
+      ($heya as any)('/api/me/devices') as Promise<{ items?: Array<{
+        id: string
+        name: string
+        kind: string
+        capabilities?: string[]
+        state?: Record<string, unknown>
+        last_seen: string
+      }> }>,
     ])
     const castDevices = castResult.status === 'fulfilled' ? (castResult.value.items ?? []) : []
     const clients = clientResult.status === 'fulfilled' ? (clientResult.value.items ?? []) : []
     devices.value = [
-      ...clients.filter(d => d.id !== clientDeviceID()).map(d => ({ ...d, provider: 'client', capabilities: ['audio'] as Array<'audio' | 'video'> })),
+      ...clients.filter(d => d.id !== clientDeviceID()).map(d => normalizeClientDevice({ ...d, provider: 'client' })),
       ...castDevices,
     ]
     devicesLoaded.value = true
+    const selectedClient = devices.value.find(d => d.id === engagedDeviceId.value && d.provider === 'client')
+    if (selectedClient) applyClientDeviceState(selectedClient)
   }
 
   const isClientDevice = computed(() => engagedDeviceId.value?.startsWith('client:') ?? false)
+
+  function normalizeClientDevice(device: CastDevice): CastDevice {
+    const declared = device.capabilities ?? []
+    return {
+      ...device,
+      provider: 'client',
+      capabilities: [
+        ...(declared.includes('audio') || declared.includes('playback.local.audio') || declared.includes('play') ? ['audio'] : []),
+        ...(declared.includes('video') || declared.includes('playback.local.video') ? ['video'] : []),
+      ],
+    }
+  }
   async function clientCommand(action: string, args?: Record<string, unknown>) {
     const id = engagedDeviceId.value
     if (!id) return
     const { $heya } = useNuxtApp()
     await ($heya as any)('/api/me/devices/{id}/command', { method: 'POST', path: { id }, body: { action, args } })
+  }
+
+  function sessionFromClientDevice(device: CastDevice): CastSession | null {
+    const state = device.state
+    if (!state || state.media_kind !== 'video' || state.state === 'stopped') return null
+    const fileID = String(state.file_id ?? '')
+    if (!fileID) return null
+    return {
+      id: String(state.session_id ?? `${device.id}:${fileID}`),
+      device_id: device.id,
+      device_name: device.name,
+      user_id: 0,
+      state: String(state.state ?? 'paused'),
+      media_kind: 'video',
+      file_id: fileID,
+      media_item_id: Number(state.media_item_id ?? 0) || undefined,
+      entity_type: state.entity_type === 'episode' ? 'episode' : 'movie',
+      entity_id: Number(state.entity_id ?? state.media_item_id ?? 0),
+      title: String(state.title ?? 'Video'),
+      audio_track: Number(state.audio_track ?? 0),
+      subtitle_track: state.subtitle_track == null ? undefined : Number(state.subtitle_track),
+      quality: String(state.quality ?? 'auto'),
+      duration_sec: Number(state.duration_sec ?? 0),
+      position_sec: Number(state.position_sec ?? 0),
+      volume: Number(state.volume ?? 100),
+      updated_at: new Date().toISOString(),
+    }
+  }
+
+  function applyClientDeviceState(device: CastDevice) {
+    const normalized = normalizeClientDevice(device)
+    const index = devices.value.findIndex(d => d.id === normalized.id)
+    if (index >= 0) devices.value[index] = { ...devices.value[index], ...normalized }
+    else devices.value.push(normalized)
+    if (engagedDeviceId.value !== normalized.id) return
+    const next = sessionFromClientDevice(normalized)
+    if (!next) {
+      if (session.value?.device_id === normalized.id) session.value = null
+      return
+    }
+    session.value = next
+    lastVideoSession = next
+    lastDeviceVolume.value = next.volume
+    samplePosition(next.position_sec)
+    if (next.file_id && videoStreamInfoFileID.value !== next.file_id) resetVideoStreamInfo(next.file_id)
+    if (next.entity_type === 'episode' && next.media_item_id) {
+      void loadVideoQueue(next.media_item_id, next.entity_id ?? 0)
+    }
+  }
+
+  function engageClientDevice(deviceID: string) {
+    engagedDeviceId.value = deviceID
+    const device = devices.value.find(d => d.id === deviceID)
+    if (device) applyClientDeviceState(device)
+  }
+
+  function releaseDevice() {
+    session.value = null
+    engagedDeviceId.value = null
+    videoRemoteOpen.value = false
   }
 
   // Adopt a session that already exists server-side. Called at boot (page
@@ -202,6 +300,11 @@ export const useCastStore = defineStore('cast', () => {
   // clears the stale mirror. Adoption does NOT take queue ownership — this
   // tab didn't start the playback.
   async function adoptExisting() {
+    if (isClientDevice.value) {
+      const device = devices.value.find(d => d.id === engagedDeviceId.value)
+      if (device) applyClientDeviceState(device)
+      return
+    }
     const { $heya } = useNuxtApp()
     try {
       const res = await $heya('/api/cast/sessions') as { items?: CastSession[] | null }
@@ -216,6 +319,9 @@ export const useCastStore = defineStore('cast', () => {
         lastDeviceVolume.value = s.volume
         samplePosition(s.position_sec)
         if (s.media_kind === 'video' && s.file_id) resetVideoStreamInfo(s.file_id)
+        if (s.media_kind === 'video' && s.entity_type === 'episode' && s.media_item_id) {
+          void loadVideoQueue(s.media_item_id, s.entity_id ?? 0)
+        }
       } else if (engagedDeviceId.value && !connecting.value) {
         session.value = null
       }
@@ -254,12 +360,13 @@ export const useCastStore = defineStore('cast', () => {
     }
   }
 
-  // Video uses the same server-owned Cast session as music, but supplies a
-  // library-file reference and watch-progress identity. HeyaConnect video is
-  // deliberately not implied here yet: this path targets Chromecast's URL-
-  // pull receiver and its scoped direct/HLS endpoints.
+  // Video shares one controller shape across server-owned Cast sessions and
+  // HeyaConnect renderers. Chromecast gets a scoped URL-pull session; a Heya
+  // device gets a typed play_video command and reports the same fields back
+  // through device.state.
   async function playVideo(input: {
     fileId: string | number
+    mediaItemId?: number
     entityType: 'movie' | 'episode'
     entityId: number
     title?: string
@@ -272,7 +379,52 @@ export const useCastStore = defineStore('cast', () => {
   }) {
     const deviceId = engagedDeviceId.value
     if (!deviceId) throw new Error('no cast device engaged')
-    if (deviceId.startsWith('client:')) throw new Error('HeyaConnect video casting is not implemented yet')
+    if (deviceId.startsWith('client:')) {
+      const device = devices.value.find(d => d.id === deviceId)
+      connecting.value = true
+      lastRequestedMediaKey = `video:${String(input.fileId)}:${input.entityType}:${input.entityId}`
+      try {
+        await clientCommand('play_video', {
+          file_id: String(input.fileId),
+          media_item_id: input.mediaItemId ?? 0,
+          entity_type: input.entityType,
+          entity_id: input.entityId,
+          title: input.title ?? '',
+          position_seconds: Math.max(0, Math.floor(input.startSeconds ?? 0)),
+        })
+        const snap: CastSession = {
+          id: `${deviceId}:${String(input.fileId)}`,
+          device_id: deviceId,
+          device_name: device?.name ?? 'Heya device',
+          user_id: 0,
+          state: input.startPaused ? 'paused' : 'starting',
+          media_kind: 'video',
+          file_id: String(input.fileId),
+          media_item_id: input.mediaItemId,
+          entity_type: input.entityType,
+          entity_id: input.entityId,
+          title: input.title,
+          audio_track: input.audioTrack ?? 0,
+          subtitle_track: input.subtitleTrack,
+          quality: input.quality ?? 'auto',
+          position_sec: Math.max(0, input.startSeconds ?? 0),
+          volume: lastDeviceVolume.value ?? Math.min(Math.max(Math.round(input.fallbackVolume), 0), 30),
+        }
+        session.value = snap
+        lastVideoSession = snap
+        samplePosition(snap.position_sec)
+        ownsPlayback = true
+        if (snap.entity_type === 'episode' && snap.media_item_id) {
+          void loadVideoQueue(snap.media_item_id, snap.entity_id ?? 0)
+        } else {
+          videoQueue.value = []
+          videoQueueKey = ''
+        }
+        return snap
+      } finally {
+        connecting.value = false
+      }
+    }
     const { $heya } = useNuxtApp()
     connecting.value = true
     lastRequestedMediaKey = `video:${String(input.fileId)}:${input.entityType}:${input.entityId}`
@@ -295,10 +447,17 @@ export const useCastStore = defineStore('cast', () => {
         body,
       }) as CastSession
       session.value = snap
+      lastVideoSession = snap
       lastRequestedMediaKey = `video:${snap.file_id ?? String(input.fileId)}:${snap.entity_type ?? input.entityType}:${snap.entity_id ?? input.entityId}`
       lastDeviceVolume.value = snap.volume
       samplePosition(snap.position_sec)
       ownsPlayback = true
+      if (snap.entity_type === 'episode' && snap.media_item_id) {
+        void loadVideoQueue(snap.media_item_id, snap.entity_id ?? 0)
+      } else {
+        videoQueue.value = []
+        videoQueueKey = ''
+      }
       return snap
     } finally {
       connecting.value = false
@@ -311,10 +470,23 @@ export const useCastStore = defineStore('cast', () => {
   async function updateVideo(input: { audioTrack?: number, subtitleTrack?: number | null, quality?: string }) {
     const s = session.value
     if (!s || s.media_kind !== 'video' || !s.file_id || !s.entity_type || !s.entity_id) {
-      throw new Error('no Chromecast video session is active')
+      throw new Error('no remote video session is active')
+    }
+    if (isClientDevice.value) {
+      if (input.audioTrack !== undefined) await clientCommand('audio', { track: input.audioTrack })
+      if (input.subtitleTrack !== undefined) await clientCommand('subtitle', { track: input.subtitleTrack })
+      if (input.quality !== undefined) await clientCommand('quality', { quality: input.quality })
+      session.value = {
+        ...s,
+        audio_track: input.audioTrack ?? s.audio_track,
+        subtitle_track: input.subtitleTrack === undefined ? s.subtitle_track : (input.subtitleTrack ?? undefined),
+        quality: input.quality ?? s.quality,
+      }
+      return session.value
     }
     return await playVideo({
       fileId: s.file_id,
+      mediaItemId: s.media_item_id,
       entityType: s.entity_type,
       entityId: s.entity_id,
       title: s.title,
@@ -336,7 +508,14 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function pause() {
-    if (isClientDevice.value) { await clientCommand('pause'); return }
+    if (isClientDevice.value) {
+      if (session.value) {
+        samplePosition(livePositionSec())
+        session.value = { ...session.value, state: 'paused' }
+      }
+      await clientCommand('pause')
+      return
+    }
     const s = session.value
     if (!s) return
     // Optimistic: the WS event confirms the provider-specific pause path.
@@ -348,7 +527,12 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function resume() {
-    if (isClientDevice.value) { await clientCommand('resume'); return }
+    if (isClientDevice.value) {
+      if (session.value) session.value = { ...session.value, state: 'playing' }
+      samplePosition(session.value?.position_sec ?? 0)
+      await clientCommand('resume')
+      return
+    }
     const s = session.value
     if (!s) return
     // AirPlay respawns at the frozen position; URL-pull providers resume the
@@ -360,7 +544,12 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function seekTo(seconds: number) {
-    if (isClientDevice.value) { await clientCommand('seek', { seconds }); return }
+    if (isClientDevice.value) {
+      samplePosition(seconds)
+      if (session.value) session.value = { ...session.value, position_sec: seconds }
+      await clientCommand('seek', { seconds })
+      return
+    }
     const s = session.value
     if (!s) return
     samplePosition(seconds)
@@ -377,7 +566,13 @@ export const useCastStore = defineStore('cast', () => {
   // Volume drags fire per pixel — debounce the POST, apply optimistically.
   let volumeTimer: ReturnType<typeof setTimeout> | null = null
   function setVolume(level: number) {
-    if (isClientDevice.value) { void clientCommand('volume', { level }); return }
+    if (isClientDevice.value) {
+      const clamped = Math.max(0, Math.min(100, Math.round(level)))
+      if (session.value) session.value = { ...session.value, volume: clamped }
+      lastDeviceVolume.value = clamped
+      void clientCommand('volume', { level: clamped })
+      return
+    }
     const s = session.value
     if (!s) return
     const clamped = Math.max(0, Math.min(100, Math.round(level)))
@@ -402,7 +597,11 @@ export const useCastStore = defineStore('cast', () => {
   // event reads as deliberate, not as a natural end to advance past.
   async function stopSession() {
     ownsPlayback = false
-    if (isClientDevice.value) { await clientCommand('stop'); return }
+    if (isClientDevice.value) {
+      session.value = null
+      await clientCommand('stop')
+      return
+    }
     const s = session.value
     session.value = null
     if (!s) return
@@ -415,6 +614,83 @@ export const useCastStore = defineStore('cast', () => {
   async function disconnect() {
     await stopSession()
     engagedDeviceId.value = null
+    videoRemoteOpen.value = false
+  }
+
+  async function loadVideoQueue(mediaItemID: number, currentEpisodeID: number) {
+    if (!mediaItemID) {
+      videoQueue.value = []
+      videoQueueKey = ''
+      return
+    }
+    const key = `${mediaItemID}:${currentEpisodeID}`
+    if (videoQueueKey === key) return
+    videoQueueKey = key
+    const request = ++videoQueueRequest
+    videoQueueLoading.value = true
+    try {
+      const { $heya } = useNuxtApp()
+      const detail = await $heya('/api/media/{id}', {
+        path: { id: String(mediaItemID) as never },
+      }) as MediaDetail
+      if (request !== videoQueueRequest) return
+      const files = detail.episode_files ?? {}
+      const all: VideoQueueItem[] = []
+      const seasons = [...(detail.seasons ?? [])].sort((a, b) => a.season_number - b.season_number)
+      for (const season of seasons) {
+        const episodes = [...(season.episodes ?? [])].sort((a, b) => a.episode_number - b.episode_number)
+        for (const episode of episodes) {
+          const key = `s${season.season_number}e${episode.episode_number}`
+          const file = files[key]
+          const fileID = file?.file_public_id || file?.file_id
+          if (!fileID) continue
+          const episodeLabel = `S${String(season.season_number).padStart(2, '0')}E${String(episode.episode_number).padStart(2, '0')}`
+          const name = episode.preferred_title || episode.title
+          all.push({
+            fileId: String(fileID),
+            mediaItemId: mediaItemID,
+            entityType: 'episode',
+            entityId: episode.id,
+            title: name ? `${episodeLabel} · ${name}` : episodeLabel,
+            episodeLabel,
+            runtimeSeconds: Math.max(0, episode.runtime_minutes ?? 0) * 60,
+          })
+        }
+      }
+      const current = all.findIndex(item => item.entityId === currentEpisodeID)
+      videoQueue.value = current >= 0 ? all.slice(current + 1) : all
+    } catch {
+      if (request === videoQueueRequest) {
+        videoQueue.value = []
+        videoQueueKey = ''
+      }
+    } finally {
+      if (request === videoQueueRequest) videoQueueLoading.value = false
+    }
+  }
+
+  async function playVideoQueueItem(item: VideoQueueItem) {
+    const current = session.value?.media_kind === 'video' ? session.value : lastVideoSession
+    if (!current) return null
+    const snap = await playVideo({
+      fileId: item.fileId,
+      mediaItemId: item.mediaItemId,
+      entityType: item.entityType,
+      entityId: item.entityId,
+      title: item.title,
+      audioTrack: current.audio_track ?? 0,
+      subtitleTrack: current.subtitle_track,
+      quality: current.quality ?? 'auto',
+      fallbackVolume: current.volume,
+    })
+    videoRemoteOpen.value = true
+    return snap
+  }
+
+  async function playNextVideo() {
+    const next = videoQueue.value[0]
+    if (!next || !engagedDeviceId.value) return null
+    return await playVideoQueueItem(next)
   }
 
   // WS mirror entry point (plugins/cast-live.client.ts). Returns 'ended'
@@ -433,11 +709,18 @@ export const useCastStore = defineStore('cast', () => {
       // from a session we already replaced must not clear the new one.
       if (!prev || prev.id !== p.session_id) return null
       const wasOurs = ownsPlayback
-      session.value = null
+      if (prev.media_kind === 'video') lastVideoSession = prev
       if (p.state === 'failed') {
+        session.value = null
         ownsPlayback = false
         return 'failed'
       }
+      if (wasOurs && prev.media_kind === 'video' && videoQueue.value.length) {
+        session.value = { ...prev, state: 'starting', position_sec: 0 }
+        samplePosition(0)
+        return 'ended'
+      }
+      session.value = null
       return wasOurs ? 'ended' : null
     }
 
@@ -470,10 +753,14 @@ export const useCastStore = defineStore('cast', () => {
       position_sec: p.position_sec,
       volume: p.volume,
     }
+    if (session.value.media_kind === 'video') lastVideoSession = session.value
     lastDeviceVolume.value = p.volume
     samplePosition(p.position_sec)
     if (p.media_kind === 'video' && p.file_id && videoStreamInfoFileID.value !== p.file_id) {
       resetVideoStreamInfo(p.file_id)
+    }
+    if (p.media_kind === 'video' && p.entity_type === 'episode' && p.media_item_id) {
+      void loadVideoQueue(p.media_item_id, p.entity_id ?? 0)
     }
     return null
   }
@@ -481,10 +768,12 @@ export const useCastStore = defineStore('cast', () => {
   return {
     devices, devicesLoaded, session, engagedDeviceId, connecting, lastDeviceVolume,
     videoStreamInfo, videoStreamInfoLoading, videoStreamInfoError,
+    videoRemoteOpen, videoQueue, videoQueueLoading,
     engaged, deviceName, isClientDevice,
     refreshDevices, adoptExisting,
     playTrack, playVideo, updateVideo, pause, resume, seekTo, setVolume, stopSession, disconnect,
-    loadVideoStreamInfo,
+    loadVideoStreamInfo, loadVideoQueue, playVideoQueueItem, playNextVideo,
+    applyClientDeviceState, engageClientDevice, releaseDevice,
     applyEvent, livePositionSec,
   }
 })

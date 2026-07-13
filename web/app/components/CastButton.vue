@@ -12,7 +12,7 @@
     v-if="visible"
     v-model="menuOpen"
     align="end"
-    :width="videoCastSession ? 336 : 304"
+    :width="304"
     :trigger-class="{ 'btn-icon': true, 'topbar-cast-btn': true, active: cast.engaged }"
     :trigger-title="cast.engaged ? `Casting to ${cast.deviceName}` : 'Cast'"
     trigger-aria-label="Cast to a device"
@@ -22,8 +22,7 @@
       <Icon :name="connecting ? 'loading' : 'cast'" :size="18" :class="{ 'cast-btn-spin': connecting }" />
     </template>
 
-    <CastVideoRemote v-if="videoCastSession" compact />
-    <div v-else-if="cast.engaged" class="cast-menu-current">
+    <div v-if="cast.engaged" class="cast-menu-current">
       <span class="cast-device-icon is-active">
         <Icon name="cast" :size="16" />
       </span>
@@ -118,6 +117,7 @@ async function pick(deviceId: string) {
   // Picking the connected device again is the disconnect gesture.
   if (cast.engagedDeviceId === deviceId) { disconnect(); return }
   const video = videoCastSession.value
+  const target = cast.devices.find(device => device.id === deviceId)
   if (video?.file_id && video.entity_type && video.entity_id) {
     const position = cast.livePositionSec()
     try {
@@ -125,6 +125,7 @@ async function pick(deviceId: string) {
       cast.engagedDeviceId = deviceId
       await cast.playVideo({
         fileId: video.file_id,
+        mediaItemId: video.media_item_id,
         entityType: video.entity_type,
         entityId: video.entity_id,
         title: video.title,
@@ -141,10 +142,16 @@ async function pick(deviceId: string) {
     }
     return
   }
+  if (target?.provider === 'client' && target.state?.media_kind === 'video') {
+    cast.engageClientDevice(deviceId)
+    cast.videoRemoteOpen = true
+    return
+  }
   void startCastTo(deviceId)
 }
 function disconnect() {
-  if (videoCastSession.value) void cast.disconnect()
+  if (videoCastSession.value && cast.isClientDevice) cast.releaseDevice()
+  else if (videoCastSession.value) void cast.disconnect()
   else void stopCasting()
 }
 

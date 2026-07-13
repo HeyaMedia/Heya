@@ -7,7 +7,7 @@
 //
 // Position is interpolated client-side between events (the server doesn't
 // tick every second) — a 500ms ticker advances the scrubber while playing.
-import type { CastStateEvent } from '~/composables/useCast'
+import type { CastDevice, CastStateEvent } from '~/composables/useCast'
 
 export default defineNuxtPlugin((nuxtApp) => {
   const { on, connected } = useEventBus()
@@ -44,9 +44,13 @@ export default defineNuxtPlugin((nuxtApp) => {
     const p = ev.payload as CastStateEvent
     const outcome = cast.applyEvent(p)
     if (outcome === 'ended') {
-      // VideoPlayer owns video completion / Up Next. Never advance the music
-      // queue merely because a movie finished on the same Cast transport.
-      if (p.media_kind === 'video') return
+      if (p.media_kind === 'video') {
+        void cast.playNextVideo().catch((error) => {
+          toast.err(error instanceof Error ? error.message : 'Could not play the next episode')
+          void cast.stopSession()
+        })
+        return
+      }
       // A track this tab started finished on the receiver — advance the
       // queue (server already scrobbled it with source "cast").
       void player.castTrackEnded()
@@ -61,6 +65,12 @@ export default defineNuxtPlugin((nuxtApp) => {
       return
     }
     syncFromSession()
+  })
+
+  on('device.state', (ev) => {
+    const device = ev.payload as CastDevice
+    if (!device?.id || device.id === clientDeviceID()) return
+    cast.applyClientDeviceState({ ...device, provider: 'client' })
   })
 
   function syncFromSession() {

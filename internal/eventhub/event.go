@@ -38,6 +38,10 @@ const (
 	// Browser/device remote-control command. Published to the user's sockets;
 	// clients discard commands whose TargetDeviceID is not their stable id.
 	EventDeviceCommand EventType = "device.command"
+	// Live HeyaConnect renderer state. Emitted when a browser announces or
+	// heartbeats so another client controlling that device can mirror video
+	// playback without polling the device list.
+	EventDeviceState EventType = "device.state"
 )
 
 // RadioICYPayload is the per-user event body for EventRadioICY. UserID
