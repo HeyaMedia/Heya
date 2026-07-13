@@ -1160,7 +1160,18 @@ if (import.meta.client) {
 .hero-stats-stars {
   display: inline-flex;
   margin-right: 4px;
+  /* Glass pill — the reactions sit over the hero backdrop art; bare outline
+     glyphs at fg-3 disappear into it. */
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
 }
+.hero-stats-stars :deep(.reaction-btn) { color: var(--fg-1); }
+.hero-stats-stars :deep(.reaction-btn:hover) { color: var(--fg-0); }
 .stat-dot { color: var(--fg-3); }
 .stat { color: var(--fg-1); }
 .hero-ext { margin-top: 10px; }

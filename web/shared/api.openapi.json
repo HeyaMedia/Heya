@@ -678,6 +678,28 @@
         ],
         "type": "object"
       },
+      "AddedBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AddedBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "added": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added"
+        ],
+        "type": "object"
+      },
       "Admin-create-userRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6019,6 +6041,30 @@
         ],
         "type": "object"
       },
+      "Library-scanner-bulk-approve-singleRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Library-scanner-bulk-approve-singleRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "min_confidence": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "min_confidence"
+        ],
+        "type": "object"
+      },
       "Library-scanner-ignore-identityRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9129,6 +9175,16 @@
           "slug": {
             "type": "string"
           },
+          "sync_services": {},
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "track_count": {
             "format": "int64",
             "type": "integer"
@@ -9150,10 +9206,12 @@
           "created_at",
           "updated_at",
           "slug",
+          "tags",
           "track_count",
           "auto_album_slug",
           "auto_artist_slug",
-          "has_cover"
+          "has_cover",
+          "sync_services"
         ],
         "type": "object"
       },
@@ -12561,6 +12619,17 @@
             "maxLength": 128,
             "minLength": 1,
             "type": "string"
+          },
+          "tags": {
+            "description": "Free-form organization tags; omit to keep existing",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -13063,6 +13132,439 @@
         "required": [
           "label",
           "height"
+        ],
+        "type": "object"
+      },
+      "Queue-advanceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-advanceRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "from_item_id": {
+            "description": "The item this renderer just finished/skipped — makes double-fires no-ops",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "default": "ended",
+            "enum": [
+              "ended",
+              "skip",
+              "prev"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_item_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "Queue-claimRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-claimRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "output": {
+            "description": "local:\u003cclient_id\u003e or cast:\u003cdevice_id\u003e",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "output"
+        ],
+        "type": "object"
+      },
+      "Queue-enqueueRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-enqueueRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "at": {
+            "default": "end",
+            "enum": [
+              "end",
+              "next"
+            ],
+            "type": "string"
+          },
+          "track_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "track_ids"
+        ],
+        "type": "object"
+      },
+      "Queue-heartbeatRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-heartbeatRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "output": {
+            "description": "This renderer's output id",
+            "minLength": 1,
+            "type": "string"
+          },
+          "playing": {
+            "type": "boolean"
+          },
+          "position_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "output",
+          "position_seconds",
+          "playing"
+        ],
+        "type": "object"
+      },
+      "Queue-jumpRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-jumpRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "item_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_id"
+        ],
+        "type": "object"
+      },
+      "Queue-move-itemRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-move-itemRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "after_item_id": {
+            "description": "Place after this item (0 = right after the current track)",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "Queue-repeatRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-repeatRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "off",
+              "all",
+              "one"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "Queue-replaceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-replaceRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "output": {
+            "description": "Claiming output id, e.g. local:\u003cclient_id\u003e",
+            "type": "string"
+          },
+          "shuffle": {
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/QueueSource"
+          },
+          "start_track_id": {
+            "description": "Track to point at first (0 = head)",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
+      "Queue-shuffleRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Queue-shuffleRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "on"
+        ],
+        "type": "object"
+      },
+      "QueueItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "album_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "album_slug": {
+            "type": "string"
+          },
+          "album_title": {
+            "type": "string"
+          },
+          "artist_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "artist_name": {
+            "type": "string"
+          },
+          "artist_slug": {
+            "type": "string"
+          },
+          "disc_number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "duration": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ord": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "track_number": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_id",
+          "ord",
+          "track_id",
+          "title",
+          "duration",
+          "disc_number",
+          "track_number",
+          "album_id",
+          "album_title",
+          "album_slug",
+          "artist_id",
+          "artist_name",
+          "artist_slug"
+        ],
+        "type": "object"
+      },
+      "QueueSource": {
+        "additionalProperties": false,
+        "properties": {
+          "genre": {
+            "description": "Genre name for kind=genre",
+            "type": "string"
+          },
+          "id": {
+            "description": "album/artist/playlist id (kind-dependent)",
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "What to materialize from",
+            "enum": [
+              "album",
+              "artist",
+              "playlist",
+              "genre",
+              "library",
+              "tracks"
+            ],
+            "type": "string"
+          },
+          "track_ids": {
+            "description": "Explicit tracks for kind=tracks (mixes, selections)",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "QueueView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/QueueView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active_output": {
+            "type": "string"
+          },
+          "current_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "current_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "playing": {
+            "type": "boolean"
+          },
+          "position_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "repeat_mode": {
+            "type": "string"
+          },
+          "shuffled": {
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/QueueSource"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "window_start_index": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "current_index",
+          "total",
+          "position_seconds",
+          "playing",
+          "repeat_mode",
+          "shuffled",
+          "items",
+          "window_start_index"
         ],
         "type": "object"
       },
@@ -14066,6 +14568,28 @@
           "rejected",
           "unmatched",
           "ignored"
+        ],
+        "type": "object"
+      },
+      "ScannerBulkApproveResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ScannerBulkApproveResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "approved": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "approved"
         ],
         "type": "object"
       },
@@ -18355,6 +18879,15 @@
           "slug": {
             "type": "string"
           },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "updated_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -18371,7 +18904,8 @@
           "cover_path",
           "created_at",
           "updated_at",
-          "slug"
+          "slug",
+          "tags"
         ],
         "type": "object"
       },
@@ -23946,6 +24480,76 @@
         ]
       }
     },
+    "/api/libraries/{id}/scanner/bulk-approve-single": {
+      "post": {
+        "operationId": "library-scanner-bulk-approve-single",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Library-scanner-bulk-approve-singleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScannerBulkApproveResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Approve single scanner candidates above a confidence threshold",
+        "tags": [
+          "Libraries"
+        ]
+      }
+    },
     "/api/libraries/{id}/scanner/identities/{identity_id}/approve-candidate": {
       "post": {
         "operationId": "library-scanner-approve-candidate",
@@ -28331,6 +28935,556 @@
         "summary": "Subscribe to a podcast feed",
         "tags": [
           "Podcasts"
+        ]
+      }
+    },
+    "/api/me/queue": {
+      "delete": {
+        "operationId": "queue-clear",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Clear the queue",
+        "tags": [
+          "Queue"
+        ]
+      },
+      "get": {
+        "operationId": "queue-get",
+        "parameters": [
+          {
+            "description": "Window anchor ord; 0 anchors on the current item",
+            "explode": false,
+            "in": "query",
+            "name": "around",
+            "schema": {
+              "description": "Window anchor ord; 0 anchors on the current item",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Window size (default 100, max 500)",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "Window size (default 100, max 500)",
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "The user's play queue (windowed)",
+        "tags": [
+          "Queue"
+        ]
+      },
+      "post": {
+        "operationId": "queue-replace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-replaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Replace the queue from a source and start playing",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/advance": {
+      "post": {
+        "operationId": "queue-advance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-advanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Report a track boundary (renderer)",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/claim": {
+      "post": {
+        "operationId": "queue-claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-claimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Become the active output",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/heartbeat": {
+      "post": {
+        "operationId": "queue-heartbeat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-heartbeatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Renderer position heartbeat",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/items": {
+      "post": {
+        "operationId": "queue-enqueue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-enqueueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddedBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Append or play-next tracks",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/items/{id}": {
+      "delete": {
+        "operationId": "queue-remove-item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Remove one queue item",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/items/{id}/move": {
+      "post": {
+        "operationId": "queue-move-item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-move-itemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Reorder one queue item",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/jump": {
+      "post": {
+        "operationId": "queue-jump",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-jumpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Point the queue at an item",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/repeat": {
+      "post": {
+        "operationId": "queue-repeat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-repeatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Set the repeat mode",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/shuffle": {
+      "post": {
+        "operationId": "queue-shuffle",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Queue-shuffleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Toggle server-side shuffle",
+        "tags": [
+          "Queue"
         ]
       }
     },

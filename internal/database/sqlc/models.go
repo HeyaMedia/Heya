@@ -339,6 +339,21 @@ type EpisodeTitle struct {
 	Source    string `json:"source"`
 }
 
+type ExternalListen struct {
+	ID              int64              `json:"id"`
+	UserID          int64              `json:"user_id"`
+	Service         string             `json:"service"`
+	Kind            string             `json:"kind"`
+	ArtistName      string             `json:"artist_name"`
+	TrackName       string             `json:"track_name"`
+	ReleaseName     string             `json:"release_name"`
+	RecordingMbid   string             `json:"recording_mbid"`
+	ListenedAt      pgtype.Timestamptz `json:"listened_at"`
+	DurationSeconds int32              `json:"duration_seconds"`
+	MatchedTrackID  pgtype.Int8        `json:"matched_track_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type ExternalRating struct {
 	ID          int64          `json:"id"`
 	MediaItemID int64          `json:"media_item_id"`
@@ -811,6 +826,28 @@ type PlayEvent struct {
 	Source          string             `json:"source"`
 }
 
+type PlayQueue struct {
+	ID              int64              `json:"id"`
+	UserID          int64              `json:"user_id"`
+	Version         int64              `json:"version"`
+	CurrentItemID   pgtype.Int8        `json:"current_item_id"`
+	PositionSeconds float32            `json:"position_seconds"`
+	Playing         bool               `json:"playing"`
+	RepeatMode      string             `json:"repeat_mode"`
+	Shuffled        bool               `json:"shuffled"`
+	Source          []byte             `json:"source"`
+	ActiveOutput    string             `json:"active_output"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PlayQueueItem struct {
+	ID      int64 `json:"id"`
+	QueueID int64 `json:"queue_id"`
+	Ord     int64 `json:"ord"`
+	TrackID int64 `json:"track_id"`
+	SrcOrd  int32 `json:"src_ord"`
+}
+
 type ProductionCompany struct {
 	ID            int64  `json:"id"`
 	ExternalIds   []byte `json:"external_ids"`
@@ -1170,6 +1207,7 @@ type UserPlaylist struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Slug        string             `json:"slug"`
+	Tags        []string           `json:"tags"`
 }
 
 type UserPlaylistSync struct {

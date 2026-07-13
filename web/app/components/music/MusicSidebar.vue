@@ -127,7 +127,10 @@
          followed by user-created ones. Visually unified: same row shape, just
          a gold heart tile instead of a cover image. -->
     <div class="ms-divider" />
-    <div class="ms-section-label">Playlists</div>
+    <div class="ms-section-label ms-section-label-link">
+      <NuxtLink to="/music/playlists" class="ms-section-link" title="All playlists">Playlists</NuxtLink>
+      <NuxtLink to="/music/playlists" class="ms-section-all" title="All playlists"><Icon name="chevright" :size="11" /></NuxtLink>
+    </div>
     <ul class="ms-playlists">
       <li>
         <NuxtLink to="/music/loved" class="ms-pl-item" :class="{ active: section === 'loved' }" :aria-current="section === 'loved' ? 'page' : undefined">
@@ -515,4 +518,10 @@ watch(() => props.section, () => {
   border: 1px dashed var(--gold);
   border-radius: var(--r-sm);
 }
+
+.ms-section-label-link { display: flex; align-items: center; justify-content: space-between; }
+.ms-section-link { color: inherit; text-decoration: none; }
+.ms-section-link:hover { color: var(--fg-0); }
+.ms-section-all { color: var(--fg-4); display: inline-flex; text-decoration: none; }
+.ms-section-all:hover { color: var(--gold); }
 </style>

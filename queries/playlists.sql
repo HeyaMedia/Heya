@@ -44,14 +44,18 @@ SELECT p.*,
             ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
            ''
        ) AS auto_artist_slug,
-       (p.cover_path != '') AS has_cover
+       (p.cover_path != '') AS has_cover,
+       -- Active sync links (row presence = syncing); deleting the playlist
+       -- cascades these away, which is what stops the sync.
+       COALESCE((SELECT array_agg(DISTINCT s.service ORDER BY s.service)
+                 FROM user_playlist_syncs s WHERE s.playlist_id = p.id), '{}') AS sync_services
 FROM user_playlists p
 WHERE p.user_id = $1
 ORDER BY p.created_at DESC;
 
 -- name: UpdateUserPlaylist :exec
 UPDATE user_playlists
-SET name = $3, description = $4, cover_path = $5, slug = $6, updated_at = now()
+SET name = $3, description = $4, cover_path = $5, slug = $6, tags = $7, updated_at = now()
 WHERE id = $1 AND user_id = $2;
 
 -- name: UpdateUserPlaylistCoverPath :exec

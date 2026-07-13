@@ -33,9 +33,10 @@ type playlistsListBody struct {
 }
 
 type playlistMutation struct {
-	Name        string `json:"name" minLength:"1" maxLength:"128" example:"Friday focus"`
-	Description string `json:"description" maxLength:"2000" example:"Deep work soundtrack"`
-	Cover       string `json:"cover_path" maxLength:"512" doc:"Optional path/URL to a custom cover image"`
+	Name        string   `json:"name" minLength:"1" maxLength:"128" example:"Friday focus"`
+	Description string   `json:"description" maxLength:"2000" example:"Deep work soundtrack"`
+	Cover       string   `json:"cover_path" maxLength:"512" doc:"Optional path/URL to a custom cover image"`
+	Tags        []string `json:"tags,omitempty" maxItems:"16" doc:"Free-form organization tags; omit to keep existing"`
 }
 
 // playlistCoverUploadForm declares the multipart/form-data schema for the

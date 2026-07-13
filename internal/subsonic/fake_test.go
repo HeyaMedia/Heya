@@ -308,7 +308,7 @@ func (f *fakeBackend) GetUserPlaylistDetail(_ context.Context, _, _ int64) (*ser
 func (f *fakeBackend) AddTrackToPlaylist(_ context.Context, _, _, _ int64) error      { return nil }
 func (f *fakeBackend) RemoveTrackFromPlaylist(_ context.Context, _, _, _ int64) error { return nil }
 func (f *fakeBackend) DeleteUserPlaylist(_ context.Context, _, _ int64) error         { return nil }
-func (f *fakeBackend) UpdateUserPlaylist(_ context.Context, _, _ int64, _, _, _ string) error {
+func (f *fakeBackend) UpdateUserPlaylist(_ context.Context, _, _ int64, _, _, _ string, _ []string) error {
 	return nil
 }
 

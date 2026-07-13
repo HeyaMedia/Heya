@@ -575,8 +575,20 @@ function playFromIndex(i: number) {
   color: var(--fg-0);
 }
 .hero.ambient-extended .hero-round.active { color: var(--gold); }
-/* The hero star rating floats bare between the glass circles — give it a
-   matching glass pill so unrated (outline) stars survive the wash. */
+/* The hero reactions float bare between the glass circles — give them a
+   matching glass pill so hollow (unreacted) glyphs survive the wash, on
+   every hero variant. */
+.hero-rate {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+}
+.hero-rate :deep(.reaction-btn) { color: var(--fg-1); }
+.hero-rate :deep(.reaction-btn:hover) { color: var(--fg-0); }
 .hero.ambient-extended .hero-rate {
   padding: 8px 12px;
   border-radius: 999px;

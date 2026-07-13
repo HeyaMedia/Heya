@@ -275,7 +275,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			IDPath
 			Body playlistMutation
 		}) (*struct{}, error) {
-			if err := app.UpdateUserPlaylist(ctx, userFrom(ctx).ID, in.ID, in.Body.Name, in.Body.Description, in.Body.Cover); err != nil {
+			if err := app.UpdateUserPlaylist(ctx, userFrom(ctx).ID, in.ID, in.Body.Name, in.Body.Description, in.Body.Cover, in.Body.Tags); err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return nil, nil

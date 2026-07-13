@@ -155,7 +155,7 @@ func (a *App) DeleteUserPlaylist(ctx context.Context, userID, playlistID int64) 
 // Renaming regenerates the slug (dev-phase convention: no legacy-URL shims —
 // see CLAUDE.md) so the URL always reflects the current name; an unchanged
 // name keeps the existing slug rather than paying a needless collision check.
-func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description, cover string) error {
+func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description, cover string, tags []string) error {
 	q := sqlc.New(a.db)
 	existing, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID})
 	if err != nil {
@@ -165,6 +165,19 @@ func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, 
 	if name != existing.Name {
 		newSlug = slug.GenerateUnique(ctx, name, "", playlistID, userPlaylistSlugExists(q, userID))
 	}
+	if tags == nil {
+		tags = existing.Tags // omitted in the request → keep stored tags
+	}
+	cleaned := make([]string, 0, len(tags))
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[strings.ToLower(t)] || len(cleaned) >= 16 {
+			continue
+		}
+		seen[strings.ToLower(t)] = true
+		cleaned = append(cleaned, t)
+	}
 	if err := q.UpdateUserPlaylist(ctx, sqlc.UpdateUserPlaylistParams{
 		ID:          playlistID,
 		UserID:      userID,
@@ -172,6 +185,7 @@ func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, 
 		Description: description,
 		CoverPath:   cover,
 		Slug:        newSlug,
+		Tags:        cleaned,
 	}); err != nil {
 		return err
 	}

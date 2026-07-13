@@ -177,7 +177,7 @@ func (s *Server) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 	if v := param(r, "comment"); v != "" {
 		comment = v
 	}
-	if err := s.app.UpdateUserPlaylist(ctx, u.ID, playlistID, name, comment, detail.Playlist.CoverPath); err != nil {
+	if err := s.app.UpdateUserPlaylist(ctx, u.ID, playlistID, name, comment, detail.Playlist.CoverPath, nil); err != nil {
 		respondError(w, r, errGeneric, "updating playlist failed")
 		return
 	}

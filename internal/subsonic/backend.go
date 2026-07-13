@@ -60,7 +60,7 @@ type Backend interface {
 	AddTrackToPlaylist(ctx context.Context, userID, playlistID, trackID int64) error
 	RemoveTrackFromPlaylist(ctx context.Context, userID, playlistID, trackID int64) error
 	DeleteUserPlaylist(ctx context.Context, userID, playlistID int64) error
-	UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description, cover string) error
+	UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description, cover string, tags []string) error
 
 	// Discovery.
 	GetSimilarArtists(ctx context.Context, artistID int64) ([]service.SimilarArtistRow, error)

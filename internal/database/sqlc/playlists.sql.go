@@ -33,7 +33,7 @@ func (q *Queries) AddTrackToPlaylist(ctx context.Context, arg AddTrackToPlaylist
 const createUserPlaylist = `-- name: CreateUserPlaylist :one
 INSERT INTO user_playlists (user_id, name, description, cover_path, slug)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, description, cover_path, created_at, updated_at, slug
+RETURNING id, user_id, name, description, cover_path, created_at, updated_at, slug, tags
 `
 
 type CreateUserPlaylistParams struct {
@@ -62,6 +62,7 @@ func (q *Queries) CreateUserPlaylist(ctx context.Context, arg CreateUserPlaylist
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Slug,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -81,7 +82,7 @@ func (q *Queries) DeleteUserPlaylist(ctx context.Context, arg DeleteUserPlaylist
 }
 
 const getUserPlaylist = `-- name: GetUserPlaylist :one
-SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug FROM user_playlists WHERE id = $1 AND user_id = $2
+SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug, tags FROM user_playlists WHERE id = $1 AND user_id = $2
 `
 
 type GetUserPlaylistParams struct {
@@ -101,12 +102,13 @@ func (q *Queries) GetUserPlaylist(ctx context.Context, arg GetUserPlaylistParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Slug,
+		&i.Tags,
 	)
 	return i, err
 }
 
 const getUserPlaylistBySlug = `-- name: GetUserPlaylistBySlug :one
-SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug FROM user_playlists WHERE slug = $1 AND user_id = $2
+SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug, tags FROM user_playlists WHERE slug = $1 AND user_id = $2
 `
 
 type GetUserPlaylistBySlugParams struct {
@@ -126,6 +128,7 @@ func (q *Queries) GetUserPlaylistBySlug(ctx context.Context, arg GetUserPlaylist
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Slug,
+		&i.Tags,
 	)
 	return i, err
 }
@@ -260,7 +263,7 @@ func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]L
 }
 
 const listUserPlaylists = `-- name: ListUserPlaylists :many
-SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.updated_at, p.slug,
+SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.updated_at, p.slug, p.tags,
        (SELECT count(*) FROM user_playlist_tracks WHERE playlist_id = p.id) AS track_count,
        -- First track's addressing pair — the FE builds the canonical
        -- /api album-cover URL from these (image URLs are unconditional:
@@ -286,7 +289,11 @@ SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.upd
             ORDER BY (al.cover_path != '') DESC, upt.position ASC LIMIT 1),
            ''
        ) AS auto_artist_slug,
-       (p.cover_path != '') AS has_cover
+       (p.cover_path != '') AS has_cover,
+       -- Active sync links (row presence = syncing); deleting the playlist
+       -- cascades these away, which is what stops the sync.
+       COALESCE((SELECT array_agg(DISTINCT s.service ORDER BY s.service)
+                 FROM user_playlist_syncs s WHERE s.playlist_id = p.id), '{}') AS sync_services
 FROM user_playlists p
 WHERE p.user_id = $1
 ORDER BY p.created_at DESC
@@ -301,10 +308,12 @@ type ListUserPlaylistsRow struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	Slug           string             `json:"slug"`
+	Tags           []string           `json:"tags"`
 	TrackCount     int64              `json:"track_count"`
 	AutoAlbumSlug  interface{}        `json:"auto_album_slug"`
 	AutoArtistSlug interface{}        `json:"auto_artist_slug"`
 	HasCover       bool               `json:"has_cover"`
+	SyncServices   interface{}        `json:"sync_services"`
 }
 
 // Used by the sidebar — small payload, includes a synthesized cover (first
@@ -327,10 +336,12 @@ func (q *Queries) ListUserPlaylists(ctx context.Context, userID int64) ([]ListUs
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Slug,
+			&i.Tags,
 			&i.TrackCount,
 			&i.AutoAlbumSlug,
 			&i.AutoArtistSlug,
 			&i.HasCover,
+			&i.SyncServices,
 		); err != nil {
 			return nil, err
 		}
@@ -374,17 +385,18 @@ func (q *Queries) ReorderPlaylistTrack(ctx context.Context, arg ReorderPlaylistT
 
 const updateUserPlaylist = `-- name: UpdateUserPlaylist :exec
 UPDATE user_playlists
-SET name = $3, description = $4, cover_path = $5, slug = $6, updated_at = now()
+SET name = $3, description = $4, cover_path = $5, slug = $6, tags = $7, updated_at = now()
 WHERE id = $1 AND user_id = $2
 `
 
 type UpdateUserPlaylistParams struct {
-	ID          int64  `json:"id"`
-	UserID      int64  `json:"user_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	CoverPath   string `json:"cover_path"`
-	Slug        string `json:"slug"`
+	ID          int64    `json:"id"`
+	UserID      int64    `json:"user_id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	CoverPath   string   `json:"cover_path"`
+	Slug        string   `json:"slug"`
+	Tags        []string `json:"tags"`
 }
 
 func (q *Queries) UpdateUserPlaylist(ctx context.Context, arg UpdateUserPlaylistParams) error {
@@ -395,6 +407,7 @@ func (q *Queries) UpdateUserPlaylist(ctx context.Context, arg UpdateUserPlaylist
 		arg.Description,
 		arg.CoverPath,
 		arg.Slug,
+		arg.Tags,
 	)
 	return err
 }
