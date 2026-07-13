@@ -2412,19 +2412,54 @@
             "readOnly": true,
             "type": "string"
           },
+          "audio_track": {
+            "description": "Zero-based audio-stream selection for video",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "device_id": {
             "description": "Target device (from /api/cast/devices)",
             "minLength": 1,
             "type": "string"
           },
+          "entity_id": {
+            "description": "Movie media-item ID or TV episode ID for video progress",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "entity_type": {
+            "description": "Watch-progress entity type for video",
+            "enum": [
+              "movie",
+              "episode"
+            ],
+            "type": "string"
+          },
+          "file_id": {
+            "description": "Video library-file reference; mutually exclusive with track_id",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "quality": {
+            "description": "Optional HLS quality profile for video; auto uses the source-compatible plan",
+            "maxLength": 24,
+            "type": "string"
+          },
           "start_seconds": {
-            "description": "Start position in the track — lets a client hand off mid-track playback",
+            "description": "Start position in the media item — lets a client hand off mid-playback",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
+          "title": {
+            "description": "Display title for video playback",
+            "maxLength": 500,
+            "type": "string"
+          },
           "track_id": {
-            "description": "Music track to play",
+            "description": "Music track to play; mutually exclusive with file_id",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -2440,7 +2475,6 @@
         },
         "required": [
           "device_id",
-          "track_id",
           "volume"
         ],
         "type": "object"
@@ -2506,6 +2540,22 @@
             "readOnly": true,
             "type": "string"
           },
+          "allowed_user_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "base_url_source": {
+            "type": "string"
+          },
           "devices": {
             "type": "string"
           },
@@ -2522,8 +2572,11 @@
         "required": [
           "enabled",
           "enabled_source",
+          "base_url",
+          "base_url_source",
           "devices",
-          "devices_source"
+          "devices_source",
+          "allowed_user_ids"
         ],
         "type": "object"
       },
@@ -3286,6 +3339,15 @@
           "addr": {
             "type": "string"
           },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "host": {
             "type": "string"
           },
@@ -3297,6 +3359,9 @@
             "type": "string"
           },
           "manufacturer": {
+            "type": "string"
+          },
+          "media_origin": {
             "type": "string"
           },
           "model": {
@@ -15636,7 +15701,20 @@
             "format": "int64",
             "type": "integer"
           },
+          "entity_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "file_id": {
+            "type": "string"
+          },
           "id": {
+            "type": "string"
+          },
+          "media_kind": {
             "type": "string"
           },
           "position_sec": {
@@ -15717,6 +15795,21 @@
             "readOnly": true,
             "type": "string"
           },
+          "allowed_user_ids": {
+            "description": "Regular users allowed to discover and control server-side cast receivers; admins are always allowed",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "base_url": {
+            "description": "Optional receiver-facing Heya origin for Chromecast/DLNA URL pulls; empty derives the routed LAN address",
+            "type": "string"
+          },
           "devices": {
             "description": "Comma-separated receiver addresses resolved by unicast mDNS (same-subnet only)",
             "type": "string"
@@ -15727,7 +15820,9 @@
         },
         "required": [
           "enabled",
-          "devices"
+          "base_url",
+          "devices",
+          "allowed_user_ids"
         ],
         "type": "object"
       },
@@ -21650,6 +21745,251 @@
           }
         ],
         "summary": "Discovered cast devices",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
+    "/api/cast/media/music/{id}": {
+      "get": {
+        "operationId": "cast-stream-track",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cast_token",
+            "schema": {
+              "maxLength": 2048,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped audio stream for a cast receiver",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
+    "/api/cast/media/video/{file_id}": {
+      "get": {
+        "operationId": "cast-stream-video",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cast_token",
+            "schema": {
+              "maxLength": 2048,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped direct video stream for a cast receiver",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
+    "/api/cast/media/video/{file_id}/hls/index.m3u8": {
+      "get": {
+        "operationId": "cast-stream-video-hls-index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cast_token",
+            "schema": {
+              "maxLength": 2048,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped video HLS variant playlist for a cast receiver",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
+    "/api/cast/media/video/{file_id}/hls/master.m3u8": {
+      "get": {
+        "operationId": "cast-stream-video-hls-master",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cast_token",
+            "schema": {
+              "maxLength": 2048,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped video HLS master playlist for a cast receiver",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
+    "/api/cast/media/video/{file_id}/hls/{segment}": {
+      "get": {
+        "operationId": "cast-stream-video-hls-segment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "segment",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cast_token",
+            "schema": {
+              "maxLength": 2048,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped video HLS segment for a cast receiver",
         "tags": [
           "Cast"
         ]

@@ -74,6 +74,12 @@ type App struct {
 	llmLocal      *llm.LocalRuntime
 	imageRuntime  *imagegen.Runtime
 	castMgr       *cast.Manager
+	castAccessMu  sync.RWMutex
+	// castAllowedUsers is the explicit non-admin allowlist loaded from
+	// system_settings. Admins are always allowed and are intentionally not
+	// required to appear here, so an edit cannot lock every admin out of the
+	// recovery/configuration path.
+	castAllowedUsers map[int64]struct{}
 
 	// Lifetime context cancelled by Close(). Used for fire-and-forget
 	// goroutines (model fetches, tailscale Enable/Logout) that must outlive
@@ -309,33 +315,34 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	castMgr.SetHub(hub)
 
 	app := &App{
-		config:         cfg,
-		db:             db,
-		matcher:        m,
-		downloader:     dl,
-		river:          riverClient,
-		watcher:        wm,
-		heya:           heya,
-		transcoder:     tc,
-		transcodeCache: tcCache,
-		audioSessions:  audioSessions,
-		hub:            hub,
-		textSearcher:   textSearcher,
-		modelFetcher:   modelFetcher,
-		analyzer:       analyzer,
-		sonicHolder:    sonicHolder,
-		recFetcher:     recFetcher,
-		recModelsDir:   recModelsDir,
-		imageResizer:   resizer,
-		radioBrowser:   radiobrowser.New(),
-		podcastIndex:   podcastindex.New(cfg.PodcastIndexKey.Value, cfg.PodcastIndexSecret.Value),
-		sessions:       sessions.New(lifetimeCtx, hub),
-		llmLocal:       llmLocal,
-		imageRuntime:   imageRuntime,
-		castMgr:        castMgr,
-		lifetimeCtx:    lifetimeCtx,
-		lifetimeCancel: lifetimeCancel,
-		startedAt:      time.Now(),
+		config:           cfg,
+		db:               db,
+		matcher:          m,
+		downloader:       dl,
+		river:            riverClient,
+		watcher:          wm,
+		heya:             heya,
+		transcoder:       tc,
+		transcodeCache:   tcCache,
+		audioSessions:    audioSessions,
+		hub:              hub,
+		textSearcher:     textSearcher,
+		modelFetcher:     modelFetcher,
+		analyzer:         analyzer,
+		sonicHolder:      sonicHolder,
+		recFetcher:       recFetcher,
+		recModelsDir:     recModelsDir,
+		imageResizer:     resizer,
+		radioBrowser:     radiobrowser.New(),
+		podcastIndex:     podcastindex.New(cfg.PodcastIndexKey.Value, cfg.PodcastIndexSecret.Value),
+		sessions:         sessions.New(lifetimeCtx, hub),
+		llmLocal:         llmLocal,
+		imageRuntime:     imageRuntime,
+		castMgr:          castMgr,
+		castAllowedUsers: make(map[int64]struct{}),
+		lifetimeCtx:      lifetimeCtx,
+		lifetimeCancel:   lifetimeCancel,
+		startedAt:        time.Now(),
 	}
 
 	// Wire the SonicEnabled closure now that the App can answer the

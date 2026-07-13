@@ -27,10 +27,43 @@ var castVolumeFlag int
 
 var castStartFlag int
 var castToFlag string
+var castVideoEntityType string
+var castVideoEntityID int64
+var castVideoTitle string
+var castVideoAudioTrack int
+var castVideoQuality string
 
 var castCmd = &cobra.Command{
 	Use:   "cast",
-	Short: "Cast music to network receivers (AirPlay)",
+	Short: "Cast media to network receivers",
+}
+
+var castVideoCmd = &cobra.Command{
+	Use:   "video <file-id>",
+	Short: "Play a library video on a Chromecast",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dev, err := castResolveDevice(cmd.Context(), castToFlag)
+		if err != nil {
+			return err
+		}
+		body := map[string]any{
+			"device_id": dev.ID, "file_id": args[0],
+			"entity_type": castVideoEntityType,
+			"title":       castVideoTitle, "audio_track": castVideoAudioTrack,
+			"quality": castVideoQuality, "volume": castVolumeFlag,
+			"start_seconds": castStartFlag,
+		}
+		if castVideoEntityID > 0 {
+			body["entity_id"] = castVideoEntityID
+		}
+		var snap castSessionJSON
+		if err := castAPI(cmd.Context(), http.MethodPost, "/api/cast/sessions", body, &snap); err != nil {
+			return err
+		}
+		fmt.Printf("casting video to %s (session %s)\n", dev.Name, snap.ID)
+		return nil
+	},
 }
 
 var castDevicesCmd = &cobra.Command{
@@ -48,10 +81,10 @@ var castDevicesCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(w, "NAME\tMODEL\tADDRESS\tID")
+		_, _ = fmt.Fprintln(w, "NAME\tPROVIDER\tCAPABILITIES\tMODEL\tADDRESS\tHEYA MEDIA ORIGIN\tID")
 		for _, d := range out.Items {
 			model := strings.TrimSpace(d.Manufacturer + " " + d.Model)
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s:%d\t%s\n", d.Name, model, d.Addr, d.Port, d.ID)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s:%d\t%s\t%s\n", d.Name, d.Provider, strings.Join(d.Capabilities, ","), model, d.Addr, d.Port, d.MediaOrigin, d.ID)
 		}
 		return w.Flush()
 	},
@@ -95,7 +128,7 @@ var castStatusCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(w, "DEVICE\tSTATE\tTRACK\tPOSITION\tVOL\tSESSION")
+		_, _ = fmt.Fprintln(w, "DEVICE\tSTATE\tMEDIA\tPOSITION\tVOL\tSESSION")
 		for _, s := range out.Items {
 			track := s.Title
 			if s.Artist != "" {
@@ -176,8 +209,15 @@ var castVolCmd = &cobra.Command{
 func init() {
 	castPlayCmd.Flags().IntVar(&castVolumeFlag, "volume", 30, "Initial device volume (0-100)")
 	castPlayCmd.Flags().IntVar(&castStartFlag, "start", 0, "Start position in seconds")
+	castVideoCmd.Flags().IntVar(&castVolumeFlag, "volume", 30, "Initial device volume (0-100)")
+	castVideoCmd.Flags().IntVar(&castStartFlag, "start", 0, "Start position in seconds")
+	castVideoCmd.Flags().StringVar(&castVideoEntityType, "entity-type", "movie", "Progress entity type (movie or episode)")
+	castVideoCmd.Flags().Int64Var(&castVideoEntityID, "entity-id", 0, "Movie media-item or episode ID (defaults from the file)")
+	castVideoCmd.Flags().StringVar(&castVideoTitle, "title", "", "Receiver display title")
+	castVideoCmd.Flags().IntVar(&castVideoAudioTrack, "audio", 0, "Zero-based audio stream")
+	castVideoCmd.Flags().StringVar(&castVideoQuality, "quality", "auto", "HLS quality profile")
 	castCmd.PersistentFlags().StringVar(&castToFlag, "to", "", "Device name (substring) or device ID")
-	castCmd.AddCommand(castDevicesCmd, castPlayCmd, castStatusCmd, castSeekCmd, castVolCmd,
+	castCmd.AddCommand(castDevicesCmd, castPlayCmd, castVideoCmd, castStatusCmd, castSeekCmd, castVolCmd,
 		castControlCmd("pause", "Pause playback"),
 		castControlCmd("resume", "Resume playback"),
 		castControlCmd("stop", "Stop the session"))
@@ -185,12 +225,15 @@ func init() {
 }
 
 type castDeviceJSON struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Model        string `json:"model"`
-	Manufacturer string `json:"manufacturer"`
-	Addr         string `json:"addr"`
-	Port         int    `json:"port"`
+	ID           string   `json:"id"`
+	Provider     string   `json:"provider"`
+	Capabilities []string `json:"capabilities"`
+	Name         string   `json:"name"`
+	Model        string   `json:"model"`
+	Manufacturer string   `json:"manufacturer"`
+	Addr         string   `json:"addr"`
+	Port         int      `json:"port"`
+	MediaOrigin  string   `json:"media_origin"`
 }
 
 type castSessionJSON struct {
@@ -198,6 +241,7 @@ type castSessionJSON struct {
 	DeviceID    string  `json:"device_id"`
 	DeviceName  string  `json:"device_name"`
 	State       string  `json:"state"`
+	MediaKind   string  `json:"media_kind"`
 	Title       string  `json:"title"`
 	Artist      string  `json:"artist"`
 	PositionSec float64 `json:"position_sec"`

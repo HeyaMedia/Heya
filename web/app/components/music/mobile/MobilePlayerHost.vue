@@ -23,16 +23,22 @@
 <script setup lang="ts">
 const { isPhone } = useViewport()
 const { currentTrack, muted, volume, toggleMute, setVolume } = usePlayerBindings()
+const cast = useCastStore()
 
 const npOpen = ref(false)
 
 // Phones have their own hardware volume buttons / system output level
 // already sitting between the engine and the speaker, so there's no phone
-// volume UI (see NowPlayingSheet). Keep the Web Audio engine's own gain
-// pinned at unity (unmuted, 100) here so nothing upstream can silently
-// leave it attenuated with no on-screen control to fix it.
+// volume UI for LOCAL playback (see NowPlayingSheet). Keep the Web Audio
+// engine's own gain pinned at unity (unmuted, 100) here so nothing upstream
+// can silently leave it attenuated with no on-screen control to fix it.
+//
+// While an output is engaged (casting / another device) the player's volume
+// IS the remote device's stream volume, and NowPlayingSheet surfaces a
+// slider for it — so bail out then, or this would slam the device back to
+// 100 on every drag and there'd be no way to turn the room down.
 watchEffect(() => {
-  if (!isPhone.value) return
+  if (!isPhone.value || cast.engaged) return
   if (muted.value) toggleMute()
   if (volume.value !== 100) setVolume(100)
 })

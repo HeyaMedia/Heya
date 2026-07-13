@@ -186,6 +186,7 @@ func deviceFromDNSResponse(packet []byte, queriedHost string) (Device, bool) {
 	return Device{
 		ID:           "airplay:" + strings.ToLower(deviceID),
 		Provider:     "airplay",
+		Capabilities: []string{"audio"},
 		Name:         dnsUnescape(name),
 		Model:        txtValue(txt, "model"),
 		Manufacturer: txtValue(txt, "manufacturer"),

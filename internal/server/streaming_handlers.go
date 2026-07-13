@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -138,7 +139,7 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 		} else {
 			fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", bw, res)
 		}
-		_, _ = fmt.Fprintf(w, "/api/stream/%s/hls/index.m3u8%s\n", file.PublicID.String(), queryPassthrough(r))
+		_, _ = fmt.Fprintf(w, "%s/index.m3u8%s\n", hlsBasePath(r, file.PublicID.String()), queryPassthrough(r))
 	}
 }
 
@@ -173,8 +174,7 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 		}
 		session.Touch()
 
-		tok := r.URL.Query().Get("token")
-		playlist := transcoder.GenerateDynamicPlaylist(session, tok)
+		playlist := transcoder.GenerateDynamicPlaylistWithQuery(session, hlsChildQuery(r))
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -196,7 +196,13 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		session := app.TranscoderSessions().GetExisting(fileID)
+		audioTrack := 0
+		if a := r.URL.Query().Get("audio"); a != "" {
+			if v, err := strconv.Atoi(a); err == nil && v >= 0 {
+				audioTrack = v
+			}
+		}
+		session := app.TranscoderSessions().GetExistingSession(fileID, audioTrack, r.URL.Query().Get("sid"))
 		if session == nil {
 			writeError(w, http.StatusNotFound, "no active transcode")
 			return
@@ -337,11 +343,31 @@ func parseSegmentIndex(name string) int {
 
 func queryPassthrough(r *http.Request) string {
 	q := r.URL.Query()
-	q.Del("token")
 	if len(q) == 0 {
-		return "?token=" + r.URL.Query().Get("token")
+		return ""
 	}
-	return "?" + q.Encode() + "&token=" + r.URL.Query().Get("token")
+	return "?" + q.Encode()
+}
+
+func hlsBasePath(r *http.Request, fileRef string) string {
+	if strings.HasPrefix(r.URL.Path, "/api/cast/media/video/") {
+		return "/api/cast/media/video/" + fileRef + "/hls"
+	}
+	return "/api/stream/" + fileRef + "/hls"
+}
+
+// hlsChildQuery keeps only authentication and exact transcode-session routing
+// on segment URLs. Capability/quality flags have already been consumed while
+// creating the variant session and need not be repeated dozens of times.
+func hlsChildQuery(r *http.Request) string {
+	in := r.URL.Query()
+	out := url.Values{}
+	for _, key := range []string{"token", "cast_token", "sid", "audio"} {
+		if value := in.Get(key); value != "" {
+			out.Set(key, value)
+		}
+	}
+	return out.Encode()
 }
 
 func workerToTranscoderInfo(info *worker.MediaInfo) transcoder.MediaInfo {

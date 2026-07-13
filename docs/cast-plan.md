@@ -6,9 +6,11 @@ control commands. Protocol research, live-validated recipes, and failure
 modes live in [docs/casting-research.md](casting-research.md); read that
 first. This doc is the build plan.
 
-**Scope for now: AirPlay 2 via the `cliap2` subprocess, music only.**
-Google Cast / DLNA / vendor URL-push are later providers behind the same
-interface. Video is out of scope until the audio path is proven.
+**Current scope: AirPlay 2 via `cliap2` plus Google Cast v2 audio/video via the
+free Default Media Receiver.** Chromecast audio is hardware-proven. Video now
+supports conservative direct MP4 playback plus HLS H.264/AAC fallback and is
+awaiting hardware validation. DLNA and vendor URL-push remain later providers
+behind the same interface.
 
 ## Architecture
 
@@ -19,8 +21,8 @@ CLI (heya cast …)        ──HTTP──▶      │
                               internal/cast
                     ┌────────────┬──────────────┬─────────────┐
                     │ discovery  │ CastSession  │ providers   │
-                    │ (mDNS)     │ (queue, pos, │ airplay:    │
-                    │            │  volume, WS) │ cliap2 supv │
+                    │ (mDNS)     │ (queue, pos, │ airplay +  │
+                    │            │  volume, WS) │ cast v2     │
                     └────────────┴──────┬───────┴─────────────┘
                                         │ PCM (stdin) + FIFO (ctrl)
                                         ▼
@@ -28,10 +30,20 @@ CLI (heya cast …)        ──HTTP──▶      │
 ```
 
 - **The server is the player.** A `CastSession` owns queue, position,
-  volume, and state; every client mirrors it via the existing
+  volume, and state; the owning user's clients mirror it via the existing
   `eventhub` WS bus. UI buttons are API calls against the session.
-- **One session per device**; starting a new one on the same device
-  replaces the old (clean stop first).
+- **One session per device, many sessions per server.** Different users may
+  cast to different receivers concurrently. The current owner may retarget
+  their receiver; another user gets a conflict instead of silently taking it
+  over. Duplicate AirPlay/Cast/DLNA advertisements sharing one receiver IP are
+  one physical reservation, so a multi-protocol device cannot be taken over
+  through a second provider ID. Future multi-zone endpoints need an explicit
+  zone key.
+- **Casting is allowlisted.** Admins always retain access; regular users are
+  explicitly enabled under Settings → Casting. Device discovery, session
+  reads/controls, and `cast.state` events all enforce that boundary. Sessions
+  and events are visible only to the user that started them; the admin network
+  diagnostics page remains the all-session operational view.
 - **PCM is a continuous stream**: track boundaries are invisible to
   cliap2, so the server gets **true gapless** by simply writing the next
   track's PCM into the same stdin and updating metadata via the FIFO.
@@ -245,16 +257,60 @@ independent tracks, both provider-side:
 
 ## Phase 5 — later providers & polish (unscoped)
 
-- Google Cast v2 provider (pure Go, URL-pull — receiver fetches
-  `/api/music/tracks/{id}/stream?token=…` with a scoped short-lived
-  cast token instead of a session token).
 - DLNA AVTransport provider (goupnp), WiiM/vendor URL-push.
 - Multi-device / multiroom sync (coordinated cliap2 instances — MA
   proves it's possible; real work).
 - HomeKit-managed speakers (Home-app access gotcha), password
   receivers (`--password`), artwork over FIFO (`ARTWORK=` URL).
-- Sub-entity: cast video (different transport entirely — Cast/DLNA
-  territory, not AirPlay-audio).
+- Cast video subtitle delivery (external WebVTT first; conversion/burn-in for
+  ASS/PGS) and richer per-receiver codec profiles.
+
+### Provider implementation order
+
+Before adding another protocol, split the current audio-only `TrackInfo`
+contract into a provider-neutral playable source (audio or video, MIME type,
+duration, metadata/artwork, and a short-lived scoped stream URL when the
+receiver pulls). Keep discovery and transport capabilities explicit so the UI
+can hide unsupported media instead of learning provider names.
+
+1. **Google Cast v2 via the Default Media Receiver — AUDIO HARDWARE-PROVEN;
+   VIDEO BACKEND BUILT, HARDWARE VALIDATION PENDING (2026-07-13).** No paid or registered Google
+   receiver app is required: Heya launches the public Default Media Receiver
+   app ID `CC1AD845`. `_googlecast._tcp` discovery, Cast v2 TLS/protobuf
+   framing, launch/load/control/status handling, native pause/resume/seek, and
+   user/path-scoped receiver-pull URLs are implemented without a third-party
+   Cast module. Audio passed real hardware testing, including the automatically
+   selected LAN media origin. Video adds a file-scoped HLS token tree,
+   per-session segment routing, direct MP4 or H.264/AAC fallback, remote
+   controls/progress, and local/receiver handoff. Discovery parses the Cast
+   `ca` bitfield (`AUDIO_OUT`/`VIDEO_OUT`), so speaker-only Cast devices never
+   appear in the video picker. Codec support is intentionally conservative:
+   `ca` describes I/O, not HEVC/AV1/HDR decoder support.
+2. **DLNA AVTransport.** Reuse the scoped URL source and add per-device quirks
+   for MIME/protocolInfo and seek support. This also proves the UPnP half of the
+   later Yamaha provider against hardware we can test.
+3. **Yamaha MusicCast (YXC + UPnP).** Use AVTransport for media injection and
+   YXC for receiver-native power, input, volume, transport events, zones, and
+   MusicCast grouping. The RX-V6A makes this path locally testable after the
+   generic DLNA transport is stable.
+4. **WiiM HTTP provider.** Implement audio URL playback/control behind normal
+   WiiM discovery. It remains dormant when no device is present and ships as
+   hardware-unverified until a WiiM owner tests it and reports diagnostics.
+
+Multiroom synchronization is separate from multi-user concurrency: the latter
+is already one independent session per receiver, while synchronized playback
+requires a group session, coordinated start clocks, and drift correction.
+
+### Remote-user edge agent (future only)
+
+A user whose receivers live on a different home LAN from the Heya server could
+run an outbound-connected discovery/sender/proxy agent. It would publish only
+that user's local receiver inventory and serve receiver-facing scoped URLs,
+with an optional local audio/video endpoint for desktop or HTPC installs. This
+must reuse HeyaConnect's identity/capability model where possible and must not
+become a generic LAN proxy or remote shell. The design and critique are recorded
+in [cast-edge-agent-plan.md](cast-edge-agent-plan.md); it is intentionally
+blocked on the native provider contracts becoming stable.
 
 ## Risks / open questions
 

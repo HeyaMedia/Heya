@@ -1,6 +1,6 @@
 // Cast session live mirror. The server owns cast playback and broadcasts
-// every state edge on `cast.state` (global, household-scoped — see
-// Manager.emitSession); this plugin folds those events into the cast store
+// every state edge on the per-user `cast.state` channel; this plugin folds
+// those events into the cast store
 // and, while THIS tab has the cast output engaged, mirrors transport state
 // into the player store so the playbar just works: play/pause/position/
 // volume all reflect the receiver.
@@ -44,6 +44,9 @@ export default defineNuxtPlugin((nuxtApp) => {
     const p = ev.payload as CastStateEvent
     const outcome = cast.applyEvent(p)
     if (outcome === 'ended') {
+      // VideoPlayer owns video completion / Up Next. Never advance the music
+      // queue merely because a movie finished on the same Cast transport.
+      if (p.media_kind === 'video') return
       // A track this tab started finished on the receiver — advance the
       // queue (server already scrobbled it with source "cast").
       void player.castTrackEnded()
@@ -53,7 +56,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       toast.err(`Cast to ${p.device_name} failed`)
       if (cast.engaged) {
         cast.engagedDeviceId = null
-        player.playing = false
+        if (p.media_kind !== 'video') player.playing = false
       }
       return
     }
@@ -69,6 +72,13 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (!s) {
       // Session gone without a natural-end advance (deliberate stop, or a
       // foreign tab owns the queue): the transport is simply not playing.
+      player.playing = false
+      return
+    }
+    if (s.media_kind === 'video') {
+      // The full-screen video player mirrors this session itself. Keeping the
+      // music store out of it prevents a video title/file ID from being
+      // mistaken for a queue track and hydrated through /api/music.
       player.playing = false
       return
     }

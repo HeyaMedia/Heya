@@ -14,9 +14,12 @@ package cast
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,16 +27,25 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// PlaybackSink lets the service layer record listens (play_events /
-// scrobbles) without this package importing service. positionSec is the
-// track position when recording; completed marks a natural track end.
-type PlaybackSink func(ctx context.Context, userID, trackID int64, positionSec, totalSec int, completed bool)
+// PlaybackSink lets the service layer record music listens and video watch
+// progress without this package importing service. positionSec is the item
+// position when recording; completed marks a natural media end.
+type PlaybackSink func(ctx context.Context, userID int64, item TrackInfo, positionSec, totalSec int, completed bool)
+
+// ErrDeviceInUse means another user already owns the one transport a physical
+// receiver can accept. Other receivers remain independent and can be used by
+// other users concurrently.
+var ErrDeviceInUse = errors.New("cast device is already in use by another user")
 
 type Manager struct {
 	dataDir string
 	hub     *eventhub.Hub // nil in contexts without a live WS hub (CLI)
 
 	playbackSink PlaybackSink
+
+	mediaBaseURL  string
+	mediaPort     string
+	mediaTokenKey []byte
 
 	// staticAddrs are receiver addresses resolved by unicast mDNS instead
 	// of multicast browse — deployments where multicast can't reach us
@@ -44,7 +56,7 @@ type Manager struct {
 	mu        sync.RWMutex
 	providers map[string]Provider
 	devices   map[string]Device
-	sessions  map[string]*Session // keyed by Device.ID — one session per device
+	sessions  map[string]*Session // keyed by physical endpoint — one session per receiver
 	byID      map[string]*Session
 	// runCtx is the manager-lifetime context every transport process is
 	// bound to. Sessions must survive the HTTP request that created
@@ -57,11 +69,12 @@ type Manager struct {
 
 func New(dataDir string) *Manager {
 	return &Manager{
-		dataDir:   dataDir,
-		providers: map[string]Provider{},
-		devices:   map[string]Device{},
-		sessions:  map[string]*Session{},
-		byID:      map[string]*Session{},
+		dataDir:       dataDir,
+		mediaTokenKey: newMediaTokenKey(),
+		providers:     map[string]Provider{},
+		devices:       map[string]Device{},
+		sessions:      map[string]*Session{},
+		byID:          map[string]*Session{},
 	}
 }
 
@@ -117,15 +130,16 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
-	binPath, err := ensureCliap2(filepath.Join(m.dataDir, "cast", "bin"))
-	if err != nil {
-		m.mu.Unlock()
-		return fmt.Errorf("cast: extracting cliap2: %w", err)
-	}
+	binPath, airplayErr := ensureCliap2(filepath.Join(m.dataDir, "cast", "bin"))
 	browseCtx, cancel := context.WithCancel(ctx)
 	m.runCtx = browseCtx
 	m.cancel = cancel
-	m.providers["airplay"] = &airplayProvider{binPath: binPath}
+	if airplayErr == nil {
+		m.providers["airplay"] = &airplayProvider{binPath: binPath}
+	} else {
+		log.Warn().Err(airplayErr).Msg("cast: AirPlay provider unavailable; continuing with URL-pull providers")
+	}
+	m.providers["chromecast"] = &chromecastProvider{}
 	m.started = true
 	providers := make([]Provider, 0, len(m.providers))
 	for _, p := range m.providers {
@@ -184,10 +198,15 @@ func (m *Manager) upsertDevice(dev Device) {
 // LastSeen lets callers grey out stale entries if they care.
 func (m *Manager) Devices() []Device {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	out := make([]Device, 0, len(m.devices))
 	for _, d := range m.devices {
 		out = append(out, d)
+	}
+	m.mu.RUnlock()
+	for i := range out {
+		if origin, err := m.mediaOriginFor(out[i]); err == nil {
+			out[i].MediaOrigin = origin
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -237,10 +256,21 @@ func (m *Manager) Play(deviceID string, userID int64, track TrackInfo, volume in
 	if m.providerFor(dev) == nil {
 		return nil, fmt.Errorf("cast: no provider for device %q", deviceID)
 	}
+	if track.PullPath != "" {
+		mediaURL, err := m.mediaURLFor(dev, userID, track)
+		if err != nil {
+			return nil, err
+		}
+		track.URL = mediaURL
+	}
 
+	endpointKey := receiverSessionKey(dev)
 	m.mu.Lock()
-	if existing, ok := m.sessions[dev.ID]; ok {
+	if existing, ok := m.sessions[endpointKey]; ok {
 		m.mu.Unlock()
+		if existing.UserID != userID || existing.Device.ID != dev.ID {
+			return nil, fmt.Errorf("%w: %s", ErrDeviceInUse, dev.Name)
+		}
 		return existing, existing.PlayTrack(track)
 	}
 	s := &Session{
@@ -252,7 +282,7 @@ func (m *Manager) Play(deviceID string, userID int64, track TrackInfo, volume in
 		track:  track,
 		volume: clampVolume(volume),
 	}
-	m.sessions[dev.ID] = s
+	m.sessions[endpointKey] = s
 	m.byID[s.ID] = s
 	m.mu.Unlock()
 
@@ -285,30 +315,62 @@ func (m *Manager) Sessions() []SessionSnapshot {
 	return out
 }
 
+// SessionsForUser is the non-admin API view. Receiver diagnostics use
+// Sessions(), but normal clients must never see another user's playback.
+func (m *Manager) SessionsForUser(userID int64) []SessionSnapshot {
+	all := m.Sessions()
+	out := make([]SessionSnapshot, 0, len(all))
+	for _, snap := range all {
+		if snap.UserID == userID {
+			out = append(out, snap)
+		}
+	}
+	return out
+}
+
 func (m *Manager) removeSession(s *Session) {
 	m.mu.Lock()
-	if m.sessions[s.Device.ID] == s {
-		delete(m.sessions, s.Device.ID)
+	endpointKey := receiverSessionKey(s.Device)
+	if m.sessions[endpointKey] == s {
+		delete(m.sessions, endpointKey)
 	}
 	delete(m.byID, s.ID)
 	m.mu.Unlock()
 }
 
-// emitSession broadcasts the session snapshot on the WS bus. Global (not
-// per-user) on purpose: cast targets are household devices and every
-// client should render the same "playing on Anlæg" state.
+// receiverSessionKey collapses duplicate protocol advertisements for the same
+// physical network endpoint. Without it, an AirPlay+Cast/DLNA receiver could be
+// controlled concurrently through two provider IDs. Future multi-zone devices
+// should expose an explicit zone endpoint key instead of sharing one Device.
+func receiverSessionKey(dev Device) string {
+	if ip := net.ParseIP(dev.Addr); ip != nil {
+		return "ip:" + ip.String()
+	}
+	if dev.Addr != "" {
+		return "host:" + strings.ToLower(dev.Addr)
+	}
+	return "id:" + dev.ID
+}
+
+// emitSession delivers session state only to the owning user's clients.
+// Network receiver state contains listening activity and control handles;
+// broadcasting it household-wide would bypass the casting allowlist.
 func (m *Manager) emitSession(s *Session) {
 	if m.hub == nil {
 		return
 	}
 	snap := s.Snapshot()
-	m.hub.Emit(eventhub.EventCastState, eventhub.CastStatePayload{
+	m.hub.EmitToUser(snap.UserID, eventhub.EventCastState, eventhub.CastStatePayload{
 		SessionID:   snap.ID,
 		DeviceID:    snap.DeviceID,
 		DeviceName:  snap.DeviceName,
 		UserID:      snap.UserID,
 		State:       string(snap.State),
+		MediaKind:   snap.MediaKind,
 		TrackID:     snap.TrackID,
+		FileID:      snap.FileID,
+		EntityType:  snap.EntityType,
+		EntityID:    snap.EntityID,
 		Title:       snap.Title,
 		Artist:      snap.Artist,
 		PositionSec: snap.PositionSec,

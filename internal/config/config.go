@@ -97,6 +97,12 @@ type SubsonicConfig struct {
 // Jellyfin/Subsonic, checked live so UI flips need no restart.
 type CastConfig struct {
 	Enabled Field[bool]
+	// BaseURL is the receiver-facing Heya origin used by URL-pull providers
+	// (Google Cast, DLNA, Yamaha, WiiM). Empty derives a plain HTTP origin
+	// from the server interface routed toward each receiver plus HEYA_PORT.
+	// Reverse-proxied/container deployments can set an explicit LAN-reachable
+	// origin such as https://heya.example.lan.
+	BaseURL Field[string]
 	// Devices is a comma-separated list of receiver addresses (IP or
 	// ip:port) resolved by direct UNICAST mDNS query instead of multicast
 	// discovery. For deployments where multicast can't reach the server:
@@ -158,6 +164,7 @@ func Load() *Config {
 		},
 		Cast: CastConfig{
 			Enabled: envBool("HEYA_CAST_ENABLED", true),
+			BaseURL: envString("HEYA_CAST_BASE_URL", ""),
 			Devices: envString("HEYA_CAST_DEVICES", ""),
 		},
 		Jobs: JobsConfig{
@@ -333,6 +340,7 @@ var sourceFields = []sourceField{
 	{"jellyfin.enabled", func(c *Config) SourceEntry { return c.Jellyfin.Enabled.Entry() }},
 	{"subsonic.enabled", func(c *Config) SourceEntry { return c.Subsonic.Enabled.Entry() }},
 	{"cast.enabled", func(c *Config) SourceEntry { return c.Cast.Enabled.Entry() }},
+	{"cast.base_url", func(c *Config) SourceEntry { return c.Cast.BaseURL.Entry() }},
 	{"cast.devices", func(c *Config) SourceEntry { return c.Cast.Devices.Entry() }},
 	{"tailscale.enabled", func(c *Config) SourceEntry { return c.Tailscale.Enabled.Entry() }},
 	{"tailscale.hostname", func(c *Config) SourceEntry { return c.Tailscale.Hostname.Entry() }},

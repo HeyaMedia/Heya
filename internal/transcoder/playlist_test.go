@@ -61,3 +61,19 @@ func TestGenerateDynamicPlaylist_VariableDurations(t *testing.T) {
 	assert.Contains(t, pl, "#EXTINF:7.000000,")
 	assert.Contains(t, pl, "#EXT-X-ENDLIST")
 }
+
+func TestGenerateDynamicPlaylistWithCastSessionQuery(t *testing.T) {
+	sess := &TranscodeSession{
+		Duration:    12,
+		TotalSegs:   2,
+		SegExt:      ".ts",
+		SegmentEnds: []float64{6, 12},
+		segments:    make([]*segReady, 2),
+	}
+	for i := range sess.segments {
+		sess.segments[i] = newSegReady()
+	}
+	pl := GenerateDynamicPlaylistWithQuery(sess, "audio=1&cast_token=signed&sid=cast-123")
+	assert.Contains(t, pl, "seg_0000.ts?audio=1&cast_token=signed&sid=cast-123")
+	assert.NotContains(t, pl, "?token=")
+}

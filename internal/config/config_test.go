@@ -14,6 +14,7 @@ var allHeyaEnvKeys = []string{
 	"HEYA_HOST", "HEYA_PORT", "HEYA_LOG_LEVEL",
 	"HEYA_LOG_FORMAT", "HEYA_DATA_DIR", "HEYA_MEDIA_URL", "HEYA_HWACCEL",
 	"HEYA_TRANSCODE_CACHE_DIR", "HEYA_TRANSCODE_CACHE_MAX_GB",
+	"HEYA_CAST_ENABLED", "HEYA_CAST_BASE_URL", "HEYA_CAST_DEVICES",
 	"HEYA_TAILSCALE_ENABLED", "HEYA_TAILSCALE_HOSTNAME",
 	"HEYA_TAILSCALE_STATE_DIR", "HEYA_TAILSCALE_HTTPS",
 	"HEYA_TAILSCALE_FUNNEL", "HEYA_TAILSCALE_AUTHKEY",
@@ -69,6 +70,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("HEYA_TAILSCALE_HTTPS", "true")
 	t.Setenv("HEYA_TRANSCODE_CACHE_MAX_GB", "200")
 	t.Setenv("HEYA_JOB_WORKERS_APPLY_METADATA", "6")
+	t.Setenv("HEYA_CAST_BASE_URL", "https://heya.lan")
 
 	cfg := Load()
 
@@ -85,6 +87,8 @@ func TestLoadEnvOverrides(t *testing.T) {
 	assert.Equal(t, 200, cfg.TranscodeCacheMaxGB.Value)
 	assert.Equal(t, 6, cfg.Jobs.Workers["apply_metadata"].Value)
 	assert.Equal(t, SourceEnv, cfg.Jobs.Workers["apply_metadata"].Source)
+	assert.Equal(t, "https://heya.lan", cfg.Cast.BaseURL.Value)
+	assert.Equal(t, SourceEnv, cfg.Cast.BaseURL.Source)
 }
 
 func TestAddr(t *testing.T) {

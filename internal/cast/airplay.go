@@ -72,6 +72,7 @@ func deviceFromEntry(e *zeroconf.ServiceEntry) (Device, bool) {
 	return Device{
 		ID:           "airplay:" + strings.ToLower(txt),
 		Provider:     "airplay",
+		Capabilities: []string{"audio"},
 		Name:         dnsUnescape(e.Instance),
 		Model:        txtValue(e.Text, "model"),
 		Manufacturer: txtValue(e.Text, "manufacturer"),

@@ -825,6 +825,14 @@ func (m *SessionManager) GetExisting(fileID int64) *TranscodeSession {
 	return nil
 }
 
+// GetExistingSession resolves the exact HLS session selected by the manifest
+// query. Segment URLs carry audio + sid so concurrent users (or two quality
+// choices for the same file) cannot accidentally read another session's
+// output merely because they share a file ID.
+func (m *SessionManager) GetExistingSession(fileID int64, audioTrack int, sessionID string) *TranscodeSession {
+	return m.existingSession(FormatKey(fileID, audioTrack, sessionID))
+}
+
 // computeCopyVideoSegmentEnds determines HLS segment boundaries for a
 // copy-video session (video is stream-copied, so cuts can only land on
 // existing keyframes — the same constraint applies whether delivery is fMP4

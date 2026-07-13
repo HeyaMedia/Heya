@@ -27,8 +27,8 @@ const (
 	EventRadioICY EventType = "radio.icy"
 	// Cast session state — fired by internal/cast on every session
 	// transition (starting/playing/paused/stopped/failed, volume, track
-	// change). Global, not per-user: cast targets are household devices
-	// and every client mirrors the same session state.
+	// change). Delivered per-user: only the owning user's clients mirror
+	// the session, matching the server-side casting allowlist.
 	EventCastState EventType = "cast.state"
 	// Play-queue change — fired per-user (EmitToUser) on every queue
 	// mutation so all of a user's clients mirror the same server-owned
@@ -66,7 +66,11 @@ type CastStatePayload struct {
 	DeviceName  string    `json:"device_name"`
 	UserID      int64     `json:"user_id"`
 	State       string    `json:"state"`
+	MediaKind   string    `json:"media_kind,omitempty"`
 	TrackID     int64     `json:"track_id,omitempty"`
+	FileID      string    `json:"file_id,omitempty"`
+	EntityType  string    `json:"entity_type,omitempty"`
+	EntityID    int64     `json:"entity_id,omitempty"`
 	Title       string    `json:"title,omitempty"`
 	Artist      string    `json:"artist,omitempty"`
 	PositionSec float64   `json:"position_sec"`

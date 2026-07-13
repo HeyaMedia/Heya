@@ -369,7 +369,11 @@ func (a *App) DeleteUser(ctx context.Context, username string) error {
 		return fmt.Errorf("user not found: %s", username)
 	}
 
-	return q.DeleteUser(ctx, user.ID)
+	if err := q.DeleteUser(ctx, user.ID); err != nil {
+		return err
+	}
+	a.stopCastSessionsForUser(user.ID)
+	return nil
 }
 
 func (a *App) ResetPassword(ctx context.Context, username, newPassword string) error {
@@ -395,7 +399,11 @@ func (a *App) ResetPassword(ctx context.Context, username, newPassword string) e
 // lookup, no "user not found" check (admin already has the row).
 func (a *App) DeleteUserByID(ctx context.Context, userID int64) error {
 	q := sqlc.New(a.db)
-	return q.DeleteUser(ctx, userID)
+	if err := q.DeleteUser(ctx, userID); err != nil {
+		return err
+	}
+	a.stopCastSessionsForUser(userID)
+	return nil
 }
 
 // SetUserAdmin flips the is_admin flag without touching username/email.
@@ -407,12 +415,19 @@ func (a *App) SetUserAdmin(ctx context.Context, userID int64, isAdmin bool) (sql
 	if err != nil {
 		return sqlc.User{}, fmt.Errorf("user not found")
 	}
-	return q.UpdateUser(ctx, sqlc.UpdateUserParams{
+	updated, err := q.UpdateUser(ctx, sqlc.UpdateUserParams{
 		ID:       userID,
 		Username: user.Username,
 		Email:    user.Email,
 		IsAdmin:  isAdmin,
 	})
+	if err != nil {
+		return sqlc.User{}, err
+	}
+	if !a.CastAccessAllowed(updated.ID, updated.IsAdmin) {
+		a.stopCastSessionsForUser(updated.ID)
+	}
+	return updated, nil
 }
 
 // ResetPasswordByID is the admin-only password reset — no current-password

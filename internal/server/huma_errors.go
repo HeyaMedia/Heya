@@ -25,6 +25,10 @@ func humaServiceErrorStatus(err error, fallbackStatus int) error {
 		return huma.Error404NotFound("not found")
 	case errors.Is(err, service.ErrRegistrationClosed):
 		return huma.Error403Forbidden(err.Error())
+	case errors.Is(err, service.ErrCastAccessDenied):
+		return huma.Error403Forbidden(err.Error())
+	case errors.Is(err, service.ErrInvalidCastAllowance):
+		return huma.Error400BadRequest(err.Error())
 	case errors.Is(err, service.ErrWrongPassword):
 		return huma.Error401Unauthorized(err.Error())
 	case errors.Is(err, service.ErrJobNotRetryable), errors.Is(err, service.ErrJobNotCancellable):

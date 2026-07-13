@@ -94,6 +94,24 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 		wrapStreamAs[trickplaySpriteInput](handleTrickplaySprite(app)))
 
 	// --- Music streaming (range-served audio bytes) ---
+	// Receiver pull endpoint: intentionally no normal bearer auth. The signed
+	// cast_token is bound to this exact path + user and the handler rechecks the
+	// live casting allowance before delegating to the normal range server.
+	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/music/{id}", "cast-stream-track", "Scoped audio stream for a cast receiver", "Cast"),
+		wrapStreamAs[castMusicStreamInput](handleCastMusicStream(app)))
+
+	// Chromecast video pulls either one direct MP4 or an HLS dependency tree.
+	// These routes deliberately use cast_token instead of bearer auth: the
+	// receiver has no Heya account, and its signed token is scoped to one file.
+	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/video/{file_id}", "cast-stream-video", "Scoped direct video stream for a cast receiver", "Cast"),
+		wrapStreamAs[castVideoStreamInput](handleCastVideoDirect(app)))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/video/{file_id}/hls/master.m3u8", "cast-stream-video-hls-master", "Scoped video HLS master playlist for a cast receiver", "Cast"),
+		wrapStreamAs[castVideoStreamInput](handleCastVideoHLS(app, handleHLSMaster(app))))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/video/{file_id}/hls/index.m3u8", "cast-stream-video-hls-index", "Scoped video HLS variant playlist for a cast receiver", "Cast"),
+		wrapStreamAs[castVideoStreamInput](handleCastVideoHLS(app, handleHLSPlaylist(app))))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/video/{file_id}/hls/{segment}", "cast-stream-video-hls-segment", "Scoped video HLS segment for a cast receiver", "Cast"),
+		wrapStreamAs[castVideoSegmentInput](handleCastVideoHLS(app, handleHLSSegment(app))))
+
 	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/stream", "stream-track", "Best-quality playable audio for a track", "Music"),
 		wrapStreamAs[musicTrackStreamInput](handleStreamTrack(app)))
 
@@ -233,6 +251,22 @@ type musicTrackStreamInput struct {
 	// is documented in prose and enforced in Go by audioQualityTiers in
 	// music_stream_handlers.go.
 	Quality string `query:"quality" required:"false" maxLength:"16" doc:"AAC transcode tier — one of aac-320, aac-256, aac-192, aac-128. Omit for the default caps-based direct-or-256k-fallback behavior. Unrecognized values are ignored, not rejected."`
+}
+
+type castMusicStreamInput struct {
+	ID        int64  `path:"id" minimum:"1"`
+	CastToken string `query:"cast_token" required:"false" maxLength:"2048"`
+}
+
+type castVideoStreamInput struct {
+	FileID    string `path:"file_id" maxLength:"64"`
+	CastToken string `query:"cast_token" required:"false" maxLength:"2048"`
+}
+
+type castVideoSegmentInput struct {
+	FileID    string `path:"file_id" maxLength:"64"`
+	Segment   string `path:"segment" maxLength:"128"`
+	CastToken string `query:"cast_token" required:"false" maxLength:"2048"`
 }
 
 type musicTrackFileInput struct {

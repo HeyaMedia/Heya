@@ -3,24 +3,39 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 const { $heya } = useNuxtApp()
 const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
-import { castConfigQuery, castStatusQuery } from '~/queries/settings'
+import { adminUsersQuery, castConfigQuery, castStatusQuery } from '~/queries/settings'
 
 const enabled = ref(false)
+const baseUrl = ref('')
 const devices = ref('')
+const allowedUserIds = ref<number[]>([])
 const configData = useQuery(castConfigQuery())
 const statusData = useQuery(castStatusQuery())
+const usersData = useQuery(adminUsersQuery())
+const users = computed(() => usersData.data.value ?? [])
 const status = computed(() => statusData.data.value ?? null)
-const loading = computed(() => configData.isLoading.value)
+const loading = computed(() => configData.isLoading.value || usersData.isLoading.value)
 const saving = ref(false)
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
 watch(() => configData.data.value, (value) => {
   if (!value) return
   enabled.value = value.enabled
+  baseUrl.value = value.base_url
   devices.value = value.devices
+  const live = usersData.data.value ? new Set(usersData.data.value.map(user => user.id)) : null
+  allowedUserIds.value = (value.allowed_user_ids ?? []).filter(id => !live || live.has(id))
 }, { immediate: true })
 
-async function save(next: { enabled?: boolean, devices?: string }) {
+// User deletion may leave an old ID in a persisted allowlist from an older
+// server version. Keep the editor self-healing; the next save drops it.
+watch(() => usersData.data.value, (value) => {
+  if (!value) return
+  const live = new Set(value.map(user => user.id))
+  allowedUserIds.value = allowedUserIds.value.filter(id => live.has(id))
+}, { immediate: true })
+
+async function save(next: { enabled?: boolean, baseUrl?: string, devices?: string, allowedUserIds?: number[] }) {
   saving.value = true
   flash.value = null
   try {
@@ -28,11 +43,15 @@ async function save(next: { enabled?: boolean, devices?: string }) {
       method: 'PUT',
       body: {
         enabled: next.enabled ?? enabled.value,
+        base_url: next.baseUrl ?? baseUrl.value,
         devices: next.devices ?? devices.value,
+        allowed_user_ids: next.allowedUserIds ?? allowedUserIds.value,
       },
     })
     enabled.value = res.enabled
+    baseUrl.value = res.base_url
     devices.value = res.devices
+    allowedUserIds.value = [...(res.allowed_user_ids ?? [])]
     flash.value = { kind: 'ok', text: res.enabled ? 'Casting enabled — discovery is running.' : 'Casting disabled.' }
     await statusData.refetch()
   } catch (e: any) {
@@ -41,6 +60,13 @@ async function save(next: { enabled?: boolean, devices?: string }) {
   } finally {
     saving.value = false
   }
+}
+
+function toggleUserAccess(userId: number, allowed: boolean) {
+  const next = new Set(allowedUserIds.value)
+  if (allowed) next.add(userId)
+  else next.delete(userId)
+  allowedUserIds.value = [...next].sort((a, b) => a - b)
 }
 
 // Diagnostics stay live while the page is open — discovery results and
@@ -57,8 +83,10 @@ onScopeDispose(() => {
 const deviceRows = computed(() =>
   (status.value?.devices ?? []).map((d) => ({
     name: d.name,
+    provider: d.provider,
     model: [d.manufacturer, d.model].filter(Boolean).join(' '),
     addr: `${d.addr}:${d.port}`,
+    mediaOrigin: d.media_origin,
     seen: timeAgoShort(d.last_seen),
   })))
 
@@ -73,7 +101,7 @@ const interfaceList = computed(() => status.value?.interfaces ?? [])
       title="Casting"
       icon="cast"
       eyebrow="Server · Playback"
-      description="Heya streams music to AirPlay receivers itself — clients only send controls. Discovery and streaming both require the server to actually reach your receivers' network."
+      description="Heya controls AirPlay and Chromecast receivers itself — clients only send controls. Discovery and playback both require the server and receiver to share a reachable network path."
     />
 
     <SettingsSection
@@ -109,6 +137,69 @@ const interfaceList = computed(() => status.value?.interfaces ?? [])
     </SettingsSection>
 
     <SettingsSection
+      title="User access"
+      icon="users"
+      description="Choose which regular users may discover and control server-side cast receivers. Admins always retain access."
+    >
+      <div v-if="loading" class="cs-empty">Loading users…</div>
+      <div v-else class="cs-user-list">
+        <label v-for="u in users" :key="u.id" class="cs-user-row" :class="{ implicit: u.is_admin }">
+          <input
+            type="checkbox"
+            :checked="u.is_admin || allowedUserIds.includes(u.id)"
+            :disabled="saving || u.is_admin"
+            :aria-label="`Allow ${u.username} to cast`"
+            @change="toggleUserAccess(u.id, ($event.target as HTMLInputElement).checked)"
+          />
+          <span class="cs-user-copy">
+            <span class="cs-user-name">{{ u.username }}</span>
+            <span class="cs-user-email">{{ u.email }}</span>
+          </span>
+          <StatusBadge :state="u.is_admin ? 'warn' : (allowedUserIds.includes(u.id) ? 'ok' : 'idle')">
+            {{ u.is_admin ? 'admin · always allowed' : (allowedUserIds.includes(u.id) ? 'allowed' : 'blocked') }}
+          </StatusBadge>
+        </label>
+      </div>
+      <div class="cs-access-actions">
+        <p class="cs-hint">
+          Blocked users do not receive receiver/session data and all cast API calls return forbidden. Revoking access also stops that user's active cast sessions.
+        </p>
+        <button class="btn btn-primary" :disabled="loading || saving" @click="save({ allowedUserIds })">Save access</button>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection
+      title="Receiver media URL"
+      icon="link"
+      description="Chromecast and later URL-pull receivers fetch media back from this Heya origin."
+      :lockedBy="isLocked('cast.base_url') ? lockTooltip('cast.base_url') : undefined"
+    >
+      <div class="cs-devices-row">
+        <input
+          v-model="baseUrl"
+          type="url"
+          class="cs-devices-input"
+          placeholder="Automatic — server LAN address"
+          aria-label="Receiver-facing Heya URL"
+          :disabled="saving || isLocked('cast.base_url')"
+          @keydown.enter="save({ baseUrl })"
+        />
+        <button
+          class="btn btn-primary"
+          :disabled="saving || isLocked('cast.base_url')"
+          @click="save({ baseUrl })"
+        >Save</button>
+      </div>
+      <p class="cs-hint">
+        Leave empty to derive <code>http://&lt;server-LAN-IP&gt;:HEYA_PORT</code>
+        for each receiver. Set an explicit <code>http://</code> or
+        <code>https://</code> origin when Heya is behind a reverse proxy,
+        Kubernetes Service, or another address the receiver must use. Also
+        settable with <code>HEYA_CAST_BASE_URL=…</code>.
+      </p>
+    </SettingsSection>
+
+    <SettingsSection
       title="Network diagnostics"
       icon="network"
       :description="status?.running ? 'Discovery is running.' : 'Discovery is not running.'"
@@ -123,12 +214,14 @@ const interfaceList = computed(() => status.value?.interfaces ?? [])
       <div class="cs-diag-block">
         <div class="cs-diag-label">Discovered receivers</div>
         <table v-if="deviceRows.length" class="cs-table">
-          <thead><tr><th>Name</th><th>Model</th><th>Address</th><th>Last seen</th></tr></thead>
+          <thead><tr><th>Name</th><th>Protocol</th><th>Model</th><th>Address</th><th>Heya media origin</th><th>Last seen</th></tr></thead>
           <tbody>
             <tr v-for="d in deviceRows" :key="d.addr">
               <td>{{ d.name }}</td>
+              <td>{{ d.provider }}</td>
               <td>{{ d.model }}</td>
               <td class="cs-mono">{{ d.addr }}</td>
+              <td class="cs-mono">{{ d.mediaOrigin || 'unresolved' }}</td>
               <td>{{ d.seen }}</td>
             </tr>
           </tbody>
@@ -218,7 +311,7 @@ const interfaceList = computed(() => status.value?.interfaces ?? [])
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--surface-0, #fff);
+  background: var(--surface-0);
   transition: transform 0.15s ease;
 }
 .cs-switch input:checked + .cs-slider {
@@ -303,6 +396,53 @@ const interfaceList = computed(() => status.value?.interfaces ?? [])
   gap: 8px;
   align-items: center;
 }
+.cs-user-list {
+  display: grid;
+  gap: 8px;
+}
+.cs-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.cs-user-row.implicit {
+  cursor: default;
+}
+.cs-user-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.cs-user-name {
+  color: var(--fg-0);
+  font-size: 13px;
+  font-weight: 600;
+}
+.cs-user-email {
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-access-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+}
+.cs-access-actions .cs-hint {
+  margin: 0;
+  max-width: 680px;
+}
 .cs-devices-input {
   flex: 1;
   min-width: 0;
@@ -313,5 +453,11 @@ const interfaceList = computed(() => status.value?.interfaces ?? [])
   color: var(--fg-0);
   font-family: var(--font-mono);
   font-size: 12px;
+}
+@media (max-width: 640px) {
+  .cs-access-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 </style>

@@ -226,6 +226,21 @@ source-address check and only answer unicast from their **own subnet**,
 so this cannot cross VLANs — it is not a substitute for the options
 above.
 
+**Chromecast/DLNA media return path.** URL-pull receivers do not need Heya to
+be public on the internet. They do need to fetch media from Heya on their own
+LAN. By default Heya asks the kernel which local interface routes to each
+receiver and signs a URL under `http://<that-interface-IP>:HEYA_PORT`; Settings
+→ Casting shows the selected media origin beside every discovered device. This
+automatically pairs a receiver on one VLAN with Heya's leg on that VLAN instead
+of leaking a loopback, Tailscale, or unrelated interface address.
+
+When the selected address is a container/pod IP the receiver cannot route to,
+set **Receiver media URL** in Settings → Casting (or
+`HEYA_CAST_BASE_URL=http://<LAN-reachable-Heya-address>:<port>`). This is an
+origin only—no path/query—and should normally remain private to the LAN. Cast
+media URLs contain a short-lived token scoped to the exact resource and user;
+they never contain the user's normal Heya bearer token.
+
 ## Version lockstep (maintainers)
 
 The one heya binary must agree on an ONNX Runtime C-API version with **every**

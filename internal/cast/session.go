@@ -59,7 +59,11 @@ type SessionSnapshot struct {
 	DeviceName  string       `json:"device_name"`
 	UserID      int64        `json:"user_id"`
 	State       SessionState `json:"state"`
+	MediaKind   string       `json:"media_kind,omitempty"`
 	TrackID     int64        `json:"track_id,omitempty"`
+	FileID      string       `json:"file_id,omitempty"`
+	EntityType  string       `json:"entity_type,omitempty"`
+	EntityID    int64        `json:"entity_id,omitempty"`
 	Title       string       `json:"title,omitempty"`
 	Artist      string       `json:"artist,omitempty"`
 	Album       string       `json:"album,omitempty"`
@@ -78,7 +82,11 @@ func (s *Session) Snapshot() SessionSnapshot {
 		DeviceName:  s.Device.Name,
 		UserID:      s.UserID,
 		State:       s.state,
+		MediaKind:   s.track.MediaKind,
 		TrackID:     s.track.TrackID,
+		FileID:      s.track.FileID,
+		EntityType:  s.track.EntityType,
+		EntityID:    s.track.EntityID,
 		Title:       s.track.Title,
 		Artist:      s.track.Artist,
 		Album:       s.track.Album,
@@ -169,8 +177,10 @@ func (s *Session) consume(tr Transport) {
 			s.mu.Unlock()
 			continue
 		case TransportPlaying, TransportResumed:
-			s.state = StatePlaying
-			s.resumedAt = time.Now()
+			if s.state != StatePlaying {
+				s.state = StatePlaying
+				s.resumedAt = time.Now()
+			}
 		case TransportPaused:
 			s.accumulateLocked()
 			s.state = StatePaused
@@ -233,27 +243,44 @@ func (s *Session) recordPlayback(completed bool) {
 	pos := s.positionLocked()
 	s.listened = 0
 	s.mu.Unlock()
-	if s.mgr.playbackSink == nil || track.TrackID == 0 {
+	if s.mgr.playbackSink == nil || (track.TrackID == 0 && track.EntityID == 0) {
 		return
 	}
-	if !completed && listened < scrobbleMinSeconds*time.Second {
+	if track.MediaKind == "video" && !completed && pos < time.Second {
 		return
 	}
-	s.mgr.playbackSink(context.Background(), s.UserID, track.TrackID, int(pos.Seconds()), track.Duration, completed)
+	if track.MediaKind != "video" && !completed && listened < scrobbleMinSeconds*time.Second {
+		return
+	}
+	if track.MediaKind == "video" && completed && track.Duration > 0 {
+		pos = time.Duration(track.Duration) * time.Second
+	}
+	s.mgr.playbackSink(context.Background(), s.UserID, track, int(pos.Seconds()), track.Duration, completed)
 }
 
-// Pause freezes the position and tears the transport down. Not the
-// transport's FIFO ACTION=PAUSE: cliap2's pause only stops *intake*, so
-// the ~4-5s of pre-roll-primed audio keeps playing after the command —
-// a stop is instantly silent and Resume respawns at the frozen position
-// (the same live-validated path as Seek). Pause latency traded for
-// resume latency (~2-3s session re-establishment), which is the
-// predictable half of that trade.
+// Pause uses native receiver control for URL-pull transports. AirPlay freezes
+// the position and tears its transport down: cliap2's FIFO pause only stops
+// intake and leaves several seconds of primed audio playing.
 func (s *Session) Pause() error {
 	s.mu.Lock()
 	if s.state != StatePlaying || s.transport == nil {
 		s.mu.Unlock()
 		return fmt.Errorf("cast: session is not playing")
+	}
+	if native, ok := s.transport.(NativeSeekTransport); ok {
+		tr := s.transport
+		s.mu.Unlock()
+		if err := native.Pause(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		if s.transport == tr && !s.closed {
+			s.accumulateLocked()
+			s.state = StatePaused
+		}
+		s.mu.Unlock()
+		s.mgr.emitSession(s)
+		return nil
 	}
 	s.accumulateLocked()
 	s.state = StatePaused
@@ -266,12 +293,28 @@ func (s *Session) Pause() error {
 	return err
 }
 
-// Resume respawns the transport at the paused position.
+// Resume stays in-session when the transport supports native seek/control;
+// AirPlay respawns at the frozen position.
 func (s *Session) Resume() error {
 	s.mu.Lock()
 	if s.state != StatePaused {
 		s.mu.Unlock()
 		return fmt.Errorf("cast: session is not paused")
+	}
+	if native, ok := s.transport.(NativeSeekTransport); ok {
+		tr := s.transport
+		s.mu.Unlock()
+		if err := native.Resume(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		if s.transport == tr && !s.closed {
+			s.state = StatePlaying
+			s.resumedAt = time.Now()
+		}
+		s.mu.Unlock()
+		s.mgr.emitSession(s)
+		return nil
 	}
 	track := s.track
 	track.StartAt = int(s.positionLocked().Seconds())
@@ -297,17 +340,15 @@ func (s *Session) SetVolume(level int) error {
 	return nil
 }
 
-// Seek replaces the transport with the same track at a new offset — the
-// live-validated seek path (in-band FLUSH+refeed is a future
-// refinement). While paused it only moves the frozen position.
+// Seek stays in-session for a native URL-pull transport and otherwise replaces
+// the transport with the same track at the new offset. While an AirPlay
+// session is paused it only moves the frozen position.
 func (s *Session) Seek(seconds int) error {
 	s.mu.Lock()
 	track := s.track
 	volume := s.volume
 	old := s.transport
 	paused := s.state == StatePaused
-	s.accumulateLocked()
-	s.retried = false
 
 	if seconds < 0 {
 		seconds = 0
@@ -316,6 +357,29 @@ func (s *Session) Seek(seconds int) error {
 		seconds = track.Duration - 1
 	}
 	track.StartAt = seconds
+	if native, ok := old.(NativeSeekTransport); ok {
+		s.mu.Unlock()
+		if err := native.Seek(seconds); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		if s.transport == old && !s.closed {
+			s.accumulateLocked()
+			s.retried = false
+			s.track = track
+			s.playedBase = 0
+			if s.state == StatePlaying {
+				s.resumedAt = time.Now()
+			} else {
+				s.resumedAt = time.Time{}
+			}
+		}
+		s.mu.Unlock()
+		s.mgr.emitSession(s)
+		return nil
+	}
+	s.accumulateLocked()
+	s.retried = false
 
 	if paused {
 		s.track = track

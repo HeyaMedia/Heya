@@ -1,7 +1,7 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 
 // Server-side casting (docs/cast-plan.md Phase 2). The SERVER is the player:
-// it streams PCM to the receiver and owns the session; this store is the
+// it pushes or exposes scoped media to the receiver and owns the session; this store is the
 // client's mirror of that session plus a thin control surface over
 // /api/cast/*. usePlayer routes its transport actions here while an output
 // is engaged, so the playbar keeps working unchanged — same buttons, remote
@@ -18,12 +18,14 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 export interface CastDevice {
   id: string
   provider: string
+  capabilities?: Array<'audio' | 'video'>
   name: string
   model?: string
   manufacturer?: string
   host?: string
   addr?: string
   port?: number
+  media_origin?: string
   last_seen?: string
   kind?: string
 }
@@ -34,7 +36,11 @@ export interface CastSession {
   device_name: string
   user_id: number
   state: string // starting | playing | paused | stopped | failed
+  media_kind?: 'audio' | 'video'
   track_id?: number
+  file_id?: string
+  entity_type?: 'movie' | 'episode'
+  entity_id?: number
   title?: string
   artist?: string
   album?: string
@@ -51,7 +57,11 @@ export interface CastStateEvent {
   device_name: string
   user_id: number
   state: string
+  media_kind?: 'audio' | 'video'
   track_id?: number
+  file_id?: string
+  entity_type?: 'movie' | 'episode'
+  entity_id?: number
   title?: string
   artist?: string
   position_sec: number
@@ -99,11 +109,11 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   // Advance ownership: only the tab that started the current cast play
-  // drives the queue when a track ends naturally, so two open tabs with
-  // populated queues don't both fire the next track (WS events are global).
+  // drives the queue when a track ends naturally, so two tabs belonging to
+  // the same user don't both fire the next track (WS events are per-user).
   // A foreign takeover is detected by a track we never requested appearing.
   let ownsPlayback = false
-  let lastRequestedTrackId = 0
+  let lastRequestedMediaKey = ''
 
   // The device stream volume we last knew. The server removes a session
   // when its track ends, so the next queue advance creates a NEW session —
@@ -114,14 +124,19 @@ export const useCastStore = defineStore('cast', () => {
 
   async function refreshDevices() {
     const { $heya } = useNuxtApp()
-    try {
-      const res = await $heya('/api/cast/devices') as { items?: CastDevice[] | null }
-      const clients = await ($heya as any)('/api/me/devices') as { items?: Array<{ id: string, name: string, kind: string, last_seen: string }> }
-      devices.value = [
-        ...(clients.items ?? []).filter(d => d.id !== clientDeviceID()).map(d => ({ ...d, provider: 'client' })),
-        ...(res.items ?? []),
-      ]
-    } catch { /* casting disabled or unreachable — keep the last list */ }
+    // HeyaConnect devices are user-private and independent of server-side
+    // casting permission. Fetch the two sources separately so a 403 from the
+    // cast allowlist never hides the user's own Heya clients.
+    const [castResult, clientResult] = await Promise.allSettled([
+      $heya('/api/cast/devices') as Promise<{ items?: CastDevice[] | null }>,
+      ($heya as any)('/api/me/devices') as Promise<{ items?: Array<{ id: string, name: string, kind: string, last_seen: string }> }>,
+    ])
+    const castDevices = castResult.status === 'fulfilled' ? (castResult.value.items ?? []) : []
+    const clients = clientResult.status === 'fulfilled' ? (clientResult.value.items ?? []) : []
+    devices.value = [
+      ...clients.filter(d => d.id !== clientDeviceID()).map(d => ({ ...d, provider: 'client', capabilities: ['audio'] as Array<'audio' | 'video'> })),
+      ...castDevices,
+    ]
     devicesLoaded.value = true
   }
 
@@ -170,7 +185,7 @@ export const useCastStore = defineStore('cast', () => {
     }
     const { $heya } = useNuxtApp()
     connecting.value = true
-    lastRequestedTrackId = trackId
+    lastRequestedMediaKey = `audio:${trackId}`
     try {
       const snap = await $heya('/api/cast/sessions', {
         method: 'POST',
@@ -190,6 +205,53 @@ export const useCastStore = defineStore('cast', () => {
     }
   }
 
+  // Video uses the same server-owned Cast session as music, but supplies a
+  // library-file reference and watch-progress identity. HeyaConnect video is
+  // deliberately not implied here yet: this path targets Chromecast's URL-
+  // pull receiver and its scoped direct/HLS endpoints.
+  async function playVideo(input: {
+    fileId: string | number
+    entityType: 'movie' | 'episode'
+    entityId: number
+    title?: string
+    audioTrack?: number
+    quality?: string
+    fallbackVolume: number
+    startSeconds?: number
+  }) {
+    const deviceId = engagedDeviceId.value
+    if (!deviceId) throw new Error('no cast device engaged')
+    if (deviceId.startsWith('client:')) throw new Error('HeyaConnect video casting is not implemented yet')
+    const { $heya } = useNuxtApp()
+    connecting.value = true
+    lastRequestedMediaKey = `video:${String(input.fileId)}:${input.entityType}:${input.entityId}`
+    try {
+      const body: Record<string, unknown> = {
+        device_id: deviceId,
+        file_id: String(input.fileId),
+        entity_type: input.entityType,
+        title: input.title ?? '',
+        audio_track: Math.max(0, Math.floor(input.audioTrack ?? 0)),
+        quality: input.quality ?? 'auto',
+        volume: lastDeviceVolume.value ?? Math.min(Math.max(Math.round(input.fallbackVolume), 0), 30),
+        start_seconds: Math.max(0, Math.floor(input.startSeconds ?? 0)),
+      }
+      if (input.entityId > 0) body.entity_id = input.entityId
+      const snap = await ($heya as any)('/api/cast/sessions', {
+        method: 'POST',
+        body,
+      }) as CastSession
+      session.value = snap
+      lastRequestedMediaKey = `video:${snap.file_id ?? String(input.fileId)}:${snap.entity_type ?? input.entityType}:${snap.entity_id ?? input.entityId}`
+      lastDeviceVolume.value = snap.volume
+      samplePosition(snap.position_sec)
+      ownsPlayback = true
+      return snap
+    } finally {
+      connecting.value = false
+    }
+  }
+
   async function postControl(id: string, verb: 'pause' | 'resume' | 'stop'): Promise<CastSession> {
     const { $heya } = useNuxtApp()
     const path = { id }
@@ -202,8 +264,7 @@ export const useCastStore = defineStore('cast', () => {
     if (isClientDevice.value) { await clientCommand('pause'); return }
     const s = session.value
     if (!s) return
-    // Optimistic: the receiver goes silent near-instantly (transport
-    // teardown); the WS event confirms.
+    // Optimistic: the WS event confirms the provider-specific pause path.
     samplePosition(livePositionSec())
     session.value = { ...s, state: 'paused' }
     const snap = await postControl(s.id, 'pause')
@@ -215,8 +276,8 @@ export const useCastStore = defineStore('cast', () => {
     if (isClientDevice.value) { await clientCommand('resume'); return }
     const s = session.value
     if (!s) return
-    // Resume respawns the sender at the frozen position (~2-3s of
-    // re-establishment — 'starting' keeps the play button engaged).
+    // AirPlay respawns at the frozen position; URL-pull providers resume the
+    // existing receiver session. The REST/WS snapshots restore the truth.
     session.value = { ...s, state: 'starting' }
     const snap = await postControl(s.id, 'resume')
     session.value = snap
@@ -277,8 +338,8 @@ export const useCastStore = defineStore('cast', () => {
 
   // Full disconnect: stop the session (if any) and release the output.
   async function disconnect() {
-    engagedDeviceId.value = null
     await stopSession()
+    engagedDeviceId.value = null
   }
 
   // WS mirror entry point (plugins/cast-live.client.ts). Returns 'ended'
@@ -307,7 +368,10 @@ export const useCastStore = defineStore('cast', () => {
 
     // A track this tab never requested = another client took over the
     // device; stop driving the queue from here.
-    if (p.track_id && p.track_id !== lastRequestedTrackId) ownsPlayback = false
+    const incomingMediaKey = p.media_kind === 'video'
+      ? `video:${p.file_id ?? ''}:${p.entity_type ?? ''}:${p.entity_id ?? 0}`
+      : (p.track_id ? `audio:${p.track_id}` : '')
+    if (incomingMediaKey && incomingMediaKey !== lastRequestedMediaKey) ownsPlayback = false
 
     session.value = {
       id: p.session_id,
@@ -315,7 +379,11 @@ export const useCastStore = defineStore('cast', () => {
       device_name: p.device_name,
       user_id: p.user_id,
       state: p.state,
+      media_kind: p.media_kind,
       track_id: p.track_id,
+      file_id: p.file_id,
+      entity_type: p.entity_type,
+      entity_id: p.entity_id,
       title: p.title,
       artist: p.artist,
       album: prev?.track_id === p.track_id ? prev?.album : undefined,
@@ -332,7 +400,7 @@ export const useCastStore = defineStore('cast', () => {
     devices, devicesLoaded, session, engagedDeviceId, connecting, lastDeviceVolume,
     engaged, deviceName, isClientDevice,
     refreshDevices, adoptExisting,
-    playTrack, pause, resume, seekTo, setVolume, stopSession, disconnect,
+    playTrack, playVideo, pause, resume, seekTo, setVolume, stopSession, disconnect,
     applyEvent, livePositionSec,
   }
 })

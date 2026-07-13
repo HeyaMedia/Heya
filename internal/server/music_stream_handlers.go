@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +12,33 @@ import (
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
 )
+
+func handleCastMusicStream(app *service.App) http.HandlerFunc {
+	normal := handleStreamTrack(app)
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Google's Default Media Receiver is a hosted web app, so its media
+		// fetch is cross-origin even though both endpoints are on the same LAN.
+		// The URL itself is narrowly scoped; CORS does not replace token checks.
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range")
+		trackID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || trackID <= 0 || app.Cast() == nil {
+			writeError(w, http.StatusNotFound, "cast media not found")
+			return
+		}
+		expectedPath := fmt.Sprintf("/api/cast/media/music/%d", trackID)
+		userID, err := app.Cast().ValidateMediaToken(r.URL.Query().Get("cast_token"), expectedPath)
+		if err != nil || app.ValidateCastMediaAccess(r.Context(), userID) != nil {
+			writeError(w, http.StatusForbidden, "invalid or expired cast media token")
+			return
+		}
+		q := r.URL.Query()
+		q.Del("cast_token")
+		r.URL.RawQuery = q.Encode()
+		w.Header().Set("Cache-Control", "private, no-store")
+		normal(w, r)
+	}
+}
 
 // parseAudioCaps pulls the audio-capability flags off the request query. The
 // frontend sets these via capsToQueryString() in useClientCaps. Missing

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import AkariSub from 'akarisub'
-import { DropdownMenuItem } from 'reka-ui'
+import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 import type { StreamAudio, StreamSubtitle, QualityOption } from '~~/shared/types'
+import type { CastStateEvent } from '~/composables/useCast'
 import { useQuery } from '@pinia/colada'
 import { playbackPreferenceQuery } from '~/queries/playback'
 import { continueWatchingQuery } from '~/queries/activity'
@@ -26,8 +27,110 @@ const entityPreferenceQuery = useQuery(() => ({
 const continueQuery = useQuery(continueWatchingQuery())
 
 const { token } = useAuth()
+const { toast } = useToast()
 const videoEl = ref<HTMLVideoElement>()
-const { state, controls, loadSource, destroyHLS } = useHeyaPlayer(videoEl)
+const { state: localState, controls: localControls, loadSource, destroyHLS } = useHeyaPlayer(videoEl)
+const cast = useCastStore()
+const musicPlayer = usePlayerStore()
+const showCastMenu = ref(false)
+const videoCastPending = ref(false)
+const videoCastSessionID = ref<string | null>(null)
+const videoCastStopping = ref(false)
+const remoteEnded = ref(false)
+const lastRemotePosition = ref(0)
+const remoteSeekTick = ref(0)
+const castClockTick = ref(0)
+const deliberatelyStoppedCastSessions = new Set<string>()
+
+const castDevices = computed(() => cast.devices.filter(d => d.capabilities?.includes('video')))
+const videoCastSession = computed(() => {
+  const s = cast.session
+  if (!s || s.media_kind !== 'video') return null
+  if (videoCastSessionID.value && s.id === videoCastSessionID.value) return s
+  const sameEntity = s.entity_type === (props.entityType || 'movie')
+    && s.entity_id === (props.entityId || props.mediaItemId || 0)
+  return sameEntity ? s : null
+})
+const videoCastActive = computed(() => !!videoCastSession.value || videoCastPending.value)
+const videoCastMode = computed(() => videoCastActive.value || remoteEnded.value)
+const castConnecting = computed(() => videoCastPending.value || cast.connecting || videoCastSession.value?.state === 'starting')
+
+// The local <video> stays mounted and paused during a cast. This proxy keeps
+// the rest of the mature player UI (seek bar, keyboard controls, progress
+// heartbeat, Up Next) reading one state surface while the active clock and
+// transport come from Chromecast.
+const state = new Proxy(localState, {
+  get(target, key, receiver) {
+    if (!videoCastMode.value) return Reflect.get(target, key, receiver)
+    const session = videoCastSession.value
+    switch (key) {
+      case 'playing': return !!session && session.state === 'playing'
+      case 'paused': return remoteEnded.value || session?.state === 'paused'
+      case 'ended': return remoteEnded.value
+      case 'loading': return false
+      case 'buffering': return castConnecting.value
+      case 'currentTime': castClockTick.value; return remoteEnded.value ? (session?.duration_sec ?? localState.duration) : (session ? cast.livePositionSec() : lastRemotePosition.value)
+      case 'duration': return session?.duration_sec ?? localState.duration
+      case 'buffered': return session ? cast.livePositionSec() : lastRemotePosition.value
+      case 'volume': return (session?.volume ?? Math.round(localState.volume * 100)) / 100
+      case 'muted': return (session?.volume ?? 1) === 0
+      case 'seekTick': return remoteSeekTick.value
+      default: return Reflect.get(target, key, receiver)
+    }
+  },
+}) as typeof localState
+
+let remoteVolumeBeforeMute = 30
+const controls = {
+  play() {
+    if (videoCastActive.value) { void cast.resume().catch(() => {}); return }
+    localControls.play()
+  },
+  pause() {
+    if (videoCastActive.value) { void cast.pause().catch(() => {}); return }
+    localControls.pause()
+  },
+  togglePlay() {
+    if (videoCastActive.value) {
+      if (videoCastSession.value?.state === 'paused') void cast.resume().catch(() => {})
+      else void cast.pause().catch(() => {})
+      return
+    }
+    localControls.togglePlay()
+  },
+  seek(time: number) {
+    if (videoCastActive.value) {
+      lastRemotePosition.value = time
+      remoteSeekTick.value++
+      void cast.seekTo(time).catch(() => {})
+      return
+    }
+    localControls.seek(time)
+  },
+  skip(seconds: number) {
+    if (videoCastActive.value) { controls.seek(state.currentTime + seconds); return }
+    localControls.skip(seconds)
+  },
+  setVolume(value: number) {
+    if (videoCastActive.value) {
+      const level = Math.max(0, Math.min(100, Math.round(value * 100)))
+      if (level > 0) remoteVolumeBeforeMute = level
+      cast.setVolume(level)
+      return
+    }
+    localControls.setVolume(value)
+  },
+  toggleMute() {
+    if (videoCastActive.value) {
+      const level = videoCastSession.value?.volume ?? 0
+      if (level > 0) { remoteVolumeBeforeMute = level; cast.setVolume(0) }
+      else cast.setVolume(remoteVolumeBeforeMute)
+      return
+    }
+    localControls.toggleMute()
+  },
+  toggleFullscreen: localControls.toggleFullscreen,
+}
 // Touch devices: rotate to landscape → immersive fullscreen, back to portrait
 // → exit. No-op on desktop / where the browser blocks it (see composable).
 useOrientationFullscreen()
@@ -152,6 +255,103 @@ function buildHLSUrl() {
   }
   return `/api/stream/${props.fileId}/hls/master.m3u8?${params}`
 }
+
+function castDeviceSub(device: { manufacturer?: string, model?: string, provider: string }) {
+  const model = [device.manufacturer, device.model].filter(Boolean).join(' ')
+  return model ? `${device.provider} · ${model}` : device.provider
+}
+
+async function pickVideoCastDevice(deviceID: string) {
+  showCastMenu.value = false
+  if (videoCastSession.value?.device_id === deviceID) {
+    await stopVideoCast(true)
+    return
+  }
+  const position = state.currentTime
+  const wasPlaying = state.playing
+  try {
+    if (cast.session) await cast.stopSession()
+    cast.engagedDeviceId = deviceID
+    videoCastPending.value = true
+    remoteEnded.value = false
+    lastRemotePosition.value = position
+    localControls.pause()
+    // A music session may have owned this Cast store immediately before the
+    // video handoff. Keep its global playbar from presenting stale playback.
+    musicPlayer.playing = false
+    const snap = await cast.playVideo({
+      fileId: props.fileId,
+      entityType: (props.entityType === 'episode' ? 'episode' : 'movie'),
+      entityId: props.entityId || props.mediaItemId || 0,
+      title: props.title,
+      audioTrack: activeAudioIdx.value,
+      quality: activeQuality.value,
+      fallbackVolume: localState.volume * 100,
+      startSeconds: position,
+    })
+    videoCastSessionID.value = snap.id
+    lastRemotePosition.value = snap.position_sec
+  } catch (error) {
+    cast.engagedDeviceId = null
+    videoCastSessionID.value = null
+    if (wasPlaying) localControls.play()
+    toast.err(error instanceof Error ? error.message : 'Could not cast this video')
+  } finally {
+    videoCastPending.value = false
+  }
+}
+
+async function restartVideoCast() {
+  const session = videoCastSession.value
+  if (!session || !cast.engagedDeviceId) return
+  const position = state.currentTime
+  videoCastPending.value = true
+  try {
+    const snap = await cast.playVideo({
+      fileId: props.fileId,
+      entityType: (props.entityType === 'episode' ? 'episode' : 'movie'),
+      entityId: props.entityId || props.mediaItemId || 0,
+      title: props.title,
+      audioTrack: activeAudioIdx.value,
+      quality: activeQuality.value,
+      fallbackVolume: session.volume,
+      startSeconds: position,
+    })
+    videoCastSessionID.value = snap.id
+    lastRemotePosition.value = snap.position_sec
+  } catch (error) {
+    toast.err(error instanceof Error ? error.message : 'Could not update Chromecast playback')
+  } finally {
+    videoCastPending.value = false
+  }
+}
+
+async function stopVideoCast(resumeLocal: boolean) {
+  const session = videoCastSession.value
+  if (!session || videoCastStopping.value) return
+  videoCastStopping.value = true
+  const position = cast.livePositionSec()
+  const wasPlaying = session.state === 'playing' || session.state === 'starting'
+  deliberatelyStoppedCastSessions.add(session.id)
+  lastRemotePosition.value = position
+  try {
+    await cast.disconnect()
+  } finally {
+    videoCastSessionID.value = null
+    videoCastPending.value = false
+    remoteEnded.value = false
+    videoCastStopping.value = false
+    const video = videoEl.value
+    if (video && Number.isFinite(position)) {
+      video.currentTime = Math.max(0, Math.min(knownDuration.value || position, position))
+    }
+    if (resumeLocal && wasPlaying) localControls.play()
+  }
+}
+
+watch(showCastMenu, (open) => {
+  if (open) void cast.refreshDevices()
+})
 
 function autoSelectAudio(prefs: ReturnType<typeof playbackForLibrary>) {
   if (!prefs.default_audio_language || !audioTracks.value.length) return
@@ -503,6 +703,10 @@ function selectAudio(idx: number) {
   activeAudioIdx.value = idx
   sessionId = Math.random().toString(36).slice(2, 10)
   showAudioMenu.value = false
+  if (videoCastActive.value) {
+    void restartVideoCast()
+    return
+  }
   const canDirectPlay = streamState.streamInfo?.playback?.action === 'direct_play' && idx === 0
   const url = canDirectPlay
     ? `/api/stream/${props.fileId}?token=${token.value}`
@@ -521,6 +725,10 @@ function selectQuality(quality: string) {
   activeQuality.value = quality
   sessionId = Math.random().toString(36).slice(2, 10)
   showQualityMenu.value = false
+  if (videoCastActive.value) {
+    void restartVideoCast()
+    return
+  }
   usingHLS.value = true
   loadSource(buildHLSUrl(), token.value!)
   const v = videoEl.value
@@ -530,15 +738,16 @@ function selectQuality(quality: string) {
   }
 }
 
-function closeMenus() { showSubMenu.value = false; showAudioMenu.value = false; showQualityMenu.value = false }
+function closeMenus() { showSubMenu.value = false; showAudioMenu.value = false; showQualityMenu.value = false; showCastMenu.value = false }
 
 // Mutually-exclusive menu opens — opening any one closes the other two.
 // Reka's own dismissable-layer already handles click-outside cleanup in a
 // real browser, but explicit watchers are safer (and let keyboard-driven
 // opens via Enter close the previous menu too).
-watch(showAudioMenu, (v) => { if (v) { showSubMenu.value = false; showQualityMenu.value = false } })
-watch(showSubMenu, (v) => { if (v) { showAudioMenu.value = false; showQualityMenu.value = false } })
-watch(showQualityMenu, (v) => { if (v) { showAudioMenu.value = false; showSubMenu.value = false } })
+watch(showAudioMenu, (v) => { if (v) { showSubMenu.value = false; showQualityMenu.value = false; showCastMenu.value = false } })
+watch(showSubMenu, (v) => { if (v) { showAudioMenu.value = false; showQualityMenu.value = false; showCastMenu.value = false } })
+watch(showQualityMenu, (v) => { if (v) { showAudioMenu.value = false; showSubMenu.value = false; showCastMenu.value = false } })
+watch(showCastMenu, (v) => { if (v) { showAudioMenu.value = false; showSubMenu.value = false; showQualityMenu.value = false } })
 function audioLabel(a: StreamAudio) {
   const p: string[] = []
   if (a.language) p.push(a.language.toUpperCase())
@@ -710,9 +919,9 @@ onMounted(() => {
 // receives the frame; we act only on the one addressed to *this* player's
 // session id. connect() is idempotent — it guarantees a live socket even on a
 // client that only ever plays (never opens a page that subscribes).
-const { toast } = useToast()
 const { on: onWsEvent, connect: connectWs } = useEventBus()
 let offSessionCmd: (() => void) | null = null
+let offCastState: (() => void) | null = null
 onMounted(() => {
   connectWs()
   offSessionCmd = onWsEvent('session.command', (event) => {
@@ -725,8 +934,29 @@ onMounted(() => {
       toast({ message: p.by ? `${p.by}: ${p.message}` : p.message, tone: 'info', icon: 'bell', duration: 7000 })
     }
   })
+  offCastState = onWsEvent('cast.state', (event) => {
+    const p = event.payload as CastStateEvent
+    if (!p || p.media_kind !== 'video') return
+    const sameSession = !!videoCastSessionID.value && p.session_id === videoCastSessionID.value
+    const sameEntity = p.entity_type === (props.entityType || 'movie')
+      && p.entity_id === (props.entityId || props.mediaItemId || 0)
+    if (!sameSession && !sameEntity) return
+    lastRemotePosition.value = p.position_sec
+    if (p.state === 'stopped') {
+      if (deliberatelyStoppedCastSessions.delete(p.session_id)) return
+      videoCastPending.value = false
+      remoteEnded.value = true
+      cast.engagedDeviceId = null
+    } else if (p.state === 'failed') {
+      videoCastPending.value = false
+      remoteEnded.value = false
+      videoCastSessionID.value = null
+      cast.engagedDeviceId = null
+      if (videoEl.value) videoEl.value.currentTime = p.position_sec
+    }
+  })
 })
-onUnmounted(() => { offSessionCmd?.() })
+onUnmounted(() => { offSessionCmd?.(); offCastState?.() })
 
 // --- In-player Resume prompt ---
 // Before the source loads, check whether the user has saved progress for
@@ -800,7 +1030,14 @@ onUnmounted(() => {
   nowPlaying.end()
 })
 
-function handleClose() { cancelUpNext(); destroyHLS(); destroySubtitles(); if (document.fullscreenElement) document.exitFullscreen(); emit('close') }
+function handleClose() {
+  if (videoCastSession.value) void stopVideoCast(false)
+  cancelUpNext()
+  destroyHLS()
+  destroySubtitles()
+  if (document.fullscreenElement) document.exitFullscreen()
+  emit('close')
+}
 
 function showCtrl() {
   controlsVisible.value = true
@@ -833,7 +1070,7 @@ function handleKeydown(e: KeyboardEvent) {
   // own keyboard navigation.
   const target = e.target as HTMLElement | null
   if (target?.matches?.('input,textarea,[contenteditable]')) return
-  if (showAudioMenu.value || showSubMenu.value || showQualityMenu.value) return
+  if (showAudioMenu.value || showSubMenu.value || showQualityMenu.value || showCastMenu.value) return
   if (resumeOpen.value && e.key === 'Escape') { onResumePick(false); e.preventDefault(); return }
   if (upNextCountdown.value > 0 && e.key === 'Escape') { cancelUpNext(); e.preventDefault(); return }
   if (upNextCountdown.value > 0 && (e.key === 'Enter' || e.key === 'n')) { playNextEpisode(); e.preventDefault(); return }
@@ -868,7 +1105,22 @@ function volIcon() {
 
 useEventListener(window, 'keydown', handleKeydown)
 onMounted(init)
-onUnmounted(() => { destroySubtitles(); cancelUpNext(); if (hideTimer) clearTimeout(hideTimer) })
+let castClockTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  castClockTimer = setInterval(() => {
+    if (!videoCastActive.value) return
+    castClockTick.value++
+    lastRemotePosition.value = cast.livePositionSec()
+  }, 500)
+  void cast.refreshDevices()
+})
+onUnmounted(() => {
+  if (videoCastSession.value && !videoCastStopping.value) void stopVideoCast(false)
+  if (castClockTimer) clearInterval(castClockTimer)
+  destroySubtitles()
+  cancelUpNext()
+  if (hideTimer) clearTimeout(hideTimer)
+})
 </script>
 
 <template>
@@ -886,6 +1138,12 @@ onUnmounted(() => { destroySubtitles(); cancelUpNext(); if (hideTimer) clearTime
 
     <template v-else>
       <video ref="videoEl" :inert="resumeOpen" @click="onVideoClick" />
+
+      <div v-if="videoCastMode" class="cast-remote-overlay" aria-live="polite">
+        <Icon :name="castConnecting ? 'loading' : 'cast'" :size="34" :class="{ 'cast-remote-spin': castConnecting }" />
+        <div class="cast-remote-title">{{ remoteEnded ? 'Playback finished' : `Playing on ${cast.deviceName || 'Chromecast'}` }}</div>
+        <div class="cast-remote-sub">{{ props.title || 'Video' }}</div>
+      </div>
 
       <!-- VTT subtitle overlay — custom rendering of the hidden TextTrack's
            active cues (see initVTT). Nudges up while the control bar is
@@ -1042,7 +1300,7 @@ onUnmounted(() => { destroySubtitles(); cancelUpNext(); if (hideTimer) clearTime
 
             <!-- Subs -->
             <AppMenu
-              v-if="subtitleTracks.length"
+              v-if="subtitleTracks.length && !videoCastActive"
               v-model="showSubMenu"
               :width="260"
               align="end"
@@ -1113,6 +1371,45 @@ onUnmounted(() => { destroySubtitles(); cancelUpNext(); if (hideTimer) clearTime
               </DropdownMenuItem>
             </AppMenu>
 
+            <!-- Video targets only. Cast speakers are intentionally absent:
+                 receiver capability comes from the Cast `ca` advertisement,
+                 not from provider/model-name guesses. -->
+            <AppMenu
+              v-if="castDevices.length || videoCastActive"
+              v-model="showCastMenu"
+              :width="280"
+              align="end"
+              :side-offset="10"
+              :trigger-class="{ 'vp-trigger': true, active: videoCastActive }"
+              content-class="vp-menu-surface"
+              :trigger-title="videoCastActive ? `Playing on ${cast.deviceName}` : 'Cast video'"
+            >
+              <template #trigger>
+                <Icon :name="castConnecting ? 'loading' : 'cast'" :size="18" :class="{ 'cast-remote-spin': castConnecting }" />
+              </template>
+              <div class="surface-section-label vp-menu-title">Video capable</div>
+              <DropdownMenuItem
+                v-for="device in castDevices"
+                :key="device.id"
+                class="surface-item vp-item"
+                @select="pickVideoCastDevice(device.id)"
+              >
+                <Icon name="television-simple" :size="15" class="surface-item-icon" />
+                <span class="cast-video-device-text">
+                  <span>{{ device.name }}</span>
+                  <span class="cast-video-device-sub">{{ castDeviceSub(device) }}</span>
+                </span>
+                <Icon v-if="videoCastSession?.device_id === device.id" name="check" :size="13" class="vp-item-check" />
+              </DropdownMenuItem>
+              <template v-if="videoCastActive">
+                <DropdownMenuSeparator class="surface-divider" />
+                <DropdownMenuItem class="surface-item vp-item cast-video-disconnect" @select="stopVideoCast(true)">
+                  <Icon name="close" :size="14" class="surface-item-icon" />
+                  <span>Disconnect and continue here</span>
+                </DropdownMenuItem>
+              </template>
+            </AppMenu>
+
             <button class="c-btn" :aria-label="state.fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" :aria-pressed="state.fullscreen" @click="controls.toggleFullscreen()">
               <Icon :name="state.fullscreen ? 'shrink' : 'expand'" :size="18" />
             </button>
@@ -1181,6 +1478,22 @@ onUnmounted(() => { destroySubtitles(); cancelUpNext(); if (hideTimer) clearTime
 <style scoped>
 .p { position: fixed; inset: 0; z-index: 9999; background: #000; }
 video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+.cast-remote-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fg-1);
+  background: color-mix(in srgb, var(--bg-0) 92%, transparent);
+  pointer-events: none;
+}
+.cast-remote-overlay :deep(svg) { color: var(--accent); }
+.cast-remote-title { margin-top: 8px; font-size: 18px; font-weight: 700; }
+.cast-remote-sub { max-width: min(70vw, 640px); color: var(--fg-3); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .p-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); font-size: 14px; gap: 8px; z-index: 20; }
 .spinner { width: 28px; height: 28px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
 
@@ -1477,6 +1790,13 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 }
 .vp-item.active { color: var(--accent); }
 .vp-item-check { color: var(--accent); flex-shrink: 0; }
+.cast-video-device-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cast-video-device-text > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cast-video-device-sub { color: var(--fg-3); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cast-video-disconnect { color: var(--bad); }
+.cast-video-disconnect[data-highlighted] { color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.cast-remote-spin { animation: video-cast-spin 0.9s linear infinite; }
+@keyframes video-cast-spin { to { transform: rotate(360deg); } }
 
 .vp-item .sub-tag {
   font-size: 9px;

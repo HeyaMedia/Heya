@@ -123,6 +123,44 @@
           </button>
         </div>
 
+        <!-- Track taste — heart / like / dislike, the phone-screen equivalent
+             of the desktop Playbar's ReactionControl. Track-scoped, so it's
+             available whether playback is local or on a remote device. -->
+        <div v-if="currentTrack" class="nps-reactions">
+          <ReactionControl
+            :model-value="ratings.get(currentTrack.id) ?? 0"
+            size="md"
+            @update:model-value="(v) => onRate(currentTrack!.id, v)"
+          />
+        </div>
+
+        <!-- Device volume — only while an output is engaged (a cast receiver
+             or another Heya device). Local phone playback rides the hardware
+             volume buttons, so there's deliberately no slider then (see
+             MobilePlayerHost). While casting the slider drives the *remote*
+             device's stream volume via the same player.setVolume path the
+             desktop Playbar uses. -->
+        <div v-if="showVolume" class="nps-volume">
+          <span v-if="deviceName" class="nps-volume-device">
+            <Icon name="cast" :size="12" />
+            <span class="nps-volume-device-name">{{ deviceName }}</span>
+          </span>
+          <div class="nps-volume-control">
+            <button type="button" class="nps-vol-btn" :aria-pressed="muted" :aria-label="muted ? 'Unmute' : 'Mute'" @click="toggleMute">
+              <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="18" />
+            </button>
+            <AppSlider
+              :model-value="muted ? 0 : volume"
+              :min="0"
+              :max="100"
+              :step="1"
+              aria-label="Volume"
+              class="nps-vol-slider"
+              @update:model-value="onVolumeChange"
+            />
+          </div>
+        </div>
+
         <div class="nps-secondary">
           <button type="button" class="nps-sicon" aria-label="Queue" @click="scrollToQueue">
             <Icon name="queue" :size="18" />
@@ -154,10 +192,36 @@ const open = defineModel<boolean>('open', { default: false })
 
 const {
   currentTrack, playing, position, duration,
-  shuffled, repeatMode,
-  togglePlay, seek, stop,
+  shuffled, repeatMode, volume, muted,
+  togglePlay, seek, stop, setVolume, toggleMute,
   toggleShuffle, cycleRepeat, nextTrack, prevTrack, formatTime,
 } = usePlayerBindings()
+
+// --- Device volume + which device we're controlling ------------------------
+// The slider only shows while an output is engaged; player.setVolume then
+// repoints to the remote device's stream volume (see usePlayer.setVolume),
+// so the same binding the desktop Playbar uses "just works" here.
+const cast = useCastStore()
+const showVolume = computed(() => cast.engaged)
+const deviceName = computed(() => cast.deviceName)
+// Mirror Playbar.onVolumeChange: a drag up from 0 while muted also unmutes.
+function onVolumeChange(v: number) {
+  if (muted.value && v > 0) toggleMute()
+  setVolume(v)
+}
+
+// --- Reactions (heart / like / dislike) ------------------------------------
+// Same per-user ratings cache the desktop Playbar reads, so a tap here lights
+// up everywhere. Prime the current track so the control paints its real state
+// on open rather than starting empty.
+const trackRatings = useTrackRatings()
+const ratings = trackRatings.ratings
+watch(currentTrack, (t) => {
+  if (t?.id && t.id > 0) trackRatings.load(t.id).catch(() => 0)
+}, { immediate: true })
+async function onRate(trackId: number, v: number) {
+  try { await trackRatings.set(trackId, v) } catch { /* rollback handled in the cache */ }
+}
 
 // --- Links (mirrors Playbar.vue's artistTo/albumTo computeds) --------------
 const artistTo = computed(() =>
@@ -535,6 +599,65 @@ watch(activeLyricIdx, (i) => {
   color: var(--gold);
   font-family: var(--font-mono);
 }
+
+/* Reactions row — centered under the transport, matching its rhythm. */
+.nps-reactions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Bump the reaction tap targets up from ReactionControl's mouse-sized
+   default toward the coarse-pointer floor. This whole <style> block is
+   unscoped (portaled sheet), so the descendant selector reaches the
+   child component's `.reaction-btn` fine. */
+.nps-reactions .reaction .reaction-btn { padding: 8px; }
+
+/* Device volume — only present while casting. A caption naming the device
+   we're controlling sits above the mute button + slider. */
+.nps-volume {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+.nps-volume-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+}
+.nps-volume-device-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nps-volume-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(80vw, 340px);
+}
+.nps-vol-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.nps-vol-btn:active { background: rgb(var(--ink) / 0.08); }
+.nps-vol-btn[aria-pressed='true'] { color: var(--gold); }
+/* Targets AppSlider's `.app-slider` root (class merges onto it). */
+.nps-vol-slider { flex: 1; min-width: 0; }
 
 .nps-secondary {
   display: flex;
