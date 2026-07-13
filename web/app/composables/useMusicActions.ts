@@ -430,14 +430,9 @@ export function useMusicActions() {
         icon: 'list',
         action: () => navigateTo(`/music/playlist/${p.slug || p.id}`),
       },
-      {
-        label: 'Delete',
-        icon: 'trash',
-        action: async () => {
-          if (!confirm(`Delete playlist "${p.name}"?`)) return
-          try { await playlists.remove(p.id) } catch { /* swallow */ }
-        },
-      },
+      // No Delete here — usePlaylistMenu appends the canonical Delete
+      // Playlist (with the sync-stop warning) after these items; every
+      // surface renders playlist menus through it.
     ]
   }
 

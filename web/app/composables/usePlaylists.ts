@@ -63,6 +63,10 @@ export function usePlaylists() {
       queryCache.invalidateQueries({ key: ['music', 'playlist', slug] })
     }
     queryCache.invalidateQueries({ key: ['music', 'home', 'recent-playlists'] })
+    // Prefix-matches the shared sidebar list AND the /music/playlists page's
+    // ['me','playlists','full'] query, so every surface converges on server
+    // truth after an optimistic patch.
+    queryCache.invalidateQueries({ key: ['me', 'playlists'] })
   }
 
   async function create(name: string, description = '', coverPath = '') {
@@ -108,23 +112,33 @@ export function usePlaylists() {
     invalidatePlaylistCaches(playlistId)
   }
 
-  // Rename / re-describe. Renaming REGENERATES the slug server-side (URLs
-  // track names during dev — no legacy-slug shims), so the caller gets the
-  // fresh row back to re-route with.
-  async function update(id: number, patch: { name: string; description: string }) {
+  // Rename / re-describe / re-tag. Renaming REGENERATES the slug server-side
+  // (URLs track names during dev — no legacy-slug shims); omitted fields keep
+  // their current value. Returns the merged row (slug may be stale until the
+  // invalidation refetch lands — the server doesn't echo the update).
+  async function update(id: number, patch: { name?: string; description?: string; tags?: string[] }) {
     const { $heya } = useNuxtApp()
-    // cover_path is required by the PUT body and stores the custom cover's
-    // disk path — pass the current value through so a rename never clears
-    // an uploaded cover.
+    // The PUT body requires name/description/cover_path — cover_path stores
+    // the custom cover's disk path, so passing the current value through is
+    // what keeps a rename from clearing an uploaded cover.
+    await ensureLoaded()
     const current = playlists.value.find(p => p.id === id)
-    const updated = await $heya('/api/me/playlists/{id}', {
+    const body = {
+      name: patch.name ?? current?.name ?? '',
+      description: patch.description ?? current?.description ?? '',
+      cover_path: current?.cover_path ?? '',
+      // Omitted tags = keep existing (server treats null as "no change").
+      ...(patch.tags ? { tags: patch.tags } : {}),
+    }
+    await $heya('/api/me/playlists/{id}', {
       method: 'PUT',
       path: { id },
-      body: { name: patch.name, description: patch.description, cover_path: current?.cover_path ?? '' },
-    }) as unknown as UserPlaylistRow
-    updateList(rows => rows.map(p => (p.id === id ? { ...p, ...updated } : p)))
-    invalidatePlaylistCaches(id, updated.slug)
-    return updated
+      body: body as never,
+    })
+    const merged = { ...(current as UserPlaylistRow), ...body } as UserPlaylistRow
+    updateList(rows => rows.map(p => (p.id === id ? { ...p, ...body } : p)))
+    invalidatePlaylistCaches(id, current?.slug)
+    return merged
   }
 
   // Custom cover upload. Multipart stays on raw $fetch — $heya/openapi-fetch
@@ -161,6 +175,7 @@ export function usePlaylists() {
       path: { id },
       body: { scope, pinned },
     })
+    invalidatePlaylistCaches(id)
   }
 
   // Persist a manual sidebar drag order. `ids` is the full list, top to
@@ -173,6 +188,7 @@ export function usePlaylists() {
       method: 'PUT',
       body: { ids },
     })
+    invalidatePlaylistCaches()
   }
 
   function setSidebarSort(sort: SidebarPlaylistSort) {

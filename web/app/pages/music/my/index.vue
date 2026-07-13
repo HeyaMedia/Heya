@@ -30,7 +30,7 @@
       <AppContextMenu
         v-for="pl in playlists"
         :key="`pl-${pl.id}`"
-        :items="actions.forPlaylist({ id: pl.id, name: pl.name, track_count: pl.track_count, slug: pl.slug })"
+        :items="playlistMenu.menuFor({ id: pl.id, name: pl.name, track_count: pl.track_count, slug: pl.slug })"
       >
       <NuxtLink
         :to="`/music/playlist/${pl.slug || pl.id}`"
@@ -163,6 +163,7 @@ const { $heya } = useNuxtApp()
 // Right-click on desktop, long-press on touch — the card shelves' only
 // play/queue path on coarse pointers (hover-play is hidden there).
 const actions = useMusicActions()
+const playlistMenu = usePlaylistMenu()
 const loadQuery = useQueryLoader()
 
 interface PlaylistRow {

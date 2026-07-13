@@ -170,27 +170,29 @@
           'reorder-source': reorderId === pl.id,
         }"
       >
-        <NuxtLink
-          :to="`/music/playlist/${pl.slug || pl.id}`"
-          class="ms-pl-item"
-          :class="{ active: section === 'playlist-' + (pl.slug || pl.id), 'drop-target': !isCoarse && dragDrop.dragState.overPlaylistId === pl.id }"
-          :aria-current="section === 'playlist-' + (pl.slug || pl.id) ? 'page' : undefined"
-          :draggable="!isCoarse"
-          @dragstart="onReorderStart($event, pl)"
-          @dragend="onReorderEnd"
-          @dragover="onRowDragOver($event, pl, i)"
-          @dragleave="onRowDragLeave"
-          @drop="onRowDrop($event, pl, i)"
-        >
-          <Poster :idx="i" :src="pl.cover_path || null" aspect="1/1" class="ms-pl-cover" :width="80" />
-          <div class="ms-pl-meta">
-            <div class="ms-pl-name">
-              <span class="ms-pl-name-text">{{ pl.name }}</span>
-              <Icon v-if="pl.pinned" name="pin" :size="10" weight="fill" class="ms-pl-pin" />
+        <AppContextMenu :items="playlistMenu.menuFor({ id: pl.id, name: pl.name, slug: pl.slug, track_count: pl.count })">
+          <NuxtLink
+            :to="`/music/playlist/${pl.slug || pl.id}`"
+            class="ms-pl-item"
+            :class="{ active: section === 'playlist-' + (pl.slug || pl.id), 'drop-target': !isCoarse && dragDrop.dragState.overPlaylistId === pl.id }"
+            :aria-current="section === 'playlist-' + (pl.slug || pl.id) ? 'page' : undefined"
+            :draggable="!isCoarse"
+            @dragstart="onReorderStart($event, pl)"
+            @dragend="onReorderEnd"
+            @dragover="onRowDragOver($event, pl, i)"
+            @dragleave="onRowDragLeave"
+            @drop="onRowDrop($event, pl, i)"
+          >
+            <Poster :idx="i" :src="pl.cover_path || null" aspect="1/1" class="ms-pl-cover" :width="80" />
+            <div class="ms-pl-meta">
+              <div class="ms-pl-name">
+                <span class="ms-pl-name-text">{{ pl.name }}</span>
+                <Icon v-if="pl.pinned" name="pin" :size="10" weight="fill" class="ms-pl-pin" />
+              </div>
+              <div class="ms-pl-count">{{ pl.count }} tracks</div>
             </div>
-            <div class="ms-pl-count">{{ pl.count }} tracks</div>
-          </div>
-        </NuxtLink>
+          </NuxtLink>
+        </AppContextMenu>
       </li>
       <li v-if="!playlists.length" class="ms-pl-empty">
         No playlists yet
@@ -238,6 +240,7 @@ const SIDEBAR_SORTS: Array<{ value: SidebarPlaylistSort; label: string }> = [
 ]
 const playlistsApi = usePlaylists()
 const { sidebarSort, setSidebarSort } = playlistsApi
+const playlistMenu = usePlaylistMenu()
 
 const reorderId = ref<number | null>(null)
 // Insertion index 0..n over props.playlists — i means "above row i",

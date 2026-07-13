@@ -62,6 +62,8 @@ export interface UserPlaylistRow {
   pinned: boolean
   sidebar_pinned: boolean
   sidebar_position: number
+  tags: string[] | null
+  sync_services: string[]
   /** First track's addressing pair — feed playlistCoverSrc(), never render
    *  cover_path directly (it's the custom cover's disk path). */
   auto_artist_slug: string

@@ -101,9 +101,7 @@ interface PlaylistRow {
 }
 
 const { $heya } = useNuxtApp()
-const actions = useMusicActions()
-const sidebarPlaylists = usePlaylists()
-const { flash } = useFlash()
+const playlistMenu = usePlaylistMenu()
 
 const listQuery = useQuery({
   key: ['me', 'playlists', 'full'],
@@ -158,97 +156,11 @@ function coverFor(p: PlaylistRow) {
   return playlistCoverSrc(p)
 }
 
-// --- Actions ---
-async function saveMutation(p: PlaylistRow, patch: Partial<{ name: string; tags: string[] }>) {
-  await $heya('/api/me/playlists/{id}', {
-    method: 'PUT',
-    path: { id: p.id },
-    body: {
-      name: patch.name ?? p.name,
-      description: p.description,
-      cover_path: p.cover_path,
-      tags: patch.tags ?? p.tags ?? [],
-    } as any,
-  })
-  listQuery.refetch()
-  sidebarPlaylists.ensureLoaded()
-}
-
-async function togglePin(p: PlaylistRow, scope: 'page' | 'sidebar', pinned: boolean) {
-  try {
-    // setPin also patches the sidebar's cache optimistically; this page's
-    // own query just refetches (tiny payload, instant reorder).
-    await sidebarPlaylists.setPin(p.id, scope, pinned)
-    listQuery.refetch()
-  } catch (e: any) {
-    flash.value = { kind: 'err', text: e?.data?.detail || 'Pin failed' }
-  }
-}
-
+// Menus + mutations live in usePlaylistMenu (shared with the sidebar, home
+// shelf, and My Music); its invalidation prefix-hits this page's
+// ['me','playlists','full'] query, so the grid re-sorts on pin/rename/etc.
 function menuFor(p: PlaylistRow): ContextMenuItem[] {
-  const items = actions.forPlaylist({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })
-  items.push(
-    { label: '', separator: true },
-    {
-      label: p.pinned ? 'Unpin' : 'Pin to top',
-      icon: 'pin',
-      action: () => togglePin(p, 'page', !p.pinned),
-    },
-    {
-      label: p.sidebar_pinned ? 'Unpin from sidebar' : 'Pin to sidebar',
-      icon: 'pin',
-      action: () => togglePin(p, 'sidebar', !p.sidebar_pinned),
-    },
-    { label: '', separator: true },
-    {
-      label: 'Rename…',
-      icon: 'edit',
-      action: async () => {
-        const name = prompt('Playlist name', p.name)?.trim()
-        if (!name || name === p.name) return
-        try {
-          await saveMutation(p, { name })
-          flash.value = { kind: 'ok', text: 'Renamed' }
-        } catch (e: any) {
-          flash.value = { kind: 'err', text: e?.data?.detail || 'Rename failed' }
-        }
-      },
-    },
-    {
-      label: 'Edit tags…',
-      icon: 'bookmark',
-      action: async () => {
-        const raw = prompt('Tags (comma separated)', (p.tags ?? []).join(', '))
-        if (raw === null) return
-        const tags = raw.split(',').map(t => t.trim()).filter(Boolean)
-        try {
-          await saveMutation(p, { tags })
-          flash.value = { kind: 'ok', text: tags.length ? 'Tags updated' : 'Tags cleared' }
-        } catch (e: any) {
-          flash.value = { kind: 'err', text: e?.data?.detail || 'Tag update failed' }
-        }
-      },
-    },
-    { label: '', separator: true },
-    {
-      label: 'Delete Playlist',
-      icon: 'close',
-      action: async () => {
-        const syncNote = p.sync_services?.length
-          ? `\n\nThis playlist syncs with ${p.sync_services.join(', ')} — deleting it stops the sync (the copy on the service stays).`
-          : ''
-        if (!confirm(`Delete “${p.name}”?${syncNote}`)) return
-        try {
-          await sidebarPlaylists.remove(p.id)
-          listQuery.refetch()
-          flash.value = { kind: 'ok', text: 'Playlist deleted' }
-        } catch (e: any) {
-          flash.value = { kind: 'err', text: e?.data?.detail || 'Delete failed' }
-        }
-      },
-    },
-  )
-  return items
+  return playlistMenu.menuFor({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })
 }
 </script>
 

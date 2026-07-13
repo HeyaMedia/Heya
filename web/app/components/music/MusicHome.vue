@@ -132,7 +132,7 @@
       <AppContextMenu
         v-for="p in recentPlaylists"
         :key="`pl-${p.id}`"
-        :items="actions.forPlaylist({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })"
+        :items="playlistMenu.menuFor({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })"
       >
       <NuxtLink
         :to="`/music/playlist/${p.slug || p.id}`"
@@ -573,6 +573,7 @@ function formatLapsed(a: LapsedArtist) {
 
 const { play, queue } = usePlayerBindings()
 const actions = useMusicActions()
+const playlistMenu = usePlaylistMenu()
 const { isCoarse } = useViewport()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
 
