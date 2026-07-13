@@ -53,6 +53,7 @@
           :alt="al.title"
           :title="al.title"
           :subtitle="`${al.artist_name}${al.year ? ' · ' + al.year : ''}`"
+          :hearted="(albumRatingValues.get(al.id) ?? 0) >= 9"
           :badge-tl="al.album_type && al.album_type !== 'album' ? al.album_type : ''"
           :missing="al.available === false"
           @play="playAlbum(al)"
@@ -83,6 +84,7 @@
           :alt="a.artist_name"
           :title="a.artist_name"
           :subtitle="`${a.album_count} albums · ${a.track_count} tracks`"
+          :hearted="(artistRatingValues.get(a.artist_id) ?? 0) >= 9"
           badge-tl="Artist"
           :missing="a.available === false"
           @play="playArtist(a.artist_slug, a.artist_name)"
@@ -474,6 +476,13 @@ const recentArtistsQuery = useQuery({
   staleTime: 1000 * 30,
 })
 const recentArtists = computed<RecentArtistRow[]>(() => recentArtistsQuery.data.value ?? [])
+
+const albumRatings = useRatings('album')
+const artistRatings = useRatings('artist')
+const albumRatingValues = albumRatings.ratings
+const artistRatingValues = artistRatings.ratings
+watch(recentAlbums, items => { if (items.length) void albumRatings.primeBulk(items.map(al => al.id)) }, { immediate: true })
+watch(recentArtists, items => { if (items.length) void artistRatings.primeBulk(items.map(a => a.artist_id)) }, { immediate: true })
 
 const onThisDayQuery = useQuery({
   key: ['music', 'home', 'on-this-day'],

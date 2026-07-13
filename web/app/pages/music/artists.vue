@@ -37,6 +37,7 @@
               :src="artistPosterUrl(a) ?? undefined"
               :alt="a.name"
               :title="a.name"
+              :hearted="(artistRatingValues.get(a.id) ?? 0) >= 9"
               no-play
               :missing="a.available === false"
             />
@@ -56,6 +57,8 @@ definePageMeta({ layout: 'default' })
 
 const { $heya } = useNuxtApp()
 const actions = useMusicActions()
+const artistRatings = useRatings('artist')
+const artistRatingValues = artistRatings.ratings
 
 const { total, pending, itemAt, ensureRange } = useVirtualCatalog<MusicArtistRow>(() => ({
   key: 'music:artists:list',
@@ -65,7 +68,9 @@ const { total, pending, itemAt, ensureRange } = useVirtualCatalog<MusicArtistRow
       items: MusicArtistRow[]
       total: number
     }
-    return { items: res.items ?? [], total: res.total ?? 0 }
+    const items = res.items ?? []
+    if (items.length) void artistRatings.primeBulk(items.map(a => a.id))
+    return { items, total: res.total ?? 0 }
   },
 }))
 

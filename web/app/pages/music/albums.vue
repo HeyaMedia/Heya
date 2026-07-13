@@ -36,6 +36,7 @@
               :alt="al.title"
               :title="al.title"
               :subtitle="al.artist_name + (al.year ? ' · ' + al.year : '')"
+              :hearted="(albumRatingValues.get(al.id) ?? 0) >= 9"
               :missing="al.available === false"
               @play="playAlbum(al)"
             />
@@ -56,6 +57,8 @@ definePageMeta({ layout: 'default' })
 const { $heya } = useNuxtApp()
 const { play, queue } = usePlayerBindings()
 const actions = useMusicActions()
+const albumRatings = useRatings('album')
+const albumRatingValues = albumRatings.ratings
 const loadQuery = useQueryLoader()
 
 const { total, pending, itemAt, ensureRange } = useVirtualCatalog<MusicAlbumRow>(() => ({
@@ -66,7 +69,9 @@ const { total, pending, itemAt, ensureRange } = useVirtualCatalog<MusicAlbumRow>
       items: MusicAlbumRow[]
       total: number
     }
-    return { items: res.items ?? [], total: res.total ?? 0 }
+    const items = res.items ?? []
+    if (items.length) void albumRatings.primeBulk(items.map(al => al.id))
+    return { items, total: res.total ?? 0 }
   },
 }))
 

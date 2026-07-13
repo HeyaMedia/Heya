@@ -20,6 +20,8 @@ const props = withDefaults(defineProps<{
   badgeTl?: string
   /** Top-right badge text — small chip painted on the art (e.g. "42 plays"). */
   badgeTr?: string
+  /** Shows a filled heart on cards whose artist/album is in the heart rating band. */
+  hearted?: boolean
   variant?: 'square' | 'circle'
   /** Hides the hover play button (use when the tile has no meaningful "play all" action). */
   noPlay?: boolean
@@ -36,6 +38,7 @@ const props = withDefaults(defineProps<{
   subtitle: '',
   badgeTl: '',
   badgeTr: '',
+  hearted: false,
   variant: 'square',
   noPlay: false,
   progressPct: 0,
@@ -72,6 +75,9 @@ watch(() => props.src, () => { imgError.value = false })
 
       <div v-if="badgeTl" class="mc-badge mc-badge-tl">{{ badgeTl }}</div>
       <div v-if="badgeTr" class="mc-badge mc-badge-tr">{{ badgeTr }}</div>
+      <div v-if="hearted" class="mc-hearted" aria-label="Hearted" title="Hearted">
+        <Icon name="heartfill" :size="15" />
+      </div>
 
       <!-- Hover-only play button — centered, glassy, EpisodeCard pattern.
            Wrap is non-interactive (pointer-events: none) so only the circle
@@ -182,6 +188,25 @@ watch(() => props.src, () => { imgError.value = false })
 }
 .mc-badge-tl { top: 8px; left: 8px; }
 .mc-badge-tr { top: 8px; right: 8px; color: var(--gold); }
+
+.mc-hearted {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--bad);
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.mc-badge-tr + .mc-hearted { top: 42px; }
 
 /* Hover play button — centered, gold. The wrap is `pointer-events: none`
    so clicks on the rest of the art still bubble to the outer NuxtLink for
