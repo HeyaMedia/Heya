@@ -107,6 +107,16 @@ func registerMusicServicesRoutes(api huma.API, app *service.App) {
 			return statusOK("synced"), nil
 		})
 
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/music-services/{service}/sync-reactions", "sync-reactions-out", "Bulk-push existing hearts to a linked service", "Me")),
+		func(ctx context.Context, in *struct {
+			Service string `path:"service" enum:"listenbrainz,lastfm"`
+		}) (*StatusOutput, error) {
+			if err := app.StartReactionsSync(ctx, userFrom(ctx).ID, in.Service); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return statusOK("syncing"), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodPost, "/api/me/music-services/lastfm/auth-start", "lastfm-auth-start", "Begin the Last.fm connect flow", "Me")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[lastfmAuthStartBody], error) {
 			authURL, token, err := app.LastfmAuthStart(ctx)

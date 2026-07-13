@@ -257,6 +257,33 @@ func (a *App) matchListen(ctx context.Context, l scrobble.Listen) (trackID int64
 	return trackID, duration, true
 }
 
+// StartReactionsSync bulk-pushes the user's existing hearts (and, for
+// ListenBrainz, dislikes) to one linked service as a durable background job.
+func (a *App) StartReactionsSync(ctx context.Context, userID int64, service string) error {
+	if !musicServiceValid(service) {
+		return fmt.Errorf("unknown service %q", service)
+	}
+	var token string
+	if err := a.db.QueryRow(ctx,
+		`SELECT token FROM user_music_services WHERE user_id = $1 AND service = $2`,
+		userID, service).Scan(&token); err != nil || token == "" {
+		return fmt.Errorf("%s is not connected yet", service)
+	}
+	if service == "lastfm" {
+		if key, secret := a.lastfmCredentials(ctx); key == "" || secret == "" {
+			return fmt.Errorf("last.fm sync needs the server API key + secret — Settings → Providers")
+		}
+	}
+	res, err := a.river.Insert(ctx, worker.SyncReactionsOutArgs{UserID: userID, Service: service}, nil)
+	if err != nil {
+		return fmt.Errorf("enqueue reaction sync: %w", err)
+	}
+	if res.UniqueSkippedAsDuplicate {
+		return fmt.Errorf("a reaction sync for %s is already running", service)
+	}
+	return nil
+}
+
 // reactionBand maps a rating onto the outbound sync band: 1 = love,
 // -1 = hate, 0 = neutral/clear.
 func reactionBand(rating int16) int {

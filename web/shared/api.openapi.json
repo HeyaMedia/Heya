@@ -27138,6 +27138,56 @@
         ]
       }
     },
+    "/api/me/music-services/{service}/sync-reactions": {
+      "post": {
+        "operationId": "sync-reactions-out",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "listenbrainz",
+                "lastfm"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Bulk-push existing hearts to a linked service",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
     "/api/me/password": {
       "put": {
         "operationId": "change-password",

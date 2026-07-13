@@ -138,6 +138,18 @@ async function startImport(service: 'listenbrainz' | 'lastfm') {
   }
 }
 
+async function syncReactions(service: 'listenbrainz' | 'lastfm') {
+  busy.value = true
+  try {
+    await $heya('/api/me/music-services/{service}/sync-reactions', { method: 'POST', path: { service } })
+    flash.value = { kind: 'ok', text: 'Syncing your hearts in the background — they\'ll appear as loves on ' + (service === 'lastfm' ? 'Last.fm' : 'ListenBrainz') }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail || 'Reaction sync failed to start' }
+  } finally {
+    busy.value = false
+  }
+}
+
 async function lastfmConnect() {
   busy.value = true
   try {
@@ -218,6 +230,9 @@ function importSummary(st?: MusicServiceImportState): string {
           </div>
           <button class="sv2-btn ghost" :disabled="busy || importing" @click="startImport('listenbrainz')">
             <Icon name="download" :size="13" /> Import history
+          </button>
+          <button v-if="lb?.token_set" class="sv2-btn ghost" :disabled="busy" @click="syncReactions('listenbrainz')">
+            <Icon name="heart" :size="13" /> Sync likes
           </button>
         </div>
         <p v-if="importSummary(lb?.import_state)" class="svc-import-state" :class="{ error: lb?.import_state?.status === 'failed' }">{{ importSummary(lb?.import_state) }}</p>
@@ -315,6 +330,9 @@ function importSummary(st?: MusicServiceImportState): string {
           </template>
           <button class="sv2-btn ghost" :disabled="busy || importing || !(lf?.username || lfUsername.trim())" @click="startImport('lastfm')">
             <Icon name="download" :size="13" /> Import history
+          </button>
+          <button v-if="lf?.token_set" class="sv2-btn ghost" :disabled="busy" @click="syncReactions('lastfm')">
+            <Icon name="heart" :size="13" /> Sync likes
           </button>
         </div>
         <p v-if="importSummary(lf?.import_state)" class="svc-import-state" :class="{ error: lf?.import_state?.status === 'failed' }">{{ importSummary(lf?.import_state) }}</p>
