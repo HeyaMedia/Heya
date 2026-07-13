@@ -459,7 +459,7 @@ async function fetchItems<T>(path: string): Promise<T[]> {
 }
 
 const mixesQuery = useQuery(musicMixesQuery())
-const mixes = computed<Mix[]>(() => mixesQuery.data.value ?? [])
+const mixes = computed<Mix[]>(() => (mixesQuery.data.value ?? []).slice(0, 6))
 
 const recentAlbumsQuery = useQuery({
   key: ['music', 'home', 'recently-added'],

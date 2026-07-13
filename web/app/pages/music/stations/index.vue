@@ -87,11 +87,11 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import { useQuery } from '@pinia/colada'
+import { musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
 const { play, queue } = usePlayerBindings()
-const { $heya } = useNuxtApp()
 const actions = useMusicActions()
 
 function mixTrackToEntity(t: MixTrack) {
@@ -108,38 +108,9 @@ function mixTrackToEntity(t: MixTrack) {
   }
 }
 
-interface MixTrack {
-  track_id: number
-  track_title: string
-  duration: number
-  album_id: number
-  album_title: string
-  album_slug: string
-  album_year: string
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-}
-interface Mix {
-  seed_artist_id: number
-  seed_artist_name: string
-  seed_artist_slug: string
-  seed_artist_media_item_id: number
-  seed_artist_media_item_public_id?: string
-  name: string
-  tracks: MixTrack[]
-}
-
-const mixesQuery = useQuery({
-  key: ['music', 'stations', 'mixes'],
-  query: async () => {
-    const r = await $heya('/api/music/home/mixes-for-you', { query: { max: 8 } }) as unknown as { items: Mix[] }
-    return r.items ?? []
-  },
-  staleTime: 1000 * 60 * 30,
-})
+const mixesQuery = useQuery(musicMixesQuery())
 await waitForQuery(mixesQuery)
-const mixes = computed<Mix[]>(() => mixesQuery.data.value ?? [])
+const mixes = computed<Mix[]>(() => (mixesQuery.data.value ?? []).slice(0, 8))
 const mixesLoading = computed(() => mixesQuery.isLoading.value)
 
 // Quick Stations definitions. Slugs match the placeholder per-station pages

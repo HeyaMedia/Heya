@@ -167,7 +167,7 @@ export const musicMixesQuery = defineQueryOptions(() => ({
   key: ['music', 'home', 'mixes-for-you'],
   query: async () => {
     const { $heya } = useNuxtApp()
-    return ((await $heya('/api/music/home/mixes-for-you')) as { items: MusicMix[] }).items ?? []
+    return ((await $heya('/api/music/home/mixes-for-you', { query: { max: 20 } })) as { items: MusicMix[] }).items ?? []
   },
   staleTime: 1000 * 60 * 60,
   meta: {
